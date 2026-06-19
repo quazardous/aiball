@@ -1181,6 +1181,11 @@ function makeLinkGrace(label: string, setDown: (down: boolean) => void) {
 }
 const proxyLinkGrace = makeLinkGrace("loop.sock proxy link", setIpcLinkDown);
 const daemonLinkGrace = makeLinkGrace("daemon link", setIpcDaemonDown);
+// #1035 S3 — true only between a proxy disconnect and the next reconnect, so the
+// reconnect handler can RESYNC (release a stale busy latch left by a Stop hook
+// dropped during the gap) WITHOUT firing on the very first boot connect (which
+// would needlessly flicker the bar). A reconnect always warrants the resync.
+let proxyWasDown = false;
 // #1041 — arm the bar countdown (`nextWakeAtMs`, rendered `📨 Ns`) from the live
 // turn-machine state. The drain fires at the `settled` re-entry boundaries (every
 // tempo, aligned on `idleSinceMs`) ; the countdown must point at the NEXT such
@@ -1612,10 +1617,24 @@ async function mainSse(): Promise<void> {
         //   - onProxyDisconnect (the tagged proxy connection closed, clean OR
         //     stale) → arm the grace ; bar goes RED if still down after it.
         onProxyConnect: () => {
-            log("loop.sock: proxy connected — link OK (clear RED)");
             proxyLinkGrace.clear();
+            // #1035 S3 — resync on a genuine RECONNECT (not the first boot
+            // connect). A code reload / link gap can leave the bar stuck busy :
+            // a Stop hook dropped while the proxy was detached never cleared the
+            // `paneBusy` latch. Release it (same authoritative release as
+            // turn:ended) ; the pane markers re-arm it within a poll if claude is
+            // really busy. The view is re-pushed to the proxy by pushViewIfChanged
+            // (1s tick + onIpcChanged), so clearing the latch also repaints.
+            if (proxyWasDown) {
+                proxyWasDown = false;
+                log("loop.sock: proxy RECONNECTED — link OK + resync (release stale busy latch)");
+                if (sd) { busyProofs = releaseBusyProofs(); setPaneBusy(sd, false); }
+            } else {
+                log("loop.sock: proxy connected — link OK");
+            }
         },
         onProxyDisconnect: () => {
+            proxyWasDown = true;
             log(`loop.sock: proxy link lost — ${LINK_DOWN_GRACE_MS / 1000}s grace before bar RED`);
             proxyLinkGrace.arm();
         },
