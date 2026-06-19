@@ -24,6 +24,7 @@ import {
     setIpcCounters,
     setIpcPaneBusy,
     setIpcPaneReady,
+    setIpcNextWakeAt,
     setIpcLinkDown,
     setIpcDaemonDown,
     setIpcStateTagInfo,
@@ -115,6 +116,31 @@ test("computeBarSnapshot: post-boot idle (bootComplete + paneReady) → status=i
     setIpcPaneReady(true);
     const s = computeBarSnapshot(sd);
     assert.equal(s.loopStatus, LOOP_STATUS.IDLE);
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("#1041 computeBarSnapshot: nextWakeInSec lit ipc.nextWakeAtMs (idle)", () => {
+    const sd = mkSd();
+    seedLoopStartOld(sd);
+    setIpcBootComplete(true);
+    setIpcPaneReady(true);
+    setIpcNextWakeAt(Date.now() + 5000);
+    const s = computeBarSnapshot(sd);
+    assert.ok(
+        s.nextWakeInSec !== null && s.nextWakeInSec >= 4 && s.nextWakeInSec <= 6,
+        `expected ~5s countdown from nextWakeAtMs, got ${s.nextWakeInSec}`,
+    );
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("#1041 computeBarSnapshot: nextWakeAtMs null → no countdown", () => {
+    const sd = mkSd();
+    seedLoopStartOld(sd);
+    setIpcBootComplete(true);
+    setIpcPaneReady(true);
+    setIpcNextWakeAt(null);
+    const s = computeBarSnapshot(sd);
+    assert.equal(s.nextWakeInSec, null);
     rmSync(sd, { recursive: true, force: true });
 });
 

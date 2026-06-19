@@ -38,7 +38,6 @@ import {
     type LoopStatus,
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
-import { WAKE_COOLDOWN_MS } from "./wake-machine.js";
 
 /** Snapshot canonical de la barre tmux. Chaque champ correspond à une
  *  tmux user-option / propriété peinte par les writers actuels. Pur
@@ -197,37 +196,29 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             if (remMs > 0) bootRemainingSec = Math.max(0, Math.ceil(remMs / 1000));
         }
     }
-    // #805 / #919 — countdown = grace d'entrée de la FIFO drain.
+    // #805 / #919 / #999 / #1041 — countdown = temps avant le prochain drain.
     //
-    // David `<chat>` : « si ça fait plus de 10s qu'on est en idle
-    // normalement le pipe est ouvert (c'est une fifo pas une tempo) ».
-    // Le 10s `WAKE_COOLDOWN_MS` est la fenêtre de GRACE après bascule en
-    // idle, pas un throttle cyclique. Sémantique :
+    // #1041 david `wk2mut` : la barre lit désormais `nextWakeAtMs` (armé par le
+    // timer via `recomputeNextWake` — prochaine re-entrée `settled` RÉELLE, ré-armé
+    // au ping SSE + à chaque snapshot turn). C'est une lecture in-process (la barre
+    // tourne dans le même process que `ipc-state`) → coût nul, et on repaint déjà
+    // 1×/s.
     //
-    //   [idle entry] ────── grace 10s (countdown 10→1) ───── [pipe OPEN]
-    //                                                          │
-    //                                                          ▼
-    //                                              drain instant sur SSE
-    //                                              ou turn:settled tick
-    //
-    // Donc countdown affiché UNIQUEMENT pendant la grace
-    // `[idleSinceMs, idleSinceMs+WAKE_COOLDOWN_MS]`. Past 10s : null (=
-    // pipe ouvert, prêt à drainer, pas de countdown utile).
-    //
-    // Gate : `view.phase === "idle"` (bar shows [idle]) + `idleSinceMs`
-    // set. Pas de gate TurnMachine XState ni loopStart : tous deux
-    // proved unreliable across reloads / SessionStart-loss (cf.
-    // historique tickets `86fjp3` rejet + `67946f9` toujours pas
-    // affiché `gjx8ek`).
+    // Pourquoi remplacer l'ancien `idleSinceMs + WAKE_COOLDOWN_MS` : celui-ci ne
+    // montrait le countdown que pendant la 1ʳᵉ fenêtre de grace après bascule idle
+    // (modèle « FIFO + grace, puis pipe ouvert »). Or le modèle #999 draine en
+    // TEMPO RÉCURRENTE (re-entrée `settled` toutes les `tempo`) ; le countdown
+    // reflète maintenant ce vrai rythme au lieu de disparaître après 10s.
+    // `nextWakeAtMs` est null exactement quand il n'y a rien à drainer (le gate
+    // d'arming encode déjà idle + boot + pending) → pas de countdown inutile (#999).
+    // On garde `view.phase === "idle"` pour ne pas afficher de countdown quand la
+    // barre est busy. (Ancien refus `86fjp3` portait sur des gates loopStart/Turn
+    // instables au reload ; ici on ne GATE pas dessus, on lit juste la valeur déjà
+    // entretenue — au pire un trou ≤ tempo après respawn, couvert par le 📨 standing.)
     let nextWakeInSec: number | null = null;
-    const idleSinceMs = ipc.idleSinceMs;
-    if (view.phase === "idle" && idleSinceMs !== null) {
-        const remainingMs = (idleSinceMs + WAKE_COOLDOWN_MS) - input.nowMs;
-        if (remainingMs > 0) {
-            nextWakeInSec = Math.ceil(remainingMs / 1000);
-        }
-        // Past grace : nextWakeInSec stays null = pipe ouvert, drain
-        // instant sur prochain SSE / turn:settled, pas de countdown.
+    if (view.phase === "idle" && ipc.nextWakeAtMs !== null) {
+        const remainingMs = ipc.nextWakeAtMs - input.nowMs;
+        if (remainingMs > 0) nextWakeInSec = Math.ceil(remainingMs / 1000);
     }
     // #993 — `❯` orange when the prompt has unsent text, plain otherwise.
     // Restore island_fg right after so the downstream segments (typing /
