@@ -1593,28 +1593,30 @@ async function mainSse(): Promise<void> {
                 respawnTimer("reload hotkey");
                 return;
             }
+            // #1039 — the proxy emits a `hello` right after (re)connecting so the
+            // server tags the connection as the proxy peer (link UP). The tag
+            // already fired at the IPC layer (markAsProxy → onProxyConnect) ; here
+            // we just no-op it instead of letting it fall through to "unknown".
+            if (event.event === "hello") return;
             const verdict = dispatchProxyEvent(sd!, event);
             log(formatVerdictLogLine(verdict));
         },
-        // #1039 — IPC link state → BarRenderer paints RED when down. The error
-        // signal is a PING THAT FAILS (david `<chat>`) : `onClientStale` fires
-        // only when the heartbeat ping went unanswered for the full 30s window
-        // (peer confirmed dead) — debounced by design, no flicker. A connect
-        // proves the link alive again (GREEN). Graceful closes (one-shot hooks)
-        // are normal churn → ignored. onConnect also drains the offload (a
-        // boot-drain (drainOffloadIntoLog at mainSse start) already replays
-        // anything buffered while the timer was down ; no per-connect drain
-        // (hooks connect every turn → would be noisy for no gain).
-        onClientConnect: () => {
-            // (Re)connected → cancel any pending RED grace and clear the
-            // link-down overlay (back to normal colours ; there is no "green").
-            log("loop.sock: client connected — proxy link OK (clear RED)");
+        // #1039 — IPC link state → BarRenderer paints RED when down. KEY the
+        // signal on the PROXY peer specifically (not raw client connect/close) :
+        // the proxy is the persistent connection that sends PROXY_EVENT frames ;
+        // the one-shot hooks (Stop/UserPrompt/SessionStart) also connect to
+        // loop.sock every turn, so reacting to ANY client churn was the bug that
+        // (a) cleared the RED on every hook connect and (b) never armed on a clean
+        // proxy kill (which fires a graceful close, not a stale terminate). Now :
+        //   - onProxyConnect (proxy sent its `hello`/first event) → link UP, clear.
+        //   - onProxyDisconnect (the tagged proxy connection closed, clean OR
+        //     stale) → arm the grace ; bar goes RED if still down after it.
+        onProxyConnect: () => {
+            log("loop.sock: proxy connected — link OK (clear RED)");
             proxyLinkGrace.clear();
         },
-        onClientStale: () => {
-            // #1039 david — don't flash RED immediately : a peer that went
-            // stale but reconnects within the grace window must stay GREEN.
-            log(`loop.sock: peer went STALE — ${LINK_DOWN_GRACE_MS / 1000}s grace before bar RED`);
+        onProxyDisconnect: () => {
+            log(`loop.sock: proxy link lost — ${LINK_DOWN_GRACE_MS / 1000}s grace before bar RED`);
             proxyLinkGrace.arm();
         },
         // #943 — `cmdReload` (external claude-loop CLI) round-trips this

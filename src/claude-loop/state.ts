@@ -2180,10 +2180,18 @@ export function createLoopServer(
         onClientConnect?: () => void;
         onClientDisconnect?: () => void;
         onClientStale?: () => void;
+        /** #1039 — the proxy peer (re)connected / dropped. Keyed on the
+         *  connection that sends PROXY_EVENT frames, so hook one-shots that
+         *  share loop.sock don't masquerade as the proxy link. */
+        onProxyConnect?: () => void;
+        onProxyDisconnect?: () => void;
     },
 ): LoopServer {
-    const server: EventServer = listenEvents(sockPath, (ev, { reply }) => {
+    const server: EventServer = listenEvents(sockPath, (ev, { reply, markAsProxy }) => {
         if (ev.kind === LOOP_SOCK_KIND.PROXY_EVENT) {
+            // #1039 — this connection IS the proxy : tag it so the server can
+            // fire onProxyConnect/onProxyDisconnect on the right peer.
+            markAsProxy();
             // Legacy event shape is wrapped as
             // `{kind:"proxyEvent", data:{event:"...", kind:"...", ...}}`
             // to fit the `Event {kind, data}` shape of ipc-events. The
@@ -2288,6 +2296,8 @@ export function createLoopServer(
         onClientConnect: handlers.onClientConnect,
         onClientDisconnect: handlers.onClientDisconnect,
         onClientStale: handlers.onClientStale,
+        onProxyConnect: handlers.onProxyConnect,
+        onProxyDisconnect: handlers.onProxyDisconnect,
     });
     return {
         pushView(view) {

@@ -58,9 +58,13 @@ export interface EventServer {
  *  is a no-op (subsequent calls dropped silently). */
 export type EventReply = (response?: Event) => void;
 
-/** Server handler shape. The optional `ctx.reply` lets the handler emit a
- *  synchronous response for request/response patterns. */
-export type EventHandler = (ev: Event, ctx: { reply: EventReply }) => void;
+/** Server handler shape. `ctx.reply` lets the handler emit a synchronous
+ *  response for request/response patterns. `ctx.markAsProxy` lets the handler
+ *  tag the originating connection as THE proxy (#1039) — the server then fires
+ *  `onProxyConnect` (first tag) / `onProxyDisconnect` (that connection closes),
+ *  so link-down detection keys on the persistent proxy peer and ignores the
+ *  one-shot hook connections that share `loop.sock`. */
+export type EventHandler = (ev: Event, ctx: { reply: EventReply; markAsProxy: () => void }) => void;
 
 /** Long-lived bidirectional client handle returned by `openEventChannel`. */
 export interface EventChannel {
@@ -100,7 +104,21 @@ const HEARTBEAT_PING_MS = 15_000;
 export function listenEvents(
     socketPath: string,
     onEvent: EventHandler,
-    opts: { transport?: Transport; onClientConnect?: () => void; onClientDisconnect?: () => void; onClientStale?: () => void } = {},
+    opts: {
+        transport?: Transport;
+        onClientConnect?: () => void;
+        onClientDisconnect?: () => void;
+        onClientStale?: () => void;
+        /** #1039 — fired when a connection first identifies as the proxy (the
+         *  handler calls `ctx.markAsProxy`). The persistent proxy peer, as
+         *  opposed to one-shot hook connections. */
+        onProxyConnect?: () => void;
+        /** #1039 — fired when a connection that had identified as the proxy
+         *  closes (clean kill OR heartbeat-stale terminate). THIS is the
+         *  link-down signal the bar paints RED on — hooks never tag, so their
+         *  churn never triggers it. */
+        onProxyDisconnect?: () => void;
+    } = {},
 ): EventServer {
     const transport = opts.transport ?? defaultTransport;
     const http: HttpServer = createHttpServer();
@@ -151,6 +169,15 @@ export function listenEvents(
         // graceful close (a one-shot hook finishing). Only the former is an
         // error signal ; the latter is normal churn.
         let staleTerminated = false;
+        // #1039 — set once this connection identifies as the proxy (sends a
+        // PROXY_EVENT frame, incl. the connect `hello`). Only a tagged
+        // connection's close is a link-down signal ; hook one-shots never tag.
+        let isProxy = false;
+        const markAsProxy = (): void => {
+            if (isProxy) return;
+            isProxy = true;
+            try { opts.onProxyConnect?.(); } catch { /* consumer threw */ }
+        };
         ws.on("pong", () => { isAlive = true; });
         ws.on("ping", () => { isAlive = true; });
         const pingInterval = setInterval(() => {
@@ -171,6 +198,9 @@ export function listenEvents(
             // ignored by the bar). #1032 S2 keeps onClientDisconnect for both.
             if (staleTerminated) { try { opts.onClientStale?.(); } catch { /* consumer threw */ } }
             try { opts.onClientDisconnect?.(); } catch { /* consumer threw */ }
+            // #1039 — the proxy peer left (clean kill OR stale terminate). This
+            // is the link-down signal ; the bar arms its RED grace on it.
+            if (isProxy) { try { opts.onProxyDisconnect?.(); } catch { /* consumer threw */ } }
         });
         ws.on("message", (raw: RawData) => {
             isAlive = true;
@@ -186,7 +216,7 @@ export function listenEvents(
                 if (response === undefined) return;
                 try { ws.send(JSON.stringify(response)); } catch { /* socket dead, swallow */ }
             };
-            try { onEvent(ev, { reply }); } catch { /* handler threw, swallow */ }
+            try { onEvent(ev, { reply, markAsProxy }); } catch { /* handler threw, swallow */ }
         });
         ws.on("error", () => { /* swallow socket-level errors */ });
     });

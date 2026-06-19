@@ -278,3 +278,53 @@ t("listenEvents : graceful close fires onClientDisconnect but NOT onClientStale"
         server.close();
     });
 });
+
+// #1039 — the proxy peer identifies itself by sending a frame (handler calls
+// ctx.markAsProxy). onProxyConnect fires on the first tag, onProxyDisconnect on
+// that connection's close (clean OR stale). This is the link-down signal — keyed
+// on the proxy, so hook one-shots that never tag don't trip it.
+t("listenEvents : proxy that taps fires onProxyConnect then onProxyDisconnect", async () => {
+    await withTmpSocketPath(async (sockPath) => {
+        let proxyConnects = 0;
+        let proxyDisconnects = 0;
+        const server = listenEvents(sockPath, (_ev, { markAsProxy }) => { markAsProxy(); }, {
+            onProxyConnect: () => { proxyConnects++; },
+            onProxyDisconnect: () => { proxyDisconnects++; },
+        });
+        await sleep(50);
+        const ch = openEventChannel(sockPath, { reconnectMs: 50 });
+        await sleep(120);
+        ch.send({ kind: "proxyEvent", data: { event: "hello" } });
+        await sleep(120);
+        assert.equal(proxyConnects, 1, "onProxyConnect fired once the proxy tapped");
+        assert.equal(proxyDisconnects, 0);
+
+        ch.close();
+        await sleep(150);
+        assert.equal(proxyDisconnects, 1, "onProxyDisconnect fired when the tagged proxy left");
+
+        server.close();
+    });
+});
+
+// #1039 — a client that connects + closes WITHOUT ever sending a frame (never
+// tags as proxy : like a one-shot hook) must NOT trip the proxy link-down signal.
+t("listenEvents : a non-tapping client never fires onProxyConnect/Disconnect", async () => {
+    await withTmpSocketPath(async (sockPath) => {
+        let proxyConnects = 0;
+        let proxyDisconnects = 0;
+        const server = listenEvents(sockPath, (_ev, { markAsProxy }) => { markAsProxy(); }, {
+            onProxyConnect: () => { proxyConnects++; },
+            onProxyDisconnect: () => { proxyDisconnects++; },
+        });
+        await sleep(50);
+        const ch = openEventChannel(sockPath, { reconnectMs: 50 });
+        await sleep(120); // connect but send nothing → never tagged
+        ch.close();
+        await sleep(150);
+        assert.equal(proxyConnects, 0, "no tap → onProxyConnect never fired");
+        assert.equal(proxyDisconnects, 0, "untagged close did NOT fire onProxyDisconnect (no false RED from hooks)");
+
+        server.close();
+    });
+});

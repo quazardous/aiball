@@ -502,6 +502,18 @@ class _ViewPushClient:
                 # #769 — publish the connection so the emitter can write on it.
                 with self._ws_lock:
                     self._ws = ws
+                # #1039 — announce ourselves right after (re)connecting so the
+                # timer tags THIS connection as the proxy peer (link UP) without
+                # waiting for the first keystroke. The timer treats `hello` as a
+                # no-op dispatch ; its only job is to identify the proxy so a
+                # later close of this connection is recognised as link-down (RED).
+                try:
+                    ws.send(_json.dumps({"kind": "proxyEvent", "data": {
+                        "event": "hello",
+                        "now_ms": int(datetime.datetime.now().timestamp() * 1000),
+                    }}))
+                except Exception:
+                    pass
                 while not self._stopped:
                     try:
                         msg = ws.recv()
