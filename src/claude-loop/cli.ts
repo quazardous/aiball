@@ -70,6 +70,7 @@ import { cmdLog } from "./cmds/log.js";
 import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweepOrphans } from "./cmds/manage.js";
 import { cmdInspect } from "./cmds/inspect.js";
 import { cmdHealth } from "./cmds/health.js";
+import { cmdDebug } from "./cmds/debug.js";
 import { cmdBacklog } from "./cmds/backlog.js";
 import { cmdSnapshot } from "./cmds/snapshot.js";
 import { CL_ENV } from "./env-vars.js";
@@ -1950,7 +1951,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "snapshot", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "debug", "backlog", "snapshot", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -2067,6 +2068,9 @@ async function main(): Promise<void> {
             }
             return cmdHealth(names, opts);
         });
+    program.command("debug <action> [name]")
+        .description("#1032 — fault injection to TEST the reload/resync chantier. Actions: `kill-proxy` (SIGKILL pty-proxy.py → bar RED then reconnect+resync), `kill-timer` (SIGKILL loop.ts → bar freezes, recover via reload). Logs the kill into the central loop.log. Name optional — defaults to the current cwd's loop.")
+        .action((action: string, name: string | undefined) => cmdDebug(action, name ?? resolveCurrentLoopName()));
     program.command("snapshot [name]")
         .description("#963 — archive timer.log + pane-captures + hooks logs sous `<sd>/snapshots/<ISO>/`. Default = capture. `--list` = liste les snapshots. `--prune` = nettoie (default --keep 10).")
         .option("--note <text>", "ajoute un note.txt au snapshot capturé (annoter le repro)")
