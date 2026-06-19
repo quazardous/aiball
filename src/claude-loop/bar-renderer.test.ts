@@ -24,7 +24,7 @@ import {
     setIpcCounters,
     setIpcPaneBusy,
     setIpcPaneReady,
-    setIpcProxyLinkUp,
+    setIpcLinkDown,
     setIpcStateTagInfo,
 } from "./ipc-state.js";
 import { LOOP_STATUS } from "./state.js";
@@ -66,7 +66,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         afkGlyph: "",
         promptGlyph: "",
         typingGlyph: "",
-        proxyLinkUp: true,
+        linkDown: false,
         ...overrides,
     };
 }
@@ -245,26 +245,28 @@ test("BarRenderer.paint: counters change → setOpt @cl_counts", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("#1039 BarRenderer.paint: link down → status-bg RED, link up → per-state bg", () => {
+test("#1039 BarRenderer.paint: default = normal bg, linkDown → RED, restored → normal", () => {
     const sd = mkSd();
     const { spawn, calls } = makeSpawnSpy();
-    setIpcProxyLinkUp(true); // start with the link up
     const r = new BarRenderer(sd, "cl-test", spawn);
-    r.tick(); // initial paint (link up)
+    r.tick(); // initial paint : linkDown defaults false → NORMAL (not red)
+    const init = calls.find((c) => c.args.includes("status-bg"));
+    assert.ok(init, "status-bg painted at boot");
+    assert.ok(!init!.args.includes("colour160"), "boot bg is NORMAL, not red (no flash)");
     calls.length = 0;
-    // Link drops → status-bg repaints with the red link_down_bg (default colour160).
-    setIpcProxyLinkUp(false);
+    // Confirmed dead link → status-bg repaints RED (default link_down_bg colour160).
+    setIpcLinkDown(true);
     r.tick();
     const down = calls.find((c) => c.args.includes("status-bg"));
     assert.ok(down, "status-bg repainted on link down");
     assert.ok(down!.args.includes("colour160"), `bg should be link_down_bg red, got: ${down!.args.join(" ")}`);
-    // Link restored → status-bg back to a non-red per-state bg.
+    // Restored → status-bg back to a non-red per-state bg.
     calls.length = 0;
-    setIpcProxyLinkUp(true);
+    setIpcLinkDown(false);
     r.tick();
     const up = calls.find((c) => c.args.includes("status-bg"));
-    assert.ok(up, "status-bg repainted on link up");
-    assert.ok(!up!.args.includes("colour160"), "bg should NOT be red when link up");
+    assert.ok(up, "status-bg repainted on restore");
+    assert.ok(!up!.args.includes("colour160"), "bg back to NORMAL when link restored");
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });

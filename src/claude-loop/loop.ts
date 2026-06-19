@@ -143,7 +143,7 @@ import {
     setIpcNextWakeAt,
     setIpcLastSseEventAtMs,
     setIpcSseConnected,
-    setIpcProxyLinkUp,
+    setIpcLinkDown,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -1152,7 +1152,7 @@ function armLinkDownGrace(): void {
     if (linkDownGraceTimer) return; // already counting down
     linkDownGraceTimer = setTimeout(() => {
         linkDownGraceTimer = null;
-        setIpcProxyLinkUp(false);
+        setIpcLinkDown(true);
         log(`loop.sock: IPC link still down after ${LINK_DOWN_GRACE_MS / 1000}s grace — bar RED`);
     }, LINK_DOWN_GRACE_MS);
 }
@@ -1527,10 +1527,11 @@ async function mainSse(): Promise<void> {
         // anything buffered while the timer was down ; no per-connect drain
         // (hooks connect every turn → would be noisy for no gain).
         onClientConnect: () => {
-            // Reconnected → cancel any pending RED grace and go GREEN.
-            log("loop.sock: client connected — IPC link UP (bar GREEN)");
+            // (Re)connected → cancel any pending RED grace and clear the
+            // link-down overlay (back to normal colours ; there is no "green").
+            log("loop.sock: client connected — IPC link OK (clear RED)");
             cancelLinkDownGrace();
-            setIpcProxyLinkUp(true);
+            setIpcLinkDown(false);
         },
         onClientStale: () => {
             // #1039 david — don't flash RED immediately : a peer that went
