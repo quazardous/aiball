@@ -1262,6 +1262,16 @@ export interface PendingDecisionEntry {
     proposed_by: string | null;
     created_at: string;
     summary_until: string | null;
+    /** #1031 — true on the LATEST pending decision of its ticket : the one
+     *  that actually requires an accept/reject. Successive decisions on a
+     *  ticket are amendments — only the last is actionable. */
+    actionable: boolean;
+    /** #1031 — true on superseded amendments (older pending decisions on the
+     *  same ticket). No action needed ; kept for the amendment history. */
+    superseded: boolean;
+    /** #1031 — comment_hashid of the live (actionable) decision that
+     *  supersedes this one. Null on the actionable entry itself. */
+    superseded_by: string | null;
 }
 
 export function listPendingDecisionsForReporter(
@@ -1312,9 +1322,35 @@ export function listPendingDecisionsForReporter(
                     proposed_by: r.byAgent ?? null,
                     created_at: r.createdAt,
                     summary_until: m.summary_until ?? null,
+                    // #1031 — flagged below once we know the latest per ticket.
+                    actionable: false,
+                    superseded: false,
+                    superseded_by: null,
                 });
             }
         } catch { /* malformed meta, skip */ }
+    }
+    // #1031 — successive decisions on a ticket are AMENDMENTS : only the
+    // latest pending one requires an accept/reject (last-wins, mirroring
+    // `computeDecisionGate`). Flag the latest per ticket `actionable` and the
+    // earlier ones `superseded` (kept for history, pointing at the live one)
+    // so consumers render the chain hierarchically instead of N flat
+    // "decisions to handle".
+    const latestByTicket = new Map<number, PendingDecisionEntry>();
+    for (const e of out) {
+        const cur = latestByTicket.get(e.ticket_id);
+        if (!cur || e.created_at.localeCompare(cur.created_at) > 0) {
+            latestByTicket.set(e.ticket_id, e);
+        }
+    }
+    for (const e of out) {
+        const live = latestByTicket.get(e.ticket_id)!;
+        if (e.comment_id === live.comment_id) {
+            e.actionable = true;
+        } else {
+            e.superseded = true;
+            e.superseded_by = live.comment_hashid;
+        }
     }
     out.sort((a, b) => b.created_at.localeCompare(a.created_at));
     return out;
