@@ -1,6 +1,14 @@
 #!/usr/bin/env -S npx --no-install tsx
 /**
- * claude-loop timer process (#B.63 TS port, #B.148 phase C reactive).
+ * claude-loop KERNEL — the worker process (#B.63 TS port, #B.148 phase C reactive).
+ *
+ * NAMING: this process is the "kernel" — the long-lived worker that runs the
+ * loop, paints the status bar, and bridges the PTY proxy and the daemon. The
+ * legacy name "timer" still survives in many comments and identifiers across
+ * claude-loop; it is being migrated to "kernel" OPPORTUNISTICALLY — when you
+ * edit a chunk of code, rename the "timer" wording you touch, but don't run a
+ * dedicated sweep. ("timer" remains the correct name for actual
+ * setTimeout/setInterval timers — those keep it.) See CONTRIBUTING.md §2.1b.
  *
  * Detached child of the `start` command. Two operating modes:
  *
