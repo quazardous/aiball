@@ -44,9 +44,9 @@ test("checkLoop: pid file with non-numeric → fail", () => {
     assert.equal(c.status, "fail");
 });
 
-test("checkLoop: live pid but cmdline doesn't match loop.ts → fail (pid recycled)", () => {
+test("checkLoop: live pid but cmdline doesn't match kernel.ts → fail (pid recycled)", () => {
     const sd = mkSd("c2");
-    // Our own pid is alive, but the cmdline is node --test, not loop.ts.
+    // Our own pid is alive, but the cmdline is node --test, not kernel.ts.
     writeFileSync(join(sd, "loop.pid"), `${process.pid}\n`);
     const c = checkLoop(sd);
     assert.equal(c.status, "fail");

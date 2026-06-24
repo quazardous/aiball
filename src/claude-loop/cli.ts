@@ -1116,7 +1116,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // Detached timer process. Inherits CL_* env via the env file
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
     const logFd = openSync(loopLogPath(sd), "a");
-    const loopScript = join(root, "src/claude-loop/loop.ts");
+    const loopScript = join(root, "src/claude-loop/kernel.ts");
     const child = spawn("bash", [
         "-lc",
         // #B.228 defensive: same fix as the hook commands above —
@@ -2069,7 +2069,7 @@ async function main(): Promise<void> {
             return cmdHealth(names, opts);
         });
     program.command("debug <action> [name]")
-        .description("#1032 — fault injection to TEST the reload/resync chantier. Actions: `kill-proxy` (SIGKILL pty-proxy.py → bar RED then reconnect+resync), `kill-kernel` (SIGKILL the loop.ts kernel → bar freezes, recover via reload). Logs the kill into the central loop.log. Name optional — defaults to the current cwd's loop.")
+        .description("#1032 — fault injection to TEST the reload/resync chantier. Actions: `kill-proxy` (SIGKILL pty-proxy.py → bar RED then reconnect+resync), `kill-kernel` (SIGKILL the kernel.ts kernel → bar freezes, recover via reload). Logs the kill into the central loop.log. Name optional — defaults to the current cwd's loop.")
         .action((action: string, name: string | undefined) => cmdDebug(action, name ?? resolveCurrentLoopName()));
     program.command("snapshot [name]")
         .description("#963 — archive timer.log + pane-captures + hooks logs sous `<sd>/snapshots/<ISO>/`. Default = capture. `--list` = liste les snapshots. `--prune` = nettoie (default --keep 10).")

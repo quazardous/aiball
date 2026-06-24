@@ -2,7 +2,7 @@
  * #990 S3 / #1009 — Boot replay from a CL_CAPTURE session.
  *
  * Re-drives the REAL boot machinery (the same pane watchers + `bootMachine`
- * the live loop wires in `loop.ts`) from a captured pane timeline, on a
+ * the live loop wires in `kernel.ts`) from a captured pane timeline, on a
  * VIRTUAL clock, and reports whether — and when — the boot phase sealed.
  *
  * #1009 LEVEL+DECAY : each virtual tick re-signals every CURRENTLY-VISIBLE boot
@@ -57,7 +57,7 @@ export interface BootReplayResult {
 
 const PUMP_STEP_MS = 1000;
 
-/** Maps each watcher to the boot-module name it represents, mirroring loop.ts. */
+/** Maps each watcher to the boot-module name it represents, mirroring kernel.ts. */
 function buildBootObserver(): {
     obs: PaneObserver;
     /** Poll the watchers' current visibility → list of visible module names. */
@@ -130,7 +130,7 @@ export function replayBootFrames(frames: ReplayPaneFrame[], opts: BootReplayOpti
     onEdge((edge, name) => { if (!sealed()) moduleEdges.push({ relMs: vnow - loopStartMs, edge, name }); });
 
     // Re-signal every currently-visible module to the machine (= the per-tick
-    // poll loop.ts does). Sealed → no-op.
+    // poll kernel.ts does). Sealed → no-op.
     const signalVisible = (): void => {
         if (sealed()) return;
         for (const name of visibleModules()) {

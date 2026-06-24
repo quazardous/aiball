@@ -575,7 +575,7 @@ export class LoopStateBus {
 
 // #1014 — `nextPaneBusy` (the #890/#992/#994 esc arm/dearm latch) is retired.
 // `paneBusy` is now the output of the composite busy decay-stack (busy-stack.ts,
-// driven in loop.ts:refreshPaneMarkers) : the remanence gives the latch's
+// driven in kernel.ts:refreshPaneMarkers) : the remanence gives the latch's
 // hysteresis for free and a turn reinforces a flickering pane. The esc/pane-idle
 // arm/dearm semantics moved there (esc-visible → seenProof(esc) ; pane-idle →
 // releaseAll).

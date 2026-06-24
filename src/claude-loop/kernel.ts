@@ -315,7 +315,7 @@ function drainOffloadIntoLog(): void {
 // Trou de visibilité comblé : si tu vois 3 lignes en 10s, tsx-watch a
 // tournoyé. Le sha permet de distinguer un hot-reload pur (sha
 // inchangé) d'un git checkout (sha bouge).
-log(`loop.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
+log(`kernel.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
 
 /**
  * Transient-tolerant tmux session check. Distinguishes between:
@@ -491,7 +491,7 @@ function selfReloadIfStale(): void {
 // Ctrl+F9 reload hotkey (and the SHA-stale auto-trigger) share ONE re-exec
 // path. Captures the XState snapshots, stamps the current SHA on the plate (so
 // the fresh timer doesn't immediately self-reload again), spawns a detached
-// new timer on the SAME entrypoint (loop.ts), and exits. The hotkey path
+// new timer on the SAME entrypoint (kernel.ts), and exits. The hotkey path
 // BYPASSES the SHA staleness check (= a manual reload regardless of drift) —
 // useful precisely when the auto-trigger is broken (#1040).
 function respawnKernel(reason: string): void {
@@ -514,12 +514,12 @@ function respawnKernel(reason: string): void {
     });
     const root = installRoot();
     const logFd = openSync(loopLogPath(sd!), "a");
-    // Entrypoint is loop.ts (NOT timer.ts — that file doesn't exist). Same bug
+    // Entrypoint is kernel.ts (NOT timer.ts — that file doesn't exist). Same bug
     // as cmdReload had : a SHA bump triggered this self-reload, which spawned
     // timer.ts → ERR_MODULE_NOT_FOUND → the timer killed itself on every
     // commit to the live checkout. (The "timer.ts" name lives on only in
-    // comments; the actual module is loop.ts.)
-    const timerScript = join(root, "src/claude-loop/loop.ts");
+    // comments; the actual module is kernel.ts.)
+    const timerScript = join(root, "src/claude-loop/kernel.ts");
     const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
     // #859 plan A — NE PAS écrire `child.pid` ici : c'est le pid du wrapper
     // bash → tsx (qui exec puis fork le vrai node timer.ts → zombie). C'est
@@ -2155,7 +2155,7 @@ async function mainSse(): Promise<void> {
         // #629 (xyss9z) : trace which writer drove the @cl_human change.
         // The timer doesn't setOpt directly — the proxy does, after receiving
         // the pushed view — but the timer is the ORIGIN of the value.
-        logBarPaint(sd, "loop.ts:bus.transition", next.presence);
+        logBarPaint(sd, "kernel.ts:bus.transition", next.presence);
     });
     // #872 Phase 3 — `performBootSeal` + `bootSealTimer` + `loopBus.on("bootEnded"/"bootStarted")`
     //   retirés. Le BootMachine acteur (cf. boot-machine.ts) est l'unique

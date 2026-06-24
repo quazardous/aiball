@@ -76,17 +76,17 @@ function probePid(pidPath: string, cmdlineMatch: RegExp): PidProbe {
 }
 
 export function checkLoop(sd: string): HealthCheck {
-    const p = probePid(loopPidPath(sd), /loop\.ts/);
+    const p = probePid(loopPidPath(sd), /kernel\.ts/);
     if (p.pid === null) return { name: "loop", status: "fail", detail: "loop.pid missing / unreadable" };
     if (!p.alive) return { name: "loop", status: "fail", detail: `pid ${p.pid} not running` };
     if (p.cmdline === null) {
         return {
             name: "loop",
             status: "fail",
-            detail: `pid ${p.pid} alive but cmdline doesn't match loop.ts (= pid recycled)`,
+            detail: `pid ${p.pid} alive but cmdline doesn't match kernel.ts (= pid recycled)`,
         };
     }
-    return { name: "loop", status: "ok", detail: `pid ${p.pid} running (tsx + loop.ts)` };
+    return { name: "loop", status: "ok", detail: `pid ${p.pid} running (tsx + kernel.ts)` };
 }
 
 export function checkLoopSource(sd: string): HealthCheck {

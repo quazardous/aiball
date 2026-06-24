@@ -8,7 +8,7 @@
  * `LOG` frame transport over `loop.sock`, exactly like the hooks do. The line
  * is delivered to the kernel BEFORE the destructive action so the timeline reads
  *
- * Naming (#1036) : "kernel" = the long-lived worker process (loop.ts) ; "timer"
+ * Naming (#1036) : "kernel" = the long-lived worker process (kernel.ts) ; "timer"
  * is reserved for genuine setTimeout/setInterval. "proxy" = pty-proxy.py.
  * `debug kill-proxy` → `proxy link lost` → `bar RED` in order.
  */
@@ -57,7 +57,7 @@ export async function cmdDebug(action: string, name: string): Promise<void> {
 
     const target = action === "kill-proxy"
         ? { pid: readPid(proxyAlivePath(sd)), label: "proxy", what: "pty-proxy.py" }
-        : { pid: readPid(loopPidPath(sd)), label: "kernel", what: "loop.ts" };
+        : { pid: readPid(loopPidPath(sd)), label: "kernel", what: "kernel.ts" };
 
     if (target.pid === null) {
         process.stderr.write(`debug ${action}: no ${target.label} pid for '${name}' (not running?)\n`);
