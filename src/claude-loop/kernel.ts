@@ -1157,6 +1157,8 @@ async function refreshCounters(): Promise<void> {
         const { open, backlog, events } = deriveBarCounters(pingsR, projectsR, backlogR, loopProject);
         if (events !== null || open !== null || backlog !== null) {
             setIpcCounters({ open, backlog, events });
+            // #1055 S4 — surface the refreshed counters on the kernel bus.
+            getKernelBus().emit("counters:refreshed", { open, backlog, events });
         }
     } catch { /* counter sync best-effort */ }
 }

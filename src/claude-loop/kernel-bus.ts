@@ -51,7 +51,7 @@ export interface KernelEventMap {
     "daemon:ping": { ticketId?: number };
     "daemon:control": { action: string };
     "pane:changed": Record<string, unknown>;
-    "counters:refreshed": { open: number; backlog: number; events: number };
+    "counters:refreshed": { open: number | null; backlog: number | null; events: number | null };
 }
 
 export type KernelEventName = keyof KernelEventMap;

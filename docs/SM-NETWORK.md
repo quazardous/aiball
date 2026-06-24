@@ -369,6 +369,48 @@ The discriminated union via `setup.types.emitted` gives the consumer
 TypeScript narrowing for free — `actor.on("afk:armed_10m", ev)` sees
 `ev.expiryMs` as `number`, not as `unknown` or `string | undefined`.
 
+## The kernel event bus
+
+The locus-event vocabulary above (`<controller>:<event_name>`) is decentralised:
+to react to a signal you must know which actor (or which non-actor source —
+`WakeBus`, the `loop.sock` server, the pane watchers) carries it. The **kernel
+bus** (`kernel-bus.ts`, `getKernelBus()`) is a single typed aggregation surface
+over all of them, so a consumer subscribes in one place:
+
+```ts
+getKernelBus().on("turn:settled", ({ idleSinceMs }) => { … });
+getKernelBus().on("ipc:disconnect", ({ peer }) => { … });
+```
+
+### Where it sits
+
+The bus is the **consumer / transport layer — OUTSIDE the purity boundary**. It
+is a plain typed `EventEmitter`-like store, NOT an XState actor, and it is
+**never imported inside a machine action** (machines still only `assign` +
+`emit`). The composition root forwards the actors' emits onto it; it never
+reaches back into a machine.
+
+### Producers (additive — they run alongside the existing wiring)
+
+- **In-process actor emits** → `bridgeActorToKernel(actor, types)` in the
+  composition root forwards every `<controller>:<event>` emit onto the bus, next
+  to the business `actor.on(...)` consumers. The actor stays the sole emitter.
+- **Cross-process sources** are adapted into the same catalogue: `WakeBus`
+  hello/ping/control → `daemon:*`; the `loop.sock` proxy connect / disconnect /
+  resync → `ipc:*`; the `LoopStateBus` transition → `pane:changed`; the counter
+  refresh → `counters:refreshed`.
+
+The full catalogue is the `KernelEventMap` type in `kernel-bus.ts`.
+
+### Convergence rule (no big-bang)
+
+The bus is **additive**. The decentralised channels it aggregates —
+`actor.on(...)` and the coarse `onIpcChanged` notifier in `ipc-state.ts` —
+**coexist** with it; the bus does not replace them. New consumers should prefer
+`getKernelBus().on(...)`; existing ad-hoc subscriptions migrate
+**opportunistically** (rename what you touch when you edit nearby code, don't
+run a dedicated sweep — same posture as the `timer → kernel` naming migration).
+
 ## See also
 
 - [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md) — claude-loop wrapper overview (uses the network).
