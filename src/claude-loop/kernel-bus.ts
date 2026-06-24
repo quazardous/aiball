@@ -28,9 +28,11 @@
 export interface KernelEventMap {
     // in-process — XState actor emits (wired in S2)
     "boot:sealed": { loopStartMs: number; reason: "deadline" | "hook" };
+    "loop:start": { loopStartMs: number };
     "turn:started": { atMs: number };
     "turn:ended": { atMs: number };
     "turn:no_turn_since": { atMs: number; reason: "session_start" | "turn_ended" };
+    "turn:settled": { idleSinceMs: number };
     "wake:requested": { source: string; atMs: number };
     "wake:in_flight_started": { atMs: number };
     "wake:delivered": { phrase: string; headMessageId: number | null };
@@ -109,4 +111,27 @@ let singleton: KernelBus | null = null;
 export function getKernelBus(): KernelBus {
     if (!singleton) singleton = new KernelBus();
     return singleton;
+}
+
+/** Minimal shape of an XState actor's `.on` surface — enough to bridge its emits. */
+export interface ActorLike {
+    on(type: KernelEventName, cb: (ev: { type: KernelEventName } & Record<string, unknown>) => void): unknown;
+}
+
+/**
+ * #1053 S2 — forward every named emit of an XState `actor` onto the kernel bus.
+ * ADDITIVE : registers separate forwarding subscriptions that run alongside the
+ * business `actor.on(...)` consumers — the actor stays the sole emitter, the
+ * kernel just gets a copy. No-op on a null actor. `bus` defaults to the
+ * singleton (overridable for tests).
+ */
+export function bridgeActorToKernel(
+    actor: ActorLike | null | undefined,
+    types: KernelEventName[],
+    bus: KernelBus = getKernelBus(),
+): void {
+    if (!actor) return;
+    for (const t of types) {
+        actor.on(t, (ev) => bus.emit(t, ev as never));
+    }
 }

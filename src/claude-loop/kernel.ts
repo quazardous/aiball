@@ -47,6 +47,7 @@ import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
 import { drainOffload, listOffloadComponents } from "./offload.js";
+import { getKernelBus, bridgeActorToKernel } from "./kernel-bus.js";
 import {
     armBusyDefer,
     WAKE_COALESCE_WINDOW_MS,
@@ -1465,6 +1466,7 @@ async function mainSse(): Promise<void> {
         // #1039 follow-up — daemon link (re)established → clear the RED overlay.
         daemonLinkGrace.clear();
         log(`SSE hello: unread=${h.unread}`);
+        getKernelBus().emit("daemon:hello", { unread: h.unread });
         // #1033 — aiball connection established (boot OR reconnect) : refresh the
         // bar counters eagerly so `o:N b:N e:N` appears as soon as we can talk to
         // the daemon, instead of waiting for the first heartbeat (~interval).
@@ -1473,6 +1475,8 @@ async function mainSse(): Promise<void> {
     wakeBus.on("control", (c) => {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
+        // #1054 S3 — surface every control action on the kernel bus.
+        getKernelBus().emit("daemon:control", { action: String(c.action ?? "") });
         if (c.action === "kill") cleanShutdown("sse:control:kill");
         // #451: operator-supplied RAW prompt → inject it into the Claude
         // session exactly like a wake (sendKeys sets the wake-in-flight +
@@ -1487,6 +1491,7 @@ async function mainSse(): Promise<void> {
     wakeBus.on("ping", (p) => {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
+        getKernelBus().emit("daemon:ping", { ticketId: p.ticket_id });
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
         // #816 david — instant counter refresh on SSE ping (else the bar's
@@ -1633,8 +1638,10 @@ async function mainSse(): Promise<void> {
             // turn:ended) ; the pane markers re-arm it within a poll if claude is
             // really busy. The view is re-pushed to the proxy by pushViewIfChanged
             // (1s tick + onIpcChanged), so clearing the latch also repaints.
+            getKernelBus().emit("ipc:connect", { peer: "proxy" });
             if (proxyWasDown) {
                 proxyWasDown = false;
+                getKernelBus().emit("ipc:resync", {});
                 log("loop.sock: proxy RECONNECTED — link OK + resync (release stale busy latch)");
                 if (sd) { busyProofs = releaseBusyProofs(); setPaneBusy(sd, false); }
             } else {
@@ -1643,6 +1650,7 @@ async function mainSse(): Promise<void> {
         },
         onProxyDisconnect: () => {
             proxyWasDown = true;
+            getKernelBus().emit("ipc:disconnect", { peer: "proxy" });
             log(`loop.sock: proxy link lost — ${LINK_DOWN_GRACE_MS / 1000}s grace before bar RED`);
             proxyLinkGrace.arm();
         },
@@ -1675,6 +1683,16 @@ async function mainSse(): Promise<void> {
         onLogLine: (line) => process.stdout.write(line),
     });
     process.on("exit", () => loopServer.close());
+    // #1053 S2 — bridge every XState actor emit onto the kernel bus. ADDITIVE :
+    // runs ALONGSIDE the business `actor.on(...)` consumers below (the kernel
+    // just gets a copy of each emit) ; the actors stay the sole emitters of
+    // their locus events (purity preserved). New code subscribes via
+    // `getKernelBus().on(...)` instead of knowing which actor carries a signal.
+    bridgeActorToKernel(bootActor as never, ["boot:sealed", "loop:start"]);
+    bridgeActorToKernel(getAfkService().getActor() as never, ["afk:armed_10m", "afk:armed_inf", "afk:cleared"]);
+    bridgeActorToKernel(getWakeService().getActor() as never, ["wake:requested", "wake:in_flight_started", "wake:delivered", "wake:cleared", "wake:cooldown_expired"]);
+    bridgeActorToKernel(getTypingService().getActor() as never, ["typing:started", "typing:ended"]);
+    bridgeActorToKernel(getTurnService().getActor() as never, ["turn:started", "turn:ended", "turn:no_turn_since", "turn:settled"]);
     // #862 Slice 5 — `installHookBarSubscriber` retiré. La transition
     // UserPromptSubmit → BUSY est dérivée par le BarRenderer depuis
     // `paneBusy` (= pane watcher détecte busy → setIpcPaneBusy(true) →
@@ -2152,6 +2170,9 @@ async function mainSse(): Promise<void> {
     // `afkStateChunkStr` chaque tick (1s safety + onIpcChanged events).
     loopBus.on("transition", (_prev, next) => {
         loopServer.pushView(next);
+        // #1054 S3 — view/pane state changed (pane watchers → recompute →
+        // transition). Surface it on the kernel bus.
+        getKernelBus().emit("pane:changed", { presence: next.presence });
         // #629 (xyss9z) : trace which writer drove the @cl_human change.
         // The timer doesn't setOpt directly — the proxy does, after receiving
         // the pushed view — but the timer is the ORIGIN of the value.

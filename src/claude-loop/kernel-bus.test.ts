@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { KernelBus, getKernelBus } from "./kernel-bus.js";
+import { KernelBus, getKernelBus, bridgeActorToKernel } from "./kernel-bus.js";
 
 test("on/emit delivers the typed payload", () => {
     const bus = new KernelBus();
@@ -67,4 +67,27 @@ test("listenerCount tracks per-event and total", () => {
 
 test("getKernelBus returns a stable singleton", () => {
     assert.equal(getKernelBus(), getKernelBus());
+});
+
+test("bridgeActorToKernel forwards actor emits onto the bus (end-to-end)", () => {
+    const bus = new KernelBus();
+    // fake XState actor : records the per-type callbacks .on registers.
+    const handlers: Record<string, (ev: unknown) => void> = {};
+    const fakeActor = {
+        on(type: string, cb: (ev: unknown) => void) { handlers[type] = cb; return () => {}; },
+    };
+    bridgeActorToKernel(fakeActor as never, ["turn:ended", "turn:settled"], bus);
+    let gotEnded: number | null = null;
+    let gotSettled: number | null = null;
+    bus.on("turn:ended", (p) => { gotEnded = p.atMs; });
+    bus.on("turn:settled", (p) => { gotSettled = p.idleSinceMs; });
+    // simulate the actor emitting
+    handlers["turn:ended"]({ type: "turn:ended", atMs: 7 });
+    handlers["turn:settled"]({ type: "turn:settled", idleSinceMs: 99 });
+    assert.equal(gotEnded, 7);
+    assert.equal(gotSettled, 99);
+});
+
+test("bridgeActorToKernel is a no-op on a null actor", () => {
+    assert.doesNotThrow(() => bridgeActorToKernel(null, ["turn:ended"], new KernelBus()));
 });
