@@ -124,6 +124,7 @@ import {
     consumePendingSnapshot,
     parseRespawnSnapshots,
     RESPAWN_STATE_ENV_VAR,
+    REATTACH_ENV_VAR,
     serializeRespawnSnapshots,
     setPendingRespawnSnapshots,
 } from "./respawn-state.js";
@@ -413,6 +414,17 @@ if (sd) {
     }
 }
 
+// #1059 — reattach (reload / self-reload / revive) vs fresh start. cmdReload +
+// respawnKernel set CL_REATTACH ; cmdStart does not. On a reattach we never
+// re-inject the bootstrap skill (claude is an ongoing session, not a fresh one).
+// And when the AFK snapshot was LOST (revive on a dead loop.sock = cold boot),
+// seed NOT-AFK-10min instead of `off` so a human working live isn't surprised
+// by autonomous wakes — it auto-releases after 10min (david's "repartir en
+// NOT-AFK 10 minutes" / no-surprise grace).
+const reattachMode = process.env[REATTACH_ENV_VAR] === "1";
+const seedReattachHold = reattachMode
+    && parseRespawnSnapshots(process.env[RESPAWN_STATE_ENV_VAR])?.afk === undefined;
+
 /**
  * Read the visible content of pane 0. Empty string on any failure
  * (tmux gone, capture errored) — callers fall back to last-known
@@ -521,13 +533,17 @@ function respawnKernel(reason: string): void {
     // spawn le new process. Le NEW timer les restaure via
     // `setPendingRespawnSnapshots` au boot puis les service factories
     // les consomment. Pattern uniforme, drop les sync ad hoc HARD_*.
-    const respawnEnv = buildRespawnEnvFromSnapshots({
-        boot: bootActor ? bootActor.getPersistedSnapshot() : undefined,
-        afk: getAfkService().getActor().getPersistedSnapshot(),
-        wake: getWakeService().getActor().getPersistedSnapshot(),
-        typing: getTypingService().getActor().getPersistedSnapshot(),
-        idle: getTurnService().getActor().getPersistedSnapshot(),
-    });
+    const respawnEnv = {
+        ...buildRespawnEnvFromSnapshots({
+            boot: bootActor ? bootActor.getPersistedSnapshot() : undefined,
+            afk: getAfkService().getActor().getPersistedSnapshot(),
+            wake: getWakeService().getActor().getPersistedSnapshot(),
+            typing: getTypingService().getActor().getPersistedSnapshot(),
+            idle: getTurnService().getActor().getPersistedSnapshot(),
+        }),
+        // #1059 — mark the new kernel as a reattach (no bootstrap re-inject).
+        [REATTACH_ENV_VAR]: "1",
+    };
     const root = installRoot();
     const logFd = openSync(loopLogPath(sd!), "a");
     // Entrypoint is kernel.ts (NOT timer.ts — that file doesn't exist). Same bug
@@ -1710,6 +1726,16 @@ async function mainSse(): Promise<void> {
     bridgeActorToKernel(getWakeService().getActor() as never, ["wake:requested", "wake:in_flight_started", "wake:delivered", "wake:cleared", "wake:cooldown_expired"]);
     bridgeActorToKernel(getTypingService().getActor() as never, ["typing:started", "typing:ended"]);
     bridgeActorToKernel(getTurnService().getActor() as never, ["turn:started", "turn:ended", "turn:no_turn_since", "turn:settled"]);
+    // #1059 — revive on a dead loop.sock cold-boots → the AFK snapshot is lost.
+    // Instead of defaulting to `off` (autonomous, would surprise a human working
+    // live), seed NOT-AFK-10min : auto-wakes are held for 10min then auto-release
+    // if nobody's there. Only when the status was actually lost (reattach without
+    // an AFK snapshot) — a normal reload restores the real AFK state untouched.
+    if (seedReattachHold) {
+        const expiryMs = Date.now() + 600_000;
+        getAfkService().set10m(expiryMs);
+        log(`reattach without AFK snapshot — seeded NOT-AFK 10min (no-surprise hold, expires ${new Date(expiryMs).toISOString()})`);
+    }
     // #862 Slice 5 — `installHookBarSubscriber` retiré. La transition
     // UserPromptSubmit → BUSY est dérivée par le BarRenderer depuis
     // `paneBusy` (= pane watcher détecte busy → setIpcPaneBusy(true) →
@@ -1872,6 +1898,13 @@ async function mainSse(): Promise<void> {
     const pushSessionBootstrapSkill = (): void => {
         if (postBootRemindersSent) return;
         postBootRemindersSent = true;
+        // #1059 — a reattach (reload / self-reload / revive) re-runs boot but
+        // claude is an ONGOING session — never re-inject the startup skill (it
+        // surprised a human working live after a revive).
+        if (reattachMode) {
+            log("session:live bootstrap skill skipped (reattach — claude already live)");
+            return;
+        }
         try {
             const promptMap = mergePrompts(loadPromptsFromYaml(pingsPath(sd!)), {});
             const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");

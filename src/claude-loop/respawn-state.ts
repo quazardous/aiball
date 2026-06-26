@@ -60,6 +60,15 @@ export function parseRespawnSnapshots(raw: string | undefined): RespawnSnapshots
 /** Env var qui transporte le swap entre OLD et NEW process. */
 export const RESPAWN_STATE_ENV_VAR = "CL_RESPAWN_STATE";
 
+/**
+ * #1059 — env var posée par cmdReload + respawnKernel : signale au NEW kernel
+ * qu'il REPREND une session claude vivante (reload/self-reload/revive), pas un
+ * démarrage frais. Sert à (a) ne PAS ré-injecter le bootstrap skill, et (b) si
+ * le snapshot AFK a été perdu (revive sock morte), repartir en NOT-AFK-10min
+ * (hold anti-surprise) au lieu de `off` (autonome). cmdStart ne la pose PAS.
+ */
+export const REATTACH_ENV_VAR = "CL_REATTACH";
+
 // =============================================================================
 // Slice C — pending snapshots stash pour les service factories.
 // =============================================================================

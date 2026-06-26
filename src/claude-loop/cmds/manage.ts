@@ -36,7 +36,7 @@ import {
     sendShutdownToTimer,
     zenPath,
 } from "../state.js";
-import { RESPAWN_STATE_ENV_VAR } from "../respawn-state.js";
+import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
 
 function die(msg: string): never {
@@ -346,9 +346,11 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     // #943 — pass the captured XState snapshots via env so the new timer's
     // service factories restore the exact state (cf. `consumePendingSnapshot`
     // in afk-service.ts etc.). Null = nothing to preserve, cold boot.
+    // #1059 — REATTACH marks the new kernel as resuming a live claude (no
+    // bootstrap re-inject ; seed NOT-AFK-10min if the AFK snapshot is lost).
     const spawnEnv = snapshotsJson
-        ? { ...process.env, [RESPAWN_STATE_ENV_VAR]: snapshotsJson }
-        : process.env;
+        ? { ...process.env, [RESPAWN_STATE_ENV_VAR]: snapshotsJson, [REATTACH_ENV_VAR]: "1" }
+        : { ...process.env, [REATTACH_ENV_VAR]: "1" };
     const child = spawn("bash", [
         "-lc",
         // #991 — preserve + re-source the volatile env.local across a reload
