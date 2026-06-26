@@ -153,6 +153,7 @@ test("sweepSiblingTimers: process avec CL_STATE_DIR matching → killed", () => 
         () => ["1234", "5678"],
         (pid) => pid === 1234 ? `PATH=/bin\0CL_STATE_DIR=${sd}\0HOME=/h\0` : `PATH=/bin\0CL_STATE_DIR=/other\0`,
         (pid) => { killed.push(pid); },
+        () => "node /r/node_modules/.bin/tsx /r/src/claude-loop/kernel.ts", // #1059 kernel cmdline
     );
     assert.deepEqual(killed, [1234]);
 });
@@ -195,8 +196,24 @@ test("sweepSiblingTimers: match au début du env buffer (sans \\0 leading)", () 
         () => ["1234"],
         () => `CL_STATE_DIR=${sd}\0PATH=/bin\0`, // marker AT START
         (pid) => { killed.push(pid); },
+        () => "tsx /r/src/claude-loop/kernel.ts", // #1059 kernel cmdline
     );
     assert.deepEqual(killed, [1234]);
+});
+
+test("sweepSiblingTimers: #1059 — CL_STATE_DIR match but NON-kernel cmdline (proxy) is SPARED", () => {
+    if (process.platform !== "linux") return;
+    const sd = "/sd";
+    const killed: number[] = [];
+    sweepSiblingTimers(
+        sd,
+        99999,
+        () => ["1234"],
+        () => `CL_STATE_DIR=${sd}\0PATH=/bin\0`,
+        (pid) => { killed.push(pid); },
+        () => "python3 -B /r/src/claude-loop/pty-proxy.py -- claude", // proxy → must NOT be killed
+    );
+    assert.deepEqual(killed, []);
 });
 
 test("sweepSiblingTimers: substring match évité (CL_STATE_DIR_BACKUP → no kill)", () => {

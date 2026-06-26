@@ -22,8 +22,8 @@ test("init : seed module 'boot' (remanence=bootMinMs) → deadline = loopStart +
     const ctx = actor.getSnapshot().context;
     assert.equal(ctx.deadlineMs, 1_030_000);
     assert.equal(actor.getSnapshot().value, "booting");
-    assert.equal(ctx.moduleSeen.has(SEED_MODULE), true);
-    assert.equal(ctx.moduleSeen.get(SEED_MODULE)!.remanenceMs, 30_000);
+    assert.equal(SEED_MODULE in ctx.moduleSeen, true);
+    assert.equal(ctx.moduleSeen[SEED_MODULE].remanenceMs, 30_000);
 });
 
 test("MODULE_SEEN : early transient stays under the floor → deadline = floor", () => {
@@ -31,7 +31,7 @@ test("MODULE_SEEN : early transient stays under the floor → deadline = floor",
     actor.send({ type: "MODULE_SEEN", name: "resume_picker", nowMs: 1_005_000 });
     // resume_picker falls at 1_005_000+10_000=1_015_000 < floor 1_030_000
     assert.equal(actor.getSnapshot().context.deadlineMs, 1_030_000);
-    assert.equal(actor.getSnapshot().context.moduleSeen.has("resume_picker"), true);
+    assert.equal("resume_picker" in actor.getSnapshot().context.moduleSeen, true);
 });
 
 test("MODULE_SEEN : late transient extends the deadline past the floor", () => {
@@ -55,10 +55,10 @@ test("MODULE_SEEN : explicit remanenceMs honoured", () => {
 });
 
 test("computeBootDeadline / liveBootModules helpers", () => {
-    const seen = new Map([
-        [SEED_MODULE, { lastSeenMs: 1_000_000, remanenceMs: 30_000 }],   // falls 1_030_000
-        ["compacting", { lastSeenMs: 1_025_000, remanenceMs: 10_000 }],  // falls 1_035_000
-    ]);
+    const seen: Record<string, { lastSeenMs: number; remanenceMs: number }> = {
+        [SEED_MODULE]: { lastSeenMs: 1_000_000, remanenceMs: 30_000 },   // falls 1_030_000
+        compacting: { lastSeenMs: 1_025_000, remanenceMs: 10_000 },      // falls 1_035_000
+    };
     assert.equal(computeBootDeadline(seen), 1_035_000);
     // at 1_032_000 : seed fallen, compacting live
     assert.deepEqual(liveBootModules(seen, 1_032_000), ["compacting"]);
@@ -84,10 +84,10 @@ test("HOOK_SEAL : booting → sealed", () => {
 test("sealed terminal : MODULE_SEEN suivants no-op", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     actor.send({ type: "HOOK_SEAL" });
-    const before = actor.getSnapshot().context.moduleSeen.size;
+    const before = Object.keys(actor.getSnapshot().context.moduleSeen).length;
     actor.send({ type: "MODULE_SEEN", name: "compacting", nowMs: 1_999_000 });
-    assert.equal(actor.getSnapshot().context.moduleSeen.size, before);
-    assert.equal(actor.getSnapshot().context.moduleSeen.has("compacting"), false);
+    assert.equal(Object.keys(actor.getSnapshot().context.moduleSeen).length, before);
+    assert.equal("compacting" in actor.getSnapshot().context.moduleSeen, false);
 });
 
 test("emit boot:sealed (reason=deadline) sur DEADLINE_REACHED", () => {

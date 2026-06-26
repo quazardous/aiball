@@ -58,7 +58,7 @@ function tmuxAlive(name: string): boolean {
  * orphans spawned by post-fix code, and an installed-base sweep needs
  * platform-specific plumbing (mac libproc / windows WMI) we haven't built.
  */
-export function sweepOrphans(sd: string): { killed: number[] } {
+export function sweepOrphans(sd: string, opts: { kernelOnly?: boolean } = {}): { killed: number[] } {
     if (process.platform !== "linux") return { killed: [] };
     const killed: number[] = [];
     const marker = `CL_STATE_DIR=${sd}`;
@@ -76,6 +76,17 @@ export function sweepOrphans(sd: string): { killed: number[] } {
         // shouldn't false-match), so anchor on `\0KEY=VAL\0` or at the
         // start of the buffer.
         if (!env.includes(`\0${marker}\0`) && !env.startsWith(`${marker}\0`)) continue;
+        // #1059 — on a RELOAD the proxy + claude are ALIVE and must survive (the
+        // proxy carries CL_STATE_DIR too, so an unfiltered sweep SIGKILLs it →
+        // claude's PTY dies = the #1032 "le proxy ne survit pas au reload").
+        // `kernelOnly` restricts the kill to sibling kernels (cmdline ~ kernel.ts).
+        // cmdStart keeps the full sweep (fresh start — nothing live to protect).
+        if (opts.kernelOnly) {
+            let cmdline: string;
+            try { cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8"); }
+            catch { continue; }
+            if (!/kernel\.ts/.test(cmdline)) continue;
+        }
         try { process.kill(pid, "SIGKILL"); killed.push(pid); }
         catch { /* race : process already dead */ }
     }
@@ -301,9 +312,11 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     // #783 — sweep any other orphan tied to this state-dir (extra timer
     // forks left by tsx-watch reload races, half-dead proxy from a previous
     // crash). No-op on platforms without /proc.
-    const swept = sweepOrphans(sd);
+    // #1059 — kernelOnly : a reload must NOT sweep the live proxy/claude (they
+    // carry CL_STATE_DIR too) ; only sibling kernels are orphans here.
+    const swept = sweepOrphans(sd, { kernelOnly: true });
     if (swept.killed.length > 0) {
-        process.stdout.write(`claude-loop: swept ${swept.killed.length} orphan process(es) bound to '${sd}' before reload\n`);
+        process.stdout.write(`claude-loop: swept ${swept.killed.length} orphan kernel(s) bound to '${sd}' before reload\n`);
     }
 
     // #251: re-stamp the plate's source SHA so a reloaded loop drops the

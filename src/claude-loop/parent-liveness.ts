@@ -76,7 +76,14 @@ export function sweepSiblingTimers(
         const env = readEnvImpl(pid);
         if (env === null) continue;
         if (!env.includes(`\0${marker}\0`) && !env.startsWith(`${marker}\0`)) continue;
-        matched.push({ pid, cmdline: readCmdline(pid) });
+        const cmdline = readCmdline(pid);
+        matched.push({ pid, cmdline });
+        // #1059 — only SIGKILL sibling KERNELS. The proxy (pty-proxy.py), claude
+        // and the one-shot hooks ALSO carry CL_STATE_DIR ; killing the proxy
+        // would take down claude's PTY (the #1032 "le proxy ne survit pas"). The
+        // match stays in `matched` for the diag log, but the kill is gated on the
+        // kernel entrypoint appearing in the cmdline.
+        if (!/kernel\.ts/.test(cmdline)) continue;
         try { killImpl(pid); killed.push(pid); }
         catch { /* race : process already dead */ }
     }

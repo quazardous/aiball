@@ -64,10 +64,17 @@ interface ModuleSeen {
     remanenceMs: number;
 }
 
+// #1059 — `moduleSeen` is a plain Record (NOT a Map) so the boot snapshot
+// round-trips through `respawn-state.ts`'s JSON serialize/restore. A Map would
+// serialize to `{}` and rehydrate as a non-iterable plain object, crashing the
+// restored boot actor (`seen is not iterable`) → kernel dead on every snapshot
+// respawn (self-reload / reload). The `?? {}` guards also make a legacy `{}`
+// snapshot (from a pre-#1059 kernel) restore cleanly as an empty Record.
+
 /** deadline = the latest fall-time across all modules = max(lastSeen + remanence). */
-export function computeBootDeadline(seen: Map<string, ModuleSeen>): number {
+export function computeBootDeadline(seen: Record<string, ModuleSeen>): number {
     let max = 0;
-    for (const m of seen.values()) {
+    for (const m of Object.values(seen ?? {})) {
         const fallsAt = m.lastSeenMs + m.remanenceMs;
         if (fallsAt > max) max = fallsAt;
     }
@@ -75,9 +82,9 @@ export function computeBootDeadline(seen: Map<string, ModuleSeen>): number {
 }
 
 /** Modules still within their remanence window at `nowMs` (= not yet fallen). */
-export function liveBootModules(seen: Map<string, ModuleSeen>, nowMs: number): string[] {
+export function liveBootModules(seen: Record<string, ModuleSeen>, nowMs: number): string[] {
     const out: string[] = [];
-    for (const [name, m] of seen) {
+    for (const [name, m] of Object.entries(seen ?? {})) {
         if (nowMs <= m.lastSeenMs + m.remanenceMs) out.push(name);
     }
     return out;
@@ -88,7 +95,7 @@ export const bootMachine = setup({
         context: {} as {
             loopStartMs: number;
             bootMinMs: number;
-            moduleSeen: Map<string, ModuleSeen>;
+            moduleSeen: Record<string, ModuleSeen>;
             deadlineMs: number;
         },
         events: {} as
@@ -103,11 +110,13 @@ export const bootMachine = setup({
         // in one assign (single map build — assign property fns see OLD context).
         onModuleSeen: assign(({ context, event }) => {
             if (event.type !== "MODULE_SEEN") return {};
-            const next = new Map(context.moduleSeen);
-            next.set(event.name, {
-                lastSeenMs: event.nowMs,
-                remanenceMs: event.remanenceMs ?? DEFAULT_REMANENCE_MS,
-            });
+            const next: Record<string, ModuleSeen> = {
+                ...context.moduleSeen,
+                [event.name]: {
+                    lastSeenMs: event.nowMs,
+                    remanenceMs: event.remanenceMs ?? DEFAULT_REMANENCE_MS,
+                },
+            };
             return { moduleSeen: next, deadlineMs: computeBootDeadline(next) };
         }),
         emitBootSealedDeadline: emit(({ context }) => ({
@@ -130,9 +139,9 @@ export const bootMachine = setup({
     initial: "booting",
     context: ({ input }) => {
         // Seed the floor module : signalled once, remanence = bootMinMs.
-        const moduleSeen = new Map<string, ModuleSeen>([
-            [SEED_MODULE, { lastSeenMs: input.loopStartMs, remanenceMs: input.bootMinMs }],
-        ]);
+        const moduleSeen: Record<string, ModuleSeen> = {
+            [SEED_MODULE]: { lastSeenMs: input.loopStartMs, remanenceMs: input.bootMinMs },
+        };
         return {
             loopStartMs: input.loopStartMs,
             bootMinMs: input.bootMinMs,
