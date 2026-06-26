@@ -476,14 +476,29 @@ function shQuote(s: string): string {
  *
  * Does not return when it reloads — the process exits after handing off.
  */
+// #1040 — edge-triggered staleness indicator. The self-reload is reported
+// broken (commits don't auto-deploy) yet `health` proves staleness IS detected,
+// so the break is in the RESPAWN path, not the trigger eval. This log makes the
+// next "commit → no reload" diagnosable WITHOUT spamming every 2s : it fires
+// ONCE when the staleness verdict flips. Reading it: at boot you should see
+// `stale=false` (= the watchdog tick is alive + reaching this check) ; after a
+// commit it should flip to `stale=true` immediately followed by `respawning
+// kernel`. `stale=true` with NO `respawning kernel` ⇒ respawn path broken ; NO
+// flip at all after a confirmed commit ⇒ the watchdog tick isn't running.
+let lastStaleEval: boolean | null = null;
 function selfReloadIfStale(): void {
     let plate: Plate;
     try { plate = readPlate(sd!); } catch { return; }
-    if (!isLoopStale(plate)) return;
     const sha = installRootSha();
+    const stale = isLoopStale(plate);
+    if (stale !== lastStaleEval) {
+        lastStaleEval = stale;
+        log(`selfReloadIfStale: source stale=${stale} (boot=${(plate.started_at_sha ?? "?").slice(0, 7)} now=${(sha ?? "?").slice(0, 7)})`);
+    }
+    if (!stale) return;
     log(
         `source moved since boot (${(plate.started_at_sha ?? "?").slice(0, 7)} → ${(sha ?? "?").slice(0, 7)}) ` +
-        `and loop is idle — self-reloading timer`,
+        `and loop is idle — self-reloading kernel`,
     );
     respawnKernel("SHA moved since boot (idle)");
 }
