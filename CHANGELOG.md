@@ -23,8 +23,11 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-06-27
+
 ### Added
 
+- `claude-loop debug kill-proxy <name>` / `kill-kernel <name>` — fault-injection commands that deliberately kill a loop's proxy or kernel process, to exercise the reload and recovery paths.
 - `CL_CAPTURE=1` records a whole `claude-loop` session (keystrokes, loop-injected wakes, and pane snapshots) into one capture folder with a shared clock, so a session can be replayed for debugging. It supersedes the older single-purpose capture switches, which still work as deprecated aliases.
 - The status bar shows the `❯` prompt glyph in a distinct colour when there is unsent text waiting at Claude's input prompt.
 
@@ -33,12 +36,17 @@ dates are YYYY-MM-DD.
 - "Claude is busy" is now derived from several reinforcing signals at once — an in-flight turn plus the live pane activity (the interrupt footer, an ongoing `/compact`) — instead of a single fragile footer match. Each signal keeps "busy" alive briefly after it was last seen, so transient flicker (e.g. typing while Claude works, which pushes the interrupt hint off-screen) no longer drops the busy state; returning to a clean idle prompt clears it at once. The result is a steadier busy indicator and fewer wakes fired on top of working sessions.
 - A shell-prefix env override at loop start (e.g. `CL_CAPTURE=1 claude-loop start …`) is now **volatile**: it applies to that session and is re-seeded clean on the next start, instead of silently persisting forever. Deliberate, persistent overrides still go through `claude-loop reload <name> --set KEY=val`.
 - `claude-loop health` with no argument now reports the loop(s) for the current directory instead of every registered loop; pass `--all` for the global view.
+- A loop's long-lived background process is now called the **kernel** (previously the "timer"); `claude-loop health` and process listings reflect the new name.
 
 ### Fixed
 
 - After boot, the loop could stay silent (never fire any wake) when a turn was in flight at boot-end or Claude's turn-end signal was missed. The live session now starts on a join of "boot finished" and "Claude idle-ready" (ready by default), and turn-end is also recovered from the pane (return to the prompt), so a missed end-signal no longer wedges the loop.
 - `claude-loop` boot could hang forever (bar stuck in the boot phase) when resuming through the resume-mode picker. Boot-phase detection is now decay-based: each transient startup screen keeps boot open only while it is actually on screen, so a screen whose disappearance is missed can no longer wedge the boot open indefinitely.
 - `claude-loop reload` left the loop dead: it relaunched the wrong entrypoint, so the old timer was killed and no new one started (the session's tmux pane and proxy were orphaned). Reload now respawns the timer correctly.
+- Loops stopped auto-deploying new code and needed a manual stop/start: both the self-reload-on-change and `claude-loop reload` were crashing on respawn (a boot-state that didn't survive the in-place hand-off). The recycle now succeeds reliably, re-execing around the live Claude session with no hard restart.
+- Reloading or self-reloading a loop could kill its terminal proxy — and with it the Claude pane. The recycle now spares the proxy and replaces only the background process.
+- After a reload or auto-recovery, a loop could silently drop your "present" state and start firing autonomous wakes while you were actively working. The presence hold (NOT-AFK) is now restored exactly across a recycle. When the prior state can't be recovered, the loop comes back in a 10-minute presence hold so autonomous wakes don't surprise you, and a recovered live session no longer re-injects its startup prompt.
+- The status bar's "next event" countdown no longer ticks in a loop while you are holding the loop present (NOT-AFK); the pending-work indicator stays without the misleading countdown.
 
 ## [0.32.0] — 2026-06-15
 
