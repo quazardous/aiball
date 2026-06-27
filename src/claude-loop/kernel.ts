@@ -127,6 +127,7 @@ import {
     REATTACH_ENV_VAR,
     serializeRespawnSnapshots,
     setPendingRespawnSnapshots,
+    shouldSeedReattachHold,
 } from "./respawn-state.js";
 import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
 import { bootMachine, liveBootModules } from "./boot-machine.js";
@@ -422,8 +423,10 @@ if (sd) {
 // by autonomous wakes — it auto-releases after 10min (david's "repartir en
 // NOT-AFK 10 minutes" / no-surprise grace).
 const reattachMode = process.env[REATTACH_ENV_VAR] === "1";
-const seedReattachHold = reattachMode
-    && parseRespawnSnapshots(process.env[RESPAWN_STATE_ENV_VAR])?.afk === undefined;
+const seedReattachHold = shouldSeedReattachHold(
+    reattachMode,
+    process.env[RESPAWN_STATE_ENV_VAR],
+);
 
 /**
  * Read the visible content of pane 0. Empty string on any failure

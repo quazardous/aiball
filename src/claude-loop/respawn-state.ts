@@ -69,6 +69,22 @@ export const RESPAWN_STATE_ENV_VAR = "CL_RESPAWN_STATE";
  */
 export const REATTACH_ENV_VAR = "CL_REATTACH";
 
+/**
+ * #1059 — décide si le NEW kernel doit SEED un hold NOT-AFK-10min au boot.
+ * Vrai uniquement quand on REPREND une session claude vivante (`reattach`)
+ * ET que le snapshot AFK a été PERDU (revive sur sock morte → cmdReload n'a
+ * pas pu fetch les snapshots → pas de `CL_RESPAWN_STATE`, donc `afk`
+ * undefined). Un reload SAIN restaure le vrai état AFK via snapshot → cette
+ * fonction renvoie false (pas de seed parasite). Un cold start (`cmdStart`,
+ * pas de `CL_REATTACH`) → false aussi (démarrage autonome normal).
+ *
+ * Helper pur (testable) : le kernel l'appelle avec `reattach =
+ * env[REATTACH_ENV_VAR] === "1"` et `rawSnapshots = env[RESPAWN_STATE_ENV_VAR]`.
+ */
+export function shouldSeedReattachHold(reattach: boolean, rawSnapshots: string | undefined): boolean {
+    return reattach && parseRespawnSnapshots(rawSnapshots)?.afk === undefined;
+}
+
 // =============================================================================
 // Slice C — pending snapshots stash pour les service factories.
 // =============================================================================
