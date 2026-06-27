@@ -428,6 +428,31 @@ const seedReattachHold = shouldSeedReattachHold(
     process.env[RESPAWN_STATE_ENV_VAR],
 );
 
+// #1059 david — seed ipc.afkMode EARLY (module load, BEFORE mainSse's first
+// `tryWake("startup")` ~line 1589). The wake gate reads `ipc.afkMode`, which is
+// only written by the AFK actor bridge LATE in mainSse (~line 2073). On a
+// reattach where claude is already idle, the startup/heartbeat wakes fire in
+// the window [boot → bridge attach] with `ipc.afkMode` still at its default
+// `off` → the NOT-AFK hold is bypassed → autonomous wakes hit a PRESENT human
+// (david: « le respawn a repassé mes 3 sessions en AFK, elles ont reçu des
+// wakes »). The committed state IS restored (see the handoff block + log), but
+// too late for the gate. Seeding ipc here closes the window — the very first
+// wake sees the real hold. The actor bridge later re-affirms the same value.
+if (sd) {
+    const afkSnap = parseRespawnSnapshots(process.env[RESPAWN_STATE_ENV_VAR])?.afk as
+        { context?: { afkMode?: AfkMode; afkExpiryMs?: number | null } } | undefined;
+    const m = afkSnap?.context?.afkMode;
+    if (m === "wait_10m" && afkSnap?.context?.afkExpiryMs != null) {
+        setIpcAfk("wait_10m", afkSnap.context.afkExpiryMs);
+    } else if (m === "wait_inf") {
+        setIpcAfk("wait_inf", null);
+    } else if (seedReattachHold) {
+        // revive sock morte (snapshot AFK perdu) : même hold anti-surprise que
+        // le seed actor plus bas (#1059), posé tôt pour la gate.
+        setIpcAfk("wait_10m", Date.now() + 600_000);
+    }
+}
+
 /**
  * Read the visible content of pane 0. Empty string on any failure
  * (tmux gone, capture errored) — callers fall back to last-known
