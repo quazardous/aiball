@@ -1246,9 +1246,20 @@ function recomputeNextWake(): void {
         || (c?.events ?? 0) > 0
         || (c?.backlog ?? 0) > 0;
     const tempoMs = wakeTempoSec * 1000;
+    // A NOT-AFK hold (human present) gates `tryWake` out at every tempo
+    // re-entry (computeWakeGate → "NOT AFK hold active"). The drain still
+    // fires recurrently and `recomputeNextWake` would honestly re-arm the
+    // countdown each cycle — so the `📨 Ns` suffix loops forever even though
+    // no event will ever be delivered while the human holds the loop (david:
+    // "le compte à rebours se déclenche en boucle alors que je suis en NOT
+    // AFK"). Suppress the countdown under a present-hold : the standing `📨`
+    // (work pending) stays visible via the bar's `hasPending` leg, and the
+    // AFK chip carries its own wait_10m decount — no misleading double timer.
+    const heldPresent = isHumanPresentHold(readLoopStateInput(sd!));
     if (
         bootDone
         && somethingToDrain
+        && !heldPresent
         && snap.matches("no_turn")
         && ctx.idleSinceMs !== null
     ) {
