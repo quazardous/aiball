@@ -164,7 +164,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, LoopStateBus, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -2035,18 +2035,39 @@ async function mainSse(): Promise<void> {
     {
         const afkSvc = getAfkService();
         const afkActor = afkSvc.getActor();
-        // Respawn handoff sync : the actor starts in "off" but ipc may
-        // already carry a wait_X mode from the handoff block. Send HARD_*
-        // to align the actor (synchronously) before attaching the bridge,
-        // so the first subscriber fire matches what's already in ipc.
-        const respawnIpc = getIpcState();
-        if (respawnIpc.afkMode === "wait_10m" && respawnIpc.afkExpiryMs !== null) {
-            afkSvc.set10m(respawnIpc.afkExpiryMs);
-            log(`afkMachine: respawn handoff wait_10m (expiry=${new Date(respawnIpc.afkExpiryMs).toISOString()})`);
-        } else if (respawnIpc.afkMode === "wait_inf") {
+        // #1059-followup david : « le respawn DOIT remettre le mode — on doit
+        // se retrouver dans le même state qu'avant ». Le respawn est une action
+        // corrective obligatoire (rien à voir avec un wake) ; il ne doit JAMAIS
+        // perdre l'AFK. On RE-ASSERTE le mode depuis le SNAPSHOT SOURCE (env),
+        // de façon déterministe + on LOG l'état restauré (diagnostic : prouve
+        // le restore à chaque respawn, edge-once au boot).
+        //
+        // Pourquoi pas l'ancien `ipc.afkMode` : à ce stade le bridge ipc n'est
+        // pas encore attaché (cf. plus bas) donc `ipc.afkMode` vaut TOUJOURS le
+        // défaut `off` → l'ancien bloc était du code mort, le restore reposait
+        // uniquement sur le `createActor({snapshot})` de la factory (fragile à
+        // l'ordre des consume). On lit ici la vérité depuis le persisted snapshot
+        // (context.afkMode/afkExpiryMs — JSON-safe, cf. respawn-state).
+        const afkSnap = parseRespawnSnapshots(process.env[RESPAWN_STATE_ENV_VAR])?.afk as
+            { context?: { afkMode?: AfkMode; afkExpiryMs?: number | null } } | undefined;
+        const restoredMode = afkSnap?.context?.afkMode;
+        const restoredExpiry = afkSnap?.context?.afkExpiryMs ?? null;
+        if (restoredMode === "wait_10m" && restoredExpiry !== null) {
+            afkSvc.set10m(restoredExpiry);
+            log(`afkMachine: respawn restored wait_10m (expiry=${new Date(restoredExpiry).toISOString()})`);
+        } else if (restoredMode === "wait_inf") {
             afkSvc.setInf();
-            log("afkMachine: respawn handoff wait_inf");
+            log("afkMachine: respawn restored wait_inf");
+        } else if (restoredMode === "off") {
+            afkSvc.setOff();
+            log("afkMachine: respawn restored off");
+        } else if (seedReattachHold) {
+            // Revive sur sock morte : pas de snapshot AFK → déjà seedé
+            // NOT-AFK-10min plus haut (#1059). Ne pas écraser.
+            log("afkMachine: no AFK snapshot (reattach/revive) — kept seeded NOT-AFK-10min");
         }
+        // (cold start sans snapshot : restoredMode undefined + pas de seed →
+        //  l'acteur reste `off`, défaut autonome normal.)
         // Bridge actor → ipcState. Runs on every snapshot (initial sync
         // delivery + every transition).
         afkActor.subscribe((snap) => {
