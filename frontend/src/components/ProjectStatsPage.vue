@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { api, type TokenUsage } from "../lib/api";
 import { formatTicketRef } from "../lib/formatting";
+import { ticketHref } from "../lib/base";
 import { estTokenCost, estTokenEffort, formatTokens } from "../lib/format";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
@@ -144,7 +145,7 @@ const topTokenMax = computed(() =>
                     <div v-if="stats.oldest_open">
                         <dt>Oldest open</dt>
                         <dd>
-                            <a :href="`/b/${stats.oldest_open.id}`" class="project-stats__ref">
+                            <a :href="ticketHref(stats.oldest_open.id)" class="project-stats__ref">
                                 {{ formatTicketRef(stats.oldest_open.id) }}
                             </a>
                             <span class="project-stats__title">{{ stats.oldest_open.title }}</span>
@@ -259,7 +260,7 @@ const topTokenMax = computed(() =>
                     class="project-stats__bars project-stats__token-top"
                 >
                     <li v-for="t in stats.top_token_tickets" :key="t.id">
-                        <a :href="`/b/${t.id}`" class="project-stats__bar-name" :title="t.title">
+                        <a :href="ticketHref(t.id)" class="project-stats__bar-name" :title="t.title">
                             <span class="project-stats__ref">{{ formatTicketRef(t.id) }}</span>
                             {{ t.title }}
                         </a>

@@ -65,6 +65,21 @@ export function replaceRoute(route: string): void {
     window.history.replaceState({}, "", `#${route}`);
 }
 
+/** #190 — canonical `<a href>` for an app route. Mirror of {@link pushRoute}
+ *  for the declarative (anchor) side: routes live in the URL HASH, so a static
+ *  link must be `#${route}` (keeps the served path = base ; a bare `/b/N` would
+ *  hard-navigate to a server path that doesn't exist). Single chokepoint so
+ *  anchors never hardcode the `#` and can't drift back to the path form.
+ *  `route` is the app-absolute route, e.g. "/b/981". */
+export function routeHref(route: string): string {
+    return `#${route}`;
+}
+
+/** Convenience: canonical anchor href for a ticket by id (or hashid). */
+export function ticketHref(idOrHashid: number | string): string {
+    return routeHref(`/b/${idOrHashid}`);
+}
+
 /** Drop back to the app root (base path, no route hash, no query). Used after
  *  the auth/setup flow to clear the install-token param. */
 export function resetToRoot(): void {

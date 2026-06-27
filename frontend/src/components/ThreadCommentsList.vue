@@ -9,6 +9,7 @@
 import type { Message } from "../lib/api";
 import type { DeciderInfo, ThreadItem } from "../lib/threadItems";
 import { formatTicketRef } from "../lib/formatting";
+import { ticketHref } from "../lib/base";
 import CommentNode from "./CommentNode.vue";
 import MarkdownView from "./MarkdownView.vue";
 
@@ -105,7 +106,7 @@ function shortTime(iso: string): string {
                             <span class="thread-relation-row__verb">{{ decodeRelationEvent(m).verb }}</span>
                             <a
                                 v-if="decodeRelationEvent(m).target !== null"
-                                :href="`/b/${decodeRelationEvent(m).target}`"
+                                :href="ticketHref(decodeRelationEvent(m).target as number)"
                                 class="thread-relation-row__ref"
                             >{{ formatTicketRef(decodeRelationEvent(m).target as number) }}</a>
                             <template v-if="i2 < item.msgs.length - 1">,</template>
@@ -122,7 +123,7 @@ function shortTime(iso: string): string {
                         <a
                             v-for="(m, i2) in item.msgs"
                             :key="m.id"
-                            :href="`/b/${m.source_ticket_id}`"
+                            :href="ticketHref(m.source_ticket_id as number)"
                             class="thread-relation-row__ref"
                         >
                             {{ formatTicketRef(m.source_ticket_id as number) }}<span

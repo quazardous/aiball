@@ -7,6 +7,7 @@ import { type InboxRow, type SearchHit } from "../lib/api";
 import { estTokenEffort, formatTokens, relativeTime, snippetOf, titleOf, tokenBreakdownTitle } from "../lib/format";
 import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import { formatTicketRef } from "../lib/formatting";
+import { ticketHref } from "../lib/base";
 import {
     INTENT_SEVERITY,
     PRIORITY_COLOR_VAR,
@@ -148,7 +149,7 @@ function onRowClick(r: InboxRow) {
     >
         <a
             v-if="group.ticketHit"
-            :href="`/b/${group.ticket_id}`"
+            :href="ticketHref(group.ticket_id)"
             class="search-hit"
             @click.prevent="emit('open-hit', group.ticketHit)"
         >
@@ -175,7 +176,7 @@ function onRowClick(r: InboxRow) {
         <a
             v-for="hit in group.commentHits"
             :key="`comment-${hit.id}`"
-            :href="`/b/${hit.hashid ?? hit.id}`"
+            :href="ticketHref(hit.hashid ?? hit.id)"
             class="search-hit search-hit--comment"
             @click.prevent="emit('open-hit', hit)"
         >

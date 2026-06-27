@@ -9,6 +9,7 @@ import { useConfirm } from "primevue/useconfirm";
 import MarkdownView from "./MarkdownView.vue";
 import { api, type Message } from "../lib/api";
 import { bus } from "../lib/bus";
+import { ticketHref } from "../lib/base";
 import { attachPasteImage } from "../lib/pasteImage";
 import { questionStats as computeQuestionStats } from "../lib/questions";
 import { readDecision } from "../lib/decisions";
@@ -478,7 +479,7 @@ async function doDelete() {
             <span>{{ LIFECYCLE_LABELS[msg.kind].verb }}</span>
             <a
                 v-if="LIFECYCLE_LABELS[msg.kind].showSource && msg.source_ticket_id"
-                :href="`/b/${msg.source_ticket_id}`"
+                :href="ticketHref(msg.source_ticket_id)"
                 class="comment-lifecycle__ref"
             >{{ formatTicketRef(msg.source_ticket_id) }}</a>
         </div>

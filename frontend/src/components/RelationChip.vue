@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { RELATION_LABELS, type RelationKind } from "../lib/relations";
 import { formatTicketRef } from "../lib/formatting";
+import { ticketHref } from "../lib/base";
 import type { TicketRelation } from "../lib/api";
 
 const props = defineProps<{
@@ -39,7 +40,7 @@ const STAGE_LABELS: Record<string, string> = {
         :data-kind="relation.kind"
     >
         <a
-            :href="`/b/${relation.target_ticket_id}`"
+            :href="ticketHref(relation.target_ticket_id)"
             class="thread-relations__chip-link"
             :title="relation.reciprocal
                 ? `Open ${formatTicketRef(relation.target_ticket_id)} — reciprocal view of \`${RELATION_LABELS[relation.kind === 'blocks' ? 'depends_on' : relation.kind === 'depends_on' ? 'blocks' : relation.kind]}\` set on ${formatTicketRef(relation.target_ticket_id)} by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`
