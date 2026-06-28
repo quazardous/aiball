@@ -2198,6 +2198,16 @@ async function mainSse(): Promise<void> {
     //   + 2 manual triggers (tryWake pre-empt + boot-end fallback).
     {
         const turnActor = getTurnService().getActor();
+        // #1075 — only (re)arm the countdown when the idle clock CHANGES (a turn
+        // started / ended → idle (re)began). At a bare `no_turn.settled` re-entry
+        // idleSinceMs is unchanged ; arming HERE would point the countdown at the
+        // NEXT boundary (B+tempo) at the EXACT instant the wake fires (the same
+        // re-entry triggers `turn:settled` → tryWake), and BEFORE counters
+        // refresh — hence the "📨 10s flashes back just before the wake" (#1075).
+        // The per-boundary re-arm now happens post-wake in the turn:settled
+        // handler (with fresh counters), so a wake that empties the queue clears
+        // the countdown instead of flashing 10.
+        let lastIdleSince: number | null | undefined;
         turnActor.subscribe((snap) => {
             setIpcIdleSince(snap.context.idleSinceMs);
             // #805 david : countdown bar segment. Gated sur bootComplete
@@ -2208,7 +2218,12 @@ async function mainSse(): Promise<void> {
             // #1041 — la logique d'arming est factorisée dans `recomputeNextWake()`
             // (source unique, partagée avec le handler SSE-ping pour armer le
             // countdown dès l'arrivée d'un hint, pas seulement à la re-entrée turn).
-            recomputeNextWake();
+            // #1075 — gate sur le changement d'idleSinceMs : on (ré)arme à un
+            // (re)passage idle réel, pas à chaque re-entrée settled (cf. ci-dessus).
+            if (snap.context.idleSinceMs !== lastIdleSince) {
+                lastIdleSince = snap.context.idleSinceMs;
+                recomputeNextWake();
+            }
         });
         turnActor.on("turn:no_turn_since", (ev) => {
             log(`turnMachine: turn:no_turn_since atMs=${ev.atMs} reason=${ev.reason}`);
@@ -2272,7 +2287,13 @@ async function mainSse(): Promise<void> {
             // a bare tick (no pending) drains the FIFO / backlog normally.
             const hint = pendingWakeHint;
             pendingWakeHint = undefined;
-            void tryWake("turn:settled", false, hint);
+            // #1075 — re-arm the countdown AFTER the drain so it reflects the
+            // POST-wake state : if the wake emptied the queue, `somethingToDrain`
+            // is now false → nextWakeAtMs=null → the `Ns` disappears (no flash to
+            // 10) ; if work remains, it arms the next boundary honestly (after
+            // delivery, not coincident with it). If the wake started a turn the
+            // bar's phase gate hides the countdown anyway.
+            void tryWake("turn:settled", false, hint).then(() => recomputeNextWake());
         });
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
