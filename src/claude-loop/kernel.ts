@@ -2309,6 +2309,23 @@ async function mainSse(): Promise<void> {
             void tryWake("turn:settled", false, hint).then(() => recomputeNextWake());
         });
     }
+    // #1075 root cause — on a REATTACH (reload / self-reload / revive) the
+    // BootMachine is restored already in `sealed`, so it re-emits NEITHER
+    // boot:sealed NOR loop:start. Without loop:start, `joinC2` stays false →
+    // `startSessionIfReady` never runs → `loopStart` is never set. And BOTH the
+    // countdown arming (`recomputeNextWake` gates on `bootDone = loopStart`) and
+    // the `turn:settled` tempo drain (early-returns on `!loopStart`) silently die
+    // after every self-reload — wakes still fire via the SSE-immediate path, so
+    // the loop looks "globally fine" except the `📨 Ns` countdown vanishes (david).
+    // Boot is complete by construction on a reattach, so satisfy C2 and run the
+    // join NOW (all actor wiring above is done). Fresh boots are unaffected: the
+    // BootMachine is still `booting` here → condition false → normal loop:start
+    // timer path. Idempotent : `startSessionIfReady` no-ops once `sessionLive`.
+    if (bootActor && bootActor.getSnapshot().matches("sealed") && !joinC2) {
+        log("reattach — boot restored already sealed (no loop:start emit) → completing session join → loopStart");
+        joinC2 = true;
+        startSessionIfReady();
+    }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time
     // (#859). Quand le parent est mort (loop killé, pane fermé, etc.),
