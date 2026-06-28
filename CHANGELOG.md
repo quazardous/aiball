@@ -23,6 +23,33 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- **"Not logged in" loop state.** When Claude Code isn't logged in, the loop
+  bar turns orange with a `/login` hint and auto-wakes are held — no point
+  waking a session that can't act. It clears automatically the moment Claude
+  completes a turn (i.e. once you've logged in).
+
+### Changed
+
+- **`--permission-mode` is now configurable and no longer forced to `auto`.**
+  A loop's claude permission mode is set via `claude_loop.permission_mode` in
+  `.aiball.yaml`, **empty by default** — claude runs in its interactive mode
+  (prompts for permissions, no bash sandbox), so host/network commands aren't
+  silently sandboxed and returning wrong results. Set it to `"auto"` for an
+  unattended / AFK loop (auto-approve + sandbox); a loop left AFK with it empty
+  will stall on the first permission prompt.
+
+### Fixed
+
+- Loop bar countdown to the next event no longer flashes back to its full value
+  at the instant the event fires.
+- After a loop reloads itself on a code change, the bar countdown **and** the
+  periodic event drain now resume correctly — previously they silently stopped
+  (the loop still woke on live pings, so it looked fine) until a full restart.
+- Clicking a ticket reference or a "child of" relation chip now navigates
+  correctly (it was using a non-hash link that didn't route).
+
 ## [0.33.0] — 2026-06-27
 
 ### Added

@@ -30,13 +30,24 @@ pop-culture phrase. Non-zero → mark idle, wait.
 
 ## Permissions (unattended runs)
 
-A loop has no human on hand to answer Claude Code's permission prompts,
-so it launches the inner session with `--permission-mode auto`: every
-tool call is classifier-checked and runs **without a prompt**. A mode
-that *prompts* (`default` / `acceptEdits` / `plan`) would stall the loop
-at the first tool call. Override the whole launch command (binary +
-flags before `--settings`) via `CL_CLAUDE_CMD` — e.g. to pick another
-mode such as `bypassPermissions`.
+The `--permission-mode` passed to the inner claude is **config-gated**
+via `claude_loop.permission_mode` (`.aiball.yaml`), and is **empty by
+default** — the flag is omitted, so claude runs in its interactive
+`default` mode: it **prompts** for permissions and does **not** sandbox
+bash. That's the safe default for a loop you sit next to (you answer the
+prompts), and it keeps host/network commands (e.g. `make t1000-status`)
+working — the `auto` sandbox would otherwise run them without network and
+return a wrong/empty result.
+
+For an **unattended / AFK** loop, set `permission_mode: "auto"`: every
+tool call is classifier-checked and runs **without a prompt**, with bash
+**sandboxed** (no network/host) unless explicitly escalated. A loop left
+AFK with the mode empty will **stall** on the first permission prompt, so
+pair `permission_mode: "auto"` with autonomous use. Other non-prompting
+modes (`bypassPermissions`, `dontAsk`) work too; the prompting modes
+(`default` / `acceptEdits` / `plan`) only suit an attended loop. You can
+also override the whole launch command (binary + flags before
+`--settings`) via `CL_CLAUDE_CMD`, which takes precedence over the config.
 
 The per-session `--settings` block carries **only hooks**; it never
 writes permission keys. So unattended autonomy comes **entirely** from

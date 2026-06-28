@@ -134,6 +134,16 @@ claude_loop:
   # debug | info | notice | warning | error | critical | alert | emergency.
   log_level: "info"
 
+  # `--permission-mode` passed to the claude binary. Empty (default) omits the
+  # flag → claude's interactive `default` mode: it PROMPTS for permissions and
+  # does NOT sandbox bash. Set "auto" for an unattended/AFK loop: claude
+  # auto-approves sandbox-safe commands and SANDBOXES the rest (no network/host
+  # access) — required for fully autonomous runs, but it's also what makes
+  # host/network commands (e.g. `make t1000-status`) see a wrong/empty result.
+  # An AFK loop with this empty will STALL on the first permission prompt.
+  # permission_mode: ""        # default: omitted (no sandbox, prompts)
+  # permission_mode: "auto"    # unattended/AFK: auto-approve + sandbox
+
   # Custom wake gates. Each runs at heartbeat; on trigger its message is
   # prepended to the wake CTA. Two forms: built-in `type:` or custom `cmd:`.
   # `blocks: true` makes the wake lead with the gate and suppress the

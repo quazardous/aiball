@@ -58,6 +58,10 @@ export interface ProjectContext {
         drained_strategy: string;
         /** #412: PSR-style log-level threshold (default "info"). Drives CL_LOG_LEVEL. */
         log_level: string;
+        /** `--permission-mode <mode>` for claude. Empty (default) = omit the flag
+         *  → interactive `default` mode (prompts, no bash sandbox). `auto` = the
+         *  unattended/AFK mode (auto-approve + sandbox). */
+        permission_mode: string;
     };
     /** #538 david `hwxbkk` : claude-binary spawn-time options namespacé séparé. */
     claude: {

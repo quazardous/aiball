@@ -859,7 +859,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // Default = real claude. Read once at spawn time, baked into the
     // session's inner command (so a fresh `claude-loop start` picks
     // up the current env, but in-flight loops stay as-spawned).
-    const claudeBin = process.env[CL_ENV.CLAUDE_CMD] ?? "claude --permission-mode auto";
+    // #1072-followup david : `--permission-mode` is now config-gated
+    // (`.aiball.yaml claude_loop.permission_mode`, default EMPTY = flag omitted).
+    // Empty → claude's interactive `default` mode (prompts, no bash sandbox), so
+    // host/network commands (make t1000-status) aren't silently sandboxed. Set
+    // `auto` per-project for an unattended/AFK loop (auto-approve + sandbox).
+    // CL_CLAUDE_CMD still overrides the whole binary+flags.
+    const pmode = ctx.claude_loop.permission_mode.trim();
+    const claudeDefault = pmode ? `claude --permission-mode ${pmode}` : "claude";
+    const claudeBin = process.env[CL_ENV.CLAUDE_CMD] ?? claudeDefault;
     // IMPORTANT: no `{ … }` brace groups here. psmux interprets a
     // command starting with `{` as a PowerShell script block and
     // base64-UTF16-encodes it for `powershell -EncodedCommand`, which
@@ -1146,7 +1154,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             `loop '${name}' started (detached)`,
             `  state:    ${sd}`,
             `  interval: ${interval}s`,
-            `  claude:   claude --permission-mode auto${passthrough ? " " + passthrough : ""}`,
+            `  claude:   ${claudeBin}${passthrough ? " " + passthrough : ""}`,
             `  attach:   ${MUX_CMD} attach -t ${tname}   (or: claude-loop attach ${name})`,
             "",
         ].join("\n"));

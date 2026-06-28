@@ -183,6 +183,13 @@ export interface AiballConfig {
          *  below it are dropped. Drives CL_LOG_LEVEL (timer + hooks). Default
          *  `info`; an unknown name degrades to the default at the logger. */
         log_level: string;
+        /** `--permission-mode <mode>` passed to the claude binary. Empty
+         *  (DEFAULT) = flag omitted → claude's interactive `default` mode
+         *  (prompts for permissions, NO bash sandbox). Set e.g. `auto` for an
+         *  unattended loop : auto-approves sandbox-safe bash and SANDBOXES the
+         *  rest (no network/host) — required for fully autonomous (AFK) runs, but
+         *  it's what blocks network/host commands like `make t1000-status`. */
+        permission_mode: string;
         /** #428: custom wake gates — raw config list, parsed at use via
          *  `parseGates` (each entry needs a built-in `type` or a custom `cmd`).
          *  When a gate triggers, its message is surfaced in the wake CTA. */
@@ -332,6 +339,11 @@ const DEFAULTS: AiballConfig = {
         drained_strategy: "once",
         // #412: PSR-style level threshold; messages below it are dropped. info default.
         log_level: "info",
+        // `--permission-mode` for claude. Empty = omit the flag → interactive
+        // `default` mode (prompts, no bash sandbox). Opt into `auto` per-project
+        // for unattended/AFK loops (auto-approve + sandbox). Empty by default so
+        // host/network commands aren't silently sandboxed (e.g. make t1000-status).
+        permission_mode: "",
         // #428: no custom gates by default (opt-in per project).
         gates: [],
     },
@@ -609,6 +621,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.afk_window_ms === "number" && cl.afk_window_ms > 0) {
                 cfg.claude_loop.afk_window_ms = cl.afk_window_ms;
+            }
+            // `--permission-mode` flag for claude (empty = omit → no sandbox).
+            if (typeof cl.permission_mode === "string") {
+                cfg.claude_loop.permission_mode = cl.permission_mode.trim();
             }
             // #305 (option a): per-project wait default (no-flag behaviour).
             if (typeof cl.wait === "boolean") {
