@@ -1775,6 +1775,19 @@ async function mainSse(): Promise<void> {
     bridgeActorToKernel(getWakeService().getActor() as never, ["wake:requested", "wake:in_flight_started", "wake:delivered", "wake:cleared", "wake:cooldown_expired"]);
     bridgeActorToKernel(getTypingService().getActor() as never, ["typing:started", "typing:ended"]);
     bridgeActorToKernel(getTurnService().getActor() as never, ["turn:started", "turn:ended", "turn:no_turn_since", "turn:settled"]);
+    // #1036 S5 — first proof-of-value consumer. A SINGLE `onAny` subscription
+    // yields a unified diagnostic trace of EVERY system event (boot/turn/wake/
+    // afk/typing + ipc/daemon/pane/counters) from ONE subscribe point — the
+    // value the kernel bus was built for (previously this trace meant wiring
+    // into 7 heterogeneous primitives). Env-gated so it's a true no-op in normal
+    // runs (no listener attached → `emit`'s anyListeners loop is skipped). Logs
+    // via `log()` (createLogger, the sole timer.log NDJSON owner) — never stdout.
+    if (process.env.CL_KERNEL_BUS_DEBUG === "1") {
+        getKernelBus().onAny((name, payload) => {
+            log(`kernelBus: ${name} ${JSON.stringify(payload)}`);
+        });
+        log("kernelBus: diagnostic onAny consumer attached (CL_KERNEL_BUS_DEBUG=1)");
+    }
     // #1059 — revive on a dead loop.sock cold-boots → the AFK snapshot is lost.
     // Instead of defaulting to `off` (autonomous, would surprise a human working
     // live), seed NOT-AFK-10min : auto-wakes are held for 10min then auto-release
