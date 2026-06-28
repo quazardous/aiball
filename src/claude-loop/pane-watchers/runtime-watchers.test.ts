@@ -1,7 +1,7 @@
 // #845 Phase B — runtime-zone watcher tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BusyWatcher, InterruptedWatcher, PromptWatcher } from "./runtime-watchers.js";
+import { BusyWatcher, InterruptedWatcher, PromptWatcher, NotLoggedInWatcher } from "./runtime-watchers.js";
 import { ErrorWatcher } from "./error-watcher.js";
 
 const CTX = { nowMs: 0 };
@@ -48,6 +48,34 @@ test("InterruptedWatcher: matches the `interrupted by user` near-prompt marker",
 test("InterruptedWatcher: false on a normal idle pane", () => {
     const w = new InterruptedWatcher();
     assert.equal(w.observe("❯ \n  ⏵⏵ auto mode on", CTX).visible, false);
+});
+
+// ---------------------------------------------------------------------------
+//  NotLoggedInWatcher (#1072)
+// ---------------------------------------------------------------------------
+
+test("NotLoggedInWatcher: matches `Not logged in` banner", () => {
+    const w = new NotLoggedInWatcher();
+    assert.equal(w.observe("Not logged in · Please run /login", CTX).visible, true);
+});
+
+test("NotLoggedInWatcher: matches `Please run /login` alone", () => {
+    const w = new NotLoggedInWatcher();
+    assert.equal(w.observe("Please run /login to continue", CTX).visible, true);
+});
+
+test("NotLoggedInWatcher: false on a normal logged-in pane", () => {
+    const w = new NotLoggedInWatcher();
+    assert.equal(w.observe("❯ \n  ⏵⏵ auto mode on", CTX).visible, false);
+});
+
+test("NotLoggedInWatcher: begin fires when the banner appears", () => {
+    const w = new NotLoggedInWatcher();
+    let beginCount = 0;
+    w.on("begin", () => { beginCount++; });
+    w.observe("❯ \n  ⏵⏵ auto mode on", CTX);
+    w.observe("Not logged in · Please run /login", CTX);
+    assert.equal(beginCount, 1);
 });
 
 // ---------------------------------------------------------------------------

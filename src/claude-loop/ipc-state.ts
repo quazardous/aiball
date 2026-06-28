@@ -184,6 +184,13 @@ export interface IpcState {
      *  segment shows `o:- b:- e:-`. Cleared on reconnect (WakeBus hello). The
      *  bar paints RED on `linkDown || daemonDown`. Default false. */
     daemonDown: boolean;
+    /** #1072 — Claude Code is NOT logged in (the pane shows "Not logged in ·
+     *  Please run /login"). Set TRUE by the NotLoggedInWatcher (pane regex),
+     *  cleared on the first Stop hook (a turn completing proves claude is
+     *  logged in and working). While true the bar paints ORANGE (priority over
+     *  the RED link-down overlay) and the wake gate blocks ALL wakes (a wake is
+     *  useless until login). Default false. */
+    notLoggedIn: boolean;
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
@@ -240,6 +247,7 @@ const state: IpcState = {
     sseConnected: null,
     linkDown: false,
     daemonDown: false,
+    notLoggedIn: false,
     bootDeadlineMs: null,
     counters: null,
     stateTagInfo: null,
@@ -407,6 +415,15 @@ export function setIpcLinkDown(down: boolean): void {
 export function setIpcDaemonDown(down: boolean): void {
     if (state.daemonDown === down) return;
     state.daemonDown = down;
+    notifyIpcChanged();
+}
+
+/** #1072 — flag Claude Code as NOT logged in (true) / logged in (false).
+ *  notifyIpcChanged → BarRenderer repaints (ORANGE iff notLoggedIn) and the
+ *  wake gate re-reads the flag (blocks all wakes while true). */
+export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
+    if (state.notLoggedIn === notLoggedIn) return;
+    state.notLoggedIn = notLoggedIn;
     notifyIpcChanged();
 }
 
@@ -600,6 +617,7 @@ export function resetIpcStateForTests(): void {
     state.sseConnected = null;
     state.linkDown = false;
     state.daemonDown = false;
+    state.notLoggedIn = false;
     state.bootDeadlineMs = null;
     state.counters = null;
     state.stateTagInfo = null;

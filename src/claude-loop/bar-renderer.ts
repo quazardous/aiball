@@ -90,6 +90,10 @@ export interface BarSnapshot {
     /** #1039 follow-up — loop↔daemon link DOWN ? Same RED overlay. The bar is
      *  red on `linkDown || daemonDown` (either critical peer lost). */
     daemonDown: boolean;
+    /** #1072 — Claude Code not logged in ? Paints the bar ORANGE (colour208,
+     *  PRIORITY over the RED link-down overlay) + a `/login` hint in the state
+     *  tag. Cleared on the first Stop hook. */
+    notLoggedIn: boolean;
 }
 
 /** #950 david `<chat>` : compose les tokens orthogonaux du marker
@@ -243,6 +247,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         typingGlyph,
         linkDown: ipc.linkDown,
         daemonDown: ipc.daemonDown,
+        notLoggedIn: ipc.notLoggedIn,
     };
 }
 
@@ -257,6 +262,9 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     // status-bg repaint (same block as loopStatus).
     if (prev.linkDown !== next.linkDown) changed.push("loopStatus");
     if (prev.daemonDown !== next.daemonDown) changed.push("loopStatus");
+    // #1072 — not-logged-in flips the bar bg ORANGE + the state-tag hint ;
+    // route through the same status-bg repaint block.
+    if (prev.notLoggedIn !== next.notLoggedIn) changed.push("loopStatus");
     if (prev.stateTag !== next.stateTag) changed.push("stateTag");
     if (prev.proxyAlive !== next.proxyAlive) changed.push("proxyAlive");
     if (prev.zenActive !== next.zenActive) changed.push("zenActive");
@@ -376,14 +384,21 @@ export class BarRenderer {
             const col = barColors();
             // #1039 — a lost link (proxy↔timer OR loop↔daemon) paints the bar
             // RED (overrides per-state bg) so the broken state is visible.
-            const bg = (next.linkDown || next.daemonDown) ? col.link_down_bg : stateBg(col, next.loopStatus);
+            // #1072 — not-logged-in paints ORANGE (colour208, same as ZEN) and
+            // takes PRIORITY over the RED overlay : it's the state the human can
+            // fix immediately (run /login).
+            const bg = next.notLoggedIn
+                ? "colour208"
+                : (next.linkDown || next.daemonDown) ? col.link_down_bg : stateBg(col, next.loopStatus);
             setOpt("status-bg", bg);
             setOpt("status-fg", col.bar_fg);
             // #950 david `<chat>` : @cl_state vit maintenant DANS le bloc
             // fond noir (colour16) à côté de `claude-loop` — meilleur
             // contraste. Plus de crochets / colons, tokens space-separated
             // (cf. renderMarkerSegment).
-            setOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] ${next.stateTag}`);
+            // #1072 — surface WHY the bar is orange so the human knows to /login.
+            const stateTagStr = next.notLoggedIn ? "⚠ not logged in · /login" : next.stateTag;
+            setOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] ${stateTagStr}`);
             // status-left : @cl_state collé à `claude-loop`, AVANT la
             // fade-out glyph. Les counters restent sur le status-bg
             // coloré à droite.

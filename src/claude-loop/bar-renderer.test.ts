@@ -70,6 +70,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         typingGlyph: "",
         linkDown: false,
         daemonDown: false,
+        notLoggedIn: false,
         ...overrides,
     };
 }

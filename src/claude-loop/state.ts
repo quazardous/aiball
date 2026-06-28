@@ -993,6 +993,7 @@ export function readLoopStateInput(
         paneReady: ipc.paneReady ?? false,
         paneCompacting: ipc.paneCompacting ?? false,
         paneInterrupted: ipc.paneInterrupted ?? false,
+        notLoggedIn: ipc.notLoggedIn ?? false,
         noWait,
         humanTypingAtMs: ipc.humanTypingAtMs,
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,

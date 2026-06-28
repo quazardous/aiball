@@ -28,6 +28,18 @@ export class BusyWatcher extends BoolWatcher {
     }
 }
 
+/** #1072 — Claude Code is NOT logged in : the pane shows "Not logged in ·
+ *  Please run /login". Drives the ORANGE bar + wake-block. Only the `begin`
+ *  edge is wired (kernel.ts) ; the flag is cleared by the first Stop hook, NOT
+ *  by this watcher's `end` — the banner scrolling off-screen does not mean
+ *  claude got logged in. */
+export class NotLoggedInWatcher extends BoolWatcher {
+    readonly name = "not_logged_in";
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        return /Not logged in|Please run \/login/.test(paneText);
+    }
+}
+
 /** "Interrupted by user" marker visible near the prompt — decoration
  *  only, not a wake gate (#345). */
 export class InterruptedWatcher extends BoolWatcher {

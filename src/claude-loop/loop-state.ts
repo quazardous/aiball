@@ -108,6 +108,11 @@ export interface LoopStateInput {
     paneCompacting: boolean;
     paneInterrupted: boolean;
 
+    /** #1072 — Claude Code is not logged in (pane shows "Not logged in ·
+     *  Please run /login"). Blocks ALL wakes (even manual) — a wake is
+     *  useless until the human runs /login. */
+    notLoggedIn: boolean;
+
     /** #722 — TTL for the input-hot observable. A keystroke is « hot »
      *  if it landed within this window (typically 3_000ms). Drives the
      *  pane-probe cadence via `shouldPollFast`. */
@@ -269,6 +274,12 @@ export function effectiveAfkMode(input: LoopStateInput): AfkMode {
  *  Order matters for the log reason ; the first failing gate wins. */
 function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: string | null } {
     const manual = input.manualWake === true;
+
+    // #1072 — never wake a not-logged-in claude : it can't act until the human
+    // runs /login. Blocks even manual wakes (placed before the manual bypass).
+    if (input.notLoggedIn) {
+        return { allowed: false, reason: "not logged in (run /login)" };
+    }
 
     // The idle-since gate is the only one a manual wake honors (pinging
     // over a busy claude is always wrong).

@@ -108,7 +108,7 @@ import {
     ResumingWatcher,
     CompactConfirmWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
@@ -156,6 +156,7 @@ import {
     setIpcSseConnected,
     setIpcLinkDown,
     setIpcDaemonDown,
+    setIpcNotLoggedIn,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -747,6 +748,7 @@ const promptW = new PromptWatcher();
 const busyW = new BusyWatcher();
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
+const notLoggedInW = new NotLoggedInWatcher();
 const errorW = new ErrorWatcher();
 const healthCheckW = new HealthCheckWatcher();
 const promptZoneW = new PromptZoneWatcher();
@@ -754,7 +756,7 @@ const promptInputW = new PromptInputWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
+    promptW, busyW, interruptedW, idlePromptW, notLoggedInW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -893,6 +895,14 @@ if (sd) {
     promptInputW.on("end", () => {
         log("watcher: prompt_input end → setIpcPromptHasInput(false)");
         setIpcPromptHasInput(false);
+    });
+    // #1072 — "Not logged in · Please run /login" in the pane → ORANGE bar +
+    // block all wakes. Only the `begin` edge is wired : the flag is cleared by
+    // the first Stop hook (below), NOT by the watcher `end` (the banner
+    // scrolling off-screen ≠ claude got logged in).
+    notLoggedInW.on("begin", () => {
+        log("watcher: not_logged_in begin → setIpcNotLoggedIn(true)");
+        setIpcNotLoggedIn(true);
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // #1009 — compacting no longer forwards begin/end edges to the boot machine ;
@@ -1812,6 +1822,12 @@ async function mainSse(): Promise<void> {
         // le gate, soit null explicite = clear defer. Stop event = idle
         // confirmed. #881 — `setIpcIdleSince` délégué à TurnController.
         getTurnService().turnEnded(ev.atMs);
+        // #1072 — a Stop hook proves claude is running (= logged in). Clear the
+        // not-logged-in flag so the ORANGE bar + wake-block lift.
+        if (getIpcState().notLoggedIn) {
+            log("hook:stop → clearing notLoggedIn (a turn completed → logged in)");
+            setIpcNotLoggedIn(false);
+        }
         if (ev.busyDeferUntilMs !== undefined) {
             if (ev.busyDeferUntilMs === null) {
                 setIpcBusyDeferUntil(null);

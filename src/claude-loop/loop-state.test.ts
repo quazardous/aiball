@@ -55,6 +55,7 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         paneReady: true,
         paneCompacting: false,
         paneInterrupted: false,
+        notLoggedIn: false,
         noWait: false,
         humanTypingAtMs: null,
         humanTypingTtlMs: 5 * SEC,
@@ -422,6 +423,31 @@ test("pane busy (esc to interrupt) → wake skipped", () => {
     }));
     assert.equal(v.wakeAllowed, false);
     assert.match(v.wakeSkipReason ?? "", /esc to interrupt/);
+});
+
+test("#1072 not logged in → wake skipped", () => {
+    const now = T0 + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        idleSinceMs: now,
+        notLoggedIn: true,
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /not logged in/);
+});
+
+test("#1072 not logged in blocks even a manual wake", () => {
+    const now = T0 + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        idleSinceMs: now,
+        notLoggedIn: true,
+        manualWake: true,
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /not logged in/);
 });
 
 test("manual wake bypasses user-grace + AFK + defer, but NOT idle-marker", () => {
