@@ -44,11 +44,21 @@ For these three cases, use `then:`, NOT a plain comment :
 
 Skipping `then:` pushes cleanup overhead onto the human.
 
-### Reject pending before amending
+**A substantive analysis is not a terminal gesture.** Writing a long explanation of what you found / what you'd do — as a *plain* comment — feels like progress but binds **nothing** : the human gets no accept/reject affordance under the composer, so the loop never closes and the ticket **resurfaces** on the next wake. The fix is to ask what your comment actually *concludes* :
 
-If your `then: "resolved"` turns out wrong, **reject the pending decision explicitly** before posting any follow-up. Stacking a new comment over a stale pending leaves the ticket stuck.
+- *this is HOW I'll do it* → `then: "plan"`
+- *this is done / can close* → `then: "resolved"`
+- *this shouldn't be done* → `then: "wontfix"`
 
-Amending a still-valid pending plan via a plain reply is fine — only when the plan is substantially the right path.
+Leave it plain **only** when it genuinely hands the ball back — a clarifying question, missing context, a refinement to a still-valid plan. Then the ticket staying in tier-2 is a deliberate "waiting on them" reminder, not a leak. But "here is my detailed reasoning, voilà" with an implicit conclusion and no `then:` is the single most common way agents make tickets bounce.
+
+### Decisions are last-wins — amend freely, don't ask to "reject" superseded ones
+
+On a ticket, **only the LATEST decision is actionable** (the gate replays decisions and the last one wins; successive `then:` proposals are amendments). So:
+
+- **Posting a newer decision supersedes the older automatically.** A superseded plan/resolution needs **no** explicit rejection — never tell the human to "reject" an old proposal you've already replaced. The latest is the only one that requires accept/reject.
+- **Reject explicitly only when you are NOT replacing it** — e.g. your `then: "resolved"` turns out wrong and you have no superseding decision to post yet (you're handing the ball back with a plain comment). There, reject so the ticket isn't left awaiting a stale proposal.
+- **Amending a still-valid pending plan** via a plain reply (or a fresher `then:`) is fine — the newer one wins.
 
 ### Reopen = your court
 
@@ -105,7 +115,7 @@ NOT triage : `ticket_get(N)` then silence. `last_actor` is still the reporter, t
 
 The wake-injection pipeline = single source of truth. It picks the head of your FIFO, puts the event in your prompt, marks just that one seen. One event per cycle.
 
-Act on the event the wake gave you, don't drain :
+Engage with the event the wake gave you, don't drain :
 - `ticket_get(N)` auto-acks every unread on #N.
 - `ticket_reply` does the same for its target thread.
 - The wake-injection itself acks its head.
@@ -133,9 +143,10 @@ NOT auto-approval to implement :
 - Polling faster than ~1 minute. Push notifications cover the live signal.
 - Posting the same ticket in 3 projects. Pick one, ask the owner.
 - Replying with "+1" or "ok". Silence is acceptable.
+- Posting a full analysis / explanation as a plain comment when it actually concludes a HOW or a resolution — bind it with `then:` or the ticket resurfaces (see Decision discipline).
 - Code dumps in titles. Bodies are for code.
 - Trailing "claim = je code ?" on a plain comment.
-- Stacking a second `then: "plan"` over an unanswered one.
+- Telling the human to "reject" a plan you've already superseded with a newer one (decisions are last-wins — the old one is moot, see the decisions section).
 
 ---
 
