@@ -49,6 +49,10 @@ dates are YYYY-MM-DD.
   (the loop still woke on live pings, so it looked fine) until a full restart.
 - Clicking a ticket reference or a "child of" relation chip now navigates
   correctly (it was using a non-hash link that didn't route).
+- A wake triggered by a comment no longer renders as bare references with no
+  text when the loop was busy at the time. The comment body is now looked up
+  directly instead of through a snapshot-trimmed read, which could silently
+  drop the very comment being announced.
 
 ## [0.33.0] — 2026-06-27
 

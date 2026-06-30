@@ -179,7 +179,7 @@ import { BarRenderer } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
-import { stripMarkdown } from "./markdown-strip.js";
+import { fetchWakeContext } from "./wake-context.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
@@ -625,7 +625,7 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
     let eventHint: WakeEventHint | undefined;
     if (hint?.ticket_id) {
         const me = process.env.AIBALL_AGENT;
-        const ctx = await fetchWakeContext(hint, me);
+        const ctx = await fetchWakeContext(client(), hint, me);
         if (!ctx.stakeholder) {
             log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — generic FIFO-pop phrase`);
         }
@@ -647,61 +647,9 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
     return result;
 }
 
-/**
- * #544 + #555 — one-shot fetch qui sert à la fois (a) le filtre stakeholder
- * et (b) l'extraction du body du commentaire pour l'inject dans le wake.
- * Mutualise l'appel daemon (auparavant `isWakeStakeholder` faisait ce fetch
- * pour le seul check booléen, on jetait le body — maintenant on le retient).
- *
- * **Stakeholder** = true iff l'un de :
- *   - l'agent tient un claim live sur le ticket
- *   - l'agent est l'assignee explicite
- *   - le body du commentaire @-mentionne l'agent
- *
- * Reporter (`by_agent`) seul N'est PAS suffisant (david `hdc7hn` :
- * « aiball-win est le reporter/owner mais il doit pas le claim »).
- *
- * **commentBody** = extrait markdown-strippé via `stripMarkdown`, renseigné
- * dès que le hint porte un `comment_hashid` et que le comment est trouvé
- * dans la réponse — indépendamment du verdict stakeholder (le caller décide
- * s'il l'utilise).
- *
- * Fail-open sur stakeholder : si la lookup foire (daemon down, hashid
- * manquant, timeout), on suppose stakeholder=true → mieux vaut un wake
- * gratuit qu'un miss silencieux. commentBody reste vide dans ce cas.
- */
-async function fetchWakeContext(
-    hint: WakeHint,
-    me: string | undefined,
-): Promise<{ stakeholder: boolean; commentBody?: string }> {
-    if (!me || !hint.ticket_id) return { stakeholder: true };
-    try {
-        const resp = await client().getTicket(hint.ticket_id, { brief: true }) as {
-            ticket?: { claimant?: string | null; assignee?: string | null };
-            comments?: Array<{ hashid?: string; body?: string | null }>;
-        };
-        const t = resp.ticket;
-        if (!t) return { stakeholder: true };
-        // Extraire body avant le verdict pour que l'enrichment marche aussi
-        // sur le chemin claim/assignee (sans @-mention dans le body).
-        let commentBody: string | undefined;
-        let mentionsMe = false;
-        if (hint.comment_hashid && Array.isArray(resp.comments)) {
-            const cm = resp.comments.find((x) => x.hashid === hint.comment_hashid);
-            const body = cm?.body ?? "";
-            if (body) commentBody = stripMarkdown(body);
-            // Same lookbehind shape as the formatting mention regex (#535),
-            // minus `>` to also catch mentions au start de markdown paragraphs.
-            const escaped = me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const re = new RegExp(`(?<![\\w@"'/])@${escaped}\\b`);
-            mentionsMe = re.test(body);
-        }
-        const stakeholder = t.claimant === me || t.assignee === me || mentionsMe;
-        return { stakeholder, commentBody };
-    } catch {
-        return { stakeholder: true };
-    }
-}
+// #1098 — `fetchWakeContext` lives in `./wake-context.ts` (kernel.ts runs
+// main() at import → not unit-testable). The client is injected at the call
+// site (pickPhrase) as `client()`.
 
 // #264: timestamp of the loop's last send-keys, so the human-typing
 // detector can exclude the loop's own injected text from "a human typed".
