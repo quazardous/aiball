@@ -29,34 +29,64 @@ test("plan pending → gaté", () => {
     assert.equal(g.get(1), true);
 });
 
-test("#600 v7z5u6: plan pending + commentaire HUMAIN postérieur → reste gaté", () => {
+test("#1113: plan pending + commentaire HUMAIN foreign postérieur → dé-gaté", () => {
+    // Renverse le cas #600 : l'humain a repris la parole au lieu d'accepter/
+    // rejeter → la proposition est moot, la balle revient à l'agent.
     const g = gate([
-        ev({ kind: "comment_added", meta: decision("plan", "pending") }),
-        ev({ kind: "comment_added", byAgent: "david" }), // plain human
+        ev({ kind: "comment_added", meta: decision("plan", "pending") }), // proposer=claude-aiball-dev
+        ev({ kind: "comment_added", byAgent: "david" }), // plain human foreign
+    ]);
+    assert.equal(g.get(1), false);
+});
+
+test("#1113: plan pending + commentaire du PROPOSEUR (même agent) → reste gaté", () => {
+    // #600 préservé pour le proposeur lui-même : parler tout seul ne ramène pas
+    // la balle au backlog (toujours en attente de l'action de l'autre).
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("plan", "pending") }), // proposer=claude-aiball-dev
+        ev({ kind: "comment_added", byAgent: "claude-aiball-dev" }), // même agent
     ]);
     assert.equal(g.get(1), true);
 });
 
-test("#600 v7z5u6: plan pending + commentaire AGENT postérieur → reste gaté", () => {
+test("#1113: plan pending + commentaire d'un AGENT TIERS foreign → dé-gaté", () => {
     const g = gate([
-        ev({ kind: "comment_added", meta: decision("plan", "pending") }),
-        ev({ kind: "comment_added", byAgent: "claude-aiball-dev" }), // agent plain
+        ev({ kind: "comment_added", meta: decision("plan", "pending") }), // proposer=claude-aiball-dev
+        ev({ kind: "comment_added", byAgent: "autre-agent" }), // foreign agent
     ]);
-    assert.equal(g.get(1), true);
+    assert.equal(g.get(1), false);
 });
 
-test("#600 v7z5u6: agent summary_until (meta sans decision) après pending → reste gaté", () => {
+test("#1113: proposeur summary_until (meta sans decision) après pending → reste gaté", () => {
     const g = gate([
-        ev({ kind: "comment_added", meta: decision("resolution", "pending") }),
+        ev({ kind: "comment_added", meta: decision("resolution", "pending") }), // proposer=claude-aiball-dev
         ev({ kind: "comment_added", byAgent: "claude-aiball-dev", meta: JSON.stringify({ summary_until: "x" }) }),
     ]);
     assert.equal(g.get(1), true);
 });
 
-test("#600 v7z5u6: resolution pending + commentaire humain postérieur → reste gaté", () => {
+test("#1113: resolution pending + commentaire humain foreign postérieur → dé-gaté", () => {
     const g = gate([
-        ev({ kind: "comment_added", meta: decision("resolution", "pending") }),
+        ev({ kind: "comment_added", meta: decision("resolution", "pending") }), // proposer=claude-aiball-dev
         ev({ kind: "comment_added", byAgent: "david" }),
+    ]);
+    assert.equal(g.get(1), false);
+});
+
+test("#1113: régression skybot #1109 — résolution pending puis échange plain (david Q / agent A / david Q) → dé-gaté", () => {
+    const g = gate([
+        ev({ kind: "comment_added", byAgent: "skybot-claude", meta: decision("resolution", "pending") }),
+        ev({ kind: "comment_added", byAgent: "david" }),          // "quelle clé ?"
+        ev({ kind: "comment_added", byAgent: "skybot-claude" }),  // réponse
+        ev({ kind: "comment_added", byAgent: "david" }),          // nouvelle question
+    ]);
+    assert.equal(g.get(1), false);
+});
+
+test("#1113: commentaire foreign AVANT toute décision pending → pas de dé-gate parasite (reste gaté après pending)", () => {
+    const g = gate([
+        ev({ kind: "comment_added", byAgent: "david" }),          // pas de gate encore
+        ev({ kind: "comment_added", byAgent: "skybot-claude", meta: decision("resolution", "pending") }),
     ]);
     assert.equal(g.get(1), true);
 });

@@ -53,6 +53,11 @@ dates are YYYY-MM-DD.
   text when the loop was busy at the time. The comment body is now looked up
   directly instead of through a snapshot-trimmed read, which could silently
   drop the very comment being announced.
+- An agent loop no longer goes silent on a ticket where you replied *under* its
+  own pending resolution/plan proposal. A follow-up comment from anyone other
+  than the proposer now hands the ball back: the ticket returns to the
+  actionable backlog and wakes the agent, instead of staying hidden behind the
+  stale proposal until you explicitly accept or reject it.
 
 ## [0.33.0] — 2026-06-27
 
