@@ -72,11 +72,14 @@ export interface TicketFlags {
      *         the hot window)
      *   - 1 = actionable (ball in my court; same set the wake-CTA points
      *         at by default)
-     *   - 2 = waiting on them (I was the last actor, no decision pending)
+     *   - 2 = follow-up (#885: they spoke last, but a decision gate holds
+     *         `actionable` — soft surface)
+     *   - 3 = waiting on them (I was the last actor, no decision pending)
+     *   - 4 = blocked (#911: gated by an open depends_on blocker)
      *   - null = not in this consumer's backlog
      * Sorts naturally with numeric asc (hot → actionable → follow-up →
-     * waiting); the route filter `?backlog=1` keeps every row whose
-     * `backlog_tier !== null`. */
+     * waiting → blocked); the route filter `?backlog=1` keeps every row
+     * whose `backlog_tier !== null`. */
     backlog_tier: 0 | 1 | 2 | 3 | 4 | null;
     backlog_cooled_until: string | null;
     gated_by_decision: boolean;

@@ -4,7 +4,9 @@
 
 A local-first board that turns Claude Code sessions into persistent,
 remotely-pilotable agents — one per project. Queue work, watch them drain
-it, accept or reject what they propose, all from one place.
+it, accept or reject what they propose — or grab the keyboard and drive
+the same session live in the terminal. Direct or backlog, your call,
+switch any time.
 
 > Runs on `127.0.0.1` (SQLite + UDS socket); data stays in
 > `~/.local/share/aiball` — no cloud, no telemetry. Claude Code is the
@@ -25,15 +27,18 @@ it, accept or reject what they propose, all from one place.
 - **Local projects** — the sidebar flags which projects have a loop running
   on this host (root auto-detected), with a per-project detail page to see the
   loops and **launch** one for a known root, straight from the UI.
-- **Same old, same old** — or just use the terminal as usual. Aiball will
-  notice and stop bothering you while you take over.
+- **Hybrid by design** — a looped session is your normal terminal with a
+  coach attached, not a black box. Type in it and drive claude live, or
+  feed it tickets and walk away — same session, same context. aiball
+  notices your keystrokes and stops bothering you while you take over,
+  then resumes draining the backlog when you leave.
 
 ## Quickstart
 
 ```bash
 # 1. Install (one-time): daemon + bins (aiball, aiball-mcp, claude-loop)
 git clone https://github.com/quazardous/aiball.git && cd aiball
-./install.sh --auth-init   # mints a one-shot install token + prints a setup URL
+./install.sh               # mints a one-shot install token + prints a setup URL
 # Open the printed *tokenized* URL to choose your first login + password:
 #   http://127.0.0.1:7777/setup?t=<token>   (one-shot, expires in 24h)
 # Lost it? re-mint with: aiball auth init
@@ -86,7 +91,9 @@ The short version (full list in [`ROADMAP.md`](./ROADMAP.md)):
 - **Windows** — install ships; `claude-loop` runs via psmux / WSL2
   (experimental, hardening — [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md)).
 - **Sandboxed autonomous agent** — `aiball sandbox` runs an agent against
-  a fixed plate of tickets (experimental — [`docs/SANDBOX.md`](./docs/SANDBOX.md)).
+  a fixed plate of tickets (experimental, development on pause — one
+  looped agent per project proved the better grain;
+  [`docs/SANDBOX.md`](./docs/SANDBOX.md)).
 
 ## Status
 

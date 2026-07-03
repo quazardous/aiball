@@ -202,7 +202,7 @@ CONF
         warn "    systemctl --user enable --now $SERVICE_NAME"
     fi
 else
-    warn "Skipping systemd. Start daemon manually with:  aiball-daemon  (or:  cd $PREFIX_LIB && npm start)"
+    warn "Skipping systemd. Start daemon manually with:  cd $PREFIX_LIB && npm start"
 fi
 
 # --- PATH check ------------------------------------------------------------

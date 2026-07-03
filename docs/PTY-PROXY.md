@@ -16,7 +16,7 @@ yields). To paint `stop` it must answer one question continuously:
 **is a human typing right now?** (Full word mapping in
 [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md#3-the-tmux-bar-word--stop--wait--loop).)
 
-The first implementation (`timer.ts::detectHumanTyping`) answered it by
+The first implementation (`kernel.ts::detectHumanTyping`) answered it by
 **pane-diffing** — capturing the bottom of the tmux pane every ~1.5 s
 and noticing when it changed. That has two hard limits:
 

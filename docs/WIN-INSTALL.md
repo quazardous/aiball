@@ -105,7 +105,7 @@ What it does:
 3. Runs `npm install` in the install dir. Dies loudly if it fails
    (daemon needs the deps). Builds the frontend bundle if missing;
    failures here only Warn (daemon still serves the API, no SPA).
-4. Creates `%APPDATA%\aiball\` (DB + uploads) and
+4. Creates `%USERPROFILE%\.local\share\aiball\` (DB + uploads) and
    `%LOCALAPPDATA%\aiball\` (logs + daemon launcher).
 5. Writes `.cmd` shims in `%LOCALAPPDATA%\Microsoft\WindowsApps\` for
    `aiball`, `aiball-mcp`, `claude-loop` (already on `PATH` by default).
@@ -175,7 +175,8 @@ aiball-daemon` (or a vite dev server) without re-running the installer.
 | `-NoTray` | skip Desktop / Start Menu / Startup shortcut creation |
 | `-NoClaudeLoop` | skip auto-install of psmux + Git Bash PATH (claude-loop deps) |
 | `-NoAuthInit` | skip auto-mint of setup token + auto-open browser |
-| `-Uninstall` | remove everything (keeps `%APPDATA%\aiball` data unless `-PurgeData`) |
+| `-StopHook` | also wire the Claude Code Stop hook globally (`~/.claude/settings.json`) so autopoll triggers in every Claude Code session |
+| `-Uninstall` | remove everything (keeps the data dir unless `-PurgeData`) |
 | `-PurgeData` | with `-Uninstall`, also wipe the data dir |
 | `-Yes` | skip interactive confirmations |
 
@@ -199,7 +200,7 @@ Scheduled Task (default — no flag at install):
 | Stop   | `Stop-ScheduledTask -TaskName aiball-daemon` |
 | Status | `Get-ScheduledTask -TaskName aiball-daemon \| Get-ScheduledTaskInfo` |
 | Logs   | `%LOCALAPPDATA%\aiball\daemon.log` (rolled at 8MB by the launcher) |
-| Data   | `%APPDATA%\aiball\` (SQLite DB, uploads, spool) |
+| Data   | `%USERPROFILE%\.local\share\aiball\` (SQLite DB, uploads, spool) |
 | Check  | `aiball check` |
 
 Windows Service (`-Service` or `-System` at install):
@@ -210,7 +211,7 @@ Windows Service (`-Service` or `-System` at install):
 | Stop   | `Stop-Service -Name aiball-daemon` |
 | Status | `Get-Service -Name aiball-daemon` (or `services.msc`) |
 | Logs   | `%LOCALAPPDATA%\aiball\daemon.log` (`-Service`) or `%PROGRAMDATA%\aiball\logs\daemon.log` (`-System`) |
-| Data   | `%APPDATA%\aiball\` (`-Service`) or `%PROGRAMDATA%\aiball\` (`-System`) |
+| Data   | `%USERPROFILE%\.local\share\aiball\` (`-Service`) or `%PROGRAMDATA%\aiball\` (`-System`) |
 | Check  | `aiball check` |
 
 ## Service mode
@@ -255,7 +256,7 @@ pwsh -File install.ps1 -System
 No password, no per-user account, survives password changes. Trade-off:
 
 - Data lives at `%PROGRAMDATA%\aiball\` (shared across users), not your
-  `%APPDATA%\aiball\`.
+  per-user `%USERPROFILE%\.local\share\aiball\`.
 - Requires admin to install (one-time).
 - The daemon runs with full system privileges — fine because it's a
   local-only TCP listener, but worth knowing.

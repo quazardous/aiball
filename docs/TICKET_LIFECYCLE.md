@@ -201,45 +201,65 @@ GET's work order.) It also **always states the open count** (per the §1
 invariant) — even when `actionable` is empty — so a gated backlog is never
 silent.
 
-### 5.0 The backlog wake — two tiers of triage
+### 5.0 The backlog wake — the tier ladder
 
 When the unread FIFO is empty but there is at least one ticket worth surfacing,
 the loop fires a **backlog wake** (`look #N: TITLE. Triage the ticket.`). The
-ticket #N is the head of the backlog set, **split in two tiers**:
+ticket #N is the head of the backlog set. Each ticket sits in the **highest
+tier it qualifies for** (`backlog_tier`, computed per consumer in
+`src/db/ticket-flags.ts`):
 
-1. **Tier 1 — ball in my court.** Tickets where the last actor on the thread is
-   someone other than me (reporter / counterpart / human). These match the
-   `actionable` lens of §4.1: the wake fires on them first because the next move
-   is mine.
-2. **Tier 2 — ball already in their court.** Tickets where I was the last actor.
-   I commented, the ball is with the reporter, and the thread is waiting on
-   them. These stay in the backlog as a soft reminder set, sorted **below** tier 1.
+- **Tier 0 — hot focus.** Cross-agent activity within the hot window (§5.1) on
+  a ticket that is otherwise in the pool — overrides every other tier.
+- **Tier 1 — ball in my court.** The `actionable` lens of §4.1: the last actor
+  is someone else and no gate applies. The wake fires on these first.
+- **Tier 2 — follow-up.** They spoke last, but a decision gate on the thread
+  still holds `actionable` (e.g. a settled resolution awaiting close, or a
+  pending proposal from a third party). Soft surface — without this tier the
+  thread would vanish from the backlog.
+- **Tier 3 — waiting on them.** I was the last actor, no decision pending: the
+  ball is with the reporter. Soft reminder set, below the tiers above.
+- **Tier 4 — blocked.** Gated by an open `depends_on` blocker. Surfaced last so
+  the agent can check the chain — the blocker may be snoozed or forgotten.
 
 A triage comment (§ in `skill/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
-moves the ticket **from tier 1 to tier 2** within the same backlog — the agent
-becomes the last actor, so the wake stops pointing at it as long as a tier-1
-ticket exists. Concrete tickets only drop OUT of the backlog on a lifecycle
+moves the ticket **from tier 1 to tier 3** within the same backlog — the agent
+becomes the last actor, so the wake stops pointing at it as long as a
+higher-tier ticket exists. Tickets only drop OUT of the backlog on a lifecycle
 decision (close by the agent via `ticket_close`, snooze by the human via the
 web UI) or when the reporter replies (which re-promotes the ticket to tier 1
-because they're now the last actor → next wake names it again).
+because they're now the last actor → next wake names it again). Note the
+pending-proposal symmetry: a follow-up comment from anyone **other than the
+proposer** lifts a pending plan/resolution gate entirely — replying under a
+proposal instead of accepting it hands the ball straight back (tier 1), it does
+not park the thread in tier 2.
 
-This formalises the soft rotation david called out: a simple comment doesn't
-"remove" a ticket from the backlog (close or snooze does), but it pushes
-the ticket to the end so the next wake picks the next head.
+This formalises the soft rotation: a simple comment doesn't "remove" a ticket
+from the backlog (close or snooze does), but it pushes the ticket down so the
+next wake picks the next head.
 
-**Why two tiers, not "drop tier 2 entirely":** a ball-in-their-court ticket
+**Cooldown — the anti-nag bound.** Once a backlog wake fires on a ticket, the
+ticket is suppressed from the backlog-wake candidate pool for a cooldown window
+(surfaced as `backlog_cooled_until` on the row; the suppression is orthogonal —
+the row keeps its tier). This is the deliberate trade-off between the tool's
+two focuses: without the cooldown the backlog becomes a nag loop (agent focus
+at the human's expense); with it, a waiting thread re-surfaces about once per
+window instead of every heartbeat. A gated thread is therefore never silent
+*forever* — its silence is bounded by the cooldown.
+
+**Why keep the waiting tiers, not drop them:** a ball-in-their-court ticket
 isn't done — it's waiting on a human/reporter who may go silent. Surfacing it
-in the wake (lower priority than tier 1) keeps it visible to the agent: a
-periodic "look #N — still waiting on them" reminder, useful for nudging the
-reporter or for the agent to decide it's stale enough to close itself.
+in the wake (below tier 1) keeps it visible to the agent: a periodic "look #N —
+still waiting on them" reminder, useful for nudging the reporter or for the
+agent to decide it's stale enough to close itself.
 
 **Within a tier**, the work-order keys from §5 apply: priority desc → own
 claim → assignment → hot → id asc.
 
-**API**: the daemon exposes the two-tier set via `GET /api/tickets?backlog=1`.
-Tickets neither in tier 1 nor in tier 2 (= other people's open work) are
-filtered out server-side; the work-order tiering keeps tier 1 first. The
-loop's `buildContextPhrase` uses this filter for the FIFO-empty fallback.
+**API**: the daemon exposes the ladder via `GET /api/tickets?backlog=1`
+(= every row whose `backlog_tier` is non-null; other people's open work is
+filtered out server-side). The loop's `buildContextPhrase` uses this filter for
+the FIFO-empty fallback.
 
 ### 5.0.1 Per-row flags exposed by `/api/tickets`
 
@@ -257,7 +277,7 @@ boolean checks on the result.
 | `claimable` | bool | `actionable` AND (in a project I own OR explicitly assigned to me on a no-claim consumer). |
 | `is_claim` | bool | I hold a live claim on this ticket (claimant=me, within window). |
 | `hot` | bool | Cross-agent visibility flag — at least one agent has been active on this thread recently. |
-| `backlog_tier` | 0\|1\|2\|null | Lower = higher focus. 0 = **hot** (cross-agent activity within the hot window — overrides actionable/waiting); 1 = actionable (ball in my court); 2 = waiting on them (I was the last actor, no decision pending); null = not in my backlog (closed / snoozed / decision-gated / **assigned to another agent**). |
+| `backlog_tier` | 0\|1\|2\|3\|4\|null | Lower = higher focus. 0 = **hot** (cross-agent activity within the hot window — overrides the tiers below); 1 = actionable (ball in my court); 2 = follow-up (they spoke last but a decision gate holds `actionable` — soft surface); 3 = waiting on them (I was the last actor, no decision pending); 4 = blocked (open `depends_on` blocker — check the chain); null = not in my backlog (closed / snoozed / **assigned to another agent**). |
 | `backlog_cooled_until` | string\|null | When the loop just woke on this ticket and the cooldown is still open, the ISO timestamp when the row will resurface. Always null when `cooldown_sec` query param is 0 or unset. |
 | `gated_by_decision` | bool | A `then:plan` or `then:resolved` proposal is sitting unresolved on the thread — the ticket is in awaiting-validation state. |
 | `last_actor` | string\|null | The consumer who last acted on the thread (denormalised). |

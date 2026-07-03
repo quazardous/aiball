@@ -87,11 +87,14 @@ unit tests (`cargo test`) built from real captured sequences.
 
 ## Markers & status
 
-- `human-typing` — timestamp file touched on every real text keystroke;
-  read by `state.ts::humanIsTyping` (5 s TTL), drives the bicolor bar word.
-- `@cl_human` — the proxy repaints this psmux user-option instantly
-  (`loop` yellow ↔ `stop` red) and clears it after the TTL, exactly like
-  the Unix proxy's path. `MUX_CMD` + `CL_TMUX` come from the loop env.
+- `human-typing` — timestamp file still touched on every real text
+  keystroke (debug trace), but the live read path is the in-memory IPC
+  stamp (`ipc.humanTypingAtMs`, 5 s TTL) fed by the proxy's keystroke
+  events over the event channel.
+- `@cl_human` — the proxy does **not** paint the bar anymore; it emits
+  keystroke events and the TS-side `BarRenderer` is the sole bar writer
+  (paints the same transitions as the Unix path). `MUX_CMD` + `CL_TMUX`
+  come from the loop env.
 - `proxy-alive` — PID-stamped presence marker dropped after a successful
   fork, removed at graceful exit. `state.ts::proxyIsAlive` probes the PID's
   liveness, so a proxy killed with `TerminateProcess` (no cleanup) leaves a
@@ -165,11 +168,12 @@ marker, wake injection (named pipe ↔ UDS), resize, exit-code propagation,
 fail-safe direct launch, and:
 
 - [x] **3-state bar word + colours.** `stop`(196) / `wait`(178) /
-      `loop`(40 green), all `bg=colour16`, painted on transition.
-- [x] **Arm user-grace on typing.** A keystroke touches `user-took-over`
-      → bar does `stop → wait → loop`.
+      `loop`(40 green), all `bg=colour16` — the proxy emits the
+      keystroke events; the TS `BarRenderer` paints on transition.
+- [x] **Arm the presence hold on typing.** A keystroke feeds the AFK
+      state machine → bar does `stop → wait → loop`.
 - [x] **ESC-takeover.** A bare ESC (gated by `CL_ESC_TAKEOVER`) arms the
-      user-grace; ESC-led CSI/SS3 (arrows) don't.
+      presence hold; ESC-led CSI/SS3 (arrows) don't.
 - [x] **Boot-grace `wait`.** Bar reads `wait` during the boot window
       (`CL_BOOT_GRACE_SEC`, `CL_WAIT`/`--no-wait`).
 - [x] **AFK detection.** Atomic-combo TOGGLE (`CL_AFK_SPEC` /

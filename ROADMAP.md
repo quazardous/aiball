@@ -15,10 +15,29 @@ sessions — one per repo, each a long-lived specialized agent — all
 monitorable and steerable from one local-first board. The rest of this
 file is the gap between that picture and today.
 
+Two principles anchor every design choice:
+
+- **Two focuses, one tool.** aiball optimizes for *your* focus (don't
+  nag the human: moderation, wake cooldowns, decisions that wait for
+  you) **and** for the *agent's* focus (a per-project backlog, one wake
+  at a time, a work order instead of loudest-first). The two pull in
+  opposite directions, so most mechanisms — cooldowns, gates, drained
+  reminders — are deliberate trade-offs between them, with explicit
+  bounds.
+- **Hybrid by design.** A looped session is not a black box: it's your
+  normal Claude Code terminal with a coach attached. Grab the keyboard
+  and drive it live, or feed it tickets and walk away — same session,
+  same context, switch whenever. The loop notices you typing and steps
+  aside, then resumes draining when you leave. This direct+backlog
+  duality is the core of the product.
+
+Where that leads:
+
 - **Persistent specialized agents** — one agent per project, kept alive
-  across turns with its own backlog (and, eventually, long-term memory),
-  instead of one-shot sessions. `claude-loop` is the seed; orchestrating
-  several is the next concrete step (see Planned).
+  across turns with its own backlog (and, eventually, long-term
+  memory), instead of one-shot sessions. In practice **one agent per
+  repo has proven the right grain for context focus** — pooling several
+  agents on one repo is parked (see Parked).
 - **Inter-project communication** — tickets / pings / comments already
   cross projects; the direction is richer cross-folder hand-off between
   agents.
@@ -27,23 +46,10 @@ file is the gap between that picture and today.
   what's left is hardening.
 
 These are *direction*, not commitments. Concrete near-term work is under
-Planned; rough-but-usable surfaces under Experimental / partial.
+Planned; rough-but-usable surfaces under Experimental / partial;
+consciously paused threads under Parked.
 
 ## Planned
-
-### Multiple agents on one project (sandbox + worktree)
-
-Today you run **one agent per repo** — one `claude-loop` per folder, each
-with its own `consumer_id` + backlog, all on the consumers panel.
-Different folders, different agents.
-
-Planned: run **several loop agents against a single folder** at once, each
-isolated in its own **git worktree**. The `aiball sandbox --worktree`
-primitive already does the isolation — it spawns a sandbox on a fresh
-`git worktree add` (branch `sandbox/<name>`), so "two sandboxes editing
-the same repo without conflict" works today. The gap is orchestrating a
-*pool* of them against one project — parallelize work on a single repo
-(e.g. one agent per feature) and surface / steer the group from aiball.
 
 ### Web terminal
 
@@ -98,7 +104,29 @@ cron re-launches a dead sandbox when fresh pings land for its agent
 For the autonomous wrapping you actually want today, use
 [`claude-loop`](./README.md#quickstart--claude-loop-recommended).
 Refactoring sandbox to run on `claude-loop` underneath is a noted
-follow-up; it's kept for experimentation — caveat emptor.
+follow-up; it's kept for experimentation — caveat emptor. Active
+development on the sandbox is **on pause** (see Parked below for the
+reasoning); `claude-loop` is the daily driver.
+
+## Parked (deliberately)
+
+### Multiple agents on one project (sandbox pool + worktrees)
+
+The original plan: run **several loop agents against a single folder** at
+once, each isolated in its own **git worktree**, orchestrated as a pool
+from aiball. The isolation primitive exists and works — `aiball sandbox
+--worktree` spawns a sandbox on a fresh `git worktree add` (branch
+`sandbox/<name>`), so two sandboxes can edit the same repo without
+conflict.
+
+Paused after real-world use, on purpose: **one agent per project turned
+out to be the right grain for context focus.** A single long-lived
+session per repo keeps the conversation coherent, and the hybrid
+direct+backlog piloting (see Direction) covers the "more hands" need
+better than a pool would — when you need to intervene, you type in the
+same terminal the agent lives in, instead of coordinating N of them. The
+worktree isolation stays available; pool orchestration will be revisited
+if a use case actually demands it.
 
 ## Open ideas (not committed)
 

@@ -2,8 +2,9 @@
 
 > **Status**: working on Linux (primary platform) and macOS (best-effort
 > — same install path; the daemon, CLI, MCP server and `claude-loop`
-> all run, but no launchd unit ships yet — start `aiball-daemon`
-> manually or via your own LaunchAgent). The shell installer
+> all run, but no launchd unit ships yet — start the daemon
+> manually (`cd ~/.local/lib/aiball && npm start`) or via your own
+> LaunchAgent). The shell installer
 > (`install.sh`) provisions the daemon + `aiball` CLI + `aiball-mcp` +
 > `claude-loop` end-to-end. The daemon listens on a Unix domain socket
 > by default (`~/.local/share/aiball/sock`); for remote access see
@@ -71,7 +72,7 @@ code and don't want install-side-effects.
 ```bash
 git clone https://github.com/quazardous/aiball.git
 cd aiball
-./install.sh --auth-init    # also mints a one-shot setup token + opens /setup
+./install.sh    # also mints a one-shot setup token + prints the setup URL
 ```
 
 What it does:
@@ -86,8 +87,9 @@ What it does:
    `aiball`, `aiball-mcp`, `claude-loop`.
 5. Installs the systemd user unit (`~/.config/systemd/user/aiball.service`),
    enables it, and (re)starts it. Skip with `--no-systemd`.
-6. With `--auth-init` (or by default in interactive mode): waits for
-   `/api/health`, then runs `aiball auth init` and prints the setup URL.
+6. Auth bootstrap (reentrant — skipped if humans already exist): waits
+   for `/api/health`, then runs `aiball auth init` and prints the setup
+   URL. Re-mint later with `aiball auth reinit`.
 
 After install, the daemon is live and you can iterate with:
 
@@ -102,7 +104,7 @@ systemctl --user status aiball
 ```bash
 git clone https://github.com/quazardous/aiball.git
 cd aiball
-./install.sh --symlink --auth-init
+./install.sh --symlink
 ```
 
 Same as Path 2, with two differences:
@@ -139,10 +141,9 @@ install, run `./install.sh --uninstall` first.
 | `--symlink` | dev install — symlink the install dir to this checkout + tsx-watch drop-in |
 | `--port 7878` | override the listen port (writes a systemd drop-in; default `7777`) |
 | `--host 0.0.0.0` | override the listen host (default `127.0.0.1`; use with care) |
-| `--no-systemd` | skip the user unit (macOS, headless boxes — start `aiball-daemon` manually) |
+| `--no-systemd` | skip the user unit (macOS, headless boxes — start the daemon manually, see below) |
 | `--proxy-url URL` | proxy-node mode — run this daemon as a transparent relay to a remote aiball (see [`REMOTE.md`](./REMOTE.md)) |
 | `--proxy-token TOK` | with `--proxy-url`, the node token minted on the remote (`aiball auth issue --node`) |
-| `--auth-init` | mint a one-shot setup token + auto-open the setup URL after install |
 | `--uninstall` | remove the install (code, bins, systemd unit); data dir preserved |
 
 Re-running with new `--port` / `--host` overwrites only the bind drop-in.
@@ -176,8 +177,7 @@ need to revalidate boot-cached entries.
 No `--no-systemd` daemon? Start it manually:
 
 ```bash
-aiball-daemon          # foreground
-# or: cd ~/.local/lib/aiball && npm start
+cd ~/.local/lib/aiball && npm start   # foreground
 ```
 
 ## Environment variables
@@ -248,8 +248,8 @@ hard) — use `readlink -f` for that.
 ## What's NOT in the Linux path
 
 - **macOS launchd unit**. The installer skips it (no `launchctl`
-  template ships). Run with `--no-systemd` and start `aiball-daemon`
-  manually or wrap it in your own LaunchAgent.
+  template ships). Run with `--no-systemd` and start the daemon
+  manually (`npm start`) or wrap it in your own LaunchAgent.
 - **Frontend HMR auto-wired**. The hard install ships the prebuilt SPA;
   the dev install (`--symlink`) shares the checkout's `frontend/dist/`
   and the daemon serves that bundle — no vite dev server runs by

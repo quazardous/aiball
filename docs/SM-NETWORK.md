@@ -21,7 +21,7 @@ of which controller does what and how they wire together.
 - **Subscriber → ipcState bridge** — each actor has one subscriber that
   mirrors `actor.context` (and state matches) to ipcState fields. That's
   the ONLY path from a controller's context to the shared state.
-- **Composition root in `timer.ts`** — actors are instantiated, wired,
+- **Composition root in `kernel.ts`** — actors are instantiated, wired,
   and started in `mainSse`. Pumps + subscribers all live alongside.
 
 ## The purity contract — events are the only integration channel
@@ -35,7 +35,7 @@ declared `actions`, the only allowed operations are :
 
 **Forbidden inside machine actions** :
 
-- ❌ `setIpc<Field>(...)` writes — that's the SUBSCRIBER's job, in `timer.ts`.
+- ❌ `setIpc<Field>(...)` writes — that's the SUBSCRIBER's job, in `kernel.ts`.
 - ❌ `armAfkViaService` / `tryWake` / any helper that mutates the runtime — that's a CONSUMER's job, via `actor.on(...)`.
 - ❌ `log(...)` inside emit actions — log in the consumer (where you have actor identity context), not in the action.
 - ❌ `Date.now()` / `Math.random()` / file reads — would break testability and the resume-from-journal property of XState.
@@ -74,7 +74,7 @@ graph LR
   AfkPump[afkExpiryTimer] -- "EXPIRY_REACHED" --> Afk
   Afk -- "subscribe → bridge" --> Ipc
   Afk -- "emit: afk:armed_10m / armed_inf / cleared" --> Consumers
-  Boot -- "emit: boot:sealed" --> Consumers[Consumers in timer.ts]
+  Boot -- "emit: boot:sealed" --> Consumers[Consumers in kernel.ts]
   Ipc --> BarRenderer
   Ipc --> WakeGate[Wake gate / isAfkActive]
 ```
@@ -91,7 +91,7 @@ graph LR
 | **Events in** | `WATCHER_TICK` (pane probes), `DEADLINE_REACHED` (deadline pump), `HOOK_SEAL` (respawn handoff) |
 | **Events emitted** | `boot:sealed` { loopStartMs, reason: `"deadline"` \| `"hook"` } |
 | **States** | `booting` (initial) → `sealed` (terminal) |
-| **Pump** | `bootDeadlineTimer` setInterval (1s) in `timer.ts` |
+| **Pump** | `bootDeadlineTimer` setInterval (1s) in `kernel.ts` |
 | **Tests** | `boot-machine.test.ts` |
 
 See the source file header for the state diagram and event semantics.
@@ -127,7 +127,7 @@ state name to `ipcState.dispAfkMode/dispAfkExpiryMs` (display).
 | **Pump** | None — XState `after(inFlightTtl)` + `after(coalesceWindow)` handle the lifecycle. |
 | **Tests** | `wake-machine.test.ts` |
 
-The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consumers gate with `wakeSvc.isIdle()` before sending. The `wake:delivered` consumer (in `timer.ts:mainSse`) calls `markMessageSeen` on the FIFO-head ack.
+The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consumers gate with `wakeSvc.isIdle()` before sending. The `wake:delivered` consumer (in `kernel.ts:mainSse`) calls `markMessageSeen` on the FIFO-head ack.
 
 ### TypingController — shipped
 
@@ -165,7 +165,7 @@ Each will follow the same pattern : pure machine, external pump (if needed), sub
 
 ### Composition root
 
-All actors are instantiated and wired inside `mainSse` in `timer.ts`. Order :
+All actors are instantiated and wired inside `mainSse` in `kernel.ts`. Order :
 
 1. Pane watchers fire `change` events (`refreshPaneMarkers`).
 2. Controller actors are created with seed input from `readLoopStateInput`.
@@ -229,7 +229,7 @@ setup({
     },
 })
 
-// In timer.ts (or any consumer)
+// In kernel.ts (or any consumer)
 afkActor.on("afk:armed_10m", (ev) => {
     log(`armed 10m expiry=${new Date(ev.expiryMs).toISOString()} from ${ev.prevMode}`);
 });
@@ -256,7 +256,7 @@ The two casings make the direction obvious : a `SCREAMING_CASE` event name in a 
 
 **Allowed inbound** :
 
-- ✅ `actor.send({type: "EVENT_NAME", ...payload})` from any consumer (timer.ts, hook subscribers, external services).
+- ✅ `actor.send({type: "EVENT_NAME", ...payload})` from any consumer (kernel.ts, hook subscribers, external services).
 - ✅ Events declared in the machine's `setup.types.events` discriminated union — TypeScript narrows the payload at the send-site.
 - ✅ A single keystroke / hook event may legitimately translate to a SCREAMING_CASE event (`KEYSTROKE`, `SESSION_START`).
 
@@ -273,7 +273,7 @@ If a consumer only ever sends an event that does `state→state'` with a single 
 ### External pump
 
 Machines stay **pure** — no internal timers, no `Date.now()`, no I/O. The
-wrapper in `timer.ts` is responsible for :
+wrapper in `kernel.ts` is responsible for :
 
 - Polling `actor.getSnapshot()` and firing synthetic events (e.g.
   `DEADLINE_REACHED` when the wall clock passes `context.deadlineMs`).
@@ -303,7 +303,7 @@ side-effects.
    `assign` + `emit`, never reach outside.
 2. Write `<name>-machine.test.ts` covering every transition, every guard,
    and every emit (`actor.on("<name>:<event_name>", cb)` + assert payload).
-3. In `timer.ts:mainSse` :
+3. In `kernel.ts:mainSse` :
    - `const actor = createActor(machine, {input: ...});`
    - `actor.subscribe(snap => bridge snap.context → ipcState)` (state mirror only).
    - `actor.on("<name>:<event_name>", ev => ...)` for each locus event reaction.
@@ -331,7 +331,7 @@ side-effects.
 
 - Loose coupling : a controller can be replaced or tested in isolation.
 - Single ownership per slice avoids cross-controller race conditions.
-- Composition root in `timer.ts` is explicit — no surprising wiring.
+- Composition root in `kernel.ts` is explicit — no surprising wiring.
 
 ### Why XState `after(N)` instead of an external `setTimeout` ?
 

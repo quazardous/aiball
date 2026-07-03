@@ -67,12 +67,10 @@ claude_loop:
   # window — pas le hook, pas la pane probe.
   boot_min_seconds: 30
 
-  # Grace window after a human prompt — auto-wakes stay skipped and
-  # `AskUserQuestion` dialogs stay allowed until this many seconds elapse
-  # since the last keystroke. SILENT on the bar (no visible word change)
-  # — F9 is the visible hold control. 600s (10min) = the loop stays out
-  # of your way after you start typing.
-  user_grace_seconds: 600
+  # NOTE — presence / grace is not a config key anymore: typing in the
+  # pane arms a fixed 10-minute presence hold (visible as `wait` on the
+  # bar) during which auto-wakes stay skipped and `AskUserQuestion`
+  # dialogs stay allowed; F9 cycles the hold by hand (away → 10 min → ∞).
 
   # WAIT default when neither --wait nor --no-wait is passed. Global CLI
   # default stays no-wait (eager boot drain); flip true to yield boot-grace
@@ -91,17 +89,10 @@ claude_loop:
   # to distinguish auto-wake from human input.
   wake_in_flight_ttl_ms: 2000
 
-  # When ON, pressing ESC in the loop pane arms the user-grace window
+  # When ON, pressing ESC in the loop pane arms the presence hold
   # (so the loop stops auto-pinging while you take over). Requires the
   # PTY proxy (the default launch path).
   esc_takeover: true
-
-  # ask_grace_seconds: 600
-  # Deprecated since the #619 collapse — `user_grace_seconds` above now
-  # drives BOTH the auto-wake gate AND the AskUserQuestion gate. Still
-  # accepted for back-compat: if set, the deferential window expands to
-  # `max(user_grace_seconds, ask_grace_seconds)`. New configs should set
-  # only `user_grace_seconds`.
 
   # AFK key — F9 cycles 3 states: `AFK` (autonomous loop, dim) →
   # `NOT AFK 10m` (jaune countdown) → `NOT AFK ∞` (rouge indefinite)
@@ -192,6 +183,7 @@ project_type: public
 #   island_fg: "colour15"     # `claude-…` on the black island (white)
 #   bar_fg: "colour16"        # name / [state] / afk on the coloured bar (black)
 #   afk_label_fg: "colour238" # dim `· afk:` label
+#   prompt_input_fg: "colour214" # the `❯` glyph when the prompt holds unsent text
 #   busy_bg: "colour33"       # claude working (electric blue)
 #   idle_bg: "colour240"      # at the prompt (dark grey)
 #   boot_bg: "colour178"      # booting (yellow)

@@ -2,7 +2,7 @@
 
 > Wrap a Claude Code session in a tmux loop that wakes itself when
 > there's work to drain. Default-coupled to aiball (the wake-up gate
-> polls `aiball pings-count`); generic via `--check-cmd <shell>`.
+> asks the daemon in-process); generic via `--check-cmd <shell>`.
 
 ---
 
@@ -169,15 +169,14 @@ Any shell snippet:
 - **Exit 0** = "there is work to drain" → wake claude.
 - **Non-zero** = "nothing to do" → stay idle.
 
-Default: `aiball pings-count -q`. The CLI subcommand prints the
-unread-ping count and exits 0 when > 0. When this exact string is
-the check-cmd, both the timer and the hooks bypass the subprocess
-fork and call `AiballClient.pingsCount()` directly in-process
-(cached client, keep-alive socket).
+Default: **empty** — the loop uses its built-in in-process check
+(`AiballClient`, cached client, keep-alive socket), no subprocess
+fork. The legacy string `aiball pings-count -q` is still recognized
+as an alias for the same fastpath (it used to be the default; the
+CLI subcommand prints the unread-ping count and exits 0 when > 0).
 
 Special values:
-- `true` (or empty) → wake unconditionally on every tick (pure
-  timer mode).
+- `true` → wake unconditionally on every tick (pure timer mode).
 
 Custom shells (e.g., file watchers, queue checks, hybrid logic) get
 shelled out per tick — no fastpath, but anything works.
@@ -191,23 +190,26 @@ who's at the keyboard**. Injecting "What's up, Doc?" into the middle of
 a prompt you're typing is worse than useless. Three signals keep the
 loop deferential, coarsest to finest.
 
-### 1. User-grace (submit-time)
+### 1. Presence hold (the AFK state machine)
 
-The `UserPromptSubmit` hook fires on every prompt submitted in the pane
-— yours *and* the loop's own auto-wake. When the prompt came from a
-**human**, the hook stamps the `user-took-over` marker (mtime = now).
-The timer and the Stop hook check `userIsTakingOver()` and skip their
-auto-wake while that marker is fresher than `CL_USER_GRACE_SEC`
-(default **60s**). Every prompt you submit re-arms the window, so an
-active session stays wake-free until you've been quiet for a minute.
+The coarse signal is an explicit **presence hold**, owned by the AFK
+state machine (see [`SM-NETWORK.md`](./SM-NETWORK.md)) : three states —
+away/autonomous (`loop`), present for 10 minutes (`wait`, 600 s expiry),
+present indefinitely (`∞`). **Typing in the pane arms the 10-minute
+hold** (except in `∞`, where only F9 releases) ; F9 cycles the three
+states by hand. While a hold is active the loop skips its auto-wakes and
+Claude's interactive dialogs (`AskUserQuestion`) stay allowed. This
+single window is the collapse of the historical two-window model
+(submit-time "user-grace" + "ask-grace") — the old `user-took-over`
+marker file and its `userIsTakingOver()` check are gone ; presence is
+in-memory IPC only.
 
-The catch: the loop's *own* wake also triggers
-`UserPromptSubmit`, which would stamp `user-took-over` and freeze the
-next wake for a full grace window — self-inflicted. Fix: every wake path
-stamps `ipc.wakeInFlightAtMs` right before injecting ; the hook sees
-the in-memory latch (TTL `CL_WAKE_IN_FLIGHT_TTL_MS`, default 2s),
-recognizes the prompt as the loop's own, and skips the `user-took-over`
-stamp.
+The catch: the loop's *own* wake also triggers `UserPromptSubmit`,
+which must not read as human presence. Fix: every wake path stamps
+`ipc.wakeInFlightAtMs` right before injecting ; the hook sees the
+in-memory latch (TTL `CL_WAKE_IN_FLIGHT_TTL_MS`, default 2s) and tags
+the submit as the loop's own (`fromAutoWake`), which the consumers
+ignore for presence purposes.
 
 ### 2. Live keystroke detection
 
@@ -262,37 +264,31 @@ the loop.
 
 ### The take-over workflow — what happens when you type
 
-Typing in the pane refreshes the **user-grace** marker
-(`CL_USER_GRACE_SEC`, default **600 s / 10 min**). user-grace gates :
+Typing in the pane **arms the 10-minute presence hold** (the same
+`NOT AFK 10m` state F9's first press reaches). The hold gates :
 
-- auto-pings (timer.tryWake skips while it's fresh),
-- `AskUserQuestion` (still allowed for the same window — the #619
-  collapse merged the historical ask-grace into user-grace).
+- auto-pings (the wake path skips while the hold is live),
+- `AskUserQuestion` (allowed for the same window — the historical
+  ask-grace was merged into this single hold).
 
-user-grace is **silent** on the bar — typing prints `stop` red for
-~5 s then the bar returns to whatever the AFK state says (usually
-`loop` green, since typing alone doesn't arm AFK). The auto-wake
-suppression keeps running invisibly. To make the hold *visible* and
-controllable, press F9.
+The hold is **visible** : typing prints `stop` red for ~5 s (live
+keystroke signal), then the bar reads `wait` yellow with the
+10-minute countdown in the status-right chunk. Every keystroke resets
+the countdown to 10:00 (except in `∞` mode, where typing is a no-op).
 
 Time-line of a single human interaction (no F9) :
 
 ```
 T=0   you type something on the pane
       ├─ bar = stop (red, ~5s)
-      ├─ user-took-over marker mtime = now (silent gate)
+      ├─ AFK SM armed → NOT AFK 10m (expiry = now + 600s)
       │
 T+5   typing stopped
-      └─ bar = loop (green) ← but auto-wakes still frozen behind the scenes
+      └─ bar = wait (yellow, countdown) ← auto-wakes held
       │
-T+600 user-grace expired
-      └─ auto-pings resume (no visible bar change — was already `loop`)
+T+600 hold expired (no keystroke since)
+      └─ bar = loop (green), auto-pings resume
 ```
-
-(Back-compat : a project that still sets `ask_grace_seconds` in
-`.aiball.yaml` is honored — the deferential window widens to
-`max(user_grace_seconds, ask_grace_seconds)`, never shrinks. New
-configs should set only `user_grace_seconds`.)
 
 **Boot-grace finale.** The boot phase lifecycle is owned by the
 `BootMachine` XState actor (see [`SM-NETWORK.md`](./SM-NETWORK.md)).
@@ -312,9 +308,9 @@ or a quick `esc to interrupt` no longer flips the bar to grey or
 blue mid-load.
 
 **F9 cycles three states ; typing arms the 10-minute hold.** AFK
-has three user-visible states and two inputs (the implementation
-lives in `afk-service.ts` ; see [`SM-NETWORK.md`](./SM-NETWORK.md)
-for the planned AfkController state machine) :
+has three user-visible states and two inputs (the AfkController
+state machine in `afk-machine.ts`, service wrapper `afk-service.ts` ;
+see [`SM-NETWORK.md`](./SM-NETWORK.md)) :
 
 - **F9** = tristate cycle `AFK → NOT AFK 10m → NOT AFK ∞ → AFK`.
 - **Text keystroke / ESC** = arm or refresh the `NOT AFK 10 min`
@@ -329,11 +325,10 @@ State transitions :
 | NOT AFK 10m   | → NOT AFK ∞       | reset countdown to 10:00 | → AFK        |
 | NOT AFK ∞     | → AFK (clear)     | no-op                    | n/a          |
 
-F9 on the `∞ → AFK` leg also clears `user-took-over` so the wake
-gate frees up alongside the visible release. The 10-minute timer is
-absolute (stored as expiry timestamp), so re-paints reflect the
-real remaining time and the toggle never accidentally resets an
-in-flight countdown.
+F9 on the `∞ → AFK` leg releases the wake gate alongside the visible
+flip. The 10-minute timer is absolute (stored as expiry timestamp), so
+re-paints reflect the real remaining time and the toggle never
+accidentally resets an in-flight countdown.
 
 (Orthogonal third gate : the Stop hook / timer also read `esc to
 interrupt` in the pane footer and arm a `busy-defer-until` window via
@@ -522,7 +517,7 @@ Flow:
    (= the `_messages.id` for comments, the `tickets.id` for
    ticket_created heads) is returned alongside the phrase as
    `ContextPhraseResult.headMessageId`.
-2. `sendKeys` (`src/claude-loop/timer.ts`) plumbs it into
+2. `sendKeys` (`src/claude-loop/kernel.ts`) plumbs it into
    `injectWakePhrase`'s `onWillInject` callback.
 3. `onWillInject` fires ONLY after the dedup gate passes (the wake
    is actually going out). It calls
@@ -636,9 +631,9 @@ src/claude-loop/
   project-context.ts                    # resolve cwd + aiball identity (agent, project)
   session-start-hook.ts                 # boot gate: check-cmd → ping or idle
   stop-hook.ts                          # turn-end gate: same logic + busy-defer
-  user-prompt-submit-hook.ts            # human-submit → user-took-over (user-grace)
+  user-prompt-submit-hook.ts            # prompt-submit event (turn start; auto-wake tagged)
   pretooluse-hook.ts                    # gate AskUserQuestion in a headless loop
-  timer.ts                              # detached ticker; AiballClient fastpath; typing poll
+  kernel.ts                             # detached ticker; SM composition root; AiballClient fastpath
   error-backoff.ts                      # exponential retry on pane crash (rate-limit/api-error)
   pty-proxy.py                          # Unix PTY proxy: live keystroke detection (see PTY-PROXY.md)
 config/defaults/claude-loop-pings.yaml  # default wake phrases + prompt templates
@@ -693,5 +688,5 @@ Install symlinks `~/.local/bin/claude-loop` alongside `aiball` and
 - `CHANGELOG.md` — narrative history (`[Unreleased]` section
   covers this work).
 - `MCP-CLIENT.md` — agent-facing docs on aiball MCP usage; the
-  default check-cmd (`aiball pings-count`) ties claude-loop to the
-  flows described there.
+  default in-process check ties claude-loop to the flows described
+  there.

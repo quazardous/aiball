@@ -39,7 +39,8 @@ at boot.
 6. Sign in with the **same account** you used on the host.
 7. Enable the VPN toggle (the app asks for the permission once).
 8. Open the URL from step 4 in any browser → log in with your aiball
-   human credentials (created at install time via `--auth-init`).
+   human credentials (created at install time by the auth bootstrap —
+   the setup URL `install.sh` printed; re-mint with `aiball auth reinit`).
 
 Verify from the host: `tailscale status` should now list the client.
 

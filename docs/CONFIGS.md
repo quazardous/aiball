@@ -16,7 +16,7 @@ commented template [`.aiball.yaml.example`](../.aiball.yaml.example).
 | `.aiball.yaml` | per-project (walks up from cwd, like git) | `autopoll:`, `consumer:`, `claude_loop:`, `workflow:`, `prompts:`, `formatting:`, `tags:` |
 | `.mcp.json` → `mcpServers.aiball.env` | per-project | **DEPRECATED** identity fallback (`AIBALL_AGENT`/`AIBALL_PROJECT`) |
 | env vars | process | `AIBALL_AGENT`/`AIBALL_PROJECT` (identity override), `AIBALL_URL`/`AIBALL_SOCK`/`AIBALL_HOME`/`AIBALL_HUMAN`, `CL_*` (claude-loop children), `XDG_CONFIG_HOME` |
-| CLI flags | invocation | `claude-loop --interval`/`--user-grace`, `aiball autopoll …` |
+| CLI flags | invocation | `claude-loop --interval`/`--check-cmd`/`--wait`, `aiball autopoll …` |
 
 `.aiball.yaml` is **per-project and optional**: drop an empty `{}` to turn
 autopoll on with defaults; without the file, autopoll stays silent. The
@@ -43,27 +43,26 @@ Keys: `enabled`, `volatile`, `throttle_seconds`, `include_recent_tickets`,
 
 ### claude-loop timeouts — `claude_loop:` — *defaults → yaml → CLI/env*
 Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
-`--user-grace`) and `CL_*` env (which the timer/hook child processes read).
-Keys: `interval_seconds`, `boot_grace_seconds`, `user_grace_seconds`,
-`wake_in_flight_ttl_ms`, `esc_takeover`, `ask_grace_seconds`, `afk_key`,
-`afk_window_ms`. See [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
+`--check-cmd`, `--wait`/`--no-wait`) and `CL_*` env (which the loop's
+child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
+`boot_grace_seconds`, `boot_min_seconds`, `auto_resume`,
+`wake_in_flight_ttl_ms`, `input_hot_ttl_ms`, `pane_probe_fast_ms`,
+`pane_probe_slow_ms`, `esc_takeover`, `afk_key`, `afk_window_ms`, `wait`,
+`drained_strategy`, `log_level`, `permission_mode`, `gates`. See
+[`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
 
 **AskUserQuestion gate + AFK.** In a loop, `AskUserQuestion` is allowed
-only if a human acted within `ask_grace_seconds` (default 600 = 10 min, longer
-than the wake user-grace — a stalled question is cheap vs a lost one); past
-that it redirects the agent to ask via a ticket comment. `afk_key` lets you
-flag yourself away *immediately* (no waiting for the timeout): the PTY proxy
-watches stdin for the combo and, on match, **toggles** an `afk` marker the gate
-honours (the combo flips away↔back, robust to the two keystrokes
-arriving coalesced in one read, and forgetting its state after each toggle so a
-stray repeat key within `afk_window_ms` can't re-toggle); resuming any
-**typing** also clears it. `afk_key` uses VS Code
-notation — `+` joins modifiers, a space is a 2-combo sequence (default
-`"esc esc"`); `afk_window_ms` (default 400) bounds the gap between the two
-combos. Since the proxy only sees the terminal's **byte stream**, the
-supported subset is what maps to distinct bytes (`esc`, `ctrl+<char>`,
-f-keys, literals); `shift`/`alt+shift`/`ctrl+shift` aren't distinguishable
-without the kitty/win32 keyboard protocol.
+while the **presence hold** is live (typing arms a 10-minute hold; F9
+cycles away → present-10 min → present-∞); past that it redirects the
+agent to ask via a ticket comment — a stalled question is cheap vs a
+lost one. `afk_key` (default `f9`) is the immediate control: the PTY
+proxy watches stdin for the key and cycles the presence state on match;
+`afk_window_ms` (default 400) is a post-fire key-repeat debounce.
+`afk_key` uses VS Code notation (`+` joins modifiers). Since the proxy
+only sees the terminal's **byte stream**, the supported subset is what
+maps to distinct bytes (`esc`, `ctrl+<char>`, f-keys, literals);
+`shift`/`alt+shift`/`ctrl+shift` aren't distinguishable without the
+kitty/win32 keyboard protocol.
 
 ### Workflow hints — `workflow:` — *defaults → yaml*
 `hint_branch`, `hint_worktree` (both off by default). See
