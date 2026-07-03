@@ -1337,26 +1337,52 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 : "— inactive → fallback direct launch (cl-pty-proxy.exe not built — run `cargo build --release` in windows/cl-pty-proxy); pane-diff detection, idle-only"
         }\n`);
     } else {
-        const impl = (process.env[CL_ENV.PROXY_IMPL] ?? resolveProjectContext().claude_loop.proxy_impl ?? "")
-            .trim().toLowerCase();
+        // The impl a FRESH start would pick (env override → config → default).
+        const configuredImpl =
+            (process.env[CL_ENV.PROXY_IMPL] ?? ctx.claude_loop.proxy_impl ?? "")
+                .trim().toLowerCase() || "python";
+        // Ground truth for a NAMED, running loop : read proxy-alive's PID and
+        // inspect its argv — `cl-pty-proxy` = rust, `pty-proxy.py` = python.
+        // Beats the ambient config (a running loop baked its impl into
+        // env.local at start time, which `check` from another shell can't see).
+        let runningImpl: string | null = null;
+        if (name) {
+            const pidRaw = (() => {
+                try { return readFileSync(proxyAlivePath(stateDirFor(name)), "utf8").trim(); }
+                catch { return ""; }
+            })();
+            const pid = Number(pidRaw);
+            if (Number.isFinite(pid) && pid > 0) {
+                const argv = (() => {
+                    try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " "); }
+                    catch { return ""; }
+                })();
+                if (argv.includes("cl-pty-proxy")) runningImpl = "rust";
+                else if (argv.includes("pty-proxy.py")) runningImpl = "python";
+            }
+        }
         const rustBin = join(selfRoot(), "windows", "cl-pty-proxy", "target", "release", "cl-pty-proxy");
-        if (impl === "rust") {
-            const hasRust = existsSync(rustBin);
-            process.stdout.write(`  proxy impl     : rust (opt-in)${hasRust ? "" : " — NOT BUILT, will fall back to python"}\n`);
+        const hasRust = existsSync(rustBin);
+        const hasPython = commandExists("python3");
+        // Always name the impl : the running one for a live loop, else the
+        // one a fresh start would use.
+        process.stdout.write(`  proxy impl     : ${
+            runningImpl
+                ? `${runningImpl} (running)`
+                : `${configuredImpl} (configured; no running loop probed)`
+        }\n`);
+        if ((runningImpl ?? configuredImpl) === "rust") {
             process.stdout.write(`  Rust proxy     : ${
                 hasRust
-                    ? "✓ active (live human-typing detection + socket wake injection)"
-                    : "— not built → run `cargo build --release` in windows/cl-pty-proxy (falls back to python meanwhile)"
+                    ? "✓ built (live human-typing detection + socket wake injection)"
+                    : "— NOT built → run `cargo build --release` in windows/cl-pty-proxy (a fresh start falls back to python)"
             }\n`);
         } else {
-            const hasPython = commandExists("python3");
-            const proxyScript = join(selfRoot(), "src/claude-loop/pty-proxy.py");
-            const proxyActive = hasPython && existsSync(proxyScript);
             process.stdout.write(`  python3        : ${hasPython ? "✓ available" : "— MISSING"}\n`);
             process.stdout.write(`  PTY proxy      : ${
-                proxyActive
+                hasPython
                     ? "✓ active (live human-typing detection + socket wake injection)"
-                    : `— inactive → fallback direct launch (${hasPython ? "proxy script missing" : "python3 missing"}); pane-diff detection, idle-only`
+                    : "— inactive → fallback direct launch (python3 missing); pane-diff detection, idle-only"
             }\n`);
         }
     }
