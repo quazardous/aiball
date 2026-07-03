@@ -61,7 +61,11 @@ fn proxy_alive_path() -> Option<String> {
 
 fn drop_proxy_alive() {
     if let Some(p) = proxy_alive_path() {
-        let _ = std::fs::write(&p, "");
+        // PID-stamped, matching the Windows path and pty-proxy.py : the
+        // TS `proxyIsAlive` probes PID liveness, and the claude-loop
+        // shutdown trap (`cli.ts`) does `kill "$(cat proxy-alive)"`. An
+        // empty file would leave the proxy unkillable on shutdown.
+        let _ = std::fs::write(&p, format!("{}\n", std::process::id()));
     }
 }
 

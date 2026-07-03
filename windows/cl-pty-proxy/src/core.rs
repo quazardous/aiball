@@ -349,10 +349,24 @@ fn split_units_with_consumed(data: &[u8]) -> (Vec<Unit>, usize) {
             i = end;
             continue;
         }
+        if data[i] == 0x1b {
+            // ESC + a byte that is neither CSI (`[`) nor SS3 (`O`) — a complete
+            // lone ESC (Alt+<char> in raw VT, or ESC immediately followed by
+            // plain text). We know the next byte exists (the i+1>=n tail case
+            // returned above) and is not `[`/`O` (those two branches continued),
+            // so this ESC is unambiguously complete. Emit it as its own unit and
+            // advance; the following byte(s) parse on the next iteration.
+            //
+            // Without this, the raw-run below sits on the ESC (its `data[j] !=
+            // 0x1b` guard is already false at j=i) and never advances → infinite
+            // loop. Masked on Windows (Alt+letter arrives as a win32 CSI), but a
+            // real hazard on the raw-VT Unix path.
+            units.push(Unit { vt: vec![0x1b], raw: vec![0x1b], is_down: true });
+            i += 1;
+            continue;
+        }
         // Raw run jusqu'au prochain ESC (paste / plain bytes — rare en
-        // win32 mode). Si on hit ESC isolé après une raw run, on le laisse
-        // traîner pour la prochaine iteration de la boucle (qui le détectera
-        // comme lone ESC at end et retournera early).
+        // win32 mode).
         let mut j = i;
         while j < n && data[j] != 0x1b {
             j += 1;
@@ -989,7 +1003,6 @@ mod tests {
     /// win32-input-mode (ESC[…_ CSI form), masking this. Ignored for now —
     /// file separately.
     #[test]
-    #[ignore]
     fn esc_plus_non_csi_byte_terminates() {
         // Run in a thread with a generous timeout — if the parser loops, the
         // join times out and we fail loudly instead of hanging cargo test.
