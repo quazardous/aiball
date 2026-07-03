@@ -157,6 +157,14 @@ export interface Message {
      */
     source_ticket_id?: number | null;
     /**
+     * #1163 Slice 1 — the parent ticket's CURRENT pivot line (latest
+     * approved comment's `meta.summary_until` on that ticket) at read
+     * time. Populated ONLY on notification surfaces (listUnread /
+     * listPings) so an agent can tell "needs action" from "plain ack"
+     * without a ticket_get round-trip. Absent elsewhere.
+     */
+    ticket_summary_until?: string | null;
+    /**
      * Sidecar JSON metadata (#B.104). String-encoded JSON shaped like
      * `{"questions": {"q-abc": {answered_by, answered_at, answered_in}}}`.
      * NULL when no metadata is attached. Today only used for the

@@ -365,6 +365,45 @@ export function markPingsRead(opts: {
  * pings clutters the inbox: the agent already knows what they posted. Data
  * is preserved in the table; just hidden from the user-facing query.
  */
+/**
+ * #1163 Slice 1 — latest approved `meta.summary_until` per ticket (the
+ * pivot line brief-reads anchor on). One grouped query ; used to enrich
+ * the notification surfaces so agents can triage a ping without a
+ * ticket_get round-trip.
+ */
+export function latestSummaryUntilByTicket(ticketIds: number[]): Map<number, string> {
+    const out = new Map<number, string>();
+    const ids = [...new Set(ticketIds.filter((id) => Number.isFinite(id)))];
+    if (ids.length === 0) return out;
+    const rows = getDb().all<{ ticket_id: number; su: string }>(sql`
+        SELECT ticket_id, json_extract(meta, '$.summary_until') AS su
+        FROM _messages m
+        WHERE ticket_id IN ${ids}
+          AND status = 'approved'
+          AND json_extract(meta, '$.summary_until') IS NOT NULL
+          AND id = (
+              SELECT MAX(m2.id) FROM _messages m2
+              WHERE m2.ticket_id = m.ticket_id
+                AND m2.status = 'approved'
+                AND json_extract(m2.meta, '$.summary_until') IS NOT NULL
+          )
+    `);
+    for (const r of rows) if (r.su) out.set(r.ticket_id, r.su);
+    return out;
+}
+
+/** #1163 Slice 1 — attach `ticket_summary_until` to notification rows. */
+function enrichWithTicketSummary(msgs: Message[]): Message[] {
+    const ids = msgs.map((m) => m.ticket_id ?? (m.kind === "ticket_created" ? m.id : null))
+        .filter((v): v is number => v !== null);
+    const su = latestSummaryUntilByTicket(ids);
+    for (const m of msgs) {
+        const tid = m.ticket_id ?? (m.kind === "ticket_created" ? m.id : null);
+        if (tid !== null && su.has(tid)) m.ticket_summary_until = su.get(tid);
+    }
+    return msgs;
+}
+
 export function listUnread(
     consumer_id: string,
     project: string | null | undefined,
@@ -373,7 +412,7 @@ export function listUnread(
 ): Message[] {
     const msgs = fetchUnread(consumer_id, project, "unread-list").messages;
     const filtered = since ? msgs.filter((m) => m.created_at >= since) : msgs;
-    return filtered.slice(0, limit);
+    return enrichWithTicketSummary(filtered.slice(0, limit));
 }
 
 /**
@@ -639,8 +678,12 @@ export function listPings(opts: {
         return b.ping.created_at.localeCompare(a.ping.created_at);
     });
     const out: Ping[] = keyed.map((k) => k.ping);
-    if (opts.limit) return out.slice(0, opts.limit);
-    return out;
+    const sliced = opts.limit ? out.slice(0, opts.limit) : out;
+    // #1163 Slice 1 — same enrichment as listUnread : the parent ticket's
+    // current pivot line rides the ping so the agent triages without a
+    // ticket_get round-trip.
+    enrichWithTicketSummary(sliced.map((p) => p.message));
+    return sliced;
 }
 
 export function unreadPingCount(recipient: string): number {
