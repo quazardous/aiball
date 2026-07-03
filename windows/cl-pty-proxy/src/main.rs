@@ -514,6 +514,10 @@ fn real_main() -> i32 {
     let afk_combos = core::parse_afk_spec(&env::var("CL_AFK_SPEC").unwrap_or_default());
     let afk_window_ms = env_f64("CL_AFK_WINDOW_MS", 400.0);
     let esc_takeover = env::var("CL_ESC_TAKEOVER").map(|v| v != "0").unwrap_or(true);
+    // #1040 — reload hotkey (default Ctrl+N = 0x0e). Empty CL_RELOAD_KEY → off.
+    let reload_key = core::parse_reload_key(
+        &env::var("CL_RELOAD_KEY").unwrap_or_else(|_| "0e".to_string()),
+    );
 
     // Ground-truth presence marker; drop stale afk / user-grace inherited from
     // a previous run in the same state dir (#351/#357), then claim the bar at
@@ -579,7 +583,7 @@ fn real_main() -> i32 {
         let sin = stdin_h;
         let boot = boot_ts;
         thread::spawn(move || {
-            let mut decider = core::Decider::new(afk_combos, esc_takeover, afk_window_ms);
+            let mut decider = core::Decider::new(afk_combos, esc_takeover, afk_window_ms, reload_key);
             let mut buf = [0u8; 8192];
             // #500 — buffer pour les CSI / SS3 / ESC isolés qui arrivent
             // splittés entre 2 ReadFile. Sans ça, le tail incomplet du read N
@@ -611,6 +615,9 @@ fn real_main() -> i32 {
                                 }
                                 if v.lone_esc {
                                     ws.emit(ws_client::keystroke("typing", ev_ms));
+                                }
+                                if v.reload_fired {
+                                    ws.emit(ws_client::reload(ev_ms));
                                 }
                             }
                             if !v.forward.is_empty() {

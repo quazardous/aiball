@@ -43,6 +43,9 @@ pub struct Verdict {
     pub afk_fired: bool,
     pub typing: bool,
     pub lone_esc: bool,
+    /// #1040 — the reload hotkey (Ctrl+N) was pressed : the caller emits a
+    /// `{event:"reload"}` proxyEvent so the kernel respawns. Swallowed (no forward).
+    pub reload_fired: bool,
     /// AFK logical state AFTER this keystroke (away = true).
     pub afk_active: bool,
 }
@@ -385,6 +388,28 @@ fn split_units_with_consumed(data: &[u8]) -> (Vec<Unit>, usize) {
 /// Parse `CL_AFK_SPEC` (`[[27,97],[7]]` — JSON list of byte lists, from the TS
 /// `parseAfkKey`) into combos. Tolerant hand-parser (no serde dep): anything
 /// malformed yields no combos (AFK disabled), like the Python `except`.
+/// Parse `CL_RELOAD_KEY` — a hex byte sequence (e.g. "0e" = Ctrl+N), mirror of
+/// the Python `bytes.fromhex`. Empty / odd-length / non-hex → empty (disabled).
+pub fn parse_reload_key(hex: &str) -> Vec<u8> {
+    let h = hex.trim();
+    if h.is_empty() || h.len() % 2 != 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(h.len() / 2);
+    let bytes = h.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let hi = (bytes[i] as char).to_digit(16);
+        let lo = (bytes[i + 1] as char).to_digit(16);
+        match (hi, lo) {
+            (Some(a), Some(b)) => out.push((a * 16 + b) as u8),
+            _ => return Vec::new(),
+        }
+        i += 2;
+    }
+    out
+}
+
 pub fn parse_afk_spec(json: &str) -> Vec<Vec<u8>> {
     let mut combos = Vec::new();
     let mut cur: Option<Vec<u8>> = None;
@@ -496,6 +521,8 @@ impl AfkDetector {
 pub struct Decider {
     afk: AfkDetector,
     esc_takeover: bool,
+    /// #1040 — bytes of the reload hotkey (empty = disabled).
+    reload_key: Vec<u8>,
     pub afk_active: bool,
     /// ms timestamp of the last text keystroke (live loop reads it for the
     /// "revert stop→rest after the typing TTL" decision).
@@ -503,10 +530,11 @@ pub struct Decider {
 }
 
 impl Decider {
-    pub fn new(combos: Vec<Vec<u8>>, esc_takeover: bool, window_ms: f64) -> Self {
+    pub fn new(combos: Vec<Vec<u8>>, esc_takeover: bool, window_ms: f64, reload_key: Vec<u8>) -> Self {
         Decider {
             afk: AfkDetector::new(combos, window_ms),
             esc_takeover,
+            reload_key,
             afk_active: false,
             last_keystroke_ms: 0.0,
         }
@@ -520,6 +548,7 @@ impl Decider {
             afk_fired: false,
             typing: false,
             lone_esc: false,
+            reload_fired: false,
             afk_active: self.afk_active,
         }
     }
@@ -527,6 +556,16 @@ impl Decider {
     /// Decide on one keystroke unit. Mirrors `_Decider.on_stdin`, adapted so
     /// `forward` carries the unit's RAW (win32) bytes for passthrough.
     pub fn on_unit(&mut self, unit: &Unit, now_ms: f64) -> Verdict {
+        // #1040 — reload hotkey (Ctrl+N by default) : exact match, checked
+        // FIRST (mirrors pty-proxy.py precedence). Swallowed on both down and
+        // up so nothing reaches claude ; the caller emits {event:"reload"} on
+        // the down. Ctrl+N decodes to vt=[0x0e] on both platforms (raw on
+        // Unix, win32 uc=0x0e on Windows), so we match on vt.
+        if !self.reload_key.is_empty() && unit.vt == self.reload_key.as_slice() {
+            let mut v = self.empty();
+            v.reload_fired = unit.is_down;
+            return v; // forward stays empty (swallowed)
+        }
         // Key-UP events: never drive detection. Swallow if it's a combo key
         // (its key-DOWN was swallowed too); otherwise forward verbatim.
         if !unit.is_down {
@@ -763,7 +802,7 @@ mod tests {
 
     #[test]
     fn combo_toggles_on_then_off_swallowed() {
-        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0); // alt+a
+        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0, vec![]); // alt+a
         let v1 = decide(&mut d, &k_alt_a(), 0.0);
         assert!(v1[0].afk_fired && v1[0].afk_active);
         assert!(v1[0].forward.is_empty());
@@ -775,7 +814,7 @@ mod tests {
 
     #[test]
     fn coalesced_repeat_one_toggle() {
-        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0);
+        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0, vec![]);
         let mut data = k_alt_a();
         data.extend(k_alt_a()); // alt+a alt+a in one read
         let v = decide(&mut d, &data, 0.0);
@@ -787,7 +826,7 @@ mod tests {
 
     #[test]
     fn esc_alone_forwarded_no_toggle() {
-        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0);
+        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0, vec![]);
         let v = decide(&mut d, &k_esc(), 0.0);
         assert_eq!(v.len(), 1);
         assert!(!v[0].afk_fired);
@@ -797,7 +836,7 @@ mod tests {
 
     #[test]
     fn ordinary_text_typing() {
-        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0);
+        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0, vec![]);
         let v = decide(&mut d, &k_char('a'), 0.0);
         assert!(v[0].typing);
         assert_eq!(v[0].word, Word::Stop);
@@ -807,7 +846,7 @@ mod tests {
 
     #[test]
     fn text_after_afk_clears() {
-        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0);
+        let mut d = Decider::new(vec![vec![27, 97]], true, 400.0, vec![]);
         decide(&mut d, &k_alt_a(), 0.0); // away
         let v = decide(&mut d, &k_char('a'), 2000.0);
         assert!(!v[0].afk_active);
@@ -816,7 +855,7 @@ mod tests {
 
     #[test]
     fn f9_default_toggles() {
-        let mut d = Decider::new(vec![vec![0x1b, 0x5b, 0x32, 0x30, 0x7e]], true, 400.0); // f9
+        let mut d = Decider::new(vec![vec![0x1b, 0x5b, 0x32, 0x30, 0x7e]], true, 400.0, vec![]); // f9
         let v = decide(&mut d, &k_f9(), 0.0);
         assert!(v[0].afk_fired && v[0].afk_active);
         assert!(v[0].forward.is_empty());
@@ -824,7 +863,7 @@ mod tests {
 
     #[test]
     fn ctrl_g_toggles() {
-        let mut d = Decider::new(vec![vec![7]], true, 400.0);
+        let mut d = Decider::new(vec![vec![7]], true, 400.0, vec![]);
         let v = decide(&mut d, &k_ctrl_g(), 0.0);
         assert!(v[0].afk_fired);
         assert!(v[0].forward.is_empty());
@@ -832,7 +871,7 @@ mod tests {
 
     #[test]
     fn alternatives_each_toggle() {
-        let mut d = Decider::new(vec![vec![7], vec![27, 97]], true, 400.0); // ctrl+g OR alt+a
+        let mut d = Decider::new(vec![vec![7], vec![27, 97]], true, 400.0, vec![]); // ctrl+g OR alt+a
         let v1 = decide(&mut d, &k_ctrl_g(), 0.0);
         assert!(v1[0].afk_active);
         let v2 = decide(&mut d, &k_alt_a(), 2000.0);
@@ -841,7 +880,7 @@ mod tests {
 
     #[test]
     fn arrow_forwarded_intact() {
-        let mut d = Decider::new(vec![vec![0x1b, 0x5b, 0x32, 0x30, 0x7e]], true, 400.0);
+        let mut d = Decider::new(vec![vec![0x1b, 0x5b, 0x32, 0x30, 0x7e]], true, 400.0, vec![]);
         let v = decide(&mut d, b"\x1b[A", 0.0);
         assert_eq!(v.len(), 1);
         assert!(!v[0].afk_fired);
@@ -856,7 +895,7 @@ mod tests {
     /// a sequence of reads, return the concatenated forward bytes + a flag for
     /// "any lone_esc verdict was raised" + "any typing verdict was raised".
     fn drive_streaming(reads: &[&[u8]], combos: Vec<Vec<u8>>) -> (Vec<u8>, bool, bool) {
-        let mut d = Decider::new(combos, true, 400.0);
+        let mut d = Decider::new(combos, true, 400.0, vec![]);
         let mut pending = Vec::new();
         let mut fwd = Vec::new();
         let mut any_lone_esc = false;
@@ -1002,6 +1041,46 @@ mod tests {
     /// progress, infinite loop. The proxy normally sees Alt+letter via
     /// win32-input-mode (ESC[…_ CSI form), masking this. Ignored for now —
     /// file separately.
+    #[test]
+    fn reload_key_fires_and_swallows() {
+        // Ctrl+N (0x0e) default reload key : swallowed (no forward) + reload_fired on down.
+        let mut d = Decider::new(vec![], true, 400.0, vec![0x0e]);
+        let unit = Unit { raw: vec![0x0e], vt: vec![0x0e], is_down: true };
+        let v = d.on_unit(&unit, 0.0);
+        assert!(v.reload_fired, "reload_fired must be set on the reload key down");
+        assert!(v.forward.is_empty(), "reload key must be swallowed (not forwarded)");
+        assert!(!v.typing && !v.afk_fired);
+    }
+
+    #[test]
+    fn reload_key_disabled_when_empty() {
+        // Empty reload_key → 0x0e forwards as a normal control byte, no reload.
+        let mut d = Decider::new(vec![], true, 400.0, vec![]);
+        let unit = Unit { raw: vec![0x0e], vt: vec![0x0e], is_down: true };
+        let v = d.on_unit(&unit, 0.0);
+        assert!(!v.reload_fired);
+        assert_eq!(v.forward, vec![0x0e], "with reload disabled the byte forwards verbatim");
+    }
+
+    #[test]
+    fn reload_key_up_swallowed_no_fire() {
+        // Key-up of the reload key (Windows) : swallowed, but does NOT fire.
+        let mut d = Decider::new(vec![], true, 400.0, vec![0x0e]);
+        let unit = Unit { raw: vec![0x0e], vt: vec![0x0e], is_down: false };
+        let v = d.on_unit(&unit, 0.0);
+        assert!(!v.reload_fired);
+        assert!(v.forward.is_empty());
+    }
+
+    #[test]
+    fn parse_reload_key_hex() {
+        assert_eq!(parse_reload_key("0e"), vec![0x0e]);
+        assert_eq!(parse_reload_key(""), Vec::<u8>::new());
+        assert_eq!(parse_reload_key("0"), Vec::<u8>::new());   // odd length
+        assert_eq!(parse_reload_key("zz"), Vec::<u8>::new());  // non-hex
+        assert_eq!(parse_reload_key("1b61"), vec![0x1b, 0x61]);
+    }
+
     #[test]
     fn esc_plus_non_csi_byte_terminates() {
         // Run in a thread with a generous timeout — if the parser loops, the

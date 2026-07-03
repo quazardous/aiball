@@ -66,6 +66,11 @@ pub fn marker(name: &str, now_ms: u128) -> Value {
     json!({ "event": "marker", "name": name, "now_ms": now_ms })
 }
 
+/// #1040 — emit the reload proxyEvent (kernel respawns on receipt).
+pub fn reload(now_ms: u128) -> Value {
+    json!({ "event": "reload", "now_ms": now_ms })
+}
+
 /// Spawn the ws-client thread. `sock_path` is the `loop.sock` path; the address
 /// marker is `<sock_path>.addr` (`{port, token}`, written by win32Transport).
 pub fn start(sock_path: String, cb: Callbacks) -> WsHandle {
