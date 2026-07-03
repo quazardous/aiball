@@ -59,6 +59,18 @@ function filtersAreNarrowed(): boolean {
 // opening the ticket. Drop to zero selected and tap reverts to its
 // usual "open the row" behaviour. The mobile UX matches what users
 // expect from Gmail / iOS Mail when a bulk batch is in flight.
+// Age helpers for the pending badge (days since creation).
+function pendingAgeDays(r: InboxRow): number {
+    const t = Date.parse(r.created_at);
+    if (!Number.isFinite(t)) return 0;
+    return Math.floor((Date.now() - t) / 86_400_000);
+}
+function pendingAgeLabel(r: InboxRow): string {
+    const d = pendingAgeDays(r);
+    if (d < 1) return "pending today";
+    return `pending ${d} d`;
+}
+
 function onRowClick(r: InboxRow) {
     if (props.selectedIds.size > 0) {
         emit("toggle-selected", r.id, !props.selectedIds.has(r.id));
@@ -208,6 +220,15 @@ function onRowClick(r: InboxRow) {
                 :severity="STATUS_SEVERITY[r.status]"
                 style="font-size: 0.7rem"
             />
+            <!-- Age of a moderation-pending row : surfaced only where the
+                 queue is looked at (no notification, no wake) — test tickets
+                 once slept 6 weeks unnoticed. Warn accent past 7 days. -->
+            <span
+                v-if="r.status === 'pending'"
+                class="pending-age"
+                :class="{ 'pending-age--stale': pendingAgeDays(r) > 7 }"
+                :title="`pending since ${r.created_at}`"
+            >{{ pendingAgeLabel(r) }}</span>
             <Tag
                 v-if="r.intent"
                 :value="r.intent"
@@ -297,6 +318,17 @@ function onRowClick(r: InboxRow) {
 </template>
 
 <style>
+.pending-age {
+    font-size: var(--fs-2xs);
+    color: var(--p-text-muted-color);
+    white-space: nowrap;
+    align-self: center;
+}
+.pending-age--stale {
+    color: var(--p-orange-500, #f97316);
+    font-weight: 600;
+}
+
 .aiball-empty {
     text-align: center;
     color: var(--p-text-muted-color);

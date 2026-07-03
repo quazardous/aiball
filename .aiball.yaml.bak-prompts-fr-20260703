@@ -1,0 +1,77 @@
+# aiball's own per-project config. See .aiball.yaml.example for the
+# annotated template covering every option.
+autopoll:
+  enabled: true
+  tone: directive
+  throttle_seconds: 30
+  volatile: false
+
+# #B.154: canonical identity source (dogfooding the new chain).
+# Without this, the value would fall through to .mcp.json env and
+# trigger the deprecation warning on claude-loop subcommands.
+consumer:
+  agent: claude-aiball-dev
+  project: aiball
+
+# Wake-CTA template overrides — FR variations (#B.232 vbdwed).
+# Skill defaults stay EN; this block localizes the dogfood loop's wake
+# wording. Each slot demos one of the three supported shapes (string,
+# list, object{tone:list}) — see .aiball.yaml.example for the schema
+# reference.
+prompts:
+  # #400 RECADRÉ (david b296px) : la grammaire {var} / {var:-defaut} / {var:+texte}
+  # porte TOUT le conditionnel DANS le template (zéro `if` d'assemblage côté code) ;
+  # le TONE (autopoll.tone ci-dessus : hint|directive|imperative) et le ROUND-ROBIN
+  # (liste = pick aléatoire) restent — un slot peut être string | liste | {tone: liste}.
+  # `renderSlot` choisit slot[tone] (fallback directive) puis round-robin dans la liste.
+  # Pluriel = « (s) » à plat (pas de règle _one/_other par placeholder — david d7zcj5).
+  # Vars toujours fournies : {culture} {lead} {ping_count} {open_count}
+  # {actionable_count} {head_id} {head_title} {head_kind} {backlog_mode}
+  # {project_scope}
+  # (les compteurs valent "" à zéro → le bloc {x:+…} correspondant disparaît).
+  # #749 : `head_kind` ∈ {"comment","new ticket",""} signale qu'un PING
+  # event porte le wake ; vide en mode `backlog_mode="1"` (pings=0 →
+  # tête du backlog par priorité). Mutuellement exclusifs.
+
+  # Partials (#400 david 54phhg) — fragments réutilisables, convention `_`,
+  # référencés via {_nom}. Résolus au tone actif + round-robin comme un slot.
+  # On factorise ici les verbes (drain / engage) au lieu de les dupliquer par tone.
+  _drain:
+    directive:
+      - "accuse réception via `unread({pings: true, mark_read: true})`"
+      - "draine via `unread({pings: true, mark_read: true})`"
+    hint:
+      - "vide avec `unread({pings: true, mark_read: true})`"
+    imperative:
+      - "accuse réception MAINTENANT via `unread({pings: true, mark_read:
+        true})`"
+  # #749 david — format minimal post-refactor. Plus de verbe ("attaque",
+  # "engage") dans le wake : juste la réf ticket + comment + body. Le skill
+  # `aiball` (côté agent) gère la glue (= claim + ticket_get). On garde une
+  # décoration légère pour les nouveaux tickets ("nouveau ticket #X: title")
+  # pour qu'ils se distinguent visuellement d'un comment ou d'un head de
+  # backlog (qui sont juste "aiball #X" / "aiball #X: title").
+
+  # Accroche conversationnelle — buckets par tone, round-robin dans chacun.
+  wake_lead:
+    directive:
+      - "fyi :"
+      - "petit point :"
+      - "à savoir :"
+    hint:
+      - "au passage,"
+      - "tiens,"
+      - "pour info,"
+    imperative:
+      - "À FAIRE VITE :"
+      - "EN ATTENTE :"
+      - "ACTION :"
+
+  # #749 david — wake_master minimal. Trois branches mutuellement exclusives
+  # (une seule fire par wake) : comment head / new ticket head / backlog
+  # head. Pas de "drain via unread()" — le wake EST le drain (le skill
+  # `aiball` fait claim + ticket_get qui prune via markTicketSeen).
+  wake_master:
+    directive: "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+nouveau ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage le ticket.}{no_head:+{culture} {lead}}"
+    hint: "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+nouveau ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage le ticket.}{no_head:+{culture} {lead}}"
+    imperative: "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+nouveau ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage le ticket.}{no_head:+{culture} {lead}}"
