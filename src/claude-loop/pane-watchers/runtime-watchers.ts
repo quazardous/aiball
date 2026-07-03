@@ -29,15 +29,32 @@ export class BusyWatcher extends BoolWatcher {
     }
 }
 
-/** #1072 — Claude Code is NOT logged in : the pane shows "Not logged in ·
- *  Please run /login". Drives the ORANGE bar + wake-block. Only the `begin`
- *  edge is wired (kernel.ts) ; the flag is cleared by the first Stop hook, NOT
+/** #1072 — Claude Code is NOT logged in : the pane shows a login banner.
+ *  Drives the ORANGE bar + wake-block. Only the `begin` edge is wired
+ *  (kernel.ts) ; the flag is cleared on busy-begin / the first Stop hook, NOT
  *  by this watcher's `end` — the banner scrolling off-screen does not mean
- *  claude got logged in. */
+ *  claude got logged in.
+ *
+ *  Hardened against the self-trip class (quick-win after the "bar stuck
+ *  orange" report) : the original whole-pane loose regex (`Not logged in|
+ *  Please run \/login`) latched on conversation text and the injected
+ *  wake-CTA merely MENTIONING those words (ticket threads about this very
+ *  bug…). Now: FOOTER-scoped with prompt-input lines dropped (`footerOf`,
+ *  same as error-backoff #948/#919) + anchored on the full banner shapes as
+ *  assembled by the Claude Code bundle (v2.1.199) :
+ *    `Not logged in · Please run /login` / `Not logged in · Run /login`
+ *    `Not logged in. Run claude auth login to authenticate.`
+ *    `(Your) session has expired. Please run /login to sign in again.` */
 export class NotLoggedInWatcher extends BoolWatcher {
     readonly name = "not_logged_in";
+    private static readonly BANNERS = [
+        /Not logged in\s*·\s*(?:Please run|Run) \/login/,
+        /Not logged in\. Run claude auth login/,
+        /session (?:has )?expired\. Please run \/login/i,
+    ];
     protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
-        return /Not logged in|Please run \/login/.test(paneText);
+        const footer = footerOf(paneText, 8);
+        return NotLoggedInWatcher.BANNERS.some((re) => re.test(footer));
     }
 }
 

@@ -45,15 +45,17 @@ Keys: `enabled`, `volatile`, `throttle_seconds`, `include_recent_tickets`,
 Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
 `--check-cmd`, `--wait`/`--no-wait`) and `CL_*` env (which the loop's
 child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
-`boot_grace_seconds`, `boot_min_seconds`, `auto_resume`,
+`boot_grace_seconds`, `boot_min_seconds`, `presence_hold_seconds`,
+`auto_resume`,
 `wake_in_flight_ttl_ms`, `input_hot_ttl_ms`, `pane_probe_fast_ms`,
 `pane_probe_slow_ms`, `esc_takeover`, `afk_key`, `afk_window_ms`, `wait`,
 `drained_strategy`, `log_level`, `permission_mode`, `gates`. See
 [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
 
 **AskUserQuestion gate + AFK.** In a loop, `AskUserQuestion` is allowed
-while the **presence hold** is live (typing arms a 10-minute hold; F9
-cycles away → present-10 min → present-∞); past that it redirects the
+while the **presence hold** is live (typing arms a hold of
+`presence_hold_seconds`, default 10 min; F9 cycles away → hold →
+present-∞); past that it redirects the
 agent to ask via a ticket comment — a stalled question is cheap vs a
 lost one. `afk_key` (default `f9`) is the immediate control: the PTY
 proxy watches stdin for the key and cycles the presence state on match;

@@ -9,10 +9,12 @@
  */
 import { type AfkService, getAfkService } from "./afk-service.js";
 import { setIpcAfk } from "./ipc-state.js";
+import { loopConfig } from "./loop-config.js";
 
 export function armAfkViaService(
     _sd: string,
-    seconds = 600,
+    // #1132 — presence-hold knob (claude_loop.presence_hold_seconds).
+    seconds: number = loopConfig().claude_loop.presence_hold_seconds,
     svc?: AfkService,
 ): number {
     const s = svc ?? getAfkService();

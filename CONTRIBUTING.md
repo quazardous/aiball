@@ -365,7 +365,7 @@ aiball's docs split by audience, and the audience changes the rules:
 | Surface                                  | Audience           | Internal refs (`#NN`, hashids) | Tone        |
 | ---------------------------------------- | ------------------ | ------------------------------ | ----------- |
 | `README.md`, `ROADMAP.md`, `MCP-CLIENT.md`, `docs/*.md`, `.aiball.yaml.example` | Public / users     | **No**                         | Tutorial    |
-| `CHANGELOG.md`, `CLAUDE.md`, this doc    | Internal           | Yes                            | Telegraphic |
+| `CHANGELOG.md`, `CLAUDE.md`, `docs/TICKET_LIFECYCLE.md` (internal design doc — explicit exception to the `docs/*` rule; stripping its refs would erase the design history), this doc | Internal           | Yes                            | Telegraphic |
 | Ticket threads, code comments            | Internal           | Yes                            | Free-form   |
 | Commit messages, PR bodies               | Internal (history) | Yes                            | Imperative  |
 

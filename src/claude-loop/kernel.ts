@@ -193,10 +193,6 @@ const loopCwd = (() => { try { return sd ? readPlate(sd).cwd : undefined; } catc
 const loopProject = process.env.AIBALL_PROJECT || undefined;
 const cfg = loopConfig().claude_loop;
 const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
-// #619 collapse (david `e54hx2`) — the historical 2-window distinction
-// (user-grace 60s for wakes vs ask-grace 600s for AskUserQuestion) was
-// retired. A single grace window now drives both gates. To stay
-// back-compat with projects that still set `ask_grace_seconds` in
 if (!sd || !name) {
     process.stderr.write("[claude-loop:kernel] missing CL_* env vars\n");
     process.exit(1);
@@ -451,7 +447,7 @@ if (sd) {
     } else if (seedReattachHold) {
         // revive sock morte (snapshot AFK perdu) : même hold anti-surprise que
         // le seed actor plus bas (#1059), posé tôt pour la gate.
-        setIpcAfk("wait_10m", Date.now() + 600_000);
+        setIpcAfk("wait_10m", Date.now() + cfg.presence_hold_seconds * 1000);
     }
 }
 
@@ -1769,7 +1765,7 @@ async function mainSse(): Promise<void> {
     // if nobody's there. Only when the status was actually lost (reattach without
     // an AFK snapshot) — a normal reload restores the real AFK state untouched.
     if (seedReattachHold) {
-        const expiryMs = Date.now() + 600_000;
+        const expiryMs = Date.now() + cfg.presence_hold_seconds * 1000;
         getAfkService().set10m(expiryMs);
         log(`reattach without AFK snapshot — seeded NOT-AFK 10min (no-surprise hold, expires ${new Date(expiryMs).toISOString()})`);
     }

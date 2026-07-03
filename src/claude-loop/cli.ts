@@ -802,7 +802,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             // (no human in front) a multi-choice dialog stalls — nobody
             // clicks. The hook denies it ONLY when no human is taking
             // over and redirects the agent to ask via an aiball ticket
-            // comment. Fail-open: human present (userIsTakingOver) or any
+            // comment. Fail-open: presence hold live (AFK SM) or any
             // doubt → allow, so interactive sessions keep the feature.
             // Registered here (loop settings) so it's scoped to loops.
             PreToolUse: [

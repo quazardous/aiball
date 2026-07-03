@@ -829,16 +829,6 @@ export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean
     return cmd === "" || cmd === LEGACY_AIBALL_CHECK_CMD;
 }
 
-/**
- * Default user-grace window in seconds (#B.145 v2.2, recalibrated
- * #B.185, then #619 david `e54hx2` bumped 60s → 600s). When the user
- * has typed a prompt within this window, the timer skips its wake so
- * the wrapper doesn't `send-keys` over a human-driven session AND the
- * `AskUserQuestion` dialog stays allowed. 600s = 10min matches the
- * pre-collapse `ask_grace_seconds` so a present-but-quiet human can
- * still pop a dialog ; F9 (afk_key) lets you release earlier. Tunable
- * via `CL_USER_GRACE_SEC`.
- */
 /** #351 + #619 david `f97nu6` — true iff a NOT-AFK hold is active, i.e. the
  *  human declared **PRESENT** (held the loop). #977 — renamed from the
  *  misleading `afkActive` : the value is `human present`, NOT `human away`.
@@ -859,7 +849,7 @@ export function humanPresentHold(_sd: string): boolean {
 
 /** #624 david `e3a6nn` : arm a NOT AFK 10m hold from the TS side
  *  (settleBoot's `--wait` path). #840 `4z59jt` — IPC seul. */
-export function armAfk10m(_sd: string, seconds = 600): void {
+export function armAfk10m(_sd: string, seconds: number = loopConfig().claude_loop.presence_hold_seconds): void {
     const expiry = Date.now() + seconds * 1000;
     setIpcAfk("wait_10m", expiry);
 }
@@ -918,7 +908,7 @@ export function toggleAfk(sd: string, _seconds = 600): void {
         const ctx = snap.context;
         const expiryMsHint = ctx.afkMode === "wait_10m" && ctx.afkExpiryMs !== null
             ? ctx.afkExpiryMs
-            : Date.now() + 600_000;
+            : Date.now() + loopConfig().claude_loop.presence_hold_seconds * 1000;
         svc.arm10m(expiryMsHint);
     } else if (nextMode === "wait_inf") {
         svc.armInf();

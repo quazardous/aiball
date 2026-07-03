@@ -67,10 +67,11 @@ claude_loop:
   # window — pas le hook, pas la pane probe.
   boot_min_seconds: 30
 
-  # NOTE — presence / grace is not a config key anymore: typing in the
-  # pane arms a fixed 10-minute presence hold (visible as `wait` on the
-  # bar) during which auto-wakes stay skipped and `AskUserQuestion`
-  # dialogs stay allowed; F9 cycles the hold by hand (away → 10 min → ∞).
+  # Presence-hold duration (seconds). Typing in the pane arms a presence
+  # hold of this length (visible as `wait` on the bar) during which
+  # auto-wakes stay skipped and `AskUserQuestion` dialogs stay allowed;
+  # F9 cycles the hold by hand (away → hold → ∞). 600 = 10 min.
+  presence_hold_seconds: 600
 
   # WAIT default when neither --wait nor --no-wait is passed. Global CLI
   # default stays no-wait (eager boot drain); flip true to yield boot-grace

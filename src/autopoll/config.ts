@@ -138,6 +138,11 @@ export interface AiballConfig {
          *  est ready avant qu'il ait vraiment dessiné son prompt.
          *  CL_BOOT_MIN_SEC. */
         boot_min_seconds: number;
+        /** #1132 — presence-hold duration in seconds : how long the loop
+         *  stays deferential (the `NOT AFK 10m` state) after a keystroke
+         *  arms it (or F9's first press / the reattach no-surprise seed).
+         *  Hardcoded 600 since the grace collapse ; re-exposed as a knob. */
+        presence_hold_seconds: number;
         /** #639 david `uqdava` : when true (default), the loop auto-crosses
          *  the resume picker that `claude --resume` shows at startup —
          *  press Enter on the highlighted session so unattended/autonomous
@@ -311,6 +316,9 @@ const DEFAULTS: AiballConfig = {
         wake_tempo_seconds: 10,
         boot_grace_seconds: 60,
         boot_min_seconds: 30,
+        // #1132 — presence-hold (NOT AFK 10m) duration; 600s = the historical
+        // collapsed grace window.
+        presence_hold_seconds: 600,
         auto_resume: true,
         wake_in_flight_ttl_ms: 2000,
         // #722 — input-hot + 2-rate pane probe defaults.
@@ -595,6 +603,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.boot_min_seconds === "number" && cl.boot_min_seconds >= 0) {
                 cfg.claude_loop.boot_min_seconds = cl.boot_min_seconds;
+            }
+            // #1132 — presence-hold duration knob.
+            if (typeof cl.presence_hold_seconds === "number" && cl.presence_hold_seconds > 0) {
+                cfg.claude_loop.presence_hold_seconds = cl.presence_hold_seconds;
             }
             if (typeof cl.auto_resume === "boolean") {
                 cfg.claude_loop.auto_resume = cl.auto_resume;

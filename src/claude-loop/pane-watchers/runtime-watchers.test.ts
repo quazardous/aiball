@@ -59,14 +59,34 @@ test("NotLoggedInWatcher: matches `Not logged in` banner", () => {
     assert.equal(w.observe("Not logged in · Please run /login", CTX).visible, true);
 });
 
-test("NotLoggedInWatcher: matches `Please run /login` alone", () => {
+test("NotLoggedInWatcher: matches the `Run /login` and session-expired variants", () => {
     const w = new NotLoggedInWatcher();
-    assert.equal(w.observe("Please run /login to continue", CTX).visible, true);
+    assert.equal(w.observe("Not logged in · Run /login", CTX).visible, true);
+    const w2 = new NotLoggedInWatcher();
+    assert.equal(
+        w2.observe("Your session has expired. Please run /login to sign in again.", CTX).visible,
+        true,
+    );
 });
 
 test("NotLoggedInWatcher: false on a normal logged-in pane", () => {
     const w = new NotLoggedInWatcher();
     assert.equal(w.observe("❯ \n  ⏵⏵ auto mode on", CTX).visible, false);
+});
+
+test("NotLoggedInWatcher: no self-trip on an injected wake-CTA prompt line quoting the banner", () => {
+    const w = new NotLoggedInWatcher();
+    // Le wake-CTA (ligne prompt `>`) peut citer un titre de ticket contenant
+    // le banner mot pour mot — footerOf drop les lignes prompt.
+    const pane = "> look #1119: claude-loop reste en claude not logged in · Please run /login. Triage.\n  ⏵⏵ auto mode on";
+    assert.equal(w.observe(pane, CTX).visible, false);
+});
+
+test("NotLoggedInWatcher: no self-trip on conversation prose mentioning the words", () => {
+    const w = new NotLoggedInWatcher();
+    // Claude qui DISCUTE du bug (loose mention, pas la forme banner exacte).
+    const pane = "● The watcher matched 'Not logged in' and 'Please run /login' as loose substrings.";
+    assert.equal(w.observe(pane, CTX).visible, false);
 });
 
 test("NotLoggedInWatcher: begin fires when the banner appears", () => {

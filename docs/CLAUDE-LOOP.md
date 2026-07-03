@@ -194,10 +194,10 @@ loop deferential, coarsest to finest.
 
 The coarse signal is an explicit **presence hold**, owned by the AFK
 state machine (see [`SM-NETWORK.md`](./SM-NETWORK.md)) : three states —
-away/autonomous (`loop`), present for 10 minutes (`wait`, 600 s expiry),
-present indefinitely (`∞`). **Typing in the pane arms the 10-minute
-hold** (except in `∞`, where only F9 releases) ; F9 cycles the three
-states by hand. While a hold is active the loop skips its auto-wakes and
+away/autonomous (`loop`), present for a window (`wait` — duration
+`claude_loop.presence_hold_seconds`, default 600 s / 10 min), present
+indefinitely (`∞`). **Typing in the pane arms the hold** (except in
+`∞`, where only F9 releases) ; F9 cycles the three states by hand. While a hold is active the loop skips its auto-wakes and
 Claude's interactive dialogs (`AskUserQuestion`) stay allowed. This
 single window is the collapse of the historical two-window model
 (submit-time "user-grace" + "ask-grace") — the old `user-took-over`
