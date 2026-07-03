@@ -9,6 +9,7 @@ import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
+import AsyncState from "./ui/AsyncState.vue";
 
 const props = defineProps<{
     project: string;
@@ -112,15 +113,11 @@ async function launch(root: string) {
                 </button>
             </template>
 
-        <div v-if="loading" class="aiball-empty">Loading…</div>
-        <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">{{ error }}</div>
-
-        <template v-else>
-            <div v-if="roots.length === 0" class="aiball-empty">
+        <AsyncState :loading="loading" :error="error" :empty="roots.length === 0">
+            <template #empty>
                 No local loop has run for this project. A project becomes <strong>local</strong>
                 when a claude-loop runs in its directory (the root is then discovered automatically).
-            </div>
-
+            </template>
             <section v-for="root in roots" :key="root" class="project-detail__root">
                 <div class="project-detail__root-head">
                     <code class="project-detail__path">{{ root }}</code>
@@ -178,7 +175,7 @@ async function launch(root: string) {
                     </li>
                 </ul>
             </section>
-        </template>
+        </AsyncState>
     </AdminDashboardLayout>
 </template>
 

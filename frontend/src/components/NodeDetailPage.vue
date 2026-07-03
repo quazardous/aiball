@@ -24,6 +24,8 @@ import { useLoader } from "../lib/loader";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
+import AsyncState from "./ui/AsyncState.vue";
+import SectionHeader from "./ui/SectionHeader.vue";
 import StatusPill from "./ui/StatusPill.vue";
 import { nodeLivenessStatus, nodeLivenessLabel } from "../lib/node-liveness";
 
@@ -159,94 +161,95 @@ function relayedSortValue(c: RelayedRow, key: string): string | number {
         @close-to-inbox="emit('close-to-inbox')"
         @close-to-list="emit('close')"
     >
-        <div v-if="loading" class="aiball-empty">Loading…</div>
-        <div v-else-if="error" class="aiball-empty node-detail__error">
-            <i class="pi pi-exclamation-triangle" />
-            {{ error }}
-        </div>
-        <template v-else-if="node">
-            <FieldRow label="status">
-                <StatusPill
-                    :status="liveness(node.last_used_at)"
-                    :label="nodeLivenessLabel(liveness(node.last_used_at))"
-                    :title="livenessTitle(node.last_used_at)"
-                />
-            </FieldRow>
-            <!-- #510 — état du canal WS reverse (/ws/proxy-node) :
-                 connected = WS OPEN ; disconnected = pas dans la map / CLOSED.
-                 Affiche aussi la dernière frame reçue (silence trop long =
-                 anomalie même si OPEN). -->
-            <FieldRow v-if="node.ws_state" label="ws reverse">
-                <StatusPill
-                    :status="wsPillStatus(node.ws_state)"
-                    :label="wsPillLabel(node.ws_state)"
-                    :title="wsPillTitle(node.ws_state)"
-                />
-            </FieldRow>
-            <!-- #513 — version + commit reportés par le proxy au hello WS.
-                 Seulement visible quand le node est connecté (avant ça les
-                 champs sont null). -->
-            <FieldRow v-if="node.ws_state?.connected && (node.ws_state.node_version || node.ws_state.node_commit)" label="proxy version">
-                <span class="aiball-mono">{{ formatProxyVersion(node.ws_state) }}</span>
-            </FieldRow>
-            <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>
-            <FieldRow label="node id"><span class="aiball-mono">{{ node.node_id }}</span></FieldRow>
-            <!-- #524 : display_host résolu côté node par sa provider chain
-                 (tailscale → hostname → …). NULL pour les nodes legacy ou
-                 jamais connectés en WS — on cache la row alors plutôt que
-                 d'afficher "—". -->
-            <FieldRow v-if="node.display_host" label="host">
-                <span class="aiball-mono">{{ node.display_host }}</span>
-                <span v-if="node.display_host_provider" class="node-host-provider">via {{ node.display_host_provider }}</span>
-            </FieldRow>
-            <FieldRow label="last peer IP">{{ node.last_seen_ip ?? "—" }}</FieldRow>
-
-            <div class="node-detail__meta">
-                <div><strong>created</strong> {{ fmt(node.created_at) }}</div>
-                <div><strong>last activity</strong> {{ fmt(node.last_used_at) }}</div>
+        <AsyncState :loading="loading">
+            <div v-if="error" class="aiball-empty node-detail__error">
+                <i class="pi pi-exclamation-triangle" />
+                {{ error }}
             </div>
+            <template v-else-if="node">
+                <FieldRow label="status">
+                    <StatusPill
+                        :status="liveness(node.last_used_at)"
+                        :label="nodeLivenessLabel(liveness(node.last_used_at))"
+                        :title="livenessTitle(node.last_used_at)"
+                    />
+                </FieldRow>
+                <!-- #510 — état du canal WS reverse (/ws/proxy-node) :
+                     connected = WS OPEN ; disconnected = pas dans la map / CLOSED.
+                     Affiche aussi la dernière frame reçue (silence trop long =
+                     anomalie même si OPEN). -->
+                <FieldRow v-if="node.ws_state" label="ws reverse">
+                    <StatusPill
+                        :status="wsPillStatus(node.ws_state)"
+                        :label="wsPillLabel(node.ws_state)"
+                        :title="wsPillTitle(node.ws_state)"
+                    />
+                </FieldRow>
+                <!-- #513 — version + commit reportés par le proxy au hello WS.
+                     Seulement visible quand le node est connecté (avant ça les
+                     champs sont null). -->
+                <FieldRow v-if="node.ws_state?.connected && (node.ws_state.node_version || node.ws_state.node_commit)" label="proxy version">
+                    <span class="aiball-mono">{{ formatProxyVersion(node.ws_state) }}</span>
+                </FieldRow>
+                <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>
+                <FieldRow label="node id"><span class="aiball-mono">{{ node.node_id }}</span></FieldRow>
+                <!-- #524 : display_host résolu côté node par sa provider chain
+                     (tailscale → hostname → …). NULL pour les nodes legacy ou
+                     jamais connectés en WS — on cache la row alors plutôt que
+                     d'afficher "—". -->
+                <FieldRow v-if="node.display_host" label="host">
+                    <span class="aiball-mono">{{ node.display_host }}</span>
+                    <span v-if="node.display_host_provider" class="node-host-provider">via {{ node.display_host_provider }}</span>
+                </FieldRow>
+                <FieldRow label="last peer IP">{{ node.last_seen_ip ?? "—" }}</FieldRow>
 
-            <section class="node-detail__relayed">
-                <h3 class="node-detail__subtitle">
-                    Relayed consumers
-                    <span class="node-detail__count">({{ node.relayed_count }})</span>
-                </h3>
-                <p class="node-detail__hint">
-                    Consumers attributed to this node by its peer IP — the clients it relays
-                    to this daemon. Revoking the node cuts them until it is re-enrolled.
-                </p>
-                <DataList
-                    :columns="relayedColumns"
-                    :rows="node.relayed ?? []"
-                    :row-key="(c: RelayedRow) => c.consumer_id"
-                    :get-sort-value="relayedSortValue"
-                    :is-empty="!node.relayed_count"
-                >
-                    <template #empty>
-                        <div class="node-detail__none">No consumers attributed to this node.</div>
-                    </template>
-                    <template #cell-consumer_id="{ row }">
-                        <!-- #460 — chip cliquable vers la page consumer détail. -->
-                        <a
-                            :href="`/consumers/${encodeURIComponent((row as RelayedRow).consumer_id)}`"
-                            class="aiball-mono node-detail__relayed-link"
-                            :title="`Open consumer details for ${(row as RelayedRow).consumer_id}`"
-                        >{{ (row as RelayedRow).consumer_id }}</a>
-                    </template>
-                    <template #cell-last_seen_at="{ row }">{{ fmt((row as RelayedRow).last_seen_at) }}</template>
-                </DataList>
-            </section>
+                <div class="node-detail__meta">
+                    <div><strong>created</strong> {{ fmt(node.created_at) }}</div>
+                    <div><strong>last activity</strong> {{ fmt(node.last_used_at) }}</div>
+                </div>
 
-            <div class="node-detail__actions">
-                <Button
-                    label="Revoke"
-                    icon="pi pi-ban"
-                    severity="danger"
-                    size="small"
-                    @click="revoke"
-                />
-            </div>
-        </template>
+                <section class="node-detail__relayed">
+                    <SectionHeader>
+                        <template #title>
+                            Relayed consumers
+                            <span class="node-detail__count">({{ node.relayed_count }})</span>
+                        </template>
+                        Consumers attributed to this node by its peer IP — the clients it relays
+                        to this daemon. Revoking the node cuts them until it is re-enrolled.
+                    </SectionHeader>
+                    <DataList
+                        :columns="relayedColumns"
+                        :rows="node.relayed ?? []"
+                        :row-key="(c: RelayedRow) => c.consumer_id"
+                        :get-sort-value="relayedSortValue"
+                        :is-empty="!node.relayed_count"
+                    >
+                        <template #empty>
+                            <div class="node-detail__none">No consumers attributed to this node.</div>
+                        </template>
+                        <template #cell-consumer_id="{ row }">
+                            <!-- #460 — chip cliquable vers la page consumer détail. -->
+                            <a
+                                :href="`/consumers/${encodeURIComponent((row as RelayedRow).consumer_id)}`"
+                                class="aiball-mono node-detail__relayed-link"
+                                :title="`Open consumer details for ${(row as RelayedRow).consumer_id}`"
+                            >{{ (row as RelayedRow).consumer_id }}</a>
+                        </template>
+                        <template #cell-last_seen_at="{ row }">{{ fmt((row as RelayedRow).last_seen_at) }}</template>
+                    </DataList>
+                </section>
+
+                <div class="node-detail__actions">
+                    <Button
+                        label="Revoke"
+                        icon="pi pi-ban"
+                        severity="danger"
+                        size="small"
+                        @click="revoke"
+                    />
+                </div>
+            </template>
+        </AsyncState>
     </AdminDetailLayout>
 </template>
 

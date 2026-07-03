@@ -262,6 +262,12 @@ body,
     align-items: center;
     justify-content: space-between;
 }
+/* ui/SectionHeader — heading sizing carried by the head row itself so the
+   component renders the same outside a .aiball-section card. */
+.aiball-section__head h3 {
+    margin: 0;
+    font-size: 1rem;
+}
 .aiball-section h3 {
     margin: 0;
     font-size: 1rem;

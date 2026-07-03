@@ -11,6 +11,7 @@ import InputText from "primevue/inputtext";
 import Button from "primevue/button";
 import { api, type ConfigPrimitive, type ManagedConfigRow } from "../lib/api";
 import { useLoader } from "../lib/loader";
+import AsyncState from "./ui/AsyncState.vue";
 
 const props = defineProps<{ project?: string | null }>();
 
@@ -103,61 +104,62 @@ watch(() => props.project, () => load());
 
 <template>
     <div class="managed-config">
-        <div v-if="loading" class="aiball-empty">Loading config…</div>
-        <div v-else-if="!visibleRows.length" class="aiball-empty">
-            No configurable keys {{ isGlobalView ? "yet" : "for a project" }}.
-        </div>
-        <div v-else class="managed-config__list">
-            <div v-for="r in visibleRows" :key="r.key" class="managed-config__row">
-                <div class="managed-config__head">
-                    <span class="managed-config__label">{{ r.label }}</span>
-                    <i
-                        v-if="r.protected"
-                        class="pi pi-lock managed-config__lock"
-                        title="Protected — moderator only"
-                    />
-                    <code class="managed-config__key">{{ r.key }}</code>
-                </div>
-                <p class="managed-config__desc">{{ r.description }}</p>
-                <div class="managed-config__control">
-                    <Select
-                        v-if="r.type === 'enum' || r.type === 'boolean'"
-                        :model-value="selectModel(r)"
-                        :options="selectOptions(r)"
-                        option-label="label"
-                        option-value="value"
-                        class="managed-config__select"
-                        @update:model-value="(v: ConfigPrimitive | string) => onSelect(r, v)"
-                    />
-                    <template v-else>
-                        <InputText
-                            v-model="drafts[r.key]"
-                            :placeholder="String(inheritedValue(r))"
-                            class="managed-config__input"
-                            @keyup.enter="saveText(r)"
+        <AsyncState :loading="loading" :empty="!visibleRows.length">
+            <template #empty>
+                No configurable keys {{ isGlobalView ? "yet" : "for a project" }}.
+            </template>
+            <div class="managed-config__list">
+                <div v-for="r in visibleRows" :key="r.key" class="managed-config__row">
+                    <div class="managed-config__head">
+                        <span class="managed-config__label">{{ r.label }}</span>
+                        <i
+                            v-if="r.protected"
+                            class="pi pi-lock managed-config__lock"
+                            title="Protected — moderator only"
                         />
-                        <Button label="Save" size="small" @click="saveText(r)" />
-                        <Button
-                            v-if="hasOverride(r)"
-                            label="Reset"
-                            size="small"
-                            severity="secondary"
-                            text
-                            @click="clearValue(r)"
+                        <code class="managed-config__key">{{ r.key }}</code>
+                    </div>
+                    <p class="managed-config__desc">{{ r.description }}</p>
+                    <div class="managed-config__control">
+                        <Select
+                            v-if="r.type === 'enum' || r.type === 'boolean'"
+                            :model-value="selectModel(r)"
+                            :options="selectOptions(r)"
+                            option-label="label"
+                            option-value="value"
+                            class="managed-config__select"
+                            @update:model-value="(v: ConfigPrimitive | string) => onSelect(r, v)"
                         />
-                    </template>
-                </div>
-                <div class="managed-config__state">
-                    effective: <strong>{{ String(r.value) }}</strong>
-                    <template v-if="hasOverride(r)">
-                        — overrides {{ isGlobalView ? `default (${r.default})` : `global (${inheritedValue(r)})` }}
-                    </template>
-                    <template v-else>
-                        — {{ isGlobalView ? "using default" : `follows global (${inheritedValue(r)})` }}
-                    </template>
+                        <template v-else>
+                            <InputText
+                                v-model="drafts[r.key]"
+                                :placeholder="String(inheritedValue(r))"
+                                class="managed-config__input"
+                                @keyup.enter="saveText(r)"
+                            />
+                            <Button label="Save" size="small" @click="saveText(r)" />
+                            <Button
+                                v-if="hasOverride(r)"
+                                label="Reset"
+                                size="small"
+                                severity="secondary"
+                                text
+                                @click="clearValue(r)"
+                            />
+                        </template>
+                    </div>
+                    <div class="managed-config__state">
+                        effective: <strong>{{ String(r.value) }}</strong>
+                        <template v-if="hasOverride(r)">
+                            — overrides {{ isGlobalView ? `default (${r.default})` : `global (${inheritedValue(r)})` }}
+                        </template>
+                        <template v-else>
+                            — {{ isGlobalView ? "using default" : `follows global (${inheritedValue(r)})` }}
+                        </template>
+                    </div>
                 </div>
             </div>
-        </div>
+        </AsyncState>
         <div v-if="error" class="managed-config__error">
             <i class="pi pi-exclamation-triangle" /> {{ error }}
         </div>

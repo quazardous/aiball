@@ -6,6 +6,8 @@ import { useLoader } from "../lib/loader";
 import { STRATEGY_OPTIONS } from "../lib/labels";
 import ManagedConfig from "./ManagedConfig.vue";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
+import AsyncState from "./ui/AsyncState.vue";
+import SectionHeader from "./ui/SectionHeader.vue";
 
 const props = defineProps<{
     project: string;
@@ -73,20 +75,14 @@ watch(() => props.project, () => load());
         :embedded="embedded"
         @close-to-inbox="emit('back')"
     >
-        <div v-if="loading" class="aiball-empty">Loading settings…</div>
-        <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">
-            {{ error }}
-        </div>
-
-        <template v-else>
+        <AsyncState :loading="loading" :error="error">
             <section class="project-settings__section">
-                <h3>Moderation strategy</h3>
-                <p class="project-settings__hint">
+                <SectionHeader title="Moderation strategy">
                     Choose how new comments and tickets are moderated in
                     <strong>{{ project }}</strong>. Leave on "Use global" to
                     follow the daemon-wide default; override only when this
                     project needs a different policy.
-                </p>
+                </SectionHeader>
                 <Select
                     v-model="strategyChoice"
                     :options="strategyOptions"
@@ -120,15 +116,14 @@ watch(() => props.project, () => load());
             <!-- #449: project-scoped config keys (same component as Settings >
                  General, in project mode → "Use global (currently X)" semantics). -->
             <section class="project-settings__section">
-                <h3>Project config</h3>
-                <p class="project-settings__hint">
+                <SectionHeader title="Project config">
                     Override the project-scoped config keys for
                     <strong>{{ project }}</strong>. Leave a key on "Use global" to
                     follow the daemon-wide value.
-                </p>
+                </SectionHeader>
                 <ManagedConfig :project="project" />
             </section>
-        </template>
+        </AsyncState>
     </AdminDashboardLayout>
 </template>
 

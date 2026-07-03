@@ -6,6 +6,8 @@ import { ticketHref } from "../lib/base";
 import { estTokenCost, estTokenEffort, formatTokens } from "../lib/format";
 import { useLoader } from "../lib/loader";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
+import AsyncState from "./ui/AsyncState.vue";
+import SectionHeader from "./ui/SectionHeader.vue";
 
 const props = defineProps<{
     project: string;
@@ -99,172 +101,170 @@ const topTokenMax = computed(() =>
             </button>
         </template>
 
-        <div v-if="loading" class="aiball-empty">Loading stats…</div>
-        <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">
-            {{ error }}
-        </div>
-        <template v-else-if="stats">
-            <!-- Pulse: 4 big numbers at a glance -->
-            <section class="project-stats__pulse">
-                <div class="stat-card">
-                    <div class="stat-card__value">{{ stats.ticket_count }}</div>
-                    <div class="stat-card__label">tickets</div>
-                    <div class="stat-card__sub">{{ stats.comment_count }} comments</div>
-                </div>
-                <div class="stat-card stat-card--accent">
-                    <div class="stat-card__value">{{ stats.open_count }}</div>
-                    <div class="stat-card__label">open</div>
-                    <div class="stat-card__sub">{{ stats.closed_count }} closed</div>
-                </div>
-                <div class="stat-card stat-card--success">
-                    <div class="stat-card__value">{{ stats.resolved_pct }}%</div>
-                    <div class="stat-card__label">resolved</div>
-                    <div class="stat-card__sub">{{ stats.resolved_count }} / {{ stats.closed_count }}</div>
-                </div>
-                <div class="stat-card stat-card--muted">
-                    <div class="stat-card__value">{{ stats.auto_approved_pct }}%</div>
-                    <div class="stat-card__label">auto-approved</div>
-                    <div class="stat-card__sub">moderation pressure</div>
-                </div>
-            </section>
-
-            <!-- Live: oldest, average age, pending counts -->
-            <section class="project-stats__section">
-                <h3>Live tickets</h3>
-                <dl class="project-stats__live">
-                    <div v-if="stats.oldest_open">
-                        <dt>Oldest open</dt>
-                        <dd>
-                            <a :href="ticketHref(stats.oldest_open.id)" class="project-stats__ref">
-                                {{ formatTicketRef(stats.oldest_open.id) }}
-                            </a>
-                            <span class="project-stats__title">{{ stats.oldest_open.title }}</span>
-                            <span class="project-stats__meta">
-                                · {{ stats.oldest_open.age_days }}d
-                                <template v-if="stats.oldest_open.by_agent"> · by {{ stats.oldest_open.by_agent }}</template>
-                            </span>
-                        </dd>
+        <AsyncState :loading="loading" :error="error">
+            <template v-if="stats">
+                <!-- Pulse: 4 big numbers at a glance -->
+                <section class="project-stats__pulse">
+                    <div class="stat-card">
+                        <div class="stat-card__value">{{ stats.ticket_count }}</div>
+                        <div class="stat-card__label">tickets</div>
+                        <div class="stat-card__sub">{{ stats.comment_count }} comments</div>
                     </div>
-                    <div>
-                        <dt>Avg age of open</dt>
-                        <dd>{{ stats.avg_age_open_days }}d</dd>
-                    </div>
-                    <div>
-                        <dt>Pending moderation</dt>
-                        <dd :class="{ 'project-stats__warn': stats.pending_mod > 0 }">
-                            {{ stats.pending_mod }}
-                        </dd>
-                    </div>
-                    <div>
-                        <dt>Pending resolution</dt>
-                        <dd :class="{ 'project-stats__warn': stats.pending_resolution > 0 }">
-                            {{ stats.pending_resolution }}
-                        </dd>
-                    </div>
-                </dl>
-            </section>
-
-            <!-- Top N: reporters, tags, intents — three columns -->
-            <section class="project-stats__section project-stats__topn">
-                <div>
-                    <h3>Top reporters</h3>
-                    <ol class="project-stats__bars">
-                        <li v-for="r in stats.top_reporters" :key="r.agent">
-                            <span class="project-stats__bar-name">{{ r.agent }}</span>
-                            <span class="project-stats__bar-track">
-                                <span
-                                    class="project-stats__bar-fill"
-                                    :style="`width: ${(r.count / topReporterMax * 100).toFixed(1)}%`"
-                                />
-                            </span>
-                            <span class="project-stats__bar-count">{{ r.count }}</span>
-                        </li>
-                        <li v-if="stats.top_reporters.length === 0" class="project-stats__empty">
-                            none
-                        </li>
-                    </ol>
-                </div>
-                <div>
-                    <h3>Top tags</h3>
-                    <ol class="project-stats__bars">
-                        <li v-for="t in stats.top_tags" :key="t.name">
-                            <span class="project-stats__bar-name">{{ t.name }}</span>
-                            <span class="project-stats__bar-track">
-                                <span
-                                    class="project-stats__bar-fill"
-                                    :style="`width: ${(t.count / topTagMax * 100).toFixed(1)}%`"
-                                />
-                            </span>
-                            <span class="project-stats__bar-count">{{ t.count }}</span>
-                        </li>
-                        <li v-if="stats.top_tags.length === 0" class="project-stats__empty">
-                            none
-                        </li>
-                    </ol>
-                </div>
-                <div>
-                    <h3>Intents</h3>
-                    <ol class="project-stats__bars">
-                        <li v-for="i in stats.top_intents" :key="i.intent">
-                            <span class="project-stats__bar-name">{{ i.intent }}</span>
-                            <span class="project-stats__bar-track">
-                                <span
-                                    class="project-stats__bar-fill"
-                                    :style="`width: ${(i.count / topIntentMax * 100).toFixed(1)}%`"
-                                />
-                            </span>
-                            <span class="project-stats__bar-count">{{ i.count }}</span>
-                        </li>
-                        <li v-if="stats.top_intents.length === 0" class="project-stats__empty">
-                            none
-                        </li>
-                    </ol>
-                </div>
-            </section>
-
-            <!-- Token effort (#406): cost-equivalent aggregate + costliest tickets.
-                 Hidden until any usage is captured (#404). -->
-            <section v-if="stats.token_usage" class="project-stats__section">
-                <h3>Token effort</h3>
-                <div class="project-stats__token-summary">
                     <div class="stat-card stat-card--accent">
-                        <div class="stat-card__value">⚡ {{ formatTokens(estTokenEffort(stats.token_usage)) }}</div>
-                        <div class="stat-card__label">effort (new tokens)</div>
-                        <div class="stat-card__sub">cost-equiv ~{{ formatTokens(estTokenCost(stats.token_usage)) }} · re-read context ×0.1</div>
+                        <div class="stat-card__value">{{ stats.open_count }}</div>
+                        <div class="stat-card__label">open</div>
+                        <div class="stat-card__sub">{{ stats.closed_count }} closed</div>
                     </div>
-                    <dl class="project-stats__token-raw">
-                        <div><dt>input</dt><dd>{{ formatTokens(stats.token_usage.tokens_in) }}</dd></div>
-                        <div><dt>output</dt><dd>{{ formatTokens(stats.token_usage.tokens_out) }}</dd></div>
-                        <div><dt>cache write</dt><dd>{{ formatTokens(stats.token_usage.cache_w) }}</dd></div>
-                        <div><dt>cache read</dt><dd>{{ formatTokens(stats.token_usage.cache_r) }}</dd></div>
+                    <div class="stat-card stat-card--success">
+                        <div class="stat-card__value">{{ stats.resolved_pct }}%</div>
+                        <div class="stat-card__label">resolved</div>
+                        <div class="stat-card__sub">{{ stats.resolved_count }} / {{ stats.closed_count }}</div>
+                    </div>
+                    <div class="stat-card stat-card--muted">
+                        <div class="stat-card__value">{{ stats.auto_approved_pct }}%</div>
+                        <div class="stat-card__label">auto-approved</div>
+                        <div class="stat-card__sub">moderation pressure</div>
+                    </div>
+                </section>
+
+                <!-- Live: oldest, average age, pending counts -->
+                <section class="project-stats__section">
+                    <SectionHeader title="Live tickets" />
+                    <dl class="project-stats__live">
+                        <div v-if="stats.oldest_open">
+                            <dt>Oldest open</dt>
+                            <dd>
+                                <a :href="ticketHref(stats.oldest_open.id)" class="project-stats__ref">
+                                    {{ formatTicketRef(stats.oldest_open.id) }}
+                                </a>
+                                <span class="project-stats__title">{{ stats.oldest_open.title }}</span>
+                                <span class="project-stats__meta">
+                                    · {{ stats.oldest_open.age_days }}d
+                                    <template v-if="stats.oldest_open.by_agent"> · by {{ stats.oldest_open.by_agent }}</template>
+                                </span>
+                            </dd>
+                        </div>
+                        <div>
+                            <dt>Avg age of open</dt>
+                            <dd>{{ stats.avg_age_open_days }}d</dd>
+                        </div>
+                        <div>
+                            <dt>Pending moderation</dt>
+                            <dd :class="{ 'project-stats__warn': stats.pending_mod > 0 }">
+                                {{ stats.pending_mod }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt>Pending resolution</dt>
+                            <dd :class="{ 'project-stats__warn': stats.pending_resolution > 0 }">
+                                {{ stats.pending_resolution }}
+                            </dd>
+                        </div>
                     </dl>
-                </div>
-                <h4
-                    v-if="stats.top_token_tickets.length > 0"
-                    class="project-stats__token-top-label"
-                >
-                    Top 3 token-heavy tickets
-                </h4>
-                <ol
-                    v-if="stats.top_token_tickets.length > 0"
-                    class="project-stats__bars project-stats__token-top"
-                >
-                    <li v-for="t in stats.top_token_tickets" :key="t.id">
-                        <a :href="ticketHref(t.id)" class="project-stats__bar-name" :title="t.title">
-                            <span class="project-stats__ref">{{ formatTicketRef(t.id) }}</span>
-                            {{ t.title }}
-                        </a>
-                        <span class="project-stats__bar-track">
-                            <span
-                                class="project-stats__bar-fill"
-                                :style="`width: ${(estTokenEffort(t.token_usage) / topTokenMax * 100).toFixed(1)}%`"
-                            />
-                        </span>
-                        <span class="project-stats__bar-count">{{ formatTokens(estTokenEffort(t.token_usage)) }}</span>
-                    </li>
-                </ol>
-            </section>
-        </template>
+                </section>
+
+                <!-- Top N: reporters, tags, intents — three columns -->
+                <section class="project-stats__section project-stats__topn">
+                    <div>
+                        <SectionHeader title="Top reporters" />
+                        <ol class="project-stats__bars">
+                            <li v-for="r in stats.top_reporters" :key="r.agent">
+                                <span class="project-stats__bar-name">{{ r.agent }}</span>
+                                <span class="project-stats__bar-track">
+                                    <span
+                                        class="project-stats__bar-fill"
+                                        :style="`width: ${(r.count / topReporterMax * 100).toFixed(1)}%`"
+                                    />
+                                </span>
+                                <span class="project-stats__bar-count">{{ r.count }}</span>
+                            </li>
+                            <li v-if="stats.top_reporters.length === 0" class="project-stats__empty">
+                                none
+                            </li>
+                        </ol>
+                    </div>
+                    <div>
+                        <SectionHeader title="Top tags" />
+                        <ol class="project-stats__bars">
+                            <li v-for="t in stats.top_tags" :key="t.name">
+                                <span class="project-stats__bar-name">{{ t.name }}</span>
+                                <span class="project-stats__bar-track">
+                                    <span
+                                        class="project-stats__bar-fill"
+                                        :style="`width: ${(t.count / topTagMax * 100).toFixed(1)}%`"
+                                    />
+                                </span>
+                                <span class="project-stats__bar-count">{{ t.count }}</span>
+                            </li>
+                            <li v-if="stats.top_tags.length === 0" class="project-stats__empty">
+                                none
+                            </li>
+                        </ol>
+                    </div>
+                    <div>
+                        <SectionHeader title="Intents" />
+                        <ol class="project-stats__bars">
+                            <li v-for="i in stats.top_intents" :key="i.intent">
+                                <span class="project-stats__bar-name">{{ i.intent }}</span>
+                                <span class="project-stats__bar-track">
+                                    <span
+                                        class="project-stats__bar-fill"
+                                        :style="`width: ${(i.count / topIntentMax * 100).toFixed(1)}%`"
+                                    />
+                                </span>
+                                <span class="project-stats__bar-count">{{ i.count }}</span>
+                            </li>
+                            <li v-if="stats.top_intents.length === 0" class="project-stats__empty">
+                                none
+                            </li>
+                        </ol>
+                    </div>
+                </section>
+
+                <!-- Token effort (#406): cost-equivalent aggregate + costliest tickets.
+                     Hidden until any usage is captured (#404). -->
+                <section v-if="stats.token_usage" class="project-stats__section">
+                    <SectionHeader title="Token effort" />
+                    <div class="project-stats__token-summary">
+                        <div class="stat-card stat-card--accent">
+                            <div class="stat-card__value">⚡ {{ formatTokens(estTokenEffort(stats.token_usage)) }}</div>
+                            <div class="stat-card__label">effort (new tokens)</div>
+                            <div class="stat-card__sub">cost-equiv ~{{ formatTokens(estTokenCost(stats.token_usage)) }} · re-read context ×0.1</div>
+                        </div>
+                        <dl class="project-stats__token-raw">
+                            <div><dt>input</dt><dd>{{ formatTokens(stats.token_usage.tokens_in) }}</dd></div>
+                            <div><dt>output</dt><dd>{{ formatTokens(stats.token_usage.tokens_out) }}</dd></div>
+                            <div><dt>cache write</dt><dd>{{ formatTokens(stats.token_usage.cache_w) }}</dd></div>
+                            <div><dt>cache read</dt><dd>{{ formatTokens(stats.token_usage.cache_r) }}</dd></div>
+                        </dl>
+                    </div>
+                    <h4
+                        v-if="stats.top_token_tickets.length > 0"
+                        class="project-stats__token-top-label"
+                    >
+                        Top 3 token-heavy tickets
+                    </h4>
+                    <ol
+                        v-if="stats.top_token_tickets.length > 0"
+                        class="project-stats__bars project-stats__token-top"
+                    >
+                        <li v-for="t in stats.top_token_tickets" :key="t.id">
+                            <a :href="ticketHref(t.id)" class="project-stats__bar-name" :title="t.title">
+                                <span class="project-stats__ref">{{ formatTicketRef(t.id) }}</span>
+                                {{ t.title }}
+                            </a>
+                            <span class="project-stats__bar-track">
+                                <span
+                                    class="project-stats__bar-fill"
+                                    :style="`width: ${(estTokenEffort(t.token_usage) / topTokenMax * 100).toFixed(1)}%`"
+                                />
+                            </span>
+                            <span class="project-stats__bar-count">{{ formatTokens(estTokenEffort(t.token_usage)) }}</span>
+                        </li>
+                    </ol>
+                </section>
+            </template>
+        </AsyncState>
     </AdminDashboardLayout>
 </template>
 

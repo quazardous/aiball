@@ -28,6 +28,7 @@ import {
 import { formatActionCompact, formatExpressionCompact } from "../lib/format";
 import { bus } from "../lib/bus";
 import DetailHeader from "./ui/DetailHeader.vue";
+import SectionHeader from "./ui/SectionHeader.vue";
 import RuleEditor from "./automation/RuleEditor.vue";
 
 const props = defineProps<{
@@ -171,25 +172,25 @@ const current = computed(() => {
         <!-- YAML : read-only fallback. -->
         <template v-if="rule && isYaml">
             <section class="aiball-section rule-detail__yaml">
-                <h3>Source : <code>.aiball.yaml</code> (read-only)</h3>
-                <p class="aiball-explainer">
+                <SectionHeader>
+                    <template #title>Source : <code>.aiball.yaml</code> (read-only)</template>
                     This rule was loaded from your <code>.aiball.yaml</code>'s
                     <code>automation:</code> block. To change it, edit the file —
                     the daemon re-reads YAML on every event.
-                </p>
+                </SectionHeader>
             </section>
             <section class="aiball-section">
-                <h3>Triggers</h3>
+                <SectionHeader title="Triggers" />
                 <div class="rule-detail__trigger-row">
                     <span v-for="t in rule.triggers" :key="t" class="trigger-chip">{{ t }}</span>
                 </div>
             </section>
             <section class="aiball-section">
-                <h3>Condition</h3>
+                <SectionHeader title="Condition" />
                 <pre class="rule-detail__expression">{{ formatExpressionCompact(rule.expression) }}</pre>
             </section>
             <section class="aiball-section">
-                <h3>Action{{ rule.actions.length > 1 ? "s" : "" }}</h3>
+                <SectionHeader :title="rule.actions.length > 1 ? 'Actions' : 'Action'" />
                 <ol class="rule-detail__action-stack">
                     <li v-for="(a, i) in rule.actions" :key="i" class="rule-detail__action">
                         {{ formatActionCompact(a) }}

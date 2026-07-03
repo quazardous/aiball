@@ -8,6 +8,7 @@ import { api, type Launcher } from "../lib/api";
 import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import PanelHeader from "./ui/PanelHeader.vue";
+import AsyncState from "./ui/AsyncState.vue";
 
 const launchers = ref<Launcher[]>([]);
 const running = ref<string | null>(null);
@@ -48,15 +49,14 @@ async function run(l: Launcher) {
             </p>
         </PanelHeader>
 
-        <div v-if="loading" class="aiball-empty">Loading…</div>
-        <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">{{ error }}</div>
-        <div v-else-if="launchers.length === 0" class="aiball-empty">
-            No launchers configured. Add a <code>launchers:</code> list to
-            <code>~/.config/aiball/config.yaml</code> — each entry needs an
-            <code>id</code>, <code>label</code> and <code>cmd</code> (optional
-            <code>args</code>, <code>cwd</code>, <code>icon</code>).
-        </div>
-        <ul v-else class="launchers-panel__list">
+        <AsyncState :loading="loading" :error="error" :empty="launchers.length === 0">
+            <template #empty>
+                No launchers configured. Add a <code>launchers:</code> list to
+                <code>~/.config/aiball/config.yaml</code> — each entry needs an
+                <code>id</code>, <code>label</code> and <code>cmd</code> (optional
+                <code>args</code>, <code>cwd</code>, <code>icon</code>).
+            </template>
+        <ul class="launchers-panel__list">
             <li v-for="l in launchers" :key="l.id" class="launchers-panel__item">
                 <Button
                     :label="l.label"
@@ -68,6 +68,7 @@ async function run(l: Launcher) {
                 <code class="launchers-panel__cmd">{{ l.cmd }}{{ l.args && l.args.length ? " " + l.args.join(" ") : "" }}</code>
             </li>
         </ul>
+        </AsyncState>
     </div>
 </template>
 

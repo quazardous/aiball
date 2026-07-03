@@ -11,6 +11,7 @@ import TagBadge from "./TagBadge.vue";
 import DataList from "./ui/DataList.vue";
 import FormField from "./ui/FormField.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
+import SectionHeader from "./ui/SectionHeader.vue";
 
 const confirmDialog = useConfirm();
 const tags = ref<CatalogTag[]>([]);
@@ -177,19 +178,21 @@ onMounted(() => {
         </PanelHeader>
 
         <section class="aiball-section">
-            <div class="aiball-section__head">
-                <h3>Catalog ({{ tags.length }})</h3>
-                <div class="tags-project-picker">
-                    <label class="field-label">project</label>
-                    <Select
-                        :model-value="project"
-                        :options="projectOptions"
-                        option-label="label"
-                        option-value="value"
-                        @update:model-value="onProjectChange"
-                    />
-                </div>
-            </div>
+            <SectionHeader>
+                <template #title>Catalog ({{ tags.length }})</template>
+                <template #actions>
+                    <div class="tags-project-picker">
+                        <label class="field-label">project</label>
+                        <Select
+                            :model-value="project"
+                            :options="projectOptions"
+                            option-label="label"
+                            option-value="value"
+                            @update:model-value="onProjectChange"
+                        />
+                    </div>
+                </template>
+            </SectionHeader>
 
             <DataList table-class="tags-table" :is-empty="!tags.length">
                 <template #empty>

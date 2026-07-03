@@ -15,6 +15,7 @@ import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import ManagedConfig from "./ManagedConfig.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
+import SectionHeader from "./ui/SectionHeader.vue";
 
 type InfoPayload = Awaited<ReturnType<typeof api.getInfo>>;
 
@@ -122,12 +123,11 @@ async function doPurgeAll() {
         <PanelHeader title="General" />
 
         <section class="general-settings__section">
-            <h3 class="general-settings__heading">Moderation strategy</h3>
-            <p class="general-settings__hint">
+            <SectionHeader title="Moderation strategy">
                 Daemon-wide default for how new tickets and replies are moderated.
                 Each project can override it in its own settings — projects left on
                 <em>“Use global”</em> follow this default.
-            </p>
+            </SectionHeader>
             <div class="general-settings__options">
                 <button
                     v-for="o in strategyOptions"
@@ -149,12 +149,11 @@ async function doPurgeAll() {
 
         <!-- #445: notifications control, moved here from the header (david). -->
         <section class="general-settings__section">
-            <h3 class="general-settings__heading">Notifications</h3>
-            <p class="general-settings__hint">
+            <SectionHeader title="Notifications">
                 Browser/OS alerts when something needs your attention (new pending
                 tickets, replies). Granted and silenced <em>per device</em> — each
                 browser keeps its own permission.
-            </p>
+            </SectionHeader>
             <div class="general-settings__options">
                 <button
                     v-if="!notifAllowed && !notifMuted"
@@ -187,11 +186,10 @@ async function doPurgeAll() {
              the available screen width; Narrow reverts to the historical 980px
              column for users who prefer the tighter reading experience. -->
         <section class="general-settings__section">
-            <h3 class="general-settings__heading">Layout density</h3>
-            <p class="general-settings__hint">
+            <SectionHeader title="Layout density">
                 How wide content uses the screen. Saved per device — each browser
                 keeps its own preference. The compose form stays narrow either way.
-            </p>
+            </SectionHeader>
             <div class="general-settings__options">
                 <button
                     type="button"
@@ -225,11 +223,10 @@ async function doPurgeAll() {
         <!-- #449: schema-driven config keys (global layer). Same component
              renders the per-project layer on the Project Settings page. -->
         <section class="general-settings__section">
-            <h3 class="general-settings__heading">Managed config</h3>
-            <p class="general-settings__hint">
+            <SectionHeader title="Managed config">
                 Daemon-wide defaults declared in the config schema. A project can
                 override the project-scoped ones in its own settings.
-            </p>
+            </SectionHeader>
             <ManagedConfig />
         </section>
 
@@ -239,21 +236,20 @@ async function doPurgeAll() {
              refresh icon ; also re-fetched after a global purge so the
              counters reflect what was just freed. -->
         <section class="general-settings__section general-settings__info">
-            <div class="general-settings__info-head">
-                <h3 class="general-settings__heading">Info</h3>
-                <button
-                    type="button"
-                    class="general-settings__info-refresh"
-                    title="Refresh"
-                    :disabled="infoLoading"
-                    @click="loadInfo"
-                >
-                    <i :class="infoLoading ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" />
-                </button>
-            </div>
-            <p class="general-settings__hint">
+            <SectionHeader title="Info">
+                <template #actions>
+                    <button
+                        type="button"
+                        class="general-settings__info-refresh"
+                        title="Refresh"
+                        :disabled="infoLoading"
+                        @click="loadInfo"
+                    >
+                        <i :class="infoLoading ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" />
+                    </button>
+                </template>
                 Daemon-wide footprint and totals. Read-only.
-            </p>
+            </SectionHeader>
             <div v-if="infoError" class="aiball-empty" style="color: var(--p-red-500)">
                 {{ infoError }}
             </div>

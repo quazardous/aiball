@@ -31,6 +31,7 @@ import { relativeTime } from "../lib/format";
 import FieldRow from "./ui/FieldRow.vue";
 import FormField from "./ui/FormField.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
+import AsyncState from "./ui/AsyncState.vue";
 import TerminalView from "./TerminalView.vue";
 
 // #464 — third tab "Terminal" (live tmux/psmux pane mirror) wired in
@@ -246,271 +247,272 @@ async function sendPrompt() {
         @close-to-inbox="emit('close-to-inbox')"
         @close-to-list="emit('close')"
     >
-        <div v-if="loading" class="aiball-empty">Loading…</div>
-        <div v-else-if="error" class="aiball-empty consumer-edit__error">
-            <i class="pi pi-exclamation-triangle" />
-            {{ error }}
-        </div>
-        <!-- #460 — page consumer split en 2 tabs (david `c7tzpk` accepté
-             `w37ybc`) : Overview (show) montre l'identité + loop status +
-             meta ; Edit (form) regroupe les champs éditables + raw prompt
-             + Cancel/Save. Default = Overview (lecture d'abord). En attendant
-             les briques AdminShowLayout/AdminFormLayout du #458 commit 2a,
-             chaque tab garde son markup actuel ; la migration vers les
-             layouts dédiés se fera là-bas. -->
-        <template v-else-if="original">
-            <Tabs v-model:value="activeTab">
-                <TabList>
-                    <Tab value="overview">Overview</Tab>
-                    <Tab value="edit">Edit</Tab>
-                    <!-- #464 — Terminal tab shown only for agent consumers. Other
-                         consumer kinds (human, …) don't have a claude-loop
-                         session to mirror. -->
-                    <Tab v-if="original.kind === 'agent'" value="terminal">Terminal</Tab>
-                </TabList>
-                <TabPanels>
-                    <TabPanel value="overview">
-                        <div class="consumer-edit__tab">
-                            <FieldRow label="consumer_id">
-                                <span class="aiball-mono">{{ original.consumer_id }}</span>
-                            </FieldRow>
+        <AsyncState :loading="loading">
+            <div v-if="error" class="aiball-empty consumer-edit__error">
+                <i class="pi pi-exclamation-triangle" />
+                {{ error }}
+            </div>
+            <!-- #460 — page consumer split en 2 tabs (david `c7tzpk` accepté
+                 `w37ybc`) : Overview (show) montre l'identité + loop status +
+                 meta ; Edit (form) regroupe les champs éditables + raw prompt
+                 + Cancel/Save. Default = Overview (lecture d'abord). En attendant
+                 les briques AdminShowLayout/AdminFormLayout du #458 commit 2a,
+                 chaque tab garde son markup actuel ; la migration vers les
+                 layouts dédiés se fera là-bas. -->
+            <template v-else-if="original">
+                <Tabs v-model:value="activeTab">
+                    <TabList>
+                        <Tab value="overview">Overview</Tab>
+                        <Tab value="edit">Edit</Tab>
+                        <!-- #464 — Terminal tab shown only for agent consumers. Other
+                             consumer kinds (human, …) don't have a claude-loop
+                             session to mirror. -->
+                        <Tab v-if="original.kind === 'agent'" value="terminal">Terminal</Tab>
+                    </TabList>
+                    <TabPanels>
+                        <TabPanel value="overview">
+                            <div class="consumer-edit__tab">
+                                <FieldRow label="consumer_id">
+                                    <span class="aiball-mono">{{ original.consumer_id }}</span>
+                                </FieldRow>
 
-                            <!-- Loop status : chips read-only (mêmes que
-                                 ProjectDetailPage / ConsumersPanel #460).
-                                 #469 david : le bouton Stop micro-inline a
-                                 migré dans le band d'actions en bas de
-                                 l'overview (vrai bouton form-style). -->
-                            <FieldRow label="loop status">
-                                <div class="consumer-edit__status">
-                                    <template v-if="original.state">
-                                        <template v-if="isOnline">
-                                            <span class="ld-tag" :class="activityClass(original.state)">{{ original.state }}</span>
-                                            <span
-                                                class="ld-tag"
-                                                :class="presenceClass(original.state_human, original.state_human_word)"
-                                            >{{ presenceWord(original.state_human, original.state_human_word) }}</span>
+                                <!-- Loop status : chips read-only (mêmes que
+                                     ProjectDetailPage / ConsumersPanel #460).
+                                     #469 david : le bouton Stop micro-inline a
+                                     migré dans le band d'actions en bas de
+                                     l'overview (vrai bouton form-style). -->
+                                <FieldRow label="loop status">
+                                    <div class="consumer-edit__status">
+                                        <template v-if="original.state">
+                                            <template v-if="isOnline">
+                                                <span class="ld-tag" :class="activityClass(original.state)">{{ original.state }}</span>
+                                                <span
+                                                    class="ld-tag"
+                                                    :class="presenceClass(original.state_human, original.state_human_word)"
+                                                >{{ presenceWord(original.state_human, original.state_human_word) }}</span>
+                                            </template>
+                                            <span v-else class="ld-tag ld-tag--offline">offline</span>
+                                            <span v-if="original.cwd" class="consumer-edit__cwd" :title="original.cwd">
+                                                @ <code>{{ original.cwd }}</code>
+                                            </span>
                                         </template>
-                                        <span v-else class="ld-tag ld-tag--offline">offline</span>
-                                        <span v-if="original.cwd" class="consumer-edit__cwd" :title="original.cwd">
-                                            @ <code>{{ original.cwd }}</code>
+                                        <span v-else class="consumer-edit__status-none">
+                                            no loop tracking — this consumer has never reported a state
                                         </span>
-                                    </template>
-                                    <span v-else class="consumer-edit__status-none">
-                                        no loop tracking — this consumer has never reported a state
+                                    </div>
+                                </FieldRow>
+
+                                <FieldRow label="kind">
+                                    <span>{{ original.kind }}</span>
+                                </FieldRow>
+                                <FieldRow v-if="original.display_name" label="display name">
+                                    <span>{{ original.display_name }}</span>
+                                </FieldRow>
+                                <FieldRow label="enabled">
+                                    <span :class="original.enabled ? '' : 'consumer-edit__status-none'">
+                                        {{ original.enabled ? "enabled" : "blocked" }}
                                     </span>
+                                </FieldRow>
+
+                                <div class="consumer-edit__meta">
+                                    <div><strong>created</strong> {{ original.created_at ? relativeTime(original.created_at) : "—" }}</div>
+                                    <div><strong>last seen</strong> {{ original.last_seen_at ? relativeTime(original.last_seen_at) : "never" }}</div>
                                 </div>
-                            </FieldRow>
 
-                            <FieldRow label="kind">
-                                <span>{{ original.kind }}</span>
-                            </FieldRow>
-                            <FieldRow v-if="original.display_name" label="display name">
-                                <span>{{ original.display_name }}</span>
-                            </FieldRow>
-                            <FieldRow label="enabled">
-                                <span :class="original.enabled ? '' : 'consumer-edit__status-none'">
-                                    {{ original.enabled ? "enabled" : "blocked" }}
-                                </span>
-                            </FieldRow>
-
-                            <div class="consumer-edit__meta">
-                                <div><strong>created</strong> {{ original.created_at ? relativeTime(original.created_at) : "—" }}</div>
-                                <div><strong>last seen</strong> {{ original.last_seen_at ? relativeTime(original.last_seen_at) : "never" }}</div>
-                            </div>
-
-                            <!-- #469 david `b910e4` : les micro-boutons d'action
-                                 inline (Stop, Delete) migrent en BAS de l'overview
-                                 sous forme de vrais boutons "form style" — labels
-                                 lisibles, taille standard, severity colorée. Stop
-                                 reste gated par `canStop` (online + has state) ;
-                                 Delete est toujours dispo. -->
-                            <div class="consumer-edit__actions">
-                                <Button
-                                    v-if="canStop"
-                                    label="Stop loop"
-                                    icon="pi pi-stop-circle"
-                                    severity="danger"
-                                    outlined
-                                    :loading="stopBusy"
-                                    :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
-                                    @click="stopLoop"
-                                />
-                                <Button
-                                    label="Delete consumer"
-                                    icon="pi pi-trash"
-                                    severity="danger"
-                                    outlined
-                                    :loading="deleteBusy"
-                                    :title="`Delete consumer ${original.consumer_id} (history preserved)`"
-                                    @click="deleteConsumer"
-                                />
-                            </div>
-                        </div>
-                    </TabPanel>
-
-                    <TabPanel value="edit">
-                        <div class="consumer-edit__tab">
-                            <FormField label="kind" for="ce-kind">
-                                <Select
-                                    inputId="ce-kind"
-                                    v-model="kind"
-                                    :options="KIND_OPTIONS"
-                                    optionLabel="label"
-                                    optionValue="value"
-                                    style="width: 100%"
-                                />
-                            </FormField>
-
-                            <FormField label="display name" for="ce-name">
-                                <InputText
-                                    id="ce-name"
-                                    v-model="displayName"
-                                    placeholder="(falls back to consumer_id)"
-                                    style="width: 100%"
-                                />
-                            </FormField>
-
-                            <FormField label="note" for="ce-note">
-                                <Textarea
-                                    id="ce-note"
-                                    v-model="note"
-                                    rows="3"
-                                    placeholder="(internal note — visible only on this page)"
-                                    style="width: 100%"
-                                />
-                            </FormField>
-
-                            <FormField label="micro-prompt" for="ce-micro-prompt">
-                                <Textarea
-                                    id="ce-micro-prompt"
-                                    v-model="microPrompt"
-                                    rows="3"
-                                    placeholder="(standing instruction injected into this agent's wake prompt via {consumer_prompt} — e.g. &quot;branch main if the ticket doesn't specify&quot;)"
-                                    style="width: 100%"
-                                />
-                                <small class="consumer-edit__hint">
-                                    Surfaced to the agent on wake via the <code>{consumer_prompt}</code>
-                                    placeholder. Opt-in: add the placeholder to your <code>wake_master</code>
-                                    template (<code>.aiball.yaml</code>) where you want it. Empty = nothing injected.
-                                </small>
-                            </FormField>
-
-                            <FormField>
-                                <label>
-                                    <input
-                                        type="checkbox"
-                                        :checked="enabled"
-                                        @change="enabled = ($event.target as HTMLInputElement).checked"
-                                    />
-                                    enabled (when off, the daemon rejects new posts from this consumer)
-                                </label>
-                            </FormField>
-
-                            <!-- #508 — global no-claim flag : consumer "spécialiste" qui ne
-                                 prend que les tickets explicitement assignés. -->
-                            <FormField>
-                                <label>
-                                    <input
-                                        type="checkbox"
-                                        :checked="canClaim"
-                                        @change="canClaim = ($event.target as HTMLInputElement).checked"
-                                    />
-                                    can claim (when off, this consumer is <strong>assignment-only</strong>: <code>ticket_engage</code> skips the global pool and returns only tickets explicitly assigned via <code>ticket_assign</code>)
-                                </label>
-                            </FormField>
-
-                            <!-- #516 (david `r59bkm` plan E) — tri-state opt-in pour les
-                                 broadcasts projet (scope=broadcast follower fan-out).
-                                 Auto = suit can_claim (claim-able → reçoit, no_claim → ne reçoit pas) ;
-                                 on = opt-in explicite ; off = opt-out explicite. -->
-                            <FormField label="project broadcasts" for="ce-notify-broadcasts">
-                                <select
-                                    id="ce-notify-broadcasts"
-                                    v-model="notifyBroadcasts"
-                                    class="consumer-edit__select"
-                                >
-                                    <option value="auto">auto (follows can-claim)</option>
-                                    <option value="on">on (always receive broadcasts)</option>
-                                    <option value="off">off (never receive broadcasts)</option>
-                                </select>
-                                <small class="consumer-edit__hint">
-                                    Receive <code>scope: broadcast</code> events (e.g. project-wide
-                                    fan-out). <strong>Auto</strong> = same as <code>can claim</code> ;
-                                    a no-claim consumer is silenced by default. Override to <strong>on</strong>
-                                    if you want a no-claim agent to still see broadcasts.
-                                </small>
-                            </FormField>
-
-                            <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->
-                            <FormField label="send a raw prompt" for="ce-prompt">
-                                <Textarea
-                                    id="ce-prompt"
-                                    v-model="promptText"
-                                    rows="4"
-                                    :placeholder="original.present
-                                        ? 'Type a prompt — injected verbatim into the live Claude session…'
-                                        : 'Loop offline — the prompt will be spooled and delivered when it reconnects.'"
-                                    style="width: 100%"
-                                    :disabled="promptBusy"
-                                    @keydown.ctrl.enter="sendPrompt"
-                                />
-                                <small class="consumer-edit__hint">
-                                    Sent <strong>verbatim</strong> — no moderation, no wake-phrase.
-                                    {{ original.present
-                                        ? "Loop is live → delivered now."
-                                        : "Loop is offline → spooled until it reconnects." }}
-                                    Ctrl+Enter to send.
-                                </small>
+                                <!-- #469 david `b910e4` : les micro-boutons d'action
+                                     inline (Stop, Delete) migrent en BAS de l'overview
+                                     sous forme de vrais boutons "form style" — labels
+                                     lisibles, taille standard, severity colorée. Stop
+                                     reste gated par `canStop` (online + has state) ;
+                                     Delete est toujours dispo. -->
                                 <div class="consumer-edit__actions">
                                     <Button
-                                        label="Send prompt"
-                                        icon="pi pi-send"
-                                        size="small"
-                                        severity="secondary"
-                                        :loading="promptBusy"
-                                        :disabled="!promptText.trim()"
-                                        @click="sendPrompt"
+                                        v-if="canStop"
+                                        label="Stop loop"
+                                        icon="pi pi-stop-circle"
+                                        severity="danger"
+                                        outlined
+                                        :loading="stopBusy"
+                                        :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
+                                        @click="stopLoop"
+                                    />
+                                    <Button
+                                        label="Delete consumer"
+                                        icon="pi pi-trash"
+                                        severity="danger"
+                                        outlined
+                                        :loading="deleteBusy"
+                                        :title="`Delete consumer ${original.consumer_id} (history preserved)`"
+                                        @click="deleteConsumer"
                                     />
                                 </div>
-                            </FormField>
+                            </div>
+                        </TabPanel>
 
-                            <div class="consumer-edit__actions">
-                                <Button
-                                    label="Cancel"
-                                    text
-                                    size="small"
-                                    :disabled="saving"
-                                    @click="emit('close')"
-                                />
-                                <Button
-                                    label="Save"
-                                    icon="pi pi-save"
-                                    size="small"
-                                    :loading="saving"
-                                    @click="save"
+                        <TabPanel value="edit">
+                            <div class="consumer-edit__tab">
+                                <FormField label="kind" for="ce-kind">
+                                    <Select
+                                        inputId="ce-kind"
+                                        v-model="kind"
+                                        :options="KIND_OPTIONS"
+                                        optionLabel="label"
+                                        optionValue="value"
+                                        style="width: 100%"
+                                    />
+                                </FormField>
+
+                                <FormField label="display name" for="ce-name">
+                                    <InputText
+                                        id="ce-name"
+                                        v-model="displayName"
+                                        placeholder="(falls back to consumer_id)"
+                                        style="width: 100%"
+                                    />
+                                </FormField>
+
+                                <FormField label="note" for="ce-note">
+                                    <Textarea
+                                        id="ce-note"
+                                        v-model="note"
+                                        rows="3"
+                                        placeholder="(internal note — visible only on this page)"
+                                        style="width: 100%"
+                                    />
+                                </FormField>
+
+                                <FormField label="micro-prompt" for="ce-micro-prompt">
+                                    <Textarea
+                                        id="ce-micro-prompt"
+                                        v-model="microPrompt"
+                                        rows="3"
+                                        placeholder="(standing instruction injected into this agent's wake prompt via {consumer_prompt} — e.g. &quot;branch main if the ticket doesn't specify&quot;)"
+                                        style="width: 100%"
+                                    />
+                                    <small class="consumer-edit__hint">
+                                        Surfaced to the agent on wake via the <code>{consumer_prompt}</code>
+                                        placeholder. Opt-in: add the placeholder to your <code>wake_master</code>
+                                        template (<code>.aiball.yaml</code>) where you want it. Empty = nothing injected.
+                                    </small>
+                                </FormField>
+
+                                <FormField>
+                                    <label>
+                                        <input
+                                            type="checkbox"
+                                            :checked="enabled"
+                                            @change="enabled = ($event.target as HTMLInputElement).checked"
+                                        />
+                                        enabled (when off, the daemon rejects new posts from this consumer)
+                                    </label>
+                                </FormField>
+
+                                <!-- #508 — global no-claim flag : consumer "spécialiste" qui ne
+                                     prend que les tickets explicitement assignés. -->
+                                <FormField>
+                                    <label>
+                                        <input
+                                            type="checkbox"
+                                            :checked="canClaim"
+                                            @change="canClaim = ($event.target as HTMLInputElement).checked"
+                                        />
+                                        can claim (when off, this consumer is <strong>assignment-only</strong>: <code>ticket_engage</code> skips the global pool and returns only tickets explicitly assigned via <code>ticket_assign</code>)
+                                    </label>
+                                </FormField>
+
+                                <!-- #516 (david `r59bkm` plan E) — tri-state opt-in pour les
+                                     broadcasts projet (scope=broadcast follower fan-out).
+                                     Auto = suit can_claim (claim-able → reçoit, no_claim → ne reçoit pas) ;
+                                     on = opt-in explicite ; off = opt-out explicite. -->
+                                <FormField label="project broadcasts" for="ce-notify-broadcasts">
+                                    <select
+                                        id="ce-notify-broadcasts"
+                                        v-model="notifyBroadcasts"
+                                        class="consumer-edit__select"
+                                    >
+                                        <option value="auto">auto (follows can-claim)</option>
+                                        <option value="on">on (always receive broadcasts)</option>
+                                        <option value="off">off (never receive broadcasts)</option>
+                                    </select>
+                                    <small class="consumer-edit__hint">
+                                        Receive <code>scope: broadcast</code> events (e.g. project-wide
+                                        fan-out). <strong>Auto</strong> = same as <code>can claim</code> ;
+                                        a no-claim consumer is silenced by default. Override to <strong>on</strong>
+                                        if you want a no-claim agent to still see broadcasts.
+                                    </small>
+                                </FormField>
+
+                                <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->
+                                <FormField label="send a raw prompt" for="ce-prompt">
+                                    <Textarea
+                                        id="ce-prompt"
+                                        v-model="promptText"
+                                        rows="4"
+                                        :placeholder="original.present
+                                            ? 'Type a prompt — injected verbatim into the live Claude session…'
+                                            : 'Loop offline — the prompt will be spooled and delivered when it reconnects.'"
+                                        style="width: 100%"
+                                        :disabled="promptBusy"
+                                        @keydown.ctrl.enter="sendPrompt"
+                                    />
+                                    <small class="consumer-edit__hint">
+                                        Sent <strong>verbatim</strong> — no moderation, no wake-phrase.
+                                        {{ original.present
+                                            ? "Loop is live → delivered now."
+                                            : "Loop is offline → spooled until it reconnects." }}
+                                        Ctrl+Enter to send.
+                                    </small>
+                                    <div class="consumer-edit__actions">
+                                        <Button
+                                            label="Send prompt"
+                                            icon="pi pi-send"
+                                            size="small"
+                                            severity="secondary"
+                                            :loading="promptBusy"
+                                            :disabled="!promptText.trim()"
+                                            @click="sendPrompt"
+                                        />
+                                    </div>
+                                </FormField>
+
+                                <div class="consumer-edit__actions">
+                                    <Button
+                                        label="Cancel"
+                                        text
+                                        size="small"
+                                        :disabled="saving"
+                                        @click="emit('close')"
+                                    />
+                                    <Button
+                                        label="Save"
+                                        icon="pi pi-save"
+                                        size="small"
+                                        :loading="saving"
+                                        @click="save"
+                                    />
+                                </div>
+                            </div>
+                        </TabPanel>
+
+                        <!-- #464 — Terminal tab : live tmux/psmux pane mirror.
+                             Lazy : the TerminalView only mounts when this tab is
+                             active, so opening the consumer detail page doesn't
+                             open an SSE per consumer the operator browses. -->
+                        <TabPanel v-if="original.kind === 'agent'" value="terminal">
+                            <div class="consumer-edit__tab">
+                                <TerminalView
+                                    v-if="activeTab === 'terminal'"
+                                    :agent-name="original.consumer_id"
+                                    :loop-state="original.state"
+                                    :human-present="original.state_human"
+                                    :human-word="original.state_human_word"
                                 />
                             </div>
-                        </div>
-                    </TabPanel>
-
-                    <!-- #464 — Terminal tab : live tmux/psmux pane mirror.
-                         Lazy : the TerminalView only mounts when this tab is
-                         active, so opening the consumer detail page doesn't
-                         open an SSE per consumer the operator browses. -->
-                    <TabPanel v-if="original.kind === 'agent'" value="terminal">
-                        <div class="consumer-edit__tab">
-                            <TerminalView
-                                v-if="activeTab === 'terminal'"
-                                :agent-name="original.consumer_id"
-                                :loop-state="original.state"
-                                :human-present="original.state_human"
-                                :human-word="original.state_human_word"
-                            />
-                        </div>
-                    </TabPanel>
-                </TabPanels>
-            </Tabs>
-        </template>
+                        </TabPanel>
+                    </TabPanels>
+                </Tabs>
+            </template>
+        </AsyncState>
     </AdminDetailLayout>
 </template>
 
