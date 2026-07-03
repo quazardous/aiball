@@ -607,7 +607,7 @@ function respawnKernel(reason: string): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null }> {
+async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null; extraSeenIds?: number[] }> {
     // #749 — every wake path (SSE direct, AFK-clear-drain, stop-hook
     // post-turn, heartbeat) routes through `buildContextPhrase` so the
     // content is uniform: pop the oldest unread FIFO event, fall back
@@ -1018,7 +1018,7 @@ function refreshPaneMarkers(): void {
 }
 
 let lastSendAt = 0;
-async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null): Promise<void> {
+async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[]): Promise<void> {
     // Touch wake-in-flight BEFORE the actual send-keys so the
     // UserPromptSubmit hook can flag from_auto_wake=true (the marker
     // only flags the auto-wake, it's NOT a gate anymore — the post-wake
@@ -1060,6 +1060,13 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         // The consumer in mainSse handles it via the payload.)
         if (backlogTicketId) {
             void client().recordBacklogWake(backlogTicketId).catch(() => {});
+        }
+        // #1163 S2 — the digest groups several decision-events into ONE
+        // delivered wake ; the head id is acked by the wake:delivered
+        // consumer, the grouped rest is acked here (same inject moment,
+        // fire-and-forget like the head).
+        for (const id of extraSeenIds ?? []) {
+            void client().markMessageSeen(id).catch(() => {});
         }
     });
     // #974 — fail loud quand le proxy était censé recevoir l'inject mais a
@@ -1412,7 +1419,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    const { phrase, headMessageId, hasContent, backlogTicketId } = await pickPhrase(hint);
+    const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds } = await pickPhrase(hint);
     // If there's nothing actionable to surface (no FIFO head, no backlog,
     // no triggered gate), don't fire — david: "si y a rien on dit rien".
     // Manual wakes and panic still go through; their content is the
@@ -1455,7 +1462,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // #881 — TurnController acteur : TURN_STARTED transitionne no_turn→in_turn
     // et clear idleSinceMs (bridge subscriber écrit setIpcIdleSince(null)).
     getTurnService().turnStarted(Date.now());
-    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId);
+    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId, extraSeenIds);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup). The legacy count watermark fallback was
     // dropped in #814 — its only writer wrote a file no one read.

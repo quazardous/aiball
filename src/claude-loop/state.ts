@@ -1460,6 +1460,9 @@ export interface ContextPhraseResult {
      *  the event). Null for backlog-head wakes and for idle / no-head
      *  culture pings. */
     headMessageId: number | null;
+    /** #1163 S2 — ids des decision-events groupés dans le digest (au-delà du
+     *  head) : à marquer seen au même moment que le head à l'injection. */
+    extraSeenIds?: number[];
     /** True iff the phrase carries actionable content (FIFO head,
      *  ticket_created head, lifecycle head, or backlog head). False
      *  when the phrase is just the idle culture+lead. Drain-style
@@ -1590,7 +1593,7 @@ export async function buildContextPhrase(
                 : 0;
         const actionableCount = sumBy("actionable_count");
         const openCount = sumBy("open_count");
-        if (pingCount === 0 && openCount === 0) return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null };
+        if (pingCount === 0 && openCount === 0) return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null, extraSeenIds: [] };
 
         // #B.232: when BOTH pings and open tickets are pending, chain
         // both directives so the agent doesn't drain pings and stop —
@@ -1692,6 +1695,38 @@ export async function buildContextPhrase(
             escalation_rejected: "REJECT — your escalation",
         };
         const unreadKind = unreadHead?.kind ?? "";
+        // #1163 S2 — digest des decision-events : quand la TÊTE du FIFO est un
+        // event décisionnel ET que les messages non-vus suivants le sont
+        // aussi (le run de tête), on les livre EN UN SEUL wake au lieu d'un
+        // tour par accept (« 5 resolution ACCEPTED = 5 tours », REX runic).
+        // Les events restent unitaires en DB ; seule la LIVRAISON groupe.
+        // Les comments/tickets (qui demandent une action) restent unitaires.
+        const DIGEST_LABELS: Record<string, string> = {
+            plan_accepted: "plan ACCEPTED",
+            plan_rejected: "plan REJECT",
+            resolution_accepted: "resolution ACCEPTED",
+            resolution_rejected: "resolution REJECT",
+            wontfix_accepted: "wontfix ACCEPTED",
+            wontfix_rejected: "wontfix REJECT",
+            escalation_accepted: "escalation ACCEPTED",
+            escalation_rejected: "escalation REJECT",
+        };
+        const unreadMsgs = Array.isArray(unreadR?.messages) ? unreadR.messages : [];
+        const decisionRun: typeof unreadMsgs = [];
+        for (const m of unreadMsgs) {
+            if (m?.kind && DIGEST_LABELS[m.kind]) decisionRun.push(m);
+            else break;
+        }
+        let headDecisionDigest = "";
+        let digestExtraSeenIds: number[] = [];
+        if (decisionRun.length >= 2) {
+            const deciders = new Set(decisionRun.map((m) => m.by_agent ?? ""));
+            const by = deciders.size === 1 ? ` — by ${[...deciders][0]}` : "";
+            const parts = decisionRun.map((m) =>
+                `${DIGEST_LABELS[m.kind!]} #${m.kind === "ticket_created" ? m.id : (m.ticket_id ?? m.id)}`);
+            headDecisionDigest = `${decisionRun.length} decisions${by}: ${parts.join(" · ")}`;
+            digestExtraSeenIds = decisionRun.slice(1).map((m) => m.id).filter((v): v is number => typeof v === "number");
+        }
         if (unreadKind && LIFECYCLE_VERBS[unreadKind]) {
             headLifecycleVerb = LIFECYCLE_VERBS[unreadKind];
         }
@@ -1700,7 +1735,7 @@ export async function buildContextPhrase(
         let headDecisionEvent = "";
         let headDecisionDecider = "";
         let headDecisionRefHashid = "";
-        if (unreadKind && DECISION_EVENT_VERBS[unreadKind]) {
+        if (unreadKind && DECISION_EVENT_VERBS[unreadKind] && !headDecisionDigest) {
             headDecisionEvent = DECISION_EVENT_VERBS[unreadKind];
             headDecisionDecider = unreadHead?.by_agent ?? "";
             // Look up the original proposal hashid via the parent_id link
@@ -1875,7 +1910,7 @@ export async function buildContextPhrase(
             // (comment, new ticket, lifecycle, decision-event, backlog).
             // The template grammar lacks an else-empty operator so the
             // inversion lives here.
-            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !headLifecycleVerb && !headDecisionEvent && !backlogMode) ? "1" : "",
+            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !headLifecycleVerb && !headDecisionEvent && !headDecisionDigest && !backlogMode) ? "1" : "",
             backlog_mode: backlogMode,
             head_comment_hashid: headCommentHashid,
             head_body: headBody,
@@ -1884,6 +1919,9 @@ export async function buildContextPhrase(
             // wake template wraps it with the ticket ref + decider + the
             // original proposal hashid for navigation.
             head_decision_event: headDecisionEvent,
+            // #1163 S2 — pré-formaté comme head_decision_event ; branche
+            // mutuellement exclusive (le single est éteint quand le digest fire).
+            head_decision_digest: headDecisionDigest,
             head_decision_decider: headDecisionDecider,
             head_decision_ref_hashid: headDecisionRefHashid,
             project_scope: scope,
@@ -1912,6 +1950,7 @@ export async function buildContextPhrase(
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
+            + "{head_decision_digest:+{head_decision_digest}}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.{state_time:+ (state {state_time})}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
@@ -1939,12 +1978,12 @@ export async function buildContextPhrase(
         // (FIFO comment, lifecycle, new ticket, or backlog). When false
         // the phrase is just the idle culture+lead — drain-style wake
         // reasons skip on it.
-        const hasContent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent || head?.kind === "new ticket" || backlogMode);
+        const hasContent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent || headDecisionDigest || head?.kind === "new ticket" || backlogMode);
         // #786 — surface the backlog-branch ticket id so the inject site
         // can start the per-consumer cooldown clock. Only when the
         // backlog branch actually fired (not on FIFO / lifecycle).
         const backlogTicketId = (backlogMode && head?.id) ? head.id : null;
-        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId };
+        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: digestExtraSeenIds };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
@@ -1954,9 +1993,10 @@ export async function buildContextPhrase(
             // A triggered gate counts as content even if the FIFO is empty.
             hasContent: hasContent || gateResults.length > 0,
             backlogTicketId,
+            extraSeenIds: digestExtraSeenIds,
         };
     } catch {
-        return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null };
+        return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null, extraSeenIds: [] };
     }
 }
 
