@@ -630,6 +630,7 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
             ticketId: hint.ticket_id,
             commentHashid: hint.comment_hashid,
             commentBody: ctx.commentBody ?? hint.comment_body,
+            commentKind: ctx.commentKind,
         };
     }
     const result = await buildContextPhrase(

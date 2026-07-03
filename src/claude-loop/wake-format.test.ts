@@ -90,3 +90,32 @@ test("#999 event wake with FIFO already carrying the comment → still comment-c
     assert.match(res.phrase, /#920/);
     assert.doesNotMatch(res.phrase, /Triage the ticket/);
 });
+
+// #1169 — un decision-event (body vide) arrivé par HINT alors que le FIFO ne
+// l'a pas comme head ne doit PAS se rendre en refs nues « (#N / #hashid) ».
+// Le hint porte maintenant `commentKind` ; la branche comment-centrique est
+// désactivée pour un decision-event → skip propre (l'event ressurgit via FIFO).
+test("#1169 hint decision-event (empty FIFO) → PAS de refs nues, tombe sur backlog", async () => {
+    const res = await buildContextPhrase(stubClient(), null, PINGS_YAML, {
+        ticketId: 1166,
+        commentHashid: "48c3kp",
+        commentBody: "", // decision-event = body vide
+        commentKind: "resolution_accepted",
+    });
+    // surtout PAS « (#1166 / #48c3kp) » nu
+    assert.doesNotMatch(res.phrase, /#48c3kp/, `refs nues rendues : ${JSON.stringify(res.phrase)}`);
+    // le FIFO étant vide, on retombe sur la branche backlog (comportement sain)
+    // — l'important est l'absence de la ref-comment nue.
+});
+
+test("#1169 hint comment_added réel (empty FIFO) → toujours comment-centric", async () => {
+    // garde-fou anti-régression : un vrai comment continue de rendre body+ref.
+    const res = await buildContextPhrase(stubClient(), null, PINGS_YAML, {
+        ticketId: 920,
+        commentHashid: "qctwhw",
+        commentBody: "real comment body",
+        commentKind: "comment_added",
+    });
+    assert.match(res.phrase, /real comment body/);
+    assert.match(res.phrase, /qctwhw/);
+});

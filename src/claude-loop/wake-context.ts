@@ -40,7 +40,7 @@ export async function fetchWakeContext(
     client: AiballClient,
     hint: WakeHint,
     me: string | undefined,
-): Promise<{ stakeholder: boolean; commentBody?: string }> {
+): Promise<{ stakeholder: boolean; commentBody?: string; commentKind?: string }> {
     if (!me || !hint.ticket_id) return { stakeholder: true };
     try {
         // Ticket header (claimant/assignee) + le message déclencheur par id,
@@ -51,7 +51,7 @@ export async function fetchWakeContext(
                 ticket?: { claimant?: string | null; assignee?: string | null };
             }>,
             hint.comment_id
-                ? (client.getMessage(hint.comment_id) as Promise<{ body?: string | null }>)
+                ? (client.getMessage(hint.comment_id) as Promise<{ body?: string | null; kind?: string }>)
                     .catch(() => null)
                 : Promise.resolve(null),
         ]);
@@ -82,7 +82,10 @@ export async function fetchWakeContext(
             mentionsMe = re.test(rawBody);
         }
         const stakeholder = t.claimant === me || t.assignee === me || mentionsMe;
-        return { stakeholder, commentBody };
+        // #1169 — remonter le kind du message déclencheur : la branche
+        // comment-centrique du wake ne doit PAS s'appliquer à un decision-event
+        // (body vide par nature) sinon le wake se réduit aux refs nues.
+        return { stakeholder, commentBody, commentKind: mResp?.kind };
     } catch {
         return { stakeholder: true };
     }

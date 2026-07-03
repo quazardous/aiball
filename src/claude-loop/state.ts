@@ -1491,6 +1491,10 @@ export interface WakeEventHint {
     commentHashid?: string;
     /** markdown-stripped comment body (already truncated upstream). */
     commentBody?: string;
+    /** #1169 — kind of the triggering message. The comment-centric anchor
+     *  only applies to a real `comment_added` ; a decision-event / lifecycle
+     *  arriving by hint must NOT render as bare refs (empty body). */
+    commentKind?: string;
 }
 
 export async function buildContextPhrase(
@@ -1782,7 +1786,16 @@ export async function buildContextPhrase(
         // the safety net for the empty-FIFO case that used to fall through to
         // the backlog branch (the bug). The backlog ticket-centric "Triage"
         // branch is reserved for the no-hint heartbeat path (gated below).
-        if (eventHint?.commentHashid
+        // #1169 — n'ancrer sur le hint QUE si c'est un vrai comment_added.
+        // Un decision-event / lifecycle arrivé par hint (body vide) rendrait
+        // « (#N / #hashid) » nu ; on le laisse tomber → l'empty-phrase guard
+        // skippe le wake proprement, et l'event ressurgit via le FIFO (où sa
+        // branche decision-event rend « Your resolution was ACCEPTED »).
+        const hintIsComment = eventHint?.commentKind
+            ? (!DECISION_EVENT_VERBS[eventHint.commentKind] && !LIFECYCLE_VERBS[eventHint.commentKind]
+                && eventHint.commentKind !== "ticket_created")
+            : true; // kind inconnu (hint legacy) : comportement inchangé
+        if (eventHint?.commentHashid && hintIsComment
             && !headCommentHashid && !headLifecycleVerb && !headDecisionEvent
             && head?.kind !== "new ticket") {
             headCommentHashid = eventHint.commentHashid;
