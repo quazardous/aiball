@@ -1887,6 +1887,10 @@ export async function buildContextPhrase(
             head_decision_decider: headDecisionDecider,
             head_decision_ref_hashid: headDecisionRefHashid,
             project_scope: scope,
+            // #1158 (a) — timestamp du CTA backlog : un pointeur d'état peut
+            // périmer dans la file d'input (pilotage concurrent) ; dater le
+            // CTA rend le skip d'un wake périmé trivial côté agent.
+            state_time: new Date().toTimeString().slice(0, 5),
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
             // empty → renders to nothing). David puts the placeholder in his
             // wake_master override where he wants it.
@@ -1908,7 +1912,7 @@ export async function buildContextPhrase(
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
-            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}";
+            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.{state_time:+ (state {state_time})}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced
