@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
 import { api, type Consumer, type NodeView } from "../lib/api";
+import { relativeTimeFine } from "../lib/format";
 import { useLoader } from "../lib/loader";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
@@ -84,16 +85,10 @@ onUnmounted(() => {
 // #B.177 Activity column helpers
 // =====================================================================
 
+// C2 slice 2 : la variante seconds-granularity vit dans lib/format
+// (`relativeTimeFine`) ; le tick réactif `now` continue de driver le repaint.
 function relativeTime(iso: string | null | undefined): string {
-    if (!iso) return "never";
-    const t = Date.parse(iso);
-    if (!Number.isFinite(t)) return iso;
-    const diff = now.value - t;
-    if (diff < 0) return "just now";
-    if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-    return `${Math.floor(diff / 86_400_000)}d ago`;
+    return relativeTimeFine(iso, now.value);
 }
 
 function isHeartbeatFresh(r: Consumer): boolean {

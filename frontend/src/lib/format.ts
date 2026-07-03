@@ -132,6 +132,35 @@ export function relativeTime(iso: string): string {
     return d.toLocaleDateString();
 }
 
+/**
+ * Seconds-granularity sibling of {@link relativeTime} (C2 slice 2 — absorbed
+ * from ConsumersPanel) : takes an explicit `nowMs` so a reactive tick-clock
+ * can drive repaint, tolerates null ("never") and unparsable input (echoed).
+ */
+export function relativeTimeFine(iso: string | null | undefined, nowMs: number = Date.now()): string {
+    if (!iso) return "never";
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return iso;
+    const diff = nowMs - t;
+    if (diff < 0) return "just now";
+    if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+    return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+/**
+ * "last activity Ns/Nmin/Nh ago" liveness hint (C2 slice 2 — the byte-identical
+ * `livenessTitle` pair in NodesPanel / NodeDetailPage).
+ */
+export function formatActivityAge(lastUsedAt: string | null, nowMs: number = Date.now()): string {
+    if (!lastUsedAt) return "never seen";
+    const ageSec = Math.max(0, Math.round((nowMs - Date.parse(lastUsedAt)) / 1000));
+    if (ageSec < 60) return `last activity ${ageSec}s ago`;
+    if (ageSec < 3600) return `last activity ${Math.round(ageSec / 60)}min ago`;
+    return `last activity ${Math.round(ageSec / 3600)}h ago`;
+}
+
 /** Inline snippet of a row — agent-authored summary (#B.87) takes
  *  priority, otherwise fall back to the body's first ~140 chars.
  *  Both flattened (whitespace collapsed). */

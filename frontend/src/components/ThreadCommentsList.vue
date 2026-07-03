@@ -9,6 +9,7 @@
 import type { Message } from "../lib/api";
 import type { DeciderInfo, ThreadItem } from "../lib/threadItems";
 import { formatTicketRef } from "../lib/formatting";
+import { relativeTime as shortTime } from "../lib/format";
 import { ticketHref } from "../lib/base";
 import CommentNode from "./CommentNode.vue";
 import MarkdownView from "./MarkdownView.vue";
@@ -55,15 +56,6 @@ function decodeRelationEvent(m: Message): { verb: string; target: number | null 
     return { verb: "linked", target };
 }
 
-function shortTime(iso: string): string {
-    const d = new Date(iso);
-    const diff = Date.now() - d.getTime();
-    const min = 60_000, hr = 3_600_000, day = 86_400_000;
-    if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m ago`;
-    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
-    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-    return d.toLocaleDateString();
-}
 </script>
 
 <template>

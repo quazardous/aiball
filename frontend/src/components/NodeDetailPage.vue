@@ -18,6 +18,7 @@ import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
+import { formatActivityAge } from "../lib/format";
 import { useLoader } from "../lib/loader";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
@@ -67,11 +68,7 @@ function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
     return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));
 }
 function livenessTitle(lastUsedAt: string | null): string {
-    if (!lastUsedAt) return "never seen";
-    const ageSec = Math.max(0, Math.round((nowMs.value - Date.parse(lastUsedAt)) / 1000));
-    if (ageSec < 60) return `last activity ${ageSec}s ago`;
-    if (ageSec < 3600) return `last activity ${Math.round(ageSec / 60)}min ago`;
-    return `last activity ${Math.round(ageSec / 3600)}h ago`;
+    return formatActivityAge(lastUsedAt, nowMs.value);
 }
 
 // #510 — pastille dédiée au canal WS reverse. Connecté + silence < 30s = up

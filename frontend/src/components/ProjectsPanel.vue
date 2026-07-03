@@ -5,7 +5,7 @@ import InputText from "primevue/inputtext";
 import { useToast } from "primevue/usetoast";
 import { api, type ProjectMeta } from "../lib/api";
 import { bus } from "../lib/bus";
-import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
+import { estTokenEffort, formatTokens, tokenBreakdownTitle, relativeTime } from "../lib/format";
 import { useLoader } from "../lib/loader";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
@@ -80,16 +80,6 @@ async function submitCreate() {
     } finally {
         creating.value = false;
     }
-}
-
-function relativeTime(iso: string): string {
-    const d = new Date(iso);
-    const diff = Date.now() - d.getTime();
-    const min = 60_000, hr = 3_600_000, day = 86_400_000;
-    if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m ago`;
-    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
-    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-    return d.toLocaleDateString();
 }
 
 defineExpose({ load });

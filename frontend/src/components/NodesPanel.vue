@@ -5,6 +5,7 @@
 // The token value is never exposed — a node is keyed by a non-secret `node_id`.
 import { ref, onMounted, onUnmounted } from "vue";
 import { api, type NodeView } from "../lib/api";
+import { formatActivityAge } from "../lib/format";
 import { useLoader } from "../lib/loader";
 import NodeDetailPage from "./NodeDetailPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
@@ -52,11 +53,7 @@ function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
     return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));
 }
 function livenessTitle(lastUsedAt: string | null): string {
-    if (!lastUsedAt) return "never seen";
-    const ageSec = Math.max(0, Math.round((nowMs.value - Date.parse(lastUsedAt)) / 1000));
-    if (ageSec < 60) return `last activity ${ageSec}s ago`;
-    if (ageSec < 3600) return `last activity ${Math.round(ageSec / 60)}min ago`;
-    return `last activity ${Math.round(ageSec / 3600)}h ago`;
+    return formatActivityAge(lastUsedAt, nowMs.value);
 }
 
 // #513 — version proxy compacte pour la liste.
