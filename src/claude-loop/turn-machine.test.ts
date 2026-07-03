@@ -151,3 +151,53 @@ test("re-entering no_turn (TURN_ENDED → fresh) reset le settle timer", async (
     await new Promise((r) => setTimeout(r, SETTLE + 50));
     assert.equal(events.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// #1162 — self-heal : TURN_ENDED hors in_turn (le trou qui rendait la loop
+// sourde après un self-reload mid-turn : Stop hooks avalés, idle jamais
+// seedé, drain tempo mort jusqu'au prochain submit humain).
+// ---------------------------------------------------------------------------
+
+test("#1162: TURN_ENDED from unknown (reload mid-turn) → no_turn + idle seedé", (t) => {
+    const actor = mkActor(t);
+    // Kernel rechargé en plein turn : pas de SESSION_START (claude n'a pas
+    // redémarré), le premier événement reçu est le Stop de fin de tour.
+    actor.send({ type: "TURN_ENDED", atMs: 5_000 });
+    assert.equal(actor.getSnapshot().matches("no_turn"), true);
+    assert.equal(actor.getSnapshot().context.idleSinceMs, 5_000);
+});
+
+test("#1162: TURN_ENDED from unknown émet turn:ended + turn:no_turn_since", (t) => {
+    const actor = mkActor(t);
+    const seen: string[] = [];
+    actor.on("turn:ended", () => { seen.push("ended"); });
+    actor.on("turn:no_turn_since", () => { seen.push("no_turn_since"); });
+    actor.send({ type: "TURN_ENDED", atMs: 5_000 });
+    assert.deepEqual(seen, ["ended", "no_turn_since"]);
+});
+
+test("#1162: TURN_ENDED from unknown ré-arme le cycle settled (tempo)", async (t) => {
+    const actor = mkActor(t, { tunnelMs: 20 });
+    let settled = 0;
+    actor.on("turn:settled", () => { settled++; });
+    actor.send({ type: "TURN_ENDED", atMs: 5_000 });
+    await new Promise((r) => setTimeout(r, 70));
+    assert.ok(settled >= 2, `settled re-emits expected, got ${settled}`);
+});
+
+test("#1162: TURN_ENDED en no_turn = re-stamp idempotent (ancre idle avancée)", (t) => {
+    const actor = mkActor(t);
+    actor.send({ type: "SESSION_START", atMs: 1_000 });
+    actor.send({ type: "TURN_ENDED", atMs: 9_000 }); // Stop d'un turn non comptabilisé
+    assert.equal(actor.getSnapshot().matches("no_turn"), true);
+    assert.equal(actor.getSnapshot().context.idleSinceMs, 9_000);
+});
+
+test("#1162: le cycle nominal in_turn → TURN_ENDED reste inchangé", (t) => {
+    const actor = mkActor(t);
+    actor.send({ type: "SESSION_START", atMs: 1_000 });
+    actor.send({ type: "TURN_STARTED", atMs: 2_000 });
+    actor.send({ type: "TURN_ENDED", atMs: 3_000 });
+    assert.equal(actor.getSnapshot().matches("no_turn"), true);
+    assert.equal(actor.getSnapshot().context.idleSinceMs, 3_000);
+});

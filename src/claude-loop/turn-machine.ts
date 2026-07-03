@@ -113,6 +113,17 @@ export const turnMachine = setup({
                     target: "no_turn",
                     actions: ["emitNoTurnSinceSessionStart", "stampIdleAt"],
                 },
+                // #1162 — self-heal symétrique de #898 : un Stop hook reçu
+                // alors que la comptabilité est perdue (kernel self-reload
+                // MID-TURN → le controller reboot en `unknown`, claude n'a
+                // pas redémarré donc pas de SESSION_START) PROUVE qu'on est
+                // au prompt. Sans cette transition, l'événement était
+                // silencieusement droppé → idle jamais seedé → drain tempo
+                // mort → loop sourde jusqu'au prochain submit humain.
+                TURN_ENDED: {
+                    target: "no_turn",
+                    actions: ["emitTurnEnded", "emitNoTurnSinceTurnEnded", "stampIdleAt"],
+                },
             },
         },
         no_turn: {
@@ -125,6 +136,14 @@ export const turnMachine = setup({
                 TURN_STARTED: {
                     target: "in_turn",
                     actions: ["emitTurnStarted", "clearIdle"],
+                },
+                // #1162 — Stop reçu alors qu'on se croit déjà no_turn (turn
+                // raté par la comptabilité) : re-stamp l'ancre idle sur la
+                // preuve la plus fraîche et repart en fresh → le cycle
+                // settled/tempo redémarre proprement. Idempotent.
+                TURN_ENDED: {
+                    target: ".fresh",
+                    actions: ["emitNoTurnSinceTurnEnded", "stampIdleAt"],
                 },
             },
             states: {
