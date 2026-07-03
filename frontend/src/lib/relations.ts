@@ -28,19 +28,6 @@ export function isLineageRelationKind(k: string): boolean {
     return (LINEAGE_RELATION_KINDS as readonly string[]).includes(k);
 }
 
-export interface TypedRelationMeta {
-    kind: RelationKind;
-    target_ticket_id: number;
-}
-
-export function inverseRelationKind(k: RelationKind): RelationKind {
-    if (k === "depends_on") return "blocks";
-    if (k === "blocks") return "depends_on";
-    if (k === "child_of") return "parent_of";
-    if (k === "parent_of") return "child_of";
-    return k;
-}
-
 /**
  * Human-facing labels for the relation kinds. Used in chips and the
  * dropdown selector.
@@ -55,16 +42,3 @@ export const RELATION_LABELS: Record<RelationKind, string> = {
     parent_of: "parent of",
 };
 
-/**
- * Severity hint for PrimeVue Tag — neutral for soft references,
- * warning for workflow-blocking, danger for duplicates.
- */
-export const RELATION_SEVERITY: Record<RelationKind, "info" | "warn" | "danger" | "secondary"> = {
-    relates_to: "info",
-    depends_on: "warn",
-    blocks: "warn",
-    duplicates: "danger",
-    ignored: "secondary",
-    child_of: "secondary",
-    parent_of: "secondary",
-};

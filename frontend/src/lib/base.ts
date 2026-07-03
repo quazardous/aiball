@@ -60,11 +60,6 @@ export function pushRoute(route: string): void {
     window.history.pushState({}, "", `#${route}`);
 }
 
-/** history.replaceState variant of {@link pushRoute}. */
-export function replaceRoute(route: string): void {
-    window.history.replaceState({}, "", `#${route}`);
-}
-
 /** #190 — canonical `<a href>` for an app route. Mirror of {@link pushRoute}
  *  for the declarative (anchor) side: routes live in the URL HASH, so a static
  *  link must be `#${route}` (keeps the served path = base ; a bare `/b/N` would

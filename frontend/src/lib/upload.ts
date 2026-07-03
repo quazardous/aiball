@@ -81,10 +81,6 @@ function resolveMime(file: File | Blob): string {
     return file.type || "application/octet-stream";
 }
 
-export function isUploadable(file: File | Blob): boolean {
-    return ALLOWED_TYPES.has(resolveMime(file));
-}
-
 /**
  * Pick the markdown snippet the recipient sees in the rendered body,
  * mirroring `src/mcp/upload.ts:renderMarkdown` :

@@ -23,10 +23,6 @@ export function scopeIcon(scope: Scope): string | null {
     }
 }
 
-export function scopeLabel(scope: Scope): string {
-    return scope;
-}
-
 export function scopeTitle(scope: Scope): string {
     switch (scope) {
         case "internal":
@@ -38,15 +34,3 @@ export function scopeTitle(scope: Scope): string {
     }
 }
 
-/**
- * Tailwind/CSS variable the badge should inherit so internal stays
- * muted and broadcast stays loud. Kept as CSS var refs so the theme
- * can swap them.
- */
-export function scopeColor(scope: Scope): string {
-    switch (scope) {
-        case "internal":  return "var(--p-text-muted-color)";
-        case "broadcast": return "var(--p-blue-500)";
-        default:          return "var(--p-text-muted-color)";
-    }
-}

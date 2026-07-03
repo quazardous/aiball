@@ -31,6 +31,3 @@ export const promoteTrigger = ref<PromoteTrigger>(
 watch(promoteTrigger, (v) => {
     localStorage.setItem(PROMOTE_TRIGGER_KEY, v);
 });
-export function togglePromoteTrigger(): void {
-    promoteTrigger.value = promoteTrigger.value === "hover" ? "contextmenu" : "hover";
-}

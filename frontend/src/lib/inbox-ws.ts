@@ -83,6 +83,25 @@ export function useInboxWs(opts: {
             bus.emit("inbox.refresh");
             return;
         }
+        if (ev.type === "project_purged") {
+            // Bulk deletion of old closed tickets — same surfaces to refetch
+            // as a project delete (rows + per-project counts). Previously
+            // undeclared and handled by the fallthrough below by accident.
+            bus.emit("inbox.refresh");
+            bus.emit("projects.refresh");
+            return;
+        }
+        if (ev.type === "project_renamed") {
+            // The old name no longer exists — reuse the project.deleted
+            // recovery path so a stale selection of the old name falls back,
+            // then refetch lists (they carry the new name). Previously
+            // undeclared (fallthrough-by-accident).
+            const old = (ev.data as { old?: string } | undefined)?.old;
+            if (old) bus.emit("project.deleted", { project: old });
+            bus.emit("projects.refresh");
+            bus.emit("inbox.refresh");
+            return;
+        }
         // Remaining events are message-shaped (`message_created`,
         // `message_decided`, `message_edited`, `message_noted`).
         const data = ev.data as Message | undefined;

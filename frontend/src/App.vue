@@ -266,8 +266,8 @@ document.documentElement.classList.toggle("aiball-dark", dark.value);
 
 // Compact layout is now the only layout (#B.312 ripped out the toggle).
 // Clean up the persisted preference so the localStorage stays tidy.
-// Keep the provide() so consumers (MessageCard, future opt-in compact
-// users) still see a reactive ref — it just never flips anymore.
+// Keep the provide() so any future opt-in compact consumer still sees
+// a reactive ref — it just never flips anymore.
 localStorage.removeItem("aiball.compact");
 const compact = ref(true);
 provide("compact", compact);

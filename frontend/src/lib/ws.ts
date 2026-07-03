@@ -14,6 +14,10 @@ export type WsEvent =
     | { type: "tag_changed"; data: unknown }
     | { type: "strategy_changed"; data: { strategy: Strategy } }
     | { type: "project_deleted"; data: { project: string; deleted_messages: number } }
+    // Bulk purge of old closed tickets inside a project (settings action).
+    | { type: "project_purged"; data: { project: string } }
+    // Project renamed from the settings page.
+    | { type: "project_renamed"; data: { old: string; new: string } }
     // A consumer's live state changed: loop state push (dedup'd daemon-side),
     // presence flip on SSE open/close, or consumer CRUD. Previously undeclared
     // — the event reached the relay through the JSON cast and was handled by

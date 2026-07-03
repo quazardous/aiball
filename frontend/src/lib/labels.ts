@@ -9,7 +9,6 @@
  * label etc"). Phase E of #B.332.
  */
 import type { InboxRow, Intent, Priority, Strategy } from "./api";
-import type { MessageKind } from "./domain";
 import type { BulkAction } from "./ticket-actions";
 import type { LifecycleStage } from "./ticket-state";
 
@@ -152,80 +151,12 @@ export const STATUS_SEVERITY: Record<InboxRow["status"], Severity> = {
     rejected: "danger",
 };
 
-// =====================================================================
-//  Kind labels + icons (single source for the moderation queue)
-// =====================================================================
-//
-// MessageCard.vue used to switch-case on `kind` and cover only 3 of the
-// 8 values (`ticket_created`, `comment_added`, `ticket_closed`), with
-// a raw-string fallback for the rest — so the moderation queue rendered
-// `ticket_blocked` / `ticket_resolved` / `ticket_reopened` etc. as
-// their raw enum text. Catalogue here so all 8 are covered uniformly
-// and adding a new kind is a one-place change (per #B.122).
-
-export const KIND_LABELS: Record<MessageKind, string> = {
-    ticket_created: "ticket",
-    comment_added: "comment",
-    ticket_closed: "close",
-    ticket_reopened: "reopen",
-    ticket_resolved: "resolved",
-    ticket_blocked: "blocked",
-    ticket_sub_added: "sub-ticket",
-    ticket_referenced: "reference",
-    ticket_relation: "relation",
-    // #830 — decision-event kinds (8). Renderer treats them as
-    // lifecycle-style chips (no body, just the verb).
-    plan_accepted: "plan accepted",
-    plan_rejected: "plan rejected",
-    resolution_accepted: "resolution accepted",
-    resolution_rejected: "resolution rejected",
-    wontfix_accepted: "wontfix accepted",
-    wontfix_rejected: "wontfix rejected",
-    escalation_accepted: "escalation accepted",
-    escalation_rejected: "escalation rejected",
-};
-
-export const KIND_ICONS: Record<MessageKind, string> = {
-    ticket_created: "pi pi-ticket",
-    comment_added: "pi pi-comment",
-    ticket_closed: "pi pi-lock",
-    ticket_reopened: "pi pi-unlock",
-    ticket_resolved: "pi pi-check-circle",
-    ticket_blocked: "pi pi-ban",
-    ticket_sub_added: "pi pi-sitemap",
-    ticket_referenced: "pi pi-link",
-    ticket_relation: "pi pi-share-alt",
-    // #830 — accepted = check, rejected = times. Kind family read via
-    // the label (plan / resolution / wontfix / escalation).
-    plan_accepted: "pi pi-check",
-    plan_rejected: "pi pi-times",
-    resolution_accepted: "pi pi-check",
-    resolution_rejected: "pi pi-times",
-    wontfix_accepted: "pi pi-check",
-    wontfix_rejected: "pi pi-times",
-    escalation_accepted: "pi pi-check",
-    escalation_rejected: "pi pi-times",
-};
-
 export const INTENT_SEVERITY: Record<Intent, Severity> = {
     panic: "danger",
     request: "info",
     question: "warn",
     fyi: "secondary",
     feature: "success", // #319: green — new feature work (branch + PR)
-};
-
-/**
- * Severity tint for priority badges (#B.222). Mirrors INTENT_SEVERITY's
- * shape so badge call-sites stay symmetric. `normal` maps to "secondary"
- * but the call-site is expected to skip rendering for the default so
- * 90% of tickets stay visually clean.
- */
-export const PRIORITY_SEVERITY: Record<Priority, Severity> = {
-    urgent: "danger",
-    high: "warn",
-    normal: "secondary",
-    low: "info",
 };
 
 // #632 david `qjmg84` : the inlined Material Symbols SVG paths now live in
@@ -235,8 +166,7 @@ export const PRIORITY_SEVERITY: Record<Priority, Severity> = {
 /**
  * #632 david `xsgcg6` : the priority chevron now lives next to the
  * checkbox (no Tag/decoration), so its color must be applied via
- * `style="color: var(...)"`. PRIORITY_SEVERITY stays for any future
- * Tag-style consumer ; this map is the bare CSS var name companion
+ * `style="color: var(...)"`. Bare CSS var name map
  * for icon-only rendering. `normal` has no color (caller skips render).
  * Uses PrimeVue's --p-* color tokens so dark/light theme follow.
  */
