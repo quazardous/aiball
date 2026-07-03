@@ -33,6 +33,15 @@ dates are YYYY-MM-DD.
   banner was missed clearing, so the loop can never freeze on a stale
   detection; the state clears itself the moment Claude is working again.
 
+- **`claude-loop health` detects orphan tmux launchers.** A wedged
+  `tmux new-session` process surviving while its session is dead used to make
+  a crashed loop look started; health now flags it per loop (new `launcher`
+  check) and sweeps for strays whose state directory was deleted. Detection
+  only — cleanup comes next.
+- **Per-project presence-hold duration.** How long the loop stays deferential
+  after you type (the `wait` window) is configurable via
+  `claude_loop.presence_hold_seconds` in `.aiball.yaml` (default unchanged,
+  10 min).
 - **"Not logged in" loop state.** When Claude Code isn't logged in, the loop
   bar turns orange with a `/login` hint and auto-wakes are held — no point
   waking a session that can't act. It clears automatically as soon as Claude is
@@ -42,6 +51,18 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **UI normalization pass.** One shared design language across the admin
+  screens: form rows, section headers and loading/error/empty states now come
+  from the shared kit; font sizes and corner radii ride a small token scale
+  (near-identical sizes were folded together — sub-pixel differences); every
+  delete confirmation uses the same dialog (two screens still used the
+  blocking browser popup). Dead screens and code were removed along the way.
+- **Loop heartbeats no longer refetch the whole inbox.** Every state push
+  from every loop used to trigger a full inbox + sidebar refetch in each open
+  browser tab (an accident of event routing); consumer state changes now
+  repaint only the consumer surfaces, and identical heartbeats aren't
+  broadcast at all. Presence flips (a killed loop clearing to offline) stay
+  live.
 - **`--permission-mode` is now configurable and no longer forced to `auto`.**
   A loop's claude permission mode is set via `claude_loop.permission_mode` in
   `.aiball.yaml`, **empty by default** — claude runs in its interactive mode
