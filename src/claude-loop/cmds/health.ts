@@ -1,15 +1,16 @@
 /**
  * `claude-loop health [<name>]` — plomberie diagnostic (#860).
  *
- * 9 checks par loop : loop process + source SHA, loop.sock UDS, proxy
- * alive, tmux session, ipc freshness, boot status, aiball daemon, SSE.
+ * 10 checks par loop : loop process + source SHA, loop.sock UDS, proxy
+ * alive, tmux session, orphan launcher (#1100), ipc freshness, boot
+ * status, aiball daemon, SSE.
  * Sortie text colorée (✅/⚠️/❌) ou `--json`. Exit code = 0 si tout
  * OK, 1 si un check ❌, 2 si au moins un ⚠️.
  *
  * Pure read-only ; aucun side-effect. Réutilise les helpers existants
  * de `state.ts` + le UDS `queryLoopState` du #774.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -175,6 +176,103 @@ export function checkTmuxSession(name: string): HealthCheck {
     return { name: "tmux session", status: "fail", detail: `${tmuxName(name)} doesn't exist` };
 }
 
+// ---------------------------------------------------------------------------
+// #1100 (Slice 1 de #1090) — orphan tmux-launcher detection.
+//
+// The start path blocks on `spawnSync(MUX_CMD, ["new-session", "-d", …])`.
+// When that launcher wedges (tmux server socket stuck, etc.) it can survive
+// while the session it was creating is dead / never born — the loop then
+// LOOKS started (a tmux process exists) but nothing runs. Detection only
+// here (health stays read-only) ; the kill lands in Slice 2 (`--revive`).
+//
+// Ownership signature : the launcher's cmdline carries our inner bootstrap
+// (`source '<STATE_ROOT>/<name>/env' …`), so a cmdline containing STATE_ROOT
+// is one of OURS even after the state dir was rm'd. (The #1090 plan said to
+// filter on a `cl-*` session prefix, but `tmuxName()` is identity — sessions
+// carry no prefix ; the STATE_ROOT marker is the real discriminator.)
+// Linux-only, like `sweepOrphans` — /proc scans have no portable equivalent.
+// ---------------------------------------------------------------------------
+
+export interface LauncherMatch { pid: number; session: string; }
+
+/** Pure matcher on a raw NUL-separated `/proc/<pid>/cmdline`. Returns the
+ *  target session name iff the process is a `tmux new-session -d -s <S>`
+ *  launcher (tmux OR psmux, absolute path tolerated). */
+export function matchLauncherCmdline(cmdline: string): string | null {
+    const argv = cmdline.split("\0").filter((a) => a.length > 0);
+    if (argv.length < 5) return null;
+    const bin = (argv[0].split(/[\\/]/).pop() ?? "").toLowerCase();
+    if (bin !== "tmux" && bin !== "psmux") return null;
+    if (argv[1] !== "new-session") return null;
+    if (!argv.includes("-d")) return null;
+    const si = argv.indexOf("-s");
+    if (si < 0 || si + 1 >= argv.length) return null;
+    return argv[si + 1];
+}
+
+/** Scan /proc for OUR surviving `new-session` launchers (cmdline matches
+ *  the launcher shape AND references STATE_ROOT). Read-only, linux-only. */
+export function scanLaunchers(): LauncherMatch[] {
+    if (process.platform !== "linux") return [];
+    const out: LauncherMatch[] = [];
+    let entries: string[];
+    try { entries = readdirSync("/proc"); }
+    catch { return out; }
+    for (const entry of entries) {
+        const pid = Number(entry);
+        if (!Number.isFinite(pid) || pid <= 1 || pid === process.pid) continue;
+        let cmdline: string;
+        try { cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8"); }
+        catch { continue; } // died / no permission
+        const session = matchLauncherCmdline(cmdline);
+        if (session === null) continue;
+        if (!cmdline.includes(STATE_ROOT)) continue; // not one of ours
+        out.push({ pid, session });
+    }
+    return out;
+}
+
+function sessionAlive(session: string): boolean {
+    const r = spawnSync(MUX_CMD, ["has-session", "-t", session], { stdio: "ignore" });
+    return !r.error && r.status === 0;
+}
+
+/** Per-loop probe : a surviving launcher for THIS loop's session while the
+ *  session is dead → fail. Deps injectable for tests. */
+export function checkOrphanLauncher(
+    name: string,
+    deps: { scan?: () => LauncherMatch[]; alive?: (s: string) => boolean } = {},
+): HealthCheck {
+    if (process.platform !== "linux") {
+        return { name: "launcher", status: "ok", detail: "n/a (non-linux)" };
+    }
+    const scan = deps.scan ?? scanLaunchers;
+    const alive = deps.alive ?? sessionAlive;
+    const t = tmuxName(name);
+    const hits = scan().filter((l) => l.session === t);
+    if (hits.length === 0) return { name: "launcher", status: "ok", detail: "no orphan launcher" };
+    if (alive(t)) {
+        // Launcher process present but the session exists — a launch in
+        // flight (transient) or tmux keeping the client around. Not an
+        // orphan ; no false positive on a live session.
+        return { name: "launcher", status: "ok", detail: `launcher pid ${hits[0].pid} present, session alive` };
+    }
+    const pids = hits.map((h) => h.pid).join(", ");
+    return { name: "launcher", status: "fail", detail: `orphan tmux launcher (pid ${pids}) — session dead` };
+}
+
+/** Global sweep for the state-dir-rm'd case the per-loop probe can't see
+ *  (health is indexed on plate.json) : any of OUR launchers whose session is
+ *  dead and which no per-loop report covers. */
+export function scanOrphanLaunchers(
+    excludeSessions: Set<string>,
+    deps: { scan?: () => LauncherMatch[]; alive?: (s: string) => boolean } = {},
+): LauncherMatch[] {
+    const scan = deps.scan ?? scanLaunchers;
+    const alive = deps.alive ?? sessionAlive;
+    return scan().filter((l) => !excludeSessions.has(l.session) && !alive(l.session));
+}
+
 const IPC_FRESH_TTL_MS = 10_000;
 export function checkIpcFreshness(live: LiveLoopState | null, nowMs: number = Date.now()): HealthCheck {
     if (live === null) {
@@ -292,6 +390,7 @@ export async function runHealthChecks(name: string): Promise<HealthReport> {
     checks.push(checkLoopSock(latencyMs, sockMissing, live));
     checks.push(checkProxy(sd));
     checks.push(checkTmuxSession(name));
+    checks.push(checkOrphanLauncher(name));
     checks.push(checkIpcFreshness(live));
     checks.push(checkBootStatus(sd, live));
     checks.push(await checkAiballDaemon());
@@ -348,6 +447,25 @@ export async function cmdHealth(target: string | string[] | null | undefined, op
     }
     const reports: HealthReport[] = [];
     for (const n of names) reports.push(await runHealthChecks(n));
+    // #1100 — global sweep : orphan launchers whose state dir was rm'd (no
+    // plate.json → no per-loop report). Rendered as a synthetic report so
+    // both the text and --json outputs keep one shape, and the exit code
+    // reflects the failure.
+    const covered = new Set(names.map((n) => tmuxName(n)));
+    const strays = scanOrphanLaunchers(covered);
+    if (strays.length > 0) {
+        reports.push({
+            loop_name: "(orphan launchers)",
+            state_dir: "",
+            exists: false,
+            checks: strays.map((l) => ({
+                name: "launcher",
+                status: "fail" as const,
+                detail: `orphan tmux launcher (pid ${l.pid}) for session '${l.session}' — session dead, no registered loop`,
+            })),
+            summary: { ok: 0, warn: 0, fail: strays.length },
+        });
+    }
     if (opts.json) {
         process.stdout.write(JSON.stringify(reports, null, 2) + "\n");
     } else {

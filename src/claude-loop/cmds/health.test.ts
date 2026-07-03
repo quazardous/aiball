@@ -21,6 +21,9 @@ const {
     checkIpcFreshness,
     checkBootStatus,
     checkSse,
+    matchLauncherCmdline,
+    checkOrphanLauncher,
+    scanOrphanLaunchers,
 } = await import("./health.js");
 
 function mkSd(name: string): string {
@@ -205,3 +208,62 @@ process.on("exit", () => {
 
 // Suppress unused-import lint if symlinkSync isn't used.
 void symlinkSync;
+
+// ---------------------------------------------------------------------------
+// #1100 — orphan tmux-launcher detection (Slice 1 de #1090).
+// ---------------------------------------------------------------------------
+
+const NUL = "\0";
+function cmdline(...argv: string[]): string { return argv.join(NUL) + NUL; }
+
+test("#1100 matchLauncherCmdline: matches the real launcher shape", () => {
+    // Forme réelle du start path : new-session -d -s <name> -c <cwd> -- bash -lc <inner>
+    const c = cmdline("tmux", "new-session", "-d", "-s", "myloop", "-c", "/home/x/proj", "--", "bash", "-lc", "source '/root/env'; …");
+    assert.equal(matchLauncherCmdline(c), "myloop");
+});
+
+test("#1100 matchLauncherCmdline: psmux + absolute path tolerated", () => {
+    const c = cmdline("/usr/local/bin/psmux", "new-session", "-d", "-s", "w1", "-c", "/p", "--", "bash", "-lc", "x");
+    assert.equal(matchLauncherCmdline(c), "w1");
+});
+
+test("#1100 matchLauncherCmdline: rejects non-launcher tmux commands", () => {
+    assert.equal(matchLauncherCmdline(cmdline("tmux", "attach", "-t", "myloop", "x")), null);
+    assert.equal(matchLauncherCmdline(cmdline("tmux", "new-session", "-s", "attached", "-c", "/p")), null); // pas -d
+    assert.equal(matchLauncherCmdline(cmdline("vim", "new-session", "-d", "-s", "x", "y")), null);
+    assert.equal(matchLauncherCmdline("garbage"), null);
+});
+
+const linuxOnly = process.platform === "linux";
+
+test("#1100 checkOrphanLauncher: launcher présent + session MORTE → fail", { skip: !linuxOnly }, () => {
+    const c = checkOrphanLauncher("deadloop", {
+        scan: () => [{ pid: 4242, session: "deadloop" }],
+        alive: () => false,
+    });
+    assert.equal(c.status, "fail");
+    assert.match(c.detail, /orphan tmux launcher \(pid 4242\)/);
+});
+
+test("#1100 checkOrphanLauncher: launcher présent + session VIVANTE → ok (pas de faux positif)", { skip: !linuxOnly }, () => {
+    const c = checkOrphanLauncher("liveloop", {
+        scan: () => [{ pid: 4242, session: "liveloop" }],
+        alive: () => true,
+    });
+    assert.equal(c.status, "ok");
+});
+
+test("#1100 checkOrphanLauncher: aucun launcher → ok", { skip: !linuxOnly }, () => {
+    const c = checkOrphanLauncher("noloop", { scan: () => [], alive: () => false });
+    assert.equal(c.status, "ok");
+});
+
+test("#1100 scanOrphanLaunchers: exclut les sessions couvertes + les vivantes", () => {
+    const scan = () => [
+        { pid: 1, session: "covered" },   // couverte par un rapport per-loop
+        { pid: 2, session: "alive" },     // session vivante
+        { pid: 3, session: "rmd-loop" },  // le cas state-dir rm'd
+    ];
+    const out = scanOrphanLaunchers(new Set(["covered"]), { scan, alive: (s) => s === "alive" });
+    assert.deepEqual(out, [{ pid: 3, session: "rmd-loop" }]);
+});
