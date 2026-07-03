@@ -3,9 +3,10 @@
 // last activity and last peer IP — each row links to the node detail page.
 // Read-only list; revoke + relayed consumers live on the detail page (#452).
 // The token value is never exposed — a node is keyed by a non-secret `node_id`.
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted } from "vue";
 import { api, type NodeView } from "../lib/api";
 import { formatActivityAge } from "../lib/format";
+import { useNowTicker } from "../lib/now-ticker";
 import { useLoader } from "../lib/loader";
 import NodeDetailPage from "./NodeDetailPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
@@ -39,15 +40,8 @@ function fmt(ts: string | null): string {
 }
 
 // #502 — la pastille est dérivée de `last_used_at` + l'horloge courante.
-const nowMs = ref(Date.now());
-let nowTimer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => {
-    load();
-    nowTimer = setInterval(() => { nowMs.value = Date.now(); }, 15_000);
-});
-onUnmounted(() => {
-    if (nowTimer) clearInterval(nowTimer);
-});
+const nowMs = useNowTicker(15_000);
+onMounted(() => { load(); });
 
 function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
     return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));

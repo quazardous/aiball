@@ -13,12 +13,13 @@
  * de corps — c'est le layout qui le fait, identique à toutes les pages
  * détail form-style.
  */
-import { ref, watch, onMounted, onUnmounted } from "vue";
+import { ref, watch } from "vue";
 import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
 import { formatActivityAge } from "../lib/format";
+import { useNowTicker } from "../lib/now-ticker";
 import { useLoader } from "../lib/loader";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
@@ -56,14 +57,7 @@ function fmt(ts: string | null): string {
 
 // #502 — pastille liveness : recompute toutes les 15s pour que la couleur
 // vieillisse sans Ctrl-R (cf. NodesPanel — même pattern).
-const nowMs = ref(Date.now());
-let nowTimer: ReturnType<typeof setInterval> | null = null;
-onMounted(() => {
-    nowTimer = setInterval(() => { nowMs.value = Date.now(); }, 15_000);
-});
-onUnmounted(() => {
-    if (nowTimer) clearInterval(nowTimer);
-});
+const nowMs = useNowTicker(15_000);
 function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
     return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));
 }

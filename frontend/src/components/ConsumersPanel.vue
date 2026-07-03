@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
 import { api, type Consumer, type NodeView } from "../lib/api";
 import { relativeTimeFine } from "../lib/format";
+import { useNowTicker } from "../lib/now-ticker";
 import { useLoader } from "../lib/loader";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
@@ -33,9 +34,11 @@ const emit = defineEmits<{
 // normal jitter never reads as offline.
 const OFFLINE_THRESHOLD_MS = 120_000;
 
-// Tick-clock so "2 min ago" updates without re-fetching the API.
-const now = ref(Date.now());
-let nowTimer: ReturnType<typeof setInterval> | null = null;
+// Tick-clock so "2 min ago" updates without re-fetching the API ; the
+// periodic ~30s refetch belt (missed-WS-event safety net) rides its onTick.
+const now = useNowTicker(6_000, (t) => {
+    if (Math.floor(t / 1000) % 30 === 0) void load();
+});
 
 const toast = useToast();
 const rows = ref<Consumer[]>([]);
@@ -72,13 +75,6 @@ const { loading, load } = useLoader(async () => {
 onMounted(() => {
     load();
     void loadNodes();
-    nowTimer = setInterval(() => {
-        now.value = Date.now();
-        if (Math.floor(now.value / 1000) % 30 === 0) void load();
-    }, 6_000);
-});
-onUnmounted(() => {
-    if (nowTimer) clearInterval(nowTimer);
 });
 
 // =====================================================================
