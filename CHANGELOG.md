@@ -27,8 +27,10 @@ dates are YYYY-MM-DD.
 
 - **"Not logged in" loop state.** When Claude Code isn't logged in, the loop
   bar turns orange with a `/login` hint and auto-wakes are held — no point
-  waking a session that can't act. It clears automatically the moment Claude
-  completes a turn (i.e. once you've logged in).
+  waking a session that can't act. It clears automatically as soon as Claude is
+  working again (i.e. once you've logged in) — the moment a turn starts, not
+  only when one finishes, so the orange bar can't linger while Claude is
+  visibly running.
 
 ### Changed
 

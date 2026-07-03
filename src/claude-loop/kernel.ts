@@ -845,12 +845,24 @@ if (sd) {
         setIpcPromptHasInput(false);
     });
     // #1072 — "Not logged in · Please run /login" in the pane → ORANGE bar +
-    // block all wakes. Only the `begin` edge is wired : the flag is cleared by
-    // the first Stop hook (below), NOT by the watcher `end` (the banner
-    // scrolling off-screen ≠ claude got logged in).
+    // block all wakes. The `begin` edge sets the flag ; it is NOT cleared by the
+    // watcher `end` (the banner scrolling off-screen ≠ claude got logged in).
     notLoggedInW.on("begin", () => {
         log("watcher: not_logged_in begin → setIpcNotLoggedIn(true)");
         setIpcNotLoggedIn(true);
+    });
+    // #1119 — clear on `busy begin` too, not just the Stop hook (below). A turn
+    // that STARTS proves claude reached the API (= logged in), which is earlier
+    // than the turn's Stop and — crucially — does NOT depend on the Stop hook
+    // firing. Without this, a not-logged-in flag stayed stuck ORANGE while
+    // claude was visibly working (`esc to interrupt`) because no Stop had fired
+    // since login. `busy` and the login banner are mutually exclusive, so this
+    // can't fight the `begin` set above.
+    busyW.on("begin", () => {
+        if (getIpcState().notLoggedIn) {
+            log("watcher: busy begin → clearing notLoggedIn (claude is running → logged in)");
+            setIpcNotLoggedIn(false);
+        }
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // #1009 — compacting no longer forwards begin/end edges to the boot machine ;
@@ -1784,7 +1796,10 @@ async function mainSse(): Promise<void> {
         // confirmed. #881 — `setIpcIdleSince` délégué à TurnController.
         getTurnService().turnEnded(ev.atMs);
         // #1072 — a Stop hook proves claude is running (= logged in). Clear the
-        // not-logged-in flag so the ORANGE bar + wake-block lift.
+        // not-logged-in flag so the ORANGE bar + wake-block lift. #1119 — this
+        // is now the belt to the busy-begin clear's suspenders (that path fires
+        // earlier + hook-independently); kept for the case where a turn ends
+        // without the busy footer ever being observed.
         if (getIpcState().notLoggedIn) {
             log("hook:stop → clearing notLoggedIn (a turn completed → logged in)");
             setIpcNotLoggedIn(false);
