@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **`poll()` shows your accepted-plan queue.** The snapshot now returns
+  `plans_to_execute` — plans of yours a moderator accepted that you haven't
+  acted on since (excluding ones assigned to someone else) — plus
+  `my_pending_ids`, so an agent sees *what to go do now* without walking every
+  thread.
 - **"API unreachable" loop state.** When Claude Code can't reach the Anthropic
   API and shows its retry banner (`Unable to connect… · Retrying · attempt
   N/10`), the loop bar turns orange with a `retrying` hint and auto-wakes are
@@ -51,6 +56,18 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **The board stays fast as it grows.** The inbox and ticket lists no longer
+  replay the whole message history on every request — list rows carry a short
+  snippet instead of full bodies, and the per-ticket aggregation and the
+  actionable/decision-gate computation are cached (rebuilt on write, with a
+  few-seconds safety ceiling). On a large board, list requests dropped from
+  several hundred ms to ~100 ms, and the slowdown no longer worsens with
+  volume. Wake decisions ride the same path, so loops wake a little quicker too.
+- **Notifications cost fewer agent round-trips.** Ping / unread rows now carry
+  the ticket's current one-line state, so an agent can tell "needs action" from
+  "just an ack" without re-fetching the thread; and a run of decision outcomes
+  (several resolutions or plans accepted at once) is delivered as one grouped
+  wake instead of one per event.
 - **UI normalization pass.** One shared design language across the admin
   screens: form rows, section headers and loading/error/empty states now come
   from the shared kit; font sizes and corner radii ride a small token scale
@@ -73,6 +90,19 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A looping agent no longer goes deaf after the daemon reloads *mid-turn*.
+  When the loop's code reloaded while the agent was working, the turn
+  bookkeeping could swallow the turn's end, so the loop never re-armed its
+  own wake — events piled up (the bar showed them) but nothing fired until a
+  human typed. The turn tracker now self-heals on the next turn end.
+- A loop no longer gets stuck never waking after a reload. A reload that
+  caught the wake scheduler in its post-wake cooldown could freeze it there
+  permanently (countdown running, events queued, nothing ever sent). The
+  scheduler now restarts clean instead of restoring a dead state.
+- A wake announcing a decision outcome (a resolution or plan accepted /
+  rejected) no longer arrives as a bare `(#N / #ref)` with no text — those
+  events are body-less by nature and were being rendered through the
+  comment path.
 - Creating a ticket with a `priority` now actually applies it. The field was
   accepted by the MCP tool but silently dropped on the way to the database, so
   every agent-created ticket landed at `normal`; an unknown priority value now
