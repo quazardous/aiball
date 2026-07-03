@@ -78,6 +78,17 @@ Remaining is parity hardening, not a from-scratch port:
 - Routine multi-hour testing of the psmux / ConPTY path (currently
   smoke-level).
 
+### One proxy for both platforms
+
+Live keystroke detection currently uses two implementations: the Python
+`pty-proxy.py` on Unix, the Rust `cl-pty-proxy` on Windows. The Rust proxy
+is already a single cross-platform binary — its Linux entry point builds
+and passes CI — so the direction is to make it the successor on Unix too
+and retire the Python proxy, leaving one implementation to maintain. The
+cutover is staged: reconcile the docs (done), close the Rust/Python parity
+gaps, wire the Unix launch behind an opt-in for parallel verification, then
+flip the default and drop the Python proxy.
+
 ## Experimental / partial
 
 ### Sandbox loop

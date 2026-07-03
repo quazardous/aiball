@@ -27,6 +27,16 @@ needed. Two facts shaped the design:
 Result: `windows/cl-pty-proxy/` — a small Rust binary, **strategy B** (see
 "Strategy A" at the bottom for the cleaner long-term plan).
 
+> **It is not Windows-only.** The crate is a single cross-platform binary:
+> its pure core (keystroke classification, AFK detection, the marker/inject
+> contract) is shared, with thin per-OS I/O glue — `main.rs` for the
+> Windows ConPTY path, `unix_main.rs` for a Linux `openpty` path. It builds
+> and passes CI on both `windows-latest` and `ubuntu-latest`. The
+> long-term intent is for this one binary to replace **both** the old
+> Windows path **and** the Unix `pty-proxy.py`. The Linux entry point is
+> built and tested but not yet wired into the loop's launch flow, so on
+> Unix the Python proxy is still what runs today (the cutover is pending).
+
 ## Where it sits
 
 ```

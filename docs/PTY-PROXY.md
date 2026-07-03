@@ -115,11 +115,20 @@ MIT.)
 - **No native dependency, no compiler.** node-pty would need a C++
   toolchain (node-gyp); this box has `gcc` but not `g++`, and we don't
   want the first native dep in the project.
-- **Unix-only is fine here.** Python's `pty` is Unix-only, but Windows
-  support is handled separately (psmux), so this proxy deliberately does
-  **not** need to be cross-platform or share its tech.
+- **Unix-only by nature.** Python's `pty` is Unix-only. This Python proxy
+  is therefore the Unix implementation only — Windows runs the Rust
+  `cl-pty-proxy` (see `PTY-PROXY-WINDOWS.md`).
 - **Fail-safe.** If PTY allocation/setup fails, the proxy `exec`s claude
   directly — the live terminal is never bricked.
+
+> **Direction — the Rust proxy is the successor.** The Rust `cl-pty-proxy`
+> is a single cross-platform binary: it already runs the Windows path in
+> production and also builds and passes CI on Linux (a working Unix entry
+> point mirrors this file's behaviour). The intended end state is for it
+> to replace this Python proxy on Unix too, so one implementation covers
+> both platforms. Until that cutover lands, the loop still launches
+> **this** Python proxy on Unix — the Rust Unix path is built and tested
+> but not yet wired into the launch flow.
 
 ## How it's wired
 
@@ -234,7 +243,9 @@ without a TS mirror to drift).
 
 ## Limitations
 
-- Linux/Unix only by design (Windows = psmux, separate).
+- Linux/Unix only (Windows runs the Rust `cl-pty-proxy`). The Rust proxy
+  is the intended cross-platform successor on Unix too — see the Direction
+  note above.
 - Requires `python3` at runtime on the loop host.
 - Only printable-text keystrokes flip the badge; navigation/control keys
   are intentionally ignored.
