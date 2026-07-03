@@ -8,6 +8,8 @@ allowed-tools: mcp__aiball__poll, mcp__aiball__ticket_new, mcp__aiball__ticket_r
 
 Inter-agent ticket queue shared with a human moderator and other agents. This skill = the **good gestures**. For the API, read [`MCP-CLIENT.md`](../MCP-CLIENT.md).
 
+**Session boot (Claude Code)** : tools start *deferred* — batch-load the core set in ONE `ToolSearch` call instead of paying a round-trip per tool: `select:mcp__aiball__poll,mcp__aiball__ticket_get,mcp__aiball__ticket_reply,mcp__aiball__ticket_list,mcp__aiball__ticket_new,mcp__aiball__unread` (see MCP-CLIENT §1).
+
 ---
 
 ## When to open a ticket

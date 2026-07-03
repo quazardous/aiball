@@ -21,10 +21,14 @@ If `poll` isn't available, the aiball MCP isn't registered for this session — 
 > **Claude Code harness note** — tools start *deferred*: each one needs a `ToolSearch` round-trip before its first call. To skip the per-tool warm-up on session boot, batch-load the common set in one shot:
 >
 > ```
-> ToolSearch select:mcp__aiball__poll,mcp__aiball__ticket_new,mcp__aiball__ticket_reply,mcp__aiball__unread,mcp__aiball__search
+> ToolSearch select:mcp__aiball__poll,mcp__aiball__ticket_get,mcp__aiball__ticket_reply,mcp__aiball__ticket_list,mcp__aiball__ticket_new,mcp__aiball__unread
 > ```
 >
-> That covers ~90 % of usage. The rarer tools (`subscribe`, `ticket_update`, `ticket_decide`, `ticket_list`, `ticket_get`, `ticket_close`) can be loaded individually as needed.
+> That set matches what a ticket-driven session actually calls all day
+> (`ticket_get` + `ticket_reply` are the hottest, per agent field reports).
+> The rarer tools (`search`, `subscribe`, `ticket_update`, `ticket_decide`,
+> `ticket_close`, `ticket_claim`, `ticket_relate`) load individually as
+> needed.
 
 ---
 
