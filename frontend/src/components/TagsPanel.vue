@@ -9,6 +9,7 @@ import { bus } from "../lib/bus";
 import { useLoader } from "../lib/loader";
 import TagBadge from "./TagBadge.vue";
 import DataList from "./ui/DataList.vue";
+import FormField from "./ui/FormField.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 
 const confirmDialog = useConfirm();
@@ -294,22 +295,19 @@ onMounted(() => {
                 <code>.aiball.yaml.example</code>.
             </p>
             <div class="aiball-form-grid">
-                <div class="aiball-field">
-                    <label class="field-label">name</label>
+                <FormField label="name">
                     <InputText v-model="newName" placeholder="e.g. blocked" class="w-full" />
-                </div>
-                <div class="aiball-field">
-                    <label class="field-label">color</label>
+                </FormField>
+                <FormField label="color">
                     <input
                         type="color"
                         v-model="newColor"
                         style="width: 3rem; height: 2.4rem; cursor: pointer; border: 0; padding: 0; background: transparent"
                     />
-                </div>
-                <div class="aiball-field" style="flex: 1">
-                    <label class="field-label">note (shown on hover)</label>
+                </FormField>
+                <FormField label="note (shown on hover)" style="flex: 1">
                     <InputText v-model="newNote" placeholder="(optional)" class="w-full" />
-                </div>
+                </FormField>
                 <Button
                     label="add tag"
                     icon="pi pi-plus"

@@ -15,12 +15,16 @@
  * Sans `label`, c'est juste la colonne `.aiball-field` (utile pour aligner un
  * bouton en bas d'une rangée `.aiball-form-grid`).
  */
-defineProps<{ label?: string }>();
+defineProps<{
+    label?: string;
+    /** Optional `for` on the label (pairs with the slotted input's `id`). */
+    for?: string;
+}>();
 </script>
 
 <template>
     <div class="aiball-field">
-        <label v-if="label" class="field-label">{{ label }}</label>
+        <label v-if="label" class="field-label" :for="$props.for">{{ label }}</label>
         <slot />
     </div>
 </template>

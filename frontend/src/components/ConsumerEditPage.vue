@@ -29,6 +29,7 @@ import { useNotify } from "../lib/notify";
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import { relativeTime } from "../lib/format";
 import FieldRow from "./ui/FieldRow.vue";
+import FormField from "./ui/FormField.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
 import TerminalView from "./TerminalView.vue";
 
@@ -349,8 +350,7 @@ async function sendPrompt() {
 
                     <TabPanel value="edit">
                         <div class="consumer-edit__tab">
-                            <div class="consumer-edit__field">
-                                <label for="ce-kind">kind</label>
+                            <FormField label="kind" for="ce-kind">
                                 <Select
                                     inputId="ce-kind"
                                     v-model="kind"
@@ -359,20 +359,18 @@ async function sendPrompt() {
                                     optionValue="value"
                                     style="width: 100%"
                                 />
-                            </div>
+                            </FormField>
 
-                            <div class="consumer-edit__field">
-                                <label for="ce-name">display name</label>
+                            <FormField label="display name" for="ce-name">
                                 <InputText
                                     id="ce-name"
                                     v-model="displayName"
                                     placeholder="(falls back to consumer_id)"
                                     style="width: 100%"
                                 />
-                            </div>
+                            </FormField>
 
-                            <div class="consumer-edit__field">
-                                <label for="ce-note">note</label>
+                            <FormField label="note" for="ce-note">
                                 <Textarea
                                     id="ce-note"
                                     v-model="note"
@@ -380,10 +378,9 @@ async function sendPrompt() {
                                     placeholder="(internal note — visible only on this page)"
                                     style="width: 100%"
                                 />
-                            </div>
+                            </FormField>
 
-                            <div class="consumer-edit__field">
-                                <label for="ce-micro-prompt">micro-prompt</label>
+                            <FormField label="micro-prompt" for="ce-micro-prompt">
                                 <Textarea
                                     id="ce-micro-prompt"
                                     v-model="microPrompt"
@@ -396,9 +393,9 @@ async function sendPrompt() {
                                     placeholder. Opt-in: add the placeholder to your <code>wake_master</code>
                                     template (<code>.aiball.yaml</code>) where you want it. Empty = nothing injected.
                                 </small>
-                            </div>
+                            </FormField>
 
-                            <div class="consumer-edit__field">
+                            <FormField>
                                 <label>
                                     <input
                                         type="checkbox"
@@ -407,11 +404,11 @@ async function sendPrompt() {
                                     />
                                     enabled (when off, the daemon rejects new posts from this consumer)
                                 </label>
-                            </div>
+                            </FormField>
 
                             <!-- #508 — global no-claim flag : consumer "spécialiste" qui ne
                                  prend que les tickets explicitement assignés. -->
-                            <div class="consumer-edit__field">
+                            <FormField>
                                 <label>
                                     <input
                                         type="checkbox"
@@ -420,14 +417,13 @@ async function sendPrompt() {
                                     />
                                     can claim (when off, this consumer is <strong>assignment-only</strong>: <code>ticket_engage</code> skips the global pool and returns only tickets explicitly assigned via <code>ticket_assign</code>)
                                 </label>
-                            </div>
+                            </FormField>
 
                             <!-- #516 (david `r59bkm` plan E) — tri-state opt-in pour les
                                  broadcasts projet (scope=broadcast follower fan-out).
                                  Auto = suit can_claim (claim-able → reçoit, no_claim → ne reçoit pas) ;
                                  on = opt-in explicite ; off = opt-out explicite. -->
-                            <div class="consumer-edit__field">
-                                <label for="ce-notify-broadcasts">project broadcasts</label>
+                            <FormField label="project broadcasts" for="ce-notify-broadcasts">
                                 <select
                                     id="ce-notify-broadcasts"
                                     v-model="notifyBroadcasts"
@@ -443,11 +439,10 @@ async function sendPrompt() {
                                     a no-claim consumer is silenced by default. Override to <strong>on</strong>
                                     if you want a no-claim agent to still see broadcasts.
                                 </small>
-                            </div>
+                            </FormField>
 
                             <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->
-                            <div class="consumer-edit__field">
-                                <label for="ce-prompt">send a raw prompt</label>
+                            <FormField label="send a raw prompt" for="ce-prompt">
                                 <Textarea
                                     id="ce-prompt"
                                     v-model="promptText"
@@ -477,7 +472,7 @@ async function sendPrompt() {
                                         @click="sendPrompt"
                                     />
                                 </div>
-                            </div>
+                            </FormField>
 
                             <div class="consumer-edit__actions">
                                 <Button
@@ -532,15 +527,6 @@ async function sendPrompt() {
 }
 .consumer-edit__error {
     color: var(--p-red-500);
-}
-.consumer-edit__field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-}
-.consumer-edit__field label {
-    font-size: 0.85rem;
-    color: var(--p-text-muted-color);
 }
 .consumer-edit__hint {
     font-size: 0.78rem;
