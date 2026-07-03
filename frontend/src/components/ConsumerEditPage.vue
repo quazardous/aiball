@@ -138,10 +138,11 @@ async function load() {
 watch(() => props.consumerId, load, { immediate: true });
 
 // #460 — live updates : the daemon broadcasts `consumer_changed` (presence
-// flip / heartbeat) → WS relay → `projects.refresh` bus. Without this, the
-// page reads a FROZEN snapshot until manual refresh (cf. ProjectDetailPage
-// #443). Re-fetch so the status badges + Stop button reflect reality.
-useBus("projects.refresh", () => { void load(); });
+// flip / state change) → WS relay → `consumers.refresh` bus. Without this,
+// the page reads a FROZEN snapshot until manual refresh (cf.
+// ProjectDetailPage #443). Re-fetch so the status badges + Stop button
+// reflect reality.
+useBus("consumers.refresh", () => { void load(); });
 
 async function save() {
     if (!original.value) return;

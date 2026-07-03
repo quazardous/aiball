@@ -68,6 +68,14 @@ export function useInboxWs(opts: {
             if (s && (STRATEGIES as readonly string[]).includes(s)) strategy.value = s;
             return;
         }
+        if (ev.type === "consumer_changed") {
+            // Dedicated lane: a loop presence/state event repaints the
+            // consumer surfaces only. The old fallthrough emitted
+            // inbox.refresh + projects.refresh on EVERY heartbeat of every
+            // loop — a full inbox refetch per loop per minute.
+            bus.emit("consumers.refresh");
+            return;
+        }
         if (ev.type === "project_deleted") {
             const deleted = (ev.data as { project?: string } | undefined)?.project;
             if (deleted) bus.emit("project.deleted", { project: deleted });
@@ -97,6 +105,7 @@ export function useInboxWs(opts: {
         if (now && prev === false) {
             bus.emit("inbox.refresh");
             bus.emit("projects.refresh");
+            bus.emit("consumers.refresh");
         }
     });
 

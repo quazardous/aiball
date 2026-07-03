@@ -31,6 +31,11 @@ export interface BusEvents {
     "inbox.refresh": void;
     /** The per-project stats (sidebar badges) should be refreshed. */
     "projects.refresh": void;
+    /** A consumer's live state changed (loop presence flip, state push,
+     *  CRUD) — the consumer surfaces (ConsumersPanel, ProjectDetailPage
+     *  loop chips, ConsumerEditPage) should refetch. Dedicated lane so a
+     *  loop heartbeat doesn't refetch the whole inbox. */
+    "consumers.refresh": void;
     /** The open thread should reload its data, if it matches the ticket id. */
     "thread.refresh": { ticketId: number };
     /** The moderation rules list should be refreshed (RulesPanel). */

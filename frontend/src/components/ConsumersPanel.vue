@@ -76,8 +76,9 @@ async function load() {
     }
 }
 
-// #443: refetch live when a loop's presence flips.
-useBus("projects.refresh", () => { void load(); });
+// #443: refetch live when a loop's presence flips (dedicated consumer
+// lane — no longer piggybacking on projects.refresh).
+useBus("consumers.refresh", () => { void load(); });
 
 onMounted(() => {
     load();

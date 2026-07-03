@@ -13,7 +13,12 @@ export type WsEvent =
     | { type: "automation_rule_changed"; data: unknown }
     | { type: "tag_changed"; data: unknown }
     | { type: "strategy_changed"; data: { strategy: Strategy } }
-    | { type: "project_deleted"; data: { project: string; deleted_messages: number } };
+    | { type: "project_deleted"; data: { project: string; deleted_messages: number } }
+    // A consumer's live state changed: loop state push (dedup'd daemon-side),
+    // presence flip on SSE open/close, or consumer CRUD. Previously undeclared
+    // — the event reached the relay through the JSON cast and was handled by
+    // the message fallthrough by accident.
+    | { type: "consumer_changed"; data: unknown };
 
 export function useWs(onEvent: (e: WsEvent) => void) {
     const connected = ref(false);

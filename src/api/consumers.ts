@@ -217,7 +217,20 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
     // #393 (Option A): optional loop project → exact root↔project attribution.
     const project = typeof body.project === "string" && body.project ? body.project : undefined;
     setConsumerState(caller, body.state, human, humanWord, cwd, project);
-    broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
+    // #1132 — heartbeat dedupe : only broadcast when something actually
+    // changed. Loops re-push an identical state every heartbeat ; blasting
+    // `consumer_changed` each time made every open browser tab refetch its
+    // consumer surfaces per heartbeat per loop. Real flips (state / human
+    // presence / word) still broadcast — and the SSE-close presence flip has
+    // its own broadcast (live-presence.ts), so a killed loop still clears
+    // live (#443).
+    const changed = !c
+        || c.state !== body.state
+        || (human !== undefined && (c.state_human ?? null) !== human)
+        || (humanWord !== undefined && (c.state_human_word ?? null) !== humanWord);
+    if (changed) {
+        broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
+    }
     res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord, cwd, project });
 });
 

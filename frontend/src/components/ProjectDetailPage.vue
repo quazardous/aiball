@@ -49,6 +49,7 @@ onMounted(load);
 // (david's "reste à running assez longtemps"). Refetch so the running badge +
 // per-root state + loop chips clear live (~6s after kill, via presence).
 useBus("projects.refresh", () => { void load(); });
+useBus("consumers.refresh", () => { void load(); });
 
 const roots = computed(() => meta.value?.roots ?? []);
 
