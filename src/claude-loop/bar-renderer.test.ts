@@ -71,6 +71,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         linkDown: false,
         daemonDown: false,
         notLoggedIn: false,
+        apiUnreachable: false,
         ...overrides,
     };
 }

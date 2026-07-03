@@ -191,6 +191,12 @@ export interface IpcState {
      *  the RED link-down overlay) and the wake gate blocks ALL wakes (a wake is
      *  useless until login). Default false. */
     notLoggedIn: boolean;
+    /** #1116 — Claude Code can't reach the API (the pane shows a retry banner :
+     *  "Unable to connect… · Retrying… · attempt N/10"). Set TRUE by the
+     *  ApiUnreachableWatcher, cleared on busy-begin / the first Stop hook (a turn
+     *  running proves the API is reachable). While true the bar paints ORANGE
+     *  (Slice 1). A wake-hold is deferred to Slice 2. Default false. */
+    apiUnreachable: boolean;
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
@@ -248,6 +254,7 @@ const state: IpcState = {
     linkDown: false,
     daemonDown: false,
     notLoggedIn: false,
+    apiUnreachable: false,
     bootDeadlineMs: null,
     counters: null,
     stateTagInfo: null,
@@ -424,6 +431,15 @@ export function setIpcDaemonDown(down: boolean): void {
 export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
     if (state.notLoggedIn === notLoggedIn) return;
     state.notLoggedIn = notLoggedIn;
+    notifyIpcChanged();
+}
+
+/** #1116 — flag Claude Code as unable to reach the API (true) / reachable
+ *  (false). notifyIpcChanged → BarRenderer repaints ORANGE while true. Slice 1
+ *  is bar-only ; the wake-hold lands in Slice 2. */
+export function setIpcApiUnreachable(apiUnreachable: boolean): void {
+    if (state.apiUnreachable === apiUnreachable) return;
+    state.apiUnreachable = apiUnreachable;
     notifyIpcChanged();
 }
 
@@ -618,6 +634,7 @@ export function resetIpcStateForTests(): void {
     state.linkDown = false;
     state.daemonDown = false;
     state.notLoggedIn = false;
+    state.apiUnreachable = false;
     state.bootDeadlineMs = null;
     state.counters = null;
     state.stateTagInfo = null;

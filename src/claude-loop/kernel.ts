@@ -108,7 +108,7 @@ import {
     ResumingWatcher,
     CompactConfirmWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
@@ -157,6 +157,7 @@ import {
     setIpcLinkDown,
     setIpcDaemonDown,
     setIpcNotLoggedIn,
+    setIpcApiUnreachable,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -697,6 +698,7 @@ const busyW = new BusyWatcher();
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
+const apiUnreachableW = new ApiUnreachableWatcher();
 const errorW = new ErrorWatcher();
 const healthCheckW = new HealthCheckWatcher();
 const promptZoneW = new PromptZoneWatcher();
@@ -704,7 +706,7 @@ const promptInputW = new PromptInputWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, interruptedW, idlePromptW, notLoggedInW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
+    promptW, busyW, interruptedW, idlePromptW, notLoggedInW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -851,17 +853,30 @@ if (sd) {
         log("watcher: not_logged_in begin → setIpcNotLoggedIn(true)");
         setIpcNotLoggedIn(true);
     });
-    // #1119 — clear on `busy begin` too, not just the Stop hook (below). A turn
-    // that STARTS proves claude reached the API (= logged in), which is earlier
-    // than the turn's Stop and — crucially — does NOT depend on the Stop hook
-    // firing. Without this, a not-logged-in flag stayed stuck ORANGE while
-    // claude was visibly working (`esc to interrupt`) because no Stop had fired
-    // since login. `busy` and the login banner are mutually exclusive, so this
-    // can't fight the `begin` set above.
+    // #1116 Slice 1 — API-unreachable retry banner in the pane → ORANGE bar. The
+    // `begin` edge sets the flag ; it is cleared on busy-begin / Stop (below),
+    // NOT by the watcher `end` (the banner scrolling off ≠ connectivity back).
+    // No wake-gate change here — the wake-hold is Slice 2.
+    apiUnreachableW.on("begin", () => {
+        log("watcher: api_unreachable begin → setIpcApiUnreachable(true)");
+        setIpcApiUnreachable(true);
+    });
+    // #1119 / #1116 — clear on `busy begin` too, not just the Stop hook (below).
+    // A turn that STARTS proves claude reached the API (= logged in AND the API
+    // is reachable), which is earlier than the turn's Stop and — crucially —
+    // does NOT depend on the Stop hook firing. Without this, a not-logged-in
+    // flag stayed stuck ORANGE while claude was visibly working (`esc to
+    // interrupt`) because no Stop had fired. `busy` is mutually exclusive with
+    // both the login banner and the retry banner, so this can't fight the
+    // `begin` sets above.
     busyW.on("begin", () => {
         if (getIpcState().notLoggedIn) {
             log("watcher: busy begin → clearing notLoggedIn (claude is running → logged in)");
             setIpcNotLoggedIn(false);
+        }
+        if (getIpcState().apiUnreachable) {
+            log("watcher: busy begin → clearing apiUnreachable (claude is running → API reachable)");
+            setIpcApiUnreachable(false);
         }
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
@@ -1803,6 +1818,11 @@ async function mainSse(): Promise<void> {
         if (getIpcState().notLoggedIn) {
             log("hook:stop → clearing notLoggedIn (a turn completed → logged in)");
             setIpcNotLoggedIn(false);
+        }
+        // #1116 — a completed turn likewise proves the API was reachable.
+        if (getIpcState().apiUnreachable) {
+            log("hook:stop → clearing apiUnreachable (a turn completed → API reachable)");
+            setIpcApiUnreachable(false);
         }
         if (ev.busyDeferUntilMs !== undefined) {
             if (ev.busyDeferUntilMs === null) {

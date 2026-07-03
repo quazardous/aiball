@@ -1,7 +1,7 @@
 // #845 Phase B — runtime-zone watcher tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BusyWatcher, InterruptedWatcher, PromptWatcher, NotLoggedInWatcher } from "./runtime-watchers.js";
+import { BusyWatcher, InterruptedWatcher, PromptWatcher, NotLoggedInWatcher, ApiUnreachableWatcher } from "./runtime-watchers.js";
 import { ErrorWatcher } from "./error-watcher.js";
 
 const CTX = { nowMs: 0 };
@@ -75,6 +75,53 @@ test("NotLoggedInWatcher: begin fires when the banner appears", () => {
     w.on("begin", () => { beginCount++; });
     w.observe("❯ \n  ⏵⏵ auto mode on", CTX);
     w.observe("Not logged in · Please run /login", CTX);
+    assert.equal(beginCount, 1);
+});
+
+// ---------------------------------------------------------------------------
+//  ApiUnreachableWatcher (#1116 Slice 1)
+// ---------------------------------------------------------------------------
+
+test("ApiUnreachableWatcher: matches the retry banner (counter + connection keyword)", () => {
+    const w = new ApiUnreachableWatcher();
+    const pane = "✻ Working…\nUnable to connect to API (ConnectionRefused) · Retrying in 0s · attempt 6/10";
+    assert.equal(w.observe(pane, CTX).visible, true);
+});
+
+test("ApiUnreachableWatcher: false on a normal idle pane", () => {
+    const w = new ApiUnreachableWatcher();
+    assert.equal(w.observe("❯ \n  ⏵⏵ auto mode on", CTX).visible, false);
+});
+
+test("ApiUnreachableWatcher: no self-trip on the retry counter alone (no connection keyword)", () => {
+    const w = new ApiUnreachableWatcher();
+    // A benign line mentioning "attempt 3/5" without any connection/retry banner
+    // must NOT latch (guards against conversation text).
+    assert.equal(w.observe("● test run: attempt 3/5 passed", CTX).visible, false);
+});
+
+test("ApiUnreachableWatcher: no self-trip on connection prose without the counter", () => {
+    const w = new ApiUnreachableWatcher();
+    // Claude discussing the ticket : mentions ConnectionRefused / Retrying but no
+    // live "attempt N/M" counter → not the actual retry pane.
+    const pane = "● The ticket is about ConnectionRefused and Retrying in the pane.";
+    assert.equal(w.observe(pane, CTX).visible, false);
+});
+
+test("ApiUnreachableWatcher: no self-trip on an injected wake-CTA prompt line (#1119 lesson)", () => {
+    const w = new ApiUnreachableWatcher();
+    // The loop-injected wake prompt (a `>` line) can quote the whole banner ;
+    // footerOf drops prompt-input lines so it can't latch the flag.
+    const pane = "> look #1116: Unable to connect to API · Retrying · attempt 6/10. Triage.\n  ⏵⏵ auto mode on";
+    assert.equal(w.observe(pane, CTX).visible, false);
+});
+
+test("ApiUnreachableWatcher: begin fires once when the retry banner appears", () => {
+    const w = new ApiUnreachableWatcher();
+    let beginCount = 0;
+    w.on("begin", () => { beginCount++; });
+    w.observe("❯ \n  ⏵⏵ auto mode on", CTX);
+    w.observe("Unable to connect to API (ConnectionRefused) · Retrying in 2s · attempt 4/10", CTX);
     assert.equal(beginCount, 1);
 });
 

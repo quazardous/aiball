@@ -67,7 +67,7 @@ export const ERROR_PATTERNS: ErrorPattern[] = [
  *  `API Error: Overloaded`). Matching it self-trips the backoff. The
  *  prompt-input lines never carry a backend error banner ; only
  *  claude's response / tool-result blocks do. */
-function footerOf(text: string, footerLines: number): string {
+export function footerOf(text: string, footerLines: number): string {
     return text
         .split("\n")
         .map((l) => l.trimEnd())

@@ -94,6 +94,10 @@ export interface BarSnapshot {
      *  PRIORITY over the RED link-down overlay) + a `/login` hint in the state
      *  tag. Cleared on the first Stop hook. */
     notLoggedIn: boolean;
+    /** #1116 — Claude Code can't reach the API (retry banner) ? Same ORANGE
+     *  overlay + a `retrying` hint in the state tag. Cleared on busy-begin /
+     *  Stop. */
+    apiUnreachable: boolean;
 }
 
 /** #950 david `<chat>` : compose les tokens orthogonaux du marker
@@ -248,6 +252,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         linkDown: ipc.linkDown,
         daemonDown: ipc.daemonDown,
         notLoggedIn: ipc.notLoggedIn,
+        apiUnreachable: ipc.apiUnreachable,
     };
 }
 
@@ -265,6 +270,8 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     // #1072 — not-logged-in flips the bar bg ORANGE + the state-tag hint ;
     // route through the same status-bg repaint block.
     if (prev.notLoggedIn !== next.notLoggedIn) changed.push("loopStatus");
+    // #1116 — api-unreachable flips the bar bg ORANGE + the state-tag hint too.
+    if (prev.apiUnreachable !== next.apiUnreachable) changed.push("loopStatus");
     if (prev.stateTag !== next.stateTag) changed.push("stateTag");
     if (prev.proxyAlive !== next.proxyAlive) changed.push("proxyAlive");
     if (prev.zenActive !== next.zenActive) changed.push("zenActive");
@@ -387,7 +394,9 @@ export class BarRenderer {
             // #1072 — not-logged-in paints ORANGE (colour208, same as ZEN) and
             // takes PRIORITY over the RED overlay : it's the state the human can
             // fix immediately (run /login).
-            const bg = next.notLoggedIn
+            // #1116 — api-unreachable shares the ORANGE overlay + priority with
+            // not-logged-in : both are "no point waking, here's why" states.
+            const bg = (next.notLoggedIn || next.apiUnreachable)
                 ? "colour208"
                 : (next.linkDown || next.daemonDown) ? col.link_down_bg : stateBg(col, next.loopStatus);
             setOpt("status-bg", bg);
@@ -397,7 +406,9 @@ export class BarRenderer {
             // contraste. Plus de crochets / colons, tokens space-separated
             // (cf. renderMarkerSegment).
             // #1072 — surface WHY the bar is orange so the human knows to /login.
-            const stateTagStr = next.notLoggedIn ? "⚠ not logged in · /login" : next.stateTag;
+            const stateTagStr = next.notLoggedIn
+                ? "⚠ not logged in · /login"
+                : next.apiUnreachable ? "⚠ API unreachable · retrying" : next.stateTag;
             setOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] ${stateTagStr}`);
             // status-left : @cl_state collé à `claude-loop`, AVANT la
             // fade-out glyph. Les counters restent sur le status-bg

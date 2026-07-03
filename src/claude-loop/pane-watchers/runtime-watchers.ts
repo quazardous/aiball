@@ -6,6 +6,7 @@
 
 import { BoolWatcher } from "./bool-watcher.js";
 import { paneFooterShowsBusy, paneShowsInterrupted } from "../state.js";
+import { footerOf } from "../error-backoff.js";
 import type { PaneScanCtx } from "./types.js";
 
 /** Claude prompt visible (= `Claude Code v`, `❯ `, `> ` at line start).
@@ -37,6 +38,28 @@ export class NotLoggedInWatcher extends BoolWatcher {
     readonly name = "not_logged_in";
     protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
         return /Not logged in|Please run \/login/.test(paneText);
+    }
+}
+
+/** #1116 Slice 1 — Claude Code can't reach the API : the pane shows a retry
+ *  banner like "Unable to connect to API (ConnectionRefused) · Retrying in 0s ·
+ *  attempt 6/10". Claude auto-retries on its own, so waking it is pointless.
+ *  This watcher drives the ORANGE bar (Slice 1) ; a wake-hold comes in Slice 2.
+ *
+ *  Anchored to avoid the #1119 self-trip class from the start : scan only the
+ *  FOOTER with prompt-input lines dropped (`footerOf`, same as error-backoff),
+ *  and require BOTH the "attempt N/M" retry counter AND a connection/retry
+ *  keyword — so conversation text or an injected wake-CTA merely mentioning
+ *  "connect"/"retry" can't latch the flag. The counter is the least-falsifiable
+ *  fingerprint of the retry pane. Cleared on busy-begin / Stop (a running turn
+ *  proves the API is reachable), never by the watcher `end` (a banner scrolling
+ *  off-screen ≠ connectivity restored). */
+export class ApiUnreachableWatcher extends BoolWatcher {
+    readonly name = "api_unreachable";
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        const footer = footerOf(paneText, 8);
+        if (!/\battempt \d+\/\d+/i.test(footer)) return false;
+        return /Unable to connect|ConnectionRefused|Retrying in\b|connect to API/i.test(footer);
     }
 }
 
