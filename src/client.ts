@@ -938,6 +938,11 @@ export class AiballClient {
             deleted_messages: number;
         }>("DELETE", `/api/projects/${encodeURIComponent(name)}`);
     }
+    /** #1164 S1 — plans of MINE that were accepted and I haven't acted on
+     *  since ("what should I go execute now"). */
+    plansToExecute() {
+        return this.http("GET", "/api/decisions/plans-to-execute");
+    }
     myArbitrage() {
         return this.http<{
             decisions: Array<{

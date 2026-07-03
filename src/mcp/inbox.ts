@@ -187,6 +187,14 @@ export function registerInboxTools(server: McpServer): void {
                 });
             };
             const myPendingOut = projectionPending(myPending);
+            // #1164 S1 — "what should I go execute now" : accepted plans of
+            // mine with no action from me since. Scoped like the rest.
+            let plansToExecute: unknown[] = [];
+            try {
+                const r = await client.plansToExecute() as { plans?: unknown[] };
+                plansToExecute = (r.plans ?? []).filter((p) =>
+                    !scopeProject || (p as { project?: string }).project === scopeProject);
+            } catch { /* degrade silently */ }
             const myPendingCommentsOut = projectionPending(myPendingComments);
             // Build the response object — fields are conditionally included
             // based on the opt-in flags. Slim by default per #B.68 user spec.
@@ -209,6 +217,15 @@ export function registerInboxTools(server: McpServer): void {
                  *  (most recent). Cross-project, ordered by id. */
                 first_ticket: (bookends as { first?: unknown }).first ?? null,
                 last_ticket: (bookends as { last?: unknown }).last ?? null,
+                /** #1164 S1 — compact ids of my moderation-pending tickets
+                 *  (the list below has the rows ; this is the at-a-glance
+                 *  answer to "WHICH ones", zero extra fetch). */
+                my_pending_ids: (Array.isArray(myPendingOut) ? myPendingOut : [])
+                    .map((m) => (m as { id?: number }).id)
+                    .filter((v): v is number => typeof v === "number"),
+                /** #1164 S1 — accepted plans awaiting MY execution (latest
+                 *  plan decision = accepted, and I haven't acted since). */
+                plans_to_execute: plansToExecute,
                 my_pending_tickets: myPendingOut,
                 /** Pending comments authored by this agent (#B.69). Needed
                  *  even in `auto-reply` since the strategy can flip to

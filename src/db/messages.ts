@@ -1274,6 +1274,98 @@ export interface PendingDecisionEntry {
     superseded_by: string | null;
 }
 
+/** #1164 S1 — a ticket whose latest plan decision (authored by the caller)
+ *  is ACCEPTED and the caller hasn't acted since : "accepted, waiting for me
+ *  to actually execute". The axis the skybot REX called the most useful. */
+export interface PlanToExecuteEntry {
+    ticket_id: number;
+    title: string | null;
+    project: string;
+    accepted_at: string;
+    /** The accepted proposal comment ; null when the plan rode the ticket
+     *  creation (#803) — the proposal is the ticket body itself. */
+    plan_comment_id: number | null;
+}
+
+export function listPlansToExecute(consumerId: string): PlanToExecuteEntry[] {
+    const db = getDb();
+    // plan_accepted decision events (server-emitted, always approved) —
+    // latest per ticket wins ; a later plan_rejected supersedes.
+    const evs = db.select({
+        id: schema.messages.id,
+        ticketId: schema.messages.ticketId,
+        parentId: schema.messages.parentMessageId,
+        createdAt: schema.messages.createdAt,
+        kind: schema.messages.kind,
+    })
+        .from(schema.messages)
+        .where(and(
+            inArray(schema.messages.kind, ["plan_accepted", "plan_rejected"]),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    const latestByTicket = new Map<number, typeof evs[number]>();
+    for (const e of evs) {
+        if (e.ticketId == null) continue;
+        const prev = latestByTicket.get(e.ticketId);
+        if (!prev || e.id > prev.id) latestByTicket.set(e.ticketId, e);
+    }
+    const out: PlanToExecuteEntry[] = [];
+    for (const [tid, ev] of latestByTicket) {
+        if (ev.kind !== "plan_accepted") continue;
+        // The accepted proposal must be MINE. parent_message_id points at the
+        // proposal comment ; it is NULL for a plan attached at ticket
+        // CREATION (#803 ticket_new({then:"plan"})) — the proposal is then
+        // the ticket itself, author = tickets.byAgent.
+        const proposalAuthor = ev.parentId != null
+            ? db.select({ byAgent: schema.messages.byAgent })
+                .from(schema.messages)
+                .where(eq(schema.messages.id, ev.parentId))
+                .get()?.byAgent
+            : db.select({ byAgent: schema.tickets.byAgent })
+                .from(schema.tickets)
+                .where(eq(schema.tickets.id, tid))
+                .get()?.byAgent;
+        if (proposalAuthor !== consumerId) continue;
+        const t = db.select({
+            title: schema.tickets.title,
+            project: schema.tickets.project,
+            lastActor: schema.tickets.lastActor,
+            status: schema.tickets.status,
+        })
+            .from(schema.tickets)
+            .where(eq(schema.tickets.id, tid))
+            .get();
+        if (!t || t.status !== "approved") continue;
+        // I acted since the accept → I'm on it (or done) : not "to execute".
+        if (t.lastActor === consumerId) continue;
+        // Closed tickets drop out (latest close > latest reopen).
+        const lifecycle = db.select({ id: schema.messages.id, kind: schema.messages.kind })
+            .from(schema.messages)
+            .where(and(
+                eq(schema.messages.ticketId, tid),
+                inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+                eq(schema.messages.status, "approved"),
+            ))
+            .all();
+        let lastClose = 0, lastReopen = 0;
+        for (const l of lifecycle) {
+            if (l.kind === "ticket_closed") lastClose = Math.max(lastClose, l.id);
+            else lastReopen = Math.max(lastReopen, l.id);
+        }
+        if (lastClose > lastReopen) continue;
+        out.push({
+            ticket_id: tid,
+            title: t.title,
+            project: t.project,
+            accepted_at: ev.createdAt,
+            plan_comment_id: ev.parentId,
+        });
+    }
+    out.sort((a, b) => b.accepted_at.localeCompare(a.accepted_at));
+    return out;
+}
+
 export function listPendingDecisionsForReporter(
     consumerId: string,
 ): PendingDecisionEntry[] {

@@ -31,6 +31,7 @@ import {
     isHuman,
     listMessages,
     listPendingDecisionsForReporter,
+    listPlansToExecute,
     markQuestionAnswered,
     noteMessage,
     promoteMessageToDecision,
@@ -122,6 +123,15 @@ messagesRouter.get("/decisions/mine", (req: Request, res: Response) => {
     const consumer = consumerOf(req);
     const decisions = listPendingDecisionsForReporter(consumer);
     res.json({ decisions });
+});
+
+/**
+ * #1164 S1 — the other direction : plans of MINE that were ACCEPTED and I
+ * haven't acted on since ("what should I go execute now"). Feeds poll().
+ */
+messagesRouter.get("/decisions/plans-to-execute", (req: Request, res: Response) => {
+    const consumer = consumerOf(req);
+    res.json({ plans: listPlansToExecute(consumer) });
 });
 
 function decide(

@@ -104,6 +104,7 @@ export {
     setMessageVote,
     listPendingResolutionDecisionsForTicket,
     listPendingDecisionsForReporter,
+    listPlansToExecute,
     type PendingDecisionEntry,
 } from "./db/messages.js";
 
