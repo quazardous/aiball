@@ -1332,11 +1332,15 @@ export function listPlansToExecute(consumerId: string): PlanToExecuteEntry[] {
             project: schema.tickets.project,
             lastActor: schema.tickets.lastActor,
             status: schema.tickets.status,
+            assignee: schema.tickets.assignee,
         })
             .from(schema.tickets)
             .where(eq(schema.tickets.id, tid))
             .get();
         if (!t || t.status !== "approved") continue;
+        // Assigned to SOMEONE ELSE → their dossier, not my execution queue
+        // (caught live : #900, my accepted plan but assignee=aiball-win).
+        if (t.assignee && t.assignee !== consumerId) continue;
         // I acted since the accept → I'm on it (or done) : not "to execute".
         if (t.lastActor === consumerId) continue;
         // Closed tickets drop out (latest close > latest reopen).
