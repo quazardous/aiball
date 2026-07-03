@@ -130,11 +130,6 @@ if a use case actually demands it.
 
 ## Open ideas (not committed)
 
-- **Consumer panel over SSE** — the consumer state
-  *push* shipped (`pushState`: loop/idle/busy + the human-presence word land on
-  the daemon), but the consumers panel still polls ~30s to read it.
-  Wiring the panel to the existing SSE event-bus would repaint it
-  instantly. Cheap now that the push side exists.
 - **claude-loop transcript reader** — instead of pane-scraping the
   `esc to interrupt` footer, read claude-code's JSONL transcript at
   `~/.claude/projects/<hash>/<id>.jsonl` for authoritative turn
