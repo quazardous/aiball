@@ -136,6 +136,13 @@ claude_loop:
   # permission_mode: ""        # default: omitted (no sandbox, prompts)
   # permission_mode: "auto"    # unattended/AFK: auto-approve + sandbox
 
+  # Which PTY-proxy backend to launch on Unix (live human-typing detection).
+  # Default = the Python proxy. Set "rust" to opt into the cross-platform Rust
+  # proxy — it must be built first (`cargo build --release` in
+  # windows/cl-pty-proxy) or the launch falls back to Python. Windows always
+  # uses the Rust proxy regardless. Only affects newly started loops.
+  # proxy_impl: "rust"
+
   # Custom wake gates. Each runs at heartbeat; on trigger its message is
   # prepended to the wake CTA. Two forms: built-in `type:` or custom `cmd:`.
   # `blocks: true` makes the wake lead with the gate and suppress the

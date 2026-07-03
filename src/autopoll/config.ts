@@ -195,6 +195,12 @@ export interface AiballConfig {
          *  rest (no network/host) — required for fully autonomous (AFK) runs, but
          *  it's what blocks network/host commands like `make t1000-status`. */
         permission_mode: string;
+        /** Which PTY-proxy implementation to launch. Empty / "python" =
+         *  the Python `pty-proxy.py` on Unix (default). "rust" = the Rust
+         *  `cl-pty-proxy` on Unix when it is built (else falls back to
+         *  Python, then to direct). Windows always uses the Rust proxy
+         *  regardless of this value. Opt-in for the Unix cutover. */
+        proxy_impl: string;
         /** #428: custom wake gates — raw config list, parsed at use via
          *  `parseGates` (each entry needs a built-in `type` or a custom `cmd`).
          *  When a gate triggers, its message is surfaced in the wake CTA. */
@@ -352,6 +358,9 @@ const DEFAULTS: AiballConfig = {
         // for unattended/AFK loops (auto-approve + sandbox). Empty by default so
         // host/network commands aren't silently sandboxed (e.g. make t1000-status).
         permission_mode: "",
+        // Empty = the Python proxy on Unix (the current default). Set
+        // "rust" per-project to opt into the Rust proxy on Unix.
+        proxy_impl: "",
         // #428: no custom gates by default (opt-in per project).
         gates: [],
     },
@@ -637,6 +646,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // `--permission-mode` flag for claude (empty = omit → no sandbox).
             if (typeof cl.permission_mode === "string") {
                 cfg.claude_loop.permission_mode = cl.permission_mode.trim();
+            }
+            // Which PTY proxy on Unix (empty/"python" default, "rust" opt-in).
+            if (typeof cl.proxy_impl === "string") {
+                cfg.claude_loop.proxy_impl = cl.proxy_impl.trim().toLowerCase();
             }
             // #305 (option a): per-project wait default (no-flag behaviour).
             if (typeof cl.wait === "boolean") {

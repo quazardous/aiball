@@ -62,6 +62,8 @@ export interface ProjectContext {
          *  → interactive `default` mode (prompts, no bash sandbox). `auto` = the
          *  unattended/AFK mode (auto-approve + sandbox). */
         permission_mode: string;
+        /** PTY-proxy backend on Unix: empty/"python" (default) or "rust". */
+        proxy_impl: string;
     };
     /** #538 david `hwxbkk` : claude-binary spawn-time options namespacé séparé. */
     claude: {
