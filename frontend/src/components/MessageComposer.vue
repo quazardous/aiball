@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
@@ -10,8 +10,10 @@ import MarkdownView from "./MarkdownView.vue";
 import TagPicker from "./TagPicker.vue";
 import { api, INTENTS, PRIORITIES, type Intent, type Priority } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
+import { useComposerDraft } from "../lib/composer-draft";
+import { useMentionAutocomplete } from "../lib/mention-autocomplete";
 import { attachPasteImage } from "../lib/pasteImage";
-import { SCOPES, scopeIcon, scopeTitle, type Scope } from "../lib/scope";
+import { SCOPES, scopeIcon, scopeTitle } from "../lib/scope";
 import { uploadFile, renderUploadSnippet, UPLOAD_ACCEPT } from "../lib/upload";
 
 type Mode = "ticket" | "comment";
@@ -39,34 +41,6 @@ const title = ref("");
 // piggy-back on whatever the user has typed (e.g. "accept resolution and
 // close" reuses the body as the lifecycle event's comment).
 const body = defineModel<string>("body", { default: "" });
-// #B.245 tristate scope (unified internal/broadcast):
-//   internal  → owners only + @mentions explicites
-//   default   → ticket subs + project owners + @mentions
-//   broadcast → default + project followers
-//
-// David #79h7zk: "le widget gardera la dernière valeur choisie par
-// ticket" — the composer persists the last-chosen scope per-ticket
-// via localStorage so the user doesn't have to re-pick it on every
-// reply within a thread. New tickets get a per-project memory.
-// Initial fallback: `default` for every mode (#253 — david: replies
-// should default to `default`, not `internal`. The prior ny8m8a
-// directive favouring `internal` for replies was reversed once david
-// tried it live).
-const scopeStorageKey = computed(() => {
-    if (props.mode === "comment" && props.ticketId !== undefined) {
-        return `aiball.composer.scope.${props.ticketId}`;
-    }
-    return `aiball.composer.scope.new.${props.project}`;
-});
-function readPersistedScope(): Scope | null {
-    const raw = localStorage.getItem(scopeStorageKey.value);
-    if (raw === "internal" || raw === "default" || raw === "broadcast") return raw;
-    return null;
-}
-const scope = ref<Scope>(readPersistedScope() ?? "default");
-watch(scope, (next) => {
-    localStorage.setItem(scopeStorageKey.value, next);
-});
 // #B.245 fgum2c: dropdown with per-option pictograms (internal /
 // default / broadcast). Includes the icon class so the Select's
 // option/value templates can render the same glyph used everywhere
@@ -81,6 +55,20 @@ const intent = ref<Intent>("request");
 // #B.222: urgency hint orthogonal to intent. Default "normal" = invisible
 // when unchanged, so 90% of ticket-creates don't pay any visual weight.
 const priority = ref<Priority>("normal");
+// Scope persistence (#B.245 / #253) + per-thread draft persistence
+// (#B.94) live in lib/composer-draft.ts — the composable owns the
+// `scope` ref, its localStorage memory, and the sessionStorage draft
+// watches (WHY comments moved alongside). `draftKey` stays in scope
+// here so submit() can drop the draft after a successful post.
+const { scope, draftKey } = useComposerDraft({
+    mode: toRef(() => props.mode),
+    project: toRef(() => props.project),
+    ticketId: toRef(() => props.ticketId),
+    title,
+    body,
+    intent,
+    priority,
+});
 // #292: tags chosen for a NEW ticket (deferred — applied after create).
 const ticketTagIds = ref<number[]>([]);
 // #514 (david `nd967z`) : assignee picker at create. Empty = no assign
@@ -173,87 +161,6 @@ const placeholder = computed(
             ? "Ticket body (optional) — markdown supported"
             : "Write a comment — markdown supported (gfm)"),
 );
-// Per-thread / per-project draft persistence (per #B.94). The composer
-// preserves what's been typed across page refreshes and thread
-// navigation: a reply on `#B.42` keeps its own draft, a reply on
-// `#B.43` keeps its own, and the new-ticket modal in `aiball` keeps
-// its own. Cleared on successful submit.
-const draftKey = computed(() => {
-    if (isTicket.value) return `aiball.draft.composer.ticket.${props.project}`;
-    const tid = props.ticketId ?? "untargeted";
-    return `aiball.draft.composer.comment.${tid}`;
-});
-
-function loadDraft() {
-    const saved = sessionStorage.getItem(draftKey.value);
-    if (saved === null) {
-        // No draft for this scope → start with a clean slate.
-        title.value = "";
-        body.value = "";
-        return;
-    }
-    if (isTicket.value) {
-        try {
-            const parsed = JSON.parse(saved) as {
-                title?: string;
-                body?: string;
-                intent?: Intent;
-                priority?: Priority;
-            };
-            title.value = typeof parsed.title === "string" ? parsed.title : "";
-            body.value = typeof parsed.body === "string" ? parsed.body : "";
-            if (parsed.intent && (INTENTS as readonly string[]).includes(parsed.intent)) {
-                intent.value = parsed.intent;
-            }
-            if (parsed.priority && (PRIORITIES as readonly string[]).includes(parsed.priority)) {
-                priority.value = parsed.priority;
-            }
-        } catch {
-            // Corrupted draft — start fresh.
-            title.value = "";
-            body.value = "";
-        }
-    } else {
-        // Comment mode: stored as plain string (body only).
-        body.value = saved;
-    }
-}
-
-// Re-run on mount AND whenever the scope (project / ticketId / mode)
-// changes. Vue reuses the same component instance across thread
-// navigation, so a watch is the right hook for "the composer now
-// belongs to a different conversation, reload its draft".
-watch(
-    [() => props.mode, () => props.project, () => props.ticketId],
-    loadDraft,
-    { immediate: true },
-);
-
-// Mirror typing into sessionStorage. Cleared (instead of stored with
-// empty values) when both fields are empty so we don't leave
-// zero-content keys around.
-watch([title, body, intent, priority], () => {
-    const key = draftKey.value;
-    if (isTicket.value) {
-        const empty = !title.value && !body.value
-            && intent.value === "request"
-            && priority.value === "normal";
-        if (empty) sessionStorage.removeItem(key);
-        else sessionStorage.setItem(
-            key,
-            JSON.stringify({
-                title: title.value,
-                body: body.value,
-                intent: intent.value,
-                priority: priority.value,
-            }),
-        );
-    } else {
-        if (!body.value) sessionStorage.removeItem(key);
-        else sessionStorage.setItem(key, body.value);
-    }
-});
-
 async function submit() {
     if (!canSubmit.value) return;
     sending.value = true;
@@ -418,11 +325,6 @@ onMounted(() => {
             });
         },
     });
-    // Load the @-mention catalog once (per #B.71). Cheap; the daemon
-    // builds it from SELECT DISTINCT across subs/tickets/messages.
-    api.mentionSuggestions()
-        .then((r) => { mentionCatalog.value = r; })
-        .catch(() => { /* offline OK — autocomplete just stays inert */ });
     // #514 + #553 — assignee picker (tickets + comments) : on charge le
     // catalog des consumers une fois au mount. Ignoré si offline.
     api.listConsumers()
@@ -433,135 +335,20 @@ onBeforeUnmount(() => {
     detachPaste?.();
 });
 
-// =====================================================================
-//  @-mention autocomplete (#B.71)
-// =====================================================================
-//
-// Inline popover anchored below the textarea. Triggered by typing `@`
-// (or scrolling the caret back to an existing @-token). Suggestions:
-// projects first (folder icon), agents second (user icon). Selection
-// replaces the partial `@xxx` with the full `@name `.
-
-interface MentionSuggestion {
-    kind: "project" | "agent";
-    value: string;
-}
-
-const mentionCatalog = ref<{ projects: string[]; agents: string[] } | null>(null);
-const mentionQuery = ref<string | null>(null);  // null = popover closed
-const mentionTokenStart = ref(0);                // body index where the `@` sits
-const mentionSelectedIdx = ref(0);
-// #515 — filtre catégorie. Default "all" (les 2 mélangés avec icônes
-// distinctes pi-folder / pi-user). L'utilisateur peut narrow sur agents
-// uniquement ou projects uniquement via les chips du header de popover.
-type MentionFilter = "all" | "agents" | "projects";
-const mentionFilter = ref<MentionFilter>("all");
-
-const mentionSuggestions = computed<MentionSuggestion[]>(() => {
-    if (mentionQuery.value === null || !mentionCatalog.value) return [];
-    const q = mentionQuery.value.toLowerCase();
-    const matchProj = mentionFilter.value === "agents"
-        ? []
-        : mentionCatalog.value.projects.filter((p) => p.toLowerCase().includes(q));
-    const matchAgent = mentionFilter.value === "projects"
-        ? []
-        : mentionCatalog.value.agents.filter((a) => a.toLowerCase().includes(q));
-    return [
-        ...matchProj.map((v): MentionSuggestion => ({ kind: "project", value: v })),
-        ...matchAgent.map((v): MentionSuggestion => ({ kind: "agent", value: v })),
-    ].slice(0, 8);
-});
-
-// #515 — quand on switche de filtre, l'index sélectionné peut pointer hors
-// de la nouvelle liste plus courte. Reset à 0 pour éviter un highlight cassé.
-function setMentionFilter(f: MentionFilter) {
-    mentionFilter.value = f;
-    mentionSelectedIdx.value = 0;
-}
-
-function detectMentionAtCaret() {
-    const el = bodyTextareaRef.value?.$el;
-    if (!el) {
-        mentionQuery.value = null;
-        return;
-    }
-    const caret = el.selectionStart ?? 0;
-    const before = body.value.slice(0, caret);
-    // Most recent `@` preceded by start-of-line or non-word non-@ char,
-    // followed by 0..N word/dash/underscore chars, ending at caret.
-    const m = before.match(/(?:^|[^\w@])@([a-zA-Z0-9_-]*)$/);
-    if (!m) {
-        mentionQuery.value = null;
-        return;
-    }
-    mentionQuery.value = m[1];
-    mentionTokenStart.value = caret - m[1].length - 1; // position of `@`
-    mentionSelectedIdx.value = 0;
-}
-
-function onComposerInput() {
-    // setTimeout(0) rather than rAF because rAF is throttled when the
-    // browser tab is in background (the autocomplete still needs to
-    // respond to typing even if the tab isn't focused).
-    setTimeout(detectMentionAtCaret, 0);
-}
-
-// Belt + braces: also re-evaluate when body changes via paste, drafts,
-// programmatic edits, etc. The @input handler above covers the typical
-// typing path; this watch handles everything else.
-watch(body, () => {
-    setTimeout(detectMentionAtCaret, 0);
-});
-
-function onComposerKeydown(ev: KeyboardEvent) {
-    if (mentionQuery.value === null || mentionSuggestions.value.length === 0) {
-        // Re-evaluate after arrow/backspace movements that change the caret.
-        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(ev.key)) {
-            // setTimeout(0) rather than rAF because rAF is throttled when the
-    // browser tab is in background (the autocomplete still needs to
-    // respond to typing even if the tab isn't focused).
-    setTimeout(detectMentionAtCaret, 0);
-        }
-        return;
-    }
-    if (ev.key === "ArrowDown") {
-        ev.preventDefault();
-        mentionSelectedIdx.value =
-            (mentionSelectedIdx.value + 1) % mentionSuggestions.value.length;
-        return;
-    }
-    if (ev.key === "ArrowUp") {
-        ev.preventDefault();
-        mentionSelectedIdx.value =
-            (mentionSelectedIdx.value - 1 + mentionSuggestions.value.length) %
-            mentionSuggestions.value.length;
-        return;
-    }
-    if (ev.key === "Enter" || ev.key === "Tab") {
-        ev.preventDefault();
-        selectMention(mentionSuggestions.value[mentionSelectedIdx.value]);
-        return;
-    }
-    if (ev.key === "Escape") {
-        ev.preventDefault();
-        mentionQuery.value = null;
-        return;
-    }
-}
-
-function selectMention(s: MentionSuggestion) {
-    const el = bodyTextareaRef.value?.$el;
-    if (!el || mentionQuery.value === null) return;
-    const start = mentionTokenStart.value;
-    const end = start + 1 + mentionQuery.value.length;
-    body.value = `${body.value.slice(0, start)}@${s.value} ${body.value.slice(end)}`;
-    mentionQuery.value = null;
-    setTimeout(() => {
-        const pos = start + s.value.length + 2; // @ + name + space
-        el.focus();
-        el.setSelectionRange(pos, pos);
-    }, 0);
-}
+// @-mention autocomplete (#B.71 / #515) — the machinery (catalog fetch,
+// caret detection, keyboard nav, selection splice) lives in
+// lib/mention-autocomplete.ts. The popover template + its CSS stay in
+// this component.
+const {
+    mentionQuery,
+    mentionSelectedIdx,
+    mentionFilter,
+    mentionSuggestions,
+    setMentionFilter,
+    onComposerInput,
+    onComposerKeydown,
+    selectMention,
+} = useMentionAutocomplete(bodyTextareaRef, body);
 
 // Attach button (per #B.76 follow-up, #694 widened to text/code/binary).
 // Picker accepts the same allow-list the server enforces ; the rendered
