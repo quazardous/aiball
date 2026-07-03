@@ -7,6 +7,7 @@
  * Extracted from db.ts (#B.332 Phase A.2).
  */
 import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
+import { invalidateFlagsCache } from "./flags-cache.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { listTypedRelationsForTicket } from "./messages.js";
@@ -260,6 +261,7 @@ export function setTicketAssignment(
     assignee: string,
     assigned_by: string,
 ): { released_claim: { ticket_id: number; claimant: string } | null } {
+    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     // #523 david `reztjq` : assignment doit reset le claim courant si claimant
     // existant ET claimant !== nouveau assignee. Self-assign (assignee ==
     // claimant) protégé : le focus reste, promu en responsabilité.
@@ -301,6 +303,7 @@ export function setTicketAssignment(
  * tiebreak (#430) + token attribution (#434). Independent of any assignment.
  */
 export function setTicketClaim(ticket_id: number, claimant: string, at: string = nowIso()): void {
+    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     getDb().update(schema.tickets)
         .set({ claimant, claimedAt: at })
         .where(eq(schema.tickets.id, ticket_id))
@@ -328,6 +331,7 @@ export function ticketsClaimedBy(consumer_id: string): { id: number; claimed_at:
 
 /** #436: release a ticket's ASSIGNMENT (responsibility) — back to the shared pool. */
 export function releaseTicketAssignment(ticket_id: number): void {
+    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     getDb().update(schema.tickets)
         .set({ assignee: null, assignedBy: null, assignedAt: null })
         .where(eq(schema.tickets.id, ticket_id))
@@ -336,6 +340,7 @@ export function releaseTicketAssignment(ticket_id: number): void {
 
 /** #436: release a ticket's CLAIM (focus) — drop the lock, keep any assignment. */
 export function releaseTicketClaim(ticket_id: number): void {
+    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     getDb().update(schema.tickets)
         .set({ claimant: null, claimedAt: null })
         .where(eq(schema.tickets.id, ticket_id))

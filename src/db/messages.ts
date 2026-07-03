@@ -8,6 +8,7 @@
  */
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { invalidateInboxAgg } from "./inbox-agg.js";
+import { invalidateFlagsCache } from "./flags-cache.js";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "../schema.js";
 import {
@@ -213,7 +214,7 @@ export function insertMessage(m: NewMessage): Message {
         return messageRowToMessage(inserted, parent?.project ?? m.project);
     });
     // #1167 — a new message changes the project's inbox aggregation.
-    invalidateInboxAgg(result.project);
+    invalidateInboxAgg(result.project); invalidateFlagsCache();
     return result;
 }
 
@@ -396,7 +397,7 @@ export function updateMessageStatus(
     matchedRuleId: number | null = null,
     kind?: MessageKind | "ticket_created" | null,
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — status flip may change closed/resolved/pending flags
+    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — status flip may change closed/resolved/pending flags
     const db = getDb();
     const decidedAt = nowIso();
     if (kind === "ticket_created") {
@@ -453,7 +454,7 @@ export function editMessage(
         scope?: string | null;
     },
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — edit may change lastSpeaker/body-gated flags
+    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — edit may change lastSpeaker/body-gated flags
     const db = getDb();
     // #B.104: re-inject `<!-- q:xxx -->` markers on any new task-list
     // lines the editor added. Existing markers are preserved.
@@ -519,7 +520,7 @@ export function editMessage(
  * isn't a `comment_added`.
  */
 export function deleteComment(id: number, by: string): Message | null {
-    invalidateInboxAgg(); // #1167 — delete changes counts/lastSpeaker
+    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — delete changes counts/lastSpeaker
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
@@ -564,7 +565,7 @@ export function moveTicket(
     targetProject: string,
     byAgent: string | null,
 ): { ticket: Message; event: Message | null; from: string } | null {
-    invalidateInboxAgg(); // #1167 — move changes which project the thread aggregates into
+    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — move changes which project the thread aggregates into
     const db = getDb();
     return db.transaction((tx) => {
         const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
@@ -1141,7 +1142,7 @@ export function reclassifyMessageDecision(
     messageId: number,
     newKind: import("../decisions.js").DecisionKind,
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — decision kind change flips plan/resolution flags
+    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — decision kind change flips plan/resolution flags
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1184,7 +1185,7 @@ export function promoteMessageToDecision(
     status: Exclude<DecisionStatus, "pending"> | undefined,
     by: string,
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — promotion adds a decision
+    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — promotion adds a decision
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1221,7 +1222,7 @@ export function promoteMessageToDecision(
  * can be cleanly removed.
  */
 export function removeMessageDecision(messageId: number): Message | null {
-    invalidateInboxAgg(); // #1167 — removal clears a decision
+    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — removal clears a decision
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();

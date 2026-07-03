@@ -6,6 +6,7 @@
  * Extracted from db.ts (#B.332 Phase A.2).
  */
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { getCachedDecisionGate, getCachedActionable } from "./flags-cache.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
@@ -1490,6 +1491,9 @@ export function lastActorExclusions(consumerId: string): Set<number> {
  * `accepted` plan is the GO-signal so it un-gates for the agent to execute.
  */
 export function decisionGateByTicket(): Map<number, boolean> {
+    return getCachedDecisionGate(() => decisionGateByTicketUncached());
+}
+function decisionGateByTicketUncached(): Map<number, boolean> {
     const db = getDb();
     // #961 — `ticket_created` is a VIRTUAL kind synthesized from the
     // `tickets` table via `ticketRowToMessage()`. The `_messages` table
@@ -1561,6 +1565,9 @@ export function decisionGateByTicket(): Map<number, boolean> {
 }
 
 export function computeActionableTicketIds(consumerId?: string): ActionableTicketSet {
+    return getCachedActionable(consumerId, () => computeActionableTicketIdsUncached(consumerId));
+}
+function computeActionableTicketIdsUncached(consumerId?: string): ActionableTicketSet {
     const db = getDb();
     const nowStr = nowIso();
 
