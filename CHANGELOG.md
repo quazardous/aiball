@@ -25,6 +25,14 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **"API unreachable" loop state.** When Claude Code can't reach the Anthropic
+  API and shows its retry banner (`Unable to connect… · Retrying · attempt
+  N/10`), the loop bar turns orange with a `retrying` hint and auto-wakes are
+  held — waking a session that can't reach the API does nothing. The hold is
+  bounded: past a safety window (2 min by default) wakes resume even if the
+  banner was missed clearing, so the loop can never freeze on a stale
+  detection; the state clears itself the moment Claude is working again.
+
 - **"Not logged in" loop state.** When Claude Code isn't logged in, the loop
   bar turns orange with a `/login` hint and auto-wakes are held — no point
   waking a session that can't act. It clears automatically as soon as Claude is

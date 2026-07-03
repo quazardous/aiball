@@ -994,6 +994,8 @@ export function readLoopStateInput(
         paneCompacting: ipc.paneCompacting ?? false,
         paneInterrupted: ipc.paneInterrupted ?? false,
         notLoggedIn: ipc.notLoggedIn ?? false,
+        apiUnreachableSinceMs: ipc.apiUnreachableSinceMs ?? null,
+        apiUnreachableTtlMs: API_UNREACHABLE_TTL_MS,
         noWait,
         humanTypingAtMs: ipc.humanTypingAtMs,
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
@@ -1026,6 +1028,12 @@ export function readLoopStateInput(
  * longer-lived "human present" signal.
  */
 export const HUMAN_TYPING_TTL_SEC = 5;
+
+/** #1116 Slice 2 — API-unreachable wake-hold TTL (ms). Past this window the
+ *  wake gate fails open so a terminal 10/10 retry failure or a detection
+ *  false-positive can never freeze the loop. Env-overridable. */
+export const API_UNREACHABLE_TTL_MS =
+    Math.max(0, Number(process.env[CL_ENV.API_UNREACHABLE_TTL_MS] ?? 120_000));
 
 /** Is the pane really running under the PTY proxy right now? (#269)
  *  The proxy drops the marker (stamped with its PID, see pty-proxy.py) after

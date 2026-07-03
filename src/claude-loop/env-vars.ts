@@ -69,6 +69,12 @@ export const CL_ENV = {
     ERROR_BACKOFF_FACTOR: "CL_ERROR_BACKOFF_FACTOR",
     ERROR_BACKOFF_CAP_MS: "CL_ERROR_BACKOFF_CAP_MS",
 
+    // #1116 Slice 2 — API-unreachable wake-hold TTL (ms). Past this window
+    // the wake gate FAILS OPEN (wakes resume) so a terminal 10/10 retry
+    // failure or a detection false-positive can never freeze the loop.
+    // Default 120000 (2 min).
+    API_UNREACHABLE_TTL_MS: "CL_API_UNREACHABLE_TTL_MS",
+
     // Debug-only opt-in logs (no yaml backing — set via shell env at start
     // or `claude-loop reload --set …`). Reads are gated on `=== "1"`.
     PROXY_LOG: "CL_PROXY_LOG",

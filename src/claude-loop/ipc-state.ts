@@ -194,9 +194,15 @@ export interface IpcState {
     /** #1116 — Claude Code can't reach the API (the pane shows a retry banner :
      *  "Unable to connect… · Retrying… · attempt N/10"). Set TRUE by the
      *  ApiUnreachableWatcher, cleared on busy-begin / the first Stop hook (a turn
-     *  running proves the API is reachable). While true the bar paints ORANGE
-     *  (Slice 1). A wake-hold is deferred to Slice 2. Default false. */
+     *  running proves the API is reachable). While true the bar paints ORANGE.
+     *  Default false. */
     apiUnreachable: boolean;
+    /** #1116 Slice 2 — when the flag above was armed (ms epoch), null when
+     *  clear. The wake gate holds wakes only while `now − since < TTL`
+     *  (`CL_API_UNREACHABLE_TTL_MS`) — past that it FAILS OPEN so a terminal
+     *  10/10 failure or a false positive can't freeze the loop; the resumed
+     *  wake then self-heals the flag via the busy-begin clear. */
+    apiUnreachableSinceMs: number | null;
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
@@ -255,6 +261,7 @@ const state: IpcState = {
     daemonDown: false,
     notLoggedIn: false,
     apiUnreachable: false,
+    apiUnreachableSinceMs: null,
     bootDeadlineMs: null,
     counters: null,
     stateTagInfo: null,
@@ -435,11 +442,13 @@ export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
 }
 
 /** #1116 — flag Claude Code as unable to reach the API (true) / reachable
- *  (false). notifyIpcChanged → BarRenderer repaints ORANGE while true. Slice 1
- *  is bar-only ; the wake-hold lands in Slice 2. */
-export function setIpcApiUnreachable(apiUnreachable: boolean): void {
+ *  (false). notifyIpcChanged → BarRenderer repaints ORANGE while true, and the
+ *  wake gate holds wakes for the TTL window (Slice 2 — see
+ *  `apiUnreachableSinceMs`). `atMs` is injectable for tests; defaults to now. */
+export function setIpcApiUnreachable(apiUnreachable: boolean, atMs?: number): void {
     if (state.apiUnreachable === apiUnreachable) return;
     state.apiUnreachable = apiUnreachable;
+    state.apiUnreachableSinceMs = apiUnreachable ? (atMs ?? Date.now()) : null;
     notifyIpcChanged();
 }
 
@@ -635,6 +644,7 @@ export function resetIpcStateForTests(): void {
     state.daemonDown = false;
     state.notLoggedIn = false;
     state.apiUnreachable = false;
+    state.apiUnreachableSinceMs = null;
     state.bootDeadlineMs = null;
     state.counters = null;
     state.stateTagInfo = null;

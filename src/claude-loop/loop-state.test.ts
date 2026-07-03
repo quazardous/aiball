@@ -56,6 +56,8 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         paneCompacting: false,
         paneInterrupted: false,
         notLoggedIn: false,
+        apiUnreachableSinceMs: null,
+        apiUnreachableTtlMs: 120 * SEC,
         noWait: false,
         humanTypingAtMs: null,
         humanTypingTtlMs: 5 * SEC,
@@ -435,6 +437,44 @@ test("#1072 not logged in → wake skipped", () => {
     }));
     assert.equal(v.wakeAllowed, false);
     assert.match(v.wakeSkipReason ?? "", /not logged in/);
+});
+
+test("#1116 API unreachable (dans le TTL) → wake skipped", () => {
+    const now = T0 + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        idleSinceMs: now,
+        apiUnreachableSinceMs: now - 30 * SEC, // armé il y a 30s, TTL 120s
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /API unreachable/);
+});
+
+test("#1116 API unreachable bloque aussi le wake manuel (dans le TTL)", () => {
+    const now = T0 + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        idleSinceMs: now,
+        apiUnreachableSinceMs: now - 30 * SEC,
+        manualWake: true,
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /API unreachable/);
+});
+
+test("#1116 TTL expiré → FAIL OPEN (le wake repart malgré le flag)", () => {
+    // Échec terminal 10/10 (ni busy ni Stop pour clear) ou faux positif de
+    // détection : passé le TTL le gate laisse passer — jamais de loop gelée.
+    const now = T0 + 10 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        idleSinceMs: now,
+        apiUnreachableSinceMs: now - 121 * SEC, // TTL 120s dépassé
+    }));
+    assert.equal(v.wakeAllowed, true);
 });
 
 test("#1072 not logged in blocks even a manual wake", () => {

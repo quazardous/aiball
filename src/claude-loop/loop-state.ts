@@ -113,6 +113,15 @@ export interface LoopStateInput {
      *  useless until the human runs /login. */
     notLoggedIn: boolean;
 
+    /** #1116 Slice 2 — when the API-unreachable retry banner was detected
+     *  (ms epoch), null when clear. Holds ALL wakes (even manual) while
+     *  `nowMs − since < apiUnreachableTtlMs`, then FAILS OPEN — a terminal
+     *  10/10 failure or a false positive must never freeze the loop; the
+     *  resumed wake self-heals the flag via the busy-begin clear. */
+    apiUnreachableSinceMs: number | null;
+    /** TTL for the hold above (`CL_API_UNREACHABLE_TTL_MS`, default 2 min). */
+    apiUnreachableTtlMs: number;
+
     /** #722 — TTL for the input-hot observable. A keystroke is « hot »
      *  if it landed within this window (typically 3_000ms). Drives the
      *  pane-probe cadence via `shouldPollFast`. */
@@ -279,6 +288,19 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     // runs /login. Blocks even manual wakes (placed before the manual bypass).
     if (input.notLoggedIn) {
         return { allowed: false, reason: "not logged in (run /login)" };
+    }
+
+    // #1116 Slice 2 — claude can't reach the API (it is auto-retrying) : a
+    // wake can't help, hold everything — but ONLY for the TTL window. Past it
+    // we fail open (terminal 10/10 failure or a detection false-positive must
+    // never freeze the loop) ; the resumed wake self-heals the stale flag via
+    // the busy-begin clear. Blocks even manual wakes while live.
+    if (input.apiUnreachableSinceMs !== null) {
+        const heldMs = input.nowMs - input.apiUnreachableSinceMs;
+        if (heldMs < input.apiUnreachableTtlMs) {
+            const leftS = Math.ceil((input.apiUnreachableTtlMs - heldMs) / 1000);
+            return { allowed: false, reason: `API unreachable (claude retrying — fail-open in ${leftS}s)` };
+        }
     }
 
     // The idle-since gate is the only one a manual wake honors (pinging
