@@ -71,7 +71,7 @@ let _singleton: WakeService | null = null;
 export function getWakeService(): WakeService {
     if (!_singleton) {
         let snap = consumePendingSnapshot("wake") as Snapshot<unknown> | undefined;
-        // #1165 — NEVER restore into a timer-only state. `inFlight` and
+        // #1166 — NEVER restore into a timer-only state. `inFlight` and
         // `cooldown` exit exclusively (or primarily) via `after()` delays,
         // and XState does NOT re-arm delayed transitions when an actor is
         // started from a persisted snapshot → a kernel self-reload that
@@ -92,7 +92,7 @@ export function resetWakeServiceForTests(): void {
     _singleton = new WakeService();
 }
 
-/** #1165 tests — null the singleton so the NEXT getWakeService() re-runs the
+/** #1166 tests — null the singleton so the NEXT getWakeService() re-runs the
  *  pending-snapshot restore path (resetWakeServiceForTests installs a fresh
  *  instance and would bypass it). */
 export function clearWakeServiceSingletonForTests(): void {

@@ -1,4 +1,4 @@
-// #1165 — un snapshot persisté en état timer-only (cooldown/inFlight) ne doit
+// #1166 — un snapshot persisté en état timer-only (cooldown/inFlight) ne doit
 // JAMAIS être restauré : XState ne ré-arme pas les after() au restore d'un
 // snapshot persisté → la machine restait en `cooldown` à vie (skybot bloqué,
 // chaque drain refusé `wakeMachine state=cooldown` toutes les 10 s). La garde
@@ -34,26 +34,26 @@ function restoreFrom(value: string) {
 // NB : une machine FRAÎCHE démarre en `gated` (BOOT_READY → idle). Le
 // critère du fix n'est donc pas isIdle mais « ne PAS être en cooldown/
 // inFlight » : droppé = boot nominal (gated), restauré-idle = idle.
-test("#1165: pending snapshot en cooldown → droppé (boot nominal en gated, pas de prison)", (t) => {
+test("#1166: pending snapshot en cooldown → droppé (boot nominal en gated, pas de prison)", (t) => {
     const svc = restoreFrom("cooldown");
     t.after(() => { setPendingRespawnSnapshots(null); resetWakeServiceForTests(); });
     assert.equal(svc.getActor().getSnapshot().value, "gated");
 });
 
-test("#1165: pending snapshot en inFlight → droppé aussi", (t) => {
+test("#1166: pending snapshot en inFlight → droppé aussi", (t) => {
     const svc = restoreFrom("inFlight");
     t.after(() => { setPendingRespawnSnapshots(null); resetWakeServiceForTests(); });
     assert.equal(svc.getActor().getSnapshot().value, "gated");
 });
 
-test("#1165: pending snapshot en idle → restauré tel quel (pas de régression)", (t) => {
+test("#1166: pending snapshot en idle → restauré tel quel (pas de régression)", (t) => {
     const svc = restoreFrom("idle");
     t.after(() => { setPendingRespawnSnapshots(null); resetWakeServiceForTests(); });
     assert.equal(svc.getActor().getSnapshot().value, "idle");
     assert.equal(svc.isIdle(), true);
 });
 
-test("#1165: preuve du bug sous-jacent — un restore direct en cooldown est une prison", (t) => {
+test("#1166: preuve du bug sous-jacent — un restore direct en cooldown est une prison", (t) => {
     // Sans la garde : createActor(snapshot=cooldown) reste en cooldown (les
     // after() ne sont pas ré-armés par XState au restore). C'est le
     // comportement observé sur skybot (drains refusés en boucle).
