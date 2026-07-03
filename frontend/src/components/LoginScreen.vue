@@ -109,7 +109,6 @@ async function submit() {
     </div>
 </template>
 
-<style>
-/* Styles are shared with SetupScreen.vue (loaded together via the
-   Vue scope-cascade). No duplication needed. */
-</style>
+<!-- Shared .auth-* styles — explicit import instead of relying on
+     SetupScreen's non-scoped block having been loaded (C4). -->
+<style src="./auth-screens.css"></style>

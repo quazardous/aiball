@@ -254,6 +254,15 @@ body,
     color: var(--p-text-color);
     line-height: 1.45;
 }
+/* C4 — narrow viewports shrink explainers app-wide. Moved here from a
+   non-scoped ProjectsPanel media rule that already leaked this exact
+   behavior everywhere ; owning it globally keeps rendering identical
+   and makes the intent explicit. */
+@media (max-width: 720px) {
+    .aiball-explainer {
+        font-size: var(--fs-sm);
+    }
+}
 .aiball-explainer--muted {
     color: var(--p-text-muted-color);
     font-size: var(--fs-lg);

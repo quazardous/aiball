@@ -216,9 +216,6 @@ defineExpose({ load });
     .projects-panel {
         gap: 0.6rem;
     }
-    .aiball-explainer {
-        font-size: var(--fs-sm);
-    }
     .create-project-form {
         flex-wrap: wrap;
     }
