@@ -66,6 +66,7 @@ import { parse as parseYaml } from "yaml";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
+import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
 import { badRequest, consumerOf, notFound, withTags, withVotes } from "./_helpers.js";
 import type { AuthenticatedRequest } from "../auth.js";
 import { moveTicketTo } from "../messages.js";
@@ -334,200 +335,11 @@ ticketsRouter.get("/inbox", (req, res) => {
     const consumerId = consumerOf(req);
 
     const tickets = listMessages({ kind: "ticket_created", project });
-    const otherMessages = listMessages({ project }).filter(
-        (m) => m.kind !== "ticket_created",
-    );
-
-    interface Agg {
-        commentCount: number;
-        pendingCount: number;
-        lastActivity: string;
-        // Walk all approved lifecycle events in id order to derive the
-        // current closed/resolved flags. Order matters because reopen
-        // resets resolved.
-        closed: boolean;
-        resolved: boolean;
-        // Agent explicitly flagged "I can't proceed, human take over"
-        // (#B.119). Independent of resolved — they signal different
-        // intents to the reporter.
-        blocked: boolean;
-        // Surface pending ticket_resolved proposals so the reporter sees
-        // in the list view that a thread is awaiting their accept/reject.
-        // Only counts non-stale ones (we ignore them once the ticket is
-        // closed since closing implicitly clears them).
-        pendingResolution: boolean;
-        // #B.168: latest comment id carrying a resolution decision —
-        // used to honor "latest wins" when multiple resolution
-        // comments coexist on the same thread.
-        latestResolutionId: number;
-        /** #B.168 follow-up: surface in the inbox row when the LAST
-            resolution decision was rejected (so the reporter sees
-            "yes I rejected it, the thread is open"). */
-        latestResolutionRejected: boolean;
-        // #B.173: same mechanic for plan decisions. David: "reject
-        // plan est pas flag dans les list comme reject resolution".
-        // Latest-wins symmetric with resolution.
-        latestPlanId: number;
-        latestPlanRejected: boolean;
-        // #656 david: symmetric to pendingResolution — surface a pending
-        // PLAN decision on the latest plan-decision comment so the inbox
-        // row can flag "you have a plan to accept/reject" same way it
-        // flags pending resolutions. Latest-wins (matches latestPlanId).
-        pendingPlan: boolean;
-        // #737 — same mechanic for ESCALATION decisions. Surfaces so the
-        // inbox row can paint a red `ESCALATED` badge demanding human
-        // attention. Latest-wins.
-        latestEscalationId: number;
-        pendingEscalation: boolean;
-        // #B.132: who spoke last on this thread. Tracks the by_agent
-        // of the most recent non-rejected approved comment_added.
-        // Falls back to the ticket creator if no comments yet.
-        lastSpeaker: string | null;
-        lastSpeakerId: number;
-    }
-    const byTicket = new Map<number, Agg>();
-    // Sort lifecycle events for each ticket by id ASC so we can replay
-    // them in order. Comments are tallied independently.
-    const lifecycleByTicket = new Map<number, Message[]>();
-    for (const m of otherMessages) {
-        if (!m.ticket_id) continue;
-        const cur =
-            byTicket.get(m.ticket_id) ??
-            ({
-                commentCount: 0,
-                pendingCount: 0,
-                lastActivity: "",
-                closed: false,
-                resolved: false,
-                blocked: false,
-                pendingResolution: false,
-                latestResolutionId: 0,
-                latestResolutionRejected: false,
-                latestPlanId: 0,
-                latestPlanRejected: false,
-                pendingPlan: false,
-                latestEscalationId: 0,
-                pendingEscalation: false,
-                lastSpeaker: null,
-                lastSpeakerId: 0,
-            } as Agg);
-        if (m.kind === "comment_added") {
-            cur.commentCount++;
-            if (m.status === "pending") cur.pendingCount++;
-        }
-        // #B.132: track who spoke last on this thread. Counts any
-        // non-rejected message carrying content the human would read.
-        // - `comment_added`: always (any status — even pending mod is
-        //   "the author spoke, just not yet visible publicly").
-        // - lifecycle events (`ticket_closed`/`reopened`/`resolved`/
-        //   `blocked`): count when they carry a non-empty body (an
-        //   explanation typed in the composer). Bare close/reopen
-        //   with no body excluded — that's not speech.
-        // System-only relations (`ticket_referenced` / `ticket_sub_added`)
-        // never count.
-        if (
-            m.status !== "rejected" &&
-            m.by_agent &&
-            m.id > cur.lastSpeakerId &&
-            (m.kind === "comment_added" ||
-                (m.body &&
-                    (m.kind === "ticket_closed" ||
-                        m.kind === "ticket_reopened" ||
-                        m.kind === "ticket_resolved" ||
-                        m.kind === "ticket_blocked")))
-        ) {
-            cur.lastSpeaker = m.by_agent;
-            cur.lastSpeakerId = m.id;
-        }
-        if (m.kind === "ticket_resolved" && m.status === "pending") {
-            cur.pendingResolution = true;
-        }
-        // #B.129 phase 2: a comment carrying `meta.decision.kind ===
-        // "resolution"` plays the same role as the legacy
-        // ticket_resolved event. Latest-wins semantics (#B.168):
-        // pending_resolution reflects whether the MOST RECENT
-        // resolution-decision comment is still pending — older
-        // pending proposals that the agent re-framed over time
-        // shouldn't keep the flag stuck after the reporter rejected
-        // the active one. otherMessages is sorted DESC by id, so the
-        // FIRST resolution-decision comment we see is the latest;
-        // skip subsequent ones via `latestResolutionId`. accepted →
-        // synthetic resolved event for the replay below.
-        let syntheticResolved: Message | null = null;
-        if (m.kind === "comment_added" && m.status === "approved") {
-            const meta = parseMeta(m.meta ?? null);
-            const d = meta.decision;
-            if (d?.kind === "resolution") {
-                if (cur.latestResolutionId === 0 || m.id > cur.latestResolutionId) {
-                    cur.latestResolutionId = m.id;
-                    cur.pendingResolution = d.status === "pending";
-                    cur.latestResolutionRejected = d.status === "rejected";
-                }
-                if (d.status === "accepted") {
-                    syntheticResolved = { ...m, kind: "ticket_resolved" };
-                }
-            }
-            // #B.173: same latest-wins for plan decisions. No
-            // synthetic event — accepting a plan doesn't change the
-            // ticket lifecycle (it just records "yes, that's the
-            // direction"), only resolutions can close. Surface the
-            // rejected state so the inbox row can flag it (parallel
-            // to latest_resolution_rejected).
-            if (d?.kind === "plan") {
-                if (cur.latestPlanId === 0 || m.id > cur.latestPlanId) {
-                    cur.latestPlanId = m.id;
-                    cur.latestPlanRejected = d.status === "rejected";
-                    cur.pendingPlan = d.status === "pending";
-                }
-            }
-            // #737 — escalation latest-wins, mirror of plan. No
-            // synthetic lifecycle event : accepting an escalation
-            // doesn't close (the human just acknowledges the action
-            // they performed). The inbox row's `pending_escalation`
-            // flag drives the red ESCALATED chip in the frontend.
-            if (d?.kind === "escalation") {
-                if (cur.latestEscalationId === 0 || m.id > cur.latestEscalationId) {
-                    cur.latestEscalationId = m.id;
-                    cur.pendingEscalation = d.status === "pending";
-                }
-            }
-        }
-        if (
-            (m.kind === "ticket_closed" ||
-                m.kind === "ticket_reopened" ||
-                m.kind === "ticket_resolved" ||
-                m.kind === "ticket_blocked") &&
-            m.status === "approved"
-        ) {
-            const list = lifecycleByTicket.get(m.ticket_id) ?? [];
-            list.push(m);
-            lifecycleByTicket.set(m.ticket_id, list);
-        }
-        if (syntheticResolved) {
-            const list = lifecycleByTicket.get(m.ticket_id) ?? [];
-            list.push(syntheticResolved);
-            lifecycleByTicket.set(m.ticket_id, list);
-        }
-        if (m.created_at > cur.lastActivity) cur.lastActivity = m.created_at;
-        byTicket.set(m.ticket_id, cur);
-    }
-    // Replay lifecycle events to compute final closed/resolved/blocked
-    // flags. Reopen clears resolved + blocked alike (it's a "scratch
-    // and restart" signal from the reporter).
-    for (const [tid, events] of lifecycleByTicket) {
-        events.sort((a, b) => a.id - b.id);
-        const cur = byTicket.get(tid)!;
-        for (const ev of events) {
-            if (ev.kind === "ticket_closed") cur.closed = true;
-            else if (ev.kind === "ticket_reopened") {
-                cur.closed = false;
-                cur.resolved = false;
-                cur.blocked = false;
-            } else if (ev.kind === "ticket_resolved") cur.resolved = true;
-            else if (ev.kind === "ticket_blocked") cur.blocked = true;
-        }
-    }
-
+    // #1167 — the per-ticket aggregation (comment counts, lifecycle
+    // replay, latest plan/resolution/escalation, lastSpeaker) is memoized
+    // per project (write-invalidated + TTL ceiling) instead of replaying
+    // the whole history on every hit. See db/inbox-agg.ts.
+    const byTicket = getInboxAgg(project);
     const tagsMap = tagsForMessages(tickets.map((m) => m.id));
     const unreadMap = ticketUnreadFlags(consumerId, tickets.map((m) => m.id));
     // #427: per-ticket token-effort tally for the inbox row (one batched
@@ -549,26 +361,7 @@ ticketsRouter.get("/inbox", (req, res) => {
     );
     const nowStr = new Date().toISOString();
     let rows = tickets.map((t) => {
-        const agg =
-            byTicket.get(t.id) ??
-            ({
-                commentCount: 0,
-                pendingCount: 0,
-                lastActivity: "",
-                closed: false,
-                resolved: false,
-                blocked: false,
-                pendingResolution: false,
-                latestResolutionId: 0,
-                latestResolutionRejected: false,
-                latestPlanId: 0,
-                latestPlanRejected: false,
-                pendingPlan: false,
-                latestEscalationId: 0,
-                pendingEscalation: false,
-                lastSpeaker: null,
-                lastSpeakerId: 0,
-            } as Agg);
+        const agg = byTicket.get(t.id) ?? emptyAgg();
         const postponedUntil = t.postponed_until ?? null;
         const postponed =
             !!postponedUntil && postponedUntil > nowStr;

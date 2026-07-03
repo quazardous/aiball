@@ -7,6 +7,7 @@
  * Extracted from db.ts (#B.332 Phase A.2).
  */
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { invalidateInboxAgg } from "./inbox-agg.js";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "../schema.js";
 import {
@@ -87,7 +88,7 @@ function bumpPriorityForEscalation(
 
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
-    return db.transaction((tx) => {
+    const result = db.transaction((tx) => {
         const createdAt = nowIso();
         // #B.104: stamp stable `<!-- q:xxx -->` markers on every
         // `- [ ]` line so future toggles can address the question by
@@ -211,6 +212,9 @@ export function insertMessage(m: NewMessage): Message {
             .from(schema.tickets).where(eq(schema.tickets.id, m.ticket_id)).get();
         return messageRowToMessage(inserted, parent?.project ?? m.project);
     });
+    // #1167 — a new message changes the project's inbox aggregation.
+    invalidateInboxAgg(result.project);
+    return result;
 }
 
 export function getMessage(id: number): Message | null {
@@ -392,6 +396,7 @@ export function updateMessageStatus(
     matchedRuleId: number | null = null,
     kind?: MessageKind | "ticket_created" | null,
 ): Message | null {
+    invalidateInboxAgg(); // #1167 — status flip may change closed/resolved/pending flags
     const db = getDb();
     const decidedAt = nowIso();
     if (kind === "ticket_created") {
@@ -448,6 +453,7 @@ export function editMessage(
         scope?: string | null;
     },
 ): Message | null {
+    invalidateInboxAgg(); // #1167 — edit may change lastSpeaker/body-gated flags
     const db = getDb();
     // #B.104: re-inject `<!-- q:xxx -->` markers on any new task-list
     // lines the editor added. Existing markers are preserved.
@@ -513,6 +519,7 @@ export function editMessage(
  * isn't a `comment_added`.
  */
 export function deleteComment(id: number, by: string): Message | null {
+    invalidateInboxAgg(); // #1167 — delete changes counts/lastSpeaker
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
@@ -557,6 +564,7 @@ export function moveTicket(
     targetProject: string,
     byAgent: string | null,
 ): { ticket: Message; event: Message | null; from: string } | null {
+    invalidateInboxAgg(); // #1167 — move changes which project the thread aggregates into
     const db = getDb();
     return db.transaction((tx) => {
         const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
@@ -1133,6 +1141,7 @@ export function reclassifyMessageDecision(
     messageId: number,
     newKind: import("../decisions.js").DecisionKind,
 ): Message | null {
+    invalidateInboxAgg(); // #1167 — decision kind change flips plan/resolution flags
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1175,6 +1184,7 @@ export function promoteMessageToDecision(
     status: Exclude<DecisionStatus, "pending"> | undefined,
     by: string,
 ): Message | null {
+    invalidateInboxAgg(); // #1167 — promotion adds a decision
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1211,6 +1221,7 @@ export function promoteMessageToDecision(
  * can be cleanly removed.
  */
 export function removeMessageDecision(messageId: number): Message | null {
+    invalidateInboxAgg(); // #1167 — removal clears a decision
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
