@@ -17,6 +17,8 @@ import { join } from "node:path";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-1156-"));
 
 const { getDb } = await import("./db/connection.js");
+const { eq } = await import("drizzle-orm");
+const schema = await import("./schema.js");
 const { submitMessage, validateNewMessage } = await import("./messages.js");
 const { createProject } = await import("./db/projects.js");
 
@@ -80,8 +82,9 @@ test("#1156: end-to-end — le ticket créé PORTE la priorité (le bug runic : 
     });
     assert.ok(!("error" in v));
     const msg = submitMessage(v);
-    const row = getDb().$client
-        .prepare("SELECT priority FROM tickets WHERE id = ?")
-        .get(msg.id) as { priority: string } | undefined;
+    const row = getDb().select({ priority: schema.tickets.priority })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.id, msg.id))
+        .get();
     assert.equal(row?.priority, "low");
 });
