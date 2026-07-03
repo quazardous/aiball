@@ -214,7 +214,7 @@ function claimerTooltip(t: TicketSummary): string {
     align-items: center;
     gap: 0.3rem 0.9rem;
     margin: 0.2rem 0 0.4rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     font-variant-numeric: tabular-nums;
 }

@@ -531,19 +531,19 @@ async function sendPrompt() {
     color: var(--p-red-500);
 }
 .consumer-edit__hint {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     line-height: 1.35;
     color: var(--p-text-muted-color);
 }
 .consumer-edit__hint code {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     font-size: 0.74rem;
 }
 /* consumer_id read-only → <FieldRow> + `.aiball-mono` (style.css). */
 .consumer-edit__meta {
     display: flex;
     gap: 1.5rem;
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .consumer-edit__actions {
@@ -560,15 +560,15 @@ async function sendPrompt() {
     gap: 0.5rem;
 }
 .consumer-edit__cwd {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .consumer-edit__cwd code {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     font-size: 0.74rem;
 }
 .consumer-edit__status-none {
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     font-style: italic;
 }

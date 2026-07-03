@@ -915,9 +915,9 @@ watch(showSnoozed, (v) => {
     background: transparent;
     border: 1px dashed var(--p-content-border-color);
     color: var(--p-text-muted-color);
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     padding: 0.25rem 0.6rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -935,7 +935,7 @@ watch(showSnoozed, (v) => {
     gap: 0.3rem;
     color: var(--p-primary-color);
     text-decoration: none;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
     align-self: flex-start;
 }
 .settings-back-link:hover { text-decoration: underline; }
@@ -1010,7 +1010,7 @@ watch(showSnoozed, (v) => {
         border-top: 1px solid var(--p-content-border-color);
     }
     .aiball-footer-settings__label {
-        font-size: 0.75rem;
+        font-size: var(--fs-xs);
         text-transform: uppercase;
         letter-spacing: 0.05em;
         color: var(--p-text-muted-color);
@@ -1025,7 +1025,7 @@ watch(showSnoozed, (v) => {
         background: transparent;
         border: 0;
         padding: 0.45rem 0.6rem;
-        border-radius: 0.4rem;
+        border-radius: var(--radius-md);
         color: var(--p-text-color);
         cursor: pointer;
         font: inherit;

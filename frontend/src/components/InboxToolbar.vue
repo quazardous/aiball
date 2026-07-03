@@ -194,7 +194,7 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
                     class="filter-project-dropdown__item filter-project-dropdown__item--more"
                     @click="inactiveOpen = !inactiveOpen"
                 >
-                    <i :class="`pi ${inactiveOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`" style="font-size: 0.7rem; opacity: 0.6" />
+                    <i :class="`pi ${inactiveOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`" style="font-size: var(--fs-2xs); opacity: 0.6" />
                     <span class="filter-project-dropdown__item-label filter-project-dropdown__item-label--muted">{{ inactiveOpen ? 'Less' : `More (${inactiveProjectOptions.length})` }}</span>
                 </button>
                 <!-- Inactive projects (juste open/snoozed, OU activity > 14j). -->
@@ -357,9 +357,9 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     list-style: none;
     padding: 0.3rem 0.55rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: var(--p-surface-0);
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     max-width: 12rem;
 }
 .filter-project-dropdown > summary::-webkit-details-marker { display: none; }
@@ -386,7 +386,7 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     max-width: calc(100vw - 2rem);
     background: var(--p-content-background);
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     box-shadow: 0 6px 16px rgba(0,0,0,0.12);
     z-index: 20;
     padding: 0.25rem;
@@ -403,11 +403,11 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     padding: 0.45rem 0.6rem;
     background: transparent;
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     text-align: left;
     cursor: pointer;
     font: inherit;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
     color: var(--p-text-color);
 }
 .filter-project-dropdown__item:hover {
@@ -431,9 +431,9 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     flex-shrink: 0;
 }
 .filter-project-dropdown__badge {
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     font-weight: 600;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.1rem 0.4rem;
     line-height: 1;
 }
@@ -446,7 +446,7 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 .filter-project-dropdown__item--more {
     gap: 0.4rem;
     color: var(--p-text-muted-color);
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     padding-block: 0.3rem;
 }
 .filter-project-dropdown__item-label--muted {
@@ -458,7 +458,7 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 .filter-project-settings {
     background: transparent;
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     width: 1.8rem;
     height: 1.8rem;
     align-items: center;
@@ -480,7 +480,7 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     background: transparent;
     color: var(--p-text-muted-color);
     font: inherit;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     cursor: pointer;
     user-select: none;
 }
@@ -559,7 +559,7 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
         max-width: 14rem;
     }
     .filter-project-dropdown__chev {
-        font-size: 0.78rem;        /* 0.65 × 1.2 */
+        font-size: var(--fs-sm);        /* 0.65 × 1.2 */
     }
     .filter-project-dropdown__badge {
         font-size: 0.84rem;        /* 0.7 × 1.2 */
@@ -615,6 +615,6 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     background: var(--p-surface-100);
 }
 .filter-search__clear i {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
 }
 </style>

@@ -55,14 +55,14 @@ const bg = computed(() => props.tag.color ?? "var(--p-surface-200)");
     align-items: center;
     gap: 0.25rem;
     padding: 0.05rem 0.45rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
+    border-radius: var(--radius-pill);
+    font-size: var(--fs-xs);
     font-weight: 600;
     line-height: 1.3rem;
     white-space: nowrap;
 }
 .tag-badge--sm {
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     padding: 0.02rem 0.4rem;
     line-height: 1.1rem;
 }

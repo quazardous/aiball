@@ -185,11 +185,11 @@ async function launch(root: string) {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
     background: var(--p-primary-color);
     color: var(--p-primary-contrast-color);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.1rem 0.5rem;
 }
 .project-detail__local.is-running {
@@ -204,14 +204,14 @@ async function launch(root: string) {
     color: var(--p-text-muted-color);
     cursor: pointer;
     padding: 0.3rem 0.5rem;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
 }
 .project-detail__refresh:hover { background: var(--p-surface-100); }
 /* #459 : flash retiré, les feedbacks vont via `useNotify()` (lib/notify.ts). */
 .project-detail__root {
     padding: 0.8rem 1rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     background: var(--p-content-background);
     display: flex;
     flex-direction: column;
@@ -223,8 +223,8 @@ async function launch(root: string) {
     gap: 0.6rem;
 }
 .project-detail__path {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
     color: var(--p-text-color);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -240,7 +240,7 @@ async function launch(root: string) {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--p-green-600, #16a34a);
     white-space: nowrap;
@@ -262,8 +262,8 @@ async function launch(root: string) {
     gap: 0.3rem;
 }
 .project-detail__loop {
-    font-size: 0.85rem;
-    border-radius: 0.3rem;
+    font-size: var(--fs-md);
+    border-radius: var(--radius-sm);
 }
 .project-detail__loop.is-offline { opacity: 0.6; }
 /* #468 follow-up `ctmqzp` — row entière cliquable (anchor occupy la
@@ -274,7 +274,7 @@ async function launch(root: string) {
     align-items: center;
     gap: 0.5rem;
     padding: 0.2rem 0.4rem;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     text-decoration: none;
     color: inherit;
     cursor: pointer;
@@ -284,22 +284,22 @@ async function launch(root: string) {
 .project-detail__dot {
     width: 0.55rem;
     height: 0.55rem;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     flex: none;
 }
 .project-detail__dot.is-on { background: var(--p-green-500); }
 .project-detail__dot.is-off { background: var(--p-surface-400); }
 .project-detail__loop-id {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     color: var(--p-text-color);
 }
 .project-detail__loop-state {
     color: var(--p-text-muted-color);
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
 }
 .project-detail__none {
     color: var(--p-text-muted-color);
     font-style: italic;
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
 }
 </style>

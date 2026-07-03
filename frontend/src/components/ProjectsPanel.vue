@@ -202,9 +202,9 @@ defineExpose({ load });
 .pending-pill {
     background: var(--p-yellow-500);
     color: black;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.1rem 0.45rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
 }
 
@@ -217,7 +217,7 @@ defineExpose({ load });
         gap: 0.6rem;
     }
     .aiball-explainer {
-        font-size: 0.82rem;
+        font-size: var(--fs-sm);
     }
     .create-project-form {
         flex-wrap: wrap;
@@ -268,7 +268,7 @@ defineExpose({ load });
     .projects-table td:not(:first-child):not(.indicator-cell)[data-label]::before {
         content: attr(data-label) ": ";
         color: var(--p-text-muted-color);
-        font-size: 0.78rem;
+        font-size: var(--fs-sm);
         margin-right: 0.3rem;
     }
     .projects-table td.indicator-cell {

@@ -176,7 +176,7 @@ function onComposerSubmitted(messageId: number | null) {
     flex-wrap: wrap;
 }
 .new-ticket-label {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
     min-width: 5rem;
 }
@@ -187,11 +187,11 @@ function onComposerSubmitted(messageId: number | null) {
     min-width: 14rem;
 }
 .new-ticket-hint {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
     padding: 0.5rem 0.7rem;
     background: var(--p-surface-50);
     border-left: 3px solid var(--p-content-border-color);
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
 }
 </style>

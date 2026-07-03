@@ -221,7 +221,7 @@ function setPriority(v: "urgent" | "high" | "normal" | "low") {
 }
 .action-block__arrow {
     color: var(--p-text-muted-color);
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     text-align: center;
     width: 1.2rem;
 }

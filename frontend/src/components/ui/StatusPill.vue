@@ -31,7 +31,7 @@ defineProps<{
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     line-height: 1;
 }
 .aiball-pill__dot {

@@ -88,7 +88,7 @@ defineExpose({ bodyTextareaRef });
                 :disabled="bodyBusy"
                 :rows="6"
                 autoResize
-                style="flex: 1; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9rem;"
+                style="flex: 1; font-family: var(--font-mono); font-size: var(--fs-lg);"
                 placeholder="Ticket body (markdown supported, leave blank to clear)"
                 @update:model-value="(v) => emit('update:bodyDraft', String(v ?? ''))"
                 @keydown.ctrl.enter.prevent="emit('save')"

@@ -1,5 +1,21 @@
 :root {
     color-scheme: light dark;
+    /* UI-audit C4 — minimal token set. Font-size scale: the audited spread
+       (0.7 ×19, 0.75 ×14, 0.78 ×36, 0.8 ×15, 0.82 ×16, 0.85 ×42, 0.9 ×18)
+       collapses onto 5 steps; the 0.78/0.8/0.82 cluster folds into --fs-sm
+       (±0.02rem — imperceptible, that's the normalization). */
+    --fs-2xs: 0.7rem;
+    --fs-xs: 0.75rem;
+    --fs-sm: 0.8rem;
+    --fs-md: 0.85rem;
+    --fs-lg: 0.9rem;
+    --radius-sm: 0.3rem;
+    --radius-md: 0.4rem;
+    --radius-lg: 0.5rem;
+    --radius-pill: 999px;
+    /* One monospace stack (was 4 divergent spellings across 27 files; the
+       lone var(--font-mono) consumer silently fell back — now defined). */
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-family:
         ui-sans-serif,
         system-ui,
@@ -46,7 +62,7 @@ body,
 
 .message-card {
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     padding: 0.9rem 1rem;
     background: var(--p-content-background);
     display: flex;
@@ -60,7 +76,7 @@ body,
 }
 .message-card .expand-chevron {
     color: var(--p-text-muted-color);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
 }
 /* The expand chevron only matters in compact mode */
 .aiball-shell:not(.aiball-compact) .message-card .expand-chevron {
@@ -116,7 +132,7 @@ body,
     flex-wrap: wrap;
     gap: 0.5rem;
     align-items: center;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 
@@ -127,11 +143,11 @@ body,
 
 .message-card .body {
     white-space: pre-wrap;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
     background: var(--p-surface-100);
     padding: 0.5rem 0.6rem;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
 }
 
 .aiball-dark .message-card .body {
@@ -157,7 +173,7 @@ body,
     align-items: center;
     padding: 0.5rem 0.6rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
 }
 
 .rules-panel .rule-row.disabled {
@@ -171,11 +187,11 @@ body,
     align-items: end;
     padding: 0.6rem;
     border: 1px dashed var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
 }
 
 .field-label {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     margin-bottom: 0.2rem;
     display: block;
@@ -196,7 +212,7 @@ body,
 .aiball-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
 }
 .aiball-table th,
 .aiball-table td {
@@ -240,7 +256,7 @@ body,
 }
 .aiball-explainer--muted {
     color: var(--p-text-muted-color);
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
 }
 
 /* Chrome de formulaire/section admin partagé (pattern qdadm, scalé). Jadis
@@ -250,7 +266,7 @@ body,
    Désormais ici, une seule fois. `.aiball-field` est adossé à <FormField>. */
 .aiball-section {
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     padding: 1rem 1.2rem;
     background: var(--p-content-background);
     display: flex;
@@ -288,7 +304,7 @@ body,
 }
 .aiball-field .field-label {
     margin-bottom: 0;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
 }
 .aiball-form-row {
     display: flex;
@@ -300,7 +316,7 @@ body,
     color: var(--p-red-500);
     background: color-mix(in srgb, var(--p-red-500) 10%, transparent);
     padding: 0.6rem 0.8rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
 }
 
 /* Wrapper racine de panel de config (sections empilées). Jadis `.rules-page`
@@ -319,19 +335,19 @@ body,
     gap: 0.3rem;
 }
 .aiball-field-row__label {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 .aiball-field-row__value {
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
 }
 /* Valeur en boîte monospace (id, token non-secret…). */
 .aiball-mono {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.9rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-lg);
     padding: 0.4rem 0.5rem;
     background: var(--p-surface-100);
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
 }
 
 /* En-tête de page détail/edit unifié (#454) : breadcrumb + titre + actions.
@@ -347,7 +363,7 @@ body,
     align-items: center;
     flex-wrap: wrap;
     gap: 0.5rem;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
 }
 .aiball-breadcrumb__link {
     display: inline-flex;
@@ -409,10 +425,10 @@ body,
 .ld-tag {
     display: inline-flex;
     align-items: center;
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     font-weight: 600;
     line-height: 1;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.15rem 0.5rem;
     text-transform: lowercase;
     letter-spacing: 0.02em;

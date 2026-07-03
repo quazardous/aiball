@@ -328,7 +328,7 @@ async function doPurgeAll() {
 }
 .general-settings__hint {
     margin: 0 0 0.8rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
     line-height: 1.5;
 }
@@ -370,10 +370,10 @@ async function doPurgeAll() {
 }
 .general-settings__option-label {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
 }
 .general-settings__option-desc {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .general-settings__option-check {
@@ -395,7 +395,7 @@ async function doPurgeAll() {
     color: var(--p-text-muted-color);
     cursor: pointer;
     padding: 0.3rem 0.5rem;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
 }
 .general-settings__info-refresh:hover { background: var(--p-surface-100); }
 .general-settings__info-refresh:disabled { cursor: default; opacity: 0.6; }
@@ -420,11 +420,11 @@ async function doPurgeAll() {
 }
 .general-settings__info-grid dd small {
     color: var(--p-text-muted-color);
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
 }
 .general-settings__path {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.78rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
     overflow-wrap: anywhere;
 }
 

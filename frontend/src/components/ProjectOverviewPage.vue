@@ -171,7 +171,7 @@ async function doPurge() {
     margin-top: 1.5rem;
     padding: 1rem 1.2rem;
     border: 1px solid color-mix(in srgb, var(--p-red-500) 25%, var(--p-content-border-color));
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--p-red-500) 3%, transparent);
 }
 .project-overview__danger h3 {

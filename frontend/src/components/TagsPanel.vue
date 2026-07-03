@@ -352,7 +352,7 @@ onMounted(() => {
 }
 .tags-lock {
     color: var(--p-text-muted-color);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
 }
 .tags-color-cell {
     display: inline-flex;
@@ -361,7 +361,7 @@ onMounted(() => {
 }
 .tags-override-dot {
     color: var(--p-primary-color);
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     line-height: 1;
 }
 .tags-order-controls {
@@ -394,7 +394,7 @@ onMounted(() => {
         row-gap: 0.3rem;
         align-items: center;
         border: 1px solid var(--p-content-border-color);
-        border-radius: 0.5rem;
+        border-radius: var(--radius-lg);
         padding: 0.45rem 0.6rem;
         margin-bottom: 0.5rem;
         background: var(--p-surface-50);

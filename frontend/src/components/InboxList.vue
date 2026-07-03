@@ -389,7 +389,7 @@ function onRowClick(r: InboxRow) {
     color: var(--p-text-muted-color);
     padding: 3rem 1rem;
     border: 1px dashed var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
 }
 /* #B.132: tint the comments-count chip green when YOU were the last
    to speak. Discreet — same icon and number, just an accent color. */
@@ -410,7 +410,7 @@ function onRowClick(r: InboxRow) {
     color: var(--p-text-muted-color);
 }
 .list-row__hold .pi {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     opacity: 0.75;
 }
 /* #829 david `hhg8qz` : 🔥 hot indicator dans le #meta slot — orthogonal
@@ -420,13 +420,13 @@ function onRowClick(r: InboxRow) {
 .list-row__hot {
     display: inline-flex;
     align-items: center;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     line-height: 1;
     margin-right: 0.15rem;
 }
 .ticket-id {
     color: var(--p-text-muted-color);
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     font-size: 0.85em;
     margin-right: 0.4rem;
 }
@@ -437,7 +437,7 @@ function onRowClick(r: InboxRow) {
    passe par la couleur (project = muted, #N = primary, cf. ci-dessous). */
 .list-row__project {
     color: var(--p-text-muted-color);
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     font-size: 0.85em;
     margin-right: 0.15rem;
 }
@@ -486,18 +486,18 @@ function onRowClick(r: InboxRow) {
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.3rem;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
 }
 .search-hit__title {
     font-weight: 600;
     color: var(--p-text-color);
 }
 .search-hit__by {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .search-hit__snippet {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
     line-height: 1.4;
     white-space: pre-wrap;
@@ -518,7 +518,7 @@ function onRowClick(r: InboxRow) {
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0.7rem 0.3rem;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
 }
 .search-group .search-hit {
     border-bottom: none;
@@ -534,7 +534,7 @@ function onRowClick(r: InboxRow) {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     margin-bottom: 0.25rem;
 }

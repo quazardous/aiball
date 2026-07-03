@@ -265,7 +265,7 @@ function relayedSortValue(c: RelayedRow, key: string): string | number {
     display: flex;
     gap: 1.5rem;
     flex-wrap: wrap;
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .node-detail__subtitle {
@@ -278,12 +278,12 @@ function relayedSortValue(c: RelayedRow, key: string): string | number {
 }
 .node-detail__hint {
     margin: 0 0 0.6rem;
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     line-height: 1.35;
     color: var(--p-text-muted-color);
 }
 .node-detail__none {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 /* #460 — link styling for the relayed consumer chip (still mono, hover = primary). */
@@ -299,10 +299,10 @@ function relayedSortValue(c: RelayedRow, key: string): string | number {
 .node-host-provider {
     margin-left: 0.5rem;
     padding: 0 0.35rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: var(--p-surface-200);
     color: var(--p-text-muted-color);
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     text-transform: lowercase;
 }
 </style>

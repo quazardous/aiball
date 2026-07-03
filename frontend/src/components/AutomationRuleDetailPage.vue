@@ -218,8 +218,8 @@ const current = computed(() => {
 .rule-detail__expression {
     background: var(--p-surface-100);
     padding: 0.6rem 0.8rem;
-    border-radius: 0.3rem;
-    font-family: ui-monospace, monospace;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
     font-size: 0.95rem;
     white-space: pre-wrap;
     word-break: break-word;
@@ -233,9 +233,9 @@ const current = computed(() => {
     background: color-mix(in srgb, var(--p-blue-500) 15%, transparent);
     color: var(--p-blue-600);
     padding: 0.15rem 0.55rem;
-    border-radius: 0.3rem;
-    font-size: 0.85rem;
-    font-family: ui-monospace, monospace;
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-md);
+    font-family: var(--font-mono);
 }
 .rule-detail__action-stack {
     list-style: none;
@@ -246,12 +246,12 @@ const current = computed(() => {
     gap: 0.4rem;
 }
 .rule-detail__action {
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 0.95rem;
     background: color-mix(in srgb, var(--p-purple-500) 10%, transparent);
     color: var(--p-purple-600);
     padding: 0.4rem 0.6rem;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     display: inline-block;
     width: fit-content;
 }

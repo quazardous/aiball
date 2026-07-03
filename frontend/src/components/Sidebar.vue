@@ -218,7 +218,7 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                 @click="inactiveOpen = !inactiveOpen"
                 :title="inactiveOpen ? 'Hide inactive projects' : `Show ${inactiveProjects.length} inactive project${inactiveProjects.length > 1 ? 's' : ''}`"
             >
-                <i :class="`pi ${inactiveOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`" style="font-size: 0.7rem; opacity: 0.6" />
+                <i :class="`pi ${inactiveOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`" style="font-size: var(--fs-2xs); opacity: 0.6" />
                 <span class="sidebar-item-more-label">{{ inactiveOpen ? 'Less' : `More (${inactiveProjects.length})` }}</span>
             </button>
             <button
@@ -409,14 +409,14 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
        the project name (david: "liseret autor du cog à coté nom
        projet pas utile") — hover background is enough affordance. */
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     width: 1.6rem;
     height: 1.6rem;
     align-items: center;
     justify-content: center;
     color: var(--p-text-muted-color);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
 }
 /* The + new-ticket button is a primary action — green tint, more
    prominent than the settings cog (david: "le bouton compact new
@@ -466,7 +466,7 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     }
 }
 .sidebar-section-label {
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--p-text-muted-color);
@@ -488,7 +488,7 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     background: transparent;
     border: 0;
     padding: 0.45rem 0.6rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     color: var(--p-text-color);
     cursor: pointer;
     font: inherit;
@@ -529,7 +529,7 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
 .sidebar-item--more {
     gap: 0.4rem;
     color: var(--p-text-muted-color);
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     padding-block: 0.25rem;
 }
 .sidebar-item-more-label { flex: 1; }
@@ -537,7 +537,7 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
 .sidebar-badge {
     font-size: 0.72rem;
     font-weight: 600;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.05rem 0.4rem;
     line-height: 1.2;
 }

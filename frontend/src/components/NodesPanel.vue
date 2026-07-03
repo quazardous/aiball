@@ -165,22 +165,22 @@ function sortValue(n: NodeView, key: string): string | number {
     font-weight: 600;
     color: var(--p-primary-color);
 }
-.nodes-id { display: block; font-size: 0.7rem; opacity: 0.5; }
+.nodes-id { display: block; font-size: var(--fs-2xs); opacity: 0.5; }
 .nodes-version {
     display: block;
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     opacity: 0.6;
     font-style: italic;
     color: var(--p-text-muted-color);
 }
 .nodes-host {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
 }
 .nodes-host-provider {
     margin-left: 0.4rem;
     padding: 0 0.35rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: var(--p-surface-200);
     color: var(--p-text-muted-color);
     font-size: 0.65rem;
@@ -237,7 +237,7 @@ function sortValue(n: NodeView, key: string): string | number {
     :deep(.nodes-table td:not(:first-child):not(.indicator-cell)[data-label]::before) {
         content: attr(data-label) ": ";
         color: var(--p-text-muted-color);
-        font-size: 0.78rem;
+        font-size: var(--fs-sm);
         margin-right: 0.3rem;
     }
     :deep(.nodes-table td.indicator-cell) {

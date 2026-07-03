@@ -132,7 +132,7 @@ watch(() => props.project, () => load());
 .project-settings__section {
     padding: 1rem 1.2rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     background: var(--p-content-background);
     display: flex;
     flex-direction: column;
@@ -150,7 +150,7 @@ watch(() => props.project, () => load());
 }
 .project-settings__section h3 {
     margin: 0;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--p-text-muted-color);
@@ -167,11 +167,11 @@ watch(() => props.project, () => load());
 .project-settings__strategy-opt small {
     display: block;
     color: var(--p-text-muted-color);
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     margin-top: 0.1rem;
 }
 .project-settings__state {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 
@@ -186,17 +186,17 @@ watch(() => props.project, () => load());
         gap: 0.4rem;
     }
     .project-settings__section h3 {
-        font-size: 0.78rem;
+        font-size: var(--fs-sm);
     }
     .project-settings__hint {
-        font-size: 0.82rem;
+        font-size: var(--fs-sm);
     }
     .project-settings__strategy-select {
         min-width: 0;
         width: 100%;
     }
     .project-settings__state {
-        font-size: 0.8rem;
+        font-size: var(--fs-sm);
     }
 }
 </style>

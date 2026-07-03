@@ -330,12 +330,12 @@ const visibleRows = computed<Consumer[]>(() => {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
     cursor: pointer;
     user-select: none;
 }
 .consumers-toolbar__count {
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 /* Look de base via `.aiball-table`. Deltas conservés via compound
@@ -348,8 +348,8 @@ const visibleRows = computed<Consumer[]>(() => {
     height: 3rem;
 }
 .consumers-table td:first-child {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
 }
 .consumers-cid__inner {
     display: flex;
@@ -364,7 +364,7 @@ const visibleRows = computed<Consumer[]>(() => {
     text-overflow: ellipsis;
 }
 .consumers-cid__tag {
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     flex-shrink: 0;
 }
 .consumers-table .col-node {

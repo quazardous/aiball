@@ -79,5 +79,5 @@ async function run(l: Launcher) {
 /* #459 : flash retiré, les feedbacks vont via `useNotify()` (lib/notify.ts). */
 .launchers-panel__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .launchers-panel__item { display: flex; align-items: center; gap: 0.6rem; }
-.launchers-panel__cmd { font-size: 0.75rem; color: var(--p-text-muted-color, #6b7280); }
+.launchers-panel__cmd { font-size: var(--fs-xs); color: var(--p-text-muted-color, #6b7280); }
 </style>

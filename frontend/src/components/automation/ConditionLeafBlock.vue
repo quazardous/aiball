@@ -277,7 +277,7 @@ function setNegate(v: boolean) {
     border: 1px solid var(--p-content-border-color);
     --leaf-accent: var(--p-cyan-500);
     border-left: 3px solid var(--leaf-accent);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--leaf-accent) 4%, var(--p-content-background, transparent));
 }
 .leaf-block--project        { --leaf-accent: var(--p-cyan-500); }
@@ -309,8 +309,8 @@ function setNegate(v: boolean) {
     user-select: none;
 }
 .leaf-block__not-label {
-    font-family: ui-monospace, monospace;
-    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
     font-weight: 600;
     color: var(--p-text-muted-color);
     letter-spacing: 0.05em;
@@ -360,9 +360,9 @@ function setNegate(v: boolean) {
 .leaf-chip {
     background: transparent;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.15rem 0.7rem;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     cursor: pointer;
     color: var(--p-text-muted-color);
     transition: background 0.12s, border-color 0.12s, color 0.12s;

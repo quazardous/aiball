@@ -276,7 +276,7 @@ const topTokenMax = computed(() =>
     color: var(--p-text-muted-color);
     cursor: pointer;
     padding: 0.3rem 0.5rem;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
 }
 .project-stats__refresh:hover {
     background: var(--p-surface-100);
@@ -293,7 +293,7 @@ const topTokenMax = computed(() =>
     padding: 0.8rem 1rem;
     background: var(--p-surface-50);
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
@@ -314,24 +314,24 @@ const topTokenMax = computed(() =>
     color: var(--p-text-color);
 }
 .stat-card__label {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--p-text-muted-color);
 }
 .stat-card__sub {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .project-stats__section {
     padding: 0.8rem 1rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     background: var(--p-content-background);
 }
 .project-stats__section h3 {
     margin: 0 0 0.5rem;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--p-text-muted-color);
@@ -349,7 +349,7 @@ const topTokenMax = computed(() =>
     gap: 0.1rem;
 }
 .project-stats__live dt {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .project-stats__live dd {
@@ -359,7 +359,7 @@ const topTokenMax = computed(() =>
     font-variant-numeric: tabular-nums;
 }
 .project-stats__ref {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     color: var(--p-primary-color);
     text-decoration: none;
     font-weight: 600;
@@ -401,7 +401,7 @@ const topTokenMax = computed(() =>
     grid-template-columns: minmax(0, 1fr) 5rem 2.5rem;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
 }
 .project-stats__bar-name {
     overflow: hidden;
@@ -467,7 +467,7 @@ const topTokenMax = computed(() =>
 }
 .project-stats__token-top-label {
     margin: 0.2rem 0 0.35rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--p-text-muted-color);

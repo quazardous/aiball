@@ -29,14 +29,14 @@
     border-radius: 50%;
     cursor: pointer;
     color: var(--p-text-muted-color);
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
 }
 .relation-menu__close:hover {
     background: var(--p-content-hover-background);
     color: var(--p-text-color);
 }
 .relation-menu__title {
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     padding-bottom: 0.3rem;
     border-bottom: 1px solid var(--p-content-border-color);
@@ -60,9 +60,9 @@
     padding: 0.25rem 0.5rem;
     background: transparent;
     border: 0;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-color);
 }
 .relation-menu__kind-btn:hover:not(:disabled) {
@@ -81,9 +81,9 @@
     background: transparent;
     border: 1px solid var(--p-red-500);
     color: var(--p-red-500);
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     text-align: left;
     display: inline-flex;
     align-items: center;

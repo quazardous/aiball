@@ -325,16 +325,16 @@ watch(html, () => {
     background: var(--p-surface-100);
     padding: 0.1em 0.35em;
     border-radius: 0.2rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 0.9em;
 }
 .md-body pre {
     position: relative; /* #556: anchor for .md-copy-btn overlay */
     background: var(--p-surface-100);
     padding: 0.6em 0.8em;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     overflow-x: auto;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 0.85em;
 }
 /* #556: copy-to-clipboard button, top-right of each fenced code block.

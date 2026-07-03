@@ -98,7 +98,7 @@ const readToggleAction = computed<BulkAction>(() =>
     gap: 0.4rem;
     padding: 0.4rem 0.6rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: var(--p-surface-50);
     position: sticky;
     top: 0;
@@ -135,7 +135,7 @@ const readToggleAction = computed<BulkAction>(() =>
     }
 }
 .bulk-count {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 </style>

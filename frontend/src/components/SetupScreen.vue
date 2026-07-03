@@ -223,7 +223,7 @@ async function submit() {
 .auth-card__subtitle {
     margin: 0;
     color: var(--p-text-muted-color);
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
     line-height: 1.45;
 }
 .auth-field {
@@ -232,7 +232,7 @@ async function submit() {
     gap: 0.25rem;
 }
 .auth-field label {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -245,13 +245,13 @@ async function submit() {
 .auth-hint {
     margin: 0;
     color: var(--p-text-muted-color);
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     line-height: 1.4;
 }
 .auth-hint code,
 .auth-card__subtitle code {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.78rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
     padding: 0.05rem 0.3rem;
     background: var(--p-surface-100);
     border-radius: 0.2rem;
@@ -261,14 +261,14 @@ async function submit() {
     background: var(--p-red-50);
     color: var(--p-red-700);
     border: 1px solid var(--p-red-200);
-    border-radius: 0.4rem;
-    font-size: 0.85rem;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-md);
 }
 .auth-footer {
     margin: 0;
     text-align: center;
     color: var(--p-text-muted-color);
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
 }
 .auth-footer a {
     color: var(--p-primary-color);

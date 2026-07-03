@@ -555,7 +555,7 @@ onBeforeUnmount(() => {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     overflow: hidden;
     background: #0f172a;
 }
@@ -573,18 +573,18 @@ onBeforeUnmount(() => {
     padding: 0.4rem 0.6rem;
     background: #1e293b;
     border-bottom: 1px solid #334155;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: #f8fafc;
 }
 .terminal-view__title {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
 }
 .terminal-view__status {
     color: #94a3b8;
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     font-style: italic;
     margin-left: auto;
 }
@@ -598,7 +598,7 @@ onBeforeUnmount(() => {
 }
 .terminal-view__warn {
     color: #fbbf24;
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;

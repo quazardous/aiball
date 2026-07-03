@@ -90,7 +90,7 @@ function onCrumb(index: number): void {
     gap: 0.9rem;
     padding: 1rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     background: var(--p-content-background);
 }
 </style>

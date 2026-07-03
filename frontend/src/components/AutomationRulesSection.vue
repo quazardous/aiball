@@ -187,21 +187,21 @@ onMounted(load);
     font-weight: 600;
     align-items: center;
     justify-content: center;
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
 }
 .rule-label__text {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     font-weight: 500;
     font-size: 0.92rem;
 }
 .rule-triggers {
-    font-family: ui-monospace, monospace;
-    font-size: 0.82rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .rule-action {
-    font-family: ui-monospace, monospace;
-    font-size: 0.82rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
     color: var(--p-purple-600);
 }
 .source-badge {
@@ -213,11 +213,11 @@ onMounted(load);
     padding: 0.05rem 0.4rem;
     border-radius: 0.25rem;
     font-size: 0.72rem;
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     margin-right: 0.4rem;
 }
 .yaml-readonly {
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     font-style: italic;
     color: var(--p-text-muted-color);
 }
@@ -270,7 +270,7 @@ onMounted(load);
     :deep(.rules-table td:not(.rule-col-rank):not(.rule-col-label)[data-label]::before) {
         content: attr(data-label) ": ";
         color: var(--p-text-muted-color);
-        font-size: 0.78rem;
+        font-size: var(--fs-sm);
         margin-right: 0.3rem;
     }
     :deep(.rules-table tr.rule-row--yaml td:first-child) {

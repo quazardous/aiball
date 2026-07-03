@@ -308,7 +308,7 @@ function toggleMobileSortDir(): void {
         align-items: center;
         gap: 0.4rem;
         padding: 0.4rem 0.5rem 0.5rem;
-        font-size: 0.85rem;
+        font-size: var(--fs-md);
     }
     .datalist-mobile-sort__label {
         color: var(--p-text-muted-color);

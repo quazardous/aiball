@@ -255,11 +255,11 @@ const emit = defineEmits<{
     width: 4.5rem;
     padding: 0.2rem 0.5rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     background: var(--p-surface-50);
     color: var(--p-text-color);
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
     text-align: center;
 }
 .header-goto__input:focus {
@@ -286,9 +286,9 @@ const emit = defineEmits<{
     background: #ef4444;
 }
 .header-badge {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.15rem 0.5rem;
     display: inline-flex;
     align-items: center;

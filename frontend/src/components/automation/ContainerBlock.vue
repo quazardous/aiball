@@ -265,7 +265,7 @@ function openAddMenu(event: Event) {
     gap: 0.4rem;
     padding: 0.5rem 0.6rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
 }
 .container-block--and {
     border-left: 3px solid var(--p-blue-500);
@@ -288,7 +288,7 @@ function openAddMenu(event: Event) {
     min-width: 10rem;
 }
 .container-block__not-label {
-    font-family: ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-weight: 600;
     color: var(--p-red-600);
     display: inline-flex;
@@ -306,7 +306,7 @@ function openAddMenu(event: Event) {
 }
 .container-block__empty {
     color: var(--p-text-muted-color);
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     padding: 0.3rem 0;
 }
 .container-block__add {

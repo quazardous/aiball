@@ -117,7 +117,7 @@ async function save() {
 .tag-picker__btn {
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 0.1rem;
     cursor: pointer;
     opacity: 0.4;

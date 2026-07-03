@@ -72,7 +72,7 @@ function goto(p: number) {
     align-items: center;
     gap: 0.4rem;
     padding: 0.3rem 0.6rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
     border-top: 1px solid var(--p-content-border-color);
     border-bottom: 1px solid var(--p-content-border-color);
@@ -95,7 +95,7 @@ function goto(p: number) {
     width: 5.5rem;
 }
 .pagination-bar__size-label {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     opacity: 0.75;
 }
 </style>

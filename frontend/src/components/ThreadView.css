@@ -57,11 +57,11 @@
     min-width: 1.6rem;
 }
 .thread-view .p-splitbutton .p-splitbutton-dropdown .p-button-icon {
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
 }
 .thread-ticket {
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     padding: 0.9rem 1rem;
     background: var(--p-content-background);
     display: flex;
@@ -78,7 +78,7 @@
     gap: 0.5rem;
     align-items: center;
     flex-wrap: wrap;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 /* #B.123 phase B.2: typed relations cartouche. Chip palette is keyed
@@ -91,7 +91,7 @@
     align-items: center;
 }
 .thread-relations__label {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     display: inline-flex;
     align-items: center;
@@ -101,8 +101,8 @@
     display: inline-flex;
     align-items: stretch;
     gap: 0;
-    border-radius: 999px;
-    font-size: 0.78rem;
+    border-radius: var(--radius-pill);
+    font-size: var(--fs-sm);
     border: 1px solid var(--p-content-border-color);
     color: var(--p-text-color);
     background: var(--p-surface-50);
@@ -135,7 +135,7 @@
     border-left: 1px solid var(--p-content-border-color);
     color: var(--p-text-muted-color);
     cursor: pointer;
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     line-height: 1;
 }
 .thread-relations__menu-btn:hover {
@@ -167,7 +167,7 @@
     letter-spacing: 0.03em;
 }
 .thread-relations__target {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     color: var(--p-primary-color);
 }
 /* #B.123 follow-up: target stage badge inside the chip. Small,
@@ -175,7 +175,7 @@
    badge (we omit it via v-if in RelationChip). */
 .thread-relations__stage {
     margin-left: 0.3rem;
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     padding: 0 0.35rem;
     border-radius: 0.2rem;
     background: var(--p-surface-200);
@@ -202,7 +202,7 @@
     flex-wrap: wrap;
     padding: 0.4rem 0.6rem;
     background: var(--p-surface-50);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     margin-top: 0.2rem;
 }
 .snooze-popover {
@@ -213,7 +213,7 @@
 }
 .snooze-popover__title {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: var(--fs-lg);
 }
 .snooze-popover__presets {
     display: flex;
@@ -257,14 +257,14 @@
     gap: 0.4rem;
     align-items: center;
     flex-wrap: wrap;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
 }
 .thread-resolved-banner {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     padding: 0.5rem 0.7rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--p-green-500) 15%, transparent);
     border-left: 3px solid var(--p-green-500);
     font-size: 0.88rem;
@@ -274,7 +274,7 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.5rem 0.7rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--p-blue-500) 12%, transparent);
     border-left: 3px solid var(--p-blue-500);
     font-size: 0.88rem;
@@ -296,22 +296,22 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.5rem 0.7rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--p-orange-500) 12%, transparent);
     border-left: 3px solid var(--p-orange-500);
     font-size: 0.88rem;
     color: var(--p-text-color);
 }
 .thread-tag {
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     padding: 0.1rem 0.5rem;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     color: black;
     font-weight: 500;
 }
 .comment-card {
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     padding: 0.7rem 0.9rem;
     background: var(--p-content-background);
     display: flex;
@@ -322,11 +322,11 @@
     display: flex;
     gap: 0.5rem;
     align-items: center;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 .comment-note {
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     color: var(--p-text-muted-color);
 }
 /* #B.130 follow-up: per-comment .comment-summary frame retired —
@@ -410,7 +410,7 @@
 .md-body .comment-ref {
     color: var(--p-text-muted-color);
     text-decoration: none;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 0.92em;
 }
 .md-body .comment-ref:hover {
@@ -421,10 +421,10 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
     font-weight: 500;
     padding: 0.25rem 0.55rem;
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     align-self: flex-start;
 }
 .comment-lifecycle[data-kind="ticket_resolved"] {
@@ -452,7 +452,7 @@
     color: var(--p-text-muted-color);
 }
 .comment-lifecycle__ref {
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     font-weight: 600;
     color: inherit;
     text-decoration: none;

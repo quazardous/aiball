@@ -421,7 +421,7 @@ async function doDelete() {
                 :title="questionStats.open === 0
                     ? 'All questions in this comment have been answered.'
                     : `${questionStats.open} question${questionStats.open === 1 ? '' : 's'} still open — click a checkbox to quote it in your reply.`"
-                style="font-size: 0.7rem; margin-left: 0.4rem"
+                style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;
                  accept/reject lives under the composer). -->
@@ -432,7 +432,7 @@ async function doDelete() {
                 :title="decision.status === 'pending'
                     ? `${msg.by_agent ?? 'someone'} tagged this comment as a ${decision.kind} — accept/reject pair is under the composer.`
                     : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
-                style="font-size: 0.7rem; margin-left: 0.4rem"
+                style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #B.129 follow-up: small chip when this comment was the
                  act that accepted/rejected a prior comment's decision.
@@ -444,7 +444,7 @@ async function doDelete() {
                 :severity="decider.action === 'accepted' ? 'success' : 'danger'"
                 :value="`${decider.action} ${decider.target_kind}`"
                 :title="`This comment ${decider.action} the ${decider.target_kind} on ${decider.target_hashid ? '#C.' + decider.target_hashid : 'a prior comment'}`"
-                style="font-size: 0.7rem; margin-left: 0.4rem"
+                style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #B.130 follow-up: TLDR is now rendered as an inline
                  frame below the body (or above in top-down) — see
@@ -495,7 +495,7 @@ async function doDelete() {
                 v-model="bodyDraft"
                 :rows="4"
                 autoResize
-                style="width: 100%; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9rem;"
+                style="width: 100%; font-family: var(--font-mono); font-size: var(--fs-lg);"
                 :disabled="saveBusy"
                 placeholder="Comment body (markdown supported, leave blank to clear)"
                 @keydown.ctrl.enter.prevent="saveEdit"
@@ -664,7 +664,7 @@ async function doDelete() {
     gap: 0.4rem;
     padding: 0.25rem 0.1rem;
     color: var(--p-text-muted-color, #888);
-    font-size: 0.85rem;
+    font-size: var(--fs-md);
 }
 /* #518 (david `7b3jc7`) — vote buttons inline footer. Pas de border button,
    juste l'icône. Muted neutre par défaut, accent vert (up) / rouge (down)
@@ -697,6 +697,6 @@ async function doDelete() {
 .comment-vote-count {
     font-variant-numeric: tabular-nums;
     font-weight: 500;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
 }
 </style>

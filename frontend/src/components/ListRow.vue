@@ -314,7 +314,7 @@ function onClick(ev: MouseEvent) {
     flex-wrap: wrap;
     gap: 0.3rem;
     row-gap: 0.25rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
 }
 .list-row__title {
     color: var(--p-text-color);
@@ -330,14 +330,14 @@ function onClick(ev: MouseEvent) {
     flex: 1;
 }
 .list-row__meta {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
 }
 .list-row__time {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     white-space: nowrap;
 }

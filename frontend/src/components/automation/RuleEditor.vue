@@ -394,10 +394,10 @@ function save() {
 .rule-editor__code {
     background: var(--p-surface-100);
     padding: 0.8rem 1rem;
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     overflow-x: auto;
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
     line-height: 1.45;
     white-space: pre;
     margin: 0;
@@ -408,12 +408,12 @@ function save() {
     gap: 0.6rem;
     padding: 0.6rem 0.8rem;
     border: 1px dashed var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--p-content-border-color) 8%, transparent);
 }
 .rule-editor__empty-hint {
     color: var(--p-text-muted-color);
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     font-style: italic;
 }
 </style>

@@ -190,18 +190,18 @@ watch(() => props.project, () => load());
     font-size: 0.92rem;
 }
 .managed-config__lock {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .managed-config__key {
     margin-left: auto;
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     font-size: 0.74rem;
     color: var(--p-text-muted-color);
 }
 .managed-config__desc {
     margin: 0;
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     line-height: 1.4;
 }
@@ -218,7 +218,7 @@ watch(() => props.project, () => load());
     min-width: 12rem;
 }
 .managed-config__state {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .managed-config__error {
@@ -226,7 +226,7 @@ watch(() => props.project, () => load());
     color: var(--p-red-500);
     background: color-mix(in srgb, var(--p-red-500) 10%, transparent);
     padding: 0.5rem 0.7rem;
-    border-radius: 0.4rem;
-    font-size: 0.85rem;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-md);
 }
 </style>

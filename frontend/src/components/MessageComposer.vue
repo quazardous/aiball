@@ -863,7 +863,7 @@ async function onAttachPicked(ev: Event) {
 <style>
 .composer {
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
+    border-radius: var(--radius-lg);
     padding: 0.8rem;
     display: flex;
     flex-direction: column;
@@ -903,7 +903,7 @@ async function onAttachPicked(ev: Event) {
     max-width: 22rem;
     background: var(--p-content-background);
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
     display: flex;
     flex-direction: column;
@@ -914,8 +914,8 @@ async function onAttachPicked(ev: Event) {
     align-items: center;
     gap: 0.5rem;
     padding: 0.3rem 0.5rem;
-    border-radius: 0.3rem;
-    font-size: 0.9rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-lg);
     cursor: pointer;
 }
 .mention-popover__item:hover,
@@ -930,11 +930,11 @@ async function onAttachPicked(ev: Event) {
 }
 .mention-popover__name {
     flex: 1;
-    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-family: var(--font-mono);
     color: var(--p-text-color);
 }
 .mention-popover__kind {
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     color: var(--p-text-muted-color);
 }
 /* #515 — bandeau filtre par catégorie (all / agents / projects). */
@@ -951,10 +951,10 @@ async function onAttachPicked(ev: Event) {
     gap: 0.3rem;
     padding: 0.2rem 0.5rem;
     border: 1px solid var(--p-content-border-color);
-    border-radius: 0.3rem;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--p-text-muted-color);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     cursor: pointer;
     transition: background 120ms, color 120ms, border-color 120ms;
 }
@@ -980,7 +980,7 @@ async function onAttachPicked(ev: Event) {
 }
 .mention-popover__empty {
     padding: 0.4rem 0.5rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     font-style: italic;
 }
@@ -1014,7 +1014,7 @@ async function onAttachPicked(ev: Event) {
     flex-wrap: wrap;
 }
 .composer-tags-label {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
 }
 .composer-title {
@@ -1041,13 +1041,13 @@ async function onAttachPicked(ev: Event) {
     flex-wrap: wrap;
 }
 .composer-hint {
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     line-height: 1.3;
 }
 .composer-preview {
     border: 1px dashed var(--p-content-border-color);
-    border-radius: 0.4rem;
+    border-radius: var(--radius-md);
     padding: 0.8rem;
     min-height: 5rem;
 }
@@ -1057,8 +1057,8 @@ async function onAttachPicked(ev: Event) {
 .composer-textarea {
     width: 100%;
     min-height: 10rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9rem;
+    font-family: var(--font-mono);
+    font-size: var(--fs-lg);
     resize: vertical;
 }
 .spacer { flex: 1; }

@@ -240,7 +240,7 @@ async function changeAssignee(next: string | null) {
 }
 .tmp-head { display: flex; align-items: center; justify-content: space-between; }
 .tmp-title { font-weight: 600; display: inline-flex; gap: 0.4rem; align-items: center; }
-.tmp-error { color: var(--p-red-500, #e5484d); font-size: 0.8rem; }
+.tmp-error { color: var(--p-red-500, #e5484d); font-size: var(--fs-sm); }
 .tmp-section { display: flex; flex-direction: column; gap: 0.5rem; }
 /* #377: owner + project pair — stacked (one per line) on smartphone,
  * side by side from the desktop breakpoint (721px, app convention). */
@@ -251,13 +251,13 @@ async function changeAssignee(next: string | null) {
 }
 .tmp-section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
 .tmp-actions { display: inline-flex; gap: 0.4rem; }
-.tmp-label { font-weight: 600; font-size: 0.85rem; }
+.tmp-label { font-weight: 600; font-size: var(--fs-md); }
 .tmp-hint { color: var(--p-text-muted-color); font-size: 0.72rem; line-height: 1.2; }
-.tmp-empty { color: var(--p-text-muted-color); font-size: 0.82rem; margin: 0; }
+.tmp-empty { color: var(--p-text-muted-color); font-size: var(--fs-sm); margin: 0; }
 .tmp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 .tmp-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.3rem 0.4rem; border-radius: 4px; }
 /* #352: zebra striping on the subscriber rows for readability. */
 .tmp-row:nth-child(even) { background: var(--p-surface-100); }
 .tmp-row.muted { opacity: 0.7; }
-.tmp-consumer { font-family: var(--font-mono, monospace); font-size: 0.85rem; }
+.tmp-consumer { font-family: var(--font-mono, monospace); font-size: var(--fs-md); }
 </style>
