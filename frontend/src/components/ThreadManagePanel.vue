@@ -12,10 +12,11 @@
  * is parent-wired (projectOptions + move-change) so it reuses ThreadView's
  * tested move+refresh path.
  */
-import { ref, onMounted, watch } from "vue";
+import { ref, watch } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 import { api, type TicketSummary } from "../lib/api";
+import { useLoader } from "../lib/loader";
 
 const props = defineProps<{
     ticket: TicketSummary;
@@ -49,29 +50,19 @@ watch(() => props.ticket.assignee, (next) => {
 watch(() => props.ticket.by_agent, (next) => {
     owner.value = next;
 });
-const loading = ref(true);
 const busy = ref(false);
 const error = ref<string | null>(null);
 
-async function load() {
-    loading.value = true;
-    error.value = null;
-    try {
-        const [s, m, c] = await Promise.all([
-            api.ticketSubscriptions(props.ticket.id),
-            api.mentionSuggestions(),
-            api.listConsumers(),
-        ]);
-        subs.value = s.subscriptions;
-        agents.value = m.agents;
-        consumers.value = c.map((cc) => cc.consumer_id);
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
-onMounted(load);
+const { loading } = useLoader(async () => {
+    const [s, m, c] = await Promise.all([
+        api.ticketSubscriptions(props.ticket.id),
+        api.mentionSuggestions(),
+        api.listConsumers(),
+    ]);
+    subs.value = s.subscriptions;
+    agents.value = m.agents;
+    consumers.value = c.map((cc) => cc.consumer_id);
+}, { error, mountLoad: true });
 
 async function toggleMute(row: SubRow) {
     busy.value = true;

@@ -19,11 +19,12 @@
  *     return an id — defensive).
  *   - "back" / "cancel" pops the user back to the inbox.
  */
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 import { api, type ProjectMeta } from "../lib/api";
 import { bus } from "../lib/bus";
+import { useLoader } from "../lib/loader";
 import MessageComposer from "./MessageComposer.vue";
 
 const props = defineProps<{
@@ -36,8 +37,6 @@ const emit = defineEmits<{
 }>();
 
 const projects = ref<ProjectMeta[]>([]);
-const loading = ref(false);
-const error = ref<string | null>(null);
 
 // #561 : plus de SENTINEL_OTHER / free-text "new project" — la création
 // d'un projet est un step explicite via Projects panel. La dropdown ne
@@ -52,35 +51,26 @@ const projectOptions = computed(() =>
     projects.value.map((p) => ({ label: p.name, value: p.name })),
 );
 
-async function loadProjects() {
-    loading.value = true;
-    try {
-        const list = await api.listProjectsDetailed(
-            localStorage.getItem("aiball.human_id") ?? "human",
-        );
-        projects.value = list;
-        // Seed the project choice with the best available default.
-        const fromUrl = props.initialProject;
-        const lastUsed = localStorage.getItem("aiball.compose.last_project");
-        const candidate = fromUrl ?? lastUsed ?? null;
-        if (
-            candidate &&
-            projects.value.some((p) => p.name === candidate)
-        ) {
-            projectChoice.value = candidate;
-        } else if (projects.value.length > 0) {
-            projectChoice.value = projects.value[0].name;
-        } else {
-            projectChoice.value = "";
-        }
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
+const { loading, error } = useLoader(async () => {
+    const list = await api.listProjectsDetailed(
+        localStorage.getItem("aiball.human_id") ?? "human",
+    );
+    projects.value = list;
+    // Seed the project choice with the best available default.
+    const fromUrl = props.initialProject;
+    const lastUsed = localStorage.getItem("aiball.compose.last_project");
+    const candidate = fromUrl ?? lastUsed ?? null;
+    if (
+        candidate &&
+        projects.value.some((p) => p.name === candidate)
+    ) {
+        projectChoice.value = candidate;
+    } else if (projects.value.length > 0) {
+        projectChoice.value = projects.value[0].name;
+    } else {
+        projectChoice.value = "";
     }
-}
-
-onMounted(loadProjects);
+}, { mountLoad: true });
 
 // Keep "last used" sticky so a power user creating several tickets on
 // the same project doesn't re-pick it each time.

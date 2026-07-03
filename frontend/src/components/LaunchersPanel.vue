@@ -2,30 +2,21 @@
 // #398: operator-approved command launchers. Lists the launchers declared in
 // the global config `launchers:` block (GET /api/launchers) and runs one on
 // click (POST /api/launchers/:id/run — human-only, detached spawn on the host).
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 import Button from "primevue/button";
 import { api, type Launcher } from "../lib/api";
+import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import PanelHeader from "./ui/PanelHeader.vue";
 
 const launchers = ref<Launcher[]>([]);
-const loading = ref(false);
-const error = ref<string | null>(null);
 const running = ref<string | null>(null);
 
 const notify = useNotify();
 
-async function load() {
-    loading.value = true;
-    error.value = null;
-    try {
-        launchers.value = await api.listLaunchers();
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
+const { loading, error, load } = useLoader(async () => {
+    launchers.value = await api.listLaunchers();
+}, { mountLoad: true });
 
 async function run(l: Launcher) {
     running.value = l.id;
@@ -41,8 +32,6 @@ async function run(l: Launcher) {
         running.value = null;
     }
 }
-
-onMounted(load);
 </script>
 
 <template>

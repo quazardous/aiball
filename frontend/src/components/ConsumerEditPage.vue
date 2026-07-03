@@ -24,7 +24,7 @@ import Tabs from "primevue/tabs";
 import Textarea from "primevue/textarea";
 import { useConfirm } from "primevue/useconfirm";
 import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
-import { useBus } from "../lib/bus";
+import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import { relativeTime } from "../lib/format";
@@ -47,7 +47,6 @@ const emit = defineEmits<{
 
 const notify = useNotify();
 const confirmDialog = useConfirm();
-const loading = ref(false);
 const saving = ref(false);
 const stopBusy = ref(false);
 const deleteBusy = ref(false);
@@ -91,58 +90,39 @@ const promptBusy = ref(false);
 
 const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
 
-async function load() {
-    // #472 david `6d56gs` "de temps en temps tout le terminal se refresh
-    // repaint" + "quand ça se repeind ça sort tout seul du mode plein
-    // ecran". Root cause : ce composant a un `<template v-else-if="original">`
-    // chaîné après `<div v-if="loading">`. Le bus `projects.refresh`
-    // (consumer_changed broadcast ~60s) appelle load() qui flippait
-    // `loading=true` un instant → l'arbre principal est démonté →
-    // TerminalView re-monte → isFullscreen / SSE / xterm tous re-créés.
-    // On ne flip `loading=true` QUE quand on n'a pas encore de donnée
-    // (premier appel) ; les refreshs ultérieurs gardent l'UI rendue
-    // pendant la requête (en cas d'erreur sur un refresh, le contenu
-    // existant reste affiché — la div d'erreur ne flashe plus).
-    if (!original.value) loading.value = true;
-    error.value = null;
-    try {
-        // We reuse the full-list endpoint and filter client-side (cost is
-        // small — a few hundred rows max). A per-id GET exists since #397
-        // (used by the claude-loop wake builder) but the list already carries
-        // `micro_prompt`, so there's no need for a second round-trip here.
-        const all = await api.listConsumers();
-        const found = all.find((c) => c.consumer_id === props.consumerId);
-        if (!found) {
-            error.value = `Consumer "${props.consumerId}" not found.`;
-            return;
-        }
-        original.value = found;
-        kind.value = found.kind;
-        displayName.value = found.display_name ?? "";
-        note.value = found.note ?? "";
-        microPrompt.value = found.micro_prompt ?? "";
-        enabled.value = found.enabled;
-        canClaim.value = found.can_claim !== false; // default true if undefined (pre-#508 row)
-        notifyBroadcasts.value = found.notify_project_broadcasts === true
-            ? "on"
-            : found.notify_project_broadcasts === false
-                ? "off"
-                : "auto";
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
+// #472 david `6d56gs` : keep-stale-while-refetching — flipping `loading`
+// on a bus refresh unmounted the main subtree (the template chains
+// `v-else-if="original"` after `v-if="loading"`) → TerminalView re-mounted
+// (fullscreen/SSE/xterm re-created). `showLoading` limits the spinner to
+// the FIRST load ; later refreshes keep the rendered UI while the request
+// runs (on refresh error the existing content stays, no flash).
+const { loading, load } = useLoader(async () => {
+    // We reuse the full-list endpoint and filter client-side (cost is
+    // small — a few hundred rows max). A per-id GET exists since #397
+    // (used by the claude-loop wake builder) but the list already carries
+    // `micro_prompt`, so there's no need for a second round-trip here.
+    const all = await api.listConsumers();
+    const found = all.find((c) => c.consumer_id === props.consumerId);
+    if (!found) throw new Error(`Consumer "${props.consumerId}" not found.`);
+    original.value = found;
+    kind.value = found.kind;
+    displayName.value = found.display_name ?? "";
+    note.value = found.note ?? "";
+    microPrompt.value = found.micro_prompt ?? "";
+    enabled.value = found.enabled;
+    canClaim.value = found.can_claim !== false; // default true if undefined (pre-#508 row)
+    notifyBroadcasts.value = found.notify_project_broadcasts === true
+        ? "on"
+        : found.notify_project_broadcasts === false
+            ? "off"
+            : "auto";
+}, { error, showLoading: () => !original.value, refreshOn: ["consumers.refresh"] });
 
 watch(() => props.consumerId, load, { immediate: true });
 
-// #460 — live updates : the daemon broadcasts `consumer_changed` (presence
-// flip / state change) → WS relay → `consumers.refresh` bus. Without this,
-// the page reads a FROZEN snapshot until manual refresh (cf.
-// ProjectDetailPage #443). Re-fetch so the status badges + Stop button
-// reflect reality.
-useBus("consumers.refresh", () => { void load(); });
+// #460 — live updates ride the `consumers.refresh` lane via `refreshOn`
+// above (daemon consumer_changed → WS relay → bus) : without it the page
+// reads a FROZEN snapshot until manual refresh (cf. ProjectDetailPage #443).
 
 async function save() {
     if (!original.value) return;

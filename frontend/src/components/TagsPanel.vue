@@ -4,13 +4,13 @@ import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import { api, type CatalogTag } from "../lib/api";
-import { bus, useBus } from "../lib/bus";
+import { bus } from "../lib/bus";
+import { useLoader } from "../lib/loader";
 import TagBadge from "./TagBadge.vue";
 import DataList from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 
 const tags = ref<CatalogTag[]>([]);
-const loading = ref(false);
 const error = ref<string | null>(null);
 
 // Project scope (#223). `_global` shows config global tags + DB tags; a
@@ -39,17 +39,10 @@ async function loadProjects() {
     }
 }
 
-async function load() {
-    loading.value = true;
-    try {
-        tags.value = await api.listTagCatalog(project.value);
-        error.value = null;
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
+// Self-refresh on bus events (WS-driven or local mutations).
+const { load } = useLoader(async () => {
+    tags.value = await api.listTagCatalog(project.value);
+}, { error, refreshOn: ["tags.refresh"] });
 
 function onProjectChange(v: string) {
     project.value = v;
@@ -148,8 +141,6 @@ function canMoveDown(t: CatalogTag): boolean {
     return sorted.length > 1 && sorted[sorted.length - 1] !== t;
 }
 
-// Self-refresh on bus events (WS-driven or local mutations).
-useBus("tags.refresh", () => load());
 onMounted(() => {
     void loadProjects();
     void load();

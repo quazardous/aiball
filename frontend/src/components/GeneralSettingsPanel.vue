@@ -6,11 +6,12 @@
 // Stays a thin presentational panel: state is owned by App.vue (strategy kept in
 // sync with the WS `strategy_changed`; notif state from useNotifications),
 // passed in + emitted back like HeaderBar did.
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type Strategy } from "../lib/api";
 import { bus } from "../lib/bus";
+import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import ManagedConfig from "./ManagedConfig.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
@@ -51,16 +52,9 @@ const purgingAll = ref(false);
 // Pure read endpoint, light enough to refetch after a purge sweep to
 // show the updated counts.
 const info = ref<InfoPayload | null>(null);
-const infoLoading = ref(false);
-const infoError = ref<string | null>(null);
-async function loadInfo() {
-    infoLoading.value = true;
-    infoError.value = null;
-    try { info.value = await api.getInfo(); }
-    catch (e) { infoError.value = (e as Error).message; }
-    finally { infoLoading.value = false; }
-}
-onMounted(loadInfo);
+const { loading: infoLoading, error: infoError, load: loadInfo } = useLoader(async () => {
+    info.value = await api.getInfo();
+}, { mountLoad: true });
 
 function fmtBytes(n: number): string {
     if (n < 1024) return `${n} B`;

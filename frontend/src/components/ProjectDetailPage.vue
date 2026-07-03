@@ -2,10 +2,10 @@
 // #393 phase 3b: per-project detail page. Shows whether the project is "local"
 // (a claude-loop with a known root has run here), its root(s), the loops at
 // each root with their live state, and a button to launch a loop for a root.
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
-import { useBus } from "../lib/bus";
+import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
@@ -19,28 +19,9 @@ const emit = defineEmits<{ (e: "back"): void }>();
 
 const meta = ref<ProjectMeta | null>(null);
 const consumers = ref<Consumer[]>([]);
-const loading = ref(false);
-const error = ref<string | null>(null);
 const launching = ref<string | null>(null);
 
 const notify = useNotify();
-
-async function load() {
-    loading.value = true;
-    error.value = null;
-    try {
-        const all = await api.listProjectsDetailed();
-        meta.value = all.find((p) => p.name === props.project) ?? null;
-        consumers.value = await api.listConsumers();
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
-
-watch(() => props.project, () => load());
-onMounted(load);
 
 // #443: the daemon broadcasts `consumer_changed` whenever a loop's presence
 // flips (live SSE open/close, #395) or it heartbeats — the WS relay turns that
@@ -48,8 +29,13 @@ onMounted(load);
 // FROZEN snapshot: a killed loop kept reading "running" until a manual refresh
 // (david's "reste à running assez longtemps"). Refetch so the running badge +
 // per-root state + loop chips clear live (~6s after kill, via presence).
-useBus("projects.refresh", () => { void load(); });
-useBus("consumers.refresh", () => { void load(); });
+const { loading, error, load } = useLoader(async () => {
+    const all = await api.listProjectsDetailed();
+    meta.value = all.find((p) => p.name === props.project) ?? null;
+    consumers.value = await api.listConsumers();
+}, { refreshOn: ["projects.refresh", "consumers.refresh"], mountLoad: true });
+
+watch(() => props.project, () => load());
 
 const roots = computed(() => meta.value?.roots ?? []);
 

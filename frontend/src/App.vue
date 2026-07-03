@@ -9,6 +9,7 @@ import { useRouting } from "./lib/router";
 import { resetToRoot, stripBase } from "./lib/base";
 import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
+import { useLoader } from "./lib/loader";
 import BulkBar from "./components/BulkBar.vue";
 import { type BulkAction, useBulkActions } from "./lib/ticket-actions";
 import {
@@ -150,7 +151,6 @@ const project = ref<string | null>(
     localStorage.getItem("aiball.project") || null,
 );
 const rows = ref<InboxRow[]>([]);
-const loading = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
 // Routed as /consumers/<id> via lib/router.ts (#B.193).
@@ -290,53 +290,49 @@ async function loadProjects() {
     }
 }
 
-async function loadRows() {
-    if (!inListView.value) return;
-    loading.value = true;
-    try {
-        if (searchActive.value) {
-            // Search mode — hit /api/search and feed the same list slot.
-            // Other filters (project, intent, open) compose naturally.
-            searchHits.value = await api.search({
-                q: searchQuery.value.trim(),
-                project: project.value ?? undefined,
-                open: onlyOpen.value,
-                limit: 100,
-            });
-            rows.value = []; // we render searchHits in this mode
-            return;
-        }
-        searchHits.value = [];
-        // `unread` is a per-consumer view, not a server-side moderation
-        // status. Don't forward it to the API — fetch the full set under
-        // the other filters, then narrow on the row's `unread` flag
-        // client-side. Same payload, smaller pile.
-        const apiStatus =
-            statusFilter.value === "all" || statusFilter.value === "unread"
-                ? undefined
-                : statusFilter.value;
-        let fetched = await api.inbox({
-            status: apiStatus,
+// Full load-shape → useLoader (C2 slice 1). The in-list-view guard stays in
+// a thin wrapper BEFORE the loader so a call outside the list view doesn't
+// flash `loading` (the original guarded before flipping it).
+const { loading, load: runLoadRows } = useLoader(async () => {
+    if (searchActive.value) {
+        // Search mode — hit /api/search and feed the same list slot.
+        // Other filters (project, intent, open) compose naturally.
+        searchHits.value = await api.search({
+            q: searchQuery.value.trim(),
             project: project.value ?? undefined,
             open: onlyOpen.value,
-            include_postponed: showSnoozed.value,
-            // #B.222: forward priority filter; "all" → no narrowing.
-            ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
+            limit: 100,
         });
-        if (statusFilter.value === "unread") {
-            fetched = fetched.filter((r) => r.unread);
-        }
-        rows.value = fetched;
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Failed to load inbox",
-            detail: (e as Error).message,
-            life: 8000,
-        });
-    } finally {
-        loading.value = false;
+        rows.value = []; // we render searchHits in this mode
+        return;
     }
+    searchHits.value = [];
+    // `unread` is a per-consumer view, not a server-side moderation
+    // status. Don't forward it to the API — fetch the full set under
+    // the other filters, then narrow on the row's `unread` flag
+    // client-side. Same payload, smaller pile.
+    const apiStatus =
+        statusFilter.value === "all" || statusFilter.value === "unread"
+            ? undefined
+            : statusFilter.value;
+    let fetched = await api.inbox({
+        status: apiStatus,
+        project: project.value ?? undefined,
+        open: onlyOpen.value,
+        include_postponed: showSnoozed.value,
+        // #B.222: forward priority filter; "all" → no narrowing.
+        ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
+    });
+    if (statusFilter.value === "unread") {
+    fetched = fetched.filter((r) => r.unread);
+    }
+    rows.value = fetched;
+}, {
+    onError: (detail) => toast.add({ severity: "error", summary: "Failed to load inbox", detail, life: 8000 }),
+});
+function loadRows(): void {
+    if (!inListView.value) return;
+    void runLoadRows();
 }
 
 // #B.213 phase A.2: arrival toasts + OS notifications wired now that

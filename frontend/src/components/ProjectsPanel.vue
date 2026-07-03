@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import { useToast } from "primevue/usetoast";
 import { api, type ProjectMeta } from "../lib/api";
-import { bus, useBus } from "../lib/bus";
+import { bus } from "../lib/bus";
 import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
+import { useLoader } from "../lib/loader";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 
 const toast = useToast();
 const rows = ref<ProjectMeta[]>([]);
-const loading = ref(false);
 const creating = ref(false);
 const newName = ref("");
 const creatingForm = ref(false);
@@ -48,21 +48,13 @@ function sortValue(row: ProjectMeta, key: string): string | number {
     }
 }
 
-async function load() {
-    loading.value = true;
-    try {
-        rows.value = await api.listProjectsDetailed();
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Failed to load projects",
-            detail: (e as Error).message,
-            life: 8000,
-        });
-    } finally {
-        loading.value = false;
-    }
-}
+const { loading, load } = useLoader(async () => {
+    rows.value = await api.listProjectsDetailed();
+}, {
+    onError: (detail) => toast.add({ severity: "error", summary: "Failed to load projects", detail, life: 8000 }),
+    refreshOn: ["projects.refresh"],
+    mountLoad: true,
+});
 
 async function submitCreate() {
     const name = newName.value.trim();
@@ -100,8 +92,6 @@ function relativeTime(iso: string): string {
     return d.toLocaleDateString();
 }
 
-onMounted(load);
-useBus("projects.refresh", () => load());
 defineExpose({ load });
 </script>
 

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { api, type TokenUsage } from "../lib/api";
 import { formatTicketRef } from "../lib/formatting";
 import { ticketHref } from "../lib/base";
 import { estTokenCost, estTokenEffort, formatTokens } from "../lib/format";
+import { useLoader } from "../lib/loader";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{
@@ -45,23 +46,12 @@ interface ProjectStatsRich {
 }
 
 const stats = ref<ProjectStatsRich | null>(null);
-const loading = ref(false);
-const error = ref<string | null>(null);
 
-async function load() {
-    loading.value = true;
-    error.value = null;
-    try {
-        stats.value = await api.projectStatsRich(props.project) as ProjectStatsRich;
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
+const { loading, error, load } = useLoader(async () => {
+    stats.value = await api.projectStatsRich(props.project) as ProjectStatsRich;
+}, { mountLoad: true });
 
 watch(() => props.project, () => load());
-onMounted(load);
 
 const topReporterMax = computed(() =>
     stats.value && stats.value.top_reporters.length > 0

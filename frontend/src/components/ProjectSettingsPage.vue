@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Select from "primevue/select";
 import { api, type Strategy } from "../lib/api";
+import { useLoader } from "../lib/loader";
 import { STRATEGY_OPTIONS } from "../lib/labels";
 import ManagedConfig from "./ManagedConfig.vue";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
@@ -22,7 +23,6 @@ const emit = defineEmits<{
 const strategy = ref<Strategy | null>(null);
 const strategyGlobal = ref<Strategy>("auto-reply");
 const strategyBusy = ref(false);
-const loading = ref(false);
 const error = ref<string | null>(null);
 const GLOBAL_SENTINEL = "_global";
 type StrategyChoice = Strategy | typeof GLOBAL_SENTINEL;
@@ -56,22 +56,13 @@ async function applyStrategy(v: StrategyChoice) {
     }
 }
 
-async function load() {
-    loading.value = true;
-    error.value = null;
-    try {
-        const r = await api.getProjectStrategy(props.project);
-        strategy.value = r.strategy;
-        strategyGlobal.value = r.global;
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
+const { loading, load } = useLoader(async () => {
+    const r = await api.getProjectStrategy(props.project);
+    strategy.value = r.strategy;
+    strategyGlobal.value = r.global;
+}, { error, mountLoad: true });
 
 watch(() => props.project, () => load());
-onMounted(load);
 </script>
 
 <template>

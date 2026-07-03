@@ -5,16 +5,16 @@
 // component drives Settings > General (global) and Project Settings (per-project)
 // so every key is editable in both places with no per-key wiring. Protected
 // keys carry a lock; the API enforces moderator-only writes (a 403 surfaces).
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Select from "primevue/select";
 import InputText from "primevue/inputtext";
 import Button from "primevue/button";
 import { api, type ConfigPrimitive, type ManagedConfigRow } from "../lib/api";
+import { useLoader } from "../lib/loader";
 
 const props = defineProps<{ project?: string | null }>();
 
 const rows = ref<ManagedConfigRow[]>([]);
-const loading = ref(false);
 const error = ref<string | null>(null);
 const drafts = ref<Record<string, string>>({}); // editing buffer for number/string
 
@@ -59,24 +59,16 @@ function selectOptions(r: ManagedConfigRow): { label: string; value: ConfigPrimi
     return opts;
 }
 
-async function load() {
-    loading.value = true;
-    error.value = null;
-    try {
-        const r = await api.listManagedConfig(props.project ?? null);
-        rows.value = r.config;
-        const d: Record<string, string> = {};
-        for (const row of r.config) {
-            const lv = isGlobalView.value ? row.global : row.project;
-            d[row.key] = lv === null || lv === undefined ? "" : String(lv);
-        }
-        drafts.value = d;
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
+const { loading, load } = useLoader(async () => {
+    const r = await api.listManagedConfig(props.project ?? null);
+    rows.value = r.config;
+    const d: Record<string, string> = {};
+    for (const row of r.config) {
+        const lv = isGlobalView.value ? row.global : row.project;
+        d[row.key] = lv === null || lv === undefined ? "" : String(lv);
     }
-}
+    drafts.value = d;
+}, { error, mountLoad: true });
 
 async function applyValue(r: ManagedConfigRow, value: ConfigPrimitive) {
     error.value = null;
@@ -107,7 +99,6 @@ function saveText(r: ManagedConfigRow) {
 }
 
 watch(() => props.project, () => load());
-onMounted(load);
 </script>
 
 <template>

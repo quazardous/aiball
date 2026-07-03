@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
 import { api, type Consumer, type NodeView } from "../lib/api";
-import { useBus } from "../lib/bus";
+import { useLoader } from "../lib/loader";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
@@ -38,7 +38,6 @@ let nowTimer: ReturnType<typeof setInterval> | null = null;
 
 const toast = useToast();
 const rows = ref<Consumer[]>([]);
-const loading = ref(false);
 
 // #455: proxy-node enrichment.
 const nodesByIp = ref<Map<string, { node_id: string; label: string | null }>>(new Map());
@@ -60,25 +59,14 @@ function nodeFor(r: Consumer): { node_id: string; label: string | null } | null 
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 const hideStale = ref(true);
 
-async function load() {
-    loading.value = true;
-    try {
-        rows.value = await api.listConsumers();
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Failed to load consumers",
-            detail: (e as Error).message,
-            life: 8000,
-        });
-    } finally {
-        loading.value = false;
-    }
-}
-
 // #443: refetch live when a loop's presence flips (dedicated consumer
 // lane — no longer piggybacking on projects.refresh).
-useBus("consumers.refresh", () => { void load(); });
+const { loading, load } = useLoader(async () => {
+    rows.value = await api.listConsumers();
+}, {
+    onError: (detail) => toast.add({ severity: "error", summary: "Failed to load consumers", detail, life: 8000 }),
+    refreshOn: ["consumers.refresh"],
+});
 
 onMounted(() => {
     load();

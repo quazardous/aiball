@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
@@ -17,6 +17,7 @@ import ThreadActionsDock from "./ThreadActionsDock.vue";
 import ThreadToolbar from "./ThreadToolbar.vue";
 import { STAGE_LABELS, useThreadItems } from "../lib/threadItems";
 import { bus, useBus } from "../lib/bus";
+import { useLoader } from "../lib/loader";
 import { useSnooze } from "../lib/snooze";
 import { useResolutionFlow } from "../lib/resolutionFlow";
 import { useThreadRelations } from "../lib/threadRelations";
@@ -29,7 +30,6 @@ const props = defineProps<{ ticketId: number }>();
 const emit = defineEmits<{ (e: "back"): void }>();
 
 const data = ref<ThreadViewData | null>(null);
-const loading = ref(false);
 const error = ref<string | null>(null);
 const decideBusy = ref(false);
 // #740 david `a9rucr` — the composer hosts an assignee picker, but the
@@ -38,6 +38,23 @@ const decideBusy = ref(false);
 // path). Bind it as a v-model so `decide()` can push the assignment
 // right after the moderation action succeeds.
 const composerAssignee = ref("");
+
+const { loading, load } = useLoader(async () => {
+    data.value = await api.getTicket(props.ticketId);
+    // If the API resolved a non-ticket id up to its parent thread, scroll
+    // to the requested message after Vue has painted the comments.
+    const focus = data.value?.focus_message_id ?? null;
+    if (focus !== null) {
+        requestAnimationFrame(() => {
+            const el = document.getElementById(`comment-${focus}`);
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                el.classList.add("comment-card--focused");
+                setTimeout(() => el.classList.remove("comment-card--focused"), 2500);
+            }
+        });
+    }
+}, { error, mountLoad: true });
 
 // Per-thread relation flow (#B.196 Layer 3) — add form + per-chip
 // menu (popover ref / target / cached title) + add/change-kind/remove
@@ -59,31 +76,6 @@ const {
     deleteFromMenu: deleteFromRelationMenu,
 } = useThreadRelations({ data, load });
 
-async function load() {
-    loading.value = true;
-    error.value = null;
-    try {
-        data.value = await api.getTicket(props.ticketId);
-        // If the API resolved a non-ticket id up to its parent thread, scroll
-        // to the requested message after Vue has painted the comments.
-        const focus = data.value?.focus_message_id ?? null;
-        if (focus !== null) {
-            requestAnimationFrame(() => {
-                const el = document.getElementById(`comment-${focus}`);
-                if (el) {
-                    el.scrollIntoView({ behavior: "smooth", block: "center" });
-                    el.classList.add("comment-card--focused");
-                    setTimeout(() => el.classList.remove("comment-card--focused"), 2500);
-                }
-            });
-        }
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        loading.value = false;
-    }
-}
-
 watch(() => props.ticketId, (_, oldId) => {
     // #B.158: when the user clicks a ref the hover-popover (relation
     // promote menu) survives the navigation if we don't tear it down.
@@ -97,7 +89,6 @@ watch(() => props.ticketId, (_, oldId) => {
     }
     load();
 });
-onMounted(load);
 
 // React to bus-driven refreshes (WS events, local actions in this or
 // any sibling component). The thread reloads itself instead of being

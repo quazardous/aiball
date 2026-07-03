@@ -18,6 +18,7 @@ import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
+import { useLoader } from "../lib/loader";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
@@ -32,30 +33,17 @@ const emit = defineEmits<{
 
 const confirm = useConfirm();
 const toast = useToast();
-const loading = ref(false);
-const error = ref<string | null>(null);
 const node = ref<NodeView | null>(null);
 
-async function load(): Promise<void> {
-    loading.value = true;
-    error.value = null;
-    try {
-        // Reuse the full-list endpoint and filter client-side (a handful of
-        // nodes at most) — same convention as ConsumerEditPage. Keeps the page
-        // self-contained so a Ctrl-R on /nodes/<id> rehydrates it.
-        const all = await api.listNodes();
-        const found = all.find((n) => n.node_id === props.nodeId);
-        if (!found) {
-            error.value = `Node "${props.nodeId}" not found.`;
-            return;
-        }
-        node.value = found;
-    } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
-    } finally {
-        loading.value = false;
-    }
-}
+const { loading, error, load } = useLoader(async () => {
+    // Reuse the full-list endpoint and filter client-side (a handful of
+    // nodes at most) — same convention as ConsumerEditPage. Keeps the page
+    // self-contained so a Ctrl-R on /nodes/<id> rehydrates it.
+    const all = await api.listNodes();
+    const found = all.find((n) => n.node_id === props.nodeId);
+    if (!found) throw new Error(`Node "${props.nodeId}" not found.`);
+    node.value = found;
+});
 
 watch(() => props.nodeId, load, { immediate: true });
 

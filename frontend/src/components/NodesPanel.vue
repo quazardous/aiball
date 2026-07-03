@@ -5,6 +5,7 @@
 // The token value is never exposed — a node is keyed by a non-secret `node_id`.
 import { ref, onMounted, onUnmounted } from "vue";
 import { api, type NodeView } from "../lib/api";
+import { useLoader } from "../lib/loader";
 import NodeDetailPage from "./NodeDetailPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
@@ -25,20 +26,10 @@ const emit = defineEmits<{
 }>();
 
 const nodes = ref<NodeView[]>([]);
-const loading = ref(true);
-const error = ref<string | null>(null);
 
-async function load(): Promise<void> {
-    loading.value = true;
-    error.value = null;
-    try {
-        nodes.value = await api.listNodes();
-    } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
-    } finally {
-        loading.value = false;
-    }
-}
+const { loading, error, load } = useLoader(async () => {
+    nodes.value = await api.listNodes();
+});
 
 function fmt(ts: string | null): string {
     if (!ts) return "—";
