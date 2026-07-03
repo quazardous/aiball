@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
+import { isProjectActive } from "../lib/project-activity";
 
 export interface ProjectListItem {
     label: string;
@@ -78,17 +79,7 @@ const activeProjectLabel = computed(() => {
 // (sinon il disparaît quand sélectionné). Même Sidebar.vue sert mobile/
 // « version portable » via le `<details>` collapse #B.161 → le fix bénéficie
 // aux deux viewports d'un seul changement.
-const INACTIVE_AGE_DAYS = 14;
-function isProjectActive(p: ProjectListItem): boolean {
-    if (p.running) return true; // loop running = actif sans question
-    const hasSignal = p.pending > 0 || p.unread > 0 || p.resolved > 0;
-    if (!hasSignal) return false;
-    // Recency check : si le dernier ticket est trop vieux, on dort.
-    if (!p.last_activity) return true; // absent = back-compat, on assume fresh
-    const ageMs = Date.now() - Date.parse(p.last_activity);
-    if (Number.isNaN(ageMs)) return true; // ISO mal formé, on assume fresh
-    return ageMs < INACTIVE_AGE_DAYS * 24 * 60 * 60 * 1000;
-}
+// C5.2 — the active/inactive rule lives in lib/project-activity.ts now.
 const allProjectItem = computed(() => props.items.find((p) => p.value === null) ?? null);
 const activeProjects = computed(() =>
     props.items.filter((p) => p.value !== null && (isProjectActive(p) || p.value === props.project)),
