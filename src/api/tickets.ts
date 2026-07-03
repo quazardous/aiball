@@ -577,7 +577,13 @@ ticketsRouter.get("/inbox", (req, res) => {
             project: t.project,
             title: t.edited_title ?? t.title,
             summary: t.summary ?? null,
-            body: t.edited_body ?? t.body,
+            // #1161 S1 — list rows carry a SNIPPET, not the full body : bodies
+            // were 75 % of the payload while the UI renders 140 chars max
+            // (`snippetOf`). Full bodies stay on the per-ticket endpoints.
+            snippet: (() => {
+                const raw = (t.edited_body ?? t.body ?? "").replace(/\s+/g, " ").trim();
+                return raw.length > 140 ? raw.slice(0, 140) + "…" : raw || null;
+            })(),
             by_agent: t.by_agent,
             created_at: t.created_at,
             status: t.status,

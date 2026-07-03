@@ -165,7 +165,7 @@ export function formatActivityAge(lastUsedAt: string | null, nowMs: number = Dat
  *  priority, otherwise fall back to the body's first ~140 chars.
  *  Both flattened (whitespace collapsed). */
 export function snippetOf(r: InboxRow): string {
-    const raw = r.summary && r.summary.trim().length > 0 ? r.summary : (r.body ?? "");
+    const raw = r.summary && r.summary.trim().length > 0 ? r.summary : (r.snippet ?? "");
     const flat = raw.replace(/\s+/g, " ").trim();
     return flat.length > 140 ? flat.slice(0, 140) + "…" : flat;
 }

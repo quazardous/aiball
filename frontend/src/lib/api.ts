@@ -408,7 +408,9 @@ export interface InboxRow {
     title: string | null;
     /** Agent-authored one-line summary (#B.87). Shown under the title. */
     summary?: string | null;
-    body: string | null;
+    /** #1161 S1 — server-side 140-char snippet (full bodies no longer ship
+     *  on list rows ; fetch the ticket for the body). */
+    snippet: string | null;
     by_agent: string | null;
     created_at: string;
     status: MessageStatus;
