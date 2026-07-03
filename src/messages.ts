@@ -18,7 +18,7 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
-import { ERROR_CODES } from "./domain.js";
+import { ERROR_CODES, PRIORITIES, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
@@ -106,6 +106,17 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
             return { error: `intent must be one of ${INTENTS.join(", ")}` };
         }
         intent = o.intent as Intent;
+    }
+    // #1156 (REX runic #1155) — `priority` was accepted by the MCP schema but
+    // unknown to this validator, so it was dropped SILENTLY and the SQL
+    // default applied. Mirror the `intent` handling: validate when present
+    // (400 on an unknown value — no silent drop), forward on ticket_created.
+    let priority: Priority | null = null;
+    if (o.priority !== undefined && o.priority !== null) {
+        if (typeof o.priority !== "string" || !(PRIORITIES as readonly string[]).includes(o.priority)) {
+            return { error: `priority must be one of ${PRIORITIES.join(", ")}` };
+        }
+        priority = o.priority as Priority;
     }
     // #B.214: no humans-only enforcement on `panic` — david (#w47f9m):
     // "un message doit de toute façon etre approuvé". Moderation is
@@ -208,6 +219,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         summary: typeof o.summary === "string" && o.summary !== "" ? o.summary : null,
         by_agent: typeof o.by_agent === "string" ? o.by_agent : null,
         intent: kind === "ticket_created" ? intent : null,
+        priority: kind === "ticket_created" ? priority : null,
         decision_kind: decisionKind,
         summary_until: summaryUntil,
         scope,

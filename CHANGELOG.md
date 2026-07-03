@@ -73,6 +73,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Creating a ticket with a `priority` now actually applies it. The field was
+  accepted by the MCP tool but silently dropped on the way to the database, so
+  every agent-created ticket landed at `normal`; an unknown priority value now
+  returns an explicit error instead of being ignored.
 - Loop bar countdown to the next event no longer flashes back to its full value
   at the instant the event fires.
 - After a loop reloads itself on a code change, the bar countdown **and** the
