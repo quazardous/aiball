@@ -11,27 +11,24 @@
  * Stop button. Other places (ConsumersPanel row, ProjectDetailPage
  * loop chip) link here so the operator has ONE canonical detail view
  * per consumer.
+ *
+ * Tab contents are extracted: Overview → ConsumerOverview.vue, Edit →
+ * ConsumerEditForm.vue. This page keeps the loader (single source of
+ * truth for `original`), the tab shell, the lazy Terminal tab and the
+ * bus wiring.
  */
-import { computed, ref, watch } from "vue";
-import Button from "primevue/button";
-import InputText from "primevue/inputtext";
-import Select from "primevue/select";
+import { ref, watch } from "vue";
 import Tab from "primevue/tab";
 import TabList from "primevue/tablist";
 import TabPanel from "primevue/tabpanel";
 import TabPanels from "primevue/tabpanels";
 import Tabs from "primevue/tabs";
-import Textarea from "primevue/textarea";
-import { useConfirm } from "primevue/useconfirm";
-import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
+import { api, type Consumer } from "../lib/api";
 import { useLoader } from "../lib/loader";
-import { useNotify } from "../lib/notify";
-import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
-import { relativeTime } from "../lib/format";
-import FieldRow from "./ui/FieldRow.vue";
-import FormField from "./ui/FormField.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
 import AsyncState from "./ui/AsyncState.vue";
+import ConsumerEditForm from "./ConsumerEditForm.vue";
+import ConsumerOverview from "./ConsumerOverview.vue";
 import TerminalView from "./TerminalView.vue";
 
 // #464 — third tab "Terminal" (live tmux/psmux pane mirror) wired in
@@ -47,50 +44,8 @@ const emit = defineEmits<{
     (e: "close-to-inbox"): void;
 }>();
 
-const notify = useNotify();
-const confirmDialog = useConfirm();
-const saving = ref(false);
-const stopBusy = ref(false);
-const deleteBusy = ref(false);
 const error = ref<string | null>(null);
 const original = ref<Consumer | null>(null);
-
-// #460 — same online/offline criterion as ProjectDetailPage + ConsumersPanel :
-// presence-AUTHORITATIVE, with the 120s heartbeat as a bridge for never-seen-
-// via-SSE cases (just after a daemon restart). Surface it as a computed so the
-// "Loop status" section + the Stop button visibility stay derived.
-const ONLINE_MS = 120_000;
-const isOnline = computed((): boolean => {
-    const c = original.value;
-    if (!c) return false;
-    if (c.present === true) return true;
-    if (c.present === false) return false;
-    if (!c.state_updated_at) return false;
-    return Date.now() - new Date(c.state_updated_at).getTime() < ONLINE_MS;
-});
-// Stop is only meaningful when a loop is actually live AND has a `state` (a
-// human consumer has no loop to kill).
-const canStop = computed((): boolean => !!original.value?.state && isOnline.value);
-
-const kind = ref<ConsumerKind>("agent");
-const displayName = ref("");
-const note = ref("");
-const microPrompt = ref("");
-const enabled = ref(true);
-// #508 — global flag : peut claim via engage / pool claimable (défaut true).
-// Quand false → consumer "spécialiste" qui ne prend QUE les tickets explicitement
-// assignés (via ticket_assign), pas le pool global.
-const canClaim = ref(true);
-// #516 (david `r59bkm` plan E) — tri-state opt-in pour les broadcasts projet.
-// "auto" (null) = suit can_claim ; "on" = opt-in explicite ; "off" = opt-out
-// explicite. Stocké en string pour le Select ; converti en boolean | null
-// au save.
-const notifyBroadcasts = ref<"auto" | "on" | "off">("auto");
-// #451: raw-prompt injection (this dedicated page is where the operator types it).
-const promptText = ref("");
-const promptBusy = ref(false);
-
-const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
 
 // #472 david `6d56gs` : keep-stale-while-refetching — flipping `loading`
 // on a bus refresh unmounted the main subtree (the template chains
@@ -103,21 +58,12 @@ const { loading, load } = useLoader(async () => {
     // small — a few hundred rows max). A per-id GET exists since #397
     // (used by the claude-loop wake builder) but the list already carries
     // `micro_prompt`, so there's no need for a second round-trip here.
+    // The tab children (ConsumerOverview / ConsumerEditForm) derive their
+    // own state from `original` — no per-field assignment here anymore.
     const all = await api.listConsumers();
     const found = all.find((c) => c.consumer_id === props.consumerId);
     if (!found) throw new Error(`Consumer "${props.consumerId}" not found.`);
     original.value = found;
-    kind.value = found.kind;
-    displayName.value = found.display_name ?? "";
-    note.value = found.note ?? "";
-    microPrompt.value = found.micro_prompt ?? "";
-    enabled.value = found.enabled;
-    canClaim.value = found.can_claim !== false; // default true if undefined (pre-#508 row)
-    notifyBroadcasts.value = found.notify_project_broadcasts === true
-        ? "on"
-        : found.notify_project_broadcasts === false
-            ? "off"
-            : "auto";
 }, { error, showLoading: () => !original.value, refreshOn: ["consumers.refresh"] });
 
 watch(() => props.consumerId, load, { immediate: true });
@@ -125,118 +71,6 @@ watch(() => props.consumerId, load, { immediate: true });
 // #460 — live updates ride the `consumers.refresh` lane via `refreshOn`
 // above (daemon consumer_changed → WS relay → bus) : without it the page
 // reads a FROZEN snapshot until manual refresh (cf. ProjectDetailPage #443).
-
-async function save() {
-    if (!original.value) return;
-    saving.value = true;
-    try {
-        await api.updateConsumer(props.consumerId, {
-            kind: kind.value,
-            display_name: displayName.value.trim() || null,
-            note: note.value.trim() || null,
-            micro_prompt: microPrompt.value.trim() || null,
-            enabled: enabled.value,
-            can_claim: canClaim.value,
-            notify_project_broadcasts: notifyBroadcasts.value === "on"
-                ? true
-                : notifyBroadcasts.value === "off"
-                    ? false
-                    : null,
-        });
-        notify.success(`Saved ${props.consumerId}`);
-        emit("close");
-    } catch (e) {
-        notify.error("Save failed", { detail: (e as Error).message });
-    } finally {
-        saving.value = false;
-    }
-}
-
-// #460 — centralised remote hard-kill (mirrors ConsumersPanel + ProjectDetailPage).
-// Confirm modal gates it so a stray click never kills a loop. Once #460
-// "centralise on the consumer detail" lands fully, the inline shortcuts in the
-// list pages can be removed if david wants — left in for now as fast paths.
-function stopLoop(): void {
-    if (!original.value) return;
-    const consumer_id = original.value.consumer_id;
-    confirmDialog.require({
-        header: "Stop loop",
-        message: `Stop the claude-loop running as "${consumer_id}"? This kills its tmux session + Claude (the conversation is lost). Its state is kept — use Delete to remove it entirely.`,
-        icon: "pi pi-stop-circle",
-        acceptLabel: "Stop",
-        rejectLabel: "Cancel",
-        acceptClass: "p-button-danger",
-        accept: () => { void doStopLoop(consumer_id); },
-    });
-}
-async function doStopLoop(consumer_id: string): Promise<void> {
-    stopBusy.value = true;
-    try {
-        const r = await api.stopLoop(consumer_id);
-        if (r.delivered) {
-            notify.success(`Stop sent to ${consumer_id}`, { detail: "The loop will self-terminate." });
-        } else {
-            notify.warn(`No live loop for ${consumer_id}`, { detail: "Nothing was connected to receive it." });
-        }
-        // Backstop the WS broadcast in case it lags : refresh after a beat.
-        setTimeout(() => void load(), 1500);
-    } catch (e) {
-        notify.error(`Stop failed for ${consumer_id}`, { detail: (e as Error).message });
-    } finally {
-        stopBusy.value = false;
-    }
-}
-
-// #469 — Delete consumer, mirrored from the ConsumersPanel pre-#468 inline
-// action (now retired from the list). Confirm + delete via the same API
-// the list used. On success we close the detail page so the operator
-// doesn't stare at a stale form.
-function deleteConsumer(): void {
-    if (!original.value) return;
-    const consumer_id = original.value.consumer_id;
-    confirmDialog.require({
-        header: "Delete consumer",
-        message: `Delete consumer "${consumer_id}"? Past posts are preserved ; the row will be re-created the next time this id posts.`,
-        icon: "pi pi-trash",
-        acceptLabel: "Delete",
-        rejectLabel: "Cancel",
-        acceptClass: "p-button-danger",
-        accept: () => { void doDelete(consumer_id); },
-    });
-}
-async function doDelete(consumer_id: string): Promise<void> {
-    deleteBusy.value = true;
-    try {
-        await api.deleteConsumer(consumer_id);
-        notify.success(`Consumer ${consumer_id} deleted`);
-        emit("close");
-    } catch (e) {
-        notify.error(`Delete failed for ${consumer_id}`, { detail: (e as Error).message });
-    } finally {
-        deleteBusy.value = false;
-    }
-}
-
-// #451: send a raw, unfiltered prompt to this loop. Spooled then delivered:
-// live → injected now; offline → delivered when the loop's SSE reconnects.
-async function sendPrompt() {
-    const text = promptText.value.trim();
-    if (!text) return;
-    promptBusy.value = true;
-    try {
-        const r = await api.sendLoopPrompt(props.consumerId, text);
-        if (r.delivered) {
-            notify.success(`Prompt sent to ${props.consumerId}`, { detail: "Injected into the live Claude session." });
-        } else {
-            notify.info(`Prompt spooled for ${props.consumerId}`, { detail: "Loop offline — it'll be delivered when the loop reconnects." });
-        }
-        promptText.value = "";
-    } catch (e) {
-        notify.error("Prompt failed", { detail: (e as Error).message });
-    } finally {
-        promptBusy.value = false;
-    }
-}
 </script>
 
 <template>
@@ -271,227 +105,20 @@ async function sendPrompt() {
                     </TabList>
                     <TabPanels>
                         <TabPanel value="overview">
-                            <div class="consumer-edit__tab">
-                                <FieldRow label="consumer_id">
-                                    <span class="aiball-mono">{{ original.consumer_id }}</span>
-                                </FieldRow>
-
-                                <!-- Loop status : chips read-only (mêmes que
-                                     ProjectDetailPage / ConsumersPanel #460).
-                                     #469 david : le bouton Stop micro-inline a
-                                     migré dans le band d'actions en bas de
-                                     l'overview (vrai bouton form-style). -->
-                                <FieldRow label="loop status">
-                                    <div class="consumer-edit__status">
-                                        <template v-if="original.state">
-                                            <template v-if="isOnline">
-                                                <span class="ld-tag" :class="activityClass(original.state)">{{ original.state }}</span>
-                                                <span
-                                                    class="ld-tag"
-                                                    :class="presenceClass(original.state_human, original.state_human_word)"
-                                                >{{ presenceWord(original.state_human, original.state_human_word) }}</span>
-                                            </template>
-                                            <span v-else class="ld-tag ld-tag--offline">offline</span>
-                                            <span v-if="original.cwd" class="consumer-edit__cwd" :title="original.cwd">
-                                                @ <code>{{ original.cwd }}</code>
-                                            </span>
-                                        </template>
-                                        <span v-else class="consumer-edit__status-none">
-                                            no loop tracking — this consumer has never reported a state
-                                        </span>
-                                    </div>
-                                </FieldRow>
-
-                                <FieldRow label="kind">
-                                    <span>{{ original.kind }}</span>
-                                </FieldRow>
-                                <FieldRow v-if="original.display_name" label="display name">
-                                    <span>{{ original.display_name }}</span>
-                                </FieldRow>
-                                <FieldRow label="enabled">
-                                    <span :class="original.enabled ? '' : 'consumer-edit__status-none'">
-                                        {{ original.enabled ? "enabled" : "blocked" }}
-                                    </span>
-                                </FieldRow>
-
-                                <div class="consumer-edit__meta">
-                                    <div><strong>created</strong> {{ original.created_at ? relativeTime(original.created_at) : "—" }}</div>
-                                    <div><strong>last seen</strong> {{ original.last_seen_at ? relativeTime(original.last_seen_at) : "never" }}</div>
-                                </div>
-
-                                <!-- #469 david `b910e4` : les micro-boutons d'action
-                                     inline (Stop, Delete) migrent en BAS de l'overview
-                                     sous forme de vrais boutons "form style" — labels
-                                     lisibles, taille standard, severity colorée. Stop
-                                     reste gated par `canStop` (online + has state) ;
-                                     Delete est toujours dispo. -->
-                                <div class="consumer-edit__actions">
-                                    <Button
-                                        v-if="canStop"
-                                        label="Stop loop"
-                                        icon="pi pi-stop-circle"
-                                        severity="danger"
-                                        outlined
-                                        :loading="stopBusy"
-                                        :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
-                                        @click="stopLoop"
-                                    />
-                                    <Button
-                                        label="Delete consumer"
-                                        icon="pi pi-trash"
-                                        severity="danger"
-                                        outlined
-                                        :loading="deleteBusy"
-                                        :title="`Delete consumer ${original.consumer_id} (history preserved)`"
-                                        @click="deleteConsumer"
-                                    />
-                                </div>
-                            </div>
+                            <ConsumerOverview
+                                :original="original"
+                                @close="emit('close')"
+                                @refresh="() => void load()"
+                            />
                         </TabPanel>
 
                         <TabPanel value="edit">
-                            <div class="consumer-edit__tab">
-                                <FormField label="kind" for="ce-kind">
-                                    <Select
-                                        inputId="ce-kind"
-                                        v-model="kind"
-                                        :options="KIND_OPTIONS"
-                                        optionLabel="label"
-                                        optionValue="value"
-                                        style="width: 100%"
-                                    />
-                                </FormField>
-
-                                <FormField label="display name" for="ce-name">
-                                    <InputText
-                                        id="ce-name"
-                                        v-model="displayName"
-                                        placeholder="(falls back to consumer_id)"
-                                        style="width: 100%"
-                                    />
-                                </FormField>
-
-                                <FormField label="note" for="ce-note">
-                                    <Textarea
-                                        id="ce-note"
-                                        v-model="note"
-                                        rows="3"
-                                        placeholder="(internal note — visible only on this page)"
-                                        style="width: 100%"
-                                    />
-                                </FormField>
-
-                                <FormField label="micro-prompt" for="ce-micro-prompt">
-                                    <Textarea
-                                        id="ce-micro-prompt"
-                                        v-model="microPrompt"
-                                        rows="3"
-                                        placeholder="(standing instruction injected into this agent's wake prompt via {consumer_prompt} — e.g. &quot;branch main if the ticket doesn't specify&quot;)"
-                                        style="width: 100%"
-                                    />
-                                    <small class="consumer-edit__hint">
-                                        Surfaced to the agent on wake via the <code>{consumer_prompt}</code>
-                                        placeholder. Opt-in: add the placeholder to your <code>wake_master</code>
-                                        template (<code>.aiball.yaml</code>) where you want it. Empty = nothing injected.
-                                    </small>
-                                </FormField>
-
-                                <FormField>
-                                    <label>
-                                        <input
-                                            type="checkbox"
-                                            :checked="enabled"
-                                            @change="enabled = ($event.target as HTMLInputElement).checked"
-                                        />
-                                        enabled (when off, the daemon rejects new posts from this consumer)
-                                    </label>
-                                </FormField>
-
-                                <!-- #508 — global no-claim flag : consumer "spécialiste" qui ne
-                                     prend que les tickets explicitement assignés. -->
-                                <FormField>
-                                    <label>
-                                        <input
-                                            type="checkbox"
-                                            :checked="canClaim"
-                                            @change="canClaim = ($event.target as HTMLInputElement).checked"
-                                        />
-                                        can claim (when off, this consumer is <strong>assignment-only</strong>: <code>ticket_engage</code> skips the global pool and returns only tickets explicitly assigned via <code>ticket_assign</code>)
-                                    </label>
-                                </FormField>
-
-                                <!-- #516 (david `r59bkm` plan E) — tri-state opt-in pour les
-                                     broadcasts projet (scope=broadcast follower fan-out).
-                                     Auto = suit can_claim (claim-able → reçoit, no_claim → ne reçoit pas) ;
-                                     on = opt-in explicite ; off = opt-out explicite. -->
-                                <FormField label="project broadcasts" for="ce-notify-broadcasts">
-                                    <select
-                                        id="ce-notify-broadcasts"
-                                        v-model="notifyBroadcasts"
-                                        class="consumer-edit__select"
-                                    >
-                                        <option value="auto">auto (follows can-claim)</option>
-                                        <option value="on">on (always receive broadcasts)</option>
-                                        <option value="off">off (never receive broadcasts)</option>
-                                    </select>
-                                    <small class="consumer-edit__hint">
-                                        Receive <code>scope: broadcast</code> events (e.g. project-wide
-                                        fan-out). <strong>Auto</strong> = same as <code>can claim</code> ;
-                                        a no-claim consumer is silenced by default. Override to <strong>on</strong>
-                                        if you want a no-claim agent to still see broadcasts.
-                                    </small>
-                                </FormField>
-
-                                <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->
-                                <FormField label="send a raw prompt" for="ce-prompt">
-                                    <Textarea
-                                        id="ce-prompt"
-                                        v-model="promptText"
-                                        rows="4"
-                                        :placeholder="original.present
-                                            ? 'Type a prompt — injected verbatim into the live Claude session…'
-                                            : 'Loop offline — the prompt will be spooled and delivered when it reconnects.'"
-                                        style="width: 100%"
-                                        :disabled="promptBusy"
-                                        @keydown.ctrl.enter="sendPrompt"
-                                    />
-                                    <small class="consumer-edit__hint">
-                                        Sent <strong>verbatim</strong> — no moderation, no wake-phrase.
-                                        {{ original.present
-                                            ? "Loop is live → delivered now."
-                                            : "Loop is offline → spooled until it reconnects." }}
-                                        Ctrl+Enter to send.
-                                    </small>
-                                    <div class="consumer-edit__actions">
-                                        <Button
-                                            label="Send prompt"
-                                            icon="pi pi-send"
-                                            size="small"
-                                            severity="secondary"
-                                            :loading="promptBusy"
-                                            :disabled="!promptText.trim()"
-                                            @click="sendPrompt"
-                                        />
-                                    </div>
-                                </FormField>
-
-                                <div class="consumer-edit__actions">
-                                    <Button
-                                        label="Cancel"
-                                        text
-                                        size="small"
-                                        :disabled="saving"
-                                        @click="emit('close')"
-                                    />
-                                    <Button
-                                        label="Save"
-                                        icon="pi pi-save"
-                                        size="small"
-                                        :loading="saving"
-                                        @click="save"
-                                    />
-                                </div>
-                            </div>
+                            <ConsumerEditForm
+                                :original="original"
+                                :consumer-id="props.consumerId"
+                                @saved="() => void load()"
+                                @close="emit('close')"
+                            />
                         </TabPanel>
 
                         <!-- #464 — Terminal tab : live tmux/psmux pane mirror.
@@ -519,6 +146,9 @@ async function sendPrompt() {
 <style>
 /* Layout (largeur + carte) → `<AdminDetailLayout>` (#458). */
 /* En-tête (breadcrumb + titre) → bricks internes du layout. */
+/* Panel-exclusive rules moved with their markup into ConsumerOverview.vue
+   / ConsumerEditForm.vue ; the classes below are shared across tabs, so
+   they stay here (non-scoped, like the children). */
 /* #460 — chaque tab applique sa gouttière verticale, miroir du body card
    pré-tabs (avant le split Overview/Edit). */
 .consumer-edit__tab {
@@ -530,46 +160,11 @@ async function sendPrompt() {
 .consumer-edit__error {
     color: var(--p-red-500);
 }
-.consumer-edit__hint {
-    font-size: var(--fs-sm);
-    line-height: 1.35;
-    color: var(--p-text-muted-color);
-}
-.consumer-edit__hint code {
-    font-family: var(--font-mono);
-    font-size: 0.74rem;
-}
-/* consumer_id read-only → <FieldRow> + `.aiball-mono` (style.css). */
-.consumer-edit__meta {
-    display: flex;
-    gap: 1.5rem;
-    font-size: var(--fs-sm);
-    color: var(--p-text-muted-color);
-}
 .consumer-edit__actions {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
     margin-top: 0.4rem;
 }
-/* #460 — loop status row : tags + cwd + Stop button on one line. */
-.consumer-edit__status {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-.consumer-edit__cwd {
-    font-size: var(--fs-sm);
-    color: var(--p-text-muted-color);
-}
-.consumer-edit__cwd code {
-    font-family: var(--font-mono);
-    font-size: 0.74rem;
-}
-.consumer-edit__status-none {
-    font-size: var(--fs-sm);
-    color: var(--p-text-muted-color);
-    font-style: italic;
-}
+/* consumer_id read-only → <FieldRow> + `.aiball-mono` (style.css). */
 </style>
