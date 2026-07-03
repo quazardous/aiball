@@ -17,6 +17,7 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
+import { useConfirm } from "primevue/useconfirm";
 import {
     api,
     type AutomationAction,
@@ -37,6 +38,7 @@ const emit = defineEmits<{
     (e: "close"): void;
 }>();
 
+const confirmDialog = useConfirm();
 const rule = ref<AutomationRule | null>(null);
 const error = ref<string | null>(null);
 const busy = ref(false);
@@ -104,9 +106,21 @@ async function save(patch: {
     }
 }
 
-async function del() {
+function del() {
     if (!rule.value || isYaml.value) return;
-    if (!confirm(`Delete automation rule #${rule.value.id}?`)) return;
+    // C2 slice 4 — PrimeVue confirm instead of the blocking native dialog.
+    confirmDialog.require({
+        header: "Delete automation rule",
+        message: `Delete automation rule #${rule.value.id}?`,
+        icon: "pi pi-trash",
+        acceptLabel: "Delete",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-danger",
+        accept: () => { void doDel(); },
+    });
+}
+async function doDel() {
+    if (!rule.value) return;
     busy.value = true;
     try {
         await api.delAutomationRule(rule.value.id);

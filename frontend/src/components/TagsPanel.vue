@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
+import { useConfirm } from "primevue/useconfirm";
 import { api, type CatalogTag } from "../lib/api";
 import { bus } from "../lib/bus";
 import { useLoader } from "../lib/loader";
@@ -10,6 +11,7 @@ import TagBadge from "./TagBadge.vue";
 import DataList from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 
+const confirmDialog = useConfirm();
 const tags = ref<CatalogTag[]>([]);
 const error = ref<string | null>(null);
 
@@ -94,10 +96,21 @@ async function saveColor(t: CatalogTag, color: string) {
     }
 }
 
-async function del(t: CatalogTag) {
+function del(t: CatalogTag) {
     if (isConfig(t) || t.id == null) return; // config tags are non-deletable
-    if (!confirm(`Delete tag '${t.name}'? Any message currently tagged loses it.`))
-        return;
+    // C2 slice 4 — PrimeVue confirm instead of the blocking native dialog.
+    confirmDialog.require({
+        header: "Delete tag",
+        message: `Delete tag '${t.name}'? Any message currently tagged loses it.`,
+        icon: "pi pi-trash",
+        acceptLabel: "Delete",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-danger",
+        accept: () => { void doDel(t); },
+    });
+}
+async function doDel(t: CatalogTag) {
+    if (t.id == null) return;
     try {
         await api.delTag(t.id);
         bus.emit("tags.refresh");
