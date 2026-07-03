@@ -5,6 +5,7 @@ import { useToast } from "primevue/usetoast";
 import { api, type Consumer, type NodeView } from "../lib/api";
 import { relativeTimeFine } from "../lib/format";
 import { useNowTicker } from "../lib/now-ticker";
+import { OFFLINE_THRESHOLD_MS, STALE_THRESHOLD_MS } from "../lib/time";
 import { useLoader } from "../lib/loader";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
@@ -25,14 +26,8 @@ const emit = defineEmits<{
     (e: "close-to-inbox"): void;
 }>();
 
-// #B.177 / #280: how long without a state heartbeat before we render a
-// loop agent as "offline". The claude-loop timer heartbeats every
-// CL_INTERVAL (default 30s), so the old 60s gave only a 2-tick margin —
-// a single delayed tick (slow pingsCount/pushState, daemon blip, GC)
-// flickered a BUSY agent to "offline" (david #280 "marqué idle/offline
-// alors que je les vois busy"). Widen to ~4× the default heartbeat so
-// normal jitter never reads as offline.
-const OFFLINE_THRESHOLD_MS = 120_000;
+// #B.177 / #280 : offline threshold — moved to lib/time.ts (C2 slice 5),
+// rationale documented there (~4× the default heartbeat).
 
 // Tick-clock so "2 min ago" updates without re-fetching the API ; the
 // periodic ~30s refetch belt (missed-WS-event safety net) rides its onTick.
@@ -60,7 +55,6 @@ function nodeFor(r: Consumer): { node_id: string; label: string | null } | null 
 
 // Hide consumers idle > 1 week by default; toggle reveals the long
 // tail for debugging (#B.193).
-const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 const hideStale = ref(true);
 
 // #443: refetch live when a loop's presence flips (dedicated consumer
