@@ -53,7 +53,12 @@ export class NotLoggedInWatcher extends BoolWatcher {
  *  "connect"/"retry" can't latch the flag. The counter is the least-falsifiable
  *  fingerprint of the retry pane. Cleared on busy-begin / Stop (a running turn
  *  proves the API is reachable), never by the watcher `end` (a banner scrolling
- *  off-screen ≠ connectivity restored). */
+ *  off-screen ≠ connectivity restored).
+ *
+ *  Regex confirmed against the shipped Claude Code bundle (v2.1.199), which
+ *  assembles the banner as:
+ *    `Unable to connect to API (${code}) · Retrying in ${n}${unit} · attempt ${a}/${max}`
+ *  (the `·` is U+00B7). So the anchors below are ground-truth, not guessed. */
 export class ApiUnreachableWatcher extends BoolWatcher {
     readonly name = "api_unreachable";
     protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
