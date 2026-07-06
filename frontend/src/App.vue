@@ -31,6 +31,7 @@ import ProjectOverviewPage from "./components/ProjectOverviewPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
 import NodesPanel from "./components/NodesPanel.vue";
+import UsagePanel from "./components/UsagePanel.vue";
 import LaunchersPanel from "./components/LaunchersPanel.vue";
 import GeneralSettingsPanel from "./components/GeneralSettingsPanel.vue";
 import AutomationPanel from "./components/AutomationPanel.vue";
@@ -691,7 +692,7 @@ watch(showSnoozed, (v) => {
                      prepends an "Inbox" crumb that covers the same job, so
                      showing both stacks two back-links. -->
                 <a
-                    v-if="(panel === 'general' || (panel === 'automation' && !automationRuleEditId) || panel === 'projects' || panel === 'tags' || (panel === 'consumers' && !consumerEditId) || (panel === 'nodes' && !nodeEditId))"
+                    v-if="(panel === 'general' || (panel === 'automation' && !automationRuleEditId) || panel === 'projects' || panel === 'tags' || (panel === 'consumers' && !consumerEditId) || (panel === 'nodes' && !nodeEditId) || panel === 'usage')"
                     href="/"
                     class="settings-back-link"
                     @click.prevent="panel = null"
@@ -737,6 +738,7 @@ watch(showSnoozed, (v) => {
                     @close-edit="nodeEditId = null"
                     @close-to-inbox="() => { nodeEditId = null; panel = null; }"
                 />
+                <UsagePanel v-else-if="panel === 'usage'" />
 
                 <NewTicketPage
                     v-else-if="panel === 'compose'"

@@ -25,7 +25,7 @@ export interface ProjectListItem {
 
 // #506 — `rules` + `work-filters` retirés (panels legacy supprimés, leur UI
 // éditait des rows non consultées par le moteur depuis #483).
-export type SettingsPanel = "general" | "automation" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
+export type SettingsPanel = "general" | "automation" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "usage" | "compose";
 
 /**
  * Per-project sub-pages (#B.127): "settings" hosts the moderation
@@ -295,6 +295,15 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             >
                 <i class="pi pi-sitemap" />
                 <span>Nodes</span>
+            </button>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'usage' }"
+                @click="emit('open-panel', 'usage')"
+            >
+                <i class="pi pi-chart-line" />
+                <span>Usage</span>
             </button>
             <button
                 type="button"

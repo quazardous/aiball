@@ -520,6 +520,15 @@ export const CONSUMER_KIND_OPTIONS: { label: string; value: ConsumerKind }[] = [
 ];
 /** Claude-loop state pushed by the timer (#B.177 B1). */
 export type ConsumerState = "boot" | "idle" | "busy";
+export interface TokenSnapshotRow {
+    project: string;
+    captured_at: string;
+    tokens_in: number;
+    tokens_out: number;
+    cache_w: number;
+    cache_r: number;
+}
+
 export interface Consumer {
     consumer_id: string;
     kind: ConsumerKind;
@@ -631,6 +640,14 @@ export interface Launcher {
 
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
+    /** #1200 — token-usage-over-time series (per project snapshots). */
+    tokenTimeseries: (opts: { project?: string; days?: number } = {}) => {
+        const qs = new URLSearchParams();
+        if (opts.project) qs.set("project", opts.project);
+        if (opts.days) qs.set("days", String(opts.days));
+        const q = qs.toString();
+        return req<{ series: TokenSnapshotRow[] }>("GET", `/api/token-usage/timeseries${q ? "?" + q : ""}`);
+    },
     /**
      * Explicitly register a project (#B.216 phase A pass 2). 409 means
      * the name already exists; 400 means empty/whitespace name.
