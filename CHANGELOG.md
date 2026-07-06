@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **`aiball consumer mark-read` can drain a whole ping backlog.** New flags:
+  `--all-projects` (mark seen across every project, not just one), `--delete`
+  (hard-remove the ping rows instead of marking them seen), and `--consumer <id>`
+  (an operator draining another consumer's firehose). Targeting another consumer
+  or `--delete` are local-trust (local CLI) only. Fills the gap left when the
+  MCP-side bulk ack was removed — an operator now has a clean path instead of raw SQL.
 - **`poll()` shows your accepted-plan queue.** The snapshot now returns
   `plans_to_execute` — plans of yours a moderator accepted that you haven't
   acted on since (excluding ones assigned to someone else) — plus

@@ -126,25 +126,38 @@ export function registerConsumerCommands(program: Command): void {
 
     program
         .command("mark-read")
-        .description("Bulk mark project messages as seen")
-        .requiredOption("--project <project>", "Project to ack")
+        .description("Bulk mark messages as seen (or --delete) — a project, or --all-projects. #1185: --consumer / --delete are local-trust operator actions.")
+        .option("--project <project>", "Project to ack")
         .option("--up-to <id>", "Mark seen up to (and including) this message id")
-        .option("--all", "Mark all current messages as seen")
+        .option("--all", "Mark all current messages as seen (needs --project)")
+        .option("--all-projects", "Drain the consumer's pings across EVERY project (firehose prune)")
+        .option("--delete", "Hard-DELETE the ping rows instead of marking them seen (local-trust only)")
+        .option("--consumer <id>", "Target ANOTHER consumer's backlog (operator, local-trust only). Default: self.")
         .action(async (opts, cmd) => {
             const client = buildClient(gOpts(cmd));
-            const project = client.resolveProject(opts.project);
-            if (!opts.all && !opts.upTo) {
-                die("mark-read: provide --up-to N or --all");
+            const allProjects = !!opts.allProjects;
+            const del = !!opts.delete;
+            if (!allProjects && !opts.project) {
+                die("mark-read: provide --project <p> or --all-projects");
             }
+            if (!allProjects && !opts.all && !opts.upTo && !del) {
+                die("mark-read: with --project, provide --up-to N, --all, or --delete");
+            }
+            const project = opts.project ? client.resolveProject(opts.project) : undefined;
             const res = await client.markReadProject({
-                project,
+                ...(project ? { project } : {}),
+                ...(allProjects ? { allProjects: true } : {}),
                 ...(opts.all ? { all: true } : {}),
                 ...(opts.upTo ? { upToId: Number(opts.upTo) } : {}),
+                ...(del ? { del: true } : {}),
+                ...(opts.consumer ? { consumer: String(opts.consumer) } : {}),
             });
             out(res, gOpts(cmd), (v) => {
-                const r = v as { acked?: number; consumer_id?: string };
-                const n = r.acked ?? 0;
-                return `marked ${n} message${n === 1 ? "" : "s"} read in ${project}${r.consumer_id ? ` (as ${r.consumer_id})` : ""}`;
+                const r = v as { acked?: number; updated?: number; affected?: number; deleted?: boolean; consumer_id?: string };
+                const n = r.affected ?? r.updated ?? r.acked ?? 0;
+                const verb = r.deleted ? "deleted" : "marked read";
+                const where = allProjects ? "all projects" : project;
+                return `${verb} ${n} ping${n === 1 ? "" : "s"} in ${where}${r.consumer_id ? ` (for ${r.consumer_id})` : ""}`;
             });
         });
 }

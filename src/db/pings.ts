@@ -211,6 +211,47 @@ export function clearSeenForMessage(message_id: number): { resurfaced: number } 
     return { resurfaced: r.changes };
 }
 
+/**
+ * #1185 — operator prune of a consumer's ping backlog. Mark-seen (default) or
+ * hard-DELETE the pings, optionally scoped to one project (default: all the
+ * consumer's pings, every project). The cross-consumer / cross-project reach is
+ * gated to local (UDS) trust at the API layer — this is a deliberate operator
+ * action, NOT the agent-side ack the MCP intentionally dropped in #826.
+ */
+export function prunePings(
+    consumer_id: string,
+    opts: { project?: string; del?: boolean } = {},
+): { affected: number } {
+    const db = getDb();
+    // Project scope → the id set of that project's tickets + their messages.
+    let scope = undefined as ReturnType<typeof targetInArray> | undefined;
+    if (opts.project) {
+        const ticketIds = db.select({ id: schema.tickets.id })
+            .from(schema.tickets).where(eq(schema.tickets.project, opts.project))
+            .all().map((r) => r.id);
+        const messageIds = ticketIds.length
+            ? db.select({ id: schema.messages.id }).from(schema.messages)
+                .where(inArray(schema.messages.ticketId, ticketIds)).all().map((r) => r.id)
+            : [];
+        const allIds = [...ticketIds, ...messageIds];
+        if (!allIds.length) return { affected: 0 };
+        scope = targetInArray(allIds);
+    }
+    if (opts.del) {
+        // Hard-delete every ping row (seen or not) for the consumer in scope.
+        const r = db.delete(schema.pings)
+            .where(and(eq(schema.pings.recipient, consumer_id), scope))
+            .run();
+        return { affected: r.changes };
+    }
+    // Mark-seen only the still-unseen rows (seen ones are already drained).
+    const r = db.update(schema.pings)
+        .set({ seenAt: nowIso() })
+        .where(and(eq(schema.pings.recipient, consumer_id), isNull(schema.pings.seenAt), scope))
+        .run();
+    return { affected: r.changes };
+}
+
 export function markAllSeenForProject(
     consumer_id: string,
     project: string,

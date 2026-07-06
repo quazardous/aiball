@@ -1015,13 +1015,24 @@ export class AiballClient {
      * Bulk mark-read by project. Pass either upToId or all=true.
      * Mirrors the bash `aiball mark-read` semantics.
      */
-    markReadProject(opts: { project: string; upToId?: number; all?: boolean }) {
+    markReadProject(opts: {
+        project?: string;
+        upToId?: number;
+        all?: boolean;
+        allProjects?: boolean;
+        del?: boolean;
+        consumer?: string;
+    }) {
         const body: Record<string, unknown> = {
-            consumer_id: this.agentId,
-            project: opts.project,
+            // #1185 — an operator (local CLI) can target another consumer's
+            // backlog; defaults to this client's own identity.
+            consumer_id: opts.consumer ?? this.agentId,
         };
-        if (opts.all === true) body.all = true;
+        if (opts.project) body.project = opts.project;
+        if (opts.allProjects === true) body.all_projects = true;
+        else if (opts.all === true) body.all = true;
         else if (opts.upToId !== undefined) body.up_to_id = opts.upToId;
+        if (opts.del === true) body.delete = true;
         return this.http("POST", "/api/mark-read", body);
     }
 

@@ -12,13 +12,14 @@ import { Router, type Request, type Response } from "express";
 import {
     listUnread,
     markAllSeenForProject,
+    prunePings,
     markMessageSeen,
     markSeenUpToForProject,
     pendingTicketsByAuthor,
     recordBacklogWake,
     unreadCount,
 } from "../db.js";
-import { badRequest, withTags } from "./_helpers.js";
+import { badRequest, consumerOf, withTags } from "./_helpers.js";
 
 export const readTrackingRouter = Router();
 
@@ -62,9 +63,30 @@ readTrackingRouter.get("/my-pending/count", (req, res) => {
 });
 
 readTrackingRouter.post("/mark-read", (req: Request, res: Response) => {
-    const { consumer_id, project, message_id, up_to_id, all } = req.body ?? {};
+    const { consumer_id, project, message_id, up_to_id, all, all_projects, delete: del } = req.body ?? {};
     if (typeof consumer_id !== "string") {
         return badRequest(res, "consumer_id required");
+    }
+    // #1185 — targeting ANOTHER consumer's backlog (operator drain), or a
+    // hard-delete, is a privileged operator action → local (UDS) trust only.
+    // Self mark-seen stays open (the agent acking its own thread reads).
+    const localTrust =
+        (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
+    const crossConsumer = consumer_id !== consumerOf(req);
+    if ((crossConsumer || del === true) && !localTrust) {
+        return res.status(403).json({
+            error: "targeting another consumer or --delete requires local (UDS) trust",
+        });
+    }
+    // #1185 — bulk prune across ALL projects (mark-seen or delete).
+    if (all_projects === true) {
+        const r = prunePings(consumer_id, { del: del === true });
+        return res.json({ consumer_id, all_projects: true, deleted: del === true, ...r });
+    }
+    // #1185 — project-scoped delete (the mark-seen `all:true` path stays below).
+    if (del === true && typeof project === "string") {
+        const r = prunePings(consumer_id, { project, del: true });
+        return res.json({ consumer_id, project, deleted: true, ...r });
     }
     if (typeof message_id === "number") {
         const r = markMessageSeen(consumer_id, message_id);

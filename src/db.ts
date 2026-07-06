@@ -207,6 +207,7 @@ export {
     deletePingsForMessage,
     markMessageSeen,
     markAllSeenForProject,
+    prunePings,
     markTicketSeen,
     markTicketUnseen,
     markSeenUpToForProject,
