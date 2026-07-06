@@ -24,6 +24,7 @@ import {
     type Strategy,
     addProjectTokenUsage,
 } from "./db.js";
+import { captureTokenSnapshotIfDue, getTokenTimeseries } from "./db.js";
 import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -90,6 +91,17 @@ api.get("/health", (_req, res) => {
 
 api.get("/strategy", (_req, res) => {
     res.json({ strategy: getStrategy() });
+});
+
+// #1200 — token usage over time. Lazy-captures a snapshot if the throttle
+// window elapsed (so the series populates even without the boot job / restart),
+// then returns the per-project series. Optional ?project= and ?days= scoping.
+api.get("/token-usage/timeseries", (req: Request, res: Response) => {
+    captureTokenSnapshotIfDue();
+    const project = typeof req.query.project === "string" ? req.query.project : undefined;
+    const days = Number(req.query.days);
+    const sinceMs = Number.isFinite(days) && days > 0 ? Date.now() - days * 86_400_000 : undefined;
+    res.json({ series: getTokenTimeseries({ project, sinceMs }) });
 });
 
 api.patch("/strategy", (req: Request, res: Response) => {

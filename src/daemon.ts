@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { captureTokenSnapshotIfDue } from "./db.js";
 import { join } from "node:path";
 import { unlinkSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -174,6 +175,10 @@ function main(): void {
         // grain — users typically snooze for hours / days, not minutes.
         revealExpiredPostpones();
         setInterval(revealExpiredPostpones, 60_000).unref();
+        // #1200 — token-usage snapshots for the over-time chart : one at boot,
+        // then hourly. The capture self-throttles, so this is idempotent.
+        captureTokenSnapshotIfDue();
+        setInterval(captureTokenSnapshotIfDue, 60 * 60_000).unref();
         // Sandbox watcher: re-arms dead loop sandboxes when their agent
         // receives a new ping (#B.81 point 2). Set
         // AIBALL_SANDBOX_WATCHER=0 to disable.

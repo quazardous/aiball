@@ -365,6 +365,13 @@
       "when": 1782700000000,
       "tag": "0051_backlog_wake_log",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1782700000001,
+      "tag": "0052_token_usage_snapshot",
+      "breakpoints": true
     }
   ]
 }

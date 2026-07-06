@@ -740,6 +740,18 @@ export const projectTokenUsage = sqliteTable("project_token_usage", {
     updatedAt: text("updated_at").notNull(),
 });
 
+// #1200 — periodic snapshot of per-project token tallies, for the usage-over-
+// time chart. Append-only ; captured throttled (hourly) on read + a boot job.
+export const tokenUsageSnapshot = sqliteTable("token_usage_snapshot", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    project: text("project").notNull(),
+    capturedAt: text("captured_at").notNull(),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    cacheW: integer("cache_w").notNull().default(0),
+    cacheR: integer("cache_r").notNull().default(0),
+});
+
 // ---- inferred types ------------------------------------------------------
 
 export type Project = typeof projects.$inferSelect;

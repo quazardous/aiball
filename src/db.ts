@@ -200,6 +200,7 @@ export {
     type TokenDelta,
     type TokenTally,
 } from "./db/token-usage.js";
+export { captureTokenSnapshotIfDue, getTokenTimeseries, type TokenSnapshotRow } from "./db/token-snapshot.js";
 
 export {
     type Ping,
