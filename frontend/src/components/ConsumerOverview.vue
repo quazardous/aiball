@@ -27,6 +27,7 @@ const notify = useNotify();
 const confirmDialog = useConfirm();
 const stopBusy = ref(false);
 const deleteBusy = ref(false);
+const pruneBusy = ref(false);
 
 // #460 — same online/offline criterion as ProjectDetailPage + ConsumersPanel :
 // presence-AUTHORITATIVE, with the 120s heartbeat as a bridge for never-seen-
@@ -109,6 +110,41 @@ async function doDelete(consumer_id: string): Promise<void> {
         deleteBusy.value = false;
     }
 }
+
+// #1185 — operator prune of this consumer's ping backlog (across all
+// projects). Mark-seen is the safe default (rows kept, resurfaceable) ;
+// del=true hard-removes the ping rows. Gated server-side to the human
+// moderator (this UI). Mirrors the Stop/Delete confirm+notify pattern.
+function prunePings(del: boolean): void {
+    if (!props.original) return;
+    const consumer_id = props.original.consumer_id;
+    confirmDialog.require({
+        header: del ? "Delete all pings" : "Mark all pings seen",
+        message: del
+            ? `Hard-DELETE every ping row for "${consumer_id}" across all projects? The pings are just notification pointers — tickets and comments are untouched. Not resurfaceable.`
+            : `Mark every unread ping for "${consumer_id}" as seen, across all projects? Drains the backlog ; rows are kept (resurfaceable).`,
+        icon: del ? "pi pi-trash" : "pi pi-check",
+        acceptLabel: del ? "Delete" : "Mark seen",
+        rejectLabel: "Cancel",
+        acceptClass: del ? "p-button-danger" : "p-button-primary",
+        accept: () => { void doPrune(consumer_id, del); },
+    });
+}
+async function doPrune(consumer_id: string, del: boolean): Promise<void> {
+    pruneBusy.value = true;
+    try {
+        const r = (await api.markReadProject({ consumer: consumer_id, allProjects: true, del })) as { affected?: number };
+        const n = r.affected ?? 0;
+        notify.success(
+            `${del ? "Deleted" : "Marked seen"} ${n} ping${n === 1 ? "" : "s"} for ${consumer_id}`,
+        );
+        emit("refresh");
+    } catch (e) {
+        notify.error(`Prune failed for ${consumer_id}`, { detail: (e as Error).message });
+    } finally {
+        pruneBusy.value = false;
+    }
+}
 </script>
 
 <template>
@@ -176,6 +212,24 @@ async function doDelete(consumer_id: string): Promise<void> {
                 :loading="stopBusy"
                 :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
                 @click="stopLoop"
+            />
+            <Button
+                label="Mark pings seen"
+                icon="pi pi-check"
+                severity="secondary"
+                outlined
+                :loading="pruneBusy"
+                :title="`Drain the ping backlog of ${original.consumer_id} (mark seen, all projects)`"
+                @click="prunePings(false)"
+            />
+            <Button
+                label="Delete pings"
+                icon="pi pi-eraser"
+                severity="warn"
+                outlined
+                :loading="pruneBusy"
+                :title="`Hard-delete every ping row of ${original.consumer_id} (all projects)`"
+                @click="prunePings(true)"
             />
             <Button
                 label="Delete consumer"

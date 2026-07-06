@@ -1139,6 +1139,19 @@ export const api = {
             "POST",
             `/api/consumers/${encodeURIComponent(consumer_id)}/loop-stop`,
         ),
+    /** #1185 — operator prune of a consumer's ping backlog across all
+     *  projects. `del` hard-deletes the rows; default marks them seen.
+     *  Gated server-side to the human moderator (this UI). */
+    markReadProject: (opts: { consumer: string; allProjects: boolean; del?: boolean }) =>
+        req<{ consumer_id: string; affected: number; deleted: boolean }>(
+            "POST",
+            "/api/mark-read",
+            {
+                consumer_id: opts.consumer,
+                ...(opts.allProjects ? { all_projects: true } : {}),
+                ...(opts.del ? { delete: true } : {}),
+            },
+        ),
     /** #451: send a raw, unfiltered prompt straight into this loop's Claude
      *  session. Always `spooled`; `delivered` = a live loop received it now
      *  (else it's drained from the spool when the loop reconnects). */

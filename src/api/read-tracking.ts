@@ -20,6 +20,7 @@ import {
     unreadCount,
 } from "../db.js";
 import { badRequest, consumerOf, withTags } from "./_helpers.js";
+import { isHuman } from "../db.js";
 
 export const readTrackingRouter = Router();
 
@@ -70,12 +71,16 @@ readTrackingRouter.post("/mark-read", (req: Request, res: Response) => {
     // #1185 — targeting ANOTHER consumer's backlog (operator drain), or a
     // hard-delete, is a privileged operator action → local (UDS) trust only.
     // Self mark-seen stays open (the agent acking its own thread reads).
+    // A prune that targets ANOTHER consumer, or a hard --delete, is a
+    // moderator action → allow the HUMAN moderator (local UDS CLI *or* the
+    // authenticated web UI, both resolve via isHuman), never an agent token.
     const localTrust =
         (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
+    const human = localTrust || isHuman(consumerOf(req));
     const crossConsumer = consumer_id !== consumerOf(req);
-    if ((crossConsumer || del === true) && !localTrust) {
+    if ((crossConsumer || del === true) && !human) {
         return res.status(403).json({
-            error: "targeting another consumer or --delete requires local (UDS) trust",
+            error: "targeting another consumer or delete requires a human moderator (local CLI or the web UI)",
         });
     }
     // #1185 — bulk prune across ALL projects (mark-seen or delete).
