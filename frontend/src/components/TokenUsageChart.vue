@@ -63,8 +63,13 @@ const xTicks = computed(() => {
         return { x: sx(t), label: fmtDate(t) };
     });
 });
+// #bmzqw8 — span-aware x labels : hours on a short window (< 2 days), dates otherwise.
+const spanShort = computed(() => (xMax.value - xMin.value) < 2 * 86_400_000);
 function fmtDate(t: number): string {
     const d = new Date(t);
+    if (spanShort.value) {
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
     return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 function fmtFull(t: number): string {

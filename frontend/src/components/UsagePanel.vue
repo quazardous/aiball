@@ -18,7 +18,7 @@ const loading = ref(false);
 
 const project = ref<string>("__all");   // sentinel = all projects (PrimeVue Select drops "" as no-selection)
 const metric = ref<"tokens_out" | "tokens_in" | "total" | "cache_r" | "cache_w">("tokens_out");
-const days = ref<number>(30);
+const days = ref<number>(1);   // #bmzqw8 — default 24h (hourly captures, young series)
 
 const metricOptions = [
     { label: "Output tokens", value: "tokens_out" },
@@ -28,6 +28,7 @@ const metricOptions = [
     { label: "Cache write", value: "cache_w" },
 ];
 const rangeOptions = [
+    { label: "24h", value: 1 },
     { label: "7 days", value: 7 },
     { label: "30 days", value: 30 },
     { label: "90 days", value: 90 },
