@@ -16,7 +16,7 @@ const rows = ref<TokenSnapshotRow[]>([]);
 const projects = ref<string[]>([]);
 const loading = ref(false);
 
-const project = ref<string>("");     // "" = all projects
+const project = ref<string>("__all");   // sentinel = all projects (PrimeVue Select drops "" as no-selection)
 const metric = ref<"tokens_out" | "tokens_in" | "total" | "cache_r" | "cache_w">("tokens_out");
 const days = ref<number>(30);
 
@@ -34,7 +34,7 @@ const rangeOptions = [
     { label: "All", value: 0 },
 ];
 const projectOptions = computed(() => [
-    { label: "All projects", value: "" },
+    { label: "All projects", value: "__all" },
     ...projects.value.map((p) => ({ label: p, value: p })),
 ]);
 
@@ -47,7 +47,7 @@ function metricVal(r: TokenSnapshotRow): number {
 const points = computed(() => {
     const byTs = new Map<number, number>();
     for (const r of rows.value) {
-        if (project.value && r.project !== project.value) continue;
+        if (project.value !== "__all" && r.project !== project.value) continue;
         const t = Date.parse(r.captured_at);
         byTs.set(t, (byTs.get(t) ?? 0) + metricVal(r));
     }
@@ -55,7 +55,7 @@ const points = computed(() => {
 });
 
 const metricLabel = computed(() => metricOptions.find((m) => m.value === metric.value)?.label ?? "tokens");
-const scopeLabel = computed(() => (project.value ? project.value : "all projects"));
+const scopeLabel = computed(() => (project.value === "__all" ? "all projects" : project.value));
 
 async function load(): Promise<void> {
     loading.value = true;
