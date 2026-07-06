@@ -20,6 +20,7 @@ import {
     touchLastSeen,
     type Token,
 } from "./db.js";
+import { getConsumer, updateConsumer } from "./db/consumers.js";
 
 // The options overload of `crypto.scrypt` doesn't survive `promisify`'s
 // type inference, so we keep the callback form behind a typed helper.
@@ -256,22 +257,25 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
  * known. Re-applied also on the UDS local-trust path (humans driving a loop
  * over UDS with AIBALL_NO_CLAIM set in their env).
  */
-/** [deprecated #775] — fallback once the proxy node ships `no_claim` via
- *  the WS `node_project_config_push` frame, papy reads `consumers.can_claim`
- *  directly and this header becomes dead weight. Kept for UDS direct calls
- *  + MCP local + tests for 1-2 versions, then dropped. */
-let _noClaimDeprecationWarned = false;
+/** #1183 — the `x-aiball-no-claim: 1` header (claude-loop/MCP exports it from the
+ *  project `.aiball.yaml consumer.no_claim`) is the CANONICAL no-claim declaration.
+ *  Persist it to `consumers.can_claim=false` so the notification fan-out gate
+ *  (#752-B, `notifications.ts`) honours it — the header alone is per-request +
+ *  lens-only, so a `no_claim` owner would otherwise still get the full default-scope
+ *  firehose. The project's own config drives it, with NO global `proxy.project_yaml`
+ *  pointer (supersedes the #775 config-push : the header already carries it from the
+ *  project dir). Trust the agent's own declaration (it gates the agent OUT of the
+ *  claim pool, never IN). Diff-guarded: write only on the true→false flip, so there's
+ *  no DB write per request. Also stashed on `ar.no_claim_hint` for the claimable lens. */
 function readNoClaimHint(req: Request, ar: AuthenticatedRequest): void {
     const v = req.header("x-aiball-no-claim");
     if (typeof v === "string" && (v === "1" || v.toLowerCase() === "true")) {
         ar.no_claim_hint = true;
-        if (!_noClaimDeprecationWarned) {
-            _noClaimDeprecationWarned = true;
-            console.warn(
-                "[auth] x-aiball-no-claim header consumed — DEPRECATED #775 : "
-                + "proxy node should push `no_claim` via the WS `node_project_config_push` "
-                + "frame instead. This header will be removed after 1-2 versions.",
-            );
+        if (ar.consumer_id) {
+            const c = getConsumer(ar.consumer_id);
+            if (c && c.can_claim) {
+                updateConsumer(ar.consumer_id, { can_claim: false });
+            }
         }
     }
 }
