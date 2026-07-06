@@ -9,6 +9,7 @@ import {
     ensureConsumer,
     getConsumer,
     listConsumers,
+    pingCountsByConsumer,
     setConsumerState,
     updateConsumer,
     upsertConsumer,
@@ -35,7 +36,14 @@ consumersRouter.get("/consumers", (_req, res) => {
     // `consumerEffectiveRunning` server-side: true = live (or in grace), false =
     // seen-then-gone this session (authoritative STOP), null = never seen via SSE
     // this session → client falls back to the `state_updated_at` freshness bridge.
-    res.json(listConsumers().map((c) => ({ ...c, present: presenceRunning(c.consumer_id) })));
+    // #1185 — per-consumer raw ping tally (total + unseen) for the list.
+    const pings = pingCountsByConsumer();
+    res.json(listConsumers().map((c) => ({
+        ...c,
+        present: presenceRunning(c.consumer_id),
+        ping_count: pings.get(c.consumer_id)?.total ?? 0,
+        ping_unseen: pings.get(c.consumer_id)?.unseen ?? 0,
+    })));
 });
 
 // #397: single consumer lookup (incl. micro_prompt) — the claude-loop timer

@@ -218,6 +218,69 @@ export function clearSeenForMessage(message_id: number): { resurfaced: number } 
  * gated to local (UDS) trust at the API layer — this is a deliberate operator
  * action, NOT the agent-side ack the MCP intentionally dropped in #826.
  */
+/**
+ * #1185 (david) — housekeeping on ticket close: drop the ticket's already-SEEN
+ * pings (drained notification pointers). Unseen ones survive — including the
+ * fresh `ticket_closed` notification just fanned out — so nobody loses an
+ * un-consumed ping. Bounds the pings table's growth without a periodic job.
+ * Resurface (#827) can only act on rows that still exist, so we keep unseen
+ * ones; a seen ping on a now-closed ticket has no live reason to resurface.
+ */
+/**
+ * #1185 (david) — one-shot backfill: drop already-SEEN pings for every ticket
+ * that is currently CLOSED (latest close > latest reopen). The per-close purge
+ * (`purgeSeenPingsForTicket`) keeps NEW closes clean; this sweeps the pre-
+ * existing backlog. Idempotent + cheap (a rerun deletes nothing new). Unseen
+ * pings and open-ticket pings are never touched.
+ */
+/**
+ * #1185 (david) — per-consumer ping tally straight from the table (total rows +
+ * still-unseen), for the consumers page. One grouped scan.
+ */
+export function pingCountsByConsumer(): Map<string, { total: number; unseen: number }> {
+    const rows = getDb().all<{ recipient: string; total: number; unseen: number }>(sql`
+        SELECT recipient,
+               COUNT(*) AS total,
+               SUM(CASE WHEN seen_at IS NULL THEN 1 ELSE 0 END) AS unseen
+        FROM pings GROUP BY recipient
+    `);
+    const out = new Map<string, { total: number; unseen: number }>();
+    for (const r of rows) out.set(r.recipient, { total: r.total, unseen: r.unseen });
+    return out;
+}
+
+export function purgeSeenPingsForClosedTickets(): { deleted: number } {
+    const r = getDb().run(sql`
+        WITH closed AS (
+            SELECT ticket_id,
+                   MAX(CASE WHEN kind='ticket_closed'   THEN id END) c,
+                   MAX(CASE WHEN kind='ticket_reopened' THEN id END) r
+            FROM _messages
+            WHERE kind IN ('ticket_closed','ticket_reopened') AND status='approved'
+            GROUP BY ticket_id
+            HAVING c IS NOT NULL AND (r IS NULL OR c > r)
+        )
+        DELETE FROM pings
+        WHERE seen_at IS NOT NULL
+          AND (ticket_id IN (SELECT ticket_id FROM closed)
+            OR comment_id IN (SELECT id FROM _messages
+                              WHERE ticket_id IN (SELECT ticket_id FROM closed)))
+    `);
+    return { deleted: (r as { changes?: number }).changes ?? 0 };
+}
+
+export function purgeSeenPingsForTicket(ticket_id: number): { deleted: number } {
+    const db = getDb();
+    const messageIds = db.select({ id: schema.messages.id })
+        .from(schema.messages).where(eq(schema.messages.ticketId, ticket_id))
+        .all().map((r) => r.id);
+    const ids = [ticket_id, ...messageIds];
+    const r = db.delete(schema.pings)
+        .where(and(targetInArray(ids), isNotNull(schema.pings.seenAt)))
+        .run();
+    return { deleted: r.changes };
+}
+
 export function prunePings(
     consumer_id: string,
     opts: { project?: string; del?: boolean } = {},

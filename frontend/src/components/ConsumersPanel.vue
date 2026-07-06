@@ -151,6 +151,7 @@ const columns: DataListColumn[] = [
     { key: "consumer_id", label: "Consumer id", sortable: true, defaultDir: "asc" },
     { key: "kind", label: "Kind", sortable: true, defaultDir: "asc", cellClass: "col-kind" },
     { key: "display_name", label: "Display name", sortable: true, defaultDir: "asc", cellClass: "col-display" },
+    { key: "pings", label: "Pings", sortable: true, defaultDir: "desc", cellClass: "col-pings" },
     { key: "node", label: "Node", cellClass: "col-node" },
     { key: "activity", label: "Activity", sortable: true, defaultDir: "desc", cellClass: "activity-cell" },
     { key: "enabled", label: "Active", sortable: true, defaultDir: "desc", cellClass: "col-enabled" },
@@ -162,6 +163,7 @@ function sortValue(r: Consumer, key: string): string | number {
         case "consumer_id": return r.consumer_id.toLowerCase();
         case "kind": return r.kind;
         case "display_name": return (r.display_name ?? "").toLowerCase();
+        case "pings": return r.ping_count ?? 0;
         case "activity": return r.last_seen_at ? Date.parse(r.last_seen_at) : 0;
         case "enabled": return r.enabled ? 1 : 0;
         default: return "";
@@ -255,6 +257,17 @@ const visibleRows = computed<Consumer[]>(() => {
             </template>
             <template #cell-kind="{ row }">{{ (row as Consumer).kind }}</template>
             <template #cell-display_name="{ row }">{{ (row as Consumer).display_name ?? "" }}</template>
+            <template #cell-pings="{ row }">
+                <span
+                    class="consumers-pings"
+                    :title="`${(row as Consumer).ping_count ?? 0} ping rows in DB · ${(row as Consumer).ping_unseen ?? 0} unseen`"
+                >
+                    {{ (row as Consumer).ping_count ?? 0 }}<span
+                        v-if="(row as Consumer).ping_unseen"
+                        class="consumers-pings__unseen"
+                    > ({{ (row as Consumer).ping_unseen }})</span>
+                </span>
+            </template>
             <template #cell-node="{ row }">
                 <a
                     v-if="nodeFor(row as Consumer)"

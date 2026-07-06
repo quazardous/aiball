@@ -20,6 +20,7 @@ import {
 } from "./db.js";
 import { ERROR_CODES, PRIORITIES, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
+import { purgeSeenPingsForTicket } from "./db.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
@@ -601,6 +602,9 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
                 const closedTicketId: number = input.ticket_id;
                 autoApproveStaleDecisionsOnClose(closedTicketId, input.by_agent ?? "owner");
                 rejectStaleClosedReopenedForTicket(closedTicketId, msg.id);
+                // #1185 (david) — drop the closed ticket's drained (seen) pings.
+                // Unseen ones (incl. the ticket_closed notification) survive.
+                purgeSeenPingsForTicket(closedTicketId);
                 // #418/#436 (révisé #568) : on relâche le claim seulement
                 // (transient focus), pas l'assignment (responsabilité audit
                 // qui reste pertinente sur un reopen ultérieur).

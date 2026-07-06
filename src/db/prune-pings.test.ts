@@ -58,3 +58,20 @@ test("#1185 scopes by consumer (other consumer untouched)", () => {
     assert.equal(r.affected, 2);
     assert.equal(listUnread("grace", "s1", 100).length, 2); // grace intacte
 });
+
+test("#1185 purgeSeenPingsForTicket drops seen, keeps unseen", async () => {
+    const { markMessageSeen, purgeSeenPingsForTicket } = await import("./pings.js");
+    try { createProject({ name: "close1" }); } catch { /* exists */ }
+    const t = insertMessage({ project: "close1", kind: "ticket_created", title: "c", by_agent: "x" });
+    // 2 comments → 2 pings for "hank" on this ticket
+    const c1 = insertMessage({ project: "close1", kind: "comment_added", ticket_id: t.id, body: "a", by_agent: "y" });
+    const c2 = insertMessage({ project: "close1", kind: "comment_added", ticket_id: t.id, body: "b", by_agent: "y" });
+    insertPing("hank", { id: c1.id, kind: "comment_added", ticket_id: t.id });
+    insertPing("hank", { id: c2.id, kind: "comment_added", ticket_id: t.id });
+    markMessageSeen("hank", c1.id); // c1 seen, c2 unseen
+    const unseenBefore = listUnread("hank", "close1", 100).length;
+    purgeSeenPingsForTicket(t.id);
+    // invariant : the SEEN ping is gone, the UNSEEN one survives untouched.
+    assert.equal(listUnread("hank", "close1", 100).length, unseenBefore); // c2 (unseen) kept
+    assert.ok(unseenBefore >= 1);
+});

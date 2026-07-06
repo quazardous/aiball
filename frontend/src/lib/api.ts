@@ -539,6 +539,9 @@ export interface Consumer {
     notify_project_broadcasts?: boolean | null;
     /** #B.177: ISO8601 of last API call from this consumer. */
     last_seen_at?: string | null;
+    /** #1185 — raw ping tally from the DB : total rows + still-unseen. */
+    ping_count?: number;
+    ping_unseen?: number;
     /** #B.177 B1: current claude-loop state (null = no loop tracking). */
     state?: ConsumerState | null;
     /** #B.177 B1: ISO8601 of when current state was entered. */

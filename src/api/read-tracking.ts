@@ -13,6 +13,7 @@ import {
     listUnread,
     markAllSeenForProject,
     prunePings,
+    purgeSeenPingsForClosedTickets,
     markMessageSeen,
     markSeenUpToForProject,
     pendingTicketsByAuthor,
@@ -115,6 +116,18 @@ readTrackingRouter.post("/mark-read", (req: Request, res: Response) => {
         res,
         "provide message_id (single ack), up_to_id with project (bulk ack up to id), or all:true with project (ack everything delivered)",
     );
+});
+
+// #1185 (david) — one-shot operator sweep: drop already-seen pings for every
+// closed ticket (the backfill for the pre-close-purge backlog). Human moderator
+// only (local CLI or the web UI). Idempotent.
+readTrackingRouter.post("/pings/purge-seen-closed", (req: Request, res: Response) => {
+    const localTrust =
+        (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
+    if (!localTrust && !isHuman(consumerOf(req))) {
+        return res.status(403).json({ error: "human moderator only (local CLI or the web UI)" });
+    }
+    return res.json(purgeSeenPingsForClosedTickets());
 });
 
 /**
