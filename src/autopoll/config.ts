@@ -358,9 +358,10 @@ const DEFAULTS: AiballConfig = {
         // for unattended/AFK loops (auto-approve + sandbox). Empty by default so
         // host/network commands aren't silently sandboxed (e.g. make t1000-status).
         permission_mode: "",
-        // Empty = the Python proxy on Unix (the current default). Set
-        // "rust" per-project to opt into the Rust proxy on Unix.
-        proxy_impl: "",
+        // "rust" = the Rust proxy on Unix (default since the cutover) when
+        // built, else it transparently falls back to the Python proxy. Set
+        // "python" per-project to force pty-proxy.py. Windows is always Rust.
+        proxy_impl: "rust",
         // #428: no custom gates by default (opt-in per project).
         gates: [],
     },

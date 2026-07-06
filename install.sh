@@ -107,6 +107,22 @@ if [[ -L "$PREFIX_LIB" ]] && ! $SYMLINK; then
     log "Existing install at $PREFIX_LIB is a symlink — keeping dev layout (run --uninstall first to switch to a prod copy)"
 fi
 
+# Live human-typing detection uses the Rust PTY proxy (cl-pty-proxy) — the
+# default on Unix since the cutover. Build the release binary best-effort : if
+# cargo is absent or the build fails, the loop transparently falls back to the
+# Python proxy (pty-proxy.py). Built in the source tree so symlink mode shares
+# it and rsync mode ships it.
+PROXY_DIR="$SRC_DIR/windows/cl-pty-proxy"
+if [[ -f "$PROXY_DIR/Cargo.toml" && ! -x "$PROXY_DIR/target/release/cl-pty-proxy" ]]; then
+    if command -v cargo >/dev/null 2>&1; then
+        log "Building the Rust PTY proxy in $PROXY_DIR (one-time, ~30s)"
+        ( cd "$PROXY_DIR" && cargo build --release --quiet ) \
+            || warn "Rust proxy build failed — the loop will use the Python proxy (pty-proxy.py) instead"
+    else
+        warn "cargo not found — the loop will use the Python proxy (pty-proxy.py); install Rust (https://rustup.rs) then re-run to enable the Rust proxy"
+    fi
+fi
+
 if $SYMLINK; then
     log "Symlinking $PREFIX_LIB → $SRC_DIR (dev install)"
     if [[ -L "$PREFIX_LIB" ]]; then
@@ -136,6 +152,7 @@ else
         --exclude=node_modules --exclude=.git \
         --exclude='*.log' --exclude='.env' --exclude='var' \
         --exclude='frontend/node_modules' \
+        --exclude='windows/cl-pty-proxy/target/debug' \
         "$SRC_DIR/" "$PREFIX_LIB/"
 fi
 

@@ -56,6 +56,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **Live human-typing detection uses the Rust proxy on Unix now.** The
+  cross-platform Rust `cl-pty-proxy` (already the Windows backend) is now the
+  default on Unix too — the installer builds it, and a loop launches it when
+  present. The Python proxy stays as an automatic fallback (when the Rust
+  binary isn't built) and via a `proxy_impl: python` opt-out. `claude-loop
+  check <loop>` reports which backend a loop is actually running.
 - **The board stays fast as it grows.** The inbox and ticket lists no longer
   replay the whole message history on every request — list rows carry a short
   snippet instead of full bodies, and the per-ticket aggregation and the

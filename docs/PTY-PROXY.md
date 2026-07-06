@@ -121,14 +121,13 @@ MIT.)
 - **Fail-safe.** If PTY allocation/setup fails, the proxy `exec`s claude
   directly — the live terminal is never bricked.
 
-> **Direction — the Rust proxy is the successor.** The Rust `cl-pty-proxy`
-> is a single cross-platform binary: it already runs the Windows path in
-> production and also builds and passes CI on Linux (a working Unix entry
-> point mirrors this file's behaviour). The intended end state is for it
-> to replace this Python proxy on Unix too, so one implementation covers
-> both platforms. Until that cutover lands, the loop still launches
-> **this** Python proxy on Unix — the Rust Unix path is built and tested
-> but not yet wired into the launch flow.
+> **The Rust proxy is now the default on Unix.** The Rust `cl-pty-proxy` is
+> a single cross-platform binary (Windows in production + a Linux entry point
+> at feature parity with this file). Since the cutover it is the default on
+> Unix too: the installer builds it, and the loop launches it when present.
+> This Python proxy is kept as the automatic fallback (when the Rust binary
+> isn't built) and via `claude_loop.proxy_impl: python` — it will be retired
+> once the Rust proxy has soaked.
 
 ## How it's wired
 
@@ -144,11 +143,14 @@ MIT.)
   fallback** for loops not started under the proxy (idle-only, ~1.5s).
 
 > **Status:** shipped and wired. `cli.ts` launches the pane through the
-> proxy with a strict fallback to plain `claude` (Unix → `pty-proxy.py`;
-> Windows → the Rust ConPTY proxy, see `PTY-PROXY-WINDOWS.md`),
-> `injectWakePhrase` writes to `inject.sock`, and `proxyIsAlive` (a
-> PID-stamped `proxy-alive` marker) is the ground truth for who paints
-> the bar's human segment.
+> proxy with a strict fallback to plain `claude`. Backend selection: Unix
+> → the Rust `cl-pty-proxy` when built (default), else this `pty-proxy.py`;
+> Windows → the Rust ConPTY proxy (see `PTY-PROXY-WINDOWS.md`).
+> `claude_loop.proxy_impl` (or `CL_PROXY_IMPL`) forces a backend on Unix,
+> and `claude-loop check <loop>` reports the one actually running. Wake
+> injection rides `loop.sock`, and `proxyIsAlive` (a PID-stamped
+> `proxy-alive` marker) is the ground truth for who paints the bar's
+> human segment.
 
 ## Diagnostic & replay
 
