@@ -44,14 +44,37 @@ function metricVal(r: TokenSnapshotRow): number {
     return r[metric.value];
 }
 
-// Aggregate rows → chart points. All-projects: sum per captured_at.
-const points = computed(() => {
-    const byTs = new Map<number, number>();
+// Per-project series (metric value over time), honouring the project filter.
+// Both charts derive from this: cumulative sums each project's raw tally,
+// delta diffs each project's OWN series then sums — so a per-project reset or
+// a project appearing mid-window is diffed correctly before aggregation.
+function seriesByProject(): Map<string, { t: number; v: number }[]> {
+    const m = new Map<string, { t: number; v: number }[]>();
     for (const r of rows.value) {
         if (project.value !== "__all" && r.project !== project.value) continue;
-        const t = Date.parse(r.captured_at);
-        byTs.set(t, (byTs.get(t) ?? 0) + metricVal(r));
+        const arr = m.get(r.project) ?? [];
+        arr.push({ t: Date.parse(r.captured_at), v: metricVal(r) });
+        m.set(r.project, arr);
     }
+    for (const arr of m.values()) arr.sort((a, b) => a.t - b.t);
+    return m;
+}
+
+// (1) Cumulative : the raw running total, summed per timestamp for all-projects.
+const points = computed(() => {
+    const byTs = new Map<number, number>();
+    for (const arr of seriesByProject().values())
+        for (const p of arr) byTs.set(p.t, (byTs.get(p.t) ?? 0) + p.v);
+    return [...byTs.entries()].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t);
+});
+
+// (2) Delta : tokens consumed BETWEEN snapshots (v[i]-v[i-1]) per project, then
+// summed. Clamp negatives (a tally reset shouldn't render as a downward spike).
+const deltaPoints = computed(() => {
+    const byTs = new Map<number, number>();
+    for (const arr of seriesByProject().values())
+        for (let i = 1; i < arr.length; i++)
+            byTs.set(arr[i].t, (byTs.get(arr[i].t) ?? 0) + Math.max(0, arr[i].v - arr[i - 1].v));
     return [...byTs.entries()].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t);
 });
 
@@ -86,9 +109,14 @@ watch(days, load);
             <Select v-model="days" :options="rangeOptions" option-label="label" option-value="value" />
         </div>
         <div class="usage-chart-title">
-            {{ metricLabel }} over time · {{ scopeLabel }}
+            {{ metricLabel }} — cumulative · {{ scopeLabel }}
         </div>
         <TokenUsageChart :points="points" unit="tokens" />
+
+        <div class="usage-chart-title usage-chart-title--second">
+            {{ metricLabel }} — consumed per capture (Δ) · {{ scopeLabel }}
+        </div>
+        <TokenUsageChart :points="deltaPoints" unit="tokens" />
     </div>
 </template>
 
@@ -100,4 +128,5 @@ watch(days, load);
     color: var(--p-text-muted-color);
     margin: 0.5rem 0 0.25rem 0.25rem;
 }
+.usage-chart-title--second { margin-top: 1.5rem; }
 </style>
