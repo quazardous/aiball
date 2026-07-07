@@ -49,24 +49,42 @@ function fmtNum(n: number): string {
     return String(Math.round(n));
 }
 
-// uPlot wants columnar AlignedData [xs, y1s, y2s, …] over a shared x axis.
-// Series share snapshot timestamps, but union+gap-fill (null) stays correct if
-// one lags. uPlot time scale wants UNIX seconds; our timestamps are ms.
-function toData(): uPlot.AlignedData {
+// The sorted ms timestamps of the CURRENT plot data. Bars mode uses an ordinal
+// x-axis (indices), so tick labels + the legend map an index back to its
+// timestamp through this (kept fresh on every (re)build / setData).
+let curTs: number[] = [];
+
+function fmtTs(ms: number): string {
+    const d = new Date(ms);
+    const span = curTs.length ? curTs[curTs.length - 1] - curTs[0] : 0;
+    const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return span < 2 * 86_400_000 ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+// uPlot wants columnar AlignedData [xs, y1s, y2s, …]. Series share snapshot
+// timestamps; union+gap-fill (null) stays correct if one lags.
+//   line mode → x = UNIX seconds on a TIME scale (real spacing).
+//   bars mode → x = 0..n-1 indices on an ORDINAL axis, so bars are uniform &
+//               evenly spaced regardless of irregular capture intervals
+//               (#jt9jtj: time-scale bars went thin + very spaced on sparse data).
+function alignedData(): uPlot.AlignedData {
     const tset = new Set<number>();
     for (const s of props.series) for (const p of s.points) tset.add(p.t);
     const ts = [...tset].sort((a, b) => a - b);
+    curTs = ts;
     const cols = props.series.map((s) => {
         const m = new Map(s.points.map((p) => [p.t, p.v]));
         return ts.map((t) => (m.has(t) ? (m.get(t) as number) : null));
     });
-    return [ts.map((t) => Math.round(t / 1000)), ...cols] as uPlot.AlignedData;
+    const xs = props.mode === "bars" ? ts.map((_, i) => i) : ts.map((t) => Math.round(t / 1000));
+    return [xs, ...cols] as uPlot.AlignedData;
 }
 
 function build(): void {
     if (!container.value || !hasData.value) return;
     destroy();
-    const data = toData();
+    const bars = props.mode === "bars";
+    const data = alignedData();
     const nPts = data[0].length;
     const colors = palette();
     const axisColor = cssVar("--p-text-muted-color", "#9ca3af");
@@ -77,9 +95,12 @@ function build(): void {
         padding: [12, 16, 0, 4],
         cursor: { points: { size: 6 } },
         legend: { show: true },
-        scales: { x: { time: true } },
+        // bars → ordinal x (evenly-spaced indices) ; line → real time scale.
+        scales: { x: bars ? { time: false } : { time: true } },
         series: [
-            {},
+            // x series: in bars mode the legend must show the timestamp behind
+            // the hovered index, not the raw index number.
+            bars ? { value: (_u: uPlot, v: number) => (curTs[Math.round(v)] != null ? fmtTs(curTs[Math.round(v)]) : "") } : {},
             ...props.series.map((s, i) => {
                 const color = colors[i % colors.length];
                 const base = {
@@ -89,11 +110,12 @@ function build(): void {
                     value: (_u: uPlot, v: number | null) => (v == null ? "--" : Number(v).toLocaleString()),
                 };
                 // #1232 — bars mode: uPlot's bars() path auto-groups sibling bar
-                // series side-by-side within each x slot; fill the bars.
-                if (props.mode === "bars") {
+                // series side-by-side. No px cap on size (#jt9jtj) so bars fill
+                // their (uniform, ordinal) slot instead of going thin on sparse data.
+                if (bars) {
                     return {
                         ...base,
-                        paths: uPlot.paths!.bars!({ size: [0.9, 60], gap: 2 }),
+                        paths: uPlot.paths!.bars!({ size: [0.9], gap: 1 }),
                         fill: color,
                         points: { show: false },
                     };
@@ -106,6 +128,10 @@ function build(): void {
                 stroke: axisColor,
                 grid: { stroke: gridColor, width: 1 },
                 ticks: { stroke: gridColor, width: 1 },
+                // bars: map ordinal index splits back to time labels.
+                ...(bars
+                    ? { values: (_u: uPlot, splits: number[]) => splits.map((i) => (curTs[Math.round(i)] != null ? fmtTs(curTs[Math.round(i)]) : "")) }
+                    : {}),
             },
             {
                 stroke: axisColor,
@@ -141,7 +167,9 @@ watch(
         // (else a stale/degenerate canvas lingers under the empty message =
         // "cassé/aberrant"). Rebuild when data returns. Otherwise cheap setData.
         if (!hasData.value) { destroy(); return; }
-        if (plot) plot.setData(toData());
+        // Bars use an ordinal x whose axis/legend closures capture `curTs`; a
+        // bare setData would leave those labels stale, so rebuild in bars mode.
+        if (plot && props.mode !== "bars") plot.setData(alignedData());
         else build();
     },
     { deep: true },
