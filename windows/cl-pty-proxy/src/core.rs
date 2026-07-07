@@ -73,6 +73,16 @@ pub fn is_typing(vt: &[u8]) -> bool {
     }
 }
 
+/// #1210 david `znsdac` — human control keys that count as PRESENCE activity
+/// (arm NOT-AFK) but are not printable text: Enter (0x0d), Tab (0x09),
+/// Backspace (0x08 / 0x7f DEL). `is_typing` excludes these (they're < 0x20 or
+/// DEL), so before this a lone Tab/Enter never touched the grace → the human
+/// stayed "AFK". Matched on the FIRST byte : a lone press is a single control
+/// byte ; a multi-key read starting with text is already handled by `is_typing`.
+pub fn is_human_control(vt: &[u8]) -> bool {
+    matches!(vt.first(), Some(0x0d) | Some(0x09) | Some(0x08) | Some(0x7f))
+}
+
 /// True if `vt` is a bare ESC (claude interrupt / human takeover), NOT an
 /// ESC-led CSI/SS3 (arrows, F-keys → `ESC[` / `ESCO`).
 pub fn is_lone_esc(vt: &[u8]) -> bool {
@@ -604,6 +614,17 @@ impl Decider {
             self.afk_active = false;
             self.last_keystroke_ms = now_ms;
             v.word = Word::Stop;
+        } else if is_human_control(&unit.vt) {
+            // #1210 david `znsdac` — Enter/Tab/Backspace are real human activity
+            // → arm NOT-AFK (`typing` event + TouchUserGrace), same wiring as
+            // typing. But they're not TEXT, so no TouchTyping / no `Stop` paint
+            // (an Enter=submit shouldn't render as "typing"). Mirrors how a lone
+            // ESC also emits the `typing` event to arm presence without being text.
+            v.typing = true;
+            v.markers = vec![Marker::ClearAfk, Marker::TouchUserGrace];
+            self.afk_active = false;
+            self.last_keystroke_ms = now_ms;
+            v.word = Word::Rest;
         } else if self.esc_takeover && is_lone_esc(&unit.vt) {
             v.lone_esc = true;
             v.markers = vec![Marker::ClearAfk, Marker::TouchUserGrace];
@@ -832,6 +853,34 @@ mod tests {
         assert!(!v[0].afk_fired);
         assert!(v[0].lone_esc);
         assert_eq!(v[0].forward, k_esc()); // forwarded now
+    }
+
+    #[test]
+    fn enter_tab_backspace_arm_not_afk_no_stop() {
+        // #1210 david `znsdac` — a lone Enter/Tab/Backspace (Linux raw path)
+        // arms NOT-AFK (typing event + TouchUserGrace) but is NOT text, so no
+        // TouchTyping and no `Stop` paint. Also still forwarded to claude.
+        for vt in [vec![0x0d], vec![0x09], vec![0x08], vec![0x7f]] {
+            let mut d = Decider::new(vec![], true, 400.0, vec![]);
+            let unit = Unit { raw: vt.clone(), vt: vt.clone(), is_down: true };
+            let v = d.on_unit(&unit, 0.0);
+            assert!(v.typing, "arms NOT-AFK for {vt:?}");
+            assert_eq!(v.word, Word::Rest, "no Stop paint for {vt:?}");
+            assert!(v.markers.contains(&Marker::ClearAfk), "{vt:?}");
+            assert!(v.markers.contains(&Marker::TouchUserGrace), "{vt:?}");
+            assert!(!v.markers.contains(&Marker::TouchTyping), "not text typing {vt:?}");
+            assert_eq!(v.forward, vt, "control key forwarded {vt:?}");
+        }
+    }
+
+    #[test]
+    fn printable_still_paints_stop() {
+        // Guard the split : real text keeps painting Stop + TouchTyping.
+        let mut d = Decider::new(vec![], true, 400.0, vec![]);
+        let unit = Unit { raw: vec![0x61], vt: vec![0x61], is_down: true }; // 'a'
+        let v = d.on_unit(&unit, 0.0);
+        assert!(v.typing && v.word == Word::Stop);
+        assert!(v.markers.contains(&Marker::TouchTyping));
     }
 
     #[test]
