@@ -12,12 +12,16 @@ import { useNotify } from "../lib/notify";
 import TokenUsageChart from "./TokenUsageChart.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 
+// #dpa34u — deep-link from a project detail page (`/usage?p=<project>`) scopes
+// the panel to that project on open. Absent → all projects.
+const props = defineProps<{ initialProject?: string | null }>();
+
 const notify = useNotify();
 const rows = ref<TokenSnapshotRow[]>([]);
 const projects = ref<string[]>([]);
 const loading = ref(false);
 
-const project = ref<string>("__all");   // sentinel = all projects (PrimeVue Select drops "" as no-selection)
+const project = ref<string>(props.initialProject || "__all");   // sentinel = all projects (PrimeVue Select drops "" as no-selection)
 const days = ref<number>(1);   // #bmzqw8 — default 24h (hourly captures, young series)
 
 const rangeOptions = [
@@ -72,6 +76,9 @@ async function load(): Promise<void> {
 }
 onMounted(load);
 watch(days, load);
+// Re-scope if the deep-link target changes while mounted (rare — the panel
+// normally mounts fresh on navigation, but keep it robust).
+watch(() => props.initialProject, (p) => { if (p) project.value = p; });
 </script>
 
 <template>

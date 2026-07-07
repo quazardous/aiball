@@ -738,7 +738,7 @@ watch(showSnoozed, (v) => {
                     @close-edit="nodeEditId = null"
                     @close-to-inbox="() => { nodeEditId = null; panel = null; }"
                 />
-                <UsagePanel v-else-if="panel === 'usage'" />
+                <UsagePanel v-else-if="panel === 'usage'" :initial-project="project" />
 
                 <NewTicketPage
                     v-else-if="panel === 'compose'"

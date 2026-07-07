@@ -8,6 +8,7 @@ import { api, type ProjectMeta, type Consumer } from "../lib/api";
 import { useLoader } from "../lib/loader";
 import { useNotify } from "../lib/notify";
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
+import { routeHref } from "../lib/base";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 import AsyncState from "./ui/AsyncState.vue";
 
@@ -39,6 +40,10 @@ const { loading, error, load } = useLoader(async () => {
 watch(() => props.project, () => load());
 
 const roots = computed(() => meta.value?.roots ?? []);
+
+// #dpa34u — deep-link to the Usage panel scoped to this project (hash route,
+// so it doesn't hard-navigate the served path — cf. routeHref).
+const usageHref = computed(() => routeHref(`/usage?p=${encodeURIComponent(props.project)}`));
 
 // Loops at each known root (consumer.cwd matches the root).
 const loopsByRoot = computed(() => {
@@ -108,6 +113,13 @@ async function launch(root: string) {
                     <span class="ld-tag" :class="activityClass(meta.running_state)">{{ meta.running_state }}</span>
                     <span class="ld-tag" :class="presenceClass(meta.running_human, meta.running_human_word)">{{ presenceWord(meta.running_human, meta.running_human_word) }}</span>
                 </template>
+                <a
+                    class="project-detail__usage"
+                    :href="usageHref"
+                    :title="`View ${project}'s token usage graph`"
+                >
+                    <i class="pi pi-chart-line" /> Usage
+                </a>
                 <button type="button" class="project-detail__refresh" title="Refresh" @click="load">
                     <i class="pi pi-refresh" />
                 </button>
@@ -207,6 +219,18 @@ async function launch(root: string) {
     border-radius: var(--radius-sm);
 }
 .project-detail__refresh:hover { background: var(--p-surface-100); }
+/* #dpa34u — link to the project-scoped Usage graph. */
+.project-detail__usage {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: var(--fs-sm);
+    color: var(--p-primary-color);
+    text-decoration: none;
+    padding: 0.3rem 0.5rem;
+    border-radius: var(--radius-sm);
+}
+.project-detail__usage:hover { background: var(--p-surface-100); }
 /* #459 : flash retiré, les feedbacks vont via `useNotify()` (lib/notify.ts). */
 .project-detail__root {
     padding: 0.8rem 1rem;
