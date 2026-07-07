@@ -1,19 +1,20 @@
 <script setup lang="ts">
 /**
- * #1200 — single-series token-usage-over-time line chart, on uPlot (#4gqxtp:
- * david « utilise une lib », the hand-rolled SVG anchored Y at 0 so slowly-
- * growing cumulative totals looked flat). uPlot auto-fits the Y domain to the
- * data range → the variation shows. One series by design → the built-in legend
- * names it ; one accent hue. Canvas colors are baked at build time, so we read
- * them from the theme tokens and rebuild on a light/dark toggle.
+ * #1200 — token-usage-over-time line chart on uPlot (#4gqxtp: david « utilise
+ * une lib » — a hand-rolled SVG anchored Y at 0 so the curves looked flat).
+ * Multi-series (#5ndpm8): each chart carries a fixed family of curves
+ * (input+output, or cache read+write) with a legend — no metric selector.
+ * uPlot auto-fits Y to the data range; canvas colors come from the theme
+ * tokens (+ a small fixed palette for the extra series) and rebuild on a
+ * light/dark toggle.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
-interface Pt { t: number; v: number }
+interface Series { label: string; points: { t: number; v: number }[] }
 const props = defineProps<{
-    points: Pt[];
+    series: Series[];
     /** legend / tooltip unit label, e.g. "tokens". */
     unit?: string;
 }>();
@@ -23,14 +24,18 @@ let plot: uPlot | null = null;
 let ro: ResizeObserver | null = null;
 let mo: MutationObserver | null = null;
 
-const hasData = computed(() => props.points.length > 0);
+const hasData = computed(() => props.series.some((s) => s.points.length > 0));
 
-// Resolve a CSS custom property against the container (so the viewer's theme
-// wins), falling back to a sane default when the token is unset.
 function cssVar(name: string, fallback: string): string {
     const el = container.value ?? document.documentElement;
     const v = getComputedStyle(el).getPropertyValue(name).trim();
     return v || fallback;
+}
+
+// Series palette : first = theme accent (adapts light/dark), rest = fixed hues
+// that read on both themes. Two series per chart today, headroom for more.
+function palette(): string[] {
+    return [cssVar("--p-primary-color", "#3b82f6"), "#f59e0b", "#10b981", "#ef4444"];
 }
 
 function fmtNum(n: number): string {
@@ -41,17 +46,26 @@ function fmtNum(n: number): string {
     return String(Math.round(n));
 }
 
-// uPlot time scale wants UNIX seconds; our timestamps are ms.
+// uPlot wants columnar AlignedData [xs, y1s, y2s, …] over a shared x axis.
+// Series share snapshot timestamps, but union+gap-fill (null) stays correct if
+// one lags. uPlot time scale wants UNIX seconds; our timestamps are ms.
 function toData(): uPlot.AlignedData {
-    const s = [...props.points].sort((a, b) => a.t - b.t);
-    return [s.map((p) => Math.round(p.t / 1000)), s.map((p) => p.v)];
+    const tset = new Set<number>();
+    for (const s of props.series) for (const p of s.points) tset.add(p.t);
+    const ts = [...tset].sort((a, b) => a - b);
+    const cols = props.series.map((s) => {
+        const m = new Map(s.points.map((p) => [p.t, p.v]));
+        return ts.map((t) => (m.has(t) ? (m.get(t) as number) : null));
+    });
+    return [ts.map((t) => Math.round(t / 1000)), ...cols] as uPlot.AlignedData;
 }
 
 function build(): void {
     if (!container.value || !hasData.value) return;
     destroy();
     const data = toData();
-    const stroke = cssVar("--p-primary-color", "#3b82f6");
+    const nPts = data[0].length;
+    const colors = palette();
     const axisColor = cssVar("--p-text-muted-color", "#9ca3af");
     const gridColor = cssVar("--p-content-border-color", "#e5e7eb");
     const opts: uPlot.Options = {
@@ -63,13 +77,13 @@ function build(): void {
         scales: { x: { time: true } },
         series: [
             {},
-            {
-                label: props.unit || "tokens",
-                stroke,
+            ...props.series.map((s, i) => ({
+                label: s.label,
+                stroke: colors[i % colors.length],
                 width: 2,
-                points: { show: data[0].length < 40 },
-                value: (_u, v) => (v == null ? "--" : Number(v).toLocaleString()),
-            },
+                points: { show: nPts < 40 },
+                value: (_u: uPlot, v: number | null) => (v == null ? "--" : Number(v).toLocaleString()),
+            })),
         ],
         axes: [
             {
@@ -95,22 +109,20 @@ function destroy(): void {
 
 onMounted(() => {
     build();
-    // Responsive width : uPlot needs explicit px, so mirror the container.
     ro = new ResizeObserver(() => {
         if (plot && container.value) plot.setSize({ width: container.value.clientWidth || 720, height: 260 });
     });
     if (container.value) ro.observe(container.value);
-    // Theme toggle stamps the root (class / data-theme) — canvas colors are
-    // baked at build, so rebuild when it flips.
+    // Theme toggle stamps the root — canvas colors are baked at build, rebuild.
     mo = new MutationObserver(() => build());
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
 });
 
-// New data : cheap in-place update ; build lazily if the plot didn't exist yet
-// (e.g. mounted with an empty series, points arrived after the first fetch).
 watch(
-    () => props.points,
+    () => props.series,
     () => {
+        // Series count/labels are fixed per chart, so setData suffices; build
+        // lazily if the plot didn't exist yet (mounted empty, data arrived).
         if (plot) plot.setData(toData());
         else build();
     },

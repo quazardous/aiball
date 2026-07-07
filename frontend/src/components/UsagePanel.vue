@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * #1200 — "Usage" admin panel: token usage over time. Filters (project, metric,
- * range) in one row above a single-series line chart. All-projects sums each
- * timestamp; a project scopes to one. First dataviz — see TokenUsageChart.vue.
+ * #1200 — "Usage" admin panel: token usage over time. Two fixed multi-curve
+ * charts (#5ndpm8): input+output, and cache read+write — no metric selector.
+ * Filters (project, range) scope both. All-projects sums each timestamp; a
+ * project scopes to one. See TokenUsageChart.vue for the uPlot render.
  */
 import { computed, onMounted, ref, watch } from "vue";
 import Select from "primevue/select";
@@ -17,16 +18,8 @@ const projects = ref<string[]>([]);
 const loading = ref(false);
 
 const project = ref<string>("__all");   // sentinel = all projects (PrimeVue Select drops "" as no-selection)
-const metric = ref<"tokens_out" | "tokens_in" | "total" | "cache_r" | "cache_w">("tokens_out");
 const days = ref<number>(1);   // #bmzqw8 — default 24h (hourly captures, young series)
 
-const metricOptions = [
-    { label: "Output tokens", value: "tokens_out" },
-    { label: "Input tokens", value: "tokens_in" },
-    { label: "Total (in+out)", value: "total" },
-    { label: "Cache read", value: "cache_r" },
-    { label: "Cache write", value: "cache_w" },
-];
 const rangeOptions = [
     { label: "24h", value: 1 },
     { label: "7 days", value: 7 },
@@ -39,46 +32,27 @@ const projectOptions = computed(() => [
     ...projects.value.map((p) => ({ label: p, value: p })),
 ]);
 
-function metricVal(r: TokenSnapshotRow): number {
-    if (metric.value === "total") return r.tokens_in + r.tokens_out;
-    return r[metric.value];
-}
-
-// Per-project series (metric value over time), honouring the project filter.
-// Both charts derive from this: cumulative sums each project's raw tally,
-// delta diffs each project's OWN series then sums — so a per-project reset or
-// a project appearing mid-window is diffed correctly before aggregation.
-function seriesByProject(): Map<string, { t: number; v: number }[]> {
-    const m = new Map<string, { t: number; v: number }[]>();
+// Sum one field per timestamp, honouring the project filter (all-projects
+// sums across projects; a scoped project keeps only its rows).
+function metricPoints(field: (r: TokenSnapshotRow) => number): { t: number; v: number }[] {
+    const byTs = new Map<number, number>();
     for (const r of rows.value) {
         if (project.value !== "__all" && r.project !== project.value) continue;
-        const arr = m.get(r.project) ?? [];
-        arr.push({ t: Date.parse(r.captured_at), v: metricVal(r) });
-        m.set(r.project, arr);
+        const t = Date.parse(r.captured_at);
+        byTs.set(t, (byTs.get(t) ?? 0) + field(r));
     }
-    for (const arr of m.values()) arr.sort((a, b) => a.t - b.t);
-    return m;
+    return [...byTs.entries()].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t);
 }
 
-// (1) Cumulative : the raw running total, summed per timestamp for all-projects.
-const points = computed(() => {
-    const byTs = new Map<number, number>();
-    for (const arr of seriesByProject().values())
-        for (const p of arr) byTs.set(p.t, (byTs.get(p.t) ?? 0) + p.v);
-    return [...byTs.entries()].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t);
-});
+const ioSeries = computed(() => [
+    { label: "input", points: metricPoints((r) => r.tokens_in) },
+    { label: "output", points: metricPoints((r) => r.tokens_out) },
+]);
+const cacheSeries = computed(() => [
+    { label: "cache read", points: metricPoints((r) => r.cache_r) },
+    { label: "cache write", points: metricPoints((r) => r.cache_w) },
+]);
 
-// (2) Delta : tokens consumed BETWEEN snapshots (v[i]-v[i-1]) per project, then
-// summed. Clamp negatives (a tally reset shouldn't render as a downward spike).
-const deltaPoints = computed(() => {
-    const byTs = new Map<number, number>();
-    for (const arr of seriesByProject().values())
-        for (let i = 1; i < arr.length; i++)
-            byTs.set(arr[i].t, (byTs.get(arr[i].t) ?? 0) + Math.max(0, arr[i].v - arr[i - 1].v));
-    return [...byTs.entries()].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t);
-});
-
-const metricLabel = computed(() => metricOptions.find((m) => m.value === metric.value)?.label ?? "tokens");
 const scopeLabel = computed(() => (project.value === "__all" ? "all projects" : project.value));
 
 async function load(): Promise<void> {
@@ -105,18 +79,14 @@ watch(days, load);
         <PanelHeader icon="pi pi-chart-line" title="Token usage" />
         <div class="usage-filters">
             <Select v-model="project" :options="projectOptions" option-label="label" option-value="value" />
-            <Select v-model="metric" :options="metricOptions" option-label="label" option-value="value" />
             <Select v-model="days" :options="rangeOptions" option-label="label" option-value="value" />
         </div>
-        <div class="usage-chart-title">
-            {{ metricLabel }} — cumulative · {{ scopeLabel }}
-        </div>
-        <TokenUsageChart :points="points" unit="tokens" />
 
-        <div class="usage-chart-title usage-chart-title--second">
-            {{ metricLabel }} — consumed per capture (Δ) · {{ scopeLabel }}
-        </div>
-        <TokenUsageChart :points="deltaPoints" unit="tokens" />
+        <div class="usage-chart-title">Input / output · {{ scopeLabel }}</div>
+        <TokenUsageChart :series="ioSeries" unit="tokens" />
+
+        <div class="usage-chart-title usage-chart-title--second">Cache read / write · {{ scopeLabel }}</div>
+        <TokenUsageChart :series="cacheSeries" unit="tokens" />
     </div>
 </template>
 
