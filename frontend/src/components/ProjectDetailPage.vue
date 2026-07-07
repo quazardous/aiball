@@ -113,17 +113,21 @@ async function launch(root: string) {
                     <span class="ld-tag" :class="activityClass(meta.running_state)">{{ meta.running_state }}</span>
                     <span class="ld-tag" :class="presenceClass(meta.running_human, meta.running_human_word)">{{ presenceWord(meta.running_human, meta.running_human_word) }}</span>
                 </template>
-                <a
-                    class="project-detail__usage"
-                    :href="usageHref"
-                    :title="`View ${project}'s token usage graph`"
-                >
-                    <i class="pi pi-chart-line" /> Usage
-                </a>
                 <button type="button" class="project-detail__refresh" title="Refresh" @click="load">
                     <i class="pi pi-refresh" />
                 </button>
             </template>
+
+        <!-- #dpa34u — Usage deep-link lives in the BODY (not #actions): the
+             detail page is normally embedded in ProjectOverviewPage's tabs,
+             where AdminDashboardLayout suppresses the whole header. Body slot
+             renders in both embedded + standalone, and above AsyncState so it
+             shows even when the project has no local loop. -->
+        <div class="project-detail__toolbar">
+            <a class="project-detail__usage" :href="usageHref" :title="`View ${project}'s token usage graph`">
+                <i class="pi pi-chart-line" /> Token usage
+            </a>
+        </div>
 
         <AsyncState :loading="loading" :error="error" :empty="roots.length === 0">
             <template #empty>
@@ -219,7 +223,11 @@ async function launch(root: string) {
     border-radius: var(--radius-sm);
 }
 .project-detail__refresh:hover { background: var(--p-surface-100); }
-/* #dpa34u — link to the project-scoped Usage graph. */
+/* #dpa34u — link to the project-scoped Usage graph (top of the body). */
+.project-detail__toolbar {
+    display: flex;
+    justify-content: flex-end;
+}
 .project-detail__usage {
     display: inline-flex;
     align-items: center;
@@ -227,7 +235,8 @@ async function launch(root: string) {
     font-size: var(--fs-sm);
     color: var(--p-primary-color);
     text-decoration: none;
-    padding: 0.3rem 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--p-content-border-color);
     border-radius: var(--radius-sm);
 }
 .project-detail__usage:hover { background: var(--p-surface-100); }
