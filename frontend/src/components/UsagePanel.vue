@@ -36,25 +36,34 @@ const projectOptions = computed(() => [
     ...projects.value.map((p) => ({ label: p, value: p })),
 ]);
 
-// Sum one field per timestamp, honouring the project filter (all-projects
-// sums across projects; a scoped project keeps only its rows).
-function metricPoints(field: (r: TokenSnapshotRow) => number): { t: number; v: number }[] {
-    const byTs = new Map<number, number>();
+// Snapshots store the CUMULATIVE tally; david wants the DERIVATIVE — tokens
+// consumed BETWEEN captures. Diff each project's own series (v[i]-v[i-1]),
+// clamp negatives (a tally reset shouldn't render as a downward spike), then
+// sum per timestamp (all-projects) honouring the project filter.
+function metricDelta(field: (r: TokenSnapshotRow) => number): { t: number; v: number }[] {
+    const byProject = new Map<string, { t: number; v: number }[]>();
     for (const r of rows.value) {
         if (project.value !== "__all" && r.project !== project.value) continue;
-        const t = Date.parse(r.captured_at);
-        byTs.set(t, (byTs.get(t) ?? 0) + field(r));
+        const arr = byProject.get(r.project) ?? [];
+        arr.push({ t: Date.parse(r.captured_at), v: field(r) });
+        byProject.set(r.project, arr);
+    }
+    const byTs = new Map<number, number>();
+    for (const arr of byProject.values()) {
+        arr.sort((a, b) => a.t - b.t);
+        for (let i = 1; i < arr.length; i++)
+            byTs.set(arr[i].t, (byTs.get(arr[i].t) ?? 0) + Math.max(0, arr[i].v - arr[i - 1].v));
     }
     return [...byTs.entries()].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t);
 }
 
 const ioSeries = computed(() => [
-    { label: "input", points: metricPoints((r) => r.tokens_in) },
-    { label: "output", points: metricPoints((r) => r.tokens_out) },
+    { label: "input", points: metricDelta((r) => r.tokens_in) },
+    { label: "output", points: metricDelta((r) => r.tokens_out) },
 ]);
 const cacheSeries = computed(() => [
-    { label: "cache read", points: metricPoints((r) => r.cache_r) },
-    { label: "cache write", points: metricPoints((r) => r.cache_w) },
+    { label: "cache read", points: metricDelta((r) => r.cache_r) },
+    { label: "cache write", points: metricDelta((r) => r.cache_w) },
 ]);
 
 const scopeLabel = computed(() => (project.value === "__all" ? "all projects" : project.value));
@@ -89,10 +98,10 @@ watch(() => props.initialProject, (p) => { if (p) project.value = p; });
             <Select v-model="days" :options="rangeOptions" option-label="label" option-value="value" />
         </div>
 
-        <div class="usage-chart-title">Input / output · {{ scopeLabel }}</div>
+        <div class="usage-chart-title">Input / output — consumed per capture (Δ) · {{ scopeLabel }}</div>
         <TokenUsageChart :series="ioSeries" unit="tokens" />
 
-        <div class="usage-chart-title usage-chart-title--second">Cache read / write · {{ scopeLabel }}</div>
+        <div class="usage-chart-title usage-chart-title--second">Cache read / write — consumed per capture (Δ) · {{ scopeLabel }}</div>
         <TokenUsageChart :series="cacheSeries" unit="tokens" />
     </div>
 </template>
