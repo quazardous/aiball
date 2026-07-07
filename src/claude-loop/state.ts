@@ -1821,6 +1821,7 @@ export async function buildContextPhrase(
         // only surfaces tier-2 reminders where they were last actor.
         // #999 — `!eventHint` : an event wake never enters the backlog
         // fallback (its format is comment-centric, anchored above).
+        let headLastActor = "";   // #1215 — backlog head's last actor (≠ me), for the CTA
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -1856,6 +1857,13 @@ export async function buildContextPhrase(
                 const top = rows.find((r) => !r.backlog_cooled_until);
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
+                    // #1215 — name the last actor so the backlog CTA reflects a
+                    // PENDING reply ("<actor> is waiting on your reply") instead of
+                    // a bland "Triage" + useless clock. Only when it's not us:
+                    // tier-1 heads (ball in my court) have last_actor ≠ me; tier-2
+                    // reminders where I was last actor keep the plain look.
+                    const la = (top as { last_actor?: string | null }).last_actor;
+                    if (la && la !== process.env.AIBALL_AGENT) headLastActor = la;
                 }
             } catch { /* fail-open : no head, template drops the look leg */ }
         }
@@ -1938,10 +1946,12 @@ export async function buildContextPhrase(
             head_decision_decider: headDecisionDecider,
             head_decision_ref_hashid: headDecisionRefHashid,
             project_scope: scope,
-            // #1158 (a) — timestamp du CTA backlog : un pointeur d'état peut
-            // périmer dans la file d'input (pilotage concurrent) ; dater le
-            // CTA rend le skip d'un wake périmé trivial côté agent.
-            state_time: new Date().toTimeString().slice(0, 5),
+            // #1215 david `go` — le CTA backlog reflète qu'un commentaire attend
+            // une réponse en NOMMANT le dernier acteur (≠ moi). Remplace l'ancien
+            // `state_time` (horloge HH:MM, #1158) jugé illisible : « <acteur> is
+            // waiting on your reply » porte l'info utile. "" quand tier-2 (j'étais
+            // le dernier acteur) → le look reste neutre.
+            head_last_actor: headLastActor,
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
             // empty → renders to nothing). David puts the placeholder in his
             // wake_master override where he wants it.
@@ -1964,7 +1974,7 @@ export async function buildContextPhrase(
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
             + "{head_decision_digest:+{head_decision_digest}}"
-            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.{state_time:+ (state {state_time})}}";
+            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_actor:+ {head_last_actor} is waiting on your reply.} Triage the ticket.}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

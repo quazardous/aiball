@@ -65,6 +65,25 @@ test("#999 heartbeat wake (no hint, empty FIFO) → backlog ticket-centric Triag
     assert.equal(res.hasContent, true);
 });
 
+test("#1215 backlog head with last_actor ≠ me → names who's waiting, no (state clock", async () => {
+    const res = await buildContextPhrase(
+        stubClient({ listTickets: async () => [{ id: 977, title: "backlog ticket", last_actor: "david" }] }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /look #977/);
+    assert.match(res.phrase, /david is waiting on your reply/);
+    // the useless HH:MM clock is gone (#1215)
+    assert.doesNotMatch(res.phrase, /\(state /);
+});
+
+test("#1215 backlog head with no last_actor → plain look, no waiting clause", async () => {
+    const res = await buildContextPhrase(stubClient(), null, PINGS_YAML);
+    assert.match(res.phrase, /look #977/);
+    assert.doesNotMatch(res.phrase, /is waiting on your reply/);
+    assert.doesNotMatch(res.phrase, /\(state /);
+});
+
 test("#999 event wake with FIFO already carrying the comment → still comment-centric", async () => {
     const res = await buildContextPhrase(
         stubClient({
