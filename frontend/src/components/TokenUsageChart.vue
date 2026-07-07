@@ -1,143 +1,133 @@
 <script setup lang="ts">
 /**
- * #1200 — single-series token-usage-over-time line chart (inline SVG, no chart
- * lib). One series by design (total, or a scoped project) → no legend, the
- * title names it; one accent hue. Dataviz skill: thin 2px line, recessive
- * grid/axes, text in ink tokens (never the series color), hover crosshair +
- * tooltip, theme-token colors so light/dark both work.
+ * #1200 — single-series token-usage-over-time line chart, on uPlot (#4gqxtp:
+ * david « utilise une lib », the hand-rolled SVG anchored Y at 0 so slowly-
+ * growing cumulative totals looked flat). uPlot auto-fits the Y domain to the
+ * data range → the variation shows. One series by design → the built-in legend
+ * names it ; one accent hue. Canvas colors are baked at build time, so we read
+ * them from the theme tokens and rebuild on a light/dark toggle.
  */
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import uPlot from "uplot";
+import "uplot/dist/uPlot.min.css";
 
 interface Pt { t: number; v: number }
 const props = defineProps<{
     points: Pt[];
-    /** y-axis / tooltip unit label, e.g. "tokens". */
+    /** legend / tooltip unit label, e.g. "tokens". */
     unit?: string;
 }>();
 
-// --- geometry (viewBox space; the SVG scales responsively) -----------------
-const W = 720;
-const H = 260;
-const M = { top: 16, right: 18, bottom: 28, left: 56 };
-const iw = W - M.left - M.right;
-const ih = H - M.top - M.bottom;
+const container = ref<HTMLDivElement | null>(null);
+let plot: uPlot | null = null;
+let ro: ResizeObserver | null = null;
+let mo: MutationObserver | null = null;
 
-const sorted = computed(() => [...props.points].sort((a, b) => a.t - b.t));
-const xMin = computed(() => sorted.value.length ? sorted.value[0].t : 0);
-const xMax = computed(() => sorted.value.length ? sorted.value[sorted.value.length - 1].t : 1);
-const yMax = computed(() => Math.max(1, ...sorted.value.map((p) => p.v)));
+const hasData = computed(() => props.points.length > 0);
 
-function sx(t: number): number {
-    const span = xMax.value - xMin.value || 1;
-    return M.left + ((t - xMin.value) / span) * iw;
-}
-function sy(v: number): number {
-    return M.top + ih - (v / yMax.value) * ih;
+// Resolve a CSS custom property against the container (so the viewer's theme
+// wins), falling back to a sane default when the token is unset.
+function cssVar(name: string, fallback: string): string {
+    const el = container.value ?? document.documentElement;
+    const v = getComputedStyle(el).getPropertyValue(name).trim();
+    return v || fallback;
 }
 
-const linePath = computed(() => {
-    if (!sorted.value.length) return "";
-    return sorted.value.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.t).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" ");
-});
-
-// --- ticks (recessive) -----------------------------------------------------
-function niceNum(n: number): string {
-    if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
-    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+function fmtNum(n: number): string {
+    const a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+    if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (a >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
     return String(Math.round(n));
 }
-const yTicks = computed(() => {
-    const n = 4;
-    return Array.from({ length: n + 1 }, (_, i) => {
-        const v = (yMax.value / n) * i;
-        return { v, y: sy(v), label: niceNum(v) };
-    });
-});
-const xTicks = computed(() => {
-    const pts = sorted.value;
-    if (pts.length < 2) return pts.map((p) => ({ x: sx(p.t), label: fmtDate(p.t) }));
-    const n = Math.min(5, pts.length);
-    return Array.from({ length: n }, (_, i) => {
-        const t = xMin.value + ((xMax.value - xMin.value) / (n - 1)) * i;
-        return { x: sx(t), label: fmtDate(t) };
-    });
-});
-// #bmzqw8 — span-aware x labels : hours on a short window (< 2 days), dates otherwise.
-const spanShort = computed(() => (xMax.value - xMin.value) < 2 * 86_400_000);
-function fmtDate(t: number): string {
-    const d = new Date(t);
-    if (spanShort.value) {
-        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    }
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-}
-function fmtFull(t: number): string {
-    const d = new Date(t);
-    return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// uPlot time scale wants UNIX seconds; our timestamps are ms.
+function toData(): uPlot.AlignedData {
+    const s = [...props.points].sort((a, b) => a.t - b.t);
+    return [s.map((p) => Math.round(p.t / 1000)), s.map((p) => p.v)];
 }
 
-// --- hover crosshair + tooltip ---------------------------------------------
-const hoverIdx = ref<number | null>(null);
-const svgEl = ref<SVGSVGElement | null>(null);
-function onMove(e: MouseEvent): void {
-    const pts = sorted.value;
-    if (!pts.length || !svgEl.value) return;
-    const rect = svgEl.value.getBoundingClientRect();
-    const px = ((e.clientX - rect.left) / rect.width) * W; // to viewBox x
-    // nearest point by x
-    let best = 0, bestD = Infinity;
-    for (let i = 0; i < pts.length; i++) {
-        const d = Math.abs(sx(pts[i].t) - px);
-        if (d < bestD) { bestD = d; best = i; }
-    }
-    hoverIdx.value = best;
+function build(): void {
+    if (!container.value || !hasData.value) return;
+    destroy();
+    const data = toData();
+    const stroke = cssVar("--p-primary-color", "#3b82f6");
+    const axisColor = cssVar("--p-text-muted-color", "#9ca3af");
+    const gridColor = cssVar("--p-content-border-color", "#e5e7eb");
+    const opts: uPlot.Options = {
+        width: container.value.clientWidth || 720,
+        height: 260,
+        padding: [12, 16, 0, 4],
+        cursor: { points: { size: 6 } },
+        legend: { show: true },
+        scales: { x: { time: true } },
+        series: [
+            {},
+            {
+                label: props.unit || "tokens",
+                stroke,
+                width: 2,
+                points: { show: data[0].length < 40 },
+                value: (_u, v) => (v == null ? "--" : Number(v).toLocaleString()),
+            },
+        ],
+        axes: [
+            {
+                stroke: axisColor,
+                grid: { stroke: gridColor, width: 1 },
+                ticks: { stroke: gridColor, width: 1 },
+            },
+            {
+                stroke: axisColor,
+                size: 56,
+                grid: { stroke: gridColor, width: 1 },
+                ticks: { stroke: gridColor, width: 1 },
+                values: (_u, vals) => vals.map((v) => fmtNum(v)),
+            },
+        ],
+    };
+    plot = new uPlot(opts, data, container.value);
 }
-const hover = computed(() => (hoverIdx.value === null ? null : sorted.value[hoverIdx.value]));
+
+function destroy(): void {
+    if (plot) { plot.destroy(); plot = null; }
+}
+
+onMounted(() => {
+    build();
+    // Responsive width : uPlot needs explicit px, so mirror the container.
+    ro = new ResizeObserver(() => {
+        if (plot && container.value) plot.setSize({ width: container.value.clientWidth || 720, height: 260 });
+    });
+    if (container.value) ro.observe(container.value);
+    // Theme toggle stamps the root (class / data-theme) — canvas colors are
+    // baked at build, so rebuild when it flips.
+    mo = new MutationObserver(() => build());
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] });
+});
+
+// New data : cheap in-place update ; build lazily if the plot didn't exist yet
+// (e.g. mounted with an empty series, points arrived after the first fetch).
+watch(
+    () => props.points,
+    () => {
+        if (plot) plot.setData(toData());
+        else build();
+    },
+    { deep: true },
+);
+
+onBeforeUnmount(() => {
+    ro?.disconnect();
+    mo?.disconnect();
+    destroy();
+});
 </script>
 
 <template>
     <div class="tuc">
-        <svg
-            ref="svgEl"
-            class="tuc__svg"
-            :viewBox="`0 0 ${W} ${H}`"
-            preserveAspectRatio="none"
-            role="img"
-            @mousemove="onMove"
-            @mouseleave="hoverIdx = null"
-        >
-            <!-- recessive grid + y ticks -->
-            <g class="tuc__grid">
-                <template v-for="tk in yTicks" :key="'y' + tk.v">
-                    <line :x1="M.left" :y1="tk.y" :x2="W - M.right" :y2="tk.y" />
-                    <text :x="M.left - 8" :y="tk.y + 3" text-anchor="end" class="tuc__axis">{{ tk.label }}</text>
-                </template>
-            </g>
-            <!-- x ticks -->
-            <g>
-                <text
-                    v-for="(tk, i) in xTicks"
-                    :key="'x' + i"
-                    :x="tk.x"
-                    :y="H - 8"
-                    text-anchor="middle"
-                    class="tuc__axis"
-                >{{ tk.label }}</text>
-            </g>
-            <!-- the series -->
-            <path :d="linePath" class="tuc__line" fill="none" />
-            <!-- hover crosshair + marker -->
-            <g v-if="hover">
-                <line :x1="sx(hover.t)" :y1="M.top" :x2="sx(hover.t)" :y2="M.top + ih" class="tuc__cross" />
-                <circle :cx="sx(hover.t)" :cy="sy(hover.v)" r="4" class="tuc__dot" />
-            </g>
-        </svg>
-        <div v-if="hover" class="tuc__tip" :style="{ left: (sx(hover.t) / W * 100) + '%' }">
-            <div class="tuc__tip-v">{{ hover.v.toLocaleString() }}<span v-if="unit"> {{ unit }}</span></div>
-            <div class="tuc__tip-t">{{ fmtFull(hover.t) }}</div>
-        </div>
-        <div v-if="!sorted.length" class="tuc__empty">
+        <div ref="container" class="tuc__plot" />
+        <div v-if="!hasData" class="tuc__empty">
             No snapshots yet — the series builds up as the daemon captures token usage over time.
         </div>
     </div>
@@ -145,21 +135,17 @@ const hover = computed(() => (hoverIdx.value === null ? null : sorted.value[hove
 
 <style scoped>
 .tuc { position: relative; width: 100%; }
-.tuc__svg { width: 100%; height: 260px; display: block; overflow: visible; }
-/* recessive grid + axes — ink tokens, never the series color */
-.tuc__grid line { stroke: var(--p-content-border-color, #e5e7eb); stroke-width: 1; opacity: 0.6; }
-.tuc__axis { fill: var(--p-text-muted-color, #9ca3af); font-size: 11px; font-family: var(--font-mono, monospace); }
-.tuc__line { stroke: var(--p-primary-color, #3b82f6); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.tuc__cross { stroke: var(--p-text-muted-color, #9ca3af); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
-.tuc__dot { fill: var(--p-primary-color, #3b82f6); stroke: var(--p-content-background, #fff); stroke-width: 2; }
-.tuc__tip {
-    position: absolute; top: 0; transform: translateX(-50%);
-    background: var(--p-content-background, #fff);
-    border: 1px solid var(--p-content-border-color, #e5e7eb);
-    border-radius: 6px; padding: 0.3rem 0.5rem; pointer-events: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12); white-space: nowrap;
+.tuc__plot { width: 100%; min-height: 260px; }
+.tuc__empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--p-text-muted-color, #9ca3af);
+    font-size: var(--fs-sm, 0.85rem);
 }
-.tuc__tip-v { font-weight: 600; font-size: var(--fs-sm, 0.85rem); color: var(--p-text-color); }
-.tuc__tip-t { font-size: 0.72rem; color: var(--p-text-muted-color, #9ca3af); }
-.tuc__empty { padding: 2rem 1rem; text-align: center; color: var(--p-text-muted-color, #9ca3af); font-size: var(--fs-sm, 0.85rem); }
+</style>
+
+<style>
+/* uPlot legend : lean on the theme ink tokens (its default is a bare table). */
+.tuc .u-legend { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--p-text-muted-color); }
+.tuc .u-legend .u-value { color: var(--p-text-color); }
 </style>
