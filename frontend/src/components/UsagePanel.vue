@@ -23,7 +23,12 @@ const loading = ref(false);
 
 const project = ref<string>(props.initialProject || "__all");   // sentinel = all projects (PrimeVue Select drops "" as no-selection)
 const days = ref<number>(1);   // #bmzqw8 — default 24h (hourly captures, young series)
+const vizMode = ref<"line" | "bars">("bars");   // #1232 — per-interval consumption reads better as bars
 
+const vizOptions = [
+    { label: "Bars", value: "bars" },
+    { label: "Line", value: "line" },
+];
 const rangeOptions = [
     { label: "24h", value: 1 },
     { label: "7 days", value: 7 },
@@ -96,13 +101,14 @@ watch(() => props.initialProject, (p) => { if (p) project.value = p; });
         <div class="usage-filters">
             <Select v-model="project" :options="projectOptions" option-label="label" option-value="value" />
             <Select v-model="days" :options="rangeOptions" option-label="label" option-value="value" />
+            <Select v-model="vizMode" :options="vizOptions" option-label="label" option-value="value" />
         </div>
 
         <div class="usage-chart-title">Input / output — consumed per capture (Δ) · {{ scopeLabel }}</div>
-        <TokenUsageChart :series="ioSeries" unit="tokens" />
+        <TokenUsageChart :series="ioSeries" :mode="vizMode" unit="tokens" />
 
         <div class="usage-chart-title usage-chart-title--second">Cache read / write — consumed per capture (Δ) · {{ scopeLabel }}</div>
-        <TokenUsageChart :series="cacheSeries" unit="tokens" />
+        <TokenUsageChart :series="cacheSeries" :mode="vizMode" unit="tokens" />
     </div>
 </template>
 

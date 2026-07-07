@@ -17,6 +17,9 @@ const props = defineProps<{
     series: Series[];
     /** legend / tooltip unit label, e.g. "tokens". */
     unit?: string;
+    /** #1232 — render as grouped bars (per-interval consumption reads better as
+     *  bars) or the classic line. Default line. */
+    mode?: "line" | "bars";
 }>();
 
 const container = ref<HTMLDivElement | null>(null);
@@ -77,13 +80,26 @@ function build(): void {
         scales: { x: { time: true } },
         series: [
             {},
-            ...props.series.map((s, i) => ({
-                label: s.label,
-                stroke: colors[i % colors.length],
-                width: 2,
-                points: { show: nPts < 40 },
-                value: (_u: uPlot, v: number | null) => (v == null ? "--" : Number(v).toLocaleString()),
-            })),
+            ...props.series.map((s, i) => {
+                const color = colors[i % colors.length];
+                const base = {
+                    label: s.label,
+                    stroke: color,
+                    width: 2,
+                    value: (_u: uPlot, v: number | null) => (v == null ? "--" : Number(v).toLocaleString()),
+                };
+                // #1232 — bars mode: uPlot's bars() path auto-groups sibling bar
+                // series side-by-side within each x slot; fill the bars.
+                if (props.mode === "bars") {
+                    return {
+                        ...base,
+                        paths: uPlot.paths!.bars!({ size: [0.9, 60], gap: 2 }),
+                        fill: color,
+                        points: { show: false },
+                    };
+                }
+                return { ...base, points: { show: nPts < 40 } };
+            }),
         ],
         axes: [
             {
@@ -130,6 +146,10 @@ watch(
     },
     { deep: true },
 );
+
+// #1232 — switching line ⇄ bars changes the series `paths`, which uPlot bakes
+// at construction → full rebuild.
+watch(() => props.mode, build);
 
 onBeforeUnmount(() => {
     ro?.disconnect();
