@@ -1,9 +1,14 @@
 /**
  * #1200 — token-usage-over-time snapshots.
  *
- * `project_token_usage` is a LIVING aggregate (running total per project). To
- * chart usage over time we periodically snapshot each project's tallies into
- * an append-only `token_usage_snapshot` table, then read the series back.
+ * A project's real token spend lives in TWO living aggregates: `project_token_usage`
+ * (the no-marker/direct-session tally) AND `ticket_token_usage` (per-ticket, where
+ * an active-ticket marker / held claim anchors the turn — #439). For a project
+ * whose work is ticket-scoped, `project_token_usage` alone barely moves (that was
+ * the "chart is flat" bug — the direct tally was frozen while 90%+ of usage sat in
+ * `ticket_token_usage`). So we snapshot the COMBINED per-project total (direct +
+ * SUM of its tickets' usage) into an append-only `token_usage_snapshot` table,
+ * then read the series back.
  *
  * Deploy-safety: `ensureTable()` runs `CREATE TABLE IF NOT EXISTS` so the code
  * works whether or not migration 0052 has been applied yet (the live daemon
@@ -60,10 +65,28 @@ export function captureTokenSnapshotIfDue(
     const db = getDb();
     const cutoff = new Date(nowMs - intervalMs).toISOString();
     const nowIso = new Date(nowMs).toISOString();
-    // Projects whose live tally hasn't been snapshotted within the window.
+    // Combined per-project total = direct tally + SUM of the project's per-ticket
+    // usage. Projects whose combined tally hasn't been snapshotted within the
+    // window are "due". UNION ALL then GROUP BY sums both sources; a project
+    // present in only one source still appears.
     const due = db.all<{ project: string; tokens_in: number; tokens_out: number; cache_w: number; cache_r: number }>(sql`
+        WITH combined AS (
+            SELECT project, tokens_in, tokens_out, cache_w, cache_r
+            FROM project_token_usage
+            UNION ALL
+            SELECT t.project AS project, tu.tokens_in, tu.tokens_out, tu.cache_w, tu.cache_r
+            FROM ticket_token_usage tu
+            JOIN tickets t ON t.id = tu.ticket_id
+        ),
+        totals AS (
+            SELECT project,
+                   SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out,
+                   SUM(cache_w) AS cache_w, SUM(cache_r) AS cache_r
+            FROM combined
+            GROUP BY project
+        )
         SELECT p.project, p.tokens_in, p.tokens_out, p.cache_w, p.cache_r
-        FROM project_token_usage p
+        FROM totals p
         WHERE NOT EXISTS (
             SELECT 1 FROM token_usage_snapshot s
             WHERE s.project = p.project AND s.captured_at >= ${cutoff}

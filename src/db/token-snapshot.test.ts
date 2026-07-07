@@ -5,9 +5,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-1200-"));
-const { getDb } = await import("./connection.js");
+const { getDb, nowIso } = await import("./connection.js");
+const schema = await import("../schema.js");
 const { createProject } = await import("./projects.js");
-const { addProjectTokenUsage } = await import("./token-usage.js");
+const { addProjectTokenUsage, addTicketTokenUsage } = await import("./token-usage.js");
 const { captureTokenSnapshotIfDue, getTokenTimeseries } = await import("./token-snapshot.js");
 getDb();
 
@@ -26,6 +27,25 @@ test("#1200 captures a snapshot per project, throttled", () => {
     const series = getTokenTimeseries({ project: "tp1" });
     assert.equal(series.length, 2);
     assert.equal(series[0].tokens_in, 100);
+});
+
+test("#1200 snapshot sums direct + per-ticket usage (the flat-chart fix)", () => {
+    createProject({ name: "tp3" });
+    // direct (no-marker) tally
+    addProjectTokenUsage("tp3", { in: 0, out: 200 });
+    // two tickets in tp3 with their own usage — the bulk of a ticket-scoped
+    // project's spend lives here, and used to be missing from the snapshot.
+    getDb().insert(schema.tickets).values([
+        { id: 8801, project: "tp3", displaySeq: 1, title: "A", status: "approved", createdAt: nowIso() },
+        { id: 8802, project: "tp3", displaySeq: 2, title: "B", status: "approved", createdAt: nowIso() },
+    ]).run();
+    addTicketTokenUsage(8801, { out: 1000 });
+    addTicketTokenUsage(8802, { out: 500 });
+    captureTokenSnapshotIfDue(0, 3_000_000_000_000); // interval 0 → always captures
+    const series = getTokenTimeseries({ project: "tp3" });
+    const latest = series[series.length - 1];
+    // 200 direct + 1000 + 500 per-ticket = 1700 combined (not just the 200).
+    assert.equal(latest.tokens_out, 1700);
 });
 
 test("#1200 timeseries scopes by project + since", () => {
