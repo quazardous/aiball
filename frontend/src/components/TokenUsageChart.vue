@@ -121,8 +121,10 @@ onMounted(() => {
 watch(
     () => props.series,
     () => {
-        // Series count/labels are fixed per chart, so setData suffices; build
-        // lazily if the plot didn't exist yet (mounted empty, data arrived).
+        // #b7622z — when a filter change empties the series, TEAR DOWN the plot
+        // (else a stale/degenerate canvas lingers under the empty message =
+        // "cassé/aberrant"). Rebuild when data returns. Otherwise cheap setData.
+        if (!hasData.value) { destroy(); return; }
         if (plot) plot.setData(toData());
         else build();
     },
