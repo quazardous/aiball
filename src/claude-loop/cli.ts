@@ -1061,16 +1061,26 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "automatic-rename", "off"], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["rename-window", "-t", tname, ""], { stdio: "ignore" });
     // Harden against claude's OUTPUT injecting into psmux. The proxy forwards
-    // claude's stdout byte-for-byte (VT fidelity), so a title OSC
-    // (`ESC]2;<text>ST`) or a tmux passthrough DCS (`ESC Ptmux;<cmd>ST`) in
-    // claude's output would otherwise reach psmux: `allow-rename` (default on)
-    // lets it rename the window (leaks a phrase into the bar/title), and
-    // `allow-passthrough` (if on) lets it run tmux commands — a real control
-    // hole, not just cosmetic. Session-scoped so we never touch the user's
-    // global config. `set-titles off` stops psmux propagating the title
-    // outward. Unknown options on an older psmux are silent no-ops (stdio
-    // ignored). david `<chat>` 2026-07-06 : "ok pour allow rename off etc".
-    spawnSync(MUX_CMD, ["set-option", "-t", tname, "allow-rename", "off"], { stdio: "ignore" });
+    // claude's stdout byte-for-byte (VT fidelity), so whatever claude paints in
+    // an escape sequence reaches psmux. Claude DOES emit a title OSC : measured
+    // live, `#{pane_title}` on a loop window held the injected wake prompt
+    // ("⠐ Process ticket #500 first in aiball"). Options, each governing exactly
+    // one sequence (see tmux(1)) :
+    //   allow-set-title   `ESC]2;…` / `ESC]0;…` — the title OSC. DEFAULT **on**,
+    //                     so this is the one that actually plugs the source.
+    //   set-titles        psmux pushing the title outward to the emulator. Off by
+    //                     default, but `set-titles-string` embeds `#T` = pane_title,
+    //                     so flipping it on would publish the prompt text.
+    //   allow-rename      `ESC k…ESC\` (screen-style window rename). Off by default.
+    //   allow-passthrough `ESC Ptmux;…ESC\` — raw bytes straight to the OUTER
+    //                     terminal, bypassing psmux's sanitising. Off by default.
+    //                     (It does NOT let a pane run psmux commands.)
+    // All four are pinned session/window-scoped, so a global ~/.tmux.conf can't
+    // re-open them and we never touch the user's config. Nothing in this repo
+    // reads `pane_title`. Unknown options on an older psmux are silent no-ops
+    // (stdio ignored). david `<chat>` 2026-07-06 + `<chat>` 2026-07-08.
+    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "allow-set-title", "off"], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "allow-rename", "off"], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "allow-passthrough", "off"], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "set-titles", "off"], { stdio: "ignore" });
     // #274 + #619 : seed the per-owner status segments so the static format

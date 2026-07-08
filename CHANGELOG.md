@@ -107,6 +107,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **A loop's terminal no longer echoes what Claude is doing.** Claude writes its
+  current activity into the terminal title, and the loop forwards its output
+  verbatim — so the text could surface in the window title of whatever terminal
+  you happen to be running in. The loop's own tmux window now refuses title,
+  rename and passthrough escape sequences from the pane, pinned per-window so it
+  never touches your global tmux config.
 - A looping agent no longer goes deaf after the daemon reloads *mid-turn*.
   When the loop's code reloaded while the agent was working, the turn
   bookkeeping could swallow the turn's end, so the loop never re-armed its
