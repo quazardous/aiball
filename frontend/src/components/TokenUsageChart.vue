@@ -17,8 +17,9 @@ const props = defineProps<{
     series: Series[];
     /** legend / tooltip unit label, e.g. "tokens". */
     unit?: string;
-    /** #1232 — render as grouped bars (per-interval consumption reads better as
-     *  bars) or the classic line. Default line. */
+    /** #1232 — render as STACKED bars (per-interval consumption reads better as
+     *  bars, and the stack's total height is the real per-interval spend) or the
+     *  classic overlaid line. Default line. */
     mode?: "line" | "bars";
 }>();
 
@@ -54,6 +55,11 @@ function fmtNum(n: number): string {
 // timestamp through this (kept fresh on every (re)build / setData).
 let curTs: number[] = [];
 
+// Raw (un-stacked) values of the CURRENT plot data, per series. In bars mode the
+// plotted column is the cumulative stack height — the legend must still show what
+// the series itself consumed, so it reads back through this (#1247).
+let curRaw: (number | null)[][] = [];
+
 function fmtTs(ms: number): string {
     const d = new Date(ms);
     const span = curTs.length ? curTs[curTs.length - 1] - curTs[0] : 0;
@@ -61,12 +67,37 @@ function fmtTs(ms: number): string {
     return span < 2 * 86_400_000 ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
+// #1247 — turn raw columns into STACKED ones. uPlot bars always anchor at the
+// scale floor, so a stack is expressed as cumulative heights + paint order: the
+// LAST series is the bottom of the stack, series i carries the sum of itself and
+// everything below it. Series are then drawn in their natural 0..n-1 order, so
+// series 0 (the tallest, full total) paints first and each lower one overpaints
+// its base — leaving series 0 visible only as the top segment. david `#1247`:
+// "input au dessus de output", i.e. props.series[0] sits on top.
+// All-null at a timestamp stays null (a gap, not a zero bar).
+function stackCols(cols: (number | null)[][]): (number | null)[][] {
+    const n = cols[0]?.length ?? 0;
+    const out = cols.map(() => new Array<number | null>(n).fill(null));
+    for (let i = 0; i < n; i++) {
+        let acc = 0;
+        let any = false;
+        for (let s = cols.length - 1; s >= 0; s--) {   // bottom → top
+            const v = cols[s][i];
+            if (v != null) { acc += v; any = true; }
+            out[s][i] = any ? acc : null;
+        }
+    }
+    return out;
+}
+
 // uPlot wants columnar AlignedData [xs, y1s, y2s, …]. Series share snapshot
 // timestamps; union+gap-fill (null) stays correct if one lags.
-//   line mode → x = UNIX seconds on a TIME scale (real spacing).
+//   line mode → x = UNIX seconds on a TIME scale (real spacing), curves overlaid
+//               on a shared scale (david: "les lignes peuvent partager la même échelle").
 //   bars mode → x = 0..n-1 indices on an ORDINAL axis, so bars are uniform &
 //               evenly spaced regardless of irregular capture intervals
-//               (#jt9jtj: time-scale bars went thin + very spaced on sparse data).
+//               (#jt9jtj: time-scale bars went thin + very spaced on sparse data),
+//               and y is STACKED (#1247).
 function alignedData(): uPlot.AlignedData {
     const tset = new Set<number>();
     for (const s of props.series) for (const p of s.points) tset.add(p.t);
@@ -76,8 +107,10 @@ function alignedData(): uPlot.AlignedData {
         const m = new Map(s.points.map((p) => [p.t, p.v]));
         return ts.map((t) => (m.has(t) ? (m.get(t) as number) : null));
     });
-    const xs = props.mode === "bars" ? ts.map((_, i) => i) : ts.map((t) => Math.round(t / 1000));
-    return [xs, ...cols] as uPlot.AlignedData;
+    curRaw = cols;
+    const bars = props.mode === "bars";
+    const xs = bars ? ts.map((_, i) => i) : ts.map((t) => Math.round(t / 1000));
+    return [xs, ...(bars ? stackCols(cols) : cols)] as uPlot.AlignedData;
 }
 
 function build(): void {
@@ -109,15 +142,22 @@ function build(): void {
                     width: 2,
                     value: (_u: uPlot, v: number | null) => (v == null ? "--" : Number(v).toLocaleString()),
                 };
-                // #1232 — bars mode: uPlot's bars() path auto-groups sibling bar
-                // series side-by-side. No px cap on size (#jt9jtj) so bars fill
-                // their (uniform, ordinal) slot instead of going thin on sparse data.
+                // #1232/#1247 — bars mode: one full-slot bar per series, drawn in
+                // order over each other, plotting cumulative heights = a stack.
+                // No px cap on size (#jt9jtj) so bars fill their (uniform, ordinal)
+                // slot instead of going thin on sparse data. Opaque fill is what
+                // makes the overpaint carve out each segment.
                 if (bars) {
                     return {
                         ...base,
                         paths: uPlot.paths!.bars!({ size: [0.9], gap: 1 }),
                         fill: color,
                         points: { show: false },
+                        // the plotted value is the cumulative height — show the raw one.
+                        value: (_u: uPlot, _v: number | null, sidx: number, didx: number | null) => {
+                            const raw = didx == null ? null : curRaw[sidx - 1]?.[didx];
+                            return raw == null ? "--" : Number(raw).toLocaleString();
+                        },
                     };
                 }
                 return { ...base, points: { show: nPts < 40 } };
