@@ -62,13 +62,75 @@ function metricDelta(field: (r: TokenSnapshotRow) => number): { t: number; v: nu
     return [...byTs.entries()].map(([t, v]) => ({ t, v })).sort((a, b) => a.t - b.t);
 }
 
+// #1288 — one bar per capture is unreadable past 24h : captures are irregular
+// and a 7-day window draws ~50 slivers. Group the deltas into fixed time
+// buckets whose width scales with the range (david: « pour 7j les data
+// devraient être regroupées par plage de 12h, pour 30j par plage de 24h »).
+// Bucketing runs AFTER the per-project diff: deltas are additive, cumulative
+// tallies are not — summing raw snapshots inside a bucket would be meaningless.
+const H = 3_600_000;
+const BUCKET_FOR_RANGE: Record<number, number> = { 1: H, 7: 12 * H, 30: 24 * H, 90: 72 * H };
+// "All" has no fixed span: climb this ladder until the window fits in ~45 bars.
+const LADDER = [1, 3, 6, 12, 24, 48, 72, 168, 336, 720].map((h) => h * H);
+
+function bucketMs(rangeDays: number, spanMs: number): number {
+    if (rangeDays) return BUCKET_FOR_RANGE[rangeDays] ?? 24 * H;
+    return LADDER.find((b) => spanMs / b <= 45) ?? LADDER[LADDER.length - 1];
+}
+
+// Snap to the LOCAL grid (midnight / noon), not UTC — a 12h bucket that starts
+// at 02:00 reads as noise. One offset for the whole session: a DST change can
+// shift a boundary by an hour, which beats a non-uniform grid (and bars mode
+// plots on an ordinal axis anyway).
+const TZ_OFF = new Date().getTimezoneOffset() * 60_000;
+function floorTo(t: number, b: number): number {
+    return Math.floor((t - TZ_OFF) / b) * b + TZ_OFF;
+}
+
+// Sum the deltas falling in each bucket, and ZERO-FILL the empty ones: a bucket
+// with no capture consumed nothing, which is a fact — dropping it would let the
+// ordinal x-axis silently compress idle stretches.
+function bucketize(points: { t: number; v: number }[], b: number): { t: number; v: number }[] {
+    if (!points.length) return [];
+    const first = floorTo(points[0].t, b);
+    const last = floorTo(points[points.length - 1].t, b);
+    const acc = new Map<number, number>();
+    for (let t = first; t <= last; t += b) acc.set(t, 0);
+    for (const p of points) {
+        const k = floorTo(p.t, b);
+        acc.set(k, (acc.get(k) ?? 0) + p.v);
+    }
+    return [...acc.entries()].map(([t, v]) => ({ t, v })).sort((a, b2) => a.t - b2.t);
+}
+
+const spanMs = computed(() => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const r of rows.value) {
+        if (project.value !== "__all" && r.project !== project.value) continue;
+        const t = Date.parse(r.captured_at);
+        if (t < lo) lo = t;
+        if (t > hi) hi = t;
+    }
+    return hi > lo ? hi - lo : 0;
+});
+const bucket = computed(() => bucketMs(days.value, spanMs.value));
+const bucketLabel = computed(() => {
+    const h = bucket.value / H;
+    return h < 24 ? `${h}h` : `${h / 24}d`;
+});
+
+function series(field: (r: TokenSnapshotRow) => number): { t: number; v: number }[] {
+    return bucketize(metricDelta(field), bucket.value);
+}
+
 const ioSeries = computed(() => [
-    { label: "input", points: metricDelta((r) => r.tokens_in) },
-    { label: "output", points: metricDelta((r) => r.tokens_out) },
+    { label: "input", points: series((r) => r.tokens_in) },
+    { label: "output", points: series((r) => r.tokens_out) },
 ]);
 const cacheSeries = computed(() => [
-    { label: "cache read", points: metricDelta((r) => r.cache_r) },
-    { label: "cache write", points: metricDelta((r) => r.cache_w) },
+    { label: "cache read", points: series((r) => r.cache_r) },
+    { label: "cache write", points: series((r) => r.cache_w) },
 ]);
 
 const scopeLabel = computed(() => (project.value === "__all" ? "all projects" : project.value));
@@ -104,10 +166,10 @@ watch(() => props.initialProject, (p) => { if (p) project.value = p; });
             <Select v-model="vizMode" :options="vizOptions" option-label="label" option-value="value" />
         </div>
 
-        <div class="usage-chart-title">Input / output — consumed per capture (Δ) · {{ scopeLabel }}</div>
+        <div class="usage-chart-title">Input / output — consumed per {{ bucketLabel }} · {{ scopeLabel }}</div>
         <TokenUsageChart :series="ioSeries" :mode="vizMode" unit="tokens" />
 
-        <div class="usage-chart-title usage-chart-title--second">Cache read / write — consumed per capture (Δ) · {{ scopeLabel }}</div>
+        <div class="usage-chart-title usage-chart-title--second">Cache read / write — consumed per {{ bucketLabel }} · {{ scopeLabel }}</div>
         <TokenUsageChart :series="cacheSeries" :mode="vizMode" unit="tokens" />
     </div>
 </template>
