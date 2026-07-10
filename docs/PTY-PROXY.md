@@ -97,6 +97,19 @@ MIT.)
 
 ## Implementation
 
+> **⚠️ Deprecated.** The reference proxy is the Rust `cl-pty-proxy`, on Unix
+> and Windows alike. `pty-proxy.py` is now only a fallback — it runs when the
+> Rust binary isn't built, or when `claude_loop.proxy_impl: python` asks for
+> it, and both cases print a notice at launch. **No new behaviour lands here.**
+> Change `windows/cl-pty-proxy/src/core.rs` first, then mirror it into the
+> Python file for as long as the fallback lives.
+>
+> Two live implementations of the same keystroke classifier drift, and the
+> drift is expensive: a terminal reply (tmux's `ESC P >|tmux …` answer to
+> claude's version probe) was classified as a bare ESC keypress in *both*, so
+> every loop start looked like a human pressing Escape and armed NOT-AFK for
+> ten minutes. Only one of the two was actually running.
+
 `src/claude-loop/pty-proxy.py`, Python standard library only:
 
 - `pty.fork()` — allocate a PTY and fork; the child gets the slave as
@@ -110,24 +123,21 @@ MIT.)
 - `AF_UNIX` `SOCK_STREAM` listener for wake injection.
 - Child exit code is propagated as the proxy's exit code.
 
-### Why Python stdlib
+### Why Python stdlib (historical)
+
+The original rationale, kept because it still explains the fallback's shape:
 
 - **No native dependency, no compiler.** node-pty would need a C++
   toolchain (node-gyp); this box has `gcc` but not `g++`, and we don't
   want the first native dep in the project.
-- **Unix-only by nature.** Python's `pty` is Unix-only. This Python proxy
-  is therefore the Unix implementation only — Windows runs the Rust
-  `cl-pty-proxy` (see `PTY-PROXY-WINDOWS.md`).
+- **Unix-only by nature.** Python's `pty` is Unix-only, so this proxy could
+  never serve Windows — which is what forced a second implementation.
 - **Fail-safe.** If PTY allocation/setup fails, the proxy `exec`s claude
   directly — the live terminal is never bricked.
 
-> **The Rust proxy is now the default on Unix.** The Rust `cl-pty-proxy` is
-> a single cross-platform binary (Windows in production + a Linux entry point
-> at feature parity with this file). Since the cutover it is the default on
-> Unix too: the installer builds it, and the loop launches it when present.
-> This Python proxy is kept as the automatic fallback (when the Rust binary
-> isn't built) and via `claude_loop.proxy_impl: python` — it will be retired
-> once the Rust proxy has soaked.
+That last point is the one the Rust proxy inherited; the first two are why
+the split happened, and the split is what we're now closing. A checkout with
+no Rust toolchain still gets a working loop through this file.
 
 ## How it's wired
 

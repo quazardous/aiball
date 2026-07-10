@@ -894,17 +894,19 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         (passthrough ? ` ${passthrough}` : "");
     // #269/#281: front claude with the PTY proxy so claude-loop detects
     // human typing live (busy included) and injects wakes through the
-    // proxy's control channel instead of tmux/psmux stdin. Two backends:
-    //   - Unix  → src/claude-loop/pty-proxy.py (Python stdlib, AF_UNIX) by
-    //     default. Requires python3; `-B` so no __pycache__ next to the proxy.
-    //     Opt into the Rust proxy on Unix with `claude_loop.proxy_impl: rust`
-    //     (or CL_PROXY_IMPL=rust) — it must be built (`cargo build --release`
-    //     in windows/cl-pty-proxy) or the launch falls back to Python.
-    //   - Windows → windows/cl-pty-proxy (Rust ConPTY, named pipe; #281
-    //     strategy B). Built artifact, not committed — see WIN-INSTALL.md.
-    //     Gated on platform (the Python proxy's pty/termios are POSIX-only
-    //     and would crash the pane on Windows) AND on the binary existing, so
-    //     an un-built checkout cleanly falls back to direct claude.
+    // proxy's control channel instead of tmux/psmux stdin. One engine, one
+    // fallback:
+    //   - windows/cl-pty-proxy (Rust) is THE proxy, on Unix and Windows
+    //     alike, whenever the binary is built (`cargo build --release`).
+    //     Not committed — see WIN-INSTALL.md.
+    //   - src/claude-loop/pty-proxy.py (Python stdlib, POSIX-only) is a
+    //     DEPRECATED fallback: used when the Rust binary is absent, or when
+    //     `claude_loop.proxy_impl: python` (CL_PROXY_IMPL=python) asks for it.
+    //     Requires python3; `-B` so no __pycache__ next to the proxy.
+    // #1294 — the default flipped to Rust. Keeping two live implementations of
+    // the same keystroke classifier let them drift: the "NOT AFK 10m on every
+    // loop start" bug (a DCS terminal reply read as a bare ESC) sat in BOTH,
+    // and only the Rust one was actually running. One engine, one place to fix.
     // Either proxy ALSO self-falls-back to exec-claude if PTY init fails —
     // the pane is never bricked. Missing proxy → launch claude directly.
     const pyProxy = join(root, "src/claude-loop/pty-proxy.py");
@@ -915,8 +917,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         process.platform === "win32" ? "cl-pty-proxy.exe" : "cl-pty-proxy",
     );
     // Which proxy backend on Unix. Env `CL_PROXY_IMPL` overrides the config
-    // (`claude_loop.proxy_impl`); empty/"python" = the Python proxy (default),
-    // "rust" = opt into the Rust proxy when it's built. Windows is always Rust.
+    // (`claude_loop.proxy_impl`); empty/"rust" = the Rust proxy when it's built
+    // (default), "python" = force the deprecated Python fallback. Windows is
+    // always Rust.
     const proxyImpl = (process.env[CL_ENV.PROXY_IMPL] ?? ctx.claude_loop.proxy_impl ?? "")
         .trim().toLowerCase();
     // #783 — kill-on-exit. Drop the `exec` prefix so bash stays alive as the
@@ -927,13 +930,21 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // No `exec` means one extra bash process per pane (cheap; same model the
     // shell uses for any login session).
     let launch: string;
+    const wantsPython = proxyImpl === "python";
     if (process.platform === "win32" && existsSync(rustProxyBin)) {
         launch = `${hookPath(rustProxyBin)} -- ${claudeCmd}`;
-    } else if (process.platform !== "win32" && proxyImpl === "rust" && existsSync(rustProxyBin)) {
-        // Unix opt-in : the Rust proxy replaces pty-proxy.py when built. Same
-        // control contract (loop.sock, proxy-alive), so the loop is unaffected.
+    } else if (process.platform !== "win32" && !wantsPython && existsSync(rustProxyBin)) {
+        // Same control contract (loop.sock, proxy-alive), so the loop is unaffected.
         launch = `${hookPath(rustProxyBin)} -- ${claudeCmd}`;
     } else if (process.platform !== "win32" && has("python3") && existsSync(pyProxy)) {
+        // Deprecated path. Say so out loud — a silent fallback is how the two
+        // implementations drifted apart in the first place.
+        process.stdout.write(
+            wantsPython
+                ? "claude-loop: using the DEPRECATED Python PTY proxy (proxy_impl: python).\n"
+                : "claude-loop: Rust PTY proxy not built — falling back to the DEPRECATED Python proxy.\n"
+                  + "  Build it with: cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml\n",
+        );
         launch = `python3 -B ${shQuote(pyProxy)} -- ${claudeCmd}`;
     } else {
         launch = claudeCmd;

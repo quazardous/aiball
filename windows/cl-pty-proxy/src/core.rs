@@ -83,12 +83,32 @@ pub fn is_human_control(vt: &[u8]) -> bool {
     matches!(vt.first(), Some(0x0d) | Some(0x09) | Some(0x08) | Some(0x7f))
 }
 
+/// 7-bit introducers that open a terminal SEQUENCE rather than a key press.
+/// Two directions land on our stdin and must never read as human input:
+///   - app→terminal echoes and, above all,
+///   - terminal→app REPLIES: claude probes the emulator at startup (XTVERSION,
+///     `ESC[>q`) and tmux answers `ESC P >|tmux 3.7 ESC \` — a DCS. Before this
+///     list held only CSI and SS3, so that `ESC P` fell through as a "bare ESC"
+///     and armed NOT-AFK 10m on every single loop start.
+/// `X`/`\` cover SOS and a lone ST closing a reply split across two reads.
+fn is_seq_introducer(b: u8) -> bool {
+    matches!(
+        b,
+        b'[' | b'O' | b'P' | b']' | b'^' | b'_' | b'X' | b'\\'
+    )
+}
+
 /// True if `vt` is a bare ESC (claude interrupt / human takeover), NOT an
-/// ESC-led CSI/SS3 (arrows, F-keys → `ESC[` / `ESCO`).
+/// ESC-led terminal sequence (arrows, F-keys, DCS/OSC replies…).
+///
+/// The trade-off is deliberate: `Alt+P` and friends now read as a sequence, not
+/// as a keypress. That is the same trade CSI/SS3 already made for `Alt+[` and
+/// `Alt+O`, and a terminal reply is orders of magnitude more frequent than an
+/// `Alt+<introducer>` chord. A real ESC press arrives as a single 0x1b byte.
 pub fn is_lone_esc(vt: &[u8]) -> bool {
     match vt {
         [0x1b] => true,
-        [0x1b, b, ..] => *b != 0x5b && *b != 0x4f, // not CSI '[' nor SS3 'O'
+        [0x1b, b, ..] => !is_seq_introducer(*b),
         _ => false,
     }
 }
@@ -789,6 +809,22 @@ mod tests {
         assert!(is_lone_esc(&[0x1b]));
         assert!(!is_lone_esc(&[0x1b, 0x5b, 0x41])); // arrow
         assert!(!is_lone_esc(&[0x61]));
+    }
+
+    /// A terminal REPLY is not a keypress. Captured live: claude sends XTVERSION
+    /// (`ESC[>q`) at startup and tmux answers with this DCS. Classified as a
+    /// bare ESC, it armed NOT-AFK 10m on every loop start.
+    #[test]
+    fn terminal_replies_are_not_lone_esc() {
+        let xtversion = b"\x1bP>|tmux 3.7\x1b\\";
+        assert!(!is_lone_esc(xtversion));
+        assert!(!is_typing(xtversion));
+        for intro in [b'[', b'O', b'P', b']', b'^', b'_', b'X', b'\\'] {
+            assert!(!is_lone_esc(&[0x1b, intro]), "ESC {intro:?} is a sequence");
+        }
+        // A real ESC press, and Alt-chords that are still human, still count.
+        assert!(is_lone_esc(&[0x1b]));
+        assert!(is_lone_esc(&[0x1b, b'a'])); // Alt+a
     }
 
     // --- parse_afk_spec ---

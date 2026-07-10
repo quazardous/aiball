@@ -2,6 +2,21 @@
 """
 claude-loop PTY proxy (#269, suite de #264 #a6wgdg / #efuuau).
 
+╔══════════════════════════════════════════════════════════════════════╗
+║  DEPRECATED — ce proxy est le FALLBACK, plus le moteur.              ║
+║                                                                      ║
+║  Le proxy de référence est `windows/cl-pty-proxy` (Rust), sur Unix   ║
+║  comme sur Windows. Celui-ci ne sert plus que lorsque le binaire     ║
+║  Rust n'est pas construit, ou via `claude_loop.proxy_impl: python`.  ║
+║                                                                      ║
+║  Deux implémentations = deux fois la même logique de détection, et   ║
+║  la dérive coûte cher : le bug « NOT AFK 10m à chaque démarrage »    ║
+║  vivait dans les DEUX (`_is_lone_esc` acceptait la réponse DCS de    ║
+║  tmux), et n'a été vu que du côté Rust. Aucune fonctionnalité neuve  ║
+║  ici : tout changement de comportement va dans `core.rs` d'abord,    ║
+║  puis est répercuté ici tant que le fallback vit.                    ║
+╚══════════════════════════════════════════════════════════════════════╝
+
 Intercalé entre tmux et claude :
 
     terminal → tmux → PTY(tmux) → [ce proxy] → PTY(claude) → claude
@@ -124,15 +139,30 @@ def is_typing_keystroke(data: bytes) -> bool:
     return True
 
 
+# Introducteurs 7-bit qui ouvrent une SÉQUENCE terminal, pas une touche. Le cas
+# qui compte est la RÉPONSE du terminal : claude sonde l'émulateur au démarrage
+# (XTVERSION, `ESC[>q`) et tmux répond `ESC P >|tmux 3.7 ESC \` — un DCS. Tant
+# que la liste ne contenait que CSI et SS3, ce `ESC P` passait pour un ESC nu et
+# armait NOT AFK 10m à CHAQUE démarrage de loop (#1294). `X`/`\` couvrent SOS et
+# un ST isolé quand la réponse est coupée entre deux reads.
+_SEQ_INTRODUCERS = (0x5B, 0x4F, 0x50, 0x5D, 0x5E, 0x5F, 0x58, 0x5C)  # [ O P ] ^ _ X \
+
+
 def _is_lone_esc(data: bytes) -> bool:
     """#345 : vrai si `data` est une touche ESC « nue » (interruption claude),
-    PAS une séquence CSI/SS3 (flèches, F-keys → ESC[ / ESCO). On veut armer la
-    reprise humaine sur un ESC d'interruption, pas sur une navigation."""
+    PAS une séquence ESC-led (flèches, F-keys, réponses DCS/OSC…). On veut armer
+    la reprise humaine sur un ESC d'interruption, pas sur une navigation ni sur
+    une réponse du terminal.
+
+    Compromis assumé : `Alt+P` & co passent désormais pour une séquence. C'est
+    le même arbitrage que CSI/SS3 faisaient déjà pour `Alt+[` / `Alt+O`, et une
+    réponse terminal est bien plus fréquente qu'un accord `Alt+<introducteur>`.
+    Miroir de `is_lone_esc` (core.rs) — garder les deux alignés."""
     if not data or data[0] != 0x1B:
         return False
     if len(data) == 1:
         return True
-    return data[1] not in (0x5B, 0x4F)  # 0x5B='[' (CSI), 0x4F='O' (SS3)
+    return data[1] not in _SEQ_INTRODUCERS
 
 
 def split_keystrokes(data: bytes, combos=None):

@@ -107,6 +107,17 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **A loop no longer starts believing a human is at the keyboard.** Claude asks
+  the terminal which emulator it is, tmux answers, and the loop's PTY proxy read
+  that answer as someone pressing Escape — so every single loop start armed a
+  ten-minute "not away" hold, silently suppressing the automatic wake-ups for
+  that whole window. Terminal replies are now told apart from key presses.
+- **The Rust PTY proxy is the default on Unix, as the docs already claimed.**
+  The Python proxy (`pty-proxy.py`) is deprecated: it stays as the automatic
+  fallback for checkouts without a Rust toolchain, and `claude_loop.proxy_impl:
+  python` still forces it, but both cases now announce themselves at launch.
+  Keeping two live copies of the same keystroke classifier is what let the
+  Escape bug above sit in both while only one of them ran.
 - **A loop's terminal no longer echoes what Claude is doing.** Claude writes its
   current activity into the terminal title, and the loop forwards its output
   verbatim — so the text could surface in the window title of whatever terminal
