@@ -69,7 +69,7 @@ function metricDelta(field: (r: TokenSnapshotRow) => number): { t: number; v: nu
 // Bucketing runs AFTER the per-project diff: deltas are additive, cumulative
 // tallies are not — summing raw snapshots inside a bucket would be meaningless.
 const H = 3_600_000;
-const BUCKET_FOR_RANGE: Record<number, number> = { 1: H, 7: 12 * H, 30: 24 * H, 90: 72 * H };
+const BUCKET_FOR_RANGE: Record<number, number> = { 1: H, 7: 12 * H, 30: 24 * H, 90: 24 * H };
 // "All" has no fixed span: climb this ladder until the window fits in ~45 bars.
 const LADDER = [1, 3, 6, 12, 24, 48, 72, 168, 336, 720].map((h) => h * H);
 
@@ -115,13 +115,21 @@ const spanMs = computed(() => {
     return hi > lo ? hi - lo : 0;
 });
 const bucket = computed(() => bucketMs(days.value, spanMs.value));
-const bucketLabel = computed(() => {
+
+// #xmypbp david — bucket the BARS only. A bar is a surface: its width claims a
+// time span, so an irregular one lies. A line is a sampled curve on a real time
+// axis — the captures ARE the samples, and smoothing them into buckets would
+// hide the spikes the line exists to show.
+const bucketed = computed(() => vizMode.value === "bars");
+const granLabel = computed(() => {
+    if (!bucketed.value) return "capture (Δ)";
     const h = bucket.value / H;
     return h < 24 ? `${h}h` : `${h / 24}d`;
 });
 
 function series(field: (r: TokenSnapshotRow) => number): { t: number; v: number }[] {
-    return bucketize(metricDelta(field), bucket.value);
+    const points = metricDelta(field);
+    return bucketed.value ? bucketize(points, bucket.value) : points;
 }
 
 const ioSeries = computed(() => [
@@ -166,10 +174,10 @@ watch(() => props.initialProject, (p) => { if (p) project.value = p; });
             <Select v-model="vizMode" :options="vizOptions" option-label="label" option-value="value" />
         </div>
 
-        <div class="usage-chart-title">Input / output — consumed per {{ bucketLabel }} · {{ scopeLabel }}</div>
+        <div class="usage-chart-title">Input / output — consumed per {{ granLabel }} · {{ scopeLabel }}</div>
         <TokenUsageChart :series="ioSeries" :mode="vizMode" unit="tokens" />
 
-        <div class="usage-chart-title usage-chart-title--second">Cache read / write — consumed per {{ bucketLabel }} · {{ scopeLabel }}</div>
+        <div class="usage-chart-title usage-chart-title--second">Cache read / write — consumed per {{ granLabel }} · {{ scopeLabel }}</div>
         <TokenUsageChart :series="cacheSeries" :mode="vizMode" unit="tokens" />
     </div>
 </template>

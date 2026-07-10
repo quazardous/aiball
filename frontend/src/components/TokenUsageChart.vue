@@ -55,6 +55,15 @@ function fmtNum(n: number): string {
 // timestamp through this (kept fresh on every (re)build / setData).
 let curTs: number[] = [];
 
+// Label for an ordinal x value. The bars scale is padded half a slot past each
+// end (#p3hm5c), so a split can land off-data or between two indices — those
+// get no label rather than a wrong one.
+function tsAt(x: number): string {
+    const i = Math.round(x);
+    if (Math.abs(x - i) > 1e-9 || curTs[i] == null) return "";
+    return fmtTs(curTs[i]);
+}
+
 // Raw (un-stacked) values of the CURRENT plot data, per series. In bars mode the
 // plotted column is the cumulative stack height — the legend must still show what
 // the series itself consumed, so it reads back through this (#1247).
@@ -129,11 +138,19 @@ function build(): void {
         cursor: { points: { size: 6 } },
         legend: { show: true },
         // bars → ordinal x (evenly-spaced indices) ; line → real time scale.
-        scales: { x: bars ? { time: false } : { time: true } },
+        // #p3hm5c — a bar is CENTRED on its index, so with the default range
+        // [0, n-1] the first and last ones straddle the plot edge and get
+        // clipped down the middle. Widen the scale by half a slot on each side
+        // so every bar owns a full slot inside the plot area.
+        scales: {
+            x: bars
+                ? { time: false, range: (): [number, number] => [-0.5, Math.max(0.5, nPts - 0.5)] }
+                : { time: true },
+        },
         series: [
             // x series: in bars mode the legend must show the timestamp behind
             // the hovered index, not the raw index number.
-            bars ? { value: (_u: uPlot, v: number) => (curTs[Math.round(v)] != null ? fmtTs(curTs[Math.round(v)]) : "") } : {},
+            bars ? { value: (_u: uPlot, v: number) => tsAt(v) } : {},
             ...props.series.map((s, i) => {
                 const color = colors[i % colors.length];
                 const base = {
@@ -169,9 +186,7 @@ function build(): void {
                 grid: { stroke: gridColor, width: 1 },
                 ticks: { stroke: gridColor, width: 1 },
                 // bars: map ordinal index splits back to time labels.
-                ...(bars
-                    ? { values: (_u: uPlot, splits: number[]) => splits.map((i) => (curTs[Math.round(i)] != null ? fmtTs(curTs[Math.round(i)]) : "")) }
-                    : {}),
+                ...(bars ? { values: (_u: uPlot, splits: number[]) => splits.map(tsAt) } : {}),
             },
             {
                 stroke: axisColor,
