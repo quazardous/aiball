@@ -1,0 +1,38 @@
+# Demo image — a throwaway aiball board pre-seeded with themed placeholder
+# data (see scripts/demo-seed.ts) for screenshots / landing-page / DevHunt.
+# NOT a production image: it sideloads an admin/admin human and re-seeds a
+# fresh board on every boot.
+#
+#   docker build -f Dockerfile.demo -t aiball-demo .
+#   docker run --rm -p 7776:7776 aiball-demo
+#   # open http://127.0.0.1:7776/  →  log in  admin / admin
+FROM node:22-bookworm
+
+# Native toolchain for better-sqlite3 (used only if no prebuilt binary matches).
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Backend deps first (layer cache).
+COPY package*.json ./
+RUN npm ci
+
+# Frontend deps, then the full source, then build dist/ (the daemon serves it).
+COPY frontend/package*.json ./frontend/
+RUN cd frontend && npm ci
+COPY . .
+RUN cd frontend && npm run build
+
+# HTTP-only demo: no local-trust UDS (AIBALL_SOCK=""), bind all interfaces so
+# the port is reachable from the host, isolated data dir under the volume.
+ENV AIBALL_HOME=/data \
+    AIBALL_PORT=7776 \
+    AIBALL_HOST=0.0.0.0 \
+    AIBALL_SOCK=""
+
+EXPOSE 7776
+VOLUME /data
+
+# Seed (idempotent wipe+reseed) then serve.
+CMD ["sh", "-c", "npx tsx scripts/demo-seed.ts && npm start"]
