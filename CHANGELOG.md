@@ -23,13 +23,18 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-07-11
+
 ### Added
 
 - **"Token usage" admin panel.** Two charts — input/output and cache
   read/write — plotting what each project *consumed between captures*, not a
   cumulative tally. Filter by project and time range, and switch between
   stacked bars (the default: bar height is the interval's real spend) and
-  overlaid lines. A project's detail page links straight to its own view.
+  overlaid lines. In bars mode the spend is grouped into even, fixed-width
+  time buckets sized to the range (finer for a day, coarser for a quarter) so
+  the chart stays readable; lines keep every raw capture. A project's detail
+  page links straight to its own view.
 - **`aiball consumer mark-read` can drain a whole ping backlog.** New flags:
   `--all-projects` (mark seen across every project, not just one), `--delete`
   (hard-remove the ping rows instead of marking them seen), and `--consumer <id>`
