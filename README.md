@@ -12,6 +12,8 @@ switch any time.
 > `~/.local/share/aiball` — no cloud, no telemetry. Claude Code is the
 > only wired agent today.
 
+![The aiball board: a project sidebar, a filterable ticket list with per-ticket intent, priority and assignee, and threaded decisions — one queue across every project on the host](./assets/screenshot-list.png)
+
 ## What you can do
 
 - **Loop** — pair a session with `claude-loop` and it stays alive between
