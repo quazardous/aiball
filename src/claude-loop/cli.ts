@@ -35,6 +35,7 @@ import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./pr
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
+import { HOOKS, buildHookSettings } from "./hooks/registry.js";
 import {
     canonicalCwd,
     barColors,
@@ -767,49 +768,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const hookPath = (p: string) =>
         shQuote(process.platform === "win32" ? p.replace(/\\/g, "/") : p);
     const tsxBin = hookPath(join(root, "node_modules", ".bin", "tsx"));
-    const stopHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/stop-hook.ts"))}`;
-    const sessionStartHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/session-start-hook.ts"))}`;
-    const userPromptSubmitHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
-    const askBlockHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/pretooluse-hook.ts"))}`;
-    const settings = {
-        hooks: {
-            // SessionStart fires once when claude has finished booting
-            // — replaces the fragile `sleep 3 && send-keys` race the
-            // wrapper used (#B.63 follow-up: david saw bugs when
-            // claude was still prompting for MCP trust etc).
-            //
-            // #B.148 bug: matcher was "startup" only, so `claude
-            // --resume` (which fires matcher="resume") and `claude
-            // --continue`/"clear" (matcher="clear") bypassed the hook
-            // entirely. Loop stayed idle even with pings unread because
-            // SSE only delivers NEW pings (existing ones don't replay).
-            // Register the same hook against each matcher so the
-            // initial drain runs in every entry mode.
-            SessionStart: [
-                { matcher: "startup", hooks: [{ type: "command", command: sessionStartHookCmd }] },
-                { matcher: "resume",  hooks: [{ type: "command", command: sessionStartHookCmd }] },
-                { matcher: "clear",   hooks: [{ type: "command", command: sessionStartHookCmd }] },
-            ],
-            Stop: [{ hooks: [{ type: "command", command: stopHookCmd }] }],
-            // UserPromptSubmit fires when the human (not the wrapper)
-            // sends a prompt. Used to (a) suspend auto-pings for the
-            // grace window so we don't send-keys over the human, and
-            // (b) flip the tmux bar to `[busy]` immediately so the
-            // display matches reality without waiting for the next
-            // Stop tick (#B.145 v2.2).
-            UserPromptSubmit: [{ hooks: [{ type: "command", command: userPromptSubmitHookCmd }] }],
-            // PreToolUse on AskUserQuestion (#264): in an AUTONOMOUS loop
-            // (no human in front) a multi-choice dialog stalls — nobody
-            // clicks. The hook denies it ONLY when no human is taking
-            // over and redirects the agent to ask via an aiball ticket
-            // comment. Fail-open: presence hold live (AFK SM) or any
-            // doubt → allow, so interactive sessions keep the feature.
-            // Registered here (loop settings) so it's scoped to loops.
-            PreToolUse: [
-                { matcher: "AskUserQuestion", hooks: [{ type: "command", command: askBlockHookCmd }] },
-            ],
-        },
-    };
+    // The `settings.hooks` object is generated from the declarative registry
+    // (src/claude-loop/hooks/registry.ts) — one entry per hook there, instead
+    // of a hand-built object here. The old hand-built shape is what let the
+    // SessionStart `compact` matcher be silently dropped; the registry lists it
+    // explicitly. `buildHookCommand` keeps the platform quoting + tsx path here
+    // (out of the pure registry). Per-hook rationale lives in registry.ts.
+    const buildHookCommand = (scriptRel: string) =>
+        `${tsxBin} ${hookPath(join(root, scriptRel))}`;
+    const settings = { hooks: buildHookSettings(HOOKS, buildHookCommand) };
     const settingsJson = JSON.stringify(settings);
 
     // claude passthrough args. Shell-escape per-arg so the inline
