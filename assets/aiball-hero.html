@@ -1,0 +1,368 @@
+<title>aiball — architecture</title>
+<style>
+  :root {
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+
+    /* light (default) — cool off-white with a green bias, emerald primary */
+    --paper: #eef3ef;
+    --card: #ffffff;
+    --ink: #10221b;
+    --muted: #5b6b63;
+    --faint: #8a988f;
+    --hair: #d5ded8;
+    --hair-strong: #c2cec7;
+    --emerald: #0f9d63;
+    --emerald-deep: #0a7a4d;
+    --seal: #0f9d63;
+    --shadow: 0 1px 2px rgba(16,34,27,.06), 0 8px 24px rgba(16,34,27,.05);
+
+    /* muted project identity hues (not neon) */
+    --h-emerald: #0f9d63;
+    --h-sky: #2c7fb8;
+    --h-amber: #b7791f;
+    --h-violet: #7a5cc7;
+    --h-rose: #bf4a6b;
+
+    /* state semantics */
+    --busy: #0f9d63;
+    --idle: #7f8f86;
+    --boot: #b7791f;
+    --wait: #2c7fb8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0a1310;
+      --card: #0f1c17;
+      --ink: #e7efe9;
+      --muted: #93a69c;
+      --faint: #63756c;
+      --hair: #1d2b25;
+      --hair-strong: #27382f;
+      --emerald: #2ee08f;
+      --emerald-deep: #4be79e;
+      --seal: #2ee08f;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+      --h-emerald: #2ee08f;
+      --h-sky: #5bb4e6;
+      --h-amber: #e0a94a;
+      --h-violet: #a487e6;
+      --h-rose: #e07898;
+      --busy: #2ee08f;
+      --idle: #7f938a;
+      --boot: #e0a94a;
+      --wait: #5bb4e6;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #eef3ef; --card: #ffffff; --ink: #10221b; --muted: #5b6b63; --faint: #8a988f;
+    --hair: #d5ded8; --hair-strong: #c2cec7; --emerald: #0f9d63; --emerald-deep: #0a7a4d; --seal: #0f9d63;
+    --shadow: 0 1px 2px rgba(16,34,27,.06), 0 8px 24px rgba(16,34,27,.05);
+    --h-emerald:#0f9d63; --h-sky:#2c7fb8; --h-amber:#b7791f; --h-violet:#7a5cc7; --h-rose:#bf4a6b;
+    --busy:#0f9d63; --idle:#7f8f86; --boot:#b7791f; --wait:#2c7fb8;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0a1310; --card: #0f1c17; --ink: #e7efe9; --muted: #93a69c; --faint: #63756c;
+    --hair: #1d2b25; --hair-strong: #27382f; --emerald: #2ee08f; --emerald-deep: #4be79e; --seal: #2ee08f;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    --h-emerald:#2ee08f; --h-sky:#5bb4e6; --h-amber:#e0a94a; --h-violet:#a487e6; --h-rose:#e07898;
+    --busy:#2ee08f; --idle:#7f938a; --boot:#e0a94a; --wait:#5bb4e6;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+  .scroll { overflow-x: auto; padding: 40px 24px 48px; }
+  .stage {
+    min-width: 1080px; max-width: 1280px; margin: 0 auto;
+    display: flex; flex-direction: column; gap: 26px;
+  }
+
+  /* ---- header / product chrome ---- */
+  .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--hair); }
+  .brandblock { display: flex; flex-direction: column; gap: 10px; }
+  .wordmark { display: flex; align-items: center; gap: 12px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--emerald); box-shadow: 0 0 0 4px color-mix(in srgb, var(--emerald) 18%, transparent); }
+  .wordmark h1 { font-family: var(--mono); font-size: 40px; font-weight: 700; letter-spacing: -.03em; margin: 0; line-height: 1; }
+  .eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: .26em; text-transform: uppercase; color: var(--emerald-deep); font-weight: 600; }
+  .thesis { font-size: 17px; line-height: 1.45; color: var(--ink); max-width: 52ch; margin: 0; }
+  .thesis b { color: var(--emerald-deep); font-weight: 650; }
+  .seal { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; text-align: right; }
+  .seal .tag { font-family: var(--mono); font-size: 11px; letter-spacing: .04em; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+  .seal .tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--emerald); }
+  .seal .ver { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+  /* ---- control plane row ---- */
+  .plane { display: grid; grid-template-columns: 190px 1fr 200px; gap: 18px; align-items: stretch; }
+  .card { background: var(--card); border: 1px solid var(--hair); border-radius: 14px; box-shadow: var(--shadow); }
+  .pad { padding: 16px 17px; }
+  .lab { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+  .edge { display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+  .edge .who { font-family: var(--mono); font-weight: 700; font-size: 15px; letter-spacing: -.01em; color: var(--ink); }
+  .edge ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  .edge li { font-size: 13px; color: var(--muted); line-height: 1.3; padding-left: 15px; position: relative; }
+  .edge li::before { content: ""; position: absolute; left: 0; top: 8px; width: 6px; height: 1.5px; background: var(--emerald); }
+  .edge .relay { font-size: 12.5px; color: var(--ink); border-top: 1px dashed var(--hair-strong); padding-top: 10px; margin-top: 2px; }
+  .edge .relay b { color: var(--emerald-deep); }
+
+  .core { position: relative; display: flex; flex-direction: column; }
+  .core-head { display: flex; align-items: baseline; gap: 12px; padding: 15px 18px 12px; border-bottom: 1px solid var(--hair); }
+  .core-head h2 { font-family: var(--mono); font-size: 17px; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+  .core-head .sub { font-size: 12px; color: var(--muted); }
+  .subs { display: grid; grid-template-columns: repeat(5, 1fr); }
+  .sub-cell { padding: 15px 14px 17px; border-right: 1px solid var(--hair); display: flex; flex-direction: column; gap: 8px; }
+  .sub-cell:last-child { border-right: 0; }
+  .sub-cell .ico { width: 22px; height: 22px; color: var(--emerald); }
+  .sub-cell .name { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+  .sub-cell .desc { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+
+  .relay-arrow { display: flex; align-items: center; }
+  /* connector labels between plane columns */
+  .plane .conn { position: relative; }
+
+  /* ---- event bus ---- */
+  .buswrap { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+  .feed { height: 20px; width: 2px; background: var(--hair-strong); margin: 0 auto; position: relative; }
+  .bus { position: relative; height: 40px; border-radius: 9px; border: 1px solid var(--hair); background: var(--card); box-shadow: var(--shadow); display: flex; align-items: center; justify-content: center; gap: 10px; overflow: hidden; }
+  .bus .rail { position: absolute; left: 14px; right: 14px; top: 50%; height: 2px; transform: translateY(-50%); background: linear-gradient(90deg, var(--hair-strong), var(--hair-strong)); }
+  .bus .pulse { position: absolute; left: 14px; right: 14px; top: 50%; height: 2px; transform: translateY(-50%); background: linear-gradient(90deg, transparent 0%, transparent 42%, var(--emerald) 50%, transparent 58%, transparent 100%); background-size: 240px 2px; animation: run 3.2s linear infinite; }
+  @keyframes run { from { background-position: -240px 0; } to { background-position: 100% 0; } }
+  .bus .plabel { position: relative; z-index: 2; font-family: var(--mono); font-size: 11.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--emerald-deep); font-weight: 700; background: var(--card); padding: 0 10px; display: inline-flex; align-items: center; gap: 8px; }
+  .bus .plabel svg { width: 15px; height: 15px; }
+  .drops { display: grid; grid-template-columns: repeat(5, 1fr); }
+  .drop { height: 18px; display: flex; justify-content: center; }
+  .drop span { width: 2px; height: 100%; background: var(--hair-strong); }
+
+  /* ---- loop cards ---- */
+  .loops { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .loop { border-radius: 13px; border: 1px solid var(--hair); background: var(--card); box-shadow: var(--shadow); padding: 14px 14px 15px; display: flex; flex-direction: column; gap: 11px; border-top: 3px solid var(--hue); }
+  .loop .lh { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .loop .proj { display: flex; flex-direction: column; gap: 2px; }
+  .loop .proj .k { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+  .loop .proj .v { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--ink); }
+  .pill { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 3px 8px; border-radius: 20px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.busy { color: var(--busy); background: color-mix(in srgb, var(--busy) 13%, transparent); }
+  .pill.idle { color: var(--idle); background: color-mix(in srgb, var(--idle) 15%, transparent); }
+  .pill.boot { color: var(--boot); background: color-mix(in srgb, var(--boot) 15%, transparent); }
+  .pill.wait { color: var(--wait); background: color-mix(in srgb, var(--wait) 14%, transparent); }
+
+  .cycle { display: flex; align-items: center; gap: 9px; padding: 4px 0 2px; }
+  .cycle .ring { width: 30px; height: 30px; color: var(--hue); flex: none; }
+  .cycle ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  .cycle li { font-family: var(--mono); font-size: 10.5px; color: var(--muted); line-height: 1.35; }
+  .cycle li b { color: var(--ink); font-weight: 700; }
+
+  .ctx { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--hair); padding-top: 9px; }
+  .ctx svg { width: 13px; height: 13px; color: var(--hue); flex: none; }
+  .ctx code { font-family: var(--mono); font-size: 10.5px; color: var(--ink); }
+
+  /* ---- differentiators ---- */
+  .why { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--hair); border-radius: 14px; background: var(--card); box-shadow: var(--shadow); overflow: hidden; }
+  .why > div { padding: 15px 17px; border-right: 1px solid var(--hair); display: flex; flex-direction: column; gap: 6px; }
+  .why > div:last-child { border-right: 0; }
+  .why .wt { font-family: var(--mono); font-size: 11.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--emerald-deep); display: flex; align-items: center; gap: 8px; }
+  .why .wt svg { width: 16px; height: 16px; }
+  .why .wd { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+  .why .wd b { color: var(--ink); font-weight: 650; }
+
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 4px; }
+  .foot .hood { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .foot .hood b { color: var(--ink); }
+  .foot .mark { font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: .02em; }
+
+  @media (prefers-reduced-motion: reduce) { .bus .pulse { animation: none; opacity: .55; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="loop-ring" viewBox="0 0 24 24">
+    <path d="M20 12a8 8 0 1 1-2.3-5.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <path d="M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+</svg>
+
+<div class="scroll">
+  <div class="stage">
+
+    <!-- header -->
+    <header class="top">
+      <div class="brandblock">
+        <div class="eyebrow">Event-driven control plane</div>
+        <div class="wordmark"><span class="dot"></span><h1>aiball</h1></div>
+        <p class="thesis">Pilot <b>N&nbsp;Claude&nbsp;Code sessions</b> — one persistent agent per project — from a single local-first board. Queue work and walk away, or grab the keyboard and drive live.</p>
+      </div>
+      <div class="seal">
+        <div class="tag">local-first · no cloud</div>
+        <div class="tag">SQLite · UDS socket</div>
+        <div class="ver">v0.34.0</div>
+      </div>
+    </header>
+
+    <!-- control plane: human → core → observability -->
+    <section class="plane">
+      <div class="card edge pad">
+        <div class="who">HUMAN</div>
+        <ul>
+          <li>Open &amp; queue tickets</li>
+          <li>Comment on threads</li>
+          <li>Accept / reject decisions</li>
+          <li>Take over the terminal</li>
+        </ul>
+        <div class="relay">tickets&nbsp;<b>&rarr;</b></div>
+      </div>
+
+      <div class="card core">
+        <div class="core-head">
+          <h2>aiball core</h2>
+          <span class="sub">Express&nbsp;+&nbsp;SQLite daemon · one process, all projects</span>
+        </div>
+        <div class="subs">
+          <div class="sub-cell">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+            <div class="name">BACKLOG</div>
+            <div class="desc">Tickets &amp; threads persisted per project</div>
+          </div>
+          <div class="sub-cell">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+            <div class="name">EVENT BUS</div>
+            <div class="desc">Real-time wakes over SSE — no polling lag</div>
+          </div>
+          <div class="sub-cell">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7h18l-2 12H5z"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>
+            <div class="name">QUEUES</div>
+            <div class="desc">Per-consumer pings, FIFO, one at a time</div>
+          </div>
+          <div class="sub-cell">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>
+            <div class="name">SIDE-LOAD</div>
+            <div class="desc">PTY proxy injects a ping between turns</div>
+          </div>
+          <div class="sub-cell">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            <div class="name">LOCAL-FIRST</div>
+            <div class="desc">127.0.0.1, UDS trust + agent tokens</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card edge pad">
+        <div class="who">OBSERVABILITY</div>
+        <ul>
+          <li>Every session's live state</li>
+          <li>Activity &amp; event stream</li>
+          <li>Health &amp; token usage</li>
+          <li>From laptop — or phone</li>
+        </ul>
+        <div class="relay"><b>&rarr;</b>&nbsp;over Tailscale</div>
+      </div>
+    </section>
+
+    <!-- event bus fanout -->
+    <section class="buswrap">
+      <div class="feed"></div>
+      <div class="bus">
+        <div class="rail"></div>
+        <div class="pulse"></div>
+        <div class="plabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>event bus</div>
+      </div>
+      <div class="drops">
+        <div class="drop"><span></span></div>
+        <div class="drop"><span></span></div>
+        <div class="drop"><span></span></div>
+        <div class="drop"><span></span></div>
+        <div class="drop"><span></span></div>
+      </div>
+    </section>
+
+    <!-- per-project loops -->
+    <section class="loops">
+      <div class="loop" style="--hue: var(--h-emerald)">
+        <div class="lh">
+          <div class="proj"><span class="k">claude-loop</span><span class="v">frontend</span></div>
+          <span class="pill busy">busy</span>
+        </div>
+        <div class="cycle">
+          <svg class="ring"><use href="#loop-ring"/></svg>
+          <ol><li><b>wake</b> on ping</li><li><b>work</b> the turn</li><li>turn ends</li><li>check queue &rarr; <b>side-load</b></li></ol>
+        </div>
+        <div class="ctx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9l3 3-3 3M13 15h4"/></svg><span>tmux · <code>local context</code></span></div>
+      </div>
+
+      <div class="loop" style="--hue: var(--h-sky)">
+        <div class="lh">
+          <div class="proj"><span class="k">claude-loop</span><span class="v">infra</span></div>
+          <span class="pill idle">idle</span>
+        </div>
+        <div class="cycle">
+          <svg class="ring"><use href="#loop-ring"/></svg>
+          <ol><li><b>wake</b> on ping</li><li><b>work</b> the turn</li><li>turn ends</li><li>check queue &rarr; <b>side-load</b></li></ol>
+        </div>
+        <div class="ctx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9l3 3-3 3M13 15h4"/></svg><span>tmux · <code>local context</code></span></div>
+      </div>
+
+      <div class="loop" style="--hue: var(--h-violet)">
+        <div class="lh">
+          <div class="proj"><span class="k">claude-loop</span><span class="v">reviewer</span></div>
+          <span class="pill busy">busy</span>
+        </div>
+        <div class="cycle">
+          <svg class="ring"><use href="#loop-ring"/></svg>
+          <ol><li><b>wake</b> on ping</li><li><b>work</b> the turn</li><li>turn ends</li><li>check queue &rarr; <b>side-load</b></li></ol>
+        </div>
+        <div class="ctx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9l3 3-3 3M13 15h4"/></svg><span>tmux · <code>local context</code></span></div>
+      </div>
+
+      <div class="loop" style="--hue: var(--h-amber)">
+        <div class="lh">
+          <div class="proj"><span class="k">claude-loop</span><span class="v">docs</span></div>
+          <span class="pill wait">wait&nbsp;· human</span>
+        </div>
+        <div class="cycle">
+          <svg class="ring"><use href="#loop-ring"/></svg>
+          <ol><li>you're <b>typing</b></li><li>loop <b>stands down</b></li><li>you leave</li><li>it <b>resumes</b> draining</li></ol>
+        </div>
+        <div class="ctx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9l3 3-3 3M13 15h4"/></svg><span>tmux · <code>local context</code></span></div>
+      </div>
+
+      <div class="loop" style="--hue: var(--h-rose)">
+        <div class="lh">
+          <div class="proj"><span class="k">claude-loop</span><span class="v">release</span></div>
+          <span class="pill boot">boot</span>
+        </div>
+        <div class="cycle">
+          <svg class="ring"><use href="#loop-ring"/></svg>
+          <ol><li><b>wake</b> on ping</li><li><b>work</b> the turn</li><li>turn ends</li><li>check queue &rarr; <b>side-load</b></li></ol>
+        </div>
+        <div class="ctx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z"/><path d="M8 9l3 3-3 3M13 15h4"/></svg><span>tmux · <code>local context</code></span></div>
+      </div>
+    </section>
+
+    <!-- why it's different -->
+    <section class="why">
+      <div>
+        <div class="wt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Async by design</div>
+        <div class="wd">Wakes fire at <b>turn-end</b>, never mid-thought. The backlog drains itself between turns.</div>
+      </div>
+      <div>
+        <div class="wt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M7 20h10"/></svg>Hybrid control</div>
+        <div class="wd">Drive Claude live in the terminal, or queue tickets and leave. <b>Same session, same context.</b></div>
+      </div>
+      <div>
+        <div class="wt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 8v4l3 2"/><path d="M16 3h5v5"/></svg>Per-project memory</div>
+        <div class="wd">One loop per repo, alive between turns. <b>Deep work at scale</b> — flow preserved across projects.</div>
+      </div>
+      <div>
+        <div class="wt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>Remote</div>
+        <div class="wd">Moderate, comment and queue from your <b>phone</b> over a private tailnet. Storage stays local.</div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <div class="hood"><b>Under the hood:</b> tmux + Claude Code hooks (SessionStart / Stop) + a PTY proxy. No magic.</div>
+      <div class="mark">pilot your agents like a GitHub board</div>
+    </footer>
+
+  </div>
+</div>

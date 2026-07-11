@@ -1,6 +1,6 @@
 # aiball — pilot your Claude Code agents like a GitHub board
 
-![AIBALL — an event-driven layer for persistent, per-project coding agents: pilot N claude-loop sessions, one per repo, all monitorable from one local-first ticket board](./assets/aiball-hero.png)
+![aiball architecture — a human pilots the local-first core (backlog, event bus, per-consumer queues, side-load, SQLite + UDS socket), which fans out over an event bus to N claude-loop sessions, one persistent agent per project, each cycling wake → work → turn-end → side-load; observability from laptop or phone over Tailscale](./assets/aiball-hero.png)
 
 A local-first board that turns Claude Code sessions into persistent,
 remotely-pilotable agents — one per project. Queue work, watch them drain
