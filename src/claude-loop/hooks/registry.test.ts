@@ -1,9 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HOOKS, buildHookSettings } from "./registry.js";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { HOOKS, HOOK_ENTRY, buildHookSettings } from "./registry.js";
 
 // Stub command builder — deterministic, so we assert wiring without paths/tsx.
 const cmd = (script: string) => `TSX ${script}`;
+const BASE = cmd(HOOK_ENTRY);
 
 test("buildHookSettings: event key order matches the registry order", () => {
     const settings = buildHookSettings(HOOKS, cmd);
@@ -15,63 +19,60 @@ test("buildHookSettings: event key order matches the registry order", () => {
     ]);
 });
 
+test("buildHookSettings: every command routes through the single dispatcher + the event arg", () => {
+    const settings = buildHookSettings(HOOKS, cmd);
+    assert.equal(settings.Stop[0].hooks[0].command, `${BASE} Stop`);
+    assert.equal(settings.UserPromptSubmit[0].hooks[0].command, `${BASE} UserPromptSubmit`);
+    // SessionStart: same command on every matcher entry.
+    for (const e of settings.SessionStart) {
+        assert.equal(e.hooks[0].command, `${BASE} SessionStart`);
+        assert.equal(e.hooks[0].type, "command");
+    }
+    assert.equal(settings.PreToolUse[0].hooks[0].command, `${BASE} PreToolUse`);
+});
+
 test("buildHookSettings: matcher-less events emit a single entry with NO matcher key", () => {
     const settings = buildHookSettings(HOOKS, cmd);
     for (const event of ["Stop", "UserPromptSubmit"]) {
         assert.equal(settings[event].length, 1, `${event} has one entry`);
-        const entry = settings[event][0];
-        assert.ok(!("matcher" in entry), `${event} entry has no matcher key`);
-        assert.deepEqual(Object.keys(entry), ["hooks"]);
+        assert.ok(!("matcher" in settings[event][0]), `${event} entry has no matcher key`);
+        assert.deepEqual(Object.keys(settings[event][0]), ["hooks"]);
     }
 });
 
-test("buildHookSettings: matcher entries serialize matcher before hooks (parity)", () => {
+test("buildHookSettings: matcher entries serialize matcher before hooks", () => {
     const settings = buildHookSettings(HOOKS, cmd);
-    const entry = settings.PreToolUse[0];
-    assert.deepEqual(Object.keys(entry), ["matcher", "hooks"]);
-    assert.equal(entry.matcher, "AskUserQuestion");
-});
-
-test("buildHookSettings: commands are wired from the registry scripts", () => {
-    const settings = buildHookSettings(HOOKS, cmd);
-    assert.equal(settings.Stop[0].hooks[0].command, "TSX src/claude-loop/stop-hook.ts");
-    assert.equal(settings.Stop[0].hooks[0].type, "command");
-    assert.equal(
-        settings.SessionStart[0].hooks[0].command,
-        "TSX src/claude-loop/session-start-hook.ts",
-    );
+    assert.deepEqual(Object.keys(settings.PreToolUse[0]), ["matcher", "hooks"]);
+    assert.equal(settings.PreToolUse[0].matcher, "AskUserQuestion");
 });
 
 test("SessionStart registers every entry mode INCLUDING compact (the previously-dropped matcher)", () => {
     const settings = buildHookSettings(HOOKS, cmd);
-    const matchers = settings.SessionStart.map((e) => e.matcher);
-    assert.deepEqual(matchers, ["startup", "resume", "clear", "compact"]);
+    assert.deepEqual(
+        settings.SessionStart.map((e) => e.matcher),
+        ["startup", "resume", "clear", "compact"],
+    );
 });
 
-test("parity with the legacy hand-built object modulo the added compact matcher", () => {
-    const settings = buildHookSettings(HOOKS, cmd);
-    // The legacy object registered SessionStart against startup/resume/clear
-    // only; everything else is identical. Drop the new compact entry and the
-    // generated object must equal the legacy shape byte-for-byte.
-    const ss = cmd("src/claude-loop/session-start-hook.ts");
-    const legacy = {
-        SessionStart: [
-            { matcher: "startup", hooks: [{ type: "command", command: ss }] },
-            { matcher: "resume", hooks: [{ type: "command", command: ss }] },
-            { matcher: "clear", hooks: [{ type: "command", command: ss }] },
-        ],
-        Stop: [{ hooks: [{ type: "command", command: cmd("src/claude-loop/stop-hook.ts") }] }],
-        UserPromptSubmit: [
-            { hooks: [{ type: "command", command: cmd("src/claude-loop/user-prompt-submit-hook.ts") }] },
-        ],
-        PreToolUse: [
-            {
-                matcher: "AskUserQuestion",
-                hooks: [{ type: "command", command: cmd("src/claude-loop/pretooluse-hook.ts") }],
-            },
-        ],
-    };
-    const generated = structuredClone(settings);
-    generated.SessionStart = generated.SessionStart.filter((e) => e.matcher !== "compact");
-    assert.equal(JSON.stringify(generated), JSON.stringify(legacy));
+test("every registry spec declares a handler module", () => {
+    for (const spec of HOOKS) {
+        assert.ok(spec.module && spec.module.endsWith(".js"), `${spec.event} has a .js module`);
+    }
+});
+
+// Integration smoke: the dispatcher runs the right handler and stays fail-open.
+// UserPromptSubmit's handler emits `{}` and exits 0 (no loop state dir → it
+// short-circuits, and even if it tried to emit, that's swallowed); an unknown
+// event and a missing arg also emit `{}` and exit 0.
+test("hook-entry dispatches by event and is fail-open", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const entry = join(here, "hook-entry.ts");
+    const run = (args: string[]) =>
+        execFileSync("npx", ["--no-install", "tsx", entry, ...args], {
+            encoding: "utf8",
+            input: "",
+        }).trim();
+    assert.equal(run(["UserPromptSubmit"]), "{}", "known event → handler emits {}");
+    assert.equal(run(["NopeNotAnEvent"]), "{}", "unknown event → fail-open {}");
+    assert.equal(run([]), "{}", "no event arg → fail-open {}");
 });
