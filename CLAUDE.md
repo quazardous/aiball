@@ -53,6 +53,7 @@ Root:
 - [`INSTALL.md`](./docs/INSTALL.md) — Linux/macOS install modes (hard / `--symlink`), flags, env vars, layout, sanity-checks, troubleshooting.
 - [`CONFIGS.md`](./docs/CONFIGS.md) — the layered ("russian-doll") config model: files, layers, precedence per concern.
 - [`CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md) — the `claude-loop` wrapper: hooks, timer, keystroke detection, state files.
+- [`HOOKS.md`](./docs/HOOKS.md) — Claude Code hook events: which aiball wires, which it deliberately doesn't, and why.
 - [`SM-NETWORK.md`](./docs/SM-NETWORK.md) — XState v5 state-machine network: per-controller slices, composition root, bridge pattern, add-a-controller checklist.
 - [`PTY-PROXY.md`](./docs/PTY-PROXY.md) — the Unix PTY proxy (live human-typing detection).
 - [`PTY-PROXY-WINDOWS.md`](./docs/PTY-PROXY-WINDOWS.md) — the Windows ConPTY port.
