@@ -55,13 +55,28 @@ wired, but there is a concrete pane-scrape / bespoke detector it would replace.
 
 ## Where hooks are wired
 
-- **Registration** — `src/claude-loop/cli.ts` builds the `settings.hooks` JSON
-  passed to the claude spawn (one entry per used event, with matchers).
-- **Handlers** — one file per used hook today
-  (`session-start-hook.ts`, `stop-hook.ts`, `user-prompt-submit-hook.ts`,
-  `pretooluse-hook.ts`). A declarative registry to collapse these insertion
-  points into a single source is proposed separately.
+- **Registry (single source)** — `src/claude-loop/hooks/registry.ts` holds the
+  declarative `HOOKS[]` table (`{ event, matchers?, module }`). `buildHookSettings()`
+  generates the `settings.hooks` JSON from it; `cli.ts` just calls that. This is
+  what keeps a matcher from being silently forgotten (the SessionStart `compact`
+  case).
+- **Dispatcher (single entry)** — `hooks/hook-entry.ts` is the only registered
+  script. `claude` invokes `hook-entry.ts <Event>`; it looks the event up in the
+  registry and dynamically imports that event's handler module. Fail-open: an
+  unknown/missing event emits `{}` and exits 0.
+- **Handlers** — one module per event (`session-start-hook.ts`, `stop-hook.ts`,
+  `user-prompt-submit-hook.ts`, `pretooluse-hook.ts`), run on import by the
+  dispatcher.
 - **Transport** — `hook-emit.ts` (`emitHookEventToTimer` → `loop.sock`, with an
   offload buffer when the socket is absent).
 - **Consumer** — `hook-watcher.ts` types the inbound events;
   `proxy-event-dispatcher.ts` correlates them (e.g. auto-wake vs human prompt).
+
+### To add a hook
+
+1. Write a handler module in `src/claude-loop/` (or reuse one).
+2. Add one `HookSpec` to `HOOKS[]` in `registry.ts` — `event`, optional
+   `matchers`, and the `module` import specifier (relative to `hook-entry.ts`).
+
+That's it: the settings entry and the dispatch are generated. No `cli.ts` edit,
+no new registered script.
