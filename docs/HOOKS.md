@@ -38,7 +38,7 @@ wired, but there is a concrete pane-scrape / bespoke detector it would replace.
 
 | Event | Status | Why (or why not) |
 |---|---|---|
-| SessionStart | **Used** | Slim boot/resume/clear signal (`session-start-hook.ts`) that seals the boot machine. Note: the `compact` source is handled by the emitter but its matcher is **not registered** — a known gap. |
+| SessionStart | **Used** | Essentially a **weak end-of-boot signal**: it is *one* input that can seal the boot machine (`boot-machine.ts` `HOOK_SEAL`), not the authority — boot also seals on a deadline / pane-decay (`DEADLINE_REACHED`) when the hook is missed. Emitted slim (`session-start-hook.ts`), same path for resume/clear. Note: the `compact` source is handled but its matcher is **not registered** — a known gap. |
 | Stop | **Used** | The turn-end "ping or sleep" hook (`stop-hook.ts`): per-turn token capture, error backoff, and the wake-injection decision. We do **not** extend it to inject the next prompt via `additionalContext` (see *One injection path*). |
 | UserPromptSubmit | **Used** | Emits a turn-start timestamp (`user-prompt-submit-hook.ts`). The human-vs-injected-ping distinction is derived timer-side by time-correlation today; a deterministic distinction by payload content is the main candidate improvement. |
 | PreToolUse | **Used** | Gates the `AskUserQuestion` tool: when no human is present, deny + redirect the agent to the ticket thread (`hook-verdict.ts`), fail-open. Candidate to generalize to permission walls. |
