@@ -87,6 +87,7 @@ export {
     type ActiveRelation,
     getMessage,
     getMessageByHashid,
+    lastAuthoredMessageId,
     listMessages,
     listPendingLifecycleForTicket,
     listPendingResolvedForTicket,

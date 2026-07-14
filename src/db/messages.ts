@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { invalidateInboxAgg } from "./inbox-agg.js";
 import { invalidateFlagsCache } from "./flags-cache.js";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -227,6 +227,38 @@ export function getMessage(id: number): Message | null {
     const parent = db.select({ project: schema.tickets.project })
         .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
     return messageRowToMessage(m, parent?.project ?? "");
+}
+
+/**
+ * #1323 — the highest `_messages` id on `ticket_id` authored by `consumer_id`
+ * strictly before `beforeId`, or null if the author has no prior message here.
+ *
+ * Used to bound the auto-prune at POST (`markTicketSeen(..., {upTo})`): an
+ * author has demonstrably had the thread state up to their own last post, so
+ * comments that landed AFTER it (e.g. a human commenting while the agent was
+ * mid-turn) must stay unseen and resurface — not be silently marked read.
+ * Only comments/lifecycle rows count; the `tickets` root is not an "author's
+ * prior post" for this purpose, so a first reply on a ticket prunes nothing.
+ */
+export function lastAuthoredMessageId(
+    consumer_id: string,
+    ticket_id: number,
+    beforeId: number,
+): number | null {
+    const row = getDb()
+        .select({ id: schema.messages.id })
+        .from(schema.messages)
+        .where(
+            and(
+                eq(schema.messages.ticketId, ticket_id),
+                eq(schema.messages.byAgent, consumer_id),
+                lt(schema.messages.id, beforeId),
+            ),
+        )
+        .orderBy(desc(schema.messages.id))
+        .limit(1)
+        .get();
+    return row?.id ?? null;
 }
 
 /**

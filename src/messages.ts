@@ -2,6 +2,7 @@ import {
     getMessage,
     getProject,
     insertMessage,
+    lastAuthoredMessageId,
     markTicketSeen,
     moveTicket,
     insertRelationEvent,
@@ -655,14 +656,28 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // alongside the inline fanOutPings/broadcast above; #322 will subscribe.
     emitLifecycle({ op: "created", message: msg });
     // #837 — auto-prune unread on the author : an agent who POSTS on a ticket
-    // has by definition read the prior context, so their own unread pings on
-    // that ticket are stale by construction. `markTicketSeen` is consumer-
-    // scoped — other recipients keep their unread. Without this guard, david's
-    // wake-stuck unblock-cascade (#751-followups, e1660f8) replayed every
-    // historical comment on tickets where I'd already replied N times.
+    // has read the prior context, so their own unread pings on that ticket are
+    // stale by construction. `markTicketSeen` is consumer-scoped — other
+    // recipients keep their unread. Without this guard, david's wake-stuck
+    // unblock-cascade (#751-followups, e1660f8) replayed every historical
+    // comment on tickets where I'd already replied N times.
+    //
+    // #1323 — but from the author's SECOND post on, bound the prune by their
+    // OWN previous post on this ticket: a comment that landed AFTER it (e.g.
+    // david commenting while the agent was mid-turn on an in-progress ticket)
+    // is NOT proven read, so it stays unseen and resurfaces rather than being
+    // silently consumed by this reply. Comments <= the prior post are still
+    // pruned, so #837's repeated-reply replay stays fixed.
+    // First post on the ticket → no watermark; keep #837's assumption that a
+    // first reply read the thread (unbounded prune). The residual gap — a
+    // mid-turn comment crossing the agent's *first* reply — needs a read-time
+    // watermark (tracked at ticket_get) and is left for a follow-up.
     if (msg.by_agent && msg.ticket_id != null) {
-        try { markTicketSeen(msg.by_agent, msg.ticket_id); }
-        catch { /* best-effort — pings table errors must not fail the message insert */ }
+        try {
+            const upTo = lastAuthoredMessageId(msg.by_agent, msg.ticket_id, msg.id);
+            if (upTo != null) markTicketSeen(msg.by_agent, msg.ticket_id, { upTo });
+            else markTicketSeen(msg.by_agent, msg.ticket_id);
+        } catch { /* best-effort — pings table errors must not fail the message insert */ }
     }
     return msg;
 }
