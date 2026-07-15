@@ -1497,6 +1497,16 @@ export interface WakeEventHint {
     commentKind?: string;
 }
 
+/**
+ * #1351 — how many unread events the wake builder fetches to look for a
+ * same-ticket bundle. The head is still the oldest (messages[0]); the rest
+ * of the window is scanned for other unread events on the head's ticket so
+ * they can be delivered in one wake instead of one turn each. A window, not
+ * "all unread": bounds the cost, and any overflow simply surfaces on the
+ * next wake.
+ */
+const WAKE_BUNDLE_FETCH_LIMIT = 30;
+
 export async function buildContextPhrase(
     client: AiballClient,
     project: string | null,
@@ -1532,7 +1542,12 @@ export async function buildContextPhrase(
             // = cross-project). When the head IS on another project, the
             // wake phrase template renders the bare ref without a project
             // prefix today — a future tweak can surface the project name.
-            (client.unread(null, 1) as Promise<{
+            // #1351 — fetch a WINDOW (not just the head): the same-ticket
+            // bundle folds every unread event of the head's ticket into one
+            // wake. The head stays messages[0] (oldest, ASC by id); the rest
+            // of the window lets us group. This also revives the #1163
+            // decision digest, which never fired under the old limit=1.
+            (client.unread(null, WAKE_BUNDLE_FETCH_LIMIT) as Promise<{
                 messages?: Array<{
                     id: number;
                     kind?: string;
@@ -1660,11 +1675,35 @@ export async function buildContextPhrase(
         // gets an info wake, not a triage push. `undefined` = unknown → no
         // suffix (fail toward the current actionable framing).
         let headClaimable: boolean | undefined;
+        // #1351 — same-ticket bundle detection (computed BEFORE the empty-head
+        // drop so a bundle survives even when its oldest event is a bare
+        // comment). When ≥2 unread events concern the HEAD's ticket, they are
+        // delivered as ONE wake instead of a turn per event.
+        const unreadMsgs = Array.isArray(unreadR?.messages) ? unreadR.messages : [];
+        const ticketIdOf = (m: (typeof unreadMsgs)[number]): number =>
+            m?.kind === "ticket_created" ? (m.id ?? 0) : (m?.ticket_id ?? 0);
+        const headTicketId = unreadHead ? ticketIdOf(unreadHead) : 0;
+        // A = all unread events of the head's ticket within the window (david's
+        // "concaténer les events d'un même ticket"), not just a contiguous run.
+        const sameTicket = headTicketId
+            ? unreadMsgs.filter((m) => ticketIdOf(m) === headTicketId)
+            : [];
+        const isBundleMode = sameTicket.length >= 2;
+        // Head (oldest) id is returned as headMessageId + marked seen by the
+        // inject site; the rest of the same-ticket run are the extras.
+        const bundleExtraSeenIds: number[] = isBundleMode
+            ? sameTicket
+                .filter((m) => m.id !== unreadHead?.id)
+                .map((m) => m.id)
+                .filter((v): v is number => typeof v === "number")
+            : [];
         // Drop empty comments without a pending decision. The FIFO head
         // must carry actionable content (body, or a pending decision
         // proposal); otherwise treat as missing so the wake falls
         // through to the idle branch instead of emitting "(#X / #Y)".
-        if (unreadHead && unreadHead.kind === "comment_added") {
+        // #1351 — but never drop when a bundle is being assembled (the bundle
+        // shows refs, so an empty oldest event is still a listed update).
+        if (unreadHead && unreadHead.kind === "comment_added" && !isBundleMode) {
             const meta = typeof unreadHead.meta === "string"
                 ? (() => { try { return JSON.parse(unreadHead.meta as string); } catch { return null; } })()
                 : null;
@@ -1706,12 +1745,16 @@ export async function buildContextPhrase(
             escalation_rejected: "REJECT — your escalation",
         };
         const unreadKind = unreadHead?.kind ?? "";
-        // #1163 S2 — digest des decision-events : quand la TÊTE du FIFO est un
-        // event décisionnel ET que les messages non-vus suivants le sont
-        // aussi (le run de tête), on les livre EN UN SEUL wake au lieu d'un
-        // tour par accept (« 5 resolution ACCEPTED = 5 tours », REX runic).
-        // Les events restent unitaires en DB ; seule la LIVRAISON groupe.
-        // Les comments/tickets (qui demandent une action) restent unitaires.
+        // #1351 — same-ticket bundle. When ≥2 unread events concern the HEAD's
+        // ticket, deliver them as ONE wake (compact refs, newest on top /
+        // oldest at the bottom) instead of a turn per event. This SUPERSEDES
+        // the #1163 decision-only digest, which never fired in prod: the fetch
+        // was capped at limit 1, so its `run.length >= 2` was unreachable.
+        // Events stay unitary in DB — only DELIVERY groups; `bundleExtraSeenIds`
+        // marks the folded-in events seen alongside the head. Labels: decisions
+        // keep their #1163 wording; comment/lifecycle/new-ticket get a compact
+        // token. Body is intentionally dropped in bundle mode (refs only) —
+        // the single-event wake still carries the full body.
         const DIGEST_LABELS: Record<string, string> = {
             plan_accepted: "plan ACCEPTED",
             plan_rejected: "plan REJECT",
@@ -1722,23 +1765,22 @@ export async function buildContextPhrase(
             escalation_accepted: "escalation ACCEPTED",
             escalation_rejected: "escalation REJECT",
         };
-        const unreadMsgs = Array.isArray(unreadR?.messages) ? unreadR.messages : [];
-        const decisionRun: typeof unreadMsgs = [];
-        for (const m of unreadMsgs) {
-            if (m?.kind && DIGEST_LABELS[m.kind]) decisionRun.push(m);
-            else break;
-        }
-        let headDecisionDigest = "";
-        let digestExtraSeenIds: number[] = [];
-        if (decisionRun.length >= 2) {
-            const deciders = new Set(decisionRun.map((m) => m.by_agent ?? ""));
-            const by = deciders.size === 1 ? ` — by ${[...deciders][0]}` : "";
-            const parts = decisionRun.map((m) =>
-                `${DIGEST_LABELS[m.kind!]} #${m.kind === "ticket_created" ? m.id : (m.ticket_id ?? m.id)}`);
-            headDecisionDigest = `${decisionRun.length} decisions${by}: ${parts.join(" · ")}`;
-            digestExtraSeenIds = decisionRun.slice(1).map((m) => m.id).filter((v): v is number => typeof v === "number");
-        }
-        if (unreadKind && LIFECYCLE_VERBS[unreadKind]) {
+        const BUNDLE_LABELS: Record<string, string> = {
+            ...DIGEST_LABELS,
+            comment_added: "comment",
+            ticket_created: "new ticket",
+            ticket_closed: "closed",
+            ticket_resolved: "resolved",
+            ticket_reopened: "reopened",
+        };
+        // Built once the head's title is resolved (below). Empty = no bundle.
+        // Detection (`isBundleMode`, `sameTicket`, `bundleExtraSeenIds`) ran
+        // above, before the empty-head drop.
+        let headBundle = "";
+        // In bundle mode the single-event branches are suppressed — only the
+        // bundle renders. Otherwise the head keeps its normal single-event
+        // rendering (comment body / lifecycle / decision-event).
+        if (unreadKind && LIFECYCLE_VERBS[unreadKind] && !isBundleMode) {
             headLifecycleVerb = LIFECYCLE_VERBS[unreadKind];
         }
         // Resolve the decision-event phrase + decider when the unread
@@ -1746,7 +1788,7 @@ export async function buildContextPhrase(
         let headDecisionEvent = "";
         let headDecisionDecider = "";
         let headDecisionRefHashid = "";
-        if (unreadKind && DECISION_EVENT_VERBS[unreadKind] && !headDecisionDigest) {
+        if (unreadKind && DECISION_EVENT_VERBS[unreadKind] && !isBundleMode) {
             headDecisionEvent = DECISION_EVENT_VERBS[unreadKind];
             headDecisionDecider = unreadHead?.by_agent ?? "";
             // Look up the original proposal hashid via the parent_id link
@@ -1765,10 +1807,10 @@ export async function buildContextPhrase(
             const isTicketRoot = unreadKind === "ticket_created";
             const isLifecycle = !!LIFECYCLE_VERBS[unreadKind];
             const isDecisionEvent = !!DECISION_EVENT_VERBS[unreadKind];
-            if (!isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.hashid === "string") {
+            if (!isBundleMode && !isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.hashid === "string") {
                 headCommentHashid = unreadHead.hashid;
             }
-            if (!isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.body === "string" && unreadHead.body) {
+            if (!isBundleMode && !isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.body === "string" && unreadHead.body) {
                 headBody = stripMarkdown(unreadHead.body);
             }
             // Title lookup for comment heads (the unread row doesn't carry
@@ -1787,6 +1829,21 @@ export async function buildContextPhrase(
             } else if (isTicketRoot && !head.title && unreadHead.title) {
                 head = { ...head, title: unreadHead.title };
             }
+        }
+        // #1351 — assemble the same-ticket bundle now the head's title is
+        // resolved. Compact refs only (no body), newest on top / oldest at the
+        // bottom (the window is ASC = oldest first, so reverse). Each line
+        // carries its own hashid so the agent can open any single event.
+        if (isBundleMode) {
+            const bundleLine = (m: (typeof unreadMsgs)[number]): string => {
+                const base = (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
+                const ref = typeof m?.hashid === "string" && m.hashid ? ` (#${m.hashid})` : "";
+                const by = m?.by_agent ? ` by ${m.by_agent}` : "";
+                return `${base}${ref}${by}`;
+            };
+            const lines = [...sameTicket].reverse().map(bundleLine).join("\n");
+            const titlePart = head?.title ? `: ${head.title}` : "";
+            headBundle = `#${headTicketId}${titlePart} — ${sameTicket.length} updates:\n${lines}`;
         }
         // #999 — event-triggered wake (SSE hint present) : anchor the phrase
         // on the hint's comment so it renders COMMENT-centric (body + ref)
@@ -1927,7 +1984,7 @@ export async function buildContextPhrase(
         // the responsible maintainer), the wake is informational — it must not
         // read as a triage push. The backlog CTA is untouched (already gated to
         // claimable heads); a new-ticket wake stays as-is (not in scope).
-        const headIsEvent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent);
+        const headIsEvent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent || headBundle);
         if (headIsEvent && headClaimable === undefined && head?.id) {
             // Defensive fill for the paths that set an event branch without the
             // title fetch above (e.g. the hint-anchored comment with a head
@@ -1960,7 +2017,7 @@ export async function buildContextPhrase(
             // (comment, new ticket, lifecycle, decision-event, backlog).
             // The template grammar lacks an else-empty operator so the
             // inversion lives here.
-            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !headLifecycleVerb && !headDecisionEvent && !headDecisionDigest && !backlogMode) ? "1" : "",
+            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !headLifecycleVerb && !headDecisionEvent && !headBundle && !backlogMode) ? "1" : "",
             backlog_mode: backlogMode,
             head_comment_hashid: headCommentHashid,
             head_body: headBody,
@@ -1971,7 +2028,10 @@ export async function buildContextPhrase(
             head_decision_event: headDecisionEvent,
             // #1163 S2 — pré-formaté comme head_decision_event ; branche
             // mutuellement exclusive (le single est éteint quand le digest fire).
-            head_decision_digest: headDecisionDigest,
+            // #1351 — the same-ticket bundle (multi-line, compact refs).
+            // Supersedes the #1163 `head_decision_digest` (decisions are one
+            // kind of bundled event now).
+            head_bundle: headBundle,
             head_decision_decider: headDecisionDecider,
             head_decision_ref_hashid: headDecisionRefHashid,
             project_scope: scope,
@@ -2014,7 +2074,7 @@ export async function buildContextPhrase(
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
-            + "{head_decision_digest:+{head_decision_digest}}"
+            + "{head_bundle:+{head_bundle}}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_actor:+ {head_last_actor} is waiting on your reply.} Triage the ticket.}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
@@ -2026,7 +2086,7 @@ export async function buildContextPhrase(
         // to cover all 5 branches. The user template still WINS when it produces
         // non-empty output ; only the missing-branch case falls back.
         const hasHead = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent
-            || head?.kind === "new ticket" || backlogMode);
+            || headBundle || head?.kind === "new ticket" || backlogMode);
         if (!cta && hasHead) {
             cta = renderSlot({}, "wake_master", vars, wakeMasterDefault, tone);
         }
@@ -2042,12 +2102,12 @@ export async function buildContextPhrase(
         // (FIFO comment, lifecycle, new ticket, or backlog). When false
         // the phrase is just the idle culture+lead — drain-style wake
         // reasons skip on it.
-        const hasContent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent || headDecisionDigest || head?.kind === "new ticket" || backlogMode);
+        const hasContent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent || headBundle || head?.kind === "new ticket" || backlogMode);
         // #786 — surface the backlog-branch ticket id so the inject site
         // can start the per-consumer cooldown clock. Only when the
         // backlog branch actually fired (not on FIFO / lifecycle).
         const backlogTicketId = (backlogMode && head?.id) ? head.id : null;
-        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: digestExtraSeenIds };
+        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: bundleExtraSeenIds };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
@@ -2057,7 +2117,7 @@ export async function buildContextPhrase(
             // A triggered gate counts as content even if the FIFO is empty.
             hasContent: hasContent || gateResults.length > 0,
             backlogTicketId,
-            extraSeenIds: digestExtraSeenIds,
+            extraSeenIds: bundleExtraSeenIds,
         };
     } catch {
         return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null, extraSeenIds: [] };

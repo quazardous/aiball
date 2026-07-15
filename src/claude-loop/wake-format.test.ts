@@ -171,6 +171,103 @@ test("#1350 backlog Triage CTA never carries the fyi suffix", async () => {
     assert.doesNotMatch(res.phrase, FYI);
 });
 
+// #1351 — same-ticket bundle: ≥2 unread events on the head's ticket are
+// delivered as ONE wake (compact refs, newest on top / oldest at the bottom),
+// and the folded-in events are marked seen via extraSeenIds.
+test("#1351 ≥2 events on the SAME ticket → one bundle, newest on top / oldest at bottom", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 3 }),
+            unread: async () => ({
+                messages: [
+                    { id: 601, kind: "comment_added", ticket_id: 920, hashid: "aaa111", body: "oldest body" },
+                    { id: 602, kind: "ticket_reopened", ticket_id: 920, hashid: "bbb222" },
+                    { id: 603, kind: "resolution_rejected", ticket_id: 920, hashid: "ccc333", by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "shared ticket", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /#920: shared ticket — 3 updates:/);
+    assert.match(res.phrase, /resolution REJECT \(#ccc333\) by david/);
+    assert.match(res.phrase, /reopened \(#bbb222\)/);
+    assert.match(res.phrase, /comment \(#aaa111\)/);
+    // newest (603) on top, oldest (601) at the bottom
+    assert.ok(
+        res.phrase.indexOf("resolution REJECT") < res.phrase.indexOf("comment (#aaa111)"),
+        "newest event must render above the oldest",
+    );
+    // compact refs only — the comment body is dropped in bundle mode
+    assert.doesNotMatch(res.phrase, /oldest body/);
+    // head (601) stays the inject-time prune target; 602/603 are the extras
+    assert.equal(res.headMessageId, 601);
+    assert.deepEqual([...(res.extraSeenIds ?? [])].sort((a, b) => a - b), [602, 603]);
+    assert.equal(res.hasContent, true);
+});
+
+test("#1351 events on DIFFERENT tickets → no bundle, head renders single", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 701, kind: "comment_added", ticket_id: 920, hashid: "aaa", body: "on 920" },
+                    { id: 702, kind: "comment_added", ticket_id: 921, hashid: "bbb", body: "on 921" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "t920", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /on 920/);
+    assert.doesNotMatch(res.phrase, /updates:/);
+    assert.doesNotMatch(res.phrase, /on 921/);
+    assert.deepEqual(res.extraSeenIds ?? [], []);
+});
+
+test("#1351 revives #1163: ≥2 decision events on one ticket → bundled, not one turn each", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 801, kind: "plan_accepted", ticket_id: 920, hashid: "p1", by_agent: "david" },
+                    { id: 802, kind: "resolution_accepted", ticket_id: 920, hashid: "p2", by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "decided", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /2 updates:/);
+    assert.match(res.phrase, /plan ACCEPTED \(#p1\) by david/);
+    assert.match(res.phrase, /resolution ACCEPTED \(#p2\) by david/);
+    assert.deepEqual(res.extraSeenIds ?? [], [802]);
+});
+
+test("#1351 bundle on a NON-claimable ticket carries the #1350 fyi suffix", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 901, kind: "comment_added", ticket_id: 920, hashid: "aaa", body: "b1" },
+                    { id: 902, kind: "comment_added", ticket_id: 920, hashid: "bbb", body: "b2" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "watched", claimable: false } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /2 updates:/);
+    assert.match(res.phrase, FYI);
+});
+
 test("#999 event wake with FIFO already carrying the comment → still comment-centric", async () => {
     const res = await buildContextPhrase(
         stubClient({
