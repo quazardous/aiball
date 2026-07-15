@@ -1653,6 +1653,13 @@ export async function buildContextPhrase(
         let headCommentHashid = "";
         let headBody = "";
         let headLifecycleVerb = "";
+        // #1350 — per-consumer `claimable` of the head event's ticket, read
+        // from the same best-effort getTicket that already fetches the title.
+        // Drives the "(fyi — action is not mandatory)" suffix on event wakes:
+        // a subscriber who isn't the responsible maintainer (non-claimable)
+        // gets an info wake, not a triage push. `undefined` = unknown → no
+        // suffix (fail toward the current actionable framing).
+        let headClaimable: boolean | undefined;
         // Drop empty comments without a pending decision. The FIFO head
         // must carry actionable content (body, or a pending decision
         // proposal); otherwise treat as missing so the wake falls
@@ -1769,10 +1776,13 @@ export async function buildContextPhrase(
             if (!head.title && !isTicketRoot) {
                 try {
                     const t = await client.getTicket(head.id, { summary: true }) as {
-                        ticket?: { title?: string | null };
+                        ticket?: { title?: string | null; claimable?: boolean };
                     };
                     const title = t.ticket?.title;
                     if (typeof title === "string" && title) head = { ...head, title };
+                    // #1350 — piggyback the claimable flag (same fetch, no extra
+                    // round-trip) for the fyi suffix on this event wake.
+                    if (typeof t.ticket?.claimable === "boolean") headClaimable = t.ticket.claimable;
                 } catch { /* best-effort */ }
             } else if (isTicketRoot && !head.title && unreadHead.title) {
                 head = { ...head, title: unreadHead.title };
@@ -1911,6 +1921,25 @@ export async function buildContextPhrase(
         // never a misleading "look #N… Triage" for a concrete event.
         const backlogMode = (pingCount === 0 && hasClaimableHead && !blocking && !eventHint)
             ? "1" : "";
+        // #1350 — role-conditioned "(fyi — action is not mandatory)" suffix on
+        // EVENT wakes (comment / lifecycle / decision-event). When the head
+        // event's ticket is non-claimable for this consumer (subscriber, not
+        // the responsible maintainer), the wake is informational — it must not
+        // read as a triage push. The backlog CTA is untouched (already gated to
+        // claimable heads); a new-ticket wake stays as-is (not in scope).
+        const headIsEvent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent);
+        if (headIsEvent && headClaimable === undefined && head?.id) {
+            // Defensive fill for the paths that set an event branch without the
+            // title fetch above (e.g. the hint-anchored comment with a head
+            // already resolved). Best-effort — failure leaves no suffix.
+            try {
+                const t = await client.getTicket(head.id, { summary: true }) as {
+                    ticket?: { claimable?: boolean };
+                };
+                if (typeof t.ticket?.claimable === "boolean") headClaimable = t.ticket.claimable;
+            } catch { /* best-effort — no suffix on failure */ }
+        }
+        const headFyi = headIsEvent && headClaimable === false ? "1" : "";
         const vars = {
             culture,
             ping_count: pingCount || "",
@@ -1952,6 +1981,11 @@ export async function buildContextPhrase(
             // waiting on your reply » porte l'info utile. "" quand tier-2 (j'étais
             // le dernier acteur) → le look reste neutre.
             head_last_actor: headLastActor,
+            // #1350 — "1" when the head EVENT wake is for a ticket this consumer
+            // isn't responsible for (non-claimable). The template appends
+            // "(fyi — action is not mandatory)" to the comment/lifecycle/
+            // decision branches so a watcher isn't pushed to over-act.
+            head_fyi: headFyi,
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
             // empty → renders to nothing). David puts the placeholder in his
             // wake_master override where he wants it.
@@ -1974,6 +2008,11 @@ export async function buildContextPhrase(
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
             + "{head_decision_digest:+{head_decision_digest}}"
+            // #1350 — role-conditioned suffix on the 3 event branches above
+            // (comment / lifecycle / decision). `head_fyi` is only set for a
+            // non-claimable event head, so this attaches to whichever event
+            // branch rendered and never to new-ticket / backlog.
+            + "{head_fyi:+ (fyi — action is not mandatory)}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_actor:+ {head_last_actor} is waiting on your reply.} Triage the ticket.}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override

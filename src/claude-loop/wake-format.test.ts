@@ -84,6 +84,87 @@ test("#1215 backlog head with no last_actor → plain look, no waiting clause", 
     assert.doesNotMatch(res.phrase, /\(state /);
 });
 
+// #1350 — the "(fyi — action is not mandatory)" suffix on EVENT wakes when the
+// head event's ticket is non-claimable for this consumer (subscriber, not the
+// responsible maintainer). Applies to the comment / lifecycle / decision-event
+// branches; never to a claimable head, never to the backlog Triage CTA.
+const FYI = /\(fyi — action is not mandatory\)/;
+
+test("#1350 comment event on a NON-claimable ticket → fyi suffix, no triage push", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 1 }),
+            unread: async () => ({
+                messages: [{ id: 501, kind: "comment_added", ticket_id: 920, hashid: "qctwhw", body: "style not correct" }],
+            }),
+            getTicket: async () => ({ ticket: { title: "watched ticket", claimable: false } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /style not correct/);
+    assert.match(res.phrase, /#920/);
+    assert.match(res.phrase, FYI);
+    assert.doesNotMatch(res.phrase, /Triage the ticket/);
+});
+
+test("#1350 comment event on a CLAIMABLE ticket → NO fyi suffix", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 1 }),
+            unread: async () => ({
+                messages: [{ id: 502, kind: "comment_added", ticket_id: 920, hashid: "qctwhw", body: "please look at this" }],
+            }),
+            getTicket: async () => ({ ticket: { title: "my ticket", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /please look at this/);
+    assert.doesNotMatch(res.phrase, FYI);
+});
+
+test("#1350 lifecycle (reopened) event on a NON-claimable ticket → fyi suffix", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 1 }),
+            unread: async () => ({
+                messages: [{ id: 503, kind: "ticket_reopened", ticket_id: 920 }],
+            }),
+            getTicket: async () => ({ ticket: { title: "watched ticket", claimable: false } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /reopened/i);
+    assert.match(res.phrase, /#920/);
+    assert.match(res.phrase, FYI);
+});
+
+test("#1350 decision-event (resolution_rejected) on a NON-claimable ticket → fyi suffix", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 1 }),
+            unread: async () => ({
+                messages: [{ id: 504, kind: "resolution_rejected", ticket_id: 920, by_agent: "david", parent_message_id: 480 }],
+            }),
+            getTicket: async () => ({ ticket: { title: "watched ticket", claimable: false } }),
+            getMessage: async () => ({ hashid: "abc123" }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /REJECT/);
+    assert.match(res.phrase, /#920/);
+    assert.match(res.phrase, FYI);
+});
+
+test("#1350 backlog Triage CTA never carries the fyi suffix", async () => {
+    const res = await buildContextPhrase(stubClient(), null, PINGS_YAML);
+    assert.match(res.phrase, /look #977/);
+    assert.doesNotMatch(res.phrase, FYI);
+});
+
 test("#999 event wake with FIFO already carrying the comment → still comment-centric", async () => {
     const res = await buildContextPhrase(
         stubClient({
