@@ -1238,6 +1238,28 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         req.query.brief === "1" ||
         req.query.digest === "1";
     const summary = !fullThread;
+    // #1350 — per-consumer `actionable`/`claimable` on the single-ticket
+    // header, mirroring the list-row flags (see ~644-673). The wake renderer
+    // reads `claimable` on the head event's ticket to decide the
+    // "(fyi — action is not mandatory)" suffix: a subscriber who is not the
+    // responsible maintainer (non-claimable) gets an info wake, not a triage
+    // push. Same helper + same owned-projects/can-claim gate as the list, so
+    // the two views can never disagree.
+    const flagConsumer = consumerOf(req);
+    const { actionableIds: hdrActionableIds } = computeActionableTicketIds(flagConsumer);
+    const hdrOwnedProjects = new Set(
+        listSubscriptions(flagConsumer)
+            .filter((s) => s.role === "owner")
+            .map((s) => s.project),
+    );
+    const hdrConsumerRow = getConsumer(flagConsumer);
+    const hdrCanClaim =
+        (!hdrConsumerRow || hdrConsumerRow.can_claim !== false) &&
+        (req as AuthenticatedRequest).no_claim_hint !== true;
+    const hdrActionable = hdrActionableIds.has(t.id);
+    const hdrClaimable = hdrCanClaim
+        ? hdrActionable && hdrOwnedProjects.has(t.project)
+        : t.assignee === flagConsumer && hdrActionable;
     const headerBase = {
         id: t.id,
         project: t.project,
@@ -1291,6 +1313,11 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // requesting consumer. Frontend uses it to skip the
         // "marking-as-read" pulse when landing on an already-read ticket.
         unread: ticketUnreadFlags(consumerOf(req), [t.id]).get(t.id) ?? false,
+        // #1350 — per-consumer work-landscape flags, same semantics as the
+        // list rows. `claimable` is the wake renderer's discriminator for the
+        // info-vs-triage suffix on event wakes.
+        actionable: hdrActionable,
+        claimable: hdrClaimable,
         // #928 david `2uxj45` (Slice 1) : ta dernière décision postée sur
         // ce ticket (then:plan / then:resolved / then:wontfix /
         // then:escalate) — surface l'état pending/accepted/rejected en
