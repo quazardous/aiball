@@ -105,6 +105,12 @@ test("#1350 comment event on a NON-claimable ticket → fyi suffix, no triage pu
     assert.match(res.phrase, /style not correct/);
     assert.match(res.phrase, /#920/);
     assert.match(res.phrase, FYI);
+    // #1350 (david `2wjbm2`) — the marker is PREFIXED, not appended: it must
+    // come BEFORE the (truncatable) comment body so it can't be cut off.
+    assert.ok(
+        res.phrase.search(FYI) < res.phrase.indexOf("style not correct"),
+        `fyi marker must precede the body: ${JSON.stringify(res.phrase)}`,
+    );
     assert.doesNotMatch(res.phrase, /Triage the ticket/);
 });
 

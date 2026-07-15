@@ -2003,16 +2003,18 @@ export async function buildContextPhrase(
         // Strict binary rule on the wake firing side (timer.ts:tryWake) —
         // fire ONLY on event OR backlog.
         const wakeMasterDefault =
-            "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
+            // #1350 — role-conditioned marker, PREFIXED (not appended) so it
+            // survives truncation of a long comment body: it must be the first
+            // thing the agent reads, not trailing after variable-length content
+            // that can be cut off. `head_fyi` is only set for a non-claimable
+            // EVENT head (comment / lifecycle / decision), so the prefix never
+            // shows on a new-ticket or backlog wake.
+            "{head_fyi:+(fyi — action is not mandatory) }"
+            + "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
             + "{head_decision_digest:+{head_decision_digest}}"
-            // #1350 — role-conditioned suffix on the 3 event branches above
-            // (comment / lifecycle / decision). `head_fyi` is only set for a
-            // non-claimable event head, so this attaches to whichever event
-            // branch rendered and never to new-ticket / backlog.
-            + "{head_fyi:+ (fyi — action is not mandatory)}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_actor:+ {head_last_actor} is waiting on your reply.} Triage the ticket.}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
