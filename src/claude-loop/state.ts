@@ -1910,10 +1910,15 @@ export async function buildContextPhrase(
                 // CTA re-fire dessus alors que le user CLI ne le voit
                 // même plus dans le backlog. Aligne le picker sur le CLI :
                 // pick le premier NON-cooled (= comportement attendu).
+                // #1355 — `limit:"500"` (was 10) mirrors the bar-counter query
+                // (kernel.ts refreshCounters). With 10, ≥10 cooled tickets
+                // sorted ahead of the sole non-cooled head made the picker miss
+                // it → head null → no wake, while the counter (500) still saw it
+                // → b:1 armed the decount → phantom loop. Same cap on both ends.
                 const raw = await client.listTickets({
                     ...(project ? { project } : {}),
                     backlog: "1",
-                    limit: "10",
+                    limit: "500",
                     cooldown_sec: cooldownSec > 0 ? String(cooldownSec) : undefined,
                 });
                 const rows = Array.isArray(raw)
