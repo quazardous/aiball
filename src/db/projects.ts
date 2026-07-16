@@ -351,27 +351,18 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
-    // #273: latest-decision-wins gate (legacy ticket_resolved/reopened +
-    // decision-on-comment, last signal per ticket). Replaces the old
-    // monotonic gate that the lifecycle loop + decision block used to set.
-    const gatedByDecisionByTicket = decisionGateByTicket();
-    const blockedByTicket = new Map<number, boolean>();
+    // #1368 — the decision / blocked gates used to be re-derived here for
+    // `actionable_count`; that inline copy drifted (it missed #418/#436) and is
+    // gone. `computeActionableTicketIds` owns every actionable gate now. This
+    // loop only resolves the CLOSED state, which `open_count` / `pending_count`
+    // still need.
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
             // Close needs to be approved to count (rejected closes
             // shouldn't shut a ticket).
             if (ev.status === "approved") closedByTicket.set(ev.ticket_id, true);
         } else if (ev.kind === "ticket_reopened") {
-            if (ev.status === "approved") {
-                closedByTicket.set(ev.ticket_id, false);
-                blockedByTicket.set(ev.ticket_id, false);
-            }
-        } else if (ev.kind === "ticket_blocked") {
-            // ticket_blocked is always auto-approved (it's a signal,
-            // not a contested mutation) but be defensive anyway.
-            if (ev.status === "approved" || ev.status === "pending") {
-                blockedByTicket.set(ev.ticket_id, true);
-            }
+            if (ev.status === "approved") closedByTicket.set(ev.ticket_id, false);
         }
     }
 
@@ -467,62 +458,22 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
     const landscapeEntriesPerProject = new Map<string, LandscapeEntry[]>();
     const landscapeLastActivityPerProject = new Map<string, string>();
 
-    // #B.123 phase B.4: gate actionable_count on active depends_on
-    // relations to an OPEN blocker. Walk all ticket_relation events in
-    // id order, keep the latest per (source, target) pair, then build
-    // the set of ticket ids whose latest active relation says "blocked
-    // by something still open". A `blocks` from A→B is the inverse of
-    // depends_on from B→A; both forms gate the dependent ticket.
-    const openTicketIds = new Set<number>();
-    for (const t of openCounts) {
-        if (t.status !== "approved") continue;
-        if (closedByTicket.get(t.id) === true) continue;
-        if (t.postponedUntil && t.postponedUntil > nowStr) continue;
-        openTicketIds.add(t.id);
-    }
-    const latestRelations = db.select({
-        sourceTicketId: schema.messages.ticketId,
-        targetTicketId: schema.messages.sourceTicketId,
-        meta: schema.messages.meta,
-        id: schema.messages.id,
-    })
-        .from(schema.messages)
-        .where(and(
-            eq(schema.messages.kind, "ticket_relation"),
-            eq(schema.messages.status, "approved"),
-        ))
-        .orderBy(schema.messages.id)
-        .all();
-    const latestPerPair = new Map<string, { source: number; target: number; kind: string }>();
-    for (const r of latestRelations) {
-        if (!r.meta || !r.targetTicketId) continue;
-        let kind: string | undefined;
-        try {
-            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
-            kind = m.relation?.kind;
-        } catch { continue; }
-        if (!kind) continue;
-        latestPerPair.set(`${r.sourceTicketId}-${r.targetTicketId}`, {
-            source: r.sourceTicketId,
-            target: r.targetTicketId,
-            kind,
-        });
-    }
-    const gatedByBlocker = new Set<number>();
-    for (const r of latestPerPair.values()) {
-        if (r.kind === "depends_on" && openTicketIds.has(r.target)) {
-            gatedByBlocker.add(r.source);
-        } else if (r.kind === "blocks" && openTicketIds.has(r.source)) {
-            // A blocks B → B is gated when A is open.
-            gatedByBlocker.add(r.target);
-        }
-    }
+    // #1368 — the depends_on/blocks gating (#B.123 phase B.4) used to be
+    // re-walked here (a whole ticket_relation scan) purely to gate
+    // `actionable_count`. `computeActionableTicketIds` already does it, so this
+    // duplicate — one more copy free to drift — is gone along with its query.
 
-    // #265/#374: per-consumer "I acted last → awaiting someone else" gate,
-    // applied to actionable_count exactly like the SET path
-    // (computeActionableTicketIds). Only when a consumer is in scope;
-    // global callers keep pre-#265 behaviour. #374: last_actor + sole-participant.
-    const awaitingOtherSet = consumer_id ? lastActorExclusions(consumer_id) : null;
+    // #1368 — `actionable_count` DELEGATES to the canonical gate instead of
+    // re-deriving it inline. The inline copy had drifted: it applied the
+    // decision / blocked / depends_on / last-actor gates but MISSED the
+    // #418/#436 held-by-other exclusion (a ticket assigned or claimed by
+    // ANOTHER agent leaves this consumer's actionable pool). So it counted
+    // other agents' work as actionable for you — which armed the wake countdown
+    // for a ticket the backlog picker (canonical gate) then refused to surface:
+    // the drain skipped and re-armed forever (david's "syndrome event fantôme",
+    // `o:3 b:0 e:0 📨 Ns` on runic), and the UI sidebar over-counted too.
+    // One source of truth now; the set is cached (flags-cache) so this is cheap.
+    const { actionableIds } = computeActionableTicketIds(consumer_id);
 
     for (const t of openCounts) {
         if (t.status !== "approved") continue;
@@ -542,20 +493,10 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
                 landscapeLastActivityPerProject.set(t.project, t.lastActorAt);
             }
         }
-        // Actionable = open and NOT marked resolved/blocked by an agent
-        // AND not gated by an active depends_on to an open blocker
-        // (#B.123 phase B.4) AND not awaiting-someone-else for this
-        // consumer (#265). The autopoll trigger uses this so:
-        //   - a resolved/blocked ticket doesn't nag (#B.119)
-        //   - a ticket waiting on an unfinished dependency doesn't
-        //     surface as work to do (gating clears when blocker closes)
-        //   - a ticket where the agent already replied last doesn't nag
-        //     while it's in the human's court (#239 conversational case)
-        const isGatedByDecision = gatedByDecisionByTicket.get(t.id) === true;
-        const isBlocked = blockedByTicket.get(t.id) === true;
-        const isGated = gatedByBlocker.has(t.id);
-        const isAwaitingOther = !!awaitingOtherSet && awaitingOtherSet.has(t.id);
-        if (!isGatedByDecision && !isBlocked && !isGated && !isAwaitingOther) {
+        // #1368 — single source of truth: the canonical set already folds in
+        // every gate (resolved/blocked #B.119, depends_on #B.123 B.4,
+        // last-actor #265/#374, AND held-by-other #418/#436).
+        if (actionableIds.has(t.id)) {
             actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
         }
     }
