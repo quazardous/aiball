@@ -249,24 +249,33 @@ export function deriveBarCounters(
 }
 
 /**
- * #1355 — the "should the `📨 Ns` countdown be armed?" predicate, extracted
- * pure so it can be unit-tested (`recomputeNextWake` lives in kernel.ts which
- * runs `main()` at import → not directly testable).
+ * #1355 / #1365 — the "should the `📨 Ns` countdown be armed?" predicate,
+ * extracted pure so it can be unit-tested (`recomputeNextWake` lives in
+ * kernel.ts which runs `main()` at import → not directly testable).
  *
- * Mirrors the `checkHasWork` delivery gate : a heartbeat drain only injects
- * when there's a pending event hint, an unread FIFO ping, or a tier-1
- * actionable ticket (`has = pings || actionable>0`). Arming on the RAW backlog
- * counter instead — which folds in non-deliverable tier-2/3/4 reminders — made
- * the decount loop to zero forever with nothing ever sent ("syndrome event
- * fantôme"). The gate here is the arming half of that same condition ; the
- * caller still layers the idle/boot/held-present checks on top.
+ * Arm on COUNTABLE WORK only — an unread FIFO ping (`events`) or a tier-1
+ * actionable ticket (`actionableOpen`), mirroring the `checkHasWork` delivery
+ * gate (`has = pings || actionable>0`).
+ *
+ * Two legs were tried and removed, both unsound:
+ *  - the RAW backlog counter (#1355) folded in non-deliverable tier-2/3/4
+ *    reminders that `checkHasWork` never delivers;
+ *  - a pending SSE hint (#1365) promised a wake the drain can't keep: when
+ *    `events === 0` the hint's event is NOT in the unread FIFO (self-ping,
+ *    already-seen, filtered), so the drain has nothing to deliver and skips —
+ *    arming on it is a phantom BY CONSTRUCTION. And when the hint's event IS in
+ *    the FIFO, `events > 0` already arms — the leg was redundant there.
+ * Both made the decount loop to zero forever with nothing ever sent (david's
+ * "syndrome event fantôme"). `pendingWakeHint` keeps its real job — anchoring
+ * the comment-centric render at drain time (#999) — it just can't arm.
+ *
+ * The caller still layers the idle/boot/held-present checks on top.
  */
 export function wakeCountdownArmable(opts: {
-    pendingHint: boolean;
     events: number;
     actionableOpen: number;
 }): boolean {
-    return opts.pendingHint || opts.events > 0 || opts.actionableOpen > 0;
+    return opts.events > 0 || opts.actionableOpen > 0;
 }
 
 /**

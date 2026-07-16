@@ -1109,18 +1109,33 @@ test("#1355 deriveBarCounters: missing actionable_count → 0 (not NaN)", () => 
     assert.deepEqual(c, { open: 5, backlog: 1, events: 0, actionableOpen: 0 });
 });
 
-// #1355 — the countdown-arming predicate mirrors the checkHasWork delivery gate.
-test("#1355 wakeCountdownArmable: arms on pendingHint / events / actionableOpen; NOT on backlog-only", () => {
-    // A pending event hint always arms (an event wake is about to render).
-    assert.equal(wakeCountdownArmable({ pendingHint: true, events: 0, actionableOpen: 0 }), true);
-    // An unread FIFO ping arms.
-    assert.equal(wakeCountdownArmable({ pendingHint: false, events: 2, actionableOpen: 0 }), true);
+// #1355 / #1365 — the countdown arms on COUNTABLE WORK only, mirroring the
+// checkHasWork delivery gate (has = pings || actionable>0).
+test("#1355 wakeCountdownArmable: arms on events / actionableOpen", () => {
+    // An unread FIFO ping arms — the drain has something to pop.
+    assert.equal(wakeCountdownArmable({ events: 2, actionableOpen: 0 }), true);
     // A tier-1 actionable ticket arms (checkHasWork would deliver it).
-    assert.equal(wakeCountdownArmable({ pendingHint: false, events: 0, actionableOpen: 1 }), true);
-    // THE FIX : nothing deliverable → no arming, even though the raw backlog
-    // counter (tier-2/3/4 reminders) may be > 0. The caller passes
-    // actionableOpen (NOT backlog) so those never arm the phantom decount.
-    assert.equal(wakeCountdownArmable({ pendingHint: false, events: 0, actionableOpen: 0 }), false);
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 1 }), true);
+});
+
+test("#1355 wakeCountdownArmable: nothing countable → no arming (backlog-only never arms)", () => {
+    // The caller passes actionableOpen (NOT the raw backlog counter), so a
+    // backlog of tier-2/3/4 reminders — which checkHasWork never delivers —
+    // can't arm the phantom decount.
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0 }), false);
+});
+
+// #1365 — a pending SSE hint is NO LONGER an arming leg. Proof it was unsound:
+// with events === 0 the hint's event isn't in the unread FIFO (self-ping /
+// already-seen / filtered), so the drain has nothing to deliver and skips —
+// arming on it promised a wake that could never fire (the residual runic
+// phantom, b:0 e:0). When the hint's event IS in the FIFO, events > 0 arms
+// anyway, so the leg was redundant. The predicate now can't even see a hint.
+test("#1365 wakeCountdownArmable: a pending hint alone (events=0) does NOT arm — phantom by construction", () => {
+    // Whatever hint may be pending, with no countable work there's no countdown.
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0 }), false);
+    // …and a hint whose event IS in the FIFO still arms, via the events leg.
+    assert.equal(wakeCountdownArmable({ events: 1, actionableOpen: 0 }), true);
 });
 
 // #1014 — the #994 nextPaneBusy arm/dearm latch is retired ; paneBusy is now

@@ -1264,16 +1264,18 @@ function recomputeNextWake(): void {
     const ctx = snap.context;
     const bootDone = getIpcState().loopStart;
     const c = getIpcState().counters;
-    // #1355 — arm on `actionableOpen` (tier-1, in-my-court), NOT the raw
-    // backlog counter. The backlog counter includes tier-2/3/4 reminders
-    // (waiting-on-them / my-decision-pending / blocked) which `checkHasWork`
-    // never delivers (has = pings || actionable>0) → arming on them made the
-    // `📨 Ns` decount loop to zero forever with nothing ever injected (david's
-    // "syndrome event fantôme", #1355). Mirroring the delivery gate keeps the
-    // countdown honest : it shows iff a wake will actually fire.
+    // #1355 / #1365 — arm on COUNTABLE WORK only : an unread FIFO ping
+    // (`events`) or a tier-1 in-my-court ticket (`actionableOpen`), mirroring
+    // the `checkHasWork` delivery gate. NOT the raw backlog counter (#1355 —
+    // folds in tier-2/3/4 reminders the gate never delivers) and NOT a pending
+    // SSE hint (#1365 — when `events === 0` the hint's event isn't in the FIFO
+    // (self-ping / already-seen / filtered) so the drain skips it : arming on it
+    // is a phantom by construction ; and when it IS in the FIFO, `events > 0`
+    // arms anyway). Both legs looped the `📨 Ns` decount forever with nothing
+    // injected — david's "syndrome event fantôme". `pendingWakeHint` still
+    // anchors the comment-centric render at drain time (#999) ; it just can't arm.
     const actionableOpen = getIpcState().actionableOpen ?? 0;
     const somethingToDrain = wakeCountdownArmable({
-        pendingHint: pendingWakeHint !== undefined,
         events: c?.events ?? 0,
         actionableOpen,
     });
