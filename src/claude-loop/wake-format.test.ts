@@ -84,20 +84,25 @@ test("#1215 backlog head with no last_actor → plain look, no waiting clause", 
     assert.doesNotMatch(res.phrase, /\(state /);
 });
 
-// #1350 — the "(fyi — action is not mandatory)" suffix on EVENT wakes when the
-// head event's ticket is non-claimable for this consumer (subscriber, not the
-// responsible maintainer). Applies to the comment / lifecycle / decision-event
-// branches; never to a claimable head, never to the backlog Triage CTA.
-const FYI = /\(fyi — action is not mandatory\)/;
+// #1350 — the "(fyi — action is not mandatory)" marker on EVENT wakes fires on
+// the `actionable && !claimable` case only : the consumer is in the loop (ball
+// in their court) but can't act because they don't own the project. A closed /
+// tier-2 / tier-3 ticket is non-claimable too but is still the recipient's own
+// responsibility → NO marker (david `9sxan3` : #1355 closed must NOT be fyi).
+// The marker lives INSIDE the ref paren (comment) or as a single suffix paren
+// (lifecycle / decision / bundle) — never a free prefix (david `ysufez`).
+// Applies to comment / lifecycle / decision / bundle ; never to a claimable
+// head, never to a non-actionable head, never to the backlog Triage CTA.
+const FYI = /fyi — action is not mandatory/;
 
-test("#1350 comment event on a NON-claimable ticket → fyi suffix, no triage push", async () => {
+test("#1350 comment event on an actionable NON-claimable ticket → fyi folded into the ref paren", async () => {
     const res = await buildContextPhrase(
         stubClient({
             pingsCount: async () => ({ unread: 1 }),
             unread: async () => ({
                 messages: [{ id: 501, kind: "comment_added", ticket_id: 920, hashid: "qctwhw", body: "style not correct" }],
             }),
-            getTicket: async () => ({ ticket: { title: "watched ticket", claimable: false } }),
+            getTicket: async () => ({ ticket: { title: "watched ticket", actionable: true, claimable: false } }),
         }),
         null,
         PINGS_YAML,
@@ -105,23 +110,30 @@ test("#1350 comment event on a NON-claimable ticket → fyi suffix, no triage pu
     assert.match(res.phrase, /style not correct/);
     assert.match(res.phrase, /#920/);
     assert.match(res.phrase, FYI);
-    // #1350 (david `2wjbm2`) — the marker is PREFIXED, not appended: it must
-    // come BEFORE the (truncatable) comment body so it can't be cut off.
+    // #1350 (david `ysufez`) — the marker lives INSIDE the ref parenthesis, a
+    // single paren `(fyi — action is not mandatory · #920 / #qctwhw)`, NOT a
+    // free prefix that reads as a duplicated parenthesis.
+    assert.match(
+        res.phrase,
+        /\(fyi — action is not mandatory · #920 \/ #qctwhw\)/,
+        `fyi marker must fold into the ref paren: ${JSON.stringify(res.phrase)}`,
+    );
+    // The marker comes AFTER the body now (folded into the trailing ref).
     assert.ok(
-        res.phrase.search(FYI) < res.phrase.indexOf("style not correct"),
-        `fyi marker must precede the body: ${JSON.stringify(res.phrase)}`,
+        res.phrase.search(FYI) > res.phrase.indexOf("style not correct"),
+        `folded marker trails the body: ${JSON.stringify(res.phrase)}`,
     );
     assert.doesNotMatch(res.phrase, /Triage the ticket/);
 });
 
-test("#1350 comment event on a CLAIMABLE ticket → NO fyi suffix", async () => {
+test("#1350 comment event on a CLAIMABLE ticket → NO fyi marker", async () => {
     const res = await buildContextPhrase(
         stubClient({
             pingsCount: async () => ({ unread: 1 }),
             unread: async () => ({
                 messages: [{ id: 502, kind: "comment_added", ticket_id: 920, hashid: "qctwhw", body: "please look at this" }],
             }),
-            getTicket: async () => ({ ticket: { title: "my ticket", claimable: true } }),
+            getTicket: async () => ({ ticket: { title: "my ticket", actionable: true, claimable: true } }),
         }),
         null,
         PINGS_YAML,
@@ -130,14 +142,34 @@ test("#1350 comment event on a CLAIMABLE ticket → NO fyi suffix", async () => 
     assert.doesNotMatch(res.phrase, FYI);
 });
 
-test("#1350 lifecycle (reopened) event on a NON-claimable ticket → fyi suffix", async () => {
+// #1350 david `9sxan3` — a comment on a NON-actionable ticket (e.g. #1355 just
+// closed → actionable=false, so claimable=false too) is the recipient's own
+// responsibility, NOT a watcher wake : it must render as a plain wake, no marker.
+test("#1350 comment event on a NON-actionable ticket (closed / tier-2/3) → NO fyi marker", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 1 }),
+            unread: async () => ({
+                messages: [{ id: 505, kind: "comment_added", ticket_id: 920, hashid: "qctwhw", body: "look at runic" }],
+            }),
+            getTicket: async () => ({ ticket: { title: "my closed ticket", actionable: false, claimable: false } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /look at runic/);
+    assert.match(res.phrase, /#920/);
+    assert.doesNotMatch(res.phrase, FYI);
+});
+
+test("#1350 lifecycle (reopened) event on an actionable NON-claimable ticket → fyi suffix", async () => {
     const res = await buildContextPhrase(
         stubClient({
             pingsCount: async () => ({ unread: 1 }),
             unread: async () => ({
                 messages: [{ id: 503, kind: "ticket_reopened", ticket_id: 920 }],
             }),
-            getTicket: async () => ({ ticket: { title: "watched ticket", claimable: false } }),
+            getTicket: async () => ({ ticket: { title: "watched ticket", actionable: true, claimable: false } }),
         }),
         null,
         PINGS_YAML,
@@ -147,14 +179,14 @@ test("#1350 lifecycle (reopened) event on a NON-claimable ticket → fyi suffix"
     assert.match(res.phrase, FYI);
 });
 
-test("#1350 decision-event (resolution_rejected) on a NON-claimable ticket → fyi suffix", async () => {
+test("#1350 decision-event (resolution_rejected) on an actionable NON-claimable ticket → fyi suffix", async () => {
     const res = await buildContextPhrase(
         stubClient({
             pingsCount: async () => ({ unread: 1 }),
             unread: async () => ({
                 messages: [{ id: 504, kind: "resolution_rejected", ticket_id: 920, by_agent: "david", parent_message_id: 480 }],
             }),
-            getTicket: async () => ({ ticket: { title: "watched ticket", claimable: false } }),
+            getTicket: async () => ({ ticket: { title: "watched ticket", actionable: true, claimable: false } }),
             getMessage: async () => ({ hashid: "abc123" }),
         }),
         null,
@@ -249,7 +281,7 @@ test("#1351 revives #1163: ≥2 decision events on one ticket → bundled, not o
     assert.deepEqual(res.extraSeenIds ?? [], [802]);
 });
 
-test("#1351 bundle on a NON-claimable ticket carries the #1350 fyi suffix", async () => {
+test("#1351 bundle on an actionable NON-claimable ticket carries the #1350 fyi suffix", async () => {
     const res = await buildContextPhrase(
         stubClient({
             pingsCount: async () => ({ unread: 2 }),
@@ -259,7 +291,7 @@ test("#1351 bundle on a NON-claimable ticket carries the #1350 fyi suffix", asyn
                     { id: 902, kind: "comment_added", ticket_id: 920, hashid: "bbb", body: "b2" },
                 ],
             }),
-            getTicket: async () => ({ ticket: { title: "watched", claimable: false } }),
+            getTicket: async () => ({ ticket: { title: "watched", actionable: true, claimable: false } }),
         }),
         null,
         PINGS_YAML,

@@ -1670,11 +1670,17 @@ export async function buildContextPhrase(
         let headLifecycleVerb = "";
         // #1350 — per-consumer `claimable` of the head event's ticket, read
         // from the same best-effort getTicket that already fetches the title.
-        // Drives the "(fyi — action is not mandatory)" suffix on event wakes:
-        // a subscriber who isn't the responsible maintainer (non-claimable)
-        // gets an info wake, not a triage push. `undefined` = unknown → no
-        // suffix (fail toward the current actionable framing).
+        // Drives the "(fyi — action non requise)" marker on event wakes.
+        // #1350 david `9sxan3`/`ysufez` : the marker fires ONLY on the
+        // `actionable && !claimable` case — a watcher who IS in the loop (the
+        // ticket is in their court) but CANNOT act on it because they don't own
+        // the project (cross-project consumer). NOT on `!claimable` alone : a
+        // closed / tier-2 / tier-3 ticket is non-claimable too but is still the
+        // recipient's own responsibility (e.g. #1355 closed → a bare `!claimable`
+        // wrongly tagged it fyi). Both flags come from the same ticket header ;
+        // `undefined` = unknown → no marker (fail toward the plain framing).
         let headClaimable: boolean | undefined;
+        let headActionable: boolean | undefined;
         // #1351 — same-ticket bundle detection (computed BEFORE the empty-head
         // drop so a bundle survives even when its oldest event is a bare
         // comment). When ≥2 unread events concern the HEAD's ticket, they are
@@ -1818,13 +1824,15 @@ export async function buildContextPhrase(
             if (!head.title && !isTicketRoot) {
                 try {
                     const t = await client.getTicket(head.id, { summary: true }) as {
-                        ticket?: { title?: string | null; claimable?: boolean };
+                        ticket?: { title?: string | null; claimable?: boolean; actionable?: boolean };
                     };
                     const title = t.ticket?.title;
                     if (typeof title === "string" && title) head = { ...head, title };
-                    // #1350 — piggyback the claimable flag (same fetch, no extra
-                    // round-trip) for the fyi suffix on this event wake.
+                    // #1350 — piggyback the actionable + claimable flags (same
+                    // fetch, no extra round-trip) for the fyi marker on this
+                    // event wake (fires on `actionable && !claimable`).
                     if (typeof t.ticket?.claimable === "boolean") headClaimable = t.ticket.claimable;
+                    if (typeof t.ticket?.actionable === "boolean") headActionable = t.ticket.actionable;
                 } catch { /* best-effort */ }
             } else if (isTicketRoot && !head.title && unreadHead.title) {
                 head = { ...head, title: unreadHead.title };
@@ -1983,25 +1991,28 @@ export async function buildContextPhrase(
         // never a misleading "look #N… Triage" for a concrete event.
         const backlogMode = (pingCount === 0 && hasClaimableHead && !blocking && !eventHint)
             ? "1" : "";
-        // #1350 — role-conditioned "(fyi — action is not mandatory)" suffix on
-        // EVENT wakes (comment / lifecycle / decision-event). When the head
-        // event's ticket is non-claimable for this consumer (subscriber, not
-        // the responsible maintainer), the wake is informational — it must not
-        // read as a triage push. The backlog CTA is untouched (already gated to
-        // claimable heads); a new-ticket wake stays as-is (not in scope).
+        // #1350 — role-conditioned "(fyi — action non requise)" marker on EVENT
+        // wakes (comment / lifecycle / decision-event / bundle). Fires on the
+        // `actionable && !claimable` case only : the consumer is in the loop
+        // (ball in their court) but can't act because they don't own the project
+        // (cross-project watcher). A closed / tier-2 / tier-3 ticket is
+        // non-claimable too but stays the recipient's own responsibility → no
+        // marker. The backlog CTA is untouched (already gated to claimable
+        // heads); a new-ticket wake stays as-is (not in scope).
         const headIsEvent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent || headBundle);
-        if (headIsEvent && headClaimable === undefined && head?.id) {
+        if (headIsEvent && (headClaimable === undefined || headActionable === undefined) && head?.id) {
             // Defensive fill for the paths that set an event branch without the
             // title fetch above (e.g. the hint-anchored comment with a head
-            // already resolved). Best-effort — failure leaves no suffix.
+            // already resolved). Best-effort — failure leaves no marker.
             try {
                 const t = await client.getTicket(head.id, { summary: true }) as {
-                    ticket?: { claimable?: boolean };
+                    ticket?: { claimable?: boolean; actionable?: boolean };
                 };
                 if (typeof t.ticket?.claimable === "boolean") headClaimable = t.ticket.claimable;
-            } catch { /* best-effort — no suffix on failure */ }
+                if (typeof t.ticket?.actionable === "boolean") headActionable = t.ticket.actionable;
+            } catch { /* best-effort — no marker on failure */ }
         }
-        const headFyi = headIsEvent && headClaimable === false ? "1" : "";
+        const headFyi = headIsEvent && headActionable === true && headClaimable === false ? "1" : "";
         const vars = {
             culture,
             ping_count: pingCount || "",
@@ -2068,18 +2079,19 @@ export async function buildContextPhrase(
         // Strict binary rule on the wake firing side (timer.ts:tryWake) —
         // fire ONLY on event OR backlog.
         const wakeMasterDefault =
-            // #1350 — role-conditioned marker, PREFIXED (not appended) so it
-            // survives truncation of a long comment body: it must be the first
-            // thing the agent reads, not trailing after variable-length content
-            // that can be cut off. `head_fyi` is only set for a non-claimable
-            // EVENT head (comment / lifecycle / decision), so the prefix never
-            // shows on a new-ticket or backlog wake.
-            "{head_fyi:+(fyi — action is not mandatory) }"
-            + "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
+            // #1350 david `9sxan3`/`ysufez` — the marker lives INSIDE the ref
+            // parenthesis, not as a free prefix (a prefix reads as a second,
+            // duplicated parenthesis next to the ref). For the comment branch it
+            // folds into the ref `(fyi — action is not mandatory · #ID / #hash)`;
+            // for lifecycle/decision/bundle (no natural trailing ref paren) it's
+            // a single suffix paren. Still truncation-safe : `head_body` is
+            // truncated upstream and the ref paren is template-appended after it,
+            // so the marker (inside that paren) always survives.
+            "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
-            + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
-            + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
-            + "{head_bundle:+{head_bundle}}"
+            + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_bundle:+{head_bundle}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_actor:+ {head_last_actor} is waiting on your reply.} Triage the ticket.}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
