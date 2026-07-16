@@ -1109,33 +1109,52 @@ test("#1355 deriveBarCounters: missing actionable_count → 0 (not NaN)", () => 
     assert.deepEqual(c, { open: 5, backlog: 1, events: 0, actionableOpen: 0 });
 });
 
-// #1355 / #1365 — the countdown arms on COUNTABLE WORK only, mirroring the
-// checkHasWork delivery gate (has = pings || actionable>0).
-test("#1355 wakeCountdownArmable: arms on events / actionableOpen", () => {
-    // An unread FIFO ping arms — the drain has something to pop.
-    assert.equal(wakeCountdownArmable({ events: 2, actionableOpen: 0 }), true);
-    // A tier-1 actionable ticket arms (checkHasWork would deliver it).
-    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 1 }), true);
+// #1355 / #1365 / #1377 — the countdown arms iff a wake will ACTUALLY be
+// delivered: an unread FIFO ping, or in-my-court work with a non-cooled head
+// the picker can really surface.
+test("#1355 wakeCountdownArmable: arms on an unread FIFO ping", () => {
+    // The drain has something to pop, regardless of the backlog.
+    assert.equal(wakeCountdownArmable({ events: 2, actionableOpen: 0, backlog: 0 }), true);
 });
 
-test("#1355 wakeCountdownArmable: nothing countable → no arming (backlog-only never arms)", () => {
-    // The caller passes actionableOpen (NOT the raw backlog counter), so a
-    // backlog of tier-2/3/4 reminders — which checkHasWork never delivers —
-    // can't arm the phantom decount.
-    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0 }), false);
+test("#1355 wakeCountdownArmable: arms on actionable work WITH a pickable head", () => {
+    // checkHasWork passes (actionable>0) AND the picker has a non-cooled row.
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 1, backlog: 1 }), true);
 });
 
-// #1365 — a pending SSE hint is NO LONGER an arming leg. Proof it was unsound:
-// with events === 0 the hint's event isn't in the unread FIFO (self-ping /
-// already-seen / filtered), so the drain has nothing to deliver and skips —
-// arming on it promised a wake that could never fire (the residual runic
-// phantom, b:0 e:0). When the hint's event IS in the FIFO, events > 0 arms
-// anyway, so the leg was redundant. The predicate now can't even see a hint.
-test("#1365 wakeCountdownArmable: a pending hint alone (events=0) does NOT arm — phantom by construction", () => {
-    // Whatever hint may be pending, with no countable work there's no countdown.
-    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0 }), false);
-    // …and a hint whose event IS in the FIFO still arms, via the events leg.
-    assert.equal(wakeCountdownArmable({ events: 1, actionableOpen: 0 }), true);
+test("#1355 wakeCountdownArmable: backlog-only (tier-2/3/4 reminders) never arms", () => {
+    // actionable=0 → checkHasWork skips before rendering, so a backlog of
+    // non-deliverable reminders must not arm the phantom decount.
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0, backlog: 3 }), false);
+});
+
+test("#1355 wakeCountdownArmable: nothing at all → no arming", () => {
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0, backlog: 0 }), false);
+});
+
+// #1365 — a pending SSE hint is NOT an arming leg (the predicate can't even see
+// one). With events === 0 the hint's event isn't in the unread FIFO (self-ping /
+// already-seen / filtered) → the drain skips it: arming would be a phantom by
+// construction. When the hint's event IS in the FIFO, the events leg arms anyway.
+test("#1365 wakeCountdownArmable: no hint leg — a hint alone can't arm; in-FIFO arms via events", () => {
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0, backlog: 0 }), false);
+    assert.equal(wakeCountdownArmable({ events: 1, actionableOpen: 0, backlog: 0 }), true);
+});
+
+// #1377 — THE m2m case. `actionable_count` is cooldown-agnostic: right after a
+// backlog wake cools the only actionable ticket, it still reads > 0 while the
+// picker (non-cooled only) finds nothing → skip → re-arm, for the whole 1h
+// cooldown window. Live proof: m2m had actionable_count=1 (#938, tier-1) with 0
+// non-cooled backlog rows → `o:6 b:0 e:0 📨 Ns` looping.
+test("#1377 wakeCountdownArmable: actionable but ALL cooled (backlog=0) → NO arming", () => {
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 1, backlog: 0 }), false);
+    // …and once the cooldown expires and the head becomes pickable again, it arms.
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 1, backlog: 1 }), true);
+});
+
+test("#1377 wakeCountdownArmable: a real FIFO event still arms even with everything cooled", () => {
+    // The events leg is independent — a pending ping is deliverable on its own.
+    assert.equal(wakeCountdownArmable({ events: 1, actionableOpen: 1, backlog: 0 }), true);
 });
 
 // #1014 — the #994 nextPaneBusy arm/dearm latch is retired ; paneBusy is now

@@ -1264,20 +1264,18 @@ function recomputeNextWake(): void {
     const ctx = snap.context;
     const bootDone = getIpcState().loopStart;
     const c = getIpcState().counters;
-    // #1355 / #1365 — arm on COUNTABLE WORK only : an unread FIFO ping
-    // (`events`) or a tier-1 in-my-court ticket (`actionableOpen`), mirroring
-    // the `checkHasWork` delivery gate. NOT the raw backlog counter (#1355 —
-    // folds in tier-2/3/4 reminders the gate never delivers) and NOT a pending
-    // SSE hint (#1365 — when `events === 0` the hint's event isn't in the FIFO
-    // (self-ping / already-seen / filtered) so the drain skips it : arming on it
-    // is a phantom by construction ; and when it IS in the FIFO, `events > 0`
-    // arms anyway). Both legs looped the `📨 Ns` decount forever with nothing
-    // injected — david's "syndrome event fantôme". `pendingWakeHint` still
-    // anchors the comment-centric render at drain time (#999) ; it just can't arm.
+    // #1355 / #1365 / #1377 — arm iff a wake will ACTUALLY be delivered : an
+    // unread FIFO ping (`events`), or in-my-court work that the picker can
+    // really surface (`actionableOpen > 0 && backlog > 0` — the delivery gate
+    // AND a non-cooled head). See `wakeCountdownArmable` for why each discarded
+    // leg (raw backlog, pending hint, bare actionableOpen) promised a wake the
+    // drain couldn't keep and looped the `📨 Ns` decount forever — david's
+    // "syndrome event fantôme". `backlog` here is already the NON-COOLED count.
     const actionableOpen = getIpcState().actionableOpen ?? 0;
     const somethingToDrain = wakeCountdownArmable({
         events: c?.events ?? 0,
         actionableOpen,
+        backlog: c?.backlog ?? 0,
     });
     const tempoMs = wakeTempoSec * 1000;
     // A NOT-AFK hold (human present) gates `tryWake` out at every tempo

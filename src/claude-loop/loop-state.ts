@@ -249,33 +249,41 @@ export function deriveBarCounters(
 }
 
 /**
- * #1355 / #1365 — the "should the `📨 Ns` countdown be armed?" predicate,
- * extracted pure so it can be unit-tested (`recomputeNextWake` lives in
- * kernel.ts which runs `main()` at import → not directly testable).
+ * #1355 / #1365 / #1377 — the "should the `📨 Ns` countdown be armed?"
+ * predicate, extracted pure so it can be unit-tested (`recomputeNextWake` lives
+ * in kernel.ts which runs `main()` at import → not directly testable).
  *
- * Arm on COUNTABLE WORK only — an unread FIFO ping (`events`) or a tier-1
- * actionable ticket (`actionableOpen`), mirroring the `checkHasWork` delivery
- * gate (`has = pings || actionable>0`).
+ * Arm iff a wake will ACTUALLY be delivered. Two independent ways:
+ *  - `events > 0` — an unread FIFO ping the drain can pop; or
+ *  - `actionableOpen > 0 && backlog > 0` — BOTH conjuncts are required:
+ *      · `actionableOpen > 0` is what `checkHasWork` gates on (`has = pings ||
+ *        actionable>0`); without it the drain skips before even rendering.
+ *      · `backlog > 0` is the NON-COOLED backlog count (`deriveBarCounters`
+ *        filters `backlog_cooled_until`), i.e. "the picker has a head to take".
  *
- * Two legs were tried and removed, both unsound:
- *  - the RAW backlog counter (#1355) folded in non-deliverable tier-2/3/4
- *    reminders that `checkHasWork` never delivers;
- *  - a pending SSE hint (#1365) promised a wake the drain can't keep: when
- *    `events === 0` the hint's event is NOT in the unread FIFO (self-ping,
- *    already-seen, filtered), so the drain has nothing to deliver and skips —
- *    arming on it is a phantom BY CONSTRUCTION. And when the hint's event IS in
- *    the FIFO, `events > 0` already arms — the leg was redundant there.
- * Both made the decount loop to zero forever with nothing ever sent (david's
- * "syndrome event fantôme"). `pendingWakeHint` keeps its real job — anchoring
- * the comment-centric render at drain time (#999) — it just can't arm.
+ * Every leg tried and removed was unsound — each promised a wake the drain
+ * couldn't keep, looping the decount to zero forever (david's "syndrome event
+ * fantôme"):
+ *  - the RAW backlog counter alone (#1355): tier-2/3/4 reminders that
+ *    `checkHasWork` never delivers (actionable=0 → skip).
+ *  - a pending SSE hint (#1365): with `events === 0` the hint's event isn't in
+ *    the FIFO (self-ping / already-seen / filtered) → skip, by construction;
+ *    and when it IS in the FIFO `events > 0` already arms. `pendingWakeHint`
+ *    keeps its real job (anchoring the comment-centric render at drain time,
+ *    #999) — it just can't arm.
+ *  - `actionableOpen` alone (#1377): `actionable_count` is COOLDOWN-AGNOSTIC.
+ *    Right after a backlog wake cools the only actionable ticket, the count
+ *    stays > 0 while the picker (non-cooled only) finds nothing → skip → re-arm
+ *    for the whole 1h cooldown window. Hence the `&& backlog > 0` conjunct.
  *
  * The caller still layers the idle/boot/held-present checks on top.
  */
 export function wakeCountdownArmable(opts: {
     events: number;
     actionableOpen: number;
+    backlog: number;
 }): boolean {
-    return opts.events > 0 || opts.actionableOpen > 0;
+    return opts.events > 0 || (opts.actionableOpen > 0 && opts.backlog > 0);
 }
 
 /**
