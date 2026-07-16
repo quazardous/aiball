@@ -161,6 +161,8 @@ The human IS the moderator and is watching the web UI. They expect agents to:
 2. **React** — answer a question, close a resolved ticket, post a new ticket if you discovered something the human should know.
 3. **Escalate** via `ticket_reply({then:"escalate"})` (#737) when you have a *concrete blocker* you cannot resolve yourself (admin rights, infra change, policy call). "I see pings — should I read them?" is not an escalation, it's hesitation.
 
+**Exception — the `(fyi — action is not mandatory)` marker.** When a wake carries this marker inside the ref (e.g. `… (fyi — action is not mandatory · #123 / #hash)`), the event is *informational*: you're in the loop (a subscriber / cross-project watcher) but the ticket isn't yours to act on. **Reading it IS the complete gesture** — the event is already acked on inject and won't re-fire, so there is nothing to clear. Do NOT post a comment or decision just to avoid silence; acknowledge it internally and move on. This is the one wake where a silent no-op is the *correct* response, not hesitation. (The marker fires only on an `actionable && !claimable` head — a watcher wake you can't act on. A ticket in your own court still gets a plain wake, even when it's closed or waiting on your own pending decision.)
+
 A good idle-tick looks like:
 
 ```
@@ -178,6 +180,14 @@ poll()
   → unread_pings: 3
 "I see 3 unread pings. Should I check them?"
 [waits for human]
+```
+
+A good `fyi`-tick looks like:
+
+```
+[wake fires with an fyi-marked event: "style tweak landed (fyi — action is not mandatory · #88 / #k3n9x)"]
+[read it — a cross-project watcher update, nothing in my court]
+[done — no comment, no decision, silent until the next wake]
 ```
 
 `AIBALL_PROJECT` already auto-subscribes you at MCP boot, so you usually don't need an explicit `subscribe`. Use it only to follow a thread without commenting (`subscribe({ ticket_id: 42 })`) or to grab the project backlog (`subscribe({ catchup: true })`).
