@@ -1939,12 +1939,33 @@ export async function buildContextPhrase(
                     limit: "500",
                     cooldown_sec: cooldownSec > 0 ? String(cooldownSec) : undefined,
                 });
-                const rows = Array.isArray(raw)
-                    ? (raw as Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }>)
-                    : ((raw as { tickets?: Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }>; rows?: Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }> })?.tickets
-                        ?? (raw as { rows?: Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }> })?.rows
+                type BacklogRow = {
+                    id: number;
+                    title?: string | null;
+                    backlog_cooled_until?: string | null;
+                    last_actor?: string | null;
+                    actionable?: boolean;
+                    claimable?: boolean;
+                };
+                const rows: BacklogRow[] = Array.isArray(raw)
+                    ? (raw as BacklogRow[])
+                    : ((raw as { tickets?: BacklogRow[]; rows?: BacklogRow[] })?.tickets
+                        ?? (raw as { rows?: BacklogRow[] })?.rows
                         ?? []);
-                const top = rows.find((r) => !r.backlog_cooled_until);
+                // #1350 slice 2 — the backlog "Triage" CTA must only surface a
+                // head the agent can actually CLAIM. The backlog set is
+                // actionable ∪ last-actor-me, NOT filtered by claimable, so a
+                // cross-project ticket that is actionable-but-not-claimable
+                // (ball technically in my court, but a project I don't own)
+                // would fire "look #N… Triage" that `ticket_claim` can't act
+                // on. Skip exactly that case: `actionable && claimable===false`.
+                // We do NOT skip non-actionable heads (tier-2 my-pending-decision
+                // / tier-3 I-was-last-actor reminders) — those are legitimate
+                // own reminders and are non-claimable by construction. Fail-open:
+                // undefined flags (older daemon) keep the current behavior.
+                const top = rows.find(
+                    (r) => !r.backlog_cooled_until && !(r.actionable === true && r.claimable === false),
+                );
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
                     // #1215 — name the last actor so the backlog CTA reflects a
@@ -1952,7 +1973,7 @@ export async function buildContextPhrase(
                     // a bland "Triage" + useless clock. Only when it's not us:
                     // tier-1 heads (ball in my court) have last_actor ≠ me; tier-2
                     // reminders where I was last actor keep the plain look.
-                    const la = (top as { last_actor?: string | null }).last_actor;
+                    const la = top.last_actor;
                     if (la && la !== process.env.AIBALL_AGENT) headLastActor = la;
                 }
             } catch { /* fail-open : no head, template drops the look leg */ }

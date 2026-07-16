@@ -95,6 +95,65 @@ test("#1215 backlog head with no last_actor → plain look, no waiting clause", 
 // head, never to a non-actionable head, never to the backlog Triage CTA.
 const FYI = /fyi — action is not mandatory/;
 
+// #1350 slice 2 — the backlog "Triage" CTA must only surface a head the agent
+// can actually CLAIM. An actionable-but-not-claimable head (cross-project) is
+// skipped; non-actionable reminders (tier-2 my pending decision / tier-3 I was
+// last actor) are kept; a claimable head is unchanged.
+test("#1350-s2 actionable-but-NOT-claimable backlog head → skipped, no Triage", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "cross-project", actionable: true, claimable: false }],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.doesNotMatch(res.phrase, /look #977/);
+    assert.doesNotMatch(res.phrase, /Triage the ticket/);
+    assert.equal(res.backlogTicketId, null);
+});
+
+test("#1350-s2 non-actionable reminder (tier-2/3, not claimable) → kept as backlog head", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "my reminder", actionable: false, claimable: false, last_actor: "david" }],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /look #977/);
+    assert.match(res.phrase, /david is waiting on your reply/);
+    assert.equal(res.backlogTicketId, 977);
+});
+
+test("#1350-s2 claimable backlog head → Triage unchanged", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "mine to work", actionable: true, claimable: true }],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /look #977/);
+    assert.match(res.phrase, /Triage/i);
+    assert.equal(res.backlogTicketId, 977);
+});
+
+test("#1350-s2 skips the non-claimable head, picks the next claimable one", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [
+                { id: 977, title: "cross-project", actionable: true, claimable: false },
+                { id: 978, title: "mine", actionable: true, claimable: true },
+            ],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.doesNotMatch(res.phrase, /look #977/);
+    assert.match(res.phrase, /look #978/);
+    assert.equal(res.backlogTicketId, 978);
+});
+
 test("#1350 comment event on an actionable NON-claimable ticket → fyi folded into the ref paren", async () => {
     const res = await buildContextPhrase(
         stubClient({
