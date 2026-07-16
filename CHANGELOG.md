@@ -23,6 +23,39 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-07-16
+
+### Added
+
+- **Grouped wake notifications.** When several updates land on the same ticket
+  while you're away, they now arrive as one wake — newest on top, each with its
+  own reference — instead of one ping per update.
+- **"Watching" marker on wake notifications.** A wake for a ticket you're only
+  in the loop on — not its owner, assignee, or claimant — is now tagged
+  `(fyi — action is not mandatory)`, so you can read it and move on instead of
+  being nudged to act on work outside your remit.
+- **Declarative hook registry.** The Claude Code hooks aiball installs are now
+  generated from one declarative registry through a single dispatcher, so adding
+  or changing a hook is one edit instead of hand-syncing settings.
+
+### Changed
+
+- **Backlog triage skips work you can't pick up.** The "look #N — triage" prompt
+  no longer surfaces a ticket in a project you don't own (you couldn't claim it
+  anyway); it moves on to the next one that's actually yours to take.
+
+### Fixed
+
+- **Wake countdown no longer spins on nothing.** The bar's "next wake" countdown
+  used to loop to zero forever when the only pending item would never actually
+  fire a wake — a reminder you can't action, or a cross-project notification
+  you're merely cc'd on. It now counts down only when a wake will really fire.
+- **Grouped wakes show the comment, not just its type.** Bundled same-ticket
+  wakes now include each comment's text (truncated), matching what a single wake
+  shows, instead of a bare "comment" label.
+- **Auto-prune stays within bounds.** Fixed an over-eager cleanup that could
+  remove a post reaching back past the author's previous one.
+
 ## [0.34.0] — 2026-07-11
 
 ### Added
