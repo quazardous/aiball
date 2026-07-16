@@ -14,6 +14,7 @@ import {
     computeLoopView,
     shouldInjectBootstrapSkill,
     deriveBarCounters,
+    wakeCountdownArmable,
     inputHotAgeMs,
     isAfkHeld,
     isAutonomous,
@@ -1066,21 +1067,23 @@ test("#922 shouldInjectBootstrapSkill : inject only when no other intent", () =>
 test("#1033 deriveBarCounters: all fulfilled, project-scoped open + non-cooled backlog", () => {
     const c = deriveBarCounters(
         { status: "fulfilled", value: { unread: 4 } },
-        { status: "fulfilled", value: [{ name: "aiball", open_count: 7 }, { name: "other", open_count: 99 }] },
+        { status: "fulfilled", value: [{ name: "aiball", open_count: 7, actionable_count: 3 }, { name: "other", open_count: 99, actionable_count: 88 }] },
         { status: "fulfilled", value: [{ backlog_cooled_until: null }, { backlog_cooled_until: "2026-01-01T00:00:00Z" }, {}] },
         "aiball",
     );
-    assert.deepEqual(c, { open: 7, backlog: 2, events: 4 });
+    // #1355 — actionableOpen is project-scoped like open (3, not 3+88).
+    assert.deepEqual(c, { open: 7, backlog: 2, events: 4, actionableOpen: 3 });
 });
 
 test("#1033 deriveBarCounters: no loopProject → open summed across projects", () => {
     const c = deriveBarCounters(
         { status: "fulfilled", value: { unread: 0 } },
-        { status: "fulfilled", value: [{ name: "a", open_count: 3 }, { name: "b", open_count: 5 }] },
+        { status: "fulfilled", value: [{ name: "a", open_count: 3, actionable_count: 2 }, { name: "b", open_count: 5, actionable_count: 1 }] },
         { status: "fulfilled", value: [] },
         undefined,
     );
-    assert.deepEqual(c, { open: 8, backlog: 0, events: 0 });
+    // #1355 — actionableOpen summed across projects too (2+1).
+    assert.deepEqual(c, { open: 8, backlog: 0, events: 0, actionableOpen: 3 });
 });
 
 test("#1033 deriveBarCounters: a rejected fetch yields null for that counter (fail-open)", () => {
@@ -1090,7 +1093,34 @@ test("#1033 deriveBarCounters: a rejected fetch yields null for that counter (fa
         { status: "fulfilled", value: [{ backlog_cooled_until: null }] },
         "aiball",
     );
-    assert.deepEqual(c, { open: null, backlog: 1, events: null });
+    // #1355 — actionableOpen shares the projects fetch → null when it fails.
+    assert.deepEqual(c, { open: null, backlog: 1, events: null, actionableOpen: null });
+});
+
+// #1355 — actionableOpen defaults to 0 when a project omits actionable_count
+// (older daemon projection), so the countdown never arms on a missing field.
+test("#1355 deriveBarCounters: missing actionable_count → 0 (not NaN)", () => {
+    const c = deriveBarCounters(
+        { status: "fulfilled", value: { unread: 0 } },
+        { status: "fulfilled", value: [{ name: "aiball", open_count: 5 }] },
+        { status: "fulfilled", value: [{ backlog_cooled_until: null }] },
+        "aiball",
+    );
+    assert.deepEqual(c, { open: 5, backlog: 1, events: 0, actionableOpen: 0 });
+});
+
+// #1355 — the countdown-arming predicate mirrors the checkHasWork delivery gate.
+test("#1355 wakeCountdownArmable: arms on pendingHint / events / actionableOpen; NOT on backlog-only", () => {
+    // A pending event hint always arms (an event wake is about to render).
+    assert.equal(wakeCountdownArmable({ pendingHint: true, events: 0, actionableOpen: 0 }), true);
+    // An unread FIFO ping arms.
+    assert.equal(wakeCountdownArmable({ pendingHint: false, events: 2, actionableOpen: 0 }), true);
+    // A tier-1 actionable ticket arms (checkHasWork would deliver it).
+    assert.equal(wakeCountdownArmable({ pendingHint: false, events: 0, actionableOpen: 1 }), true);
+    // THE FIX : nothing deliverable → no arming, even though the raw backlog
+    // counter (tier-2/3/4 reminders) may be > 0. The caller passes
+    // actionableOpen (NOT backlog) so those never arm the phantom decount.
+    assert.equal(wakeCountdownArmable({ pendingHint: false, events: 0, actionableOpen: 0 }), false);
 });
 
 // #1014 — the #994 nextPaneBusy arm/dearm latch is retired ; paneBusy is now

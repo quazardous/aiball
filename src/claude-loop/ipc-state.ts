@@ -165,6 +165,15 @@ export interface IpcState {
      *  timer's count-refresh tick. Read by `BarRenderer` to compose the
      *  segment string. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
+    /** #1355 — actionable count (tickets in MY court, tier-1) across the
+     *  in-scope project(s). Distinct from `counters.open` (all open) and
+     *  `counters.backlog` (all non-cooled tiers incl. 2/3/4 reminders).
+     *  Mutated via `setIpcActionableOpen` by the same count-refresh tick.
+     *  `recomputeNextWake` arms the `📨 Ns` countdown on THIS (mirror of
+     *  the `checkHasWork` delivery gate) so the decount never loops on a
+     *  backlog that will never fire a wake (the "syndrome event fantôme").
+     *  `null` = no signal yet (never armed the countdown on it). */
+    actionableOpen: number | null;
     /** #869 — SSE connection state, flipped by `WakeBus` events. True
      *  while subscription is live, false on `error`, null pre-connect.
      *  Read by `claude-loop health.checkSse` — replaces the flaky
@@ -264,6 +273,7 @@ const state: IpcState = {
     apiUnreachableSinceMs: null,
     bootDeadlineMs: null,
     counters: null,
+    actionableOpen: null,
     stateTagInfo: null,
 };
 
@@ -326,6 +336,15 @@ export function setIpcIdleSince(atMs: number | null): void {
  *  countdown segment after `o:N b:N e:N`. */
 export function setIpcNextWakeAt(atMs: number | null): void {
     state.nextWakeAtMs = atMs;
+    notifyIpcChanged();
+}
+
+/** #1355 — set the actionable (tier-1, in-my-court) count read from the
+ *  count-refresh tick. `recomputeNextWake` arms the countdown on this,
+ *  not on the raw backlog counter (which includes non-deliverable
+ *  tier-2/3/4 reminders → phantom decount loop). */
+export function setIpcActionableOpen(n: number | null): void {
+    state.actionableOpen = n;
     notifyIpcChanged();
 }
 
@@ -647,5 +666,6 @@ export function resetIpcStateForTests(): void {
     state.apiUnreachableSinceMs = null;
     state.bootDeadlineMs = null;
     state.counters = null;
+    state.actionableOpen = null;
     state.stateTagInfo = null;
 }

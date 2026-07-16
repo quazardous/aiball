@@ -150,6 +150,7 @@ import {
     setIpcBootDeadlineMs,
     setIpcBootActiveModules,
     setIpcCounters,
+    setIpcActionableOpen,
     setIpcIdleSince,
     setIpcNextWakeAt,
     setIpcLastSseEventAtMs,
@@ -166,7 +167,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, LoopStateBus, type AfkMode } from "./loop-state.js";
+import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -1199,15 +1200,19 @@ async function refreshCounters(): Promise<void> {
         if (loopProject) backlogQuery.project = loopProject;
         const [pingsR, projectsR, backlogR] = await Promise.allSettled([
             client().pingsCount() as Promise<{ unread?: number }>,
-            client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
+            client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number; actionable_count?: number }>>,
             client().listTickets(backlogQuery) as Promise<unknown[]>,
         ]);
-        const { open, backlog, events } = deriveBarCounters(pingsR, projectsR, backlogR, loopProject);
+        const { open, backlog, events, actionableOpen } = deriveBarCounters(pingsR, projectsR, backlogR, loopProject);
         if (events !== null || open !== null || backlog !== null) {
             setIpcCounters({ open, backlog, events });
             // #1055 S4 — surface the refreshed counters on the kernel bus.
             getKernelBus().emit("counters:refreshed", { open, backlog, events });
         }
+        // #1355 — arm the countdown on the actionable count (mirror of the
+        // delivery gate), not the raw backlog counter. Pushed separately so a
+        // partial fetch (projects ok, backlog failed) still updates it.
+        if (actionableOpen !== null) setIpcActionableOpen(actionableOpen);
     } catch { /* counter sync best-effort */ }
 }
 // #999 model (a) — the latest SSE event awaiting a drain. Set by the SSE
@@ -1259,9 +1264,19 @@ function recomputeNextWake(): void {
     const ctx = snap.context;
     const bootDone = getIpcState().loopStart;
     const c = getIpcState().counters;
-    const somethingToDrain = pendingWakeHint !== undefined
-        || (c?.events ?? 0) > 0
-        || (c?.backlog ?? 0) > 0;
+    // #1355 — arm on `actionableOpen` (tier-1, in-my-court), NOT the raw
+    // backlog counter. The backlog counter includes tier-2/3/4 reminders
+    // (waiting-on-them / my-decision-pending / blocked) which `checkHasWork`
+    // never delivers (has = pings || actionable>0) → arming on them made the
+    // `📨 Ns` decount loop to zero forever with nothing ever injected (david's
+    // "syndrome event fantôme", #1355). Mirroring the delivery gate keeps the
+    // countdown honest : it shows iff a wake will actually fire.
+    const actionableOpen = getIpcState().actionableOpen ?? 0;
+    const somethingToDrain = wakeCountdownArmable({
+        pendingHint: pendingWakeHint !== undefined,
+        events: c?.events ?? 0,
+        actionableOpen,
+    });
     const tempoMs = wakeTempoSec * 1000;
     // A NOT-AFK hold (human present) gates `tryWake` out at every tempo
     // re-entry (computeWakeGate → "NOT AFK hold active"). The drain still
