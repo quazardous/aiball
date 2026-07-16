@@ -65,23 +65,53 @@ test("#999 heartbeat wake (no hint, empty FIFO) → backlog ticket-centric Triag
     assert.equal(res.hasContent, true);
 });
 
-test("#1215 backlog head with last_actor ≠ me → names who's waiting, no (state clock", async () => {
+// #1363 david `futbsc` — a backlog head whose last actor isn't me SHOWS that
+// last event's content (a bundle-style line) so the agent reads it and judges,
+// instead of asserting "<actor> is waiting on your reply" — which fired on any
+// last_actor ≠ me, even a plain confirmation that awaited no reply.
+test("#1363 backlog head with last_actor ≠ me → shows the last event content, NOT 'waiting on your reply'", async () => {
     const res = await buildContextPhrase(
-        stubClient({ listTickets: async () => [{ id: 977, title: "backlog ticket", last_actor: "david" }] }),
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "backlog ticket", last_actor: "david" }],
+            getTicket: async () => ({
+                ticket: { title: "backlog ticket" },
+                comments: [{ kind: "comment_added", body: "j'ai fermé 1360", hashid: "6sfrtm", by_agent: "david" }],
+            }),
+        }),
         null,
         PINGS_YAML,
     );
     assert.match(res.phrase, /look #977/);
-    assert.match(res.phrase, /david is waiting on your reply/);
-    // the useless HH:MM clock is gone (#1215)
+    // the actual comment (a confirmation) is shown → the agent sees it needs no reply
+    assert.match(res.phrase, /j'ai fermé 1360 \(#6sfrtm\) by david/);
+    // no more false assertion, no legacy clock
+    assert.doesNotMatch(res.phrase, /is waiting on your reply/);
     assert.doesNotMatch(res.phrase, /\(state /);
 });
 
-test("#1215 backlog head with no last_actor → plain look, no waiting clause", async () => {
+test("#1363 backlog head with a lifecycle last event → shows the label line", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "backlog ticket", last_actor: "david" }],
+            getTicket: async () => ({
+                ticket: { title: "backlog ticket" },
+                comments: [{ kind: "ticket_reopened", hashid: "gb88t9", by_agent: "david" }],
+            }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /look #977/);
+    assert.match(res.phrase, /reopened \(#gb88t9\) by david/);
+    assert.doesNotMatch(res.phrase, /is waiting on your reply/);
+});
+
+test("#1363 backlog head with no last_actor (I was last) → plain look, no last-event line", async () => {
     const res = await buildContextPhrase(stubClient(), null, PINGS_YAML);
     assert.match(res.phrase, /look #977/);
     assert.doesNotMatch(res.phrase, /is waiting on your reply/);
     assert.doesNotMatch(res.phrase, /\(state /);
+    assert.doesNotMatch(res.phrase, / — /);
 });
 
 // #1350 — the "(fyi — action is not mandatory)" marker on EVENT wakes fires on
@@ -120,8 +150,9 @@ test("#1350-s2 non-actionable reminder (tier-2/3, not claimable) → kept as bac
         null,
         PINGS_YAML,
     );
+    // the reminder is KEPT as backlog head (slice 2 doesn't skip non-actionable
+    // tier-2/3 reminders); the last-event line rendering is covered by #1363.
     assert.match(res.phrase, /look #977/);
-    assert.match(res.phrase, /david is waiting on your reply/);
     assert.equal(res.backlogTicketId, 977);
 });
 

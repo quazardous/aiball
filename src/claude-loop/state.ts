@@ -1779,6 +1779,23 @@ export async function buildContextPhrase(
             ticket_resolved: "resolved",
             ticket_reopened: "reopened",
         };
+        // #1351 + #1363 — render ONE event as a compact line, SAME content as
+        // its standalone wake : a comment shows its markdown-stripped body
+        // (truncated like a single-comment wake, `stripMarkdown` default 240) ;
+        // lifecycle / decision / new-ticket events have no body → keep their
+        // descriptive label ("closed", "resolution ACCEPTED", …). Shared by the
+        // same-ticket bundle (#1351) and the backlog CTA's last-event line
+        // (#1363 david `futbsc` — show what happened instead of asserting
+        // "<actor> is waiting on your reply", let the agent judge).
+        const renderEventLine = (m: { kind?: string; body?: string | null; hashid?: string | null; by_agent?: string | null }): string => {
+            const body = typeof m?.body === "string" ? m.body : "";
+            const base = m?.kind === "comment_added" && body.trim()
+                ? stripMarkdown(body)
+                : (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
+            const ref = typeof m?.hashid === "string" && m.hashid ? ` (#${m.hashid})` : "";
+            const by = m?.by_agent ? ` by ${m.by_agent}` : "";
+            return `${base}${ref}${by}`;
+        };
         // Built once the head's title is resolved (below). Empty = no bundle.
         // Detection (`isBundleMode`, `sameTicket`, `bundleExtraSeenIds`) ran
         // above, before the empty-head drop.
@@ -1842,24 +1859,11 @@ export async function buildContextPhrase(
         // resolved. Newest on top / oldest at the bottom (the window is ASC =
         // oldest first, so reverse). Each line carries its own hashid so the
         // agent can open any single event.
-        // #1351 david `36phxd` — a bundled line must carry the SAME content as
-        // its standalone wake ; only the DELIVERY differs. So a comment shows
-        // its markdown-stripped body (truncated exactly like a single-comment
-        // wake, `stripMarkdown` default 240), NOT the bare "comment" label.
-        // Lifecycle / decision / new-ticket events have no body → keep their
-        // descriptive label ("closed", "resolution ACCEPTED", …), which IS what
-        // their standalone wake shows.
+        // #1351 david `36phxd` — a bundled line carries the SAME content as its
+        // standalone wake (via `renderEventLine`) ; only the DELIVERY differs.
+        // Newest on top / oldest at the bottom (the window is ASC → reverse).
         if (isBundleMode) {
-            const bundleLine = (m: (typeof unreadMsgs)[number]): string => {
-                const body = typeof m?.body === "string" ? m.body : "";
-                const base = m?.kind === "comment_added" && body.trim()
-                    ? stripMarkdown(body)
-                    : (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
-                const ref = typeof m?.hashid === "string" && m.hashid ? ` (#${m.hashid})` : "";
-                const by = m?.by_agent ? ` by ${m.by_agent}` : "";
-                return `${base}${ref}${by}`;
-            };
-            const lines = [...sameTicket].reverse().map(bundleLine).join("\n");
+            const lines = [...sameTicket].reverse().map((m) => renderEventLine(m)).join("\n");
             const titlePart = head?.title ? `: ${head.title}` : "";
             headBundle = `#${headTicketId}${titlePart} — ${sameTicket.length} updates:\n${lines}`;
         }
@@ -1906,7 +1910,7 @@ export async function buildContextPhrase(
         // only surfaces tier-2 reminders where they were last actor.
         // #999 — `!eventHint` : an event wake never enters the backlog
         // fallback (its format is comment-centric, anchored above).
-        let headLastActor = "";   // #1215 — backlog head's last actor (≠ me), for the CTA
+        let headLastComment = "";   // #1215/#1363 — backlog head's last event line (author ≠ me), for the CTA
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -1968,13 +1972,25 @@ export async function buildContextPhrase(
                 );
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
-                    // #1215 — name the last actor so the backlog CTA reflects a
-                    // PENDING reply ("<actor> is waiting on your reply") instead of
-                    // a bland "Triage" + useless clock. Only when it's not us:
-                    // tier-1 heads (ball in my court) have last_actor ≠ me; tier-2
-                    // reminders where I was last actor keep the plain look.
+                    // #1363 david `futbsc` — when the head's last actor isn't me,
+                    // SHOW that last event's content (a bundle-style line) instead
+                    // of asserting "<actor> is waiting on your reply". The old
+                    // assertion (#1215) fired on ANY last_actor ≠ me, so a plain
+                    // human confirmation ("j'ai fermé X") read as a pending reply
+                    // it never was. Showing the content lets the agent read it and
+                    // judge whether a reply is owed — no intent heuristic. Only for
+                    // last_actor ≠ me (tier-1 ball-in-my-court) ; tier-3 reminders
+                    // where I was last actor keep the plain look.
                     const la = top.last_actor;
-                    if (la && la !== process.env.AIBALL_AGENT) headLastActor = la;
+                    if (la && la !== process.env.AIBALL_AGENT) {
+                        try {
+                            const resp = await client.getTicket(top.id, { summary: false, limit: 1, order: "desc" }) as {
+                                comments?: Array<{ kind?: string; body?: string | null; hashid?: string; by_agent?: string | null }>;
+                            };
+                            const last = Array.isArray(resp.comments) ? resp.comments[0] : undefined;
+                            if (last) headLastComment = renderEventLine(last);
+                        } catch { /* fail-open : no last-event line, CTA stays neutral */ }
+                    }
                 }
             } catch { /* fail-open : no head, template drops the look leg */ }
         }
@@ -2087,7 +2103,7 @@ export async function buildContextPhrase(
             // `state_time` (horloge HH:MM, #1158) jugé illisible : « <acteur> is
             // waiting on your reply » porte l'info utile. "" quand tier-2 (j'étais
             // le dernier acteur) → le look reste neutre.
-            head_last_actor: headLastActor,
+            head_last_comment: headLastComment,
             // #1350 — "1" when the head EVENT wake is for a ticket this consumer
             // isn't responsible for (non-claimable). The template appends
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
@@ -2123,7 +2139,7 @@ export async function buildContextPhrase(
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_bundle:+{head_bundle}{head_fyi:+ (fyi — action is not mandatory)}}"
-            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_actor:+ {head_last_actor} is waiting on your reply.} Triage the ticket.}";
+            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_comment:+ — {head_last_comment}.} Triage the ticket.}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced
