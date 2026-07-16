@@ -6,7 +6,7 @@
 // exact message by id (`getMessage`), which is snapshot-independent.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fetchWakeContext } from "./wake-context.js";
+import { fetchWakeContext, pingIsDeliverable } from "./wake-context.js";
 import type { AiballClient } from "../client.js";
 import type { WakeHint } from "./state.js";
 
@@ -128,4 +128,30 @@ test("#1098 no me / no ticket_id → trivially stakeholder, no fetch", async () 
     assert.deepEqual(await fetchWakeContext(client, HINT, undefined), { stakeholder: true });
     assert.deepEqual(await fetchWakeContext(client, {}, "claude-test"), { stakeholder: true });
     assert.equal(calls.getTicketOpts.length, 0);
+});
+
+// #1351 — fetchWakeContext surfaces the ticket's project so the SSE handler can
+// gate the hint on deliverability (pingIsDeliverable).
+test("#1351 fetchWakeContext returns the ticket project", async () => {
+    const { client } = stubClient({
+        getTicket: async () => ({ ticket: { claimant: null, assignee: null, project: "runic" } }),
+    });
+    const ctx = await fetchWakeContext(client, HINT, "claude-test");
+    assert.equal(ctx.project, "runic");
+});
+
+// #1351 david `hhqd9a` — the phantom fix : a ping only arms the wake countdown
+// when it's DELIVERABLE (same project OR stakeholder). A cross-project,
+// non-stakeholder broadcast must NOT arm (the runic b:0 e:0 loop).
+test("#1351 pingIsDeliverable: same project → deliverable (even if not stakeholder)", () => {
+    assert.equal(pingIsDeliverable({ project: "runic", stakeholder: false }, "runic"), true);
+});
+test("#1351 pingIsDeliverable: cross-project + stakeholder → deliverable", () => {
+    assert.equal(pingIsDeliverable({ project: "aiball", stakeholder: true }, "runic"), true);
+});
+test("#1351 pingIsDeliverable: cross-project + NOT stakeholder → NOT deliverable (the phantom ping)", () => {
+    assert.equal(pingIsDeliverable({ project: "aiball", stakeholder: false }, "runic"), false);
+});
+test("#1351 pingIsDeliverable: fail-open — unresolved project but stakeholder=true stays deliverable", () => {
+    assert.equal(pingIsDeliverable({ project: undefined, stakeholder: true }, "runic"), true);
 });

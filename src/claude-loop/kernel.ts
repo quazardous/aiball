@@ -181,7 +181,7 @@ import { BarRenderer } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
-import { fetchWakeContext } from "./wake-context.js";
+import { fetchWakeContext, pingIsDeliverable } from "./wake-context.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
@@ -1592,13 +1592,29 @@ async function mainSse(): Promise<void> {
                 }
             });
         } else {
-            pendingWakeHint = p;
-            // #1041 — arm the `📨 Ns` countdown NOW (don't wait for the next turn
-            // re-entry to recompute it), so the [hint → drain] window is visible.
-            recomputeNextWake();
-            const nw = getIpcState().nextWakeAtMs;
-            const inSec = nw !== null ? Math.max(0, Math.ceil((nw - Date.now()) / 1000)) : null;
-            log(`SSE ping recorded as pending hint — countdown armed nextWakeAtMs=${nw} (~${inSec ?? "?"}s), drains on next turn:settled (≤${wakeTempoSec}s tempo)`);
+            // #1351 david `hhqd9a` — gate the pending hint on DELIVERABILITY.
+            // A cross-project, non-stakeholder broadcast lands in the SSE feed
+            // (#800) but produces no wake for this consumer ; recording it as a
+            // hint arms the `📨 Ns` countdown that then loops forever (b:0 e:0)
+            // because the drain skips it and the next such ping re-arms — the
+            // runic "syndrome event fantôme" that survived the #1355 backlog fix.
+            // Deliverable = same project (a FIFO event we own, also counted in
+            // `e:`) OR stakeholder (claimant/assignee/@mention). Fail-open on a
+            // lookup failure (stakeholder=true) → a free wake beats a silent miss.
+            void (async () => {
+                const ctx = await fetchWakeContext(client(), p, process.env.AIBALL_AGENT);
+                if (!pingIsDeliverable(ctx, loopProject)) {
+                    log(`SSE ping #${p.ticket_id} not deliverable for ${process.env.AIBALL_AGENT} (project=${ctx.project ?? "?"} ≠ ${loopProject ?? "?"}, not stakeholder) — hint dropped, no countdown arm`);
+                    return;
+                }
+                pendingWakeHint = p;
+                // #1041 — arm the `📨 Ns` countdown NOW (don't wait for the next turn
+                // re-entry to recompute it), so the [hint → drain] window is visible.
+                recomputeNextWake();
+                const nw = getIpcState().nextWakeAtMs;
+                const inSec = nw !== null ? Math.max(0, Math.ceil((nw - Date.now()) / 1000)) : null;
+                log(`SSE ping recorded as pending hint — countdown armed nextWakeAtMs=${nw} (~${inSec ?? "?"}s), drains on next turn:settled (≤${wakeTempoSec}s tempo)`);
+            })();
         }
     });
     wakeBus.on("error", (e) => {

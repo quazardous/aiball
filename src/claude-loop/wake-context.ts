@@ -36,19 +36,39 @@ import type { AiballClient } from "../client.js";
 import { stripMarkdown } from "./markdown-strip.js";
 import type { WakeHint } from "./state.js";
 
+/**
+ * #1351 david `hhqd9a` — is an SSE ping DELIVERABLE to this consumer, i.e. will
+ * it actually produce a wake ? A ping lands in the cross-project SSE feed (#800)
+ * even when it's a pure broadcast the consumer can't act on ; arming the
+ * `📨 Ns` countdown on such a ping loops it forever (b:0 e:0) because the drain
+ * skips it (not stakeholder → empty phrase) and the next ping re-arms — the
+ * runic "syndrome event fantôme" that survived the #1355 backlog fix.
+ *
+ * Deliverable = the ping's ticket is in THIS loop's project (a FIFO event we
+ * own — also covered by the `e:` counter) OR the consumer is a stakeholder
+ * (claimant / assignee / @mention — a legit cross-project fan-out). Fail-open:
+ * an unresolved project with stakeholder=true (lookup failure) stays deliverable.
+ */
+export function pingIsDeliverable(
+    ctx: { project?: string; stakeholder: boolean },
+    loopProject: string | undefined,
+): boolean {
+    return ctx.project === loopProject || ctx.stakeholder;
+}
+
 export async function fetchWakeContext(
     client: AiballClient,
     hint: WakeHint,
     me: string | undefined,
-): Promise<{ stakeholder: boolean; commentBody?: string; commentKind?: string }> {
+): Promise<{ stakeholder: boolean; commentBody?: string; commentKind?: string; project?: string }> {
     if (!me || !hint.ticket_id) return { stakeholder: true };
     try {
-        // Ticket header (claimant/assignee) + le message déclencheur par id,
-        // en parallèle. getMessage est best-effort (null si échec) ; le verdict
-        // stakeholder ne dépend pas du body.
+        // Ticket header (claimant/assignee/project) + le message déclencheur par
+        // id, en parallèle. getMessage est best-effort (null si échec) ; le
+        // verdict stakeholder ne dépend pas du body.
         const [tResp, mResp] = await Promise.all([
             client.getTicket(hint.ticket_id, { summary: true }) as Promise<{
-                ticket?: { claimant?: string | null; assignee?: string | null };
+                ticket?: { claimant?: string | null; assignee?: string | null; project?: string };
             }>,
             hint.comment_id
                 ? (client.getMessage(hint.comment_id) as Promise<{ body?: string | null; kind?: string }>)
@@ -85,7 +105,8 @@ export async function fetchWakeContext(
         // #1169 — remonter le kind du message déclencheur : la branche
         // comment-centrique du wake ne doit PAS s'appliquer à un decision-event
         // (body vide par nature) sinon le wake se réduit aux refs nues.
-        return { stakeholder, commentBody, commentKind: mResp?.kind };
+        // #1351 — le project sert au gate de délivrabilité du hint (pingIsDeliverable).
+        return { stakeholder, commentBody, commentKind: mResp?.kind, project: t.project };
     } catch {
         return { stakeholder: true };
     }
