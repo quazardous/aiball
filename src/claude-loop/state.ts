@@ -1839,12 +1839,22 @@ export async function buildContextPhrase(
             }
         }
         // #1351 — assemble the same-ticket bundle now the head's title is
-        // resolved. Compact refs only (no body), newest on top / oldest at the
-        // bottom (the window is ASC = oldest first, so reverse). Each line
-        // carries its own hashid so the agent can open any single event.
+        // resolved. Newest on top / oldest at the bottom (the window is ASC =
+        // oldest first, so reverse). Each line carries its own hashid so the
+        // agent can open any single event.
+        // #1351 david `36phxd` — a bundled line must carry the SAME content as
+        // its standalone wake ; only the DELIVERY differs. So a comment shows
+        // its markdown-stripped body (truncated exactly like a single-comment
+        // wake, `stripMarkdown` default 240), NOT the bare "comment" label.
+        // Lifecycle / decision / new-ticket events have no body → keep their
+        // descriptive label ("closed", "resolution ACCEPTED", …), which IS what
+        // their standalone wake shows.
         if (isBundleMode) {
             const bundleLine = (m: (typeof unreadMsgs)[number]): string => {
-                const base = (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
+                const body = typeof m?.body === "string" ? m.body : "";
+                const base = m?.kind === "comment_added" && body.trim()
+                    ? stripMarkdown(body)
+                    : (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
                 const ref = typeof m?.hashid === "string" && m.hashid ? ` (#${m.hashid})` : "";
                 const by = m?.by_agent ? ` by ${m.by_agent}` : "";
                 return `${base}${ref}${by}`;

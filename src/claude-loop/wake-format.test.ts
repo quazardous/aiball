@@ -225,18 +225,43 @@ test("#1351 ≥2 events on the SAME ticket → one bundle, newest on top / oldes
     assert.match(res.phrase, /#920: shared ticket — 3 updates:/);
     assert.match(res.phrase, /resolution REJECT \(#ccc333\) by david/);
     assert.match(res.phrase, /reopened \(#bbb222\)/);
-    assert.match(res.phrase, /comment \(#aaa111\)/);
+    // #1351 david `36phxd` — a comment line carries its body (same content as a
+    // standalone comment wake), not the bare "comment" label.
+    assert.match(res.phrase, /oldest body \(#aaa111\)/);
     // newest (603) on top, oldest (601) at the bottom
     assert.ok(
-        res.phrase.indexOf("resolution REJECT") < res.phrase.indexOf("comment (#aaa111)"),
+        res.phrase.indexOf("resolution REJECT") < res.phrase.indexOf("oldest body (#aaa111)"),
         "newest event must render above the oldest",
     );
-    // compact refs only — the comment body is dropped in bundle mode
-    assert.doesNotMatch(res.phrase, /oldest body/);
+    // lifecycle / decision lines keep their descriptive label (no body).
+    assert.doesNotMatch(res.phrase, /comment \(#aaa111\)/);
     // head (601) stays the inject-time prune target; 602/603 are the extras
     assert.equal(res.headMessageId, 601);
     assert.deepEqual([...(res.extraSeenIds ?? [])].sort((a, b) => a - b), [602, 603]);
     assert.equal(res.hasContent, true);
+});
+
+test("#1351 david `36phxd`: a long markdown comment body is stripped + truncated in its bundle line", async () => {
+    const longBody = "**bold intro** " + "lorem ipsum dolor sit amet ".repeat(20); // >240 chars
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 611, kind: "comment_added", ticket_id: 920, hashid: "aaa", body: longBody, by_agent: "david" },
+                    { id: 612, kind: "comment_added", ticket_id: 920, hashid: "bbb", body: "short one", by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "t", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    // markdown stripped (no `**`), truncated with the ellipsis stripMarkdown uses.
+    assert.doesNotMatch(res.phrase, /\*\*/);
+    assert.match(res.phrase, /…/);
+    // the short second comment renders its body in full + its ref.
+    assert.match(res.phrase, /short one \(#bbb\) by david/);
 });
 
 test("#1351 events on DIFFERENT tickets → no bundle, head renders single", async () => {
