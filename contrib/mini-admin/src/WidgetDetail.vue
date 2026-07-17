@@ -6,6 +6,7 @@ import FieldRow from "@kit/FieldRow.vue";
 import FormField from "@kit/FormField.vue";
 import { getWidget, saveWidget, type Widget, type WidgetStatus } from "./store";
 import { canEdit } from "./session";
+import { crumbs } from "./router";
 
 const props = defineProps<{ id: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -43,8 +44,13 @@ async function save(): Promise<void> {
 </script>
 
 <template>
+    <!-- Step 4: the crumbs now come from the route table instead of being typed
+         out here. The kit takes them as a REQUIRED prop and never derives them —
+         which is why aiball's own eight pages each hand-write their chain, and
+         why four sibling project pages have already drifted to two different
+         chains. Deriving them is the caller's job, always. -->
     <AdminDetailLayout
-        :crumbs="[{ label: 'Widgets' }]"
+        :crumbs="crumbs"
         :current="id"
         title="Edit widget"
         @close-to-inbox="emit('close')"
