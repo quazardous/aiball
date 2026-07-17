@@ -65,6 +65,7 @@ Root:
 - [`WORKFLOW.md`](./docs/WORKFLOW.md) — `feature` vs mainstream dev workflow (intent-driven; never switch the runtime checkout's branch).
 - [`MIGRATIONS.md`](./docs/MIGRATIONS.md) — drizzle/SQLite migration conventions.
 - [`I18N.md`](./docs/I18N.md) — i18n policy (English-only today) + proposed approach.
+- [`UI-KIT.md`](./docs/UI-KIT.md) — build an admin screen with the Vue UI kit, step by step; what it gives you and what it deliberately doesn't. Demo: `contrib/mini-admin/`.
 - [`TICKET_LIFECYCLE.md`](./docs/TICKET_LIFECYCLE.md) — TARGET design: ticket states/events + the per-consumer `actionable` gate (`last_actor` model unifying #265/#273/#358).
 
 ## Conventions

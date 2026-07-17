@@ -488,6 +488,7 @@ editing. Skim the headers first if the doc is large.
 | Install paths, install modes                   | [`docs/INSTALL.md`](docs/INSTALL.md) (Linux/macOS) or [`docs/WIN-INSTALL.md`](docs/WIN-INSTALL.md) |
 | MCP client / agent-facing tool surface         | [`MCP-CLIENT.md`](./MCP-CLIENT.md)              |
 | Workflow (feature vs mainstream branch model)  | [`docs/WORKFLOW.md`](docs/WORKFLOW.md)                |
+| Admin screens / the Vue UI kit                 | [`docs/UI-KIT.md`](docs/UI-KIT.md) — step-by-step + the traps |
 
 When in doubt about which doc applies, grep first
 (`grep -l <symbol> docs/`) rather than read everything.
