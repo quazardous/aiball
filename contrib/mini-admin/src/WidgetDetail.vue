@@ -7,9 +7,13 @@ import FormField from "@kit/FormField.vue";
 import { getWidget, saveWidget, type Widget, type WidgetStatus } from "./store";
 import { canEdit } from "./session";
 import { crumbs } from "./router";
+import PartsSection from "./PartsSection.vue";
 
 const props = defineProps<{ id: string }>();
-const emit = defineEmits<{ (e: "close"): void }>();
+const emit = defineEmits<{
+    (e: "close"): void;
+    (e: "open-part", partId: string): void;
+}>();
 
 const widget = ref<Widget | null>(null);
 const loading = ref(true);
@@ -117,6 +121,14 @@ async function save(): Promise<void> {
                 <p v-if="saveError" class="aiball-explainer" style="color: var(--p-red-500, #ef4444)">
                     {{ saveError }}
                 </p>
+
+                <!-- Step 5: the child list, nested straight into the parent's
+                     card. This part cost nothing — DataList and SectionHeader
+                     compose without complaint. -->
+                <PartsSection
+                    :widget-id="widget.id"
+                    @open="(partId) => emit('open-part', partId)"
+                />
             </template>
         </AsyncState>
     </AdminDetailLayout>

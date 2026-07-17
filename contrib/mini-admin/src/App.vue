@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import WidgetsList from "./WidgetsList.vue";
 import WidgetDetail from "./WidgetDetail.vue";
+import PartDetail from "./PartDetail.vue";
 import { role, type Role } from "./session";
 import { currentMatch, currentPath, menu, navigate } from "./router";
 
@@ -38,10 +39,21 @@ const ROLES: Role[] = ["viewer", "editor"];
             </div>
         </div>
 
+        <!-- Step 5 reopened this file for the fourth time: every new route is
+             one more v-else-if here. The route table knows the tree, but nothing
+             maps a route to its component — so the dispatch stays hand-written,
+             exactly the shape of the frontend's if/else the table was meant to
+             avoid. The kit has no router-view, and neither does the demo yet. -->
+        <PartDetail
+            v-if="currentMatch?.route.path === '/widgets/:id/parts/:partId'"
+            :part-id="currentMatch.params.partId"
+            @close="navigate(`/widgets/${currentMatch?.params.id}`)"
+        />
         <WidgetDetail
-            v-if="currentMatch?.route.path === '/widgets/:id'"
+            v-else-if="currentMatch?.route.path === '/widgets/:id'"
             :id="currentMatch.params.id"
             @close="navigate('/widgets')"
+            @open-part="(partId) => navigate(`/widgets/${currentMatch?.params.id}/parts/${partId}`)"
         />
         <WidgetsList
             v-else-if="currentMatch?.route.path === '/widgets'"

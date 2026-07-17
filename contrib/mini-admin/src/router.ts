@@ -26,6 +26,11 @@ export const ROUTES: Route[] = [
     { path: "/", label: "Home", inMenu: true },
     { path: "/widgets", label: "Widgets", parent: "/", inMenu: true },
     { path: "/widgets/:id", label: "Widget", parent: "/widgets" },
+    // Step 5 — children. Adding the routes themselves WAS additive: three lines
+    // in the table, nothing else touched. The table paid off exactly where
+    // aiball's if/else chains would have charged three edits each.
+    { path: "/widgets/:id/parts", label: "Parts", parent: "/widgets/:id" },
+    { path: "/widgets/:id/parts/:partId", label: "Part", parent: "/widgets/:id/parts" },
 ];
 
 export interface Crumb {
@@ -83,8 +88,23 @@ export const crumbs = computed<Crumb[]>(() => {
     while (parent) {
         const p: Route | undefined = ROUTES.find((r) => r.path === parent);
         if (!p) break;
-        chain.unshift({ label: p.label, href: `#${p.path}` });
+        chain.unshift({ label: p.label, href: `#${fill(p.path, m.params)}` });
         parent = p.parent;
     }
     return chain;
 });
+
+/**
+ * STEP 5 REOPENED STEP 4. The crumb builder above shipped with `href: p.path`,
+ * which worked only because every parent was static (`/widgets`). At the third
+ * level the parent carries params, so the link came out as the literal
+ * `#/widgets/:id`. Nesting broke the design that looked fine two steps ago —
+ * the same class of bug as aiball's drifting chains, in code written to expose
+ * it. Substituting the current match's params is the fix.
+ */
+function fill(pattern: string, params: Record<string, string>): string {
+    return pattern
+        .split("/")
+        .map((seg) => (seg.startsWith(":") ? encodeURIComponent(params[seg.slice(1)] ?? seg) : seg))
+        .join("/");
+}

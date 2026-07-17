@@ -4,6 +4,9 @@ import Aura from "@primeuix/themes/aura";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
+// Step 5 reopened this file too: one child field is numeric, and the kit has no
+// input at all — so a fourth PrimeVue component gets registered here.
+import InputNumber from "primevue/inputnumber";
 
 // STEP 2 REOPENED THIS FILE. Step 1 booted on `vue` alone and looked fine —
 // but the kit's CSS reads `--p-*` custom properties (--p-content-background,
@@ -31,5 +34,6 @@ app.use(PrimeVue, {
 app.component("Button", Button);
 app.component("InputText", InputText);
 app.component("Select", Select);
+app.component("InputNumber", InputNumber);
 
 app.mount("#app");
