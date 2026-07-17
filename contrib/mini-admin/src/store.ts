@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { canEdit, ForbiddenError } from "./session";
 
 // The demo has no backend on purpose: the tutorial is about the UI kit, not
 // about wiring an API. This fake store keeps the async shape (promises, a
@@ -37,6 +38,8 @@ export async function getWidget(id: string): Promise<Widget> {
 
 export async function saveWidget(patch: Widget): Promise<Widget> {
     await latency();
+    // Step 3 — the server is the one that refuses, exactly like aiball's routes.
+    if (!canEdit.value) throw new ForbiddenError("save a widget");
     if (!patch.name.trim()) throw new Error("name is required");
     const i = rows.value.findIndex((w) => w.id === patch.id);
     if (i < 0) throw new Error(`no widget ${patch.id}`);
