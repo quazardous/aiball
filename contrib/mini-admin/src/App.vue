@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import PanelHeader from "@kit/PanelHeader.vue";
+import { ref } from "vue";
+import WidgetsList from "./WidgetsList.vue";
+import WidgetDetail from "./WidgetDetail.vue";
+
+// Step 2 needs no router: one ref is enough to swap list ↔ detail. Real
+// navigation (URL, menu, breadcrumb) is step 4 — that is where the demo finds
+// out what the frontend's router really costs.
+const openId = ref<string | null>(null);
 </script>
 
 <template>
@@ -8,11 +15,12 @@ import PanelHeader from "@kit/PanelHeader.vue";
          shared stylesheet — so it does not exist outside that app. See
          docs/UI-KIT.md, step 1. -->
     <main class="demo-main">
-        <PanelHeader title="Widgets">
-            <p class="aiball-explainer aiball-explainer--muted">
-                Step 1 — the stack boots and one kit component renders.
-            </p>
-        </PanelHeader>
+        <WidgetDetail
+            v-if="openId"
+            :id="openId"
+            @close="openId = null"
+        />
+        <WidgetsList v-else @open="(id) => (openId = id)" />
     </main>
 </template>
 

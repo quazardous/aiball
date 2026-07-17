@@ -10,6 +10,9 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@primeuix/themes": "^1.0.0",
+    "primeicons": "^7.0.0",
+    "primevue": "^4.2.0",
     "vue": "^3.5.0"
   },
   "devDependencies": {
