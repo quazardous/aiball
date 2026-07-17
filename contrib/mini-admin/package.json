@@ -1,0 +1,21 @@
+{
+  "name": "aiball-mini-admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tutorial demo — a mini admin built with the aiball UI kit. See docs/UI-KIT.md.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "vue-tsc": "^2.1.0"
+  }
+}

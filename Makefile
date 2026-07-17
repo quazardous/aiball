@@ -183,10 +183,19 @@ ui-build:
 
 typecheck:
 	$(NPM) run typecheck
+# `npm --prefix X exec` resolves the BINARY from X but leaves the cwd here, so
+# vue-tsc picked up the ROOT tsconfig and re-checked the backend — the frontend
+# leg was a silent no-op that always went green. vue-tsc has no project flag we
+# can trust here (it resolves `include` relative to cwd), so cd for real.
 	@if [ -d frontend/node_modules ]; then \
-	    $(NPM) --prefix frontend exec -- vue-tsc --noEmit; \
+	    cd frontend && $(NPM) exec -- vue-tsc --noEmit; \
 	else \
 	    echo "(skip frontend typecheck — run 'make install-frontend' first)"; \
+	fi
+	@if [ -d contrib/mini-admin/node_modules ]; then \
+	    cd contrib/mini-admin && $(NPM) exec -- vue-tsc --noEmit; \
+	else \
+	    echo "(skip contrib typecheck — run 'npm --prefix contrib/mini-admin install' first)"; \
 	fi
 
 smoke:
