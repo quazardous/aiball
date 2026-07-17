@@ -23,6 +23,23 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- **UI kit walkthrough** (`docs/UI-KIT.md`) — a step-by-step for building an
+  admin screen with the Vue components, written from an actually-built demo
+  (`contrib/mini-admin/`, one commit per step) rather than from reading the
+  code. Documents what the kit gives you, and the traps it doesn't warn about.
+- The demo is built in CI and covered by `make typecheck`, so the walkthrough
+  breaks loudly instead of rotting when the kit changes.
+
+### Fixed
+
+- `make typecheck` never typechecked the frontend. It ran `npm --prefix
+  frontend exec -- vue-tsc`, which resolves the binary from `frontend/` but
+  leaves the working directory at the repo root — so `vue-tsc` read the root
+  tsconfig and re-checked the backend, always going green. Both legs now cd for
+  real. CI was unaffected.
+
 ## [0.35.0] — 2026-07-16
 
 ### Added
