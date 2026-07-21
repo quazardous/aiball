@@ -11,6 +11,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
+import { DECISION_KINDS, type DecisionKind } from "../decisions.js";
 import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import { getAfkService } from "./afk-service.js";
 import { getTypingService } from "./typing-service.js";
@@ -1740,16 +1741,22 @@ export async function buildContextPhrase(
         // sans la croix. Les 4 phrases reject mettent désormais "REJECT"
         // en tête de phrase pour qu'il soit immédiatement visible dans
         // l'inject prompt (pas noyé entre "Your" et le reste).
-        const DECISION_EVENT_VERBS: Record<string, string> = {
-            plan_accepted: "Your plan was ACCEPTED — execute",
-            plan_rejected: "REJECT — your plan, ball back in your court",
-            resolution_accepted: "Your resolution was ACCEPTED, ticket closed",
-            resolution_rejected: "REJECT — your resolution, ticket stays open",
-            wontfix_accepted: "Your wontfix was ACCEPTED, ticket closed",
-            wontfix_rejected: "REJECT — your wontfix, ticket stays open",
-            escalation_accepted: "Your escalation was ACCEPTED",
-            escalation_rejected: "REJECT — your escalation",
+        // Per-kind wake phrasings for the two terminal transitions. Keyed on
+        // DecisionKind (Record<DecisionKind, …>) so a new decision verb can't
+        // ship without its wording — TS forces the entry. The flat
+        // `<kind>_<transition>` → phrase map the branches read is built from it.
+        const DECISION_VERB_PHRASES: Record<DecisionKind, { accepted: string; rejected: string }> = {
+            plan: { accepted: "Your plan was ACCEPTED — execute", rejected: "REJECT — your plan, ball back in your court" },
+            resolution: { accepted: "Your resolution was ACCEPTED, ticket closed", rejected: "REJECT — your resolution, ticket stays open" },
+            wontfix: { accepted: "Your wontfix was ACCEPTED, ticket closed", rejected: "REJECT — your wontfix, ticket stays open" },
+            escalation: { accepted: "Your escalation was ACCEPTED", rejected: "REJECT — your escalation" },
         };
+        const DECISION_EVENT_VERBS: Record<string, string> = Object.fromEntries(
+            DECISION_KINDS.flatMap((k): Array<[string, string]> => [
+                [`${k}_accepted`, DECISION_VERB_PHRASES[k].accepted],
+                [`${k}_rejected`, DECISION_VERB_PHRASES[k].rejected],
+            ]),
+        );
         const unreadKind = unreadHead?.kind ?? "";
         // #1351 — same-ticket bundle. When ≥2 unread events concern the HEAD's
         // ticket, deliver them as ONE wake (compact refs, newest on top /
@@ -1761,23 +1768,21 @@ export async function buildContextPhrase(
         // keep their #1163 wording; comment/lifecycle/new-ticket get a compact
         // token. Body is intentionally dropped in bundle mode (refs only) —
         // the single-event wake still carries the full body.
-        const DIGEST_LABELS: Record<string, string> = {
-            plan_accepted: "plan ACCEPTED",
-            plan_rejected: "plan REJECT",
-            resolution_accepted: "resolution ACCEPTED",
-            resolution_rejected: "resolution REJECT",
-            wontfix_accepted: "wontfix ACCEPTED",
-            wontfix_rejected: "wontfix REJECT",
-            escalation_accepted: "escalation ACCEPTED",
-            escalation_rejected: "escalation REJECT",
-        };
+        // Compact digest labels are mechanical (`<kind> ACCEPTED|REJECT`), so
+        // derive them from DECISION_KINDS — a new verb is auto-labelled.
+        const DIGEST_LABELS: Record<string, string> = Object.fromEntries(
+            DECISION_KINDS.flatMap((k): Array<[string, string]> => [
+                [`${k}_accepted`, `${k} ACCEPTED`],
+                [`${k}_rejected`, `${k} REJECT`],
+            ]),
+        );
         const BUNDLE_LABELS: Record<string, string> = {
             ...DIGEST_LABELS,
+            // lifecycle labels are the SAME strings as LIFECYCLE_VERBS — spread
+            // it instead of re-typing closed/resolved/reopened by hand.
+            ...LIFECYCLE_VERBS,
             comment_added: "comment",
             ticket_created: "new ticket",
-            ticket_closed: "closed",
-            ticket_resolved: "resolved",
-            ticket_reopened: "reopened",
         };
         // #1351 + #1363 — render ONE event as a compact line, SAME content as
         // its standalone wake : a comment shows its markdown-stripped body
