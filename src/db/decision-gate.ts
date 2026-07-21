@@ -23,6 +23,8 @@
 // pas de proposeur → un commentaire tardif ne les lève pas (flux d'auto-close
 // préservé). = « point 4 » (lastAuthor GO-override) différé de #273.
 
+import { CLOSING_DECISION_KINDS, WAITING_DECISION_KINDS } from "../decisions.js";
+
 /** Un event pertinent pour le gate, fourni dans l'ordre d'insertion (id asc). */
 export interface DecisionGateEvent {
     ticketId: number | null;
@@ -112,7 +114,8 @@ function applyDecisionSignal(
     decision: { kind?: string; status?: string },
     byAgent: string | null,
 ): void {
-    if (decision.kind === "resolution" || decision.kind === "wontfix") {
+    const kind = decision.kind ?? "";
+    if ((CLOSING_DECISION_KINDS as readonly string[]).includes(kind)) {
         // #802 — wontfix shares resolution's gate semantics : pending OR
         // accepted = ticket gated. Difference is in the side-effect
         // (acceptance auto-closes the ticket, see api/messages.ts decide
@@ -127,7 +130,7 @@ function applyDecisionSignal(
         } else if (decision.status === "rejected") {
             state.set(ticketId, { gated: false, proposer: null });
         }
-    } else if (decision.kind === "plan" || decision.kind === "escalation") {
+    } else if ((WAITING_DECISION_KINDS as readonly string[]).includes(kind)) {
         // Plan accepté = go-signal → dé-gaté (le ticket re-rentre dans
         // l'actionable pour être exécuté). Plan rejeté = dé-gaté aussi.
         // #737 — escalation partage les mêmes sémantiques de gate :

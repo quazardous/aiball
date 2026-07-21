@@ -19,7 +19,7 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
-import { ERROR_CODES, PRIORITIES, type Priority } from "./domain.js";
+import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
@@ -40,7 +40,7 @@ import { fanOutPings, fanOutMentions } from "./notifications.js";
 // misuse (agents temporizing with blocked when they were just
 // waiting on input). Historical rows stay in the DB and continue to
 // render via the lifecycle replay; only emission is gated.
-export const VALID_KINDS = [
+export const VALID_KINDS: readonly MessageKind[] = [
     "ticket_created",
     "comment_added",
     "ticket_closed",
@@ -52,33 +52,15 @@ export const VALID_KINDS = [
     // is server-derived from the underlying decision). Listed here so
     // validateNewMessage accepts them on the internal submitMessage call
     // path the decide handler takes — direct API POSTs are still blocked
-    // by `assertDecisionEventInternal` below.
-    "plan_accepted",
-    "plan_rejected",
-    "resolution_accepted",
-    "resolution_rejected",
-    "wontfix_accepted",
-    "wontfix_rejected",
-    "escalation_accepted",
-    "escalation_rejected",
-] as const satisfies readonly MessageKind[];
+    // by `assertDecisionEventInternal` below. DERIVED from DECISION_KINDS
+    // (via domain.ts), so a new decision verb needs no edit here.
+    ...DECISION_EVENT_KINDS,
+];
 
-// #830 — server-derived decision event kinds. Posts from external API
-// callers MUST NOT carry these directly (only the /decide handler can
-// emit them once the underlying meta.decision.status has flipped).
-export const DECISION_EVENT_KINDS = [
-    "plan_accepted",
-    "plan_rejected",
-    "resolution_accepted",
-    "resolution_rejected",
-    "wontfix_accepted",
-    "wontfix_rejected",
-    "escalation_accepted",
-    "escalation_rejected",
-] as const satisfies readonly MessageKind[];
-export function isDecisionEventKind(s: string): boolean {
-    return (DECISION_EVENT_KINDS as readonly string[]).includes(s);
-}
+// #830 — the canonical decision-event set + guard now live in domain.ts
+// (DERIVED from DECISION_KINDS). Re-exported here so existing importers
+// (api/messages.ts, tests) keep pulling them from `./messages.js`.
+export { isDecisionEventKind };
 
 export interface ValidationError {
     error: string;

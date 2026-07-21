@@ -9,13 +9,15 @@
  * concepts, not DB rows. `db/connection.ts` re-exports the types so
  * existing call sites keep compiling without touching imports.
  *
- * Frontend mirror: `frontend/src/lib/domain.ts`. The two files MUST be
- * kept identical — the frontend bundle does not pull from `src/`, so
- * sharing a runtime module is impossible without a shared package.
- * Diverging here means UI / API drift.
+ * Frontend mirror: `frontend/src/lib/domain.ts` re-exports this module via
+ * the `@shared` alias (vite + tsconfig paths), so there is ONE source — no
+ * hand-kept copy to drift.
  */
 
-export const MESSAGE_KINDS = [
+import { DECISION_KINDS, type DecisionKind } from "./decisions.js";
+
+// Base (non-decision) message kinds — explicit literals.
+const BASE_MESSAGE_KINDS = [
     "ticket_created",
     "comment_added",
     "ticket_closed",
@@ -29,24 +31,32 @@ export const MESSAGE_KINDS = [
     // in meta.relation.kind). Lifecycle replay treats these as N-N graph
     // edges, NOT as comments — see src/relations.ts.
     "ticket_relation",
-    // #830 david `a7pn65` — dedicated event kinds for the 4 decision verbs
-    // (plan / resolution / wontfix / escalation) × the 2 terminal transitions
-    // (accepted / rejected). Replaces the previous "no dedicated event" path
-    // where the reporter's accept/reject only flipped meta.decision.status on
-    // the original comment, leaving the agent's wake injecting the unchanged
-    // proposal body with no verbal hint of the transition. Each event is
-    // inserted by the /decide handler AFTER applyDecision succeeds; meta
-    // carries `decision_ref: <original.hashid>` so the wake/UI can backlink.
-    "plan_accepted",
-    "plan_rejected",
-    "resolution_accepted",
-    "resolution_rejected",
-    "wontfix_accepted",
-    "wontfix_rejected",
-    "escalation_accepted",
-    "escalation_rejected",
 ] as const;
-export type MessageKind = typeof MESSAGE_KINDS[number];
+
+// #830 david `a7pn65` — dedicated event kinds for the decision verbs
+// (plan / resolution / wontfix / escalation) × the 2 terminal transitions
+// (accepted / rejected). Replaces the previous "no dedicated event" path
+// where the reporter's accept/reject only flipped meta.decision.status on
+// the original comment, leaving the agent's wake injecting the unchanged
+// proposal body with no verbal hint of the transition. Each event is
+// inserted by the /decide handler AFTER applyDecision succeeds; meta
+// carries `decision_ref: <original.hashid>` so the wake/UI can backlink.
+//
+// DERIVED from DECISION_KINDS (the single source): the set is exactly the
+// cross-product `kind × {accepted, rejected}`, so a new decision verb needs
+// no edit here — it flows in from decisions.ts. Type-level derivation via a
+// template-literal type keeps the union exact; runtime array mirrors it.
+export const DECISION_TRANSITIONS = ["accepted", "rejected"] as const;
+export type DecisionTransition = typeof DECISION_TRANSITIONS[number];
+export type DecisionEventKind = `${DecisionKind}_${DecisionTransition}`;
+export const DECISION_EVENT_KINDS: readonly DecisionEventKind[] =
+    DECISION_KINDS.flatMap((k) => DECISION_TRANSITIONS.map((t) => `${k}_${t}` as DecisionEventKind));
+export function isDecisionEventKind(s: string): s is DecisionEventKind {
+    return (DECISION_EVENT_KINDS as readonly string[]).includes(s);
+}
+
+export type MessageKind = typeof BASE_MESSAGE_KINDS[number] | DecisionEventKind;
+export const MESSAGE_KINDS: readonly MessageKind[] = [...BASE_MESSAGE_KINDS, ...DECISION_EVENT_KINDS];
 
 export const MESSAGE_STATUSES = ["pending", "approved", "rejected"] as const;
 export type MessageStatus = typeof MESSAGE_STATUSES[number];

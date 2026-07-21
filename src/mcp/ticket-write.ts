@@ -10,7 +10,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MESSAGE_SCOPES } from "../domain.js";
+import { type DecisionKind } from "../decisions.js";
 import { asText, client, effectiveBy, markActiveTicket } from "./_helpers.js";
+
+// Single source for the `then` verb → decision kind mapping. The MCP verb
+// vocabulary (`resolved` / `escalate`) is agent-facing sugar; the stored
+// `decision_kind` is the canonical DECISION_KINDS value. `satisfies` keeps
+// the values honest against the domain enum.
+const DECISION_VERB_TO_KIND = {
+    resolved: "resolution",
+    plan: "plan",
+    wontfix: "wontfix",
+    escalate: "escalation",
+} as const satisfies Record<string, DecisionKind>;
+type DecisionVerb = keyof typeof DECISION_VERB_TO_KIND;
 
 export function registerTicketWriteTools(server: McpServer): void {
     server.registerTool(
@@ -235,19 +248,18 @@ export function registerTicketWriteTools(server: McpServer): void {
             // with blocked when they were just waiting on input). The
             // right pattern for "I need info" is a plain comment with a
             // question — the conversational thread covers it naturally.
-            const kind: string = !then
-                ? "comment_added"
-                : then === "resolved" || then === "plan" || then === "wontfix" || then === "escalate"
-                  ? "comment_added"
-                  : then === "close"
-                    ? "ticket_closed"
-                    : "ticket_reopened";
-            const decision_kind =
-                then === "resolved" ? "resolution"
-                : then === "plan" ? "plan"
-                : then === "wontfix" ? "wontfix"
-                : then === "escalate" ? "escalation"
-                : undefined;
+            // close / reopen are lifecycle rows ; every other verb (and the
+            // no-`then` case) is a comment_added. The decision verbs map to
+            // their canonical kind via DECISION_VERB_TO_KIND — no per-verb
+            // enumeration here.
+            const kind: string =
+                then === "close" ? "ticket_closed"
+                : then === "reopen" ? "ticket_reopened"
+                : "comment_added";
+            const decision_kind: DecisionKind | undefined =
+                then && then !== "close" && then !== "reopen"
+                    ? DECISION_VERB_TO_KIND[then as DecisionVerb]
+                    : undefined;
             const proj = project ?? target.project;
             const res = await client.postMessage({
                 project: proj,
