@@ -20,15 +20,12 @@ import type { Message, TicketSummary } from "./api";
 // the consumer typing.
 type DecisionBearing = Pick<Message, "id" | "status" | "meta">;
 
-export type DecisionKind = "plan" | "resolution" | "wontfix" | "escalation";
-export type DecisionStatus = "pending" | "accepted" | "rejected";
-
-export interface CommentDecision {
-    kind: DecisionKind;
-    status: DecisionStatus;
-    decided_by?: string;
-    decided_at?: string;
-}
+// Single source: the daemon's `src/decisions.ts` (via the `@shared` alias).
+// Imported for local use in the helpers below AND re-exported so existing
+// consumers keep importing them from here. The frontend keeps only its own
+// message-shaped read helpers; the kind/status taxonomy is shared.
+import type { DecisionKind, DecisionStatus, CommentDecision } from "@shared/decisions";
+export type { DecisionKind, DecisionStatus, CommentDecision };
 
 /** Extract the decision block from a message's `meta` JSON. Returns
  *  null when meta is empty, malformed, or has no decision key. */

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
@@ -37,7 +38,15 @@ export default defineConfig({
     // make Rollup see `../../../../../dev/aiball/frontend/index.html` as
     // the entry, which it rejects (relative paths not allowed for
     // emitted file names). #B.178 follow-up.
-    resolve: { preserveSymlinks: true },
+    resolve: {
+        preserveSymlinks: true,
+        // #B.122 — the frontend shares the daemon's business enums instead of
+        // hand-mirroring them: `@shared` points at the repo-root `src/` so
+        // `lib/domain.ts` can re-export `src/domain.ts` (single source, no drift).
+        alias: {
+            "@shared": fileURLToPath(new URL("../src", import.meta.url)),
+        },
+    },
     server: {
         port: 5173,
         proxy: {
