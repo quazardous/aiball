@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-07-21
+
 ### Added
 
 - **UI kit walkthrough** (`docs/UI-KIT.md`) — a step-by-step for building an
@@ -42,6 +44,8 @@ dates are YYYY-MM-DD.
 - **Grouped wakes now read oldest-first.** A wake bundling several updates on
   one ticket listed them newest-on-top; it now reads top-down like the thread
   itself — oldest first, newest at the bottom.
+- The README quickstart now documents the **F9** presence control and drops a
+  stale `-- --resume` from the launch example (`claude-loop` alone suffices).
 
 ## [0.35.0] — 2026-07-16
 
