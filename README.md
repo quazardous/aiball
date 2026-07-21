@@ -48,13 +48,17 @@ git clone https://github.com/quazardous/aiball.git && cd aiball
 # 2. Wire a project (per repo): writes .mcp.json + .aiball.yaml (idempotent)
 cd <your-project> && claude-loop init
 
-# 3. Launch a session in the loop (anything after -- is forwarded to claude)
-claude-loop -- --resume
+# 3. Launch a session in the loop (append `-- <flags>` to forward them to claude)
+claude-loop
 ```
 
 tmux opens with claude inside; the status bar tracks real state
 (`boot` → `idle` → `busy`, plus a `stop` / `wait` / `loop` human-presence
 word). Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
+Press **F9** to take or release the wheel by hand: it cycles autonomous →
+held 10 min → held until you press again, so you can pilot live without the
+loop pinging over you (full presence model in
+[`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md)).
 Run `aiball check` to verify wiring. Full install guide (modes, flags,
 env vars, troubleshooting) in [`docs/INSTALL.md`](./docs/INSTALL.md); other
 setups (bare MCP, autopoll Stop hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md);
