@@ -92,6 +92,13 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: contrib/mini-admin/package-lock.json
+      # The demo typechecks the kit files by path from frontend/src; their
+      # `import ... from "vue"` resolves (TS-side) against frontend/node_modules,
+      # not the demo's own — so the frontend deps must be installed too. (vite
+      # build alone wouldn't need them; vue-tsc does.) This is also what keeps
+      # the "kit change breaks the tutorial → CI red" guarantee honest.
+      - run: npm ci
+        working-directory: frontend
       - run: npm ci
         working-directory: contrib/mini-admin
       - run: npm run build
