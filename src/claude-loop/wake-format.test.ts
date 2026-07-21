@@ -294,9 +294,9 @@ test("#1350 backlog Triage CTA never carries the fyi suffix", async () => {
 });
 
 // #1351 — same-ticket bundle: ≥2 unread events on the head's ticket are
-// delivered as ONE wake (compact refs, newest on top / oldest at the bottom),
-// and the folded-in events are marked seen via extraSeenIds.
-test("#1351 ≥2 events on the SAME ticket → one bundle, newest on top / oldest at bottom", async () => {
+// delivered as ONE wake (compact refs, chronological — oldest first / newest at
+// the bottom, #1408), and the folded-in events are marked seen via extraSeenIds.
+test("#1351 ≥2 events on the SAME ticket → one bundle, chronological oldest first / newest at bottom", async () => {
     const res = await buildContextPhrase(
         stubClient({
             pingsCount: async () => ({ unread: 3 }),
@@ -318,10 +318,10 @@ test("#1351 ≥2 events on the SAME ticket → one bundle, newest on top / oldes
     // #1351 david `36phxd` — a comment line carries its body (same content as a
     // standalone comment wake), not the bare "comment" label.
     assert.match(res.phrase, /oldest body \(#aaa111\)/);
-    // newest (603) on top, oldest (601) at the bottom
+    // #1408 — chronological: oldest (601) on top, newest (603) at the bottom
     assert.ok(
-        res.phrase.indexOf("resolution REJECT") < res.phrase.indexOf("oldest body (#aaa111)"),
-        "newest event must render above the oldest",
+        res.phrase.indexOf("oldest body (#aaa111)") < res.phrase.indexOf("resolution REJECT"),
+        "oldest event must render above the newest (chronological order)",
     );
     // lifecycle / decision lines keep their descriptive label (no body).
     assert.doesNotMatch(res.phrase, /comment \(#aaa111\)/);

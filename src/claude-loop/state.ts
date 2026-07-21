@@ -1856,14 +1856,17 @@ export async function buildContextPhrase(
             }
         }
         // #1351 — assemble the same-ticket bundle now the head's title is
-        // resolved. Newest on top / oldest at the bottom (the window is ASC =
-        // oldest first, so reverse). Each line carries its own hashid so the
-        // agent can open any single event.
+        // resolved. Each line carries its own hashid so the agent can open any
+        // single event.
         // #1351 david `36phxd` — a bundled line carries the SAME content as its
         // standalone wake (via `renderEventLine`) ; only the DELIVERY differs.
-        // Newest on top / oldest at the bottom (the window is ASC → reverse).
+        // #1408 david — chronological order, oldest first / newest at the
+        // bottom. The window is already ASC (oldest first, same as
+        // `client.unread()`), so render it as-is — no reverse. This matches a
+        // human reading a thread top-down and the head (messages[0], the oldest)
+        // stays the line the agent anchors on.
         if (isBundleMode) {
-            const lines = [...sameTicket].reverse().map((m) => renderEventLine(m)).join("\n");
+            const lines = sameTicket.map((m) => renderEventLine(m)).join("\n");
             const titlePart = head?.title ? `: ${head.title}` : "";
             headBundle = `#${headTicketId}${titlePart} — ${sameTicket.length} updates:\n${lines}`;
         }
