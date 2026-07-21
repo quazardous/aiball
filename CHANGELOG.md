@@ -39,6 +39,9 @@ dates are YYYY-MM-DD.
   leaves the working directory at the repo root — so `vue-tsc` read the root
   tsconfig and re-checked the backend, always going green. Both legs now cd for
   real. CI was unaffected.
+- **Grouped wakes now read oldest-first.** A wake bundling several updates on
+  one ticket listed them newest-on-top; it now reads top-down like the thread
+  itself — oldest first, newest at the bottom.
 
 ## [0.35.0] — 2026-07-16
 
