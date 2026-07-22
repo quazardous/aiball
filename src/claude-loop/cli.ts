@@ -638,6 +638,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export ${CL_ENV.NAME}=${shQuote(name)}`,
         `export ${CL_ENV.STATE_DIR}=${shQuote(sd)}`,
         `export ${CL_ENV.PINGS}=${shQuote(pingsPath(sd))}`,
+        // Defensive: force claude's CLASSIC (scrollback) renderer for looped
+        // sessions. Claude Code's opt-in "fullscreen" / NO_FLICKER mode paints
+        // into the alternate screen buffer with a fixed-overlay footer — which
+        // silently de-calibrates every pane-watcher regex (busy/idle/boot/
+        // compact/health/prompt all scrape `capture-pane -p`). This env var
+        // overrides a global `"tui":"fullscreen"` in ~/.claude/settings.json, so
+        // enabling fullscreen there can't brick your loops. Sourced before env.local,
+        // so a power user who really wants fullscreen can unset it there.
+        `export CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`,
         // CLI-only flags (no yaml backing, no shell override) :
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.

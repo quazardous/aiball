@@ -23,6 +23,14 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Changed
+
+- Looped sessions now force Claude Code's classic (scrollback) renderer. Claude's
+  opt-in fullscreen / no-flicker mode paints into the alternate screen buffer,
+  which de-calibrates the terminal-scraping the loop relies on to read session
+  state — so turning fullscreen on globally can no longer silently break your
+  loops. Power users can still opt back in per-loop via the local env file.
+
 ## [0.36.0] — 2026-07-21
 
 ### Added
