@@ -11,7 +11,8 @@
 #                  [--proxy-token TOK]  # relaying to a remote aiball (writes the
 #                                      # proxy: block; mint TOK on the remote with
 #                                      # `aiball auth issue --node`)
-#   ./install.sh --uninstall           # remove everything we installed
+#   ./install.sh --uninstall           # remove everything we installed (data kept)
+#   ./install.sh --uninstall --purge   # ALSO delete the data dir (accounts, tickets)
 #
 # Reentrant: re-running with new --port / --host overwrites only the bind
 # settings; existing data ($AIBALL_HOME), tokens and accounts are preserved.
@@ -25,6 +26,7 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 NO_SYSTEMD=false
 UNINSTALL=false
+PURGE=false
 SYMLINK=false
 PORT=""
 HOST=""
@@ -35,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-systemd) NO_SYSTEMD=true; shift ;;
         --uninstall)  UNINSTALL=true; shift ;;
+        --purge)      PURGE=true; shift ;;
         --symlink)    SYMLINK=true; shift ;;
         # #394: proxy-node mode — relay this daemon to a remote aiball.
         --proxy-url)    PROXY_URL="${2:-}"; shift 2 ;;
@@ -81,20 +84,44 @@ uninstall() {
     else
         rm -rf "$PREFIX_LIB"
     fi
-    warn "Data preserved at \$AIBALL_HOME (~/.local/share/aiball). Remove manually if you want a clean slate."
+    local data_dir="$HOME/.local/share/aiball"
+    if $PURGE; then
+        rm -rf "$data_dir"
+        warn "Purged data dir $data_dir (accounts, tickets, tokens — gone)."
+    else
+        warn "Data preserved at $data_dir (accounts, tickets). Re-run with --purge for a clean slate."
+    fi
     log "Done."
 }
 
 if $UNINSTALL; then uninstall; exit 0; fi
 
 # --- prerequisites ---------------------------------------------------------
+# Report ALL missing hard deps at once (fail-fast, not one die per re-run), then
+# warn up front about the soft deps whose absence only bites LATER: today a
+# missing tmux lets the daemon install cleanly, then `claude-loop` dies with a
+# cryptic error. Surface it here instead.
 
-command -v node >/dev/null 2>&1 || die "node is required (>=20). Install via nvm or your package manager."
-command -v npm  >/dev/null 2>&1 || die "npm is required."
-command -v rsync >/dev/null 2>&1 || die "rsync is required."
+missing=()
+for bin in node npm rsync; do
+    command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
+done
+if command -v node >/dev/null 2>&1; then
+    NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+    [[ "$NODE_MAJOR" -ge 20 ]] || missing+=("node>=20 (found $(node --version))")
+fi
+if [[ ${#missing[@]} -gt 0 ]]; then
+    die "missing required tool(s): ${missing[*]}. Install them (node via nvm or your package manager), then re-run."
+fi
 
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[[ "$NODE_MAJOR" -ge 20 ]] || die "node >=20 required, found $(node --version)"
+# Soft deps — the daemon installs fine without them, but the loop won't run.
+command -v tmux >/dev/null 2>&1 \
+    || warn "tmux not found — the daemon is fine, but 'claude-loop' needs tmux to run a session. Install it before looping."
+command -v git >/dev/null 2>&1 \
+    || warn "git not found — needed for wiring projects and cutting releases (scripts/release.sh)."
+if ! command -v cargo >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+    warn "no PTY-proxy runtime — the loop needs cargo (builds the fast Rust proxy) OR python3 (the fallback). Install one before looping."
+fi
 
 # --- deploy source ---------------------------------------------------------
 # Preserve the existing layout when the user didn't ask for a change:
@@ -295,6 +322,6 @@ cat <<EOF
 Data dir:    ~/.local/share/aiball
 Code dir:    $PREFIX_LIB$($SYMLINK && printf "  (→ %s)" "$SRC_DIR")
 Service:     systemctl --user status $SERVICE_NAME
-Uninstall:   $SRC_DIR/install.sh --uninstall
+Uninstall:   $SRC_DIR/install.sh --uninstall   (add --purge to also wipe data)
 ────────────────────────────────────────────────────────────────────
 EOF
