@@ -721,7 +721,7 @@ export function insertRelationEvent(opts: {
  * Inserted as `approved` with `decided_by=auto` — typed relations
  * don't go through moderation (the audit lives in the message log).
  */
-import { inverseRelationKind, type RelationKind } from "../relations.js";
+import { inverseRelationKind, relationAxis, type RelationKind } from "../relations.js";
 export function insertTypedRelation(opts: {
     source_ticket_id: number;
     target_ticket_id: number;
@@ -800,10 +800,17 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
         ))
         .orderBy(schema.messages.id)
         .all();
-    // Latest-event-wins per (target). Key on target_ticket_id since
-    // a ticket may have at most one active relation per target — the
-    // user changes kinds by posting a fresh event, not by adding more.
-    const latestByTarget = new Map<number, ActiveRelation & { kindIsTombstone: boolean }>();
+    // Latest-event-wins per (target, AXIS). Keying on the target ALONE conflated
+    // orthogonal concerns (#1466): a `depends_on` gate and a `parent_of` lineage
+    // edge to the SAME target shared one slot, so the reciprocal lineage silently
+    // clobbered the direct gate — a created-but-invisible relation. Axis-keyed:
+    // latest wins WITHIN an axis (posting `blocks` replaces a prior `depends_on`),
+    // relations COEXIST ACROSS axes (lineage + gate to the same child both show).
+    // `ignored` is a per-target tombstone CUT (unrelate removes the link whatever
+    // its kind), not an axis — a relation survives only if authored after the last
+    // cut to that target (from either side of the pair).
+    const directByKey = new Map<string, ActiveRelation>(); // `${target}:${axis}` → latest direct
+    const tombstoneCut = new Map<number, number>(); // target → latest `ignored` event id
     for (const r of direct) {
         if (!r.meta) continue;
         let parsedKind: string | undefined;
@@ -813,20 +820,22 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
         } catch { continue; }
         const target = r.sourceTicketId; // target stored in sourceTicketId per insertTypedRelation
         if (!target || !parsedKind) continue;
-        latestByTarget.set(target, {
+        if (parsedKind === "ignored") {
+            tombstoneCut.set(target, r.id); // events are id-asc, so the last cut wins
+            continue;
+        }
+        directByKey.set(`${target}:${relationAxis(parsedKind as RelationKind)}`, {
             target_ticket_id: target,
             kind: parsedKind as RelationKind,
             last_event_id: r.id,
             last_event_at: r.createdAt,
             by_agent: r.byAgent,
-            kindIsTombstone: parsedKind === "ignored",
         });
     }
     // Reciprocal edges (#B.197): events authored on OTHER tickets that
-    // point AT this ticket. Persisted one-way (relations.ts line 49
-    // "don't auto-flip on insert"), but semantically symmetric — a
-    // `blocks A→B` event means B is `depends_on A`. Pull the reverse
-    // pile, inverse the kind, expose with reciprocal=true so the
+    // point AT this ticket. Persisted one-way (relations.ts "don't auto-flip
+    // on insert"), but semantically symmetric — a `blocks A→B` event means B is
+    // `depends_on A`. Inverse the kind, expose with reciprocal=true so the
     // frontend can render them visually distinct.
     const reverse = db.select({
         id: schema.messages.id,
@@ -843,7 +852,7 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
         ))
         .orderBy(schema.messages.id)
         .all();
-    const latestByOriginator = new Map<number, ActiveRelation & { kindIsTombstone: boolean }>();
+    const recipByKey = new Map<string, ActiveRelation>(); // `${target}:${axis}` → latest reciprocal
     for (const r of reverse) {
         if (!r.meta || !r.ticketId) continue;
         let parsedKind: string | undefined;
@@ -852,33 +861,31 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
             parsedKind = m.relation?.kind;
         } catch { continue; }
         if (!parsedKind) continue;
+        const originator = r.ticketId;
+        if (parsedKind === "ignored") {
+            // The other side removed the link — a target-scoped cut on us too.
+            if (r.id > (tombstoneCut.get(originator) ?? 0)) tombstoneCut.set(originator, r.id);
+            continue;
+        }
         const inversed = inverseRelationKind(parsedKind as RelationKind);
-        latestByOriginator.set(r.ticketId, {
-            target_ticket_id: r.ticketId,
+        recipByKey.set(`${originator}:${relationAxis(inversed)}`, {
+            target_ticket_id: originator,
             kind: inversed,
             last_event_id: r.id,
             last_event_at: r.createdAt,
             by_agent: r.byAgent,
             reciprocal: true,
-            kindIsTombstone: parsedKind === "ignored",
         });
     }
-    // Dedup: if a direct relation already exists for the same target
-    // with the same effective kind, skip the reciprocal (symmetric
-    // kinds collide trivially; blocks/depends_on collide when both
-    // sides recorded the relation explicitly).
-    for (const [originator, rel] of latestByOriginator) {
-        const directHit = latestByTarget.get(originator);
-        if (directHit && directHit.kind === rel.kind && !directHit.kindIsTombstone) continue;
-        // Don't let a reciprocal override a tombstoned direct event —
-        // the user explicitly removed that link from this side.
-        if (directHit && directHit.kindIsTombstone) continue;
-        latestByTarget.set(originator, rel);
-    }
-    return Array.from(latestByTarget.values())
-        .filter((r) => !r.kindIsTombstone)
-        .map(({ kindIsTombstone: _, ...rest }) => rest)
-        .sort((a, b) => b.last_event_id - a.last_event_id);
+    // Combine: a relation survives only if authored AFTER the last cut to its
+    // target. A locally-authored direct relation is authoritative for its
+    // (target, axis) slot — the reciprocal shows only where no direct occupies it.
+    const survives = (rel: ActiveRelation): boolean =>
+        rel.last_event_id > (tombstoneCut.get(rel.target_ticket_id) ?? 0);
+    const out = new Map<string, ActiveRelation>();
+    for (const [key, rel] of directByKey) if (survives(rel)) out.set(key, rel);
+    for (const [key, rel] of recipByKey) if (survives(rel) && !out.has(key)) out.set(key, rel);
+    return Array.from(out.values()).sort((a, b) => b.last_event_id - a.last_event_id);
 }
 
 /**

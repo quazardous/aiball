@@ -23,6 +23,14 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- A typed relation created via `ticket_relate` could be silently invisible: a gate
+  (`depends_on`/`blocks`) that shared a target with a lineage edge
+  (`parent_of`/`child_of`) was swallowed when the relations were read back — the
+  API reported it created but never showed it. Relations on different axes to the
+  same target now coexist (the latest still wins within an axis).
+
 ### Changed
 
 - Looped sessions now force Claude Code's classic (scrollback) renderer. Claude's

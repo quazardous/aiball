@@ -26,9 +26,10 @@
  *
  * Events are stored as `messages` rows with `kind = "ticket_relation"`
  * and `meta = { relation: { kind, target_ticket_id } }`. The current
- * relation set for a ticket is the replay of all such events filtered
- * by the latest mutation per (source, target, kind) tuple — see
- * `db/messages.ts::listTypedRelationsForTicket`.
+ * relation set for a ticket is the replay of all such events, keyed by
+ * (source, target, AXIS): the latest event wins within an axis, and
+ * relations on different axes to the same target coexist (see
+ * `relationAxis` + `db/messages.ts::listTypedRelationsForTicket`).
  *
  * Frontend mirror: `frontend/src/lib/relations.ts` (must stay aligned —
  * neither side imports across the build boundary).
@@ -80,4 +81,21 @@ export function inverseRelationKind(k: RelationKind): RelationKind {
     if (k === "child_of") return "parent_of";
     if (k === "parent_of") return "child_of";
     return k;
+}
+
+/**
+ * Relation AXIS — the orthogonal concern a kind belongs to. Two relations
+ * to the same target COEXIST when they're on different axes (e.g. a `parent_of`
+ * lineage edge AND a `depends_on` gate to the same child), but the latest one
+ * WINS within an axis (posting `blocks` replaces a prior `depends_on`). This is
+ * what `listTypedRelationsForTicket` keys its replay on — keying on the target
+ * alone silently dropped a gate that shared a target with a lineage edge (a
+ * created-but-invisible relation). `ignored` is a tombstone, not an axis.
+ */
+export function relationAxis(k: RelationKind): "lineage" | "gate" | "xref" | "dup" | "ignored" {
+    if (k === "child_of" || k === "parent_of") return "lineage";
+    if (k === "depends_on" || k === "blocks") return "gate";
+    if (k === "duplicates") return "dup";
+    if (k === "ignored") return "ignored";
+    return "xref"; // relates_to
 }
