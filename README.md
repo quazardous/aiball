@@ -64,10 +64,18 @@ the loop internals in [`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
 
 ## Remote (Tailscale)
 
-The loop in your pocket: `aiball init tailscale` exposes the local daemon to
-your tailnet via `tailscale serve` (the daemon brings it up at boot) — read the
-inbox, moderate, queue tickets from your phone. Storage stays local; private,
-end-to-end encrypted, no public exposure. Guide:
+The loop in your pocket — read the inbox, moderate, queue tickets from your
+phone. Storage stays local; private, end-to-end encrypted, no public exposure.
+The lazy path (on the host, Tailscale installed + `sudo tailscale up` done):
+
+```bash
+aiball init tailscale     # configure once (writes the global providers block)
+aiball providers up       # expose now; the daemon re-does it at every boot
+aiball status             # prints your tailnet URL
+```
+
+That's it — no service to hand-manage, the daemon brings it up on every restart.
+Full guide (HTTP fallback, sub-path serving, troubleshooting):
 [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
 
 A project living on another host? Run its `claude-loop` **there**, slaved to

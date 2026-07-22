@@ -19,12 +19,15 @@ at boot.
    aiball init tailscale            # HTTPS on :443 (needs MagicDNS HTTPS)
    aiball init tailscale --http     # plain HTTP on :80 (fallback if HTTPS fails)
    ```
-3. Apply it so the daemon brings it up automatically at every boot
-   (regenerates the systemd unit's autostart hook, then restarts):
+3. Bring it up:
    ```bash
-   bash install.sh && systemctl --user restart aiball
+   aiball providers up
    ```
-   Or bring it up right now without a restart: `aiball providers up`.
+   That's the whole apply step. The systemd user unit already carries an
+   `ExecStartPost=… aiball providers up` hook (shipped in the unit, not
+   generated), so every daemon (re)start re-exposes it automatically — you
+   never re-run `install.sh` for this. `aiball providers up` just does it
+   *now* without waiting for a restart.
 4. Confirm + get the URL:
    ```bash
    aiball status        # shows: proxy: tailscale [...] — up → https://<host>.<tailnet>.ts.net
