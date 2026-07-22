@@ -16,6 +16,7 @@ switch any time.
 ```bash
 # 1. Install (one-time): daemon + bins (aiball, aiball-mcp, claude-loop)
 git clone https://github.com/quazardous/aiball.git && cd aiball
+git checkout "$(git describe --tags --abbrev=0)"   # latest stable release (omit to ride main / bleeding edge)
 ./install.sh               # mints a one-shot install token + prints a setup URL
 # Open the printed *tokenized* URL to choose your first login + password:
 #   http://127.0.0.1:7777/setup?t=<token>   (one-shot, expires in 24h)

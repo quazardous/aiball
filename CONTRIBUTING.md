@@ -419,6 +419,15 @@ Don't bump the version manually unless cutting a release. Releases
 are the human's call; agents propose them via tickets when relevant
 (e.g. accumulated `[Unreleased]` bullets warrant a tag).
 
+Cutting a release is two steps. First, by hand: bump `package.json`,
+move the `[Unreleased]` bullets under a dated `## [X.Y.Z] — YYYY-MM-DD`
+header, commit + push on `main`. Then run **`scripts/release.sh`** — it
+tags `vX.Y.Z` (annotated), pushes the tag, and publishes a GitHub
+Release whose notes are that CHANGELOG section. The script bumps/commits
+nothing, so it's safe on the live-runtime checkout; `--dry-run` prints
+what it would do. This is what keeps a stable tag adopters can clone
+instead of bleeding `main`.
+
 ### 3.5 Frontmatter & structure
 
 No required YAML frontmatter for `docs/*.md` files. Conventions that
