@@ -1,7 +1,5 @@
 # aiball — pilot your Claude Code agents like a GitHub board
 
-![aiball architecture — a human pilots the local-first core (backlog, event bus, per-consumer queues, side-load, SQLite + UDS socket), which fans out over an event bus to N claude-loop sessions, one persistent agent per project, each cycling wake → work → turn-end → side-load; observability from laptop or phone over Tailscale](./assets/aiball-hero.png)
-
 A local-first board that turns Claude Code sessions into persistent,
 remotely-pilotable agents — one per project. Queue work, watch them drain
 it, accept or reject what they propose — or grab the keyboard and drive
@@ -9,31 +7,9 @@ the same session live in the terminal. Direct or backlog, your call,
 switch any time.
 
 > Runs on `127.0.0.1` (SQLite + UDS socket); data stays in
-> `~/.local/share/aiball` — no cloud, no telemetry. Claude Code is the
-> only wired agent today.
+> `~/.local/share/aiball` — no cloud, no telemetry.
 
 ![The aiball board: a project sidebar, a filterable ticket list with per-ticket intent, priority and assignee, and threaded decisions — one queue across every project on the host](./assets/screenshot-list.png)
-
-## What you can do
-
-- **Loop** — pair a session with `claude-loop` and it stays alive between
-  turns: queue tickets any time, the agent wakes on each (SSE event-bus,
-  no polling lag) and drains the backlog autonomously. No babysitting, no
-  interruption mid-turn.
-- **Pilot like GitHub** — tickets + threaded comments per project, with
-  decisions that ride on the comment: the agent proposes a resolution or
-  a plan, you accept / reject in place. The thread is the audit trail.
-- **Gate & monitor** — the consumers panel shows every session and
-  whether it's looping, waiting, or busy. See what your agents are doing
-  and steer them — from your laptop or your phone.
-- **Local projects** — the sidebar flags which projects have a loop running
-  on this host (root auto-detected), with a per-project detail page to see the
-  loops and **launch** one for a known root, straight from the UI.
-- **Hybrid by design** — a looped session is your normal terminal with a
-  coach attached, not a black box. Type in it and drive claude live, or
-  feed it tickets and walk away — same session, same context. aiball
-  notices your keystrokes and stops bothering you while you take over,
-  then resumes draining the backlog when you leave.
 
 ## Quickstart
 
@@ -64,6 +40,27 @@ env vars, troubleshooting) in [`docs/INSTALL.md`](./docs/INSTALL.md); other
 setups (bare MCP, autopoll Stop hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md);
 the loop internals in [`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
 
+## What you can do
+
+- **Loop** — pair a session with `claude-loop` and it stays alive between
+  turns: queue tickets any time, the agent wakes on each (SSE event-bus,
+  no polling lag) and drains the backlog autonomously. No babysitting, no
+  interruption mid-turn.
+- **Pilot like GitHub** — tickets + threaded comments per project, with
+  decisions that ride on the comment: the agent proposes a resolution or
+  a plan, you accept / reject in place. The thread is the audit trail.
+- **Gate & monitor** — the consumers panel shows every session and
+  whether it's looping, waiting, or busy. See what your agents are doing
+  and steer them — from your laptop or your phone.
+- **Local projects** — the sidebar flags which projects have a loop running
+  on this host (root auto-detected), with a per-project detail page to see the
+  loops and **launch** one for a known root, straight from the UI.
+- **Hybrid by design** — a looped session is your normal terminal with a
+  coach attached, not a black box. Type in it and drive claude live, or
+  feed it tickets and walk away — same session, same context. aiball
+  notices your keystrokes and stops bothering you while you take over,
+  then resumes draining the backlog when you leave.
+
 ## Remote (Tailscale)
 
 The loop in your pocket: `aiball init tailscale` exposes the local daemon to
@@ -89,6 +86,8 @@ apart from claude's output, holds pings back while you're typing (a grace
 window), and injects wakes straight into claude's PTY. Details:
 [`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md) +
 [`docs/PTY-PROXY.md`](./docs/PTY-PROXY.md).
+
+![aiball architecture — a human pilots the local-first core (backlog, event bus, per-consumer queues, side-load, SQLite + UDS socket), which fans out over an event bus to N claude-loop sessions, one persistent agent per project, each cycling wake → work → turn-end → side-load; observability from laptop or phone over Tailscale](./assets/aiball-hero.png)
 
 ## Roadmap
 
