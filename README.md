@@ -41,6 +41,13 @@ env vars, troubleshooting) in [`docs/INSTALL.md`](./docs/INSTALL.md); other
 setups (bare MCP, autopoll Stop hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md);
 the loop internals in [`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
 
+**Your first ticket** — with a session looping, open the board (the URL from
+setup, e.g. `http://127.0.0.1:7777`), pick your project, and file a ticket
+("add a README badge", say). The looped agent wakes on its own, works it, and
+proposes a resolution on the thread; you **accept** (or reject) under the
+comment. That's the whole loop — queue, drain, decide. Detach and it keeps
+going; grab the keyboard and you're driving live.
+
 ## What you can do
 
 - **Loop** — pair a session with `claude-loop` and it stays alive between
