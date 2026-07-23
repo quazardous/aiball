@@ -1919,6 +1919,15 @@ export async function buildContextPhrase(
         // #999 — `!eventHint` : an event wake never enters the backlog
         // fallback (its format is comment-centric, anchored above).
         let headLastComment = "";   // #1215/#1363 — backlog head's last event line (author ≠ me), for the CTA
+        // #1470 — the backlog head's tier, so the CTA can ask the RIGHT question.
+        // The backlog deliberately rotates aged context back into view (it sinks
+        // temporarily to let agents breathe); the pressure is wanted. What was
+        // wrong is the instruction: "Triage the ticket" on a tier-2/3/4 head made
+        // the agent re-derive the gate and answer "standby", which doesn't move
+        // `last_actor` — so it re-fired unchanged. Naming the tier turns that turn
+        // into the re-examination the rotation exists for. null = unknown (older
+        // daemon) → the template falls back to the plain triage wording.
+        let headTier: number | null = null;
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -1958,6 +1967,8 @@ export async function buildContextPhrase(
                     last_actor?: string | null;
                     actionable?: boolean;
                     claimable?: boolean;
+                    /** #1470 — drives the tier-aware CTA (see `headTier`). */
+                    backlog_tier?: number | null;
                 };
                 const rows: BacklogRow[] = Array.isArray(raw)
                     ? (raw as BacklogRow[])
@@ -1980,6 +1991,7 @@ export async function buildContextPhrase(
                 );
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
+                    headTier = typeof top.backlog_tier === "number" ? top.backlog_tier : null;
                     // #1363 david `futbsc` — when the head's last actor isn't me,
                     // SHOW that last event's content (a bundle-style line) instead
                     // of asserting "<actor> is waiting on your reply". The old
@@ -2112,6 +2124,15 @@ export async function buildContextPhrase(
             // waiting on your reply » porte l'info utile. "" quand tier-2 (j'étais
             // le dernier acteur) → le look reste neutre.
             head_last_comment: headLastComment,
+            // #1470 — tier of the backlog head, exposed as a SIGNAL so the
+            // template (not code) decides the wording. The grammar has no
+            // else-operator, so the "plain triage" inversion is computed here —
+            // same convention as `no_head` above. Only one ever fires.
+            head_tier: backlogMode && headTier !== null ? String(headTier) : "",
+            head_tier_triage: backlogMode && (headTier === null || headTier <= 1) ? "1" : "",
+            head_tier_followup: backlogMode && headTier === 2 ? "1" : "",
+            head_tier_waiting: backlogMode && headTier === 3 ? "1" : "",
+            head_tier_blocked: backlogMode && headTier === 4 ? "1" : "",
             // #1350 — "1" when the head EVENT wake is for a ticket this consumer
             // isn't responsible for (non-claimable). The template appends
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
@@ -2147,7 +2168,15 @@ export async function buildContextPhrase(
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_bundle:+{head_bundle}{head_fyi:+ (fyi — action is not mandatory)}}"
-            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_comment:+ — {head_last_comment}.} Triage the ticket.}";
+            // #1470 — the backlog leg closes with a TIER-AWARE instruction. The
+            // rotation (and its pressure) is unchanged: same head, same cadence.
+            // Only the ask changes, so a re-surfaced ticket gets the re-examination
+            // it was rotated back for instead of a reflex "standby".
+            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_comment:+ — {head_last_comment}.}"
+            + "{head_tier_triage:+ Triage the ticket.}"
+            + "{head_tier_followup:+ Your pending decision is what gates this — re-examine whether it's still the right scope instead of just acking.}"
+            + "{head_tier_waiting:+ You spoke last: re-surfaced so you re-check it — chase them, or let it ride.}"
+            + "{head_tier_blocked:+ Blocked by an open dependency — re-check the chain: the blocker may be snoozed or stale.}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

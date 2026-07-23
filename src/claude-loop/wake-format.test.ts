@@ -65,6 +65,52 @@ test("#999 heartbeat wake (no hint, empty FIFO) → backlog ticket-centric Triag
     assert.equal(res.hasContent, true);
 });
 
+// #1470 — the backlog CTA is TIER-AWARE. The rotation itself is unchanged (same
+// head, same cadence); only the instruction adapts, so a ticket rotated back for
+// re-examination gets the right question instead of a reflex "Triage" the agent
+// answers with "standby".
+test("#1470 tier-2 head (my pending decision gates it) → asks to re-examine the scope, not to triage", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "backlog ticket", backlog_tier: 2 }],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /look #977/);
+    assert.match(res.phrase, /re-examine/i);
+    assert.doesNotMatch(res.phrase, /Triage the ticket/i);
+});
+
+test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "backlog ticket", backlog_tier: 4 }],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /re-check the chain/i);
+    assert.doesNotMatch(res.phrase, /Triage the ticket/i);
+});
+
+test("#1470 tier-1 head still gets the plain Triage wording", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "backlog ticket", backlog_tier: 1 }],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /Triage the ticket/i);
+});
+
+test("#1470 unknown tier (older daemon) falls back to Triage — never an empty ask", async () => {
+    // stubClient's default row carries no `backlog_tier` at all.
+    const res = await buildContextPhrase(stubClient(), null, PINGS_YAML);
+    assert.match(res.phrase, /Triage the ticket/i);
+});
+
 // #1363 david `futbsc` — a backlog head whose last actor isn't me SHOWS that
 // last event's content (a bundle-style line) so the agent reads it and judges,
 // instead of asserting "<actor> is waiting on your reply" — which fired on any

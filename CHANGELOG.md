@@ -40,6 +40,14 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **The backlog wake now asks the right question.** It always closed with "Triage
+  the ticket", even when the ticket was surfaced because your own decision is
+  pending, because you spoke last, or because a dependency still blocks it — so
+  the agent re-derived the situation and answered "standby". The instruction now
+  matches why the ticket came back (re-examine your pending scope · chase them ·
+  re-check the blocker), turning a rotated-back ticket into the re-examination it
+  was rotated back for. The rotation itself is unchanged: same head, same cadence.
+  The new tier signals are template variables, so the wording is overridable.
 - Looped sessions now force Claude Code's classic (scrollback) renderer. Claude's
   opt-in fullscreen / no-flicker mode paints into the alternate screen buffer,
   which de-calibrates the terminal-scraping the loop relies on to read session
