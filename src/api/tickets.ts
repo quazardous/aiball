@@ -63,7 +63,7 @@ import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work
 import { globalConfigPath, assignWindowSec } from "../autopoll/config.js";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
+import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
@@ -1015,7 +1015,7 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
-    const body = (req.body ?? {}) as { target_ticket_id?: number; kind?: string };
+    const body = (req.body ?? {}) as { target_ticket_id?: number; kind?: string; axis_kind?: string };
     const target = Number(body.target_ticket_id);
     if (!Number.isFinite(target) || target <= 0) {
         return res.status(400).json({ error: "target_ticket_id required (positive integer)" });
@@ -1071,12 +1071,32 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
             error: `#${id} parent_of #${target} would create a lineage cycle`,
         });
     }
-    // Idempotency (#275): at most one active edge per (source, target).
+    // #1468 — an `ignored` tombstone may be scoped to ONE axis via `axis_kind`
+    // (the kind whose axis to remove: `depends_on` cuts the gate, leaving a
+    // `parent_of` lineage to the same target alive). Omitted = the historical
+    // target-scoped cut that removes every axis.
+    const axisKindStr = typeof body.axis_kind === "string" ? body.axis_kind : "";
+    if (axisKindStr && !isRelationKind(axisKindStr)) {
+        return res.status(400).json({
+            error: `axis_kind must be one of ${RELATION_KINDS.join(", ")}`,
+        });
+    }
+    if (axisKindStr && kindStr !== "ignored") {
+        return res.status(400).json({
+            error: "axis_kind only applies when removing a relation (kind=ignored)",
+        });
+    }
+    const cutAxis = axisKindStr ? relationAxis(axisKindStr as RelationKind) : undefined;
+    // Idempotency (#275): at most one active edge per (source, target, axis).
     // Re-posting the same active kind, or removing (ignored) an edge that
     // isn't there, is a no-op — don't append a redundant event.
     const before = listTypedRelationsForTicket(id);
     if (kindStr === "ignored") {
-        if (!before.some((r) => r.target_ticket_id === target)) {
+        // Axis-scoped: only a relation on THAT axis counts as something to cut.
+        const hit = cutAxis
+            ? before.some((r) => r.target_ticket_id === target && relationAxis(r.kind) === cutAxis)
+            : before.some((r) => r.target_ticket_id === target);
+        if (!hit) {
             return res.json({ ticket_id: id, event_id: null, noop: true, relations: before });
         }
     } else if (before.some((r) => r.target_ticket_id === target && r.kind === kindStr)) {
@@ -1088,6 +1108,7 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
         target_ticket_id: target,
         relation_kind: kindStr as RelationKind,
         by_agent: caller,
+        axis: cutAxis,
     });
     if (!event) return res.status(500).json({ error: "failed to create relation event" });
     broadcast({ type: "message_created", data: event });

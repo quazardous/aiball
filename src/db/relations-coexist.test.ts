@@ -25,7 +25,7 @@ function seed(id: number): void {
         createdAt: nowIso(),
     }).run();
 }
-for (let i = 1; i <= 8; i++) seed(i);
+for (let i = 1; i <= 14; i++) seed(i);
 
 test("reciprocal parent_of + direct depends_on to the same target COEXIST", () => {
     // child #2 is child_of parent #1 → #1 sees a reciprocal parent_of → #2.
@@ -70,4 +70,48 @@ test("a relation re-authored AFTER a cut survives it", () => {
     const to8 = listTypedRelationsForTicket(7).filter((r) => r.target_ticket_id === 8);
     assert.equal(to8.length, 1, "only the post-cut relation survives");
     assert.equal(to8[0].kind, "relates_to");
+});
+
+// #1468 — axis-scoped unrelate: remove one axis, keep the others.
+test("axis-scoped cut drops the gate and KEEPS the reciprocal lineage", () => {
+    // child #10 is child_of parent #9 → #9 sees a reciprocal parent_of.
+    insertTypedRelation({ source_ticket_id: 10, target_ticket_id: 9, relation_kind: "child_of", by_agent: "a" });
+    insertTypedRelation({ source_ticket_id: 9, target_ticket_id: 10, relation_kind: "depends_on", by_agent: "a" });
+    assert.equal(
+        listTypedRelationsForTicket(9).filter((r) => r.target_ticket_id === 10).length,
+        2,
+        "lineage + gate coexist before the scoped cut",
+    );
+    // Cut ONLY the gate axis.
+    insertTypedRelation({
+        source_ticket_id: 9, target_ticket_id: 10, relation_kind: "ignored", by_agent: "a", axis: "gate",
+    });
+    const to10 = listTypedRelationsForTicket(9).filter((r) => r.target_ticket_id === 10);
+    assert.equal(to10.length, 1, "only the gate was removed");
+    assert.equal(to10[0].kind, "parent_of", "the reciprocal lineage survives the scoped cut");
+    assert.ok(to10[0].reciprocal, "and it is still the reciprocal view");
+});
+
+test("a bare cut still removes every axis (back-compat)", () => {
+    insertTypedRelation({ source_ticket_id: 11, target_ticket_id: 12, relation_kind: "parent_of", by_agent: "a" });
+    insertTypedRelation({ source_ticket_id: 11, target_ticket_id: 12, relation_kind: "depends_on", by_agent: "a" });
+    insertTypedRelation({ source_ticket_id: 11, target_ticket_id: 12, relation_kind: "ignored", by_agent: "a" });
+    assert.equal(
+        listTypedRelationsForTicket(11).filter((r) => r.target_ticket_id === 12).length,
+        0,
+        "no axis survives a bare tombstone",
+    );
+});
+
+test("re-relating the same axis AFTER a scoped cut works", () => {
+    insertTypedRelation({ source_ticket_id: 13, target_ticket_id: 14, relation_kind: "parent_of", by_agent: "a" });
+    insertTypedRelation({ source_ticket_id: 13, target_ticket_id: 14, relation_kind: "depends_on", by_agent: "a" });
+    insertTypedRelation({
+        source_ticket_id: 13, target_ticket_id: 14, relation_kind: "ignored", by_agent: "a", axis: "gate",
+    });
+    insertTypedRelation({ source_ticket_id: 13, target_ticket_id: 14, relation_kind: "blocks", by_agent: "a" });
+    const to14 = listTypedRelationsForTicket(13).filter((r) => r.target_ticket_id === 14);
+    assert.equal(to14.length, 2, "lineage kept + gate re-created");
+    assert.ok(to14.some((r) => r.kind === "parent_of"), "lineage was never cut");
+    assert.ok(to14.some((r) => r.kind === "blocks"), "the new gate clears the older scoped cut");
 });

@@ -64,6 +64,11 @@ export function isRelationKind(s: string): s is RelationKind {
 export interface TypedRelationMeta {
     kind: RelationKind;
     target_ticket_id: number;
+    /** #1468 — set ONLY on an `ignored` tombstone that removes a SINGLE axis
+     *  instead of every relation to the target. Absent = the historical
+     *  target-scoped cut (`ticket_unrelate` without a `kind`), which stays the
+     *  default so existing tombstones keep their meaning (no migration). */
+    axis?: RelationAxis;
 }
 
 /**
@@ -92,7 +97,8 @@ export function inverseRelationKind(k: RelationKind): RelationKind {
  * alone silently dropped a gate that shared a target with a lineage edge (a
  * created-but-invisible relation). `ignored` is a tombstone, not an axis.
  */
-export function relationAxis(k: RelationKind): "lineage" | "gate" | "xref" | "dup" | "ignored" {
+export type RelationAxis = "lineage" | "gate" | "xref" | "dup" | "ignored";
+export function relationAxis(k: RelationKind): RelationAxis {
     if (k === "child_of" || k === "parent_of") return "lineage";
     if (k === "depends_on" || k === "blocks") return "gate";
     if (k === "duplicates") return "dup";

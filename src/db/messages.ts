@@ -721,12 +721,16 @@ export function insertRelationEvent(opts: {
  * Inserted as `approved` with `decided_by=auto` — typed relations
  * don't go through moderation (the audit lives in the message log).
  */
-import { inverseRelationKind, relationAxis, type RelationKind } from "../relations.js";
+import { inverseRelationKind, relationAxis, type RelationAxis, type RelationKind } from "../relations.js";
 export function insertTypedRelation(opts: {
     source_ticket_id: number;
     target_ticket_id: number;
     relation_kind: RelationKind;
     by_agent: string | null;
+    /** #1468 — only meaningful with `relation_kind: "ignored"`: scopes the
+     *  tombstone to a single axis instead of cutting every relation to the
+     *  target. Omit for the historical target-scoped unrelate. */
+    axis?: RelationAxis;
 }): Message | null {
     const db = getDb();
     return db.transaction((tx) => {
@@ -740,6 +744,7 @@ export function insertTypedRelation(opts: {
             relation: {
                 kind: opts.relation_kind,
                 target_ticket_id: opts.target_ticket_id,
+                ...(opts.axis ? { axis: opts.axis } : {}),
             },
         };
         const inserted = tx.insert(schema.messages).values({
@@ -810,18 +815,32 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
     // its kind), not an axis — a relation survives only if authored after the last
     // cut to that target (from either side of the pair).
     const directByKey = new Map<string, ActiveRelation>(); // `${target}:${axis}` → latest direct
-    const tombstoneCut = new Map<number, number>(); // target → latest `ignored` event id
+    // Two levels of tombstone (#1468): a BARE `ignored` cuts every axis to the
+    // target (historical `ticket_unrelate` with no kind); an AXIS-SCOPED one
+    // (`meta.relation.axis`) cuts only that axis, leaving the others alive.
+    const tombstoneCut = new Map<number, number>(); // target → latest bare `ignored` id
+    const axisCut = new Map<string, number>(); // `${target}:${axis}` → latest scoped `ignored` id
+    const cutAt = (r: { id: number }, target: number, axis?: RelationAxis): void => {
+        if (axis) {
+            const key = `${target}:${axis}`;
+            if (r.id > (axisCut.get(key) ?? 0)) axisCut.set(key, r.id);
+        } else if (r.id > (tombstoneCut.get(target) ?? 0)) {
+            tombstoneCut.set(target, r.id);
+        }
+    };
     for (const r of direct) {
         if (!r.meta) continue;
         let parsedKind: string | undefined;
+        let parsedAxis: RelationAxis | undefined;
         try {
-            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
+            const m = JSON.parse(r.meta) as { relation?: { kind?: string; axis?: RelationAxis } };
             parsedKind = m.relation?.kind;
+            parsedAxis = m.relation?.axis;
         } catch { continue; }
         const target = r.sourceTicketId; // target stored in sourceTicketId per insertTypedRelation
         if (!target || !parsedKind) continue;
         if (parsedKind === "ignored") {
-            tombstoneCut.set(target, r.id); // events are id-asc, so the last cut wins
+            cutAt(r, target, parsedAxis);
             continue;
         }
         directByKey.set(`${target}:${relationAxis(parsedKind as RelationKind)}`, {
@@ -856,15 +875,17 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
     for (const r of reverse) {
         if (!r.meta || !r.ticketId) continue;
         let parsedKind: string | undefined;
+        let parsedAxis: RelationAxis | undefined;
         try {
-            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
+            const m = JSON.parse(r.meta) as { relation?: { kind?: string; axis?: RelationAxis } };
             parsedKind = m.relation?.kind;
+            parsedAxis = m.relation?.axis;
         } catch { continue; }
         if (!parsedKind) continue;
         const originator = r.ticketId;
         if (parsedKind === "ignored") {
-            // The other side removed the link — a target-scoped cut on us too.
-            if (r.id > (tombstoneCut.get(originator) ?? 0)) tombstoneCut.set(originator, r.id);
+            // The other side removed the link — same cut semantics on our view.
+            cutAt(r, originator, parsedAxis);
             continue;
         }
         const inversed = inverseRelationKind(parsedKind as RelationKind);
@@ -880,11 +901,14 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
     // Combine: a relation survives only if authored AFTER the last cut to its
     // target. A locally-authored direct relation is authoritative for its
     // (target, axis) slot — the reciprocal shows only where no direct occupies it.
-    const survives = (rel: ActiveRelation): boolean =>
-        rel.last_event_id > (tombstoneCut.get(rel.target_ticket_id) ?? 0);
+    // A relation must clear BOTH cuts: the bare target-scoped one and the
+    // axis-scoped one for its own axis (#1468).
+    const survives = (rel: ActiveRelation, key: string): boolean =>
+        rel.last_event_id > (tombstoneCut.get(rel.target_ticket_id) ?? 0)
+        && rel.last_event_id > (axisCut.get(key) ?? 0);
     const out = new Map<string, ActiveRelation>();
-    for (const [key, rel] of directByKey) if (survives(rel)) out.set(key, rel);
-    for (const [key, rel] of recipByKey) if (survives(rel) && !out.has(key)) out.set(key, rel);
+    for (const [key, rel] of directByKey) if (survives(rel, key)) out.set(key, rel);
+    for (const [key, rel] of recipByKey) if (survives(rel, key) && !out.has(key)) out.set(key, rel);
     return Array.from(out.values()).sort((a, b) => b.last_event_id - a.last_event_id);
 }
 

@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- `ticket_unrelate` can now remove a **single** relation axis: pass the relation's
+  kind to drop just that link — e.g. cut the `depends_on` gate while keeping the
+  lineage to the same ticket. Without a kind it still removes every relation to
+  that target, so existing callers are unaffected.
+
 ### Fixed
 
 - A typed relation created via `ticket_relate` could be silently invisible: a gate

@@ -59,7 +59,7 @@ export function registerTicketRelationTools(server: McpServer): void {
         "ticket_unrelate",
         {
             description:
-                "Remove the relation from `ticket_id` to `target_id` (whatever its kind). Implemented as a tombstone event (`kind=ignored`) on the append-only log — the link drops out of both tickets' `relations[]`, and the audit trail is preserved. Idempotent: unrelating a pair that has no active edge is a no-op. Removes the edge as seen from `ticket_id`'s side (also suppresses a reciprocal edge authored from the other ticket). Same permission as `ticket_relate` (human moderator or reporter of either ticket). Returns the refreshed `relations[]`.",
+                "Remove the relation from `ticket_id` to `target_id`. Implemented as a tombstone event (`kind=ignored`) on the append-only log — the link drops out of both tickets' `relations[]`, and the audit trail is preserved. Idempotent: unrelating a pair that has no active edge is a no-op. Removes the edge as seen from `ticket_id`'s side (also suppresses a reciprocal edge authored from the other ticket). Same permission as `ticket_relate` (human moderator or reporter of either ticket). Returns the refreshed `relations[]`.\n\n**Scope**: without `kind`, removes EVERY relation to that target (all axes). Pass `kind` to remove only that relation's AXIS and leave the others intact — e.g. `kind: \"depends_on\"` drops the gate but keeps a `parent_of` lineage to the same child. Since a kind's whole axis is one slot, passing `depends_on` or `blocks` removes the same gate edge either way.",
             inputSchema: {
                 ticket_id: z
                     .number()
@@ -69,10 +69,23 @@ export function registerTicketRelationTools(server: McpServer): void {
                     .number()
                     .int()
                     .describe("Target ticket id to unlink from `ticket_id`."),
+                kind: z
+                    .enum([
+                        "child_of",
+                        "parent_of",
+                        "depends_on",
+                        "blocks",
+                        "relates_to",
+                        "duplicates",
+                    ])
+                    .optional()
+                    .describe(
+                        "Optional. Remove ONLY this relation's axis (lineage child_of/parent_of · gate depends_on/blocks · relates_to · duplicates), leaving relations on other axes to the same target alive. Omit to remove every relation to the target (the default, unchanged behaviour).",
+                    ),
             },
         },
-        async ({ ticket_id, target_id }) => {
-            const res = await client.relate(ticket_id, target_id, "ignored");
+        async ({ ticket_id, target_id, kind }) => {
+            const res = await client.relate(ticket_id, target_id, "ignored", kind);
             return asText(res);
         },
     );

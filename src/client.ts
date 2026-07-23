@@ -557,13 +557,18 @@ export class AiballClient {
      * kind validity, target existence, reporter-or-human permission, the
      * lineage cycle guard, and idempotency.
      */
-    relate(ticket_id: number, target_ticket_id: number, kind: string) {
+    relate(ticket_id: number, target_ticket_id: number, kind: string, axis_kind?: string) {
         return this.http<{
             ticket_id: number;
             event_id: number | null;
             noop?: boolean;
             relations: unknown[];
-        }>("POST", `/api/tickets/${ticket_id}/relations`, { target_ticket_id, kind });
+        }>("POST", `/api/tickets/${ticket_id}/relations`, {
+            target_ticket_id,
+            kind,
+            // #1468 — scopes an `ignored` tombstone to a single axis.
+            ...(axis_kind ? { axis_kind } : {}),
+        });
     }
     /**
      * Same endpoint with `detailed=1` — returns objects with counts
