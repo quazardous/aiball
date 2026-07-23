@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-07-23
+
 ### Added
 
 - `ticket_unrelate` can now remove a **single** relation axis: pass the relation's
