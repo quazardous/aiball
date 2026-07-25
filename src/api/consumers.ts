@@ -127,6 +127,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         note?: unknown;
         micro_prompt?: unknown;
         can_claim?: unknown;
+        can_create_agent?: unknown;
         notify_project_broadcasts?: unknown;
     };
     if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
@@ -140,11 +141,11 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     // on the sibling routes (loop-stop / prompt / nodes). Non-capability
     // fields (display_name, note, micro_prompt, …) stay editable as before.
     // Future capability flags (e.g. can_create_agent) join CAPABILITY_FIELDS.
-    const CAPABILITY_FIELDS = ["can_claim"] as const;
+    const CAPABILITY_FIELDS = ["can_claim", "can_create_agent"] as const;
     const touchesCapability = CAPABILITY_FIELDS.some((f) => body[f] !== undefined);
     if (touchesCapability && !isHuman(consumerOf(req))) {
         return res.status(403).json({
-            error: "consumer capability fields (can_claim) are human-only — set them via the moderator UI, not from an agent",
+            error: "consumer capability fields (can_claim, can_create_agent) are human-only — set them via the moderator UI, not from an agent",
         });
     }
     const patch: {
@@ -154,6 +155,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         note?: string | null;
         micro_prompt?: string | null;
         can_claim?: boolean;
+        can_create_agent?: boolean;
         notify_project_broadcasts?: boolean | null;
     } = {};
     if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
@@ -175,6 +177,9 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     }
     if (body.can_claim !== undefined && typeof body.can_claim === "boolean") {
         patch.can_claim = body.can_claim;
+    }
+    if (body.can_create_agent !== undefined && typeof body.can_create_agent === "boolean") {
+        patch.can_create_agent = body.can_create_agent;
     }
     // #516 — tri-state (null | true | false). API accepte les 3 valeurs ;
     // tout autre type est silently ignored (no-op).

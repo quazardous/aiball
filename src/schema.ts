@@ -636,6 +636,13 @@ export const consumers = sqliteTable("consumers", {
      */
     canClaim: integer("can_claim").notNull().default(1),
     /**
+     * #1435 slice 7 — lead capability. 1 = this consumer (a "lead") may
+     * provision/launch crew agents via the crew tools; 0 (default) = cannot.
+     * Human-granted only (edited in ConsumerEditPage, gated like can_claim by
+     * the #1477 guard on PATCH /consumers). Migration 0054.
+     */
+    canCreateAgent: integer("can_create_agent").notNull().default(0),
+    /**
      * #516 david `r59bkm` plan E — tri-state opt-in pour recevoir les
      * broadcasts projet (fanOutPings scope='broadcast' follower fan-out).
      * NULL = auto (suit canClaim : claim-able reçoit les broadcasts comme

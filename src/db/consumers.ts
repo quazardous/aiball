@@ -67,6 +67,10 @@ export interface Consumer {
      *  global et ne retourne QUE les tickets explicitement assignés. Peut
      *  toujours recevoir push d'assignement, commenter, resolved, etc. */
     can_claim: boolean;
+    /** #1435 slice 7 — lead capability: true = may provision/launch crew
+     *  agents (via the crew tools); false (default) = cannot. Human-granted
+     *  only (gated like can_claim). */
+    can_create_agent: boolean;
     /** #516 — tri-state opt-in pour les broadcasts projet. null = auto
      *  (suit can_claim) ; true = opt-in explicite ; false = opt-out explicite.
      *  `effective_notify_project_broadcasts` (helper) résout à un boolean. */
@@ -110,6 +114,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         last_seen_ip: r.lastSeenIp ?? null,
         remote: isRemoteConsumer(r.lastSeenVia, r.lastSeenIp),
         can_claim: r.canClaim !== 0,
+        can_create_agent: r.canCreateAgent === 1,
         notify_project_broadcasts: r.notifyProjectBroadcasts == null
             ? null
             : r.notifyProjectBroadcasts === 1,
@@ -289,6 +294,9 @@ export interface UpdateConsumerPatch {
     /** #508 — global flag : false = consumer "spécialiste" (assignment-only,
      *  ne claim PAS via engage). Édité dans ConsumerEditPage. */
     can_claim?: boolean;
+    /** #1435 slice 7 — lead capability : true = may provision crew agents.
+     *  Human-granted only (gated by the #1477 PATCH guard). */
+    can_create_agent?: boolean;
     /** #516 — tri-state opt-in pour broadcasts projet. null = auto (suit
      *  can_claim) ; true/false = override. Passer `null` ou omettre = no-op
      *  (préserve la valeur courante). */
@@ -305,6 +313,7 @@ export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch):
     if (patch.note !== undefined) row.note = patch.note;
     if (patch.micro_prompt !== undefined) row.microPrompt = patch.micro_prompt;
     if (patch.can_claim !== undefined) row.canClaim = patch.can_claim ? 1 : 0;
+    if (patch.can_create_agent !== undefined) row.canCreateAgent = patch.can_create_agent ? 1 : 0;
     if (patch.notify_project_broadcasts !== undefined) {
         row.notifyProjectBroadcasts = patch.notify_project_broadcasts === null
             ? null

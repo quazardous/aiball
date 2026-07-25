@@ -379,6 +379,13 @@
       "when": 1782700000002,
       "tag": "0053_tickets_upstream_coupling",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1782700000003,
+      "tag": "0054_consumers_can_create_agent",
+      "breakpoints": true
     }
   ]
 }

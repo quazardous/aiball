@@ -61,3 +61,16 @@ test("agent editing a NON-capability field (note) → still allowed", async () =
     assert.equal(res.status, 200);
     assert.equal(getConsumer("target")?.note, "hello from agent");
 });
+
+test("agent editing can_create_agent → 403 (capability is human-only)", async () => {
+    assert.equal(getConsumer("target")?.can_create_agent, false); // default
+    const res = await patch(AGENT, { can_create_agent: true });
+    assert.equal(res.status, 403);
+    assert.equal(getConsumer("target")?.can_create_agent, false); // not granted
+});
+
+test("human granting can_create_agent → 200", async () => {
+    const res = await patch(HUMAN, { can_create_agent: true });
+    assert.equal(res.status, 200);
+    assert.equal(getConsumer("target")?.can_create_agent, true);
+});
