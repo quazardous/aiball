@@ -89,6 +89,24 @@ stays as the automatic fallback and an explicit `proxy_impl: python`
 opt-out). Retiring the Python proxy is the last step, once the Rust proxy
 has soaked.
 
+### Upstream coupling (GitHub / GitLab)
+
+Today aiball only *renders* an upstream ref: write `gh#1160` in a ticket
+and the per-project `upstream:` binding in `.aiball.yaml` turns it into a
+clickable chip. That's link-only — no API calls, no state sync.
+
+The full picture is a two-way coupling driver. You **manually** tie an
+aiball ticket to an external issue: *import* (`gh#123` → a new coupled
+aiball ticket) and *export* (push an aiball ticket up as a GitHub issue,
+behind a confirming button) are both explicit one-gesture actions,
+available from the UI, the CLI, and MCP. Coupling is never automatic, so
+a project's aiball-only tickets stay untouched by default. Once a ticket
+is coupled, a background poller mirrors state and labels/tags between the
+two sides; conflicts resolve with one authoritative direction per link,
+not a silent merge. The provider layer is already an extensible registry,
+so GitLab / Gitea drop in as additional drivers, and a webhook path can
+later replace polling for lower latency.
+
 ## Experimental / partial
 
 ### Sandbox loop
