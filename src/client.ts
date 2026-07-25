@@ -588,6 +588,24 @@ export class AiballClient {
         });
     }
     /**
+     * Upstream coupling phase 2 — manual export. Create a new external issue
+     * from an existing aiball ticket and couple the ticket to it. WRITES to
+     * the remote (a new GitHub issue), so callers should confirm first. The
+     * daemon holds the write-scoped token. `repo` overrides the project's
+     * default binding; omit to use it.
+     */
+    exportUpstream(ticket_id: number, opts: { kind?: string; repo?: string; by_agent?: string } = {}) {
+        return this.http<{
+            ticket: { id: number; title: string | null; tags: unknown[] };
+            external: { num: number; title: string; state: string; url: string; labels: string[] };
+            provider: string;
+        }>("POST", `/api/tickets/${ticket_id}/export`, {
+            ...(opts.kind ? { kind: opts.kind } : {}),
+            ...(opts.repo ? { repo: opts.repo } : {}),
+            ...(opts.by_agent ? { by_agent: opts.by_agent } : {}),
+        });
+    }
+    /**
      * Same endpoint with `detailed=1` — returns objects with counts
      * (ticket_count, open_count, pending_count, last_activity…) instead
      * of bare names. Used by poll() to surface per-project workload.

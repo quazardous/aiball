@@ -71,12 +71,34 @@ Import is **idempotent**: re-importing an issue that's already coupled fails
 (HTTP 409) and points you at the existing ticket instead of forking a
 duplicate. Pull requests are refused (their lifecycle differs from an issue's).
 
+## Export an aiball ticket
+
+Push an existing aiball ticket UP as a **new** GitHub issue and couple the
+ticket to it. This **writes to the remote** (it creates a public issue), so the
+surfaces gate it behind an explicit confirmation.
+
+- **CLI** — requires `--yes` (the write is irreversible):
+
+  ```console
+  aiball ticket export 123 --yes                     # uses the project's default binding
+  aiball ticket export 123 --repo owner/repo --yes   # explicit target
+  ```
+
+- **MCP** — `ticket_export({ ticket_id, repo? })` (the deliberate call is the
+  confirmation).
+
+- **HTTP** — `POST /api/tickets/:id/export` with an optional `{ "repo": "..." }`.
+
+The target repo is the project's default `github` binding unless you pass an
+explicit `repo`. Export needs a **write-scoped** token. A ticket that is
+already coupled is refused — unlink it first rather than forking a second
+remote issue.
+
 ## What's not here yet
 
-Coupling is being built in slices. Landed today: manual import. Planned next:
+Coupling is being built in slices. Landed today: manual import + export.
+Planned next:
 
-- **Export** — push an aiball ticket up as a new GitHub issue (behind a
-  confirming action, since it writes to the remote).
 - **Background sync** — a poller that keeps state and labels/tags in step on
   *already-coupled* tickets (including closing a ticket when its upstream issue
   closes). Conflicts resolve with one authoritative direction per link, not a

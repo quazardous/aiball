@@ -69,6 +69,7 @@ import { parseMeta } from "../questions.js";
 import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
 import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotes } from "./_helpers.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
+import { exportUpstream } from "../upstream-export.js";
 import type { AuthenticatedRequest } from "../auth.js";
 import { moveTicketTo } from "../messages.js";
 import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
@@ -1018,6 +1019,32 @@ ticketsRouter.post("/tickets/import", async (req: Request, res: Response) => {
     const by_agent = body.by_agent || consumerOf(req);
     try {
         const { ticket, external, provider } = await importUpstream({ project, ref, by_agent });
+        return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
+    } catch (err) {
+        if (err instanceof AlreadyCoupledError) {
+            return res.status(409).json({ error: err.message, existing_ticket_id: err.existingTicketId });
+        }
+        return badRequest(res, err instanceof Error ? err.message : String(err));
+    }
+});
+
+/**
+ * Upstream coupling phase 2 — Slice 1: manual export. Create a NEW external
+ * issue from an existing aiball ticket and couple it. WRITES to the remote —
+ * surfaces gate it behind an explicit confirmation. Body: { kind?, repo? }.
+ */
+ticketsRouter.post("/tickets/:id/export", async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "ticket id required");
+    const body = (req.body ?? {}) as { kind?: string; repo?: string; by_agent?: string };
+    const by_agent = body.by_agent || consumerOf(req);
+    try {
+        const { ticket, external, provider } = await exportUpstream({
+            ticket_id: id,
+            kind: body.kind,
+            repo: body.repo,
+            by_agent,
+        });
         return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
     } catch (err) {
         if (err instanceof AlreadyCoupledError) {

@@ -2,7 +2,7 @@
  * `aiball ticket` command group (carved out of cli.ts in #B.213
  * phase 3.C on 2026-05-19). Behavior-preserving move.
  *
- * Subcommands: new, comment, close, list, get, import
+ * Subcommands: new, comment, close, list, get, import, export
  *
  * Exposed entry point: `registerTicketCommands(program)`.
  */
@@ -152,6 +152,28 @@ export function registerTicketCommands(program: Command): void {
                     provider: string;
                 };
                 return `imported #${r.ticket.id} ← ${r.provider} ${r.external.url} [${r.external.state}]\n  ${r.ticket.title ?? ""}`;
+            });
+        });
+
+    ticket
+        .command("export <id>")
+        .description("Export a ticket UP to a new GitHub issue and couple it (writes to the remote)")
+        .option("--repo <owner/repo>", "Target repo override (default: project's default binding)")
+        .option("--yes", "Confirm the remote write (required — export creates a public issue)")
+        .action(async (id: string, opts, cmd) => {
+            const globalOpts = gOpts(cmd);
+            if (!opts.yes) {
+                die("ticket export creates a PUBLIC issue on the remote — re-run with --yes to confirm.");
+            }
+            const client = buildClient(globalOpts);
+            const res = await client.exportUpstream(Number(id), opts.repo ? { repo: opts.repo } : {});
+            out(res, globalOpts, (v) => {
+                const r = v as {
+                    ticket: { id: number };
+                    external: { url: string; num: number };
+                    provider: string;
+                };
+                return `exported ticket #${r.ticket.id} → ${r.provider} issue #${r.external.num}\n  ${r.external.url}`;
             });
         });
 

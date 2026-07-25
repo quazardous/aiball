@@ -31,6 +31,10 @@ dates are YYYY-MM-DD.
   nothing is imported automatically, so aiball-only tickets are untouched.
   Configure a repo binding per project and a host-level API token; see the
   new upstream-coupling guide.
+- Export the other way too: `ticket export <id> --yes` (CLI), the
+  `ticket_export` MCP tool, or the HTTP API create a new GitHub issue from an
+  aiball ticket and couple them. It writes to the remote, so it's gated behind
+  an explicit confirmation and needs a write-scoped token.
 
 ## [0.37.0] — 2026-07-23
 

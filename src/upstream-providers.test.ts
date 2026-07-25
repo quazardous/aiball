@@ -101,3 +101,36 @@ test("providerByKind resolves github and rejects unknown", () => {
     assert.equal(providerByKind("github")?.id, "github");
     assert.equal(providerByKind("bogus"), null);
 });
+
+test("createIssue POSTs title/body and maps the created issue", async () => {
+    const { impl, calls } = stubFetch(201, {
+        number: 77,
+        title: "New from aiball",
+        body: "the body",
+        state: "open",
+        html_url: "https://github.com/acme/widgets/issues/77",
+    });
+    const issue = await githubProvider.createIssue!(
+        target, { title: "New from aiball", body: "the body" }, { fetchImpl: impl, token: "wtok" },
+    );
+    assert.equal(issue.num, 77);
+    assert.equal(issue.url, "https://github.com/acme/widgets/issues/77");
+    assert.equal(calls[0].url, "https://api.github.com/repos/acme/widgets/issues");
+    assert.equal(calls[0].headers["authorization"], "Bearer wtok");
+});
+
+test("createIssue without a token is refused (write needs auth)", async () => {
+    const { impl } = stubFetch(201, {});
+    await assert.rejects(
+        () => githubProvider.createIssue!(target, { title: "x", body: "y" }, { fetchImpl: impl }),
+        /needs a write-scoped token/,
+    );
+});
+
+test("createIssue surfaces an HTTP error", async () => {
+    const { impl } = stubFetch(403, {});
+    await assert.rejects(
+        () => githubProvider.createIssue!(target, { title: "x", body: "y" }, { fetchImpl: impl, token: "t" }),
+        /HTTP 403/,
+    );
+});

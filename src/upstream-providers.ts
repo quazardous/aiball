@@ -61,6 +61,12 @@ export interface FetchIssueOpts {
     fetchImpl?: typeof fetch;
 }
 
+/** Fields to create a new external issue (phase 2, export). */
+export interface NewExternalIssue {
+    title: string;
+    body: string;
+}
+
 /** Provider interface — each implementation owns its parse + URL build. */
 export interface UpstreamProvider {
     /** Stable identifier — used in `.aiball.yaml upstream[].kind`. */
@@ -79,6 +85,13 @@ export interface UpstreamProvider {
      * error (caller surfaces the message).
      */
     fetchIssue?(target: UpstreamTarget, num: number, opts?: FetchIssueOpts): Promise<ExternalIssue>;
+    /**
+     * Phase 2 (export) — create a new external issue and return it. OPTIONAL,
+     * like `fetchIssue`. Requires a write-scoped token (it mutates the remote),
+     * so `opts.token` is mandatory in practice — the impl throws without one.
+     * Throws on HTTP / network error.
+     */
+    createIssue?(target: UpstreamTarget, input: NewExternalIssue, opts?: FetchIssueOpts): Promise<ExternalIssue>;
 }
 
 /** GitHub provider — phase 1's only implementation. Zero deps. */
@@ -136,6 +149,46 @@ export const githubProvider: UpstreamProvider = {
             body: j.body ?? "",
             state: j.state === "closed" ? "closed" : "open",
             labels,
+            url: j.html_url,
+        };
+    },
+    async createIssue(target, input, opts = {}): Promise<ExternalIssue> {
+        if (!opts.token) {
+            throw new Error(
+                "github: creating an issue needs a write-scoped token — set upstream_auth.github.token in ~/.config/aiball/config.yaml",
+            );
+        }
+        const doFetch = opts.fetchImpl ?? fetch;
+        const url = `https://api.github.com/repos/${target.owner}/${target.repo}/issues`;
+        const res = await doFetch(url, {
+            method: "POST",
+            headers: {
+                "accept": "application/vnd.github+json",
+                "x-github-api-version": "2022-11-28",
+                "user-agent": "aiball-upstream-coupling",
+                "content-type": "application/json",
+                "authorization": `Bearer ${opts.token}`,
+            },
+            body: JSON.stringify({ title: input.title, body: input.body }),
+        });
+        if (!res.ok) {
+            const hint = res.status === 401 || res.status === 403
+                ? " (auth/scope — the token needs write access to this repo)"
+                : res.status === 404
+                    ? " (repo not found, or the token can't see it)"
+                    : "";
+            throw new Error(`github: POST ${target.owner}/${target.repo} issue → HTTP ${res.status}${hint}`);
+        }
+        const j = await res.json() as {
+            number: number; title: string; body: string | null;
+            state: string; html_url: string;
+        };
+        return {
+            num: j.number,
+            title: j.title,
+            body: j.body ?? "",
+            state: j.state === "closed" ? "closed" : "open",
+            labels: [],
             url: j.html_url,
         };
     },

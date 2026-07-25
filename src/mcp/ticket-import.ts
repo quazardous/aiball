@@ -1,10 +1,11 @@
 /**
- * Upstream coupling (GitHub / GitLab), phase 2 — Slice 0: the `ticket_import`
- * MCP tool. Manually import an external issue as a coupled aiball ticket.
+ * Upstream coupling (GitHub / GitLab), phase 2 — the `ticket_import` (Slice 0)
+ * and `ticket_export` (Slice 1) MCP tools. Manually couple an aiball ticket to
+ * an external issue, in either direction.
  *
- * Thin wrapper over POST /api/tickets/import (the daemon holds the host-level
- * token and does the fetch). Manual only — there is no auto-discovery; a
- * project's aiball-only tickets are never touched.
+ * Thin wrappers over POST /api/tickets/import and POST /api/tickets/:id/export
+ * (the daemon holds the host-level token). Manual only — there is no
+ * auto-discovery; a project's aiball-only tickets are never touched.
  *
  * Exposed entry point: `registerTicketImportTool(server)`.
  */
@@ -31,6 +32,28 @@ export function registerTicketImportTool(server: McpServer): void {
         async ({ ref, project }) => {
             const proj = client.resolveProject(project);
             const res = await client.importUpstream(ref, proj);
+            return asText(res);
+        },
+    );
+
+    server.registerTool(
+        "ticket_export",
+        {
+            description:
+                "Export an existing aiball ticket UP to a NEW external issue (GitHub today) and couple the ticket to it. The issue takes the ticket's title/body; the ticket records the upstream link. ⚠️ This WRITES to the remote — it creates a public issue — so only call it as a deliberate, confirmed action.\n\nTarget repo: the project's default `github` binding in `.aiball.yaml upstream:`, or pass `repo: \"owner/repo\"` to override. Needs a write-scoped host token (`upstream_auth.github.token`). Refuses a ticket that is already coupled (unlink first) so it never forks a second remote issue. Returns the ticket + the created issue.",
+            inputSchema: {
+                ticket_id: z
+                    .number()
+                    .int()
+                    .describe("The aiball ticket to export."),
+                repo: z
+                    .string()
+                    .optional()
+                    .describe("Optional `owner/repo` override; defaults to the project's default github binding."),
+            },
+        },
+        async ({ ticket_id, repo }) => {
+            const res = await client.exportUpstream(ticket_id, repo ? { repo } : {});
             return asText(res);
         },
     );
