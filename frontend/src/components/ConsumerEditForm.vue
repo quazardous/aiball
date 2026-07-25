@@ -37,9 +37,6 @@ const enabled = ref(true);
 // Quand false → consumer "spécialiste" qui ne prend QUE les tickets explicitement
 // assignés (via ticket_assign), pas le pool global.
 const canClaim = ref(true);
-// #1435 slice 7 — lead capability : true = ce consumer peut provisionner/lancer
-// des crews (via les crew tools). Défaut false (human-granted).
-const canCreateAgent = ref(false);
 // #516 (david `r59bkm` plan E) — tri-state opt-in pour les broadcasts projet.
 // "auto" (null) = suit can_claim ; "on" = opt-in explicite ; "off" = opt-out
 // explicite. Stocké en string pour le Select ; converti en boolean | null
@@ -62,7 +59,6 @@ watch(() => props.original, (found) => {
     microPrompt.value = found.micro_prompt ?? "";
     enabled.value = found.enabled;
     canClaim.value = found.can_claim !== false; // default true if undefined (pre-#508 row)
-    canCreateAgent.value = found.can_create_agent === true; // default false
     notifyBroadcasts.value = found.notify_project_broadcasts === true
         ? "on"
         : found.notify_project_broadcasts === false
@@ -81,7 +77,6 @@ async function save() {
             micro_prompt: microPrompt.value.trim() || null,
             enabled: enabled.value,
             can_claim: canClaim.value,
-            can_create_agent: canCreateAgent.value,
             notify_project_broadcasts: notifyBroadcasts.value === "on"
                 ? true
                 : notifyBroadcasts.value === "off"
@@ -191,18 +186,6 @@ async function sendPrompt() {
             </label>
         </FormField>
 
-        <!-- #1435 slice 7 — lead capability: may provision/launch crew agents
-             (via the crew tools). Human-granted only. -->
-        <FormField>
-            <label>
-                <input
-                    type="checkbox"
-                    :checked="canCreateAgent"
-                    @change="canCreateAgent = ($event.target as HTMLInputElement).checked"
-                />
-                can create agent (this consumer is a <strong>lead</strong>: it may provision + launch crew agents in isolated worktrees)
-            </label>
-        </FormField>
 
         <!-- #516 (david `r59bkm` plan E) — tri-state opt-in pour les
              broadcasts projet (scope=broadcast follower fan-out).

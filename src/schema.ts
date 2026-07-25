@@ -637,9 +637,16 @@ export const consumers = sqliteTable("consumers", {
     canClaim: integer("can_claim").notNull().default(1),
     /**
      * #1435 slice 7 — lead capability. 1 = this consumer (a "lead") may
-     * provision/launch crew agents via the crew tools; 0 (default) = cannot.
-     * Human-granted only (edited in ConsumerEditPage, gated like can_claim by
-     * the #1477 guard on PATCH /consumers). Migration 0054.
+     * provision/launch crew agents; 0 (default) = cannot. Human-granted only,
+     * gated like can_claim by the #1477 guard on PATCH /consumers. Migration 0054.
+     *
+     * DORMANT / future-proof (david `zzm2rr`, 2026-07-25): the consumer of this
+     * flag — an *agent-facing* MCP create-agent tool — is deliberately PARKED
+     * (an aiball agent is not disposable; deciding to create one stays a human
+     * judgment). So the column + its human-only guard exist and are tested, but
+     * there is NO UI toggle and NO tool reading it yet. Kept so that re-opening
+     * the long-term "lead orchestrates crews" reflection is drop-in rather than
+     * a fresh migration + wiring pass.
      */
     canCreateAgent: integer("can_create_agent").notNull().default(0),
     /**
