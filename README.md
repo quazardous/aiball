@@ -11,6 +11,14 @@ switch any time.
 
 ![The aiball board: a project sidebar, a filterable ticket list with per-ticket intent, priority and assignee, and threaded decisions — one queue across every project on the host](./assets/screenshot-list.png)
 
+**Built to keep your focus on what matters.** Work is tickets, not a stale
+`PLAN.md`: the agent proposes a plan or a resolution you accept or reject right
+on the thread, you split anything into sub-tickets, gate a ticket behind its
+blocker, snooze what can wait, and see at a glance which threads got a reply.
+The board floats the next thing to look at and drains the rest in the
+background — an organic, always-current plan instead of markdown that rots the
+moment coding starts.
+
 ## Quickstart
 
 ```bash
