@@ -21,6 +21,7 @@ import { registerTicketWriteTools } from "./mcp/ticket-write.js";
 import { registerTicketReadTools } from "./mcp/ticket-read.js";
 import { registerTicketRelationTools } from "./mcp/ticket-relations.js";
 import { registerTicketImportTool } from "./mcp/ticket-import.js";
+import { shouldSurfaceUpstreamTools } from "./upstream-visibility.js";
 import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
 import { registerUploadTools } from "./mcp/upload.js";
@@ -43,16 +44,12 @@ const server = new McpServer({
 registerTicketWriteTools(server);
 registerTicketReadTools(server);
 registerTicketRelationTools(server);
-registerTicketImportTool(server);
 registerSubscriptionTools(server);
 registerInboxTools(server);
 registerUploadTools(server);
 registerWelcomeTools(server);
 
 // ---- start ----------------------------------------------------------------
-
-const transport = new StdioServerTransport();
-await server.connect(transport);
 
 // If the agent has an explicit project (AIBALL_PROJECT, typically set in
 // .mcp.json env), auto-subscribe at startup so the agent's outbox feed
@@ -62,11 +59,39 @@ await server.connect(transport);
 // project subscriptions (manual `subscribe({ project: "other" })`) keep
 // the default "follower" role unless the caller passes role=owner.
 // upsertSubscription is idempotent — it updates the role if it differs,
-// so this is safe to call on every MCP launch.
+// so this is safe to call on every MCP launch. Awaited (not fire-and-forget)
+// so the upstream-tool gate below sees the owner role on a fresh agent's very
+// first launch; a daemon-down failure just leaves the gate to fail closed.
 if (client.defaultProject) {
-    client.subscribe(client.defaultProject, false, "owner").catch(() => {
+    try {
+        await client.subscribe(client.defaultProject, false, "owner");
+    } catch {
         // Daemon may be down at MCP startup; the agent will hit the spool
         // path on its next post and the subscription registers later when
         // the daemon comes back. Don't crash the MCP for this.
-    });
+    }
 }
+
+// #1542 — the upstream import/export tools surface ONLY when the agent's
+// project has an upstream binding AND the agent is a project owner (the
+// "lead"). Owner/follower is the only role model today, so owner == lead;
+// this refines automatically to an explicit lead/crew split later, since crew
+// won't hold the owner role. Fail-closed: if we can't verify (daemon down,
+// etc.) the tools stay hidden — they need the daemon anyway.
+try {
+    const project = client.defaultProject;
+    if (project) {
+        const [cfg, subs] = await Promise.all([client.getConfig(), client.mySubs()]);
+        const surface = shouldSurfaceUpstreamTools({
+            project,
+            upstream: cfg.upstream,
+            subs: (subs as Array<{ project: string; role: string }>) ?? [],
+        });
+        if (surface) registerTicketImportTool(server);
+    }
+} catch {
+    // fail-closed: leave the upstream tools unregistered
+}
+
+const transport = new StdioServerTransport();
+await server.connect(transport);

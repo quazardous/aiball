@@ -676,6 +676,14 @@ export class AiballClient {
             `/api/subscriptions?consumer_id=${encodeURIComponent(this.agentId)}`,
         );
     }
+    /** #1542 — the daemon's resolved config surface. Today used to read the
+     *  `upstream` binding map (which projects have a coupling target) so the
+     *  MCP can gate the import/export tools on it. */
+    getConfig() {
+        return this.http<{
+            upstream?: Record<string, Array<{ kind: string; ref: string; default?: boolean }>>;
+        }>("GET", "/api/config");
+    }
     /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO.
      *  #798 — `since` is an ISO 8601 cutoff. Filters messages whose
      *  `created_at` is >= since. */
