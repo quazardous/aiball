@@ -198,9 +198,12 @@ project_type: public
 #   link_down_bg: "colour160" # IPC link to the proxy lost — bar may be stale (red)
 
 # --- upstream provider bindings -----------------------------------------------
-# Renders `<prefix>#NNN` refs as clickable chips in markdown bodies
-# (render-only — no API sync). Key = aiball project name. Per-provider:
-# at most ONE entry can have `default: true`.
+# Renders `<prefix>#NNN` refs as clickable chips in markdown bodies, AND lets
+# the bare `gh#N` form resolve to a repo for `ticket import` (coupling).
+# Key = aiball project name. Per-provider: at most ONE entry can have
+# `default: true`. The self-contained `gh:owner/repo#N` form needs no binding.
+# The API TOKEN for coupling is host-level and lives in the GLOBAL config
+# (~/.config/aiball/config.yaml → upstream_auth), never here. See docs/UPSTREAM.md.
 
 # upstream:
 #   my-project:
