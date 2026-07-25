@@ -71,6 +71,10 @@ export interface Consumer {
      *  agents (via the crew tools); false (default) = cannot. Human-granted
      *  only (gated like can_claim). */
     can_create_agent: boolean;
+    /** #1435 slice 5 — multi-agent role (lead / crew / null), set server-side
+     *  from the `x-aiball-role` header. Descriptive (how the agent launched),
+     *  surfaced in the consumers UI. NULL = solo/unset. */
+    role: string | null;
     /** #516 — tri-state opt-in pour les broadcasts projet. null = auto
      *  (suit can_claim) ; true = opt-in explicite ; false = opt-out explicite.
      *  `effective_notify_project_broadcasts` (helper) résout à un boolean. */
@@ -115,6 +119,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         remote: isRemoteConsumer(r.lastSeenVia, r.lastSeenIp),
         can_claim: r.canClaim !== 0,
         can_create_agent: r.canCreateAgent === 1,
+        role: r.role ?? null,
         notify_project_broadcasts: r.notifyProjectBroadcasts == null
             ? null
             : r.notifyProjectBroadcasts === 1,
@@ -297,6 +302,9 @@ export interface UpdateConsumerPatch {
     /** #1435 slice 7 — lead capability : true = may provision crew agents.
      *  Human-granted only (gated by the #1477 PATCH guard). */
     can_create_agent?: boolean;
+    /** #1435 slice 5 — multi-agent role (lead / crew / null). Persisted from
+     *  the `x-aiball-role` header (not a capability). */
+    role?: string | null;
     /** #516 — tri-state opt-in pour broadcasts projet. null = auto (suit
      *  can_claim) ; true/false = override. Passer `null` ou omettre = no-op
      *  (préserve la valeur courante). */
@@ -314,6 +322,7 @@ export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch):
     if (patch.micro_prompt !== undefined) row.microPrompt = patch.micro_prompt;
     if (patch.can_claim !== undefined) row.canClaim = patch.can_claim ? 1 : 0;
     if (patch.can_create_agent !== undefined) row.canCreateAgent = patch.can_create_agent ? 1 : 0;
+    if (patch.role !== undefined) row.role = patch.role;
     if (patch.notify_project_broadcasts !== undefined) {
         row.notifyProjectBroadcasts = patch.notify_project_broadcasts === null
             ? null

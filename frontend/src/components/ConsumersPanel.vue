@@ -253,6 +253,14 @@ const visibleRows = computed<Consumer[]>(() => {
                         class="consumers-cid__tag"
                         :title="`last seen via ${(row as Consumer).last_seen_via ?? '?'}${(row as Consumer).last_seen_ip ? ' · ' + (row as Consumer).last_seen_ip : ''}`"
                     />
+                    <!-- #1435 slice 5 — multi-agent role badge (lead / crew). -->
+                    <Tag
+                        v-if="(row as Consumer).role"
+                        :value="(row as Consumer).role ?? ''"
+                        :severity="(row as Consumer).role === 'lead' ? 'success' : 'contrast'"
+                        class="consumers-cid__tag"
+                        :title="`multi-agent role: ${(row as Consumer).role}`"
+                    />
                 </div>
             </template>
             <template #cell-kind="{ row }">{{ (row as Consumer).kind }}</template>

@@ -552,6 +552,9 @@ export interface Consumer {
     /** #1435 slice 7 — lead capability: true = may provision/launch crew
      *  agents. Default false. Human-granted only. */
     can_create_agent?: boolean;
+    /** #1435 slice 5 — multi-agent role (lead / crew / null), set from the
+     *  agent's launch role. Shown as a badge in the consumers panel. */
+    role?: string | null;
     /** #516 — tri-state opt-in pour broadcasts projet. null = auto (suit
      *  can_claim) ; true = opt-in explicite ; false = opt-out explicite. */
     notify_project_broadcasts?: boolean | null;

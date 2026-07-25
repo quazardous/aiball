@@ -163,6 +163,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         ar.token_kind = "agent";
         if (explicit) touchLastSeen(cid, "uds"); // #B.177 / #386 / #422 (local same-uid)
         readNoClaimHint(req, ar);
+        readRoleHint(req, ar);
         next();
         return;
     }
@@ -220,6 +221,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
             if (labelRaw && labelRaw !== row.label) updateTokenLabel(token, labelRaw);
         }
         readNoClaimHint(req, ar);
+        readRoleHint(req, ar);
         next();
         return;
     }
@@ -241,6 +243,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
     }
     touchLastSeen(ar.consumer_id, "tcp", clientIp(req)); // #B.177 / #422 (direct bearer over TCP)
     readNoClaimHint(req, ar);
+    readRoleHint(req, ar);
     next();
 }
 
@@ -277,6 +280,23 @@ function readNoClaimHint(req: Request, ar: AuthenticatedRequest): void {
                 updateConsumer(ar.consumer_id, { can_claim: false });
             }
         }
+    }
+}
+
+/** #1435 slice 5 — persist the agent's multi-agent role from the `x-aiball-role`
+ *  header so it shows in the UI. Unlike no_claim (one-way, capability), role is a
+ *  descriptor: update-on-change in BOTH directions (an agent relaunched with a
+ *  different role updates it) — but only when the header is present (absence never
+ *  clears it). Only `lead`/`crew` are accepted; anything else is ignored. Role is
+ *  self-declared (how the loop launched), NOT a gated capability, so it's set here
+ *  and deliberately kept out of the #1477 PATCH capability guard. */
+function readRoleHint(req: Request, ar: AuthenticatedRequest): void {
+    const v = req.header("x-aiball-role");
+    if (v !== "lead" && v !== "crew") return;
+    if (!ar.consumer_id) return;
+    const c = getConsumer(ar.consumer_id);
+    if (c && c.role !== v) {
+        updateConsumer(ar.consumer_id, { role: v });
     }
 }
 

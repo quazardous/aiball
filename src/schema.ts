@@ -650,6 +650,14 @@ export const consumers = sqliteTable("consumers", {
      */
     canCreateAgent: integer("can_create_agent").notNull().default(0),
     /**
+     * #1435 slice 5 — multi-agent role (lead / crew), persisted so the UI can
+     * show it. Set server-side from the `x-aiball-role` request header (see
+     * src/auth.ts), NOT via the human-gated PATCH — it's an agent self-declared
+     * descriptor (how it was launched), not a capability. NULL = solo/unset.
+     * Migration 0055.
+     */
+    role: text("role"),
+    /**
      * #516 david `r59bkm` plan E — tri-state opt-in pour recevoir les
      * broadcasts projet (fanOutPings scope='broadcast' follower fan-out).
      * NULL = auto (suit canClaim : claim-able reçoit les broadcasts comme

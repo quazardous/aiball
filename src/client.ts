@@ -101,6 +101,11 @@ export class AiballClient {
         if (process.env.AIBALL_NO_CLAIM === "1") {
             headers["x-aiball-no-claim"] = "1";
         }
+        // #1435 slice 5 — forward the multi-agent role so the daemon persists it
+        // on the consumer (visible in the UI). Mirrors the no-claim hint.
+        if (process.env.AIBALL_ROLE) {
+            headers["x-aiball-role"] = process.env.AIBALL_ROLE;
+        }
         const payload = body ? JSON.stringify(body) : undefined;
         // #855 — retry-with-backoff on transient daemon-down errors so
         // an `aiball restart` (or tsx-watch reload) doesn't kill in-flight
@@ -244,6 +249,9 @@ export class AiballClient {
         // but consistent — auth middleware reads the same header in any path).
         if (process.env.AIBALL_NO_CLAIM === "1") {
             headers["x-aiball-no-claim"] = "1";
+        }
+        if (process.env.AIBALL_ROLE) {
+            headers["x-aiball-role"] = process.env.AIBALL_ROLE;
         }
         const path = "/api/uploads";
         const timeoutMs = Math.max(this.timeoutMs, 15000);
