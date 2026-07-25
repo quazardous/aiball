@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { loadConfig } = await import("../autopoll/config.js");
-const { resolveProjectContext } = await import("./project-context.js");
+const { resolveProjectContext, subscriptionRoleFor } = await import("./project-context.js");
 
 function projectDir(role: string | null): string {
     const dir = mkdtempSync(join(tmpdir(), "aiball-1435-"));
@@ -50,4 +50,18 @@ test("no role = solo default (role null, no_claim false)", () => {
 test("an unknown role value is ignored (stays null)", () => {
     const cfg = loadConfig(projectDir("captain"));
     assert.equal(cfg.consumer.role, null);
+});
+
+// #1435 slice 1 — the subscription role at MCP boot (the with-multi-agent
+// side): crew subscribes follower (kept out of owner-gated surfaces), lead /
+// unset keep owner (today's behaviour).
+test("crew subscribes as follower", () => {
+    assert.equal(subscriptionRoleFor("crew"), "follower");
+});
+test("lead subscribes as owner", () => {
+    assert.equal(subscriptionRoleFor("lead"), "owner");
+});
+test("no role subscribes as owner (solo default)", () => {
+    assert.equal(subscriptionRoleFor(undefined), "owner");
+    assert.equal(subscriptionRoleFor(null), "owner");
 });

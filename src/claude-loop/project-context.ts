@@ -90,6 +90,17 @@ interface ResolveOpts {
     cwd?: string;
 }
 
+/**
+ * #1435 slice 1 — the subscription role an agent registers with at MCP boot,
+ * derived from its multi-agent role. A **crew** agent subscribes as a
+ * **follower** (assignment-only, kept out of owner-gated surfaces); **lead**
+ * and unset keep the historical **owner** subscription. Pure so both modes
+ * are unit-testable without a live MCP. Takes the raw env value (AIBALL_ROLE).
+ */
+export function subscriptionRoleFor(role: string | null | undefined): "owner" | "follower" {
+    return role === "crew" ? "follower" : "owner";
+}
+
 export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
     const cwd = opts.cwd ?? process.env.AIBALL_CWD ?? process.cwd();
     const cfg = loadConfig(cwd);

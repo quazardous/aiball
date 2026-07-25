@@ -22,6 +22,7 @@ import { registerTicketReadTools } from "./mcp/ticket-read.js";
 import { registerTicketRelationTools } from "./mcp/ticket-relations.js";
 import { registerTicketImportTool } from "./mcp/ticket-import.js";
 import { shouldSurfaceUpstreamTools } from "./upstream-visibility.js";
+import { subscriptionRoleFor } from "./claude-loop/project-context.js";
 import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
 import { registerUploadTools } from "./mcp/upload.js";
@@ -68,7 +69,7 @@ registerWelcomeTools(server);
 // the owner-gated surfaces (e.g. the #1542 upstream tools below). `lead` /
 // unset keep the historical owner subscription.
 if (client.defaultProject) {
-    const subRole = process.env.AIBALL_ROLE === "crew" ? "follower" : "owner";
+    const subRole = subscriptionRoleFor(process.env.AIBALL_ROLE);
     try {
         await client.subscribe(client.defaultProject, false, subRole);
     } catch {
