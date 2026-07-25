@@ -60,11 +60,17 @@ registerWelcomeTools(server);
 // the default "follower" role unless the caller passes role=owner.
 // upsertSubscription is idempotent — it updates the role if it differs,
 // so this is safe to call on every MCP launch. Awaited (not fire-and-forget)
-// so the upstream-tool gate below sees the owner role on a fresh agent's very
+// so the upstream-tool gate below sees the role on a fresh agent's very
 // first launch; a daemon-down failure just leaves the gate to fail closed.
+//
+// #1435 slice 1 — a **crew** agent (AIBALL_ROLE=crew) subscribes as a
+// **follower**, not owner: crew is assignment-only, and this keeps it out of
+// the owner-gated surfaces (e.g. the #1542 upstream tools below). `lead` /
+// unset keep the historical owner subscription.
 if (client.defaultProject) {
+    const subRole = process.env.AIBALL_ROLE === "crew" ? "follower" : "owner";
     try {
-        await client.subscribe(client.defaultProject, false, "owner");
+        await client.subscribe(client.defaultProject, false, subRole);
     } catch {
         // Daemon may be down at MCP startup; the agent will hit the spool
         // path on its next post and the subscription registers later when

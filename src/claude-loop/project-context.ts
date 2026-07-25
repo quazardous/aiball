@@ -16,7 +16,7 @@
  * that also handles the side effects callers want (env mutation for
  * child processes, deprecation warning).
  */
-import { loadConfig, type ConsumerSource } from "../autopoll/config.js";
+import { loadConfig, type ConsumerRole, type ConsumerSource } from "../autopoll/config.js";
 
 export type AgentSource = ConsumerSource;
 
@@ -32,8 +32,12 @@ export interface ProjectContext {
     /** Where the project value came from. */
     project_source: AgentSource;
     /** #508 phase A2 — when true, this project's agent is no-claim
-     *  (assignment-only). Mirrored from `consumer.no_claim` in `.aiball.yaml`. */
+     *  (assignment-only). Mirrored from `consumer.no_claim` in `.aiball.yaml`.
+     *  #1435 slice 1 — forced true when `role === "crew"`. */
     no_claim: boolean;
+    /** #1435 slice 1 — multi-agent role (lead / crew), from `--role` or
+     *  `.aiball.yaml consumer.role`. Null = solo/lead (today's default). */
+    role: ConsumerRole | null;
     /** True when `.mcp.json` carries the deprecated identity env block. */
     mcp_json_deprecated: boolean;
     /** Absolute path to the loaded `.aiball.yaml`, if any. */
@@ -98,7 +102,10 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         project: cfg.consumer.project!,
         agent_source: cfg.consumer.agent_source ?? "default",
         project_source: cfg.consumer.project_source ?? "default",
-        no_claim: cfg.consumer.no_claim,
+        // #1435 slice 1 — a crew agent is assignment-only, so its role forces
+        // no_claim on top of any explicit `consumer.no_claim`.
+        no_claim: cfg.consumer.no_claim || cfg.consumer.role === "crew",
+        role: cfg.consumer.role,
         mcp_json_deprecated: cfg.mcp_json_deprecated,
         config_path: cfg.configPath,
         project_type: cfg.project_type,
@@ -121,6 +128,10 @@ export function applyToProcessEnv(ctx: ProjectContext): void {
     // it up and injects `x-aiball-no-claim: 1` on every API call.
     if (ctx.no_claim) process.env.AIBALL_NO_CLAIM = "1";
     else delete process.env.AIBALL_NO_CLAIM;
+    // #1435 slice 1 — propagate the role so the child + its MCP subscribe with
+    // the right role (crew = follower, not owner). Null = unset (owner/lead).
+    if (ctx.role) process.env.AIBALL_ROLE = ctx.role;
+    else delete process.env.AIBALL_ROLE;
 }
 
 /**

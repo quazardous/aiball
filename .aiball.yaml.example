@@ -40,6 +40,12 @@ autopoll:
 #   # If true, agent is "assignment-only": ticket_engage skips the claimable
 #   # pool and only returns explicitly assigned tickets.
 #   no_claim: false
+#   # Multi-agent role (sugar over the primitives above). `lead` = the
+#   # maintainer agent (owner subscription, can claim) — the default when
+#   # unset. `crew` = an assignment-only worker (follower subscription,
+#   # no_claim forced). The `claude-loop --role lead|crew` flag overrides
+#   # this per launch. Leave unset for the classic single-agent workflow.
+#   role: lead
 
 # --- claude-loop --------------------------------------------------------------
 # The tmux wrapper around `claude`. CLI flags (--interval, --user-grace, …)

@@ -134,6 +134,15 @@ export interface AiballConfig {
          * Default false (= can claim normally, A1 semantic preserved).
          */
         no_claim: boolean;
+        /**
+         * #1435 slice 1 — multi-agent role sugar. `"lead"` = the maintainer
+         * agent (owner subscription, can claim). `"crew"` = an assignment-only
+         * worker (follower subscription, no_claim forced). `null` = unset =
+         * solo/lead behaviour (today's default). A `--role` CLI flag overrides
+         * this per-launch. Maps onto existing primitives (subscription role +
+         * no_claim); it does not introduce a new authority axis.
+         */
+        role: ConsumerRole | null;
     };
     /**
      * True when `.mcp.json` next to the config carries an
@@ -323,6 +332,8 @@ export interface AiballConfig {
 }
 
 export type ConsumerSource = "env" | "aiball.yaml" | "mcp.json" | "default";
+/** #1435 slice 1 — multi-agent role. See `consumer.role` in AiballConfig. */
+export type ConsumerRole = "lead" | "crew";
 
 const DEFAULTS: AiballConfig = {
     autopoll: {
@@ -342,6 +353,7 @@ const DEFAULTS: AiballConfig = {
         agent_source: null,
         project_source: null,
         no_claim: false,
+        role: null,
     },
     mcp_json_deprecated: false,
     claude_loop: {
@@ -629,6 +641,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #508 phase A2 (`qmwp66`) — no_claim flag, same level as agent.
             if (typeof c.no_claim === "boolean") {
                 cfg.consumer.no_claim = c.no_claim;
+            }
+            // #1435 slice 1 — multi-agent role sugar (lead / crew).
+            if (c.role === "lead" || c.role === "crew") {
+                cfg.consumer.role = c.role;
             }
             // #B.180 david: all claude-loop timeouts configurable.
             const cl = (raw.claude_loop ?? {}) as Record<string, unknown>;

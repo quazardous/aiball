@@ -239,6 +239,10 @@ interface StartOpts {
     consumer?: string;
     /** #390: project name (overrides resolved ctx.project). */
     project?: string;
+    /** #1435 slice 1 — multi-agent role sugar. `lead` = owner + can-claim
+     *  (today's default); `crew` = follower + no_claim (assignment-only).
+     *  Overrides `.aiball.yaml consumer.role` for this launch. */
+    role?: "lead" | "crew";
     /** #393: launch the loop in this directory instead of the invoker's cwd
      *  (e.g. the daemon starting a loop for a known project root from the UI). */
     cwd?: string;
@@ -460,6 +464,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // .aiball.yaml — David's "consumer_id pas propre au remote").
     if (opts.consumer) ctx.agent = opts.consumer;
     if (opts.project) ctx.project = opts.project;
+    // #1435 slice 1 — `--role lead|crew` overrides the resolved role. A crew
+    // agent is assignment-only, so crew forces no_claim (mirrors the config
+    // derivation). Both propagate to children via applyToProcessEnv below.
+    if (opts.role) {
+        ctx.role = opts.role;
+        if (opts.role === "crew") ctx.no_claim = true;
+    }
     // #420: resolve the loop name AFTER the agent is known, so an omitted --name
     // defaults to a per-agent slug → two loops in the same dir under different
     // agents auto-get distinct names. Explicit --name still wins.
@@ -691,6 +702,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #508 phase A2 — propagate the project-yaml no_claim flag so the
         // claude process + every API call from it carries the no-claim hint.
         ...(ctx.no_claim ? [`export AIBALL_NO_CLAIM=1`] : []),
+        // #1435 slice 1 — propagate the multi-agent role so the spawned MCP
+        // subscribes with the right role (crew = follower, not owner).
+        ...(ctx.role ? [`export AIBALL_ROLE=${shQuote(ctx.role)}`] : []),
         // #480 david : le timer + les hooks sont spawn sans `cwd:` explicite
         // côté Node, donc ils héritent du cwd du shell de lancement
         // (typiquement le dev checkout aiball/). `loadConfig()` no-arg
@@ -1938,6 +1952,9 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
         .option("--agent <id>", "#420: alias for --consumer (the loop's agent identity). Set a distinct one to run several loops in the same dir.")
         .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
+        // #1435: multi-agent role sugar — lead (owner + can-claim, today's
+        // default) or crew (follower + assignment-only worktree worker).
+        .addOption(new Option("--role <role>", "#1435: multi-agent role — `lead` (owner + can-claim) or `crew` (follower, assignment-only). Overrides .aiball.yaml consumer.role.").choices(["lead", "crew"]))
         // #393: launch in an explicit dir (e.g. the daemon spawning a loop for a
         // known project root from the UI) instead of the invoker's cwd.
         .option("--cwd <path>", "#393: launch the loop in this directory instead of the current one.")
@@ -1962,6 +1979,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             attach: boolean; startupPing: boolean; force?: boolean;
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
+            role?: string;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
             once?: boolean; zen?: boolean;
@@ -1985,6 +2003,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 aiballToken: opts.aiballToken,
                 consumer: opts.consumer ?? opts.agent, // #420: --agent is an alias for --consumer
                 project: opts.project,
+                role: opts.role === "lead" || opts.role === "crew" ? opts.role : undefined,
                 cwd: opts.cwd,
                 init: opts.init === true,
                 initForce: opts.initForce === true,
