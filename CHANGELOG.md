@@ -35,6 +35,18 @@ dates are YYYY-MM-DD.
   `ticket_export` MCP tool, or the HTTP API create a new GitHub issue from an
   aiball ticket and couple them. It writes to the remote, so it's gated behind
   an explicit confirmation and needs a write-scoped token.
+- Multiple agents per project (opt-in): run a **lead** plus assignment-only
+  **crew** agents, each isolated in its own git worktree. Set the role with
+  `claude-loop --role lead|crew` (or `consumer.role` in `.aiball.yaml`);
+  `claude-loop crew create <name> [--start]` provisions a crew worktree,
+  installs a crew-specific skill into it, and self-checks it; `crew list` shows
+  the crews. Each agent's role is shown as a badge in the consumers panel.
+
+### Fixed
+
+- Consumer capability fields (can-claim, and the new can-create-agent) are now
+  human-only on `PATCH /consumers`: an agent can no longer grant itself
+  capabilities (previously the route was unguarded).
 
 ## [0.37.0] — 2026-07-23
 
