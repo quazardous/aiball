@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
+import { useConfirm } from "primevue/useconfirm";
+import { useToast } from "primevue/usetoast";
 import { api, INTENTS, type Intent, type Priority, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
+import { upstreamBindings } from "../lib/upstream-providers";
 import { topDown } from "../lib/prefs";
 import { formatTicketRef } from "../lib/formatting";
 import ThreadRelations from "./ThreadRelations.vue";
@@ -153,6 +156,56 @@ async function decide(action: "approve" | "reject") {
         error.value = (e as Error).message;
     } finally {
         decideBusy.value = false;
+    }
+}
+
+// #1542 — upstream export. Show the button only when the project has an
+// upstream binding AND the ticket isn't already coupled (a coupled ticket
+// shows the link chip instead) and isn't closed. The write is remote, so it
+// goes through a confirm dialog. The UI is human-operated → no role gate here
+// (the MCP tools carry the owner/lead gate; this is the moderator's UI).
+const confirm = useConfirm();
+const toast = useToast();
+const exportBusy = ref(false);
+const canExportUpstream = computed<boolean>(() => {
+    const t = data.value?.ticket;
+    if (!t || t.closed) return false;
+    if (t.upstream_kind) return false;
+    const bindings = upstreamBindings.value[t.project];
+    return !!bindings && bindings.some((b) => b.kind === "github" && b.default);
+});
+function exportUpstream() {
+    const t = data.value?.ticket;
+    if (!t) return;
+    confirm.require({
+        header: "Export to GitHub",
+        message: "This creates a NEW public GitHub issue from this ticket and couples them. Continue?",
+        icon: "pi pi-github",
+        acceptLabel: "Create issue",
+        rejectLabel: "Cancel",
+        accept: () => { void doExport(t.id); },
+    });
+}
+async function doExport(tid: number) {
+    exportBusy.value = true;
+    try {
+        const res = await api.exportUpstream(tid);
+        toast.add({
+            severity: "success",
+            summary: "Exported to GitHub",
+            detail: `Created issue #${res.external.num}`,
+            life: 5000,
+        });
+        broadcastRefresh(tid);
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Export failed",
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    } finally {
+        exportBusy.value = false;
     }
 }
 
@@ -477,10 +530,12 @@ async function copyTicketRef() {
                     show-edit-button
                     :editing="editing"
                     :managing="managing"
+                    :can-export-upstream="canExportUpstream"
                     :marking-read="threadMarkingRead"
                     :mark-read-dwell-ms="markReadDwellMs"
                     @start-edit="editing = true"
                     @start-manage="managing = true"
+                    @export-upstream="exportUpstream"
                 />
                 <ThreadManagePanel
                     v-if="managing"
@@ -570,8 +625,10 @@ async function copyTicketRef() {
                     <ThreadHeader
                         :ticket="data.ticket"
                         :is-snoozed="isSnoozed"
+                        :can-export-upstream="canExportUpstream"
                         :marking-read="threadMarkingRead"
                         :mark-read-dwell-ms="markReadDwellMs"
+                        @export-upstream="exportUpstream"
                     />
                 </template>
                 <template #extra-actions>

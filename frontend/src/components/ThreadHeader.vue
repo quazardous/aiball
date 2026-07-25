@@ -13,16 +13,21 @@
  * #352 — "manage" opens in-place like edit, not a popover.
  */
 import Button from "primevue/button";
+import { computed } from "vue";
 import type { TicketSummary } from "../lib/api";
 import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
+import { githubProvider } from "../lib/upstream-providers";
 
-defineProps<{
+const props = defineProps<{
     ticket: TicketSummary;
     isSnoozed: boolean;
     showBanners?: boolean;
     showEditButton?: boolean;
     editing?: boolean;
     managing?: boolean;
+    /** #1542 — show the "Export to GitHub" button. ThreadView sets this only
+     *  when the project has an upstream binding and the ticket isn't coupled. */
+    canExportUpstream?: boolean;
     /** #596 — auto-mark-read dwell in progress. The header shows a
      *  pulsing dot near the title so the human SEES the 2s grace
      *  window instead of just discovering "it became read" silently. */
@@ -33,7 +38,18 @@ defineProps<{
 const emit = defineEmits<{
     (e: "start-edit"): void;
     (e: "start-manage"): void;
+    (e: "export-upstream"): void;
 }>();
+
+/** #1542 — web URL of the coupled external issue, built from the stored
+ *  provider ref (`github:owner/repo`) + number. Null when uncoupled or the
+ *  ref doesn't parse (only github supported today). */
+const upstreamUrl = computed<string | null>(() => {
+    const t = props.ticket;
+    if (t.upstream_kind !== "github" || !t.upstream_ref || !t.upstream_num) return null;
+    const target = githubProvider.parseRef(t.upstream_ref);
+    return target ? githubProvider.buildUrl(target, t.upstream_num) : null;
+});
 
 /**
  * #567 — tooltip de la chip "claim by". Quand l'assignee est la même
@@ -119,6 +135,17 @@ function claimerTooltip(t: TicketSummary): string {
         >
             <i class="pi pi-bolt" /> {{ formatTokens(estTokenEffort(ticket.token_usage)) }} tok
         </span>
+        <!-- #1542 — coupled to an external issue: link chip. -->
+        <a
+            v-if="upstreamUrl"
+            class="thread-subline__item thread-subline__upstream"
+            :href="upstreamUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            :title="`Coupled to ${ticket.upstream_ref} #${ticket.upstream_num}`"
+        >
+            <i class="pi pi-github" /> {{ ticket.upstream_kind }} #{{ ticket.upstream_num }}
+        </a>
     </div>
     <template v-if="showBanners">
         <div
@@ -165,7 +192,7 @@ function claimerTooltip(t: TicketSummary): string {
          haut). #382 : la priorité est remontée au-dessus du titre ; cette
          bande ne porte plus que les tags (+ les boutons edit/manage). -->
     <div
-        v-if="(ticket.tags && ticket.tags.length) || showEditButton"
+        v-if="(ticket.tags && ticket.tags.length) || showEditButton || canExportUpstream"
         class="thread-meta-extra"
     >
         <span
@@ -195,6 +222,21 @@ function claimerTooltip(t: TicketSummary): string {
                 severity="secondary"
                 text
                 @click="emit('start-manage')"
+            />
+        </template>
+        <!-- #1542 — export this ticket UP to a new GitHub issue. Only shown
+             when the project has an upstream binding and the ticket isn't
+             already coupled (ThreadView computes `canExportUpstream`). Writes
+             to the remote → ThreadView confirms before firing. -->
+        <template v-if="canExportUpstream">
+            <span v-if="!showEditButton" class="spacer" />
+            <Button
+                icon="pi pi-github"
+                label="Export to GitHub"
+                size="small"
+                severity="secondary"
+                text
+                @click="emit('export-upstream')"
             />
         </template>
     </div>

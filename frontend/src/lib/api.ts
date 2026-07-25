@@ -349,6 +349,12 @@ export interface TicketSummary {
      *  backlog. */
     decision_proposable?: boolean;
     gated_by_decision?: boolean;
+    /** #1542 — upstream coupling. Set only when the ticket is coupled to an
+     *  external issue (manual import/export). All null = a pure aiball ticket. */
+    upstream_kind?: string | null;
+    upstream_ref?: string | null;
+    upstream_num?: number | null;
+    upstream_synced_at?: string | null;
 }
 
 /** #404: per-ticket token-effort tally (raw counts from the Claude transcript). */
@@ -872,6 +878,27 @@ export const api = {
             "GET",
             `/api/tickets/${ticketId}/subscriptions`,
         ),
+    // ---- upstream coupling (GitHub / GitLab) -----------------------------
+    /** Import an external issue (`gh#123` or `gh:owner/repo#123`) as a new
+     *  coupled ticket. 409 if already coupled (with `existing_ticket_id`). */
+    importUpstream: (ref: string, project: string) =>
+        req<{
+            ticket: { id: number; title: string | null };
+            external: { num: number; title: string; state: string; url: string; labels: string[] };
+            provider: string;
+        }>("POST", "/api/tickets/import", { ref, project, by_agent: currentConsumer() }),
+    /** Export a ticket UP as a new GitHub issue and couple it. Writes to the
+     *  remote — call only from a confirmed action. `repo` overrides the
+     *  project's default binding. */
+    exportUpstream: (ticketId: number, repo?: string) =>
+        req<{
+            ticket: { id: number };
+            external: { num: number; url: string };
+            provider: string;
+        }>("POST", `/api/tickets/${ticketId}/export`, {
+            ...(repo ? { repo } : {}),
+            by_agent: currentConsumer(),
+        }),
     /** #352: mute/unmute one SPECIFIC subscriber's subscription on a ticket. */
     muteSubscription: (ticketId: number, consumerId: string, muted: boolean) =>
         req<{ consumer_id: string; ticket_id: number; muted: boolean }>(

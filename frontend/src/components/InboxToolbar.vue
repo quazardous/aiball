@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { computed, ref, onMounted, onUnmounted } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 import ToggleButton from "primevue/togglebutton";
 import InputText from "primevue/inputtext";
+import Dialog from "primevue/dialog";
+import { useToast } from "primevue/usetoast";
 import { type SortBy, type StatusFilter } from "../lib/labels";
-import { PRIORITIES, type Priority } from "../lib/api";
+import { api, PRIORITIES, type Priority } from "../lib/api";
+import { bus } from "../lib/bus";
+import { upstreamBindings } from "../lib/upstream-providers";
 
 /** #B.222 priority filter — "all" + each enum value. Owned here so
  *  parents don't have to mirror PRIORITIES at every call-site. */
@@ -28,7 +32,7 @@ export interface SortOption {
 
 import MobileProjectPicker, { type ProjectOption } from "./MobileProjectPicker.vue";
 export type { ProjectOption } from "./MobileProjectPicker.vue";
-defineProps<{
+const props = defineProps<{
     statusFilter: StatusFilter;
     statusFilterOptions: StatusFilterOption[];
     onlyOpen: boolean;
@@ -71,6 +75,49 @@ function syncFilters() {
 }
 onMounted(() => window.addEventListener("resize", syncFilters));
 onUnmounted(() => window.removeEventListener("resize", syncFilters));
+
+// #1542 — import an external issue as a coupled ticket. Shown only when the
+// current project has a default upstream (github) binding. Self-contained
+// dialog: enter a ref (gh#N / gh:owner/repo#N), POST, toast, refresh the inbox.
+const toast = useToast();
+const canImportUpstream = computed<boolean>(() => {
+    if (!props.project) return false;
+    const bindings = upstreamBindings.value[props.project];
+    return !!bindings && bindings.some((b) => b.kind === "github" && b.default);
+});
+const importOpen = ref(false);
+const importRef = ref("");
+const importBusy = ref(false);
+function openImport() {
+    importRef.value = "";
+    importOpen.value = true;
+}
+async function doImport() {
+    const ref_ = importRef.value.trim();
+    if (!ref_ || !props.project) return;
+    importBusy.value = true;
+    try {
+        const res = await api.importUpstream(ref_, props.project);
+        toast.add({
+            severity: "success",
+            summary: "Imported from GitHub",
+            detail: `Created ticket #${res.ticket.id} from ${res.provider} #${res.external.num}`,
+            life: 5000,
+        });
+        importOpen.value = false;
+        bus.emit("inbox.refresh");
+        bus.emit("projects.refresh");
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Import failed",
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    } finally {
+        importBusy.value = false;
+    }
+}
 </script>
 
 <template>
@@ -122,6 +169,19 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
             size="small"
             title="New ticket"
             @click="emit('new-ticket')"
+        />
+        <!-- #1542 — import a GitHub issue as a coupled ticket. Only when the
+             current project has a default upstream binding. -->
+        <Button
+            v-if="canImportUpstream"
+            class="filter-import-upstream"
+            :label="isPhone ? '' : 'Import'"
+            icon="pi pi-github"
+            size="small"
+            severity="secondary"
+            outlined
+            title="Import a GitHub issue as a coupled ticket"
+            @click="openImport"
         />
         <div class="filters-body" :class="{ 'filters-body--collapsed': !filtersExpanded }">
                 <Select
@@ -194,6 +254,36 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
         </div>
         <span class="spacer" />
     </div>
+
+    <!-- #1542 — import dialog. Enter a ref (gh#123 or gh:owner/repo#123). -->
+    <Dialog
+        v-model:visible="importOpen"
+        modal
+        header="Import from GitHub"
+        :style="{ width: '28rem', maxWidth: '92vw' }"
+    >
+        <p class="import-dialog__hint">
+            Enter a GitHub issue reference. A bare <code>gh#123</code> uses this
+            project's default repo; <code>gh:owner/repo#123</code> targets any repo.
+        </p>
+        <InputText
+            v-model="importRef"
+            placeholder="gh#123"
+            class="import-dialog__input"
+            autofocus
+            @keyup.enter="doImport"
+        />
+        <template #footer>
+            <Button label="Cancel" text severity="secondary" @click="importOpen = false" />
+            <Button
+                label="Import"
+                icon="pi pi-github"
+                :loading="importBusy"
+                :disabled="!importRef.trim()"
+                @click="doImport"
+            />
+        </template>
+    </Dialog>
 </template>
 
 <style>
@@ -379,5 +469,14 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 }
 .filter-search__clear i {
     font-size: var(--fs-sm);
+}
+/* #1542 — import dialog. */
+.import-dialog__hint {
+    margin: 0 0 0.6rem;
+    font-size: var(--fs-sm);
+    color: var(--p-text-muted-color);
+}
+.import-dialog__input {
+    width: 100%;
 }
 </style>
