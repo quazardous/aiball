@@ -32,6 +32,7 @@ import { AIBALL_VERSION } from "../version.js";
 import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
 import { applyBootstrapOptions } from "../cli/bootstrap-options.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
+import { cmdCrewCreate, cmdCrewList } from "./crew.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
@@ -2043,7 +2044,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "debug", "backlog", "snapshot", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "debug", "backlog", "snapshot", "crew", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -2055,6 +2056,23 @@ async function main(): Promise<void> {
         .helpOption("-h, --help", "Show help");
     program.addCommand(buildStartCommand((opts) => cmdStart({ ...opts, claudeArgs: passthrough })).name("start"));
     program.command("list").description("List all known loops").action(cmdList);
+    // #1435 slice 2 — multi-agent crew lifecycle. `crew create <name>`
+    // provisions an isolated git worktree (worktrees/<name>, branch crew/<name>)
+    // and, with --start, launches a loop there in --role crew (assignment-only).
+    {
+        const crew = new Command("crew").description("Multi-agent: provision + list crew agents (isolated git worktrees).");
+        crew.command("create <name>")
+            .description("Provision a crew worktree (worktrees/<name>, branch crew/<name>). --start launches its loop in --role crew.")
+            .option("--start", "Launch the crew loop (detached) right after provisioning.")
+            .option("--dry-run", "Print what would be provisioned without touching git or starting anything.")
+            .option("--base <ref>", "Base ref for the new worktree branch (default HEAD).")
+            .action((name: string, opts: { start?: boolean; dryRun?: boolean; base?: string }) =>
+                cmdCrewCreate(name, { start: opts.start === true, dryRun: opts.dryRun === true, base: opts.base }));
+        crew.command("list")
+            .description("List provisioned crews (worktrees under worktrees/) for the current project.")
+            .action(() => cmdCrewList());
+        program.addCommand(crew);
+    }
     program.command("attach [name]")
         .description("tmux attach to a loop session. Name optional — defaults to the single loop registered for the current cwd (#415).")
         .action((name: string | undefined) => cmdAttach(name));
