@@ -23,6 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- Couple a ticket to an external issue: `ticket import gh#123` (CLI), the
+  `ticket_import` MCP tool, or the HTTP API pull an issue from GitHub and
+  create a linked aiball ticket, mapping its labels to tags. Manual only —
+  nothing is imported automatically, so aiball-only tickets are untouched.
+  Configure a repo binding per project and a host-level API token; see the
+  new upstream-coupling guide.
+
 ## [0.37.0] — 2026-07-23
 
 ### Added
