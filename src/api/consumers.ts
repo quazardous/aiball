@@ -132,6 +132,21 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
         return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
     }
+    // #1477 — a consumer's CAPABILITY fields are human-piloted and never
+    // writable by an agent. Without this guard any authenticated agent could
+    // flip its own `can_claim` (self-promote out of assignment-only), which
+    // would make the whole #1435 authority model — and #508's specialist
+    // no-claim consumers already in prod — decorative. Mirrors the human gate
+    // on the sibling routes (loop-stop / prompt / nodes). Non-capability
+    // fields (display_name, note, micro_prompt, …) stay editable as before.
+    // Future capability flags (e.g. can_create_agent) join CAPABILITY_FIELDS.
+    const CAPABILITY_FIELDS = ["can_claim"] as const;
+    const touchesCapability = CAPABILITY_FIELDS.some((f) => body[f] !== undefined);
+    if (touchesCapability && !isHuman(consumerOf(req))) {
+        return res.status(403).json({
+            error: "consumer capability fields (can_claim) are human-only — set them via the moderator UI, not from an agent",
+        });
+    }
     const patch: {
         kind?: ConsumerKind;
         display_name?: string | null;
