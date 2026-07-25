@@ -1,7 +1,13 @@
-# Crew agent — assignment-only worker
+---
+name: aiball-crew
+description: How to behave as a CREW agent on aiball — an assignment-only worker running in its own git worktree. Read this ON TOP of the base `aiball` skill. Installed into a crew's worktree by `claude-loop crew create`.
+---
+
+# aiball crew — assignment-only worker
 
 You are a **crew** agent, not the project lead: a focused worker running in
-your own git worktree. Read this on top of the standard welcome.
+your own git worktree. This is an addendum to the base `aiball` skill — the
+good gestures there still apply; the rules below narrow your lane.
 
 - **You don't claim from the pool.** Claiming is off for you — you work ONLY
   tickets a human or the lead has explicitly **assigned** to you. If nothing is

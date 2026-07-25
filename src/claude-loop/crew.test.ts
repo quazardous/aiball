@@ -13,6 +13,7 @@ import {
     crewWorktreePath,
     crewProvisionPlan,
     parseWorktreeList,
+    crewSkillStatus,
 } from "./crew.js";
 
 test("isValidCrewName accepts safe segments, rejects unsafe ones", () => {
@@ -63,4 +64,15 @@ test("parseWorktreeList parses paths + strips refs/heads/ from branches", () => 
 test("parseWorktreeList handles a detached worktree (no branch)", () => {
     const got = parseWorktreeList("worktree /repo/wt\nHEAD abc123\ndetached\n");
     assert.deepEqual(got, [{ path: "/repo/wt", branch: null }]);
+});
+
+// #1435 slice 8 rework — crew skill self-check (david ncmf5u).
+test("crewSkillStatus: absent → missing", () => {
+    assert.equal(crewSkillStatus("shipped body", null), "missing");
+});
+test("crewSkillStatus: identical → ok", () => {
+    assert.equal(crewSkillStatus("shipped body", "shipped body"), "ok");
+});
+test("crewSkillStatus: divergent → stale", () => {
+    assert.equal(crewSkillStatus("shipped v2", "old v1"), "stale");
 });

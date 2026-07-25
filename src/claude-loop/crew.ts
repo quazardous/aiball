@@ -15,7 +15,7 @@
  * are thin wrappers, guarded behind `--dry-run` for a side-effect-free preview.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resolveProjectContext } from "./project-context.js";
 import { installRoot } from "./state.js";
@@ -79,6 +79,52 @@ export function crewProvisionPlan(args: {
     };
 }
 
+// ---- crew skill (slice 8 rework) ------------------------------------------
+// A crew agent auto-loads a role-specific skill from its worktree's
+// `.claude/skills/aiball-crew/` (on top of the global base `aiball` skill).
+// `crew create` installs it and self-checks it matches the shipped source.
+
+export type CrewSkillStatus = "ok" | "missing" | "stale";
+
+/** Pure: shipped skill body vs what's installed (or null = absent). */
+export function crewSkillStatus(shipped: string, installed: string | null): CrewSkillStatus {
+    if (installed === null) return "missing";
+    return installed === shipped ? "ok" : "stale";
+}
+
+function crewSkillPaths(worktree: string): { src: string; dest: string } {
+    return {
+        src: join(installRoot(), "skill", "crew", "SKILL.md"),
+        dest: join(worktree, ".claude", "skills", "aiball-crew", "SKILL.md"),
+    };
+}
+
+/**
+ * Install (or refresh) the crew skill into the worktree + self-check it matches
+ * the shipped source. Returns the status BEFORE any fix so the caller reports
+ * ok / installed / refreshed. Idempotent: an "ok" skill is left untouched.
+ */
+export function installCrewSkill(worktree: string): CrewSkillStatus {
+    const { src, dest } = crewSkillPaths(worktree);
+    const shipped = readFileSync(src, "utf8");
+    const installed = existsSync(dest) ? readFileSync(dest, "utf8") : null;
+    const status = crewSkillStatus(shipped, installed);
+    if (status !== "ok") {
+        mkdirSync(dirname(dest), { recursive: true });
+        writeFileSync(dest, shipped);
+    }
+    return status;
+}
+
+/** Read-only skill status for `crew list` (no install/refresh). */
+export function crewSkillStatusFor(worktree: string): CrewSkillStatus {
+    const { src, dest } = crewSkillPaths(worktree);
+    let shipped: string;
+    try { shipped = readFileSync(src, "utf8"); } catch { return "missing"; }
+    const installed = existsSync(dest) ? readFileSync(dest, "utf8") : null;
+    return crewSkillStatus(shipped, installed);
+}
+
 function printPlan(plan: CrewProvisionPlan, willStart: boolean): void {
     process.stdout.write(
         `crew '${plan.name}' (${plan.project})\n` +
@@ -130,6 +176,16 @@ export function cmdCrewCreate(name: string, opts: CrewCreateOpts): void {
         process.stdout.write(`crew '${name}' created at ${plan.dir} (branch ${plan.branch})\n`);
     }
 
+    // Install + self-check the crew skill in the worktree (david `ncmf5u`):
+    // the crew agent auto-loads it on top of the global base skill. Idempotent.
+    const skillStatus = installCrewSkill(plan.dir);
+    const skillMsg = skillStatus === "ok"
+        ? "skill: ok"
+        : skillStatus === "missing"
+            ? "skill: installed"
+            : "skill: stale → refreshed";
+    process.stdout.write(`  ${skillMsg} (aiball-crew)\n`);
+
     if (opts.start) {
         // Detached launch (mirror of the daemon's loop spawn) so the crew loop
         // runs in its worktree without grabbing this terminal's tmux attach.
@@ -180,6 +236,8 @@ export function cmdCrewList(): void {
     }
     for (const w of crews) {
         const name = w.path.slice(worktreesRoot.length + 1);
-        process.stdout.write(`${name.padEnd(20)}  ${(w.branch ?? "-").padEnd(24)}  ${w.path}\n`);
+        const skill = crewSkillStatusFor(w.path);
+        const skillCol = skill === "ok" ? "skill ✓" : skill === "stale" ? "skill ↻" : "skill ✗";
+        process.stdout.write(`${name.padEnd(20)}  ${(w.branch ?? "-").padEnd(24)}  ${skillCol.padEnd(8)}  ${w.path}\n`);
     }
 }
