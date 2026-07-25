@@ -43,6 +43,7 @@ function resolveType(arg: string | undefined): {
     requested: string;
     fromArg: string | null;
     fromYaml: string | null;
+    role: string | null;
 } {
     // #591 — bin/aiball-mcp cd's to the install root before exec, so
     // process.cwd() inside this subprocess is the AIBALL install dir, NOT
@@ -51,10 +52,15 @@ function resolveType(arg: string | undefined): {
     // src/client.ts). Without this, loadConfig walks up from the install
     // root and never sees the per-project .aiball.yaml.
     const cfg = loadConfig(process.env.AIBALL_CWD ?? process.cwd());
+    // #1435 slice 8 — the agent's role drives an orthogonal welcome addendum.
+    // AIBALL_ROLE (exported by claude-loop, consistent with src/mcp.ts) wins;
+    // fall back to the resolved config's consumer.role.
+    const role = process.env.AIBALL_ROLE ?? cfg.consumer.role ?? null;
     return {
         requested: arg ?? cfg.project_type ?? DEFAULT_PROJECT_TYPE,
         fromArg: arg ?? null,
         fromYaml: cfg.project_type,
+        role,
     };
 }
 
@@ -75,9 +81,9 @@ export function registerWelcomeTools(server: McpServer): void {
         },
         async ({ project_type }) => {
             const root = installRoot();
-            const { requested, fromArg, fromYaml } = resolveType(project_type);
+            const { requested, fromArg, fromYaml, role } = resolveType(project_type);
             try {
-                const kit = buildWelcomeKit(root, requested);
+                const kit = buildWelcomeKit(root, requested, role);
                 return asText({
                     ...kit,
                     // Diagnostics : where the values came from. Useful when

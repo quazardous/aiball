@@ -81,6 +81,16 @@ export interface WelcomeKit {
      *  text. Field is present even when the project uses the defaults
      *  — so the skill / agent never has to hardcode the shapes. */
     formatting: { id: string; match: string; canonical: string }[];
+    /** #1435 slice 8 — the caller's multi-agent role (lead / crew / null),
+     *  orthogonal to project_type. Echoed so the agent knows how it was
+     *  read. */
+    role: string | null;
+    /** #1435 slice 8 — role-specific operating addendum, read from
+     *  `welcome/roles/<role>.md`. Non-null only when the agent has a role
+     *  WITH an addendum file (today: `crew` — assignment-only worker). A
+     *  crew agent reads this ON TOP of `welcome_md`; lead/solo get null and
+     *  keep the standard guidance. Orthogonal to the project_type kit. */
+    role_addendum: string | null;
 }
 
 /** Error thrown when the requested `project_type` is not a valid type
@@ -202,10 +212,20 @@ function loadTemplateManifest(typeDir: string): WelcomeTemplateManifest[] {
 export function buildWelcomeKit(
     installRoot: string,
     requestedType: string | null | undefined,
+    role?: string | null,
 ): WelcomeKit {
     const { project_type, available_types } = resolveProjectType(installRoot, requestedType);
     const typeDir = join(welcomeRoot(installRoot), project_type);
     const welcome_md = readFileSync(join(typeDir, "WELCOME.md"), "utf8");
+    // #1435 slice 8 — role addendum, orthogonal to project_type. A role with a
+    // `welcome/roles/<role>.md` file (today: crew) gets extra operating
+    // guidance on top of welcome_md; lead/solo/unknown → null (standard kit).
+    const roleName = role ?? null;
+    let role_addendum: string | null = null;
+    if (roleName) {
+        const rolePath = join(welcomeRoot(installRoot), "roles", `${roleName}.md`);
+        if (existsSync(rolePath)) role_addendum = readFileSync(rolePath, "utf8");
+    }
     // #667 — resolve the effective formatting patterns from the same
     // 3-layer chain as /api/config (shipped defaults → global → project).
     // Surfaced here so agents reading the welcome kit also get the ID
@@ -221,6 +241,8 @@ export function buildWelcomeKit(
         welcome_md,
         templates: loadTemplateManifest(typeDir),
         formatting,
+        role: roleName,
+        role_addendum,
     };
 }
 

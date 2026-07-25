@@ -49,6 +49,11 @@ function scaffold(): string {
         "# Welcome (private)\n\nInternal repos.\n",
     );
 
+    // #1435 slice 8 — role addenda under welcome/roles/<role>.md. Only `crew`
+    // ships one; `lead` deliberately has none (keeps the standard kit).
+    mkdirSync(join(w, "roles"), { recursive: true });
+    writeFileSync(join(w, "roles", "crew.md"), "# Crew agent\n\nYou are assignment-only.\n");
+
     // draft — directory without WELCOME.md ⇒ ignored.
     mkdirSync(join(w, "draft"), { recursive: true });
 
@@ -220,4 +225,34 @@ test("getWelcomeTemplate: private type has no templates → any name errors", ()
     }
     assert.ok(caught instanceof UnknownTemplateError);
     assert.deepEqual((caught as UnknownTemplateError).availableTemplates, []);
+});
+
+// #1435 slice 8 — role-differentiated welcome (orthogonal to project_type).
+test("buildWelcomeKit: crew role → crew addendum on top of the kit", () => {
+    const root = scaffold();
+    const kit = buildWelcomeKit(root, "public", "crew");
+    assert.equal(kit.project_type, "public"); // kit still driven by project_type
+    assert.equal(kit.role, "crew");
+    assert.match(kit.role_addendum ?? "", /assignment-only/);
+});
+
+test("buildWelcomeKit: no role → no addendum (solo default)", () => {
+    const root = scaffold();
+    const kit = buildWelcomeKit(root, "public", null);
+    assert.equal(kit.role, null);
+    assert.equal(kit.role_addendum, null);
+});
+
+test("buildWelcomeKit: lead role (no roles/lead.md) → no addendum", () => {
+    const root = scaffold();
+    const kit = buildWelcomeKit(root, "public", "lead");
+    assert.equal(kit.role, "lead");
+    assert.equal(kit.role_addendum, null);
+});
+
+test("buildWelcomeKit: crew role in a private project still gets the addendum", () => {
+    const root = scaffold();
+    const kit = buildWelcomeKit(root, "private", "crew");
+    assert.equal(kit.project_type, "private");
+    assert.match(kit.role_addendum ?? "", /assignment-only/);
 });
