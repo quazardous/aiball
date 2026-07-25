@@ -37,6 +37,30 @@ export interface ResolvedRef {
     num: number;
 }
 
+/**
+ * Phase 2 — a normalized external issue, provider-agnostic. The coupling
+ * driver maps this onto an aiball ticket (title/body/state + labels→tags).
+ */
+export interface ExternalIssue {
+    num: number;
+    title: string;
+    body: string;
+    /** Coarse lifecycle state, normalized across providers. */
+    state: "open" | "closed";
+    /** Label names (github labels / gitlab labels) → aiball tags. */
+    labels: string[];
+    /** Canonical web URL of the issue. */
+    url: string;
+}
+
+/** Options for a live fetch. `fetchImpl` is injectable for tests. */
+export interface FetchIssueOpts {
+    /** Bearer token for the provider's API (host-level credential). */
+    token?: string | null;
+    /** Override the global `fetch` (tests inject a stub). */
+    fetchImpl?: typeof fetch;
+}
+
 /** Provider interface — each implementation owns its parse + URL build. */
 export interface UpstreamProvider {
     /** Stable identifier — used in `.aiball.yaml upstream[].kind`. */
@@ -48,6 +72,13 @@ export interface UpstreamProvider {
     parseRef(ref: string): UpstreamTarget | null;
     /** Build the URL for a (target, num) pair. */
     buildUrl(target: UpstreamTarget, num: number): string;
+    /**
+     * Phase 2 — fetch a single external issue. OPTIONAL: render-only
+     * providers (phase 1) omit it and stay valid; a provider without
+     * `fetchIssue` simply can't be imported from. Throws on HTTP / network
+     * error (caller surfaces the message).
+     */
+    fetchIssue?(target: UpstreamTarget, num: number, opts?: FetchIssueOpts): Promise<ExternalIssue>;
 }
 
 /** GitHub provider — phase 1's only implementation. Zero deps. */
@@ -63,10 +94,63 @@ export const githubProvider: UpstreamProvider = {
     buildUrl(target, num) {
         return `https://github.com/${target.owner}/${target.repo}/issues/${num}`;
     },
+    async fetchIssue(target, num, opts = {}): Promise<ExternalIssue> {
+        const doFetch = opts.fetchImpl ?? fetch;
+        const url = `https://api.github.com/repos/${target.owner}/${target.repo}/issues/${num}`;
+        const headers: Record<string, string> = {
+            "accept": "application/vnd.github+json",
+            "x-github-api-version": "2022-11-28",
+            // GitHub rejects requests without a User-Agent.
+            "user-agent": "aiball-upstream-coupling",
+        };
+        if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
+        const res = await doFetch(url, { headers });
+        if (!res.ok) {
+            const hint = res.status === 404
+                ? " (not found — private repo needs a token, or wrong owner/repo/num)"
+                : res.status === 401 || res.status === 403
+                    ? " (auth — check the github token in ~/.config/aiball/config.yaml)"
+                    : "";
+            throw new Error(`github: GET ${target.owner}/${target.repo}#${num} → HTTP ${res.status}${hint}`);
+        }
+        const j = await res.json() as {
+            number: number;
+            title: string;
+            body: string | null;
+            state: string;
+            html_url: string;
+            labels?: Array<string | { name?: string }>;
+            pull_request?: unknown;
+        };
+        // A PR is also an "issue" in GitHub's API; refuse to import one as a
+        // ticket (its lifecycle is different). Explicit over silent.
+        if (j.pull_request) {
+            throw new Error(`github: ${target.owner}/${target.repo}#${num} is a pull request, not an issue`);
+        }
+        const labels = (j.labels ?? [])
+            .map((l) => (typeof l === "string" ? l : l?.name))
+            .filter((n): n is string => !!n);
+        return {
+            num: j.number,
+            title: j.title,
+            body: j.body ?? "",
+            state: j.state === "closed" ? "closed" : "open",
+            labels,
+            url: j.html_url,
+        };
+    },
 };
 
 /** Built-in providers. Extend by appending here. */
 export const BUILT_IN_PROVIDERS: UpstreamProvider[] = [githubProvider];
+
+/** Look up a provider by its stable `id` (e.g. `"github"`). Null when unknown. */
+export function providerByKind(
+    kind: string,
+    providers: readonly UpstreamProvider[] = BUILT_IN_PROVIDERS,
+): UpstreamProvider | null {
+    return providers.find((p) => p.id === kind) ?? null;
+}
 
 /**
  * Resolve a textual ref like `gh#1160` or `gh:owner/repo#1160` against the

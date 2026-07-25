@@ -189,6 +189,21 @@ export const tickets = sqliteTable("tickets", {
     isClaim: integer("is_claim").notNull().default(0),
     claimant: text("claimant"),
     claimedAt: text("claimed_at"),
+    /**
+     * Upstream coupling (GitHub / GitLab), phase 2. A ticket is "coupled"
+     * to an external issue when these are set. ALL NULL = a pure aiball
+     * ticket the coupling driver never touches — this is what preserves
+     * aiball-only tickets by construction. Coupling is always an explicit,
+     * manual act (import / export); nothing here is populated automatically.
+     *   upstreamKind      provider id, e.g. "github" (UpstreamProvider.id)
+     *   upstreamRef       provider ref string, e.g. "github:owner/repo"
+     *   upstreamNum       external issue number
+     *   upstreamSyncedAt  ISO8601 of the last successful sync (NULL until first)
+     */
+    upstreamKind: text("upstream_kind"),
+    upstreamRef: text("upstream_ref"),
+    upstreamNum: integer("upstream_num"),
+    upstreamSyncedAt: text("upstream_synced_at"),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),
@@ -198,6 +213,7 @@ export const tickets = sqliteTable("tickets", {
     index("idx_tickets_priority").on(t.priority),
     index("idx_tickets_assignee").on(t.assignee),
     index("idx_tickets_claimant").on(t.claimant),
+    index("idx_tickets_upstream").on(t.upstreamKind, t.upstreamRef, t.upstreamNum),
 ]);
 
 export const messages = sqliteTable("_messages", {

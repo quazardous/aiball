@@ -571,6 +571,23 @@ export class AiballClient {
         });
     }
     /**
+     * Upstream coupling phase 2 — manual import. Fetch an external issue
+     * (e.g. `gh#123` or `gh:owner/repo#123`) and create a coupled aiball
+     * ticket from it. The daemon does the fetch (it holds the host-level
+     * token) and applies labels→tags + the per-ticket coupling columns.
+     */
+    importUpstream(ref: string, project?: string, by_agent?: string) {
+        return this.http<{
+            ticket: { id: number; title: string | null; tags: unknown[] };
+            external: { num: number; title: string; state: string; url: string; labels: string[] };
+            provider: string;
+        }>("POST", "/api/tickets/import", {
+            ref,
+            ...(project ? { project } : {}),
+            ...(by_agent ? { by_agent } : {}),
+        });
+    }
+    /**
      * Same endpoint with `detailed=1` — returns objects with counts
      * (ticket_count, open_count, pending_count, last_activity…) instead
      * of bare names. Used by poll() to surface per-project workload.

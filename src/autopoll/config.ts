@@ -59,6 +59,36 @@ export function assignWindowSec(): number {
     }
 }
 
+/**
+ * Upstream coupling (GitHub / GitLab), phase 2 — API credential for a
+ * provider. A token is a HOST-level secret, so it lives in the GLOBAL config
+ * (`~/.config/aiball/config.yaml`), never in a committable per-project
+ * `.aiball.yaml`. Shape:
+ *
+ *   upstream_auth:
+ *     github:
+ *       token: ghp_xxx
+ *
+ * Env fallback per provider (handy for CI / one-off runs): `github` reads
+ * `GITHUB_TOKEN` then `GH_TOKEN`. Returns null when nothing is configured —
+ * public repos still import unauthenticated (subject to GitHub rate limits).
+ */
+export function upstreamToken(kind: string): string | null {
+    try {
+        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as {
+            upstream_auth?: Record<string, { token?: unknown } | undefined>;
+        };
+        const t = raw?.upstream_auth?.[kind]?.token;
+        if (typeof t === "string" && t.trim()) return t.trim();
+    } catch {
+        // fall through to env
+    }
+    if (kind === "github") {
+        return process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || null;
+    }
+    return null;
+}
+
 export type AutopollTone = "hint" | "directive" | "imperative";
 const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
 

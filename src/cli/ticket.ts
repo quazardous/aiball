@@ -2,7 +2,7 @@
  * `aiball ticket` command group (carved out of cli.ts in #B.213
  * phase 3.C on 2026-05-19). Behavior-preserving move.
  *
- * Subcommands: new, comment, close, list, get
+ * Subcommands: new, comment, close, list, get, import
  *
  * Exposed entry point: `registerTicketCommands(program)`.
  */
@@ -134,6 +134,25 @@ export function registerTicketCommands(program: Command): void {
                 if (opts.project) q.project = opts.project;
                 out(await client.listTickets(q), globalOpts, fmtTicketList);
             }
+        });
+
+    ticket
+        .command("import <ref>")
+        .description("Import an external issue (e.g. gh#123 or gh:owner/repo#123) as a coupled ticket")
+        .option("--project <project>", "Project (default $AIBALL_PROJECT)")
+        .action(async (ref: string, opts, cmd) => {
+            const globalOpts = gOpts(cmd);
+            const client = buildClient(globalOpts);
+            const project = withProject(client, opts.project);
+            const res = await client.importUpstream(ref, project);
+            out(res, globalOpts, (v) => {
+                const r = v as {
+                    ticket: { id: number; title: string | null };
+                    external: { url: string; state: string };
+                    provider: string;
+                };
+                return `imported #${r.ticket.id} ← ${r.provider} ${r.external.url} [${r.external.state}]\n  ${r.ticket.title ?? ""}`;
+            });
         });
 
     ticket

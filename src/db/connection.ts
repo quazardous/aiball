@@ -188,6 +188,15 @@ export interface Message {
      *  unclaimed. See src/db/assignment-gate.ts (isHeldByOther). */
     claimant?: string | null;
     claimed_at?: string | null;
+    /**
+     * Upstream coupling (GitHub / GitLab), phase 2. Set only on tickets
+     * coupled to an external issue (manual import/export). ALL NULL = a
+     * pure aiball ticket. See tickets table in src/schema.ts.
+     */
+    upstream_kind?: string | null;
+    upstream_ref?: string | null;
+    upstream_num?: number | null;
+    upstream_synced_at?: string | null;
 }
 
 export type SubscriptionRole = "owner" | "follower";
@@ -520,6 +529,10 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         is_claim: !!t.isClaim,
         claimant: t.claimant ?? null,
         claimed_at: t.claimedAt ?? null,
+        upstream_kind: t.upstreamKind ?? null,
+        upstream_ref: t.upstreamRef ?? null,
+        upstream_num: t.upstreamNum ?? null,
+        upstream_synced_at: t.upstreamSyncedAt ?? null,
     };
 }
 

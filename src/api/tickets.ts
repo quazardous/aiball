@@ -67,7 +67,8 @@ import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, ty
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
-import { badRequest, consumerOf, notFound, withTags, withVotes } from "./_helpers.js";
+import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotes } from "./_helpers.js";
+import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import type { AuthenticatedRequest } from "../auth.js";
 import { moveTicketTo } from "../messages.js";
 import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
@@ -1001,6 +1002,30 @@ ticketsRouter.post("/tickets/:id/move", (req: Request, res: Response) => {
 // ForTicket) keeps only the latest per target. To remove, POST kind=ignored
 // — acts as a tombstone in the replay. No PATCH/DELETE endpoint; the event
 // log is the source of truth.
+
+/**
+ * Upstream coupling (GitHub / GitLab), phase 2 — Slice 0: manual import.
+ * Fetch an external issue and create a coupled aiball ticket from it. Manual
+ * only; nothing here runs automatically. Body: { project?, ref } where `ref`
+ * is a bare `gh#123` (needs a default binding) or explicit `gh:owner/repo#123`.
+ */
+ticketsRouter.post("/tickets/import", async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { project?: string; ref?: string; by_agent?: string };
+    const ref = typeof body.ref === "string" ? body.ref.trim() : "";
+    if (!ref) return badRequest(res, "ref required (e.g. gh#123 or gh:owner/repo#123)");
+    const project = typeof body.project === "string" && body.project ? body.project : undefined;
+    if (!project) return badRequest(res, "project required");
+    const by_agent = body.by_agent || consumerOf(req);
+    try {
+        const { ticket, external, provider } = await importUpstream({ project, ref, by_agent });
+        return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
+    } catch (err) {
+        if (err instanceof AlreadyCoupledError) {
+            return res.status(409).json({ error: err.message, existing_ticket_id: err.existingTicketId });
+        }
+        return badRequest(res, err instanceof Error ? err.message : String(err));
+    }
+});
 
 ticketsRouter.get("/tickets/:id/relations", (req, res) => {
     const id = Number(req.params.id);

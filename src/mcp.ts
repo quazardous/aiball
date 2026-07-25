@@ -20,6 +20,7 @@ import { client } from "./mcp/_helpers.js";
 import { registerTicketWriteTools } from "./mcp/ticket-write.js";
 import { registerTicketReadTools } from "./mcp/ticket-read.js";
 import { registerTicketRelationTools } from "./mcp/ticket-relations.js";
+import { registerTicketImportTool } from "./mcp/ticket-import.js";
 import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
 import { registerUploadTools } from "./mcp/upload.js";
@@ -42,6 +43,7 @@ const server = new McpServer({
 registerTicketWriteTools(server);
 registerTicketReadTools(server);
 registerTicketRelationTools(server);
+registerTicketImportTool(server);
 registerSubscriptionTools(server);
 registerInboxTools(server);
 registerUploadTools(server);
