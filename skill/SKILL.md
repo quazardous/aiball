@@ -97,11 +97,22 @@ Default = HELP THE REPORTER, not silence.
 
 ---
 
-## `look #N: TITLE. Triage the ticket.` — backlog wake
+## `look #N: TITLE. …` — backlog wake
 
-When the FIFO is empty and the work-order has actionable work, the wake reads :
+When the FIFO is empty, the wake names a ticket from the backlog pool. That
+pool is **wider than `actionable`** — it also surfaces threads you can't
+formally act on, so they don't vanish. **The wake's last sentence tells you
+which case you're in**; read it, it's not decoration :
 
-> `<culture phrase> look #N: <title>. Triage the ticket.`
+| The wake ends with… | What's true | What's wanted |
+|---|---|---|
+| `Triage the ticket.` | The ball is yours | One of the three gestures below |
+| `Your pending decision is what gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope — don't just ack |
+| `You spoke last: … chase them, or let it ride.` | You're waiting on them | Chase **or** deliberately let it ride |
+| `Blocked by an open dependency…` | A blocker gates it | Help on the **blocker**, not here |
+
+Only the first calls for triage. On the others, doing nothing can be the right
+answer — say so in a line rather than re-posting.
 
 **Triage = ONE of three gestures, in order of preference :**
 
