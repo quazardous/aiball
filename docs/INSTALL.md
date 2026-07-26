@@ -99,6 +99,33 @@ aiball --version
 systemctl --user status aiball
 ```
 
+#### Install a specific stable release
+
+`git clone` above tracks `main` (the latest development state). To install a
+tagged **stable release** instead, pin the checkout to the release tag before
+running `install.sh` — everything else is identical:
+
+```bash
+git clone https://github.com/quazardous/aiball.git
+cd aiball
+git checkout v0.37.0     # a tag from the releases page
+./install.sh
+```
+
+Or without git, from the release's source tarball:
+
+```bash
+curl -fsSL https://github.com/quazardous/aiball/archive/refs/tags/v0.37.0.tar.gz | tar xz
+cd aiball-0.37.0
+./install.sh
+```
+
+Releases (tags + notes) are on the [releases page](https://github.com/quazardous/aiball/releases);
+`aiball --version` then reports the installed tag. Releases ship **source only**
+(no pre-built binaries — the Rust PTY proxy is built at install time via `cargo`,
+best-effort). To move an existing install to a newer release, re-checkout the new
+tag (or re-extract) and re-run `./install.sh`.
+
 ### Path 3: Dev install (`--symlink`)
 
 ```bash
