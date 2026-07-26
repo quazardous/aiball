@@ -23,9 +23,10 @@
  *     bar-boot state until the watchers end (= picker dismissed)
  *   - this hook just emits the SessionStart event and exits
  */
-import { readFileSync, appendFileSync } from "node:fs";
+import { readFileSync, appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CL_ENV } from "./env-vars.js";
+import { SESSION_ID_FILE, isValidUuid } from "./session-id.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
 import { sendEventOnce } from "./ipc-events.js";
 import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
@@ -63,12 +64,30 @@ function log(msg: string): void {
 }
 
 // Claude Code passes JSON on stdin with a `source` field
-// (startup / resume / clear / compact).
+// (startup / resume / clear / compact) + the `session_id` claude is using.
 let source = "startup";
+let sessionId: string | null = null;
 try {
     const raw = readFileSync(0, "utf8");
-    if (raw) source = (JSON.parse(raw) as { source?: string }).source ?? source;
+    if (raw) {
+        const p = JSON.parse(raw) as { source?: string; session_id?: string };
+        source = p.source ?? source;
+        sessionId = typeof p.session_id === "string" ? p.session_id : null;
+    }
 } catch { /* no stdin, assume startup */ }
+
+// #1549 `auto` mode — persist the session id claude actually used to
+// `<project cwd>/.aiball-session_id` so the next `claude-loop start` resumes
+// THIS exact session (see resolveSession). Detection, not imposition: we let
+// claude pick its id, then record it. No-op for legacy/managed/fixed (they
+// already own the id up front). Best-effort — never blocks claude's boot.
+if (process.env.AIBALL_SESSION_MODE === "auto" && sessionId && isValidUuid(sessionId)) {
+    const projectCwd = process.env.AIBALL_PROJECT_CWD ?? process.cwd();
+    try {
+        writeFileSync(join(projectCwd, SESSION_ID_FILE), sessionId + "\n");
+        log(`auto: persisted session id ${sessionId} → ${SESSION_ID_FILE}`);
+    } catch (e) { log(`auto: persist session id failed ${(e as Error).message ?? e}`); }
+}
 
 if (source === "startup" || source === "resume" || source === "compact" || source === "clear") {
     try {

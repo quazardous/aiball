@@ -171,6 +171,22 @@ claude:
   # Default true (claude-loop resumes the most recent session by default).
   always_resume: true
 
+  # How this agent's claude session is chosen. Matters for multi-agent
+  # projects (a lead + crew workers) where several persistent agents must NOT
+  # all converge on "the most recent session". Applies to the LEAD; crew
+  # workers are always `managed` (each gets its own stable session).
+  #   auto    — default. First run: start a fresh session; aiball detects the
+  #             session id claude uses and records it in `.aiball-session_id`
+  #             (gitignore it), then resumes exactly that session next time.
+  #   legacy  — the historical behavior: `--resume` + always_resume above
+  #             (picks the most recent session for the directory). No id tracking.
+  #   managed — assign a deterministic session per agent (derived, restart-proof)
+  #             and resume exactly that one, no picker.
+  #   fixed   — use the explicit id in `session_id` below.
+  session_mode: auto
+  # Session id used only when session_mode is `fixed` (must be a valid UUID).
+  # session_id: "00000000-0000-4000-8000-000000000000"
+
 # --- workflow hints -----------------------------------------------------------
 # claude-loop wraps `feature`-intent ticket wakes with a branch hint
 # ("Feature: build it in <branch>, not on main."). Request/other intents

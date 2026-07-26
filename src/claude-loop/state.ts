@@ -132,6 +132,17 @@ export interface Plate {
      */
     started_at_sha?: string | null;
     /**
+     * #1549: the claude session this loop is bound to, when running in a
+     * managed/fixed `session_mode` (lead) or as a crew (forced managed).
+     * Recorded for visibility (`claude-loop list`/`inspect`) — NOT the source
+     * of truth: `managed` ids are derived from the loop name, so this survives
+     * the state-dir wipe on restart by re-derivation, not by persistence.
+     * `null`/absent = `auto` mode (claude picks the session as before).
+     */
+    session_id?: string | null;
+    /** #1549: effective session mode applied at start (auto|managed|fixed). */
+    session_mode?: string | null;
+    /**
      * #390: remote-daemon connection. Present when the loop was started
      * against a REMOTE aiball (machine A) over HTTP+token instead of the
      * local Unix socket — `claude-loop start --aiball-url …`. Persisted so
