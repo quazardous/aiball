@@ -258,6 +258,15 @@ export interface AiballConfig {
          *  `false` (préserve l'existant — claude démarre sur une session
          *  vide par défaut). */
         always_resume: boolean;
+        /** #1549 — comment claude-loop gère l'id de session claude pour CET
+         *  agent (lead ; un crew est forcé `managed` en amont). `auto` (défaut)
+         *  = statu quo (`--resume` nu + always_resume) ; `managed` = id dérivé
+         *  du nom du loop (`--session-id`/`--resume <uuid>`, déterministe,
+         *  résiste au restart) ; `fixed` = id fourni via `session_id`. */
+        session_mode: string;
+        /** #1549 — session id explicite pour `session_mode: fixed`. Ignoré
+         *  hors mode fixed. Doit être un UUID valide. */
+        session_id: string;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -415,6 +424,11 @@ const DEFAULTS: AiballConfig = {
         // (or an explicit --resume / --resume=<id>). Opt-out per-tree via
         // `.aiball.yaml claude.always_resume: false`.
         always_resume: true,
+        // #1549 — default `auto` preserves the always_resume behavior above;
+        // opt into deterministic per-agent sessions via `session_mode: managed`
+        // (or `fixed` + `session_id`). Crew agents are forced to `managed`.
+        session_mode: "auto",
+        session_id: "",
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -720,6 +734,13 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             const cb = (raw.claude ?? {}) as Record<string, unknown>;
             if (typeof cb.always_resume === "boolean") {
                 cfg.claude.always_resume = cb.always_resume;
+            }
+            // #1549 — per-agent session management (validated at use in cli.ts).
+            if (typeof cb.session_mode === "string" && cb.session_mode.trim()) {
+                cfg.claude.session_mode = cb.session_mode.trim().toLowerCase();
+            }
+            if (typeof cb.session_id === "string" && cb.session_id.trim()) {
+                cfg.claude.session_id = cb.session_id.trim();
             }
             // #565 david : per-project `project_type:` — picked up by the
             // MCP `welcome` tool. Free-string ; absent = null (welcome

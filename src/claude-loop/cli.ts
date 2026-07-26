@@ -33,6 +33,7 @@ import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
 import { applyBootstrapOptions } from "../cli/bootstrap-options.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import { cmdCrewCreate, cmdCrewList } from "./crew.js";
+import { resolveSession, normalizeSessionMode, type SessionResolvePlan } from "./session-id.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
@@ -310,23 +311,42 @@ function pruneDeadStateDirs(): void {
  * `true` on any IO error so a permissions glitch falls back to the
  * pre-#616 behaviour (inject --resume, claude figures it out).
  */
+/**
+ * Directory where claude stores this cwd's sessions:
+ * `~/.claude/projects/<encoded-cwd>`. #620 (aiball-win) : the encoder just
+ * collapses every non-alnum char to `-` (matches claude's own encoder) — on
+ * Unix the leading `/` maps to `-` by the same rule, so output is identical
+ * cross-platform. The old strip-leading-slash-then-prepend was Unix-only and
+ * broke on Windows drive letters (`C:\\Users\\…`).
+ */
+function claudeProjectDir(cwd: string): string {
+    const encoded = resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-");
+    return join(homedir(), ".claude", "projects", encoded);
+}
+
 function hasClaudeSessions(cwd: string): boolean {
     try {
-        const abs = resolve(cwd);
-        // #620 (aiball-win) : Windows fix. The old encoder stripped a
-        // leading `/` then prepended `-` — Unix-shaped only. On Windows
-        // the absolute path starts with a drive letter (`C:\\Users\\…`),
-        // so there's no leading `/` to strip + the prepend yielded
-        // `-C--Users-…` while claude's real dir is `C--Users-…`. Drop
-        // the special-case : just collapse every non-alnum char to `-`
-        // (matches claude's own encoder). On Unix the leading `/` maps
-        // to `-` by the same rule, so output stays identical.
-        const encoded = abs.replace(/[^a-zA-Z0-9]/g, "-");
-        const dir = join(homedir(), ".claude", "projects", encoded);
+        const dir = claudeProjectDir(cwd);
         if (!existsSync(dir)) return false;
         return readdirSync(dir).some((f) => f.endsWith(".jsonl"));
     } catch {
         return true;
+    }
+}
+
+/**
+ * #1549 — does a SPECIFIC session id already have a transcript for this cwd ?
+ * The session's `<uuid>.jsonl` is written by claude the moment the session
+ * exists, so this tells `resolveSession` whether to `--resume <id>` (exists)
+ * or create it fresh via `--session-id <id>`. Best-effort : false on any IO
+ * error, so a glitch degrades to "create" (claude then errors clearly if the
+ * id is actually taken, rather than us silently resuming the wrong thing).
+ */
+function sessionExists(cwd: string, id: string): boolean {
+    try {
+        return existsSync(join(claudeProjectDir(cwd), `${id}.jsonl`));
+    } catch {
+        return false;
     }
 }
 
@@ -517,6 +537,24 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // start from a symlinked alias of the same dir slips past the guard.
     const cwd = canonicalCwd(ctx.cwd);
 
+    // #1549 — per-agent session management. A crew agent is FORCED to `managed`
+    // (its whole point is a stable, non-shared session) ; a lead follows its
+    // configured `claude.session_mode` (default `auto` = legacy always_resume).
+    // Resolve now so the id is stamped on the plate AND injected as claude flags
+    // below. `auto` yields an empty plan → the always_resume block runs
+    // unchanged ; `managed` derives the id from the loop name (restart-proof).
+    const effectiveSessionMode =
+        ctx.role === "crew" ? "managed" : normalizeSessionMode(ctx.claude.session_mode);
+    const sessionPlan: SessionResolvePlan = resolveSession({
+        mode: effectiveSessionMode,
+        configuredId: ctx.claude.session_id,
+        loopName: name,
+        sessionExists: (id) => sessionExists(cwd, id),
+    });
+    if (sessionPlan.warning) {
+        process.stderr.write(`claude-loop: ${sessionPlan.warning}\n`);
+    }
+
     // #B.216 david (979632): auto-register the project with the aiball
     // daemon so `claude-loop start` in any dir surfaces a fresh entry
     // in ProjectsPanel without a separate `aiball project init`. Best
@@ -627,6 +665,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #B.225: stamp the install-root SHA so `list` / `check` can
         // flag the daemon when source moves past what its timer loaded.
         started_at_sha: installRootSha(),
+        // #1549: record the bound session (visibility only; managed ids are
+        // re-derived, not sourced, from this).
+        session_id: sessionPlan.sessionId,
+        session_mode: sessionPlan.mode,
         // #390: persist the remote connection so `restart` replays it.
         remote: opts.aiballUrl
             ? {
@@ -811,34 +853,60 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // dans claudeArgs n'a pas un double flag. Namespacé `claude:` (et non
     // `claude_loop:`) parce que ça concerne le binaire claude lui-même.
     let effectiveClaudeArgs = opts.claudeArgs;
-    // #616 — first-class `claude-loop --no-resume` flag (top-level, no `--`
-    // dash-dash needed). Inject `--no-resume` into claudeArgs so the
-    // always_resume detection below sees it as the sentinel and skips
-    // the auto-inject. Same end-effect as `claude-loop start -- --no-resume`,
-    // just a more discoverable per-invocation opt-out.
-    if (opts.noResume && !opts.claudeArgs.includes("--no-resume")) {
-        effectiveClaudeArgs = ["--no-resume", ...opts.claudeArgs];
-    }
-    // #639 david `uqdava` : `--resume` flag also forces `claude.always_resume`
-    // to true regardless of yaml config (mirror of how `--no-resume` forces it
-    // to false via the sentinel injection above).
-    const alwaysResume = opts.forceResume ? true : ctx.claude.always_resume;
-    if (alwaysResume) {
-        const hasResume = effectiveClaudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
-        if (!hasResume) {
-            // #616 follow-up (david arf8xs) : auto-skip --resume si AUCUNE
-            // session claude n'existe pour ce cwd. Sinon, `claude --resume`
-            // sur un projet vierge bloque sur le picker vide. La détection
-            // est best-effort (lecture du dossier ~/.claude/projects/<encoded-cwd>)
-            // — silencieusement skip à la moindre IO error : on retombe sur
-            // le comportement précédent (--resume inject, claude se débrouille).
-            if (!hasClaudeSessions(cwd)) {
-                process.stdout.write(
-                    `claude-loop: no prior claude session found for ${cwd} — skipping auto --resume (override with explicit --resume or --resume=<id>)\n`,
-                );
-            } else {
-                effectiveClaudeArgs = ["--resume", ...effectiveClaudeArgs];
+    if (sessionPlan.mode === "auto") {
+        // ---- legacy always_resume path (#538/#616/#639), unchanged ----------
+        // #616 — first-class `claude-loop --no-resume` flag (top-level, no `--`
+        // dash-dash needed). Inject `--no-resume` into claudeArgs so the
+        // always_resume detection below sees it as the sentinel and skips
+        // the auto-inject. Same end-effect as `claude-loop start -- --no-resume`,
+        // just a more discoverable per-invocation opt-out.
+        if (opts.noResume && !opts.claudeArgs.includes("--no-resume")) {
+            effectiveClaudeArgs = ["--no-resume", ...opts.claudeArgs];
+        }
+        // #639 david `uqdava` : `--resume` flag also forces `claude.always_resume`
+        // to true regardless of yaml config (mirror of how `--no-resume` forces it
+        // to false via the sentinel injection above).
+        const alwaysResume = opts.forceResume ? true : ctx.claude.always_resume;
+        if (alwaysResume) {
+            const hasResume = effectiveClaudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
+            if (!hasResume) {
+                // #616 follow-up (david arf8xs) : auto-skip --resume si AUCUNE
+                // session claude n'existe pour ce cwd. Sinon, `claude --resume`
+                // sur un projet vierge bloque sur le picker vide. La détection
+                // est best-effort (lecture du dossier ~/.claude/projects/<encoded-cwd>)
+                // — silencieusement skip à la moindre IO error : on retombe sur
+                // le comportement précédent (--resume inject, claude se débrouille).
+                if (!hasClaudeSessions(cwd)) {
+                    process.stdout.write(
+                        `claude-loop: no prior claude session found for ${cwd} — skipping auto --resume (override with explicit --resume or --resume=<id>)\n`,
+                    );
+                } else {
+                    effectiveClaudeArgs = ["--resume", ...effectiveClaudeArgs];
+                }
             }
+        }
+    } else {
+        // #1549 managed / fixed — WE own the session id: inject `--session-id`
+        // (create) or `--resume <id>` (reprise), bypassing the picker entirely.
+        // Defensive: if the user already passed a session flag on the cli, leave
+        // their choice alone rather than fighting it.
+        const userSetSession = opts.claudeArgs.some((a) =>
+            a === "--resume" || a.startsWith("--resume=") ||
+            a === "--session-id" || a.startsWith("--session-id="));
+        if (userSetSession) {
+            process.stdout.write(
+                `claude-loop: session_mode=${sessionPlan.mode} but claude args already carry a session flag — leaving them as-is\n`,
+            );
+        } else {
+            // `-n <agent>` labels the session (picker + terminal title) so a
+            // human can tell which agent owns it — unless the user set a name.
+            const nameFlag = opts.claudeArgs.some((a) => a === "-n" || a === "--name" || a.startsWith("--name="))
+                ? []
+                : ["-n", ctx.agent];
+            effectiveClaudeArgs = [...sessionPlan.args, ...nameFlag, ...effectiveClaudeArgs];
+            process.stdout.write(
+                `claude-loop: session_mode=${sessionPlan.mode} → ${sessionPlan.args.join(" ")}\n`,
+            );
         }
     }
     const passthrough = effectiveClaudeArgs.map(shQuote).join(" ");
@@ -1433,6 +1501,11 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 process.stdout.write(`    pings_path   : ${plate.pings_path}\n`);
                 process.stdout.write(`    cwd          : ${plate.cwd}\n`);
                 process.stdout.write(`    claude_args  : ${plate.claude_args.length === 0 ? "(none)" : plate.claude_args.join(" ")}\n`);
+                // #1549 — which claude session this loop is bound to.
+                const sMode = plate.session_mode ?? "auto";
+                process.stdout.write(
+                    `    session      : ${sMode}${plate.session_id ? ` (${plate.session_id})` : ""}\n`,
+                );
                 // #B.225 ghost detection: surface stamped SHA + diff vs
                 // current install-root HEAD so a stale daemon is
                 // visible without grepping plate.json by hand.

@@ -73,6 +73,10 @@ export interface ProjectContext {
     claude: {
         /** Auto-inject `--resume` into claudeArgs if absent. */
         always_resume: boolean;
+        /** #1549 — session management mode (auto|managed|fixed). */
+        session_mode: string;
+        /** #1549 — explicit session id for `fixed` mode. */
+        session_id: string;
     };
     /** #385: tmux bar colour profile (layered defaults → global → project). */
     colors: {
