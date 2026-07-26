@@ -106,7 +106,7 @@ which case you're in**; read it, it's not decoration :
 
 | The wake ends with… | What's true | What's wanted |
 |---|---|---|
-| `Triage the ticket.` | The ball is yours | One of the three gestures below |
+| `Triage the ticket.` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath |
 | `Your pending decision is what gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope — don't just ack |
 | `You spoke last: … chase them, or let it ride.` | You're waiting on them | Chase **or** deliberately let it ride |
 | `Blocked by an open dependency…` | A blocker gates it | Help on the **blocker**, not here |
