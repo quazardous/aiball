@@ -35,6 +35,7 @@ import { loadLaunchers, getLauncher } from "./launchers.js";
 import { searchMessages } from "./search.js";
 import { bearerAuth } from "./auth.js";
 import { badRequest, consumerOf } from "./api/_helpers.js";
+import { schedulerStatus } from "./cron/index.js";
 import { AIBALL_VERSION } from "./version.js";
 import { agentHelpersRouter } from "./api/agent-helpers.js";
 import { authRouter } from "./api/auth.js";
@@ -86,7 +87,15 @@ api.use(uploadsRouter);
  * cheap defense in depth).
  */
 api.get("/health", (_req, res) => {
-    res.json({ ok: true, ts: new Date().toISOString(), version: AIBALL_VERSION });
+    // #1566 — `cron` answers "why hasn't X run since 2am" without reading code:
+    // per task, when it last ran, how long it took, what it last failed with,
+    // and when it is next due. Empty outside the daemon (CLI / tests).
+    res.json({
+        ok: true,
+        ts: new Date().toISOString(),
+        version: AIBALL_VERSION,
+        cron: schedulerStatus(),
+    });
 });
 
 api.get("/strategy", (_req, res) => {

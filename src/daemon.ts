@@ -1,5 +1,4 @@
 import { createServer } from "node:http";
-import { captureTokenSnapshotIfDue } from "./db.js";
 import { join } from "node:path";
 import { unlinkSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -11,36 +10,11 @@ import { attachWs } from "./ws.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
 import { drainSpool, watchSpool } from "./spool.js";
-import { listExpiredPostpones, setTicketPostpone, getMessage, backfillParentTicketRelations } from "./db.js";
-import { broadcast as wsBroadcast } from "./ws.js";
-import { checkSandboxPings } from "./sandbox/watcher.js";
+import { backfillParentTicketRelations } from "./db.js";
+import { startScheduler, CRON_TASKS } from "./cron/index.js";
 import { registerAutomationRuntime } from "./automation/runtime.js";
 import { loadProxy, startProxyWsClient } from "./proxy.js";
 import { attachProxyWs } from "./proxy-ws.js";
-
-/**
- * Snooze reveal cron (per #B.329). Every 60s, find tickets whose
- * `postponed_until` has passed, clear the field, and broadcast a
- * `message_edited` so the UI bounces them back into the open inbox.
- * The ticket was never actually closed (snooze ≠ close), so no
- * synthetic `ticket_reopened` event is needed — clearing the field
- * is enough.
- */
-function revealExpiredPostpones(): void {
-    try {
-        const ids = listExpiredPostpones();
-        for (const id of ids) {
-            setTicketPostpone(id, null);
-            const updated = getMessage(id);
-            if (updated) wsBroadcast({ type: "message_edited", data: updated });
-        }
-        if (ids.length > 0) {
-            console.log(`[postpone] revealed ${ids.length} ticket${ids.length === 1 ? "" : "s"}`);
-        }
-    } catch (e) {
-        console.error("[postpone] reveal cron failed:", e);
-    }
-}
 
 /**
  * #407 — SIGUSR2 = reload config in place, no downtime (driven by `aiball
@@ -170,22 +144,10 @@ function main(): void {
         } catch (e) {
             console.error("parent→child_of backfill failed:", e);
         }
-        // Run the postpone reveal cron once at boot (in case the daemon
-        // was down past a deadline), then every 60s after. 60s is fine
-        // grain — users typically snooze for hours / days, not minutes.
-        revealExpiredPostpones();
-        setInterval(revealExpiredPostpones, 60_000).unref();
-        // #1200 — token-usage snapshots for the over-time chart : one at boot,
-        // then hourly. The capture self-throttles, so this is idempotent.
-        captureTokenSnapshotIfDue();
-        setInterval(captureTokenSnapshotIfDue, 60 * 60_000).unref();
-        // Sandbox watcher: re-arms dead loop sandboxes when their agent
-        // receives a new ping (#B.81 point 2). Set
-        // AIBALL_SANDBOX_WATCHER=0 to disable.
-        if (process.env.AIBALL_SANDBOX_WATCHER !== "0") {
-            checkSandboxPings();
-            setInterval(checkSandboxPings, 30_000).unref();
-        }
+        // #1566 — every recurring job is declared in `src/cron/index.ts`; the
+        // runner owns the catch, the overlap guard and the health record. Add a
+        // periodic job THERE, not here.
+        startScheduler(CRON_TASKS);
         // #505 — en mode proxy, on ouvre une WS persistante vers `papy`. Elle
         // sert à la fois de heartbeat (chaque frame bumpe `tokens.last_used_at`
         // → pastille up/down) ET de canal d'ordres pour les ops cross-host

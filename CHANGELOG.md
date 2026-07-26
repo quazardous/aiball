@@ -39,8 +39,17 @@ dates are YYYY-MM-DD.
   safe. Ships a manifest listing what's inside and what was dropped. Lands in
   `$TMPDIR` by default, or wherever `claude_loop.dump_dir` points.
 
+- The health endpoint now reports the daemon's recurring jobs: for each one,
+  when it last ran, how long it took, what it last failed with, and when it is
+  next due. Answers "why hasn't that happened since this morning" without
+  digging through logs.
+
 ### Changed
 
+- Recurring daemon jobs are declared in one table instead of being wired one by
+  one. A job that fails — including one that fails asynchronously — is recorded
+  and skipped rather than taking the daemon down, and a job still running when
+  its next turn comes around is skipped instead of piling up.
 - Editing a ticket or comment now rewrites its title and body in place, and the
   version as originally filed is kept aside the first time you edit it — first
   and last only, no intermediate revisions. Nothing displays that archive yet;
