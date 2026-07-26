@@ -1506,6 +1506,10 @@ export interface ContextPhraseResult {
  */
 export interface WakeEventHint {
     ticketId: number;
+    /** #1569 — id of the triggering message. Needed when the wake anchors on
+     *  the hint instead of the FIFO head: whatever we RENDER is what the inject
+     *  site must mark seen, otherwise we ack an event we never showed. */
+    commentId?: number;
     /** comment hashid of the triggering comment_added, when the event is a
      *  comment. Drives the comment-centric anchor. */
     commentHashid?: string;
@@ -1915,6 +1919,9 @@ export async function buildContextPhrase(
         // « (#N / #hashid) » nu ; on le laisse tomber → l'empty-phrase guard
         // skippe le wake proprement, et l'event ressurgit via le FIFO (où sa
         // branche decision-event rend « Your resolution was ACCEPTED »).
+        // #1569 — true when the wake anchors on the hint instead of the FIFO
+        // head. Drives what gets marked seen: we must ack what we RENDER.
+        let hintAnchored = false;
         const hintIsComment = eventHint?.commentKind
             ? (!DECISION_EVENT_VERBS[eventHint.commentKind] && !LIFECYCLE_VERBS[eventHint.commentKind]
                 && eventHint.commentKind !== "ticket_created")
@@ -1924,7 +1931,20 @@ export async function buildContextPhrase(
             && head?.kind !== "new ticket") {
             headCommentHashid = eventHint.commentHashid;
             if (eventHint.commentBody) headBody = eventHint.commentBody;
-            if (!head?.id) {
+            // #1569 (david `fdsw2h`) — the hint's hashid and body are grafted
+            // unconditionally, so the TICKET has to follow. It used to be adopted
+            // only `if (!head?.id)`: when the FIFO already held a head from
+            // ANOTHER ticket, its number was kept while the hint supplied the
+            // body — rendering `(#head / #hint-hashid)`, a pair that never
+            // existed. That's the "artificial glue": a bundle of two tickets the
+            // same-ticket bundler would never have built.
+            //
+            // Rule A (david's accept): an event wake anchors on its event, whole
+            // — ticket included. This just finishes what #999 already intended
+            // ("anchored on that event"). The FIFO head is left UNREAD and comes
+            // back on the next wake, so nothing is lost by preferring the hint.
+            if (!head?.id || head.id !== eventHint.ticketId) {
+                hintAnchored = true;
                 head = { id: eventHint.ticketId, title: undefined, kind: "comment" };
                 // The hint doesn't carry the parent ticket title — best-effort.
                 try {
@@ -2225,7 +2245,18 @@ export async function buildContextPhrase(
         // headMessageId carries the inject-time prune target. Only the
         // FIFO-driven branch has a real id; backlog and idle paths set
         // null so the inject site doesn't try to prune nothing.
-        const headMessageId = unreadHead?.id ?? null;
+        // #1569 — when the wake anchored on the hint, the FIFO head was NOT
+        // shown, so acking it would silently swallow an event. Point at the
+        // hint's own message instead (null when the hint carries no id:
+        // better to re-deliver than to ack blind).
+        const headMessageId = hintAnchored
+            ? (eventHint?.commentId ?? null)
+            : (unreadHead?.id ?? null);
+        // Same reasoning for the bundle extras and the diag: they describe the
+        // FIFO head's ticket, which is not what we rendered.
+        const effExtraSeenIds = hintAnchored ? [] : bundleExtraSeenIds;
+        const effWakeTicketId = hintAnchored ? (eventHint?.ticketId ?? null) : wakeTicketId;
+        const effBundleTicketCount = hintAnchored ? 1 : bundleTicketCount;
         // hasContent flags whether one of the actionable branches fired
         // (FIFO comment, lifecycle, new ticket, or backlog). When false
         // the phrase is just the idle culture+lead — drain-style wake
@@ -2235,7 +2266,7 @@ export async function buildContextPhrase(
         // can start the per-consumer cooldown clock. Only when the
         // backlog branch actually fired (not on FIFO / lifecycle).
         const backlogTicketId = (backlogMode && head?.id) ? head.id : null;
-        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: bundleExtraSeenIds, wakeTicketId, bundleTicketCount };
+        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: effExtraSeenIds, wakeTicketId: effWakeTicketId, bundleTicketCount: effBundleTicketCount };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
@@ -2245,9 +2276,9 @@ export async function buildContextPhrase(
             // A triggered gate counts as content even if the FIFO is empty.
             hasContent: hasContent || gateResults.length > 0,
             backlogTicketId,
-            extraSeenIds: bundleExtraSeenIds,
-            wakeTicketId,
-            bundleTicketCount,
+            extraSeenIds: effExtraSeenIds,
+            wakeTicketId: effWakeTicketId,
+            bundleTicketCount: effBundleTicketCount,
         };
     } catch {
         return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null, extraSeenIds: [] };

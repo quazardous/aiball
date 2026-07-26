@@ -629,6 +629,7 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
         }
         eventHint = {
             ticketId: hint.ticket_id,
+            commentId: hint.comment_id,
             commentHashid: hint.comment_hashid,
             commentBody: ctx.commentBody ?? hint.comment_body,
             commentKind: ctx.commentKind,

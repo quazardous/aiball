@@ -515,3 +515,64 @@ test("#1169 hint comment_added réel (empty FIFO) → toujours comment-centric",
     assert.match(res.phrase, /real comment body/);
     assert.match(res.phrase, /qctwhw/);
 });
+
+// --- #1569 — the hint and the FIFO head disagree --------------------------
+//
+// Reproduces the incident verbatim: a comment lands on #1563 while the FIFO
+// head is an unrelated event on #1565. The wake used to graft the hint's
+// hashid + body onto the FIFO head's NUMBER, rendering `(#1565 / #h3b6ay)` —
+// a pair that never existed. Rule A (david): the event wake anchors on its
+// event, ticket included.
+
+/** FIFO head = two events on #1565, i.e. a legitimate same-ticket bundle. */
+function clientWithForeignHead(): AiballClient {
+    return stubClient({
+        unread: async () => ({
+            messages: [
+                { id: 1013333, kind: "comment_added", ticket_id: 1565, hashid: "8fdg8t", body: "crée un ticket pour le delta de doc" },
+                { id: 1013334, kind: "comment_added", ticket_id: 1565, hashid: "szwv5n", body: "" },
+            ],
+        }),
+    });
+}
+
+test("#1569 hint on another ticket than the FIFO head → anchors on the HINT", async () => {
+    const res = await buildContextPhrase(clientWithForeignHead(), null, PINGS_YAML, {
+        ticketId: 1563,
+        commentId: 1013339,
+        commentHashid: "h3b6ay",
+        commentBody: "si on utilise gh la clé est pas obligatoire",
+    });
+    assert.match(res.phrase, /h3b6ay/, "the hint's comment is what we render");
+    assert.match(res.phrase, /#1563/, "…so its ticket must be the one shown");
+    assert.doesNotMatch(
+        res.phrase,
+        /\(#1565 ?\/ ?#h3b6ay\)/,
+        "the glued pair must never be rendered again",
+    );
+});
+
+test("#1569 the un-shown FIFO head is NOT marked seen", async () => {
+    const res = await buildContextPhrase(clientWithForeignHead(), null, PINGS_YAML, {
+        ticketId: 1563,
+        commentId: 1013339,
+        commentHashid: "h3b6ay",
+        commentBody: "si on utilise gh la clé est pas obligatoire",
+    });
+    assert.equal(res.headMessageId, 1013339, "we ack what we rendered, not the FIFO head");
+    assert.notEqual(res.headMessageId, 1013333, "acking #1565's event would swallow it unseen");
+    assert.deepEqual(res.extraSeenIds, [], "nor may its bundle siblings be acked");
+    assert.equal(res.wakeTicketId, 1563, "the diag must report the ticket actually delivered");
+});
+
+test("#1569 hint on the SAME ticket as the head keeps the bundle intact", async () => {
+    const res = await buildContextPhrase(clientWithForeignHead(), null, PINGS_YAML, {
+        ticketId: 1565,
+        commentId: 1013333,
+        commentHashid: "8fdg8t",
+        commentBody: "crée un ticket pour le delta de doc",
+    });
+    // No divergence → the pre-existing same-ticket bundling is untouched.
+    assert.equal(res.wakeTicketId, 1565);
+    assert.deepEqual(res.extraSeenIds, [1013334], "the sibling event is still folded in");
+});

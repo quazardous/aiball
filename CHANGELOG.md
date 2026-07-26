@@ -64,6 +64,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A comment can no longer be announced under another ticket's number. When a
+  comment arrived while the agent was busy and an unrelated ticket was next in
+  the queue, the wake showed that comment's text under the other ticket's
+  number — enough to make an agent reply on the wrong thread. The wake now
+  stays on the ticket the comment belongs to, and the queued event it stepped
+  over is left unread instead of being silently marked as seen.
 - A hung `gh` call can no longer block upstream work indefinitely: invocations
   are capped and the child is killed, surfacing a timeout instead of a promise
   that never settles.
