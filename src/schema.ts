@@ -106,8 +106,15 @@ export const tickets = sqliteTable("tickets", {
     decidedBy: text("decided_by"),
     matchedRuleId: integer("matched_rule_id"),
     humanNote: text("human_note"),
-    editedTitle: text("edited_title"),
-    editedBody: text("edited_body"),
+    /**
+     * #1565 — `title`/`body` above always hold the CURRENT text; these keep the
+     * pre-edit archive, written once at the FIRST edit and never touched again
+     * (first + last, no intermediate versions). NULL means "never edited" — not
+     * a systematic copy. Nothing reads them yet; they exist so a rewrite can't
+     * lose what the ticket originally said.
+     */
+    originalTitle: text("original_title"),
+    originalBody: text("original_body"),
     /**
      * Event scope (#B.245 tristate, replaces the legacy `broadcast`
      * boolean). One of `internal` / `default` / `broadcast` — see
@@ -232,7 +239,8 @@ export const messages = sqliteTable("_messages", {
     decidedBy: text("decided_by"),
     matchedRuleId: integer("matched_rule_id"),
     humanNote: text("human_note"),
-    editedBody: text("edited_body"),
+    /** #1565 — pre-edit archive of `body`. Same contract as `tickets.originalBody`. */
+    originalBody: text("original_body"),
     /**
      * Public-facing comment reference (#C<hashid>). 6-char base32 string,
      * randomly generated at insert time. Distinct from the internal numeric

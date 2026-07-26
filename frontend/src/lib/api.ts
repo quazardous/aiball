@@ -62,8 +62,6 @@ export interface Message {
     decided_by: string | null;
     matched_rule_id: number | null;
     human_note: string | null;
-    edited_title: string | null;
-    edited_body: string | null;
     intent: Intent | null;
     /** Per-ticket urgency hint (#B.222). Tickets only; defaults to
      *  "normal" at the SQL layer if absent. Comments and lifecycle

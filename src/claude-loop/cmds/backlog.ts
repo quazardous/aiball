@@ -25,7 +25,6 @@ interface BacklogOpts {
 interface TicketRow {
     id?: number;
     title?: string;
-    edited_title?: string;
     priority?: string;
     backlog_tier?: 0 | 1 | 2 | 3 | 4 | null;
     actionable?: boolean;
@@ -96,7 +95,7 @@ function fmtTicket(t: TicketRow): string {
         ? `⏳${fmtCooledUntil(t.backlog_cooled_until)}`
         : t.unread ? "*" : " ";
     const prio = t.priority && t.priority !== "normal" ? `(${t.priority}) ` : "";
-    const title = t.edited_title ?? t.title ?? "";
+    const title = t.title ?? "";
     const last = t.last_actor ? ` ← ${t.last_actor}` : "";
     return `${marker} #${String(t.id).padEnd(4)} ${prio}${title}${last}`;
 }

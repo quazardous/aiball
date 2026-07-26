@@ -167,7 +167,6 @@ export function getTicketBookends(opts: {
         id: schema.tickets.id,
         project: schema.tickets.project,
         title: schema.tickets.title,
-        editedTitle: schema.tickets.editedTitle,
         byAgent: schema.tickets.byAgent,
         createdAt: schema.tickets.createdAt,
         intent: schema.tickets.intent,
@@ -186,7 +185,7 @@ export function getTicketBookends(opts: {
     const toBookend = (r: typeof filtered[number]): TicketBookend => ({
         id: r.id,
         project: r.project,
-        title: r.editedTitle ?? r.title ?? "",
+        title: r.title ?? "",
         by_agent: r.byAgent,
         created_at: r.createdAt,
         intent: r.intent,
@@ -216,7 +215,6 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
     const rows = db.select({
         id: schema.tickets.id,
         title: schema.tickets.title,
-        editedTitle: schema.tickets.editedTitle,
         status: schema.tickets.status,
     })
         .from(schema.tickets)
@@ -230,7 +228,7 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
         const stage = stages.get(r.id) ?? "open";
         return {
             id: r.id,
-            title: r.editedTitle ?? r.title ?? "(no title)",
+            title: r.title ?? "(no title)",
             status: r.status as "pending" | "approved" | "rejected",
             closed: stage === "closed" || stage === "closed-resolved",
             stage,

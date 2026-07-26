@@ -170,7 +170,7 @@ export function registerInboxTools(server: McpServer): void {
             }
             // Project-scope my_pending_* if AIBALL_PROJECT is set and we're
             // not in all_projects mode. Default summary projection drops the
-            // body / edited_body to keep poll() responses small.
+            // body to keep poll() responses small.
             const projectionPending = (rows: unknown): unknown => {
                 const arr = Array.isArray(rows) ? rows : [];
                 const scoped = scopeProject
@@ -181,8 +181,8 @@ export function registerInboxTools(server: McpServer): void {
                 if (!summaryPending) return scoped;
                 return scoped.map((m) => {
                     const r = m as Record<string, unknown>;
-                    const { body: _b, edited_body: _eb, ...rest } = r;
-                    void _b; void _eb;
+                    const { body: _b, ...rest } = r;
+                    void _b;
                     return rest;
                 });
             };

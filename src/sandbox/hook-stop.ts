@@ -28,8 +28,6 @@ interface TicketResponse {
         body: string | null;
         closed: boolean;
         status: "pending" | "approved" | "rejected";
-        edited_title?: string | null;
-        edited_body?: string | null;
     };
 }
 
@@ -85,8 +83,8 @@ async function main(): Promise<void> {
         }
         actionable = {
             id: t.id,
-            title: resp.ticket.edited_title ?? resp.ticket.title ?? "",
-            body: resp.ticket.edited_body ?? resp.ticket.body ?? "",
+            title: resp.ticket.title ?? "",
+            body: resp.ticket.body ?? "",
         };
         break;
     }

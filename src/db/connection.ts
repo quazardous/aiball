@@ -99,8 +99,13 @@ export interface Message {
     decided_by: string | null;
     matched_rule_id: number | null;
     human_note: string | null;
-    edited_title: string | null;
-    edited_body: string | null;
+    /**
+     * #1565 — pre-edit archive. `title`/`body` above are always the current
+     * text; these carry what the ticket said before its first rewrite (NULL =
+     * never edited). Exposed read-only — no surface renders them yet.
+     */
+    original_title: string | null;
+    original_body: string | null;
     intent: Intent | null;
     /**
      * Urgency hint (#B.222) — tickets only, always set (DB default
@@ -511,8 +516,8 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         decided_by: t.decidedBy,
         matched_rule_id: t.matchedRuleId,
         human_note: t.humanNote,
-        edited_title: t.editedTitle,
-        edited_body: t.editedBody,
+        original_title: t.originalTitle,
+        original_body: t.originalBody,
         intent: (t.intent as Intent | null) ?? null,
         priority: (t.priority as Priority | undefined) ?? "normal",
         display_seq: t.displaySeq,
@@ -554,8 +559,8 @@ export function messageRowToMessage(m: schema.Message, project: string): Message
         decided_by: m.decidedBy,
         matched_rule_id: m.matchedRuleId,
         human_note: m.humanNote,
-        edited_title: null,
-        edited_body: m.editedBody,
+        original_title: null,
+        original_body: m.originalBody,
         intent: null,
         display_seq: m.displaySeq,
         scope: ((m.scope as "internal" | "default" | "broadcast" | undefined) ?? "default"),

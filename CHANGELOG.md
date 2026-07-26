@@ -39,8 +39,18 @@ dates are YYYY-MM-DD.
   safe. Ships a manifest listing what's inside and what was dropped. Lands in
   `$TMPDIR` by default, or wherever `claude_loop.dump_dir` points.
 
+### Changed
+
+- Editing a ticket or comment now rewrites its title and body in place, and the
+  version as originally filed is kept aside the first time you edit it — first
+  and last only, no intermediate revisions. Nothing displays that archive yet;
+  it exists so a rewrite can never lose what the ticket first said.
+
 ### Fixed
 
+- Search now matches the current text of an edited ticket or comment. It was
+  indexing the version as originally filed, so it missed everything an edit had
+  added and still matched text an edit had removed.
 - `claude-loop health` no longer reports a dead PTY proxy on a perfectly
   healthy loop. It only recognised the Python proxy, so every loop running the
   Rust one — the default — failed that check and the command exited non-zero.

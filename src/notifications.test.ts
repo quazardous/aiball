@@ -46,8 +46,8 @@ function seedComment(by: string, ticket_id: number, scope: "internal" | "default
     decided_by: "auto";
     matched_rule_id: null;
     human_note: null;
-    edited_title: null;
-    edited_body: null;
+    original_title: null;
+    original_body: null;
     intent: null;
     display_seq: number;
     scope: "internal" | "default" | "broadcast";
@@ -86,8 +86,8 @@ function seedComment(by: string, ticket_id: number, scope: "internal" | "default
         decided_by: "auto",
         matched_rule_id: null,
         human_note: null,
-        edited_title: null,
-        edited_body: null,
+        original_title: null,
+        original_body: null,
         intent: null,
         display_seq: r.displaySeq!,
         scope,

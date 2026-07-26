@@ -17,8 +17,6 @@ interface TicketResponse {
         id: number;
         title: string | null;
         body: string | null;
-        edited_title?: string | null;
-        edited_body?: string | null;
     };
 }
 
@@ -52,8 +50,8 @@ async function main(): Promise<void> {
     for (const t of plate.tickets) {
         try {
             const resp = (await client.getTicket(t.id)) as TicketResponse;
-            const title = resp.ticket.edited_title ?? resp.ticket.title ?? "";
-            const body = resp.ticket.edited_body ?? resp.ticket.body ?? "";
+            const title = resp.ticket.title ?? "";
+            const body = resp.ticket.body ?? "";
             if (!title && !body) continue;
             briefs.push(`## #${t.id} — ${title}\n\n${body}`);
         } catch {

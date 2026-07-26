@@ -280,6 +280,11 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
     ) {
         return badRequest(res, "provide title, body, summary, intent, priority, and/or scope");
     }
+    // #1565 — `title` is the ticket's real column (NOT NULL), no longer an
+    // overlay that null could clear. Reject rather than 500 at the DB layer.
+    if (title !== undefined && typeof title !== "string") {
+        return badRequest(res, "title must be a string");
+    }
     if (intent !== undefined && intent !== null) {
         if (typeof intent !== "string" || !INTENTS.includes(intent as Intent)) {
             return badRequest(res, `intent must be one of ${INTENTS.join(", ")}`);

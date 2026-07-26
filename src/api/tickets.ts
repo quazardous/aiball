@@ -370,13 +370,13 @@ ticketsRouter.get("/inbox", (req, res) => {
         return {
             id: t.id,
             project: t.project,
-            title: t.edited_title ?? t.title,
+            title: t.title,
             summary: t.summary ?? null,
             // #1161 S1 — list rows carry a SNIPPET, not the full body : bodies
             // were 75 % of the payload while the UI renders 140 chars max
             // (`snippetOf`). Full bodies stay on the per-ticket endpoints.
             snippet: (() => {
-                const raw = (t.edited_body ?? t.body ?? "").replace(/\s+/g, " ").trim();
+                const raw = (t.body ?? "").replace(/\s+/g, " ").trim();
                 return raw.length > 140 ? raw.slice(0, 140) + "…" : raw || null;
             })(),
             by_agent: t.by_agent,
@@ -560,7 +560,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         ? req.query.tags.split(",").map((s) => s.trim()).filter(Boolean)
         : null;
     // Verbosity (#B.83 then #B.87 palier 2): default is summary now —
-    // header-only payload, no body / edited_body. Pass `full=1` to
+    // header-only payload, no body. Pass `full=1` to
     // re-include bodies. `summary=1` kept as an accepted alias for
     // explicit-summary requests; `summary=0` forces full. The plain
     // default (neither flag) is summary.
@@ -756,7 +756,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         const base = {
             id: m.id,
             project: m.project,
-            title: m.edited_title ?? m.title,
+            title: m.title,
             // Agent-authored summary (#B.87). Falls back to title when
             // unset so consumers always have something printable.
             summary: m.summary ?? null,
@@ -798,7 +798,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             is_claim: flags.is_claim,
         };
         if (summary) return base;
-        return { ...base, body: m.edited_body ?? m.body };
+        return { ...base, body: m.body };
     });
 
     let result = tickets;
@@ -1336,7 +1336,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     const headerBase = {
         id: t.id,
         project: t.project,
-        title: t.edited_title ?? t.title,
+        title: t.title,
         summary: t.summary ?? null,
         by_agent: t.by_agent,
         created_at: t.created_at,
@@ -1521,7 +1521,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
                     if (m.kind !== "comment_added") return m;
                     const su = parseMeta(m.meta ?? null).summary_until ?? null;
                     if (m.id === cutId) {
-                        return { ...m, body: null, edited_body: null, summary_until: su } as typeof m;
+                        return { ...m, body: null, summary_until: su } as typeof m;
                     }
                     return { ...m, summary_until: su } as typeof m;
                 });
@@ -1540,7 +1540,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
                 if (!summaryUntil) {
                     return { ...m, summary_until: null } as typeof m;
                 }
-                return { ...m, body: null, edited_body: null, summary_until: summaryUntil } as typeof m;
+                return { ...m, body: null, summary_until: summaryUntil } as typeof m;
             });
         }
     }
@@ -1549,7 +1549,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     // original text. `meta.deleted` stays so the frontend renders the marker.
     outComments = outComments.map((m) =>
         m.kind === "comment_added" && parseMeta(m.meta ?? null).deleted
-            ? ({ ...m, body: null, edited_body: null } as typeof m)
+            ? ({ ...m, body: null } as typeof m)
             : m,
     );
     // #396 (david h4gp5z): paginate + order the full thread feed. Lets a reader
@@ -1586,11 +1586,11 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     // for same-host (UDS / local-trust) callers — then `uri` is a `file://`
     // path; remote/browser callers get the HTTP ref. Only scan the bodies
     // actually present in the response (brief mode collapses pre-pivot ones).
-    const ticketBody = t.edited_body ?? t.body;
+    const ticketBody = t.body;
     const localTrust =
         (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
     const attachments = resolveAttachments(
-        [ticketBody, ...outComments.map((c) => c.edited_body ?? c.body)],
+        [ticketBody, ...outComments.map((c) => c.body)],
         localTrust,
     );
     res.json({

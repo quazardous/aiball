@@ -73,7 +73,7 @@ export interface UploadStats {
 
 /**
  * Compute storage stats by joining `uploads` against the union of
- * `tickets.body` + `_messages.body` (with `edited_body` fallback).
+ * `tickets.body` + `_messages.body` (plus the `original_body` archive).
  * Orphan = no body anywhere contains the upload URL pattern.
  *
  * The LIKE pattern is `%/uploads/<sha>.%` which is anchored on the
@@ -111,7 +111,7 @@ function isUploadReferenced(sha: string): boolean {
         .where(
             or(
                 like(schema.tickets.body, pattern),
-                like(schema.tickets.editedBody, pattern),
+                like(schema.tickets.originalBody, pattern),
             ),
         )
         .limit(1)
@@ -122,7 +122,7 @@ function isUploadReferenced(sha: string): boolean {
         .where(
             or(
                 like(schema.messages.body, pattern),
-                like(schema.messages.editedBody, pattern),
+                like(schema.messages.originalBody, pattern),
             ),
         )
         .limit(1)

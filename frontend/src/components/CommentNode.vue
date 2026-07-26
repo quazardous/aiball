@@ -94,7 +94,7 @@ const scopeHint = computed(() => {
 });
 
 const questionStats = computed(() =>
-    computeQuestionStats(props.msg.edited_body ?? props.msg.body ?? ""),
+    computeQuestionStats(props.msg.body ?? ""),
 );
 
 // #B.129 phase 4: decision-on-comment audit chip. Read-only — the
@@ -258,7 +258,7 @@ function startEdit() {
     const saved = sessionStorage.getItem(draftKey.value);
     bodyDraft.value = saved !== null
         ? saved
-        : (props.msg.edited_body ?? props.msg.body ?? "");
+        : (props.msg.body ?? "");
     editing.value = true;
 }
 function cancelEdit() {
@@ -266,7 +266,7 @@ function cancelEdit() {
     editing.value = false;
 }
 async function saveEdit() {
-    const current = props.msg.edited_body ?? props.msg.body ?? "";
+    const current = props.msg.body ?? "";
     if (bodyDraft.value === current) {
         sessionStorage.removeItem(draftKey.value);
         editing.value = false;
@@ -503,8 +503,8 @@ async function doDelete() {
             </div>
         </div>
         <MarkdownView
-            v-if="!editing && (msg.body || msg.edited_body)"
-            :source="msg.edited_body ?? msg.body"
+            v-if="!editing && msg.body"
+            :source="msg.body"
             :message-id="msg.id"
             :questions-clickable="true"
             :self-ticket-id="msg.ticket_id ?? undefined"

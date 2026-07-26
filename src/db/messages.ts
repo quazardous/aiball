@@ -473,7 +473,13 @@ export function updateMessageStatus(
 export function editMessage(
     id: number,
     fields: {
-        title?: string | null;
+        /**
+         * #1565 — `title` is the real NOT NULL column now, so null is no longer
+         * accepted: it used to mean "drop the edited_title override and fall
+         * back to the original", and that override no longer exists. The HTTP
+         * layer rejects a null title up front.
+         */
+        title?: string;
         body?: string | null;
         summary?: string | null;
         intent?: Intent | null;
@@ -490,14 +496,27 @@ export function editMessage(
     const db = getDb();
     // #B.104: re-inject `<!-- q:xxx -->` markers on any new task-list
     // lines the editor added. Existing markers are preserved.
-    const editedBody =
+    const nextBody =
         fields.body !== undefined && fields.body !== null
             ? injectMarkers(fields.body)
             : fields.body;
-    // Try tickets first — only tickets have edited_title and intent.
+    // Try tickets first — only tickets have a title and intent.
+    //
+    // #1565: `title`/`body` ARE the current text — the edit overwrites them in
+    // place. `original_*` keeps the pre-edit archive, and `coalesce` is what
+    // makes it first-edit-only: in an UPDATE, SQLite evaluates the right-hand
+    // side against the PRE-update row, so a NULL archive takes the outgoing
+    // text and an already-filled one keeps what it had. First + last, never an
+    // intermediate version.
     const ticketPatch: Partial<schema.NewTicket> = {};
-    if (fields.title !== undefined) ticketPatch.editedTitle = fields.title;
-    if (fields.body !== undefined) ticketPatch.editedBody = editedBody;
+    if (fields.title !== undefined) {
+        ticketPatch.originalTitle = sql`coalesce(${schema.tickets.originalTitle}, ${schema.tickets.title})` as unknown as string;
+        ticketPatch.title = fields.title;
+    }
+    if (fields.body !== undefined) {
+        ticketPatch.originalBody = sql`coalesce(${schema.tickets.originalBody}, ${schema.tickets.body})` as unknown as string;
+        ticketPatch.body = nextBody;
+    }
     // Summary has no `edited_summary` overlay — it's agent-authored
     // metadata, mutated in place (#B.87). The owner-bypass check that
     // gates this edit is the same gate that protects title/body anyway.
@@ -526,7 +545,10 @@ export function editMessage(
     // ticket-scoped and silently ignored on comments/lifecycle.
     if (fields.body !== undefined) {
         db.update(schema.messages)
-            .set({ editedBody: editedBody })
+            .set({
+                body: nextBody,
+                originalBody: sql`coalesce(${schema.messages.originalBody}, ${schema.messages.body})` as unknown as string,
+            })
             .where(eq(schema.messages.id, id))
             .run();
     }

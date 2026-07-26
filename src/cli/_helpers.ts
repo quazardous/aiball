@@ -169,7 +169,6 @@ export function fmtTicketList(v: unknown): string {
             const t = r as {
                 id?: number;
                 title?: string;
-                edited_title?: string;
                 by_agent?: string;
                 status?: string;
                 closed?: boolean;
@@ -183,7 +182,7 @@ export function fmtTicketList(v: unknown): string {
                     : t.status === "rejected"
                         ? "x"
                         : "✓";
-            const title = (t.edited_title ?? t.title ?? "(no title)").slice(0, 80);
+            const title = (t.title ?? "(no title)").slice(0, 80);
             const tags = Array.isArray(t.tags) && t.tags.length ? ` [${t.tags.join(",")}]` : "";
             const sub = t.sub_ticket_count ? ` (+${t.sub_ticket_count} sub)` : "";
             return `${flag} #${String(t.id ?? "?").padStart(4)}  ${(t.by_agent ?? "?").padEnd(20)} ${title}${tags}${sub}`;
@@ -200,7 +199,7 @@ export function fmtTicketThread(v: unknown): string {
     const t = x.ticket as Record<string, unknown> | undefined;
     if (!t) return "(ticket not found)";
     const id = t.id;
-    const title = t.edited_title ?? t.title ?? "(no title)";
+    const title = t.title ?? "(no title)";
     const lines = [
         `#${id} — ${title}`,
         `by ${t.by_agent ?? "?"}  ${t.created_at ?? ""}  status=${t.status ?? "?"}${t.closed ? " (closed)" : ""}${t.resolved ? " (resolved)" : ""}`,

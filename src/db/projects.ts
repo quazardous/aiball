@@ -1098,7 +1098,6 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         decidedBy: schema.tickets.decidedBy,
         byAgent: schema.tickets.byAgent,
         title: schema.tickets.title,
-        editedTitle: schema.tickets.editedTitle,
         intent: schema.tickets.intent,
         createdAt: schema.tickets.createdAt,
         postponedUntil: schema.tickets.postponedUntil,
@@ -1166,7 +1165,7 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
     const dayMs = 86_400_000;
     const oldestOpenSummary = oldestOpen ? {
         id: oldestOpen.id,
-        title: oldestOpen.editedTitle ?? oldestOpen.title ?? "",
+        title: oldestOpen.title ?? "",
         by_agent: oldestOpen.byAgent,
         created_at: oldestOpen.createdAt,
         age_days: Math.round((nowMs - new Date(oldestOpen.createdAt).getTime()) / dayMs * 10) / 10,
@@ -1253,7 +1252,7 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
     // Same formula as frontend/src/lib/format.ts::estTokenEffort.
     const tokenMap = getTicketTokenUsage(ticketIds);
     const tokEffort = (u: TokenTally) => u.tokens_in + u.cache_w + u.tokens_out;
-    const tokTitleById = new Map(tickets.map((t) => [t.id, t.editedTitle ?? t.title ?? ""]));
+    const tokTitleById = new Map(tickets.map((t) => [t.id, t.title ?? ""]));
     const tokTotal: TokenTally = { tokens_in: 0, tokens_out: 0, cache_w: 0, cache_r: 0, updated_at: "" };
     const tokRows: { id: number; title: string; token_usage: TokenTally }[] = [];
     for (const [id, u] of tokenMap) {
