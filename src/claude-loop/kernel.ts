@@ -1020,6 +1020,15 @@ function refreshPaneMarkers(): void {
 }
 
 let lastSendAt = 0;
+// #1547 — wake diagnostics: tell a single (possibly grouped) wake apart from a
+// SUCCESSION (rafale). `wakeSeq` counts deliveries since the last quiet gap
+// (> WAKE_SERIES_RESET_MS = a real return-to-idle after work): a rafale makes it
+// climb (2, 3, 4…), an isolated wake stays at 1. `bundled` = events carried by
+// THIS one wake (#1163 digest grouping) → a grouped wake shows bundled>1, seq=1;
+// a succession shows bundled=1 with seq climbing. Log-only, no behavior change.
+let lastWakeDeliveryMs = 0;
+let wakeSeq = 0;
+const WAKE_SERIES_RESET_MS = 60_000;
 async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[]): Promise<void> {
     // Touch wake-in-flight BEFORE the actual send-keys so the
     // UserPromptSubmit hook can flag from_auto_wake=true (the marker
@@ -1050,6 +1059,16 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         // recordBacklogWake) — ces actions vivent en consumer, pas
         // dans le callback (purity contract #877).
         getWakeService().delivered(phrase, headMessageId ?? null, nowMs);
+        // #1547 — diagnostic line: kind + target + bundled (grouping) + series
+        // (rafale). Lets a reader of loop.log tell ONE grouped wake (bundled>1,
+        // series=#1) from a SUCCESSION (series climbing, small gaps).
+        const sinceMs = lastWakeDeliveryMs ? nowMs - lastWakeDeliveryMs : -1;
+        wakeSeq = (lastWakeDeliveryMs && sinceMs <= WAKE_SERIES_RESET_MS) ? wakeSeq + 1 : 1;
+        lastWakeDeliveryMs = nowMs;
+        const wkind = headMessageId != null ? "event" : (backlogTicketId != null ? "backlog-sink" : "other");
+        const wtarget = headMessageId != null ? `msg#${headMessageId}` : (backlogTicketId != null ? `#${backlogTicketId}` : "-");
+        const bundled = 1 + (extraSeenIds?.length ?? 0);
+        log(`wake:diag kind=${wkind} target=${wtarget} bundled=${bundled} series=#${wakeSeq} sinceLastWakeMs=${sinceMs < 0 ? "-" : sinceMs}`);
         // #879 — armBusyDefer redondant avec le cooldown state du
         // WakeMachine ; gardé pendant la transition pour que les
         // consumers externes (stop-hook etc.) qui lisent ipc.busyDeferUntilMs
