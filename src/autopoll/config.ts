@@ -227,11 +227,11 @@ export interface AiballConfig {
          *  rest (no network/host) — required for fully autonomous (AFK) runs, but
          *  it's what blocks network/host commands like `make t1000-status`. */
         permission_mode: string;
-        /** Which PTY-proxy implementation to launch. Empty / "python" =
-         *  the Python `pty-proxy.py` on Unix (default). "rust" = the Rust
-         *  `cl-pty-proxy` on Unix when it is built (else falls back to
-         *  Python, then to direct). Windows always uses the Rust proxy
-         *  regardless of this value. Opt-in for the Unix cutover. */
+        /** Which PTY-proxy implementation to launch. "rust" (the DEFAULT
+         *  since the Unix cutover) = the Rust `cl-pty-proxy` when it is built,
+         *  else it falls back to Python, then to direct. "python" forces the
+         *  Python `pty-proxy.py` on Unix. Windows always uses the Rust proxy
+         *  regardless of this value. */
         proxy_impl: string;
         /** #428: custom wake gates — raw config list, parsed at use via
          *  `parseGates` (each entry needs a built-in `type` or a custom `cmd`).

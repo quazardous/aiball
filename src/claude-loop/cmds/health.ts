@@ -157,14 +157,30 @@ export function checkLoopSock(latencyMs: number, sockMissing: boolean, live: Liv
     return { name: "loop.sock", status: "ok", detail: `responding (${latencyMs}ms round-trip)` };
 }
 
+/** Cmdline signature of EITHER PTY-proxy implementation. `cl-pty-proxy` is the
+ *  Rust one — the default since the cutover (`claude_loop.proxy_impl`), and the
+ *  only one on Windows ; `pty-proxy.py` is the Python fallback. Matching only
+ *  the Python one made every default-configured loop report a dead proxy. */
+export const PROXY_CMDLINE = /cl-pty-proxy(\.exe)?|pty-proxy\.py/;
+
+/** Which implementation a matched proxy cmdline belongs to. Pure — the health
+ *  line names what's actually running instead of hard-coding one impl. */
+export function proxyImplLabel(cmdline: string): string {
+    return /pty-proxy\.py/.test(cmdline) ? "pty-proxy.py, python" : "cl-pty-proxy, rust";
+}
+
 export function checkProxy(sd: string): HealthCheck {
-    const p = probePid(proxyAlivePath(sd), /pty-proxy\.py/);
+    const p = probePid(proxyAlivePath(sd), PROXY_CMDLINE);
     if (p.pid === null) return { name: "proxy", status: "warn", detail: "proxy-alive missing (running without PTY proxy?)" };
     if (!p.alive) return { name: "proxy", status: "fail", detail: `pid ${p.pid} not running` };
     if (p.cmdline === null) {
-        return { name: "proxy", status: "fail", detail: `pid ${p.pid} alive but cmdline doesn't match pty-proxy.py` };
+        return {
+            name: "proxy",
+            status: "fail",
+            detail: `pid ${p.pid} alive but cmdline matches no known PTY proxy (= pid recycled)`,
+        };
     }
-    return { name: "proxy", status: "ok", detail: `pid ${p.pid} running (pty-proxy.py)` };
+    return { name: "proxy", status: "ok", detail: `pid ${p.pid} running (${proxyImplLabel(p.cmdline)})` };
 }
 
 export function checkTmuxSession(name: string): HealthCheck {

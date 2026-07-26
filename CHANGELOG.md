@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- `claude-loop health` no longer reports a dead PTY proxy on a perfectly
+  healthy loop. It only recognised the Python proxy, so every loop running the
+  Rust one — the default — failed that check and the command exited non-zero.
+  It now accepts either and names the implementation actually running.
+
 ## [0.38.0] — 2026-07-26
 
 ### Added

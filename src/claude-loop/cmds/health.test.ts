@@ -18,6 +18,8 @@ const {
     checkLoopSource,
     checkLoopSock,
     checkProxy,
+    PROXY_CMDLINE,
+    proxyImplLabel,
     checkIpcFreshness,
     checkBootStatus,
     checkSse,
@@ -112,6 +114,35 @@ test("checkProxy: stale pid (process dead) → fail", () => {
     // Even if EPERM means "alive but not ours", checkProxy returns fail because cmdline won't match.
     const c = checkProxy(sd);
     assert.notEqual(c.status, "ok");
+});
+
+// #1559 — the matcher used to be `/pty-proxy\.py/` alone, so every loop on the
+// default `proxy_impl: "rust"` reported a dead proxy. Both cmdlines below are
+// verbatim from live processes.
+const RUST_CMDLINE = "/home/u/aiball/windows/cl-pty-proxy/target/release/cl-pty-proxy"
+    + " -- claude --settings /home/u/.claude-loop/cl-x/claude-settings.json -n agent";
+const PYTHON_CMDLINE = "/usr/bin/python3 /home/u/aiball/src/claude-loop/pty-proxy.py"
+    + " -- claude --settings /home/u/.claude-loop/cl-x/claude-settings.json -n agent";
+
+test("PROXY_CMDLINE: matches the Rust proxy (the #1559 regression)", () => {
+    assert.ok(PROXY_CMDLINE.test(RUST_CMDLINE));
+});
+
+test("PROXY_CMDLINE: still matches the Python proxy", () => {
+    assert.ok(PROXY_CMDLINE.test(PYTHON_CMDLINE));
+});
+
+test("PROXY_CMDLINE: matches the Windows binary", () => {
+    assert.ok(PROXY_CMDLINE.test("C:\\aiball\\windows\\cl-pty-proxy\\target\\release\\cl-pty-proxy.exe -- claude"));
+});
+
+test("PROXY_CMDLINE: doesn't match an unrelated process (pid recycled)", () => {
+    assert.equal(PROXY_CMDLINE.test("/usr/bin/node /home/u/other/server.js"), false);
+});
+
+test("proxyImplLabel: names the implementation actually running", () => {
+    assert.equal(proxyImplLabel(RUST_CMDLINE), "cl-pty-proxy, rust");
+    assert.equal(proxyImplLabel(PYTHON_CMDLINE), "pty-proxy.py, python");
 });
 
 test("checkIpcFreshness: live=null → fail", () => {
