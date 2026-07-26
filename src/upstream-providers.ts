@@ -100,8 +100,10 @@ export interface UpstreamProvider {
     fetchIssue?(target: UpstreamTarget, num: number, opts?: FetchIssueOpts): Promise<ExternalIssue>;
     /**
      * Phase 2 (export) — create a new external issue and return it. OPTIONAL,
-     * like `fetchIssue`. Requires a write-scoped token (it mutates the remote),
-     * so `opts.token` is mandatory in practice — the impl throws without one.
+     * like `fetchIssue`. It mutates the remote, so it needs write credentials —
+     * but WHOSE is the transport's business: over `http` a write-scoped
+     * `opts.token` is mandatory (the impl throws without one), while `gh`
+     * carries the CLI's own keyring credential and needs no token from us.
      * Throws on HTTP / network error.
      */
     createIssue?(target: UpstreamTarget, input: NewExternalIssue, opts?: FetchIssueOpts): Promise<ExternalIssue>;
