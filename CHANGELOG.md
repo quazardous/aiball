@@ -23,8 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-07-26
+
 ### Added
 
+- Each agent can now pin its own Claude session, so a project running several
+  persistent agents no longer has them all converge on "the most recent
+  session". `claude.session_mode` picks the strategy: `auto` (default — start
+  fresh once, record the id, resume exactly that one afterwards), `legacy` (the
+  previous most-recent-session behaviour), `managed` (a deterministic id per
+  agent, restart-proof), or `fixed` (an explicit `claude.session_id`).
 - Releases are now cut by CI: pushing a `vX.Y.Z` tag builds the `cl-pty-proxy`
   binaries for Linux and Windows and publishes the GitHub Release with them
   attached, so a release no longer depends on what one machine can compile.
@@ -44,6 +52,25 @@ dates are YYYY-MM-DD.
   `claude-loop crew create <name> [--start]` provisions a crew worktree,
   installs a crew-specific skill into it, and self-checks it; `crew list` shows
   the crews. Each agent's role is shown as a badge in the consumers panel.
+
+### Changed
+
+- A project's Settings tab no longer offers editable fields for options that
+  are only ever read from `.aiball.yaml`. Setting them in the UI looked like it
+  worked and did nothing; the API now refuses writes to file-only keys instead
+  of accepting them silently. Interim measure while the config service is
+  reworked.
+- The wake diagnostic log now names the ticket a wake was delivered for and
+  counts how many distinct tickets a single wake bundled, so a grouped wake can
+  be told apart from a succession of them in `claude-loop log`.
+
+### Removed
+
+- Dropped two config keys that were parsed and documented but never read:
+  `claude_loop.auto_resume` (a dead duplicate of `claude.always_resume`, which
+  is the one actually wired) and the whole `workflow:` namespace, whose
+  wake-time branch hint was never implemented. Existing files that still set
+  them are ignored, not rejected.
 
 ### Fixed
 
