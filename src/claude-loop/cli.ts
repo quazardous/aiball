@@ -33,7 +33,7 @@ import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
 import { applyBootstrapOptions } from "../cli/bootstrap-options.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import { cmdCrewCreate, cmdCrewList } from "./crew.js";
-import { resolveSession, normalizeSessionMode, type SessionResolvePlan } from "./session-id.js";
+import { resolveSession, normalizeSessionMode, SESSION_ID_FILE, type SessionResolvePlan } from "./session-id.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
@@ -351,6 +351,21 @@ function sessionExists(cwd: string, id: string): boolean {
 }
 
 /**
+ * #1549 `auto` mode — read the session id claude used, persisted by the
+ * SessionStart hook to `<cwd>/.aiball-session_id`. Lives in the cwd (not the
+ * loop state-dir, which is wiped on restart) so continuity survives a restart.
+ * Returns null when absent/unreadable → the caller starts a fresh session.
+ */
+function readPersistedSessionId(cwd: string): string | null {
+    try {
+        const v = readFileSync(join(cwd, SESSION_ID_FILE), "utf8").trim();
+        return v || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Find a LIVE loop (tmux session present) running in the same cwd
  * AND for the same agent. Used by `start` to refuse a duplicate
  * spawn — david: "pluieurs claude-loop nommé pareil devrait pas
@@ -539,10 +554,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
 
     // #1549 — per-agent session management. A crew agent is FORCED to `managed`
     // (its whole point is a stable, non-shared session) ; a lead follows its
-    // configured `claude.session_mode` (default `auto` = legacy always_resume).
-    // Resolve now so the id is stamped on the plate AND injected as claude flags
-    // below. `auto` yields an empty plan → the always_resume block runs
-    // unchanged ; `managed` derives the id from the loop name (restart-proof).
+    // configured `claude.session_mode` (default `auto` = detect+persist). Resolve
+    // now so the id is stamped on the plate AND injected as claude flags below.
+    // `legacy` yields an empty plan → the always_resume block runs unchanged ;
+    // `auto` resumes the persisted id (or starts fresh, the hook persists it) ;
+    // `managed` derives the id from the loop name (restart-proof).
     const effectiveSessionMode =
         ctx.role === "crew" ? "managed" : normalizeSessionMode(ctx.claude.session_mode);
     const sessionPlan: SessionResolvePlan = resolveSession({
@@ -550,6 +566,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         configuredId: ctx.claude.session_id,
         loopName: name,
         sessionExists: (id) => sessionExists(cwd, id),
+        readPersistedId: () => readPersistedSessionId(cwd),
     });
     if (sessionPlan.warning) {
         process.stderr.write(`claude-loop: ${sessionPlan.warning}\n`);
@@ -748,6 +765,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #1435 slice 1 — propagate the multi-agent role so the spawned MCP
         // subscribes with the right role (crew = follower, not owner).
         ...(ctx.role ? [`export AIBALL_ROLE=${shQuote(ctx.role)}`] : []),
+        // #1549 — propagate the EFFECTIVE session mode so the SessionStart hook
+        // knows whether to detect+persist the session id (`auto` only).
+        `export AIBALL_SESSION_MODE=${shQuote(effectiveSessionMode)}`,
         // #480 david : le timer + les hooks sont spawn sans `cwd:` explicite
         // côté Node, donc ils héritent du cwd du shell de lancement
         // (typiquement le dev checkout aiball/). `loadConfig()` no-arg
@@ -853,7 +873,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // dans claudeArgs n'a pas un double flag. Namespacé `claude:` (et non
     // `claude_loop:`) parce que ça concerne le binaire claude lui-même.
     let effectiveClaudeArgs = opts.claudeArgs;
-    if (sessionPlan.mode === "auto") {
+    if (sessionPlan.mode === "legacy") {
         // ---- legacy always_resume path (#538/#616/#639), unchanged ----------
         // #616 — first-class `claude-loop --no-resume` flag (top-level, no `--`
         // dash-dash needed). Inject `--no-resume` into claudeArgs so the
@@ -886,10 +906,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             }
         }
     } else {
-        // #1549 managed / fixed — WE own the session id: inject `--session-id`
-        // (create) or `--resume <id>` (reprise), bypassing the picker entirely.
-        // Defensive: if the user already passed a session flag on the cli, leave
-        // their choice alone rather than fighting it.
+        // #1549 auto / managed / fixed — aiball owns the session. `auto` resumes
+        // the persisted id (or starts fresh on first run, letting the SessionStart
+        // hook detect+persist it) ; `managed`/`fixed` inject `--session-id` (create)
+        // or `--resume <id>` (reprise), bypassing the picker. Defensive: if the
+        // user already passed a session flag on the cli, leave their choice alone.
         const userSetSession = opts.claudeArgs.some((a) =>
             a === "--resume" || a.startsWith("--resume=") ||
             a === "--session-id" || a.startsWith("--session-id="));
@@ -904,9 +925,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 ? []
                 : ["-n", ctx.agent];
             effectiveClaudeArgs = [...sessionPlan.args, ...nameFlag, ...effectiveClaudeArgs];
-            process.stdout.write(
-                `claude-loop: session_mode=${sessionPlan.mode} → ${sessionPlan.args.join(" ")}\n`,
-            );
+            const what = sessionPlan.args.length
+                ? sessionPlan.args.join(" ")
+                : "fresh session (will detect + persist the id)";
+            process.stdout.write(`claude-loop: session_mode=${sessionPlan.mode} → ${what}\n`);
         }
     }
     const passthrough = effectiveClaudeArgs.map(shQuote).join(" ");
