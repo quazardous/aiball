@@ -318,6 +318,24 @@
     flex-direction: column;
     gap: 0.4rem;
 }
+/* #1561 david `gstpra`: "le picto seul est pas assez visible". A glyph in the
+   header is easy to miss when scanning a thread, so the whole card carries a
+   very light wash — a comment that notified nobody now reads as different at a
+   glance.
+
+   Muted grey rather than an accent hue: the signal is "this one was quieter",
+   not "this one matters more". `color-mix` keeps it correct in any theme —
+   blending a few percent of the muted text colour into the normal card
+   background stays light on a light theme and dark on a dark one, instead of
+   hardcoding a pale hex that would glare in dark mode.
+
+   Only `internal` gets it. `broadcast` keeps the picto alone: over-notifying
+   announces itself through its consequences, whereas the whole risk with an
+   internal comment is mistaking it for an ordinary one. */
+.comment-card--internal {
+    background: color-mix(in srgb, var(--p-text-muted-color) 7%, var(--p-content-background));
+    border-color: color-mix(in srgb, var(--p-text-muted-color) 30%, var(--p-content-border-color));
+}
 .comment-card .meta {
     display: flex;
     gap: 0.5rem;

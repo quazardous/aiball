@@ -361,7 +361,11 @@ async function doDelete() {
 <template>
     <div
         class="comment-card"
-        :class="{ 'comment-card--pending': msg.status === 'pending' }"
+        :class="{
+            'comment-card--pending': msg.status === 'pending',
+            // #1561 — wash the whole card for a comment that pinged nobody.
+            'comment-card--internal': msg.scope === 'internal',
+        }"
         :id="`comment-${msg.id}`"
     >
         <header class="meta">

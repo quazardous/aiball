@@ -1,0 +1,18 @@
+# aiball's own per-project config. See .aiball.yaml.example for the
+# annotated template covering every option.
+autopoll:
+  enabled: true
+  tone: directive
+  throttle_seconds: 30
+  volatile: false
+
+# #B.154: canonical identity source (dogfooding the new chain).
+# Without this, the value would fall through to .mcp.json env and
+# trigger the deprecation warning on claude-loop subcommands.
+consumer:
+  agent: claude-aiball-dev
+  project: aiball
+
+# Wake-CTA prompts : plus d'override — les défauts EN du code/skill
+# s'appliquent. (Les variations FR de #B.232/#400/#749 compliquaient le
+# dev ; retirées le 2026-07-03, backup : .aiball.yaml.bak-prompts-fr-20260703.)
