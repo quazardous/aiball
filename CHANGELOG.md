@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The comment post button now carries a dropdown with **post without
+  notifying**: the comment lands on the thread but generates no ping, so no
+  agent is woken by it. Useful for leaving yourself a note mid-thread. It
+  suppresses the notification, not the reading — the agent still sees the
+  comment when it opens the ticket.
 - `claude-loop bug` packages everything needed to diagnose a broken loop —
   the logs, the `health` verdicts and the environment — into one `.tar.gz` to
   attach to a report. Built for someone outside your project: assembled from a

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from "vue"
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
+import SplitButton from "primevue/splitbutton";
 import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import { useToast } from "primevue/usetoast";
@@ -13,7 +14,7 @@ import { bus, useBus } from "../lib/bus";
 import { useComposerDraft } from "../lib/composer-draft";
 import { useMentionAutocomplete } from "../lib/mention-autocomplete";
 import { attachPasteImage } from "../lib/pasteImage";
-import { SCOPES, scopeIcon, scopeTitle } from "../lib/scope";
+import { SCOPES, scopeIcon, scopeTitle, type Scope } from "../lib/scope";
 import { uploadFile, renderUploadSnippet, UPLOAD_ACCEPT } from "../lib/upload";
 
 type Mode = "ticket" | "comment";
@@ -161,7 +162,27 @@ const placeholder = computed(
             ? "Ticket body (optional) — markdown supported"
             : "Write a comment — markdown supported (gfm)"),
 );
-async function submit() {
+/**
+ * #1561 — post a comment WITHOUT any fan-out, from the post button's dropdown.
+ *
+ * `scope: "internal"` makes `fanOutPings` return early: no ping to thread
+ * subscribers, project owners or followers, so no wake. The agent still SEES
+ * the comment when it reads the thread — this suppresses the notification, not
+ * the reading. The label says so; don't rename it to "hidden" until a read
+ * filter actually exists.
+ *
+ * Passed as a one-shot override rather than by setting `scope.value`: that ref
+ * is persisted per-ticket, so mutating it would silently make every later
+ * comment on the same thread internal too, with no control in comment mode to
+ * notice or undo it.
+ */
+const postMenu = computed(() => [{
+    label: "post without notifying",
+    icon: `pi ${scopeIcon("internal")}`,
+    command: () => { void submit("internal"); },
+}]);
+
+async function submit(scopeOverride?: Scope) {
     if (!canSubmit.value) return;
     sending.value = true;
     error.value = null;
@@ -221,8 +242,12 @@ async function submit() {
                 parent_id: props.parentId ?? props.ticketId,
                 body: body.value,
                 by_agent: author,
-                // #B.245 tristate. Forward only when non-default.
-                ...(scope.value !== "default" ? { scope: scope.value } : {}),
+                // #B.245 tristate. Forward only when non-default. `scopeOverride`
+                // (#1561) is the one-shot "post without notifying" path — it
+                // deliberately does not touch the persisted `scope`.
+                ...((scopeOverride ?? scope.value) !== "default"
+                    ? { scope: scopeOverride ?? scope.value }
+                    : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
             // #553 david : assignee picker dispo en comment mode aussi.
@@ -492,8 +517,8 @@ async function onAttachPicked(ev: Event) {
                 placeholder="Ticket title"
                 class="composer-title"
                 :disabled="sending"
-                @keydown.ctrl.enter.prevent="submit"
-                @keydown.meta.enter.prevent="submit"
+                @keydown.ctrl.enter.prevent="submit()"
+                @keydown.meta.enter.prevent="submit()"
             />
             <Select
                 v-model="intent"
@@ -535,8 +560,8 @@ async function onAttachPicked(ev: Event) {
                 autoResize
                 @input="onComposerInput"
                 @keydown="onComposerKeydown"
-                @keydown.ctrl.enter.prevent="submit"
-                @keydown.meta.enter.prevent="submit"
+                @keydown.ctrl.enter.prevent="submit()"
+                @keydown.meta.enter.prevent="submit()"
                 @blur="mentionQuery = null"
             />
             <div
@@ -632,13 +657,30 @@ async function onAttachPicked(ev: Event) {
             />
             <span class="spacer" />
             <slot name="extra-actions" :body="body" :sending="sending" />
-            <Button
+            <!-- #1561 — comment mode gets the no-fan-out entry in a dropdown,
+                 same shape as the accept/reject SplitButtons in the dock. In
+                 ticket mode the scope Select above already exposes the choice,
+                 so the plain button stays. -->
+            <SplitButton
+                v-if="!isTicket"
                 :label="submitLabel"
                 icon="pi pi-send"
                 size="small"
                 :loading="sending"
                 :disabled="!canSubmit"
-                @click="submit"
+                :model="postMenu"
+                menu-button-aria-label="Post without notifying the agent"
+                title="Post normally — subscribers and project owners get a ping. Use the dropdown to post without notifying anyone."
+                @click="submit()"
+            />
+            <Button
+                v-else
+                :label="submitLabel"
+                icon="pi pi-send"
+                size="small"
+                :loading="sending"
+                :disabled="!canSubmit"
+                @click="submit()"
             />
         </div>
         <div v-if="error" style="color: var(--p-red-500); font-size: 0.85rem">
