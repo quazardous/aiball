@@ -26,11 +26,13 @@ dates are YYYY-MM-DD.
 ### Added
 
 - `claude-loop bug` packages everything needed to diagnose a broken loop —
-  logs, pane captures, the `health` verdicts and the environment — into one
-  `.tar.gz` to attach to a report. It is built from a whitelist (credential
-  files in the state dir are never included) and secret-scrubbed, and ships a
-  manifest telling you to read it before sending. Lands in `$TMPDIR` by
-  default, or wherever `claude_loop.dump_dir` points.
+  the logs, the `health` verdicts and the environment — into one `.tar.gz` to
+  attach to a report. Built for someone outside your project: assembled from a
+  whitelist (credential files are never included), with token shapes and the
+  wake prompts redacted — those quote your ticket titles verbatim — and pane
+  captures left out unless you ask for them, since a screen dump can't be made
+  safe. Ships a manifest listing what's inside and what was dropped. Lands in
+  `$TMPDIR` by default, or wherever `claude_loop.dump_dir` points.
 
 ### Fixed
 

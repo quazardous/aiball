@@ -2291,8 +2291,9 @@ async function main(): Promise<void> {
         .description("#1560 — build one .tar.gz to attach to a bug report: the snapshot (logs + pane captures), the `health` verdicts, and the environment. Assembled from a whitelist (env / env.local / claude-settings.json are never included) and secret-scrubbed. Written to `claude_loop.dump_dir` or $TMPDIR. Read MANIFEST.txt inside before sending it.")
         .option("--note <text>", "what you were doing when it broke — goes in the bundle")
         .option("--out <path>", "Output archive path (default: <dump_dir or $TMPDIR>/claude-loop-bug-<loop>-<ISO>.tar.gz)")
-        .option("--raw", "skip the secret scrub — for debugging the bundler, never for a report you hand to someone else")
-        .action((name: string | undefined, opts: { note?: string; out?: string; raw?: boolean }) => cmdBug(name ?? resolveCurrentLoopName(), opts));
+        .option("--with-pane-captures", "include the pane captures — verbatim screen dumps, excluded by default because no scrub makes them safe to send")
+        .option("--raw", "skip the redaction pass — for debugging the bundler, never for a report you hand to someone else")
+        .action((name: string | undefined, opts: { note?: string; out?: string; raw?: boolean; withPaneCaptures?: boolean }) => cmdBug(name ?? resolveCurrentLoopName(), opts));
     program.command("backlog")
         .description("Show the backlog of this loop's project + agent (resolved from .aiball.yaml / plate). Default = ticket backlog tiered hot → actionable → waiting (#791). `--events` = FIFO unread events (what the wake / MCP `unread()` would drain). `--counter-only` = print just `o:N b:N e:N` (same numbers the bar shows). `--cooled` = inclut les tickets en cooldown backlog wake (marker ⏳).")
         .option("--events", "Show the FIFO unread events instead of the ticket backlog")

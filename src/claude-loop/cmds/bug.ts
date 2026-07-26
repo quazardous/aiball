@@ -39,6 +39,11 @@ export interface BugOpts {
     /** Skip the scrub. For debugging the bundler itself, never for a report
      *  you hand to someone else. */
     raw?: boolean;
+    /** Include the pane captures. Off by default: a pane capture is a verbatim
+     *  screen dump — source, file contents, whatever was on screen — and no
+     *  scrub can make that safe to send to a stranger. Opt in when the bug is
+     *  actually about pane detection, and read them first. */
+    withPaneCaptures?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +79,56 @@ export function scrubSecrets(text: string): string {
         );
 }
 
+/**
+ * Redact the prompt payload out of `loop.log`'s wake lines (#1560, third-party
+ * hardening).
+ *
+ * The log is NDJSON, and almost all of it is state-machine telemetry with no
+ * project content. Two message shapes carry prose:
+ *
+ *     wake (turn:settled) → '<the whole wake prompt>'
+ *     wakeMachine: wake:delivered phrase="<truncated prompt>" headMessageId=N
+ *
+ * and a wake prompt quotes **ticket titles and comment fragments verbatim**.
+ * (The second one is easy to miss — grepping for the first shape alone leaves
+ * titles in the bundle, which is exactly what happened here until a real
+ * bundle was grepped for a known title. Verify against an archive, not against
+ * a reading of the logger.)
+ * On a third party's machine that is their private board, so it must not
+ * travel. The diagnostic value of the line is that a wake fired and when —
+ * never the text — so we keep the line and replace the payload with its
+ * length. `wake:diag` lines are untouched: their `ticket=#N` is a bare number,
+ * and the whole point of a wake-storm report is comparing those numbers.
+ *
+ * Parses line by line rather than regexing the raw text, so quoting and
+ * embedded newlines are handled by the JSON parser. Unparseable lines pass
+ * through untouched.
+ */
+export function redactLogProse(ndjson: string): string {
+    return ndjson
+        .split("\n")
+        .map((line) => {
+            if (!line.trim()) return line;
+            let row: unknown;
+            try { row = JSON.parse(line); } catch { return line; }
+            if (typeof row !== "object" || row === null) return line;
+            const rec = row as Record<string, unknown>;
+            if (typeof rec.msg !== "string") return line;
+            const redacted = rec.msg
+                .replace(
+                    /(→ ')([\s\S]*)('\s*)$/,
+                    (_m, head: string, payload: string) => `${head}[redacted ${payload.length} chars]'`,
+                )
+                .replace(
+                    /(\bphrase=")([\s\S]*)("(?=\s|$))/,
+                    (_m, head: string, payload: string) => `${head}[redacted ${payload.length} chars]"`,
+                );
+            if (redacted === rec.msg) return line;
+            return JSON.stringify({ ...rec, msg: redacted });
+        })
+        .join("\n");
+}
+
 /** Text files we scrub in place. Anything else in the snapshot (pane captures
  *  are text too, but may be large) gets the same treatment — the scrub is
  *  cheap and a leak in a pane capture counts just as much. */
@@ -90,7 +145,11 @@ function scrubTree(dir: string): { scrubbed: number; skipped: number } {
         }
         try {
             const before = readFileSync(p, "utf8");
-            const after = scrubSecrets(before);
+            // Log files get the prose redaction too — that's where the wake
+            // prompts, and therefore the ticket titles, live.
+            const after = p.endsWith(".log")
+                ? scrubSecrets(redactLogProse(before))
+                : scrubSecrets(before);
             if (after !== before) writeFileSync(p, after);
             scrubbed += 1;
         } catch {
@@ -156,21 +215,41 @@ export function formatManifest(v: {
     scrubbed: number;
     skipped: number;
     raw: boolean;
+    paneCapturesDropped: boolean;
 }): string {
     const head = [
-        "This archive is a claude-loop diagnostic bundle.",
+        "This archive is a claude-loop diagnostic bundle, built to be sent to",
+        "someone who does not work on your project.",
         "",
         "READ IT BEFORE YOU SEND IT. It is assembled from a whitelist — the",
         "state dir's env / env.local / claude-settings.json are never included —",
         v.raw
             ? "but --raw was used, so NOTHING was redacted."
-            : `and ${v.scrubbed} file(s) went through a best-effort secret scrub.`,
-        "",
-        "The scrub catches known token shapes and `key: value` secrets. It does",
-        "NOT recognise confidential prose: loop.log contains ticket titles and",
-        "bodies, which on a private project is content you may not want to share.",
+            : `and ${v.scrubbed} file(s) went through the redaction pass.`,
         "",
     ];
+    if (!v.raw) {
+        head.push(
+            "What the redaction does:",
+            "  - known token shapes and `key: value` secrets are replaced;",
+            "  - wake lines in the logs keep their timing and kind, but their",
+            "    prompt payload is dropped — that payload quotes ticket titles",
+            "    and comment fragments verbatim.",
+            "",
+            "What it does NOT do: recognise confidential prose in general. Skim",
+            "the logs before sending if your project is sensitive.",
+            "",
+        );
+    }
+    if (v.paneCapturesDropped) {
+        head.push(
+            "Pane captures were EXCLUDED. They are verbatim screen dumps — source,",
+            "file contents, anything that was on screen — and no scrub makes that",
+            "safe to hand to a stranger. If the bug is about pane detection, re-run",
+            "with --with-pane-captures and read them yourself first.",
+            "",
+        );
+    }
     if (v.skipped > 0) {
         head.push(
             `${v.skipped} file(s) could not be read as text and were left as-is —`,
@@ -234,7 +313,19 @@ export async function cmdBug(name: string, opts: BugOpts): Promise<void> {
 
     const staging = mkdtempSync(join(tmpdir(), "cl-bug-"));
     try {
-        cpSync(snapDir, join(staging, "snapshot"), { recursive: true });
+        // Pane captures are excluded unless asked for — see BugOpts.
+        let paneCapturesDropped = false;
+        cpSync(snapDir, join(staging, "snapshot"), {
+            recursive: true,
+            filter: (src) => {
+                if (opts.withPaneCaptures) return true;
+                if (/[/\\]pane-captures([/\\]|$)/.test(src)) {
+                    paneCapturesDropped = true;
+                    return false;
+                }
+                return true;
+            },
+        });
 
         // 2. The ten verdicts, at the moment the bug is reported.
         const report = await runHealthChecks(name);
@@ -264,6 +355,7 @@ export async function cmdBug(name: string, opts: BugOpts): Promise<void> {
             scrubbed,
             skipped,
             raw: !!opts.raw,
+            paneCapturesDropped,
         }));
 
         // 6. One archive.
@@ -286,7 +378,8 @@ export async function cmdBug(name: string, opts: BugOpts): Promise<void> {
             + `  ${files.length + 1} files, ${report.summary.fail} health check(s) failing\n`
             + (opts.raw
                 ? "  ⚠ --raw: nothing was redacted\n"
-                : `  ${scrubbed} file(s) scrubbed${skipped ? `, ${skipped} unreadable as text` : ""}\n`)
+                : `  ${scrubbed} file(s) redacted${skipped ? `, ${skipped} unreadable as text` : ""}\n`)
+            + (paneCapturesDropped ? "  pane captures excluded (--with-pane-captures to include)\n" : "")
             + "  Read MANIFEST.txt inside before attaching it to a ticket.\n",
         );
     } finally {

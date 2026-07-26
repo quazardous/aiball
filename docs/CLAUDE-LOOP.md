@@ -674,14 +674,24 @@ claude-loop bug --note "what you were doing when it broke"
 ```
 
 The archive lands in `claude_loop.dump_dir`, or `$TMPDIR` if that's unset
-(`--out <path>` for a one-off). It is assembled from a whitelist — the state
-dir's `env`, `env.local` and `claude-settings.json` are never included — and
-run through a best-effort secret scrub.
+(`--out <path>` for a one-off). It is built for someone who does not work on
+your project, so it is assembled from a whitelist and redacted:
 
-**Read `MANIFEST.txt` inside before sending it.** The scrub recognises token
-shapes and `key: value` secrets, not confidential prose: `loop.log` carries
-ticket titles and bodies, which on a private project is content you may not
-want to hand to a stranger.
+- the state dir's `env`, `env.local` and `claude-settings.json` are never
+  included — a file added there later is excluded by default rather than
+  leaking by default;
+- known token shapes and `key: value` secrets are replaced;
+- wake log lines keep their timing and kind, but their prompt payload is
+  dropped — that payload quotes **your ticket titles and comment fragments**
+  verbatim;
+- **pane captures are excluded.** They are verbatim screen dumps — source,
+  file contents, whatever was on screen — and no scrub makes that safe to
+  send. Use `--with-pane-captures` when the bug really is about pane
+  detection, and read them yourself first.
+
+**Read `MANIFEST.txt` inside before sending it.** It lists what the archive
+contains and what was left out. The redaction handles the shapes above; it
+does not recognise confidential prose in general.
 
 ---
 

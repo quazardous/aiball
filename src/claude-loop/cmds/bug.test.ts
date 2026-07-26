@@ -10,7 +10,63 @@ import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { scrubSecrets, resolveOutPath, stampFor, formatManifest } from "./bug.js";
+import { scrubSecrets, resolveOutPath, stampFor, formatManifest, redactLogProse } from "./bug.js";
+
+// --- log prose: the wake payload quotes the board verbatim -----------------
+
+// Verbatim from a live loop.log — a wake line carries the whole prompt, and
+// the prompt carries ticket titles. On a third party's machine that is their
+// private board, so this is the line that must not travel.
+const WAKE_LINE = JSON.stringify({
+    ts: "2026-07-26T09:39:41.000Z",
+    level: "info",
+    msg: "wake (turn:settled) → 'Anybody out there? look #1554: Suivi : vraie rafale de wakes. Triage the ticket.'",
+    tag: "claude-loop:cl-x",
+});
+
+test("redactLogProse: the wake payload — i.e. the ticket title — is gone", () => {
+    const out = redactLogProse(WAKE_LINE);
+    assert.ok(!out.includes("rafale de wakes"), out);
+    assert.ok(!out.includes("Anybody out there"), out);
+});
+
+test("redactLogProse: the line survives, with its timing and kind intact", () => {
+    const row = JSON.parse(redactLogProse(WAKE_LINE));
+    assert.equal(row.ts, "2026-07-26T09:39:41.000Z");
+    assert.equal(row.level, "info");
+    assert.equal(row.tag, "claude-loop:cl-x");
+    assert.match(row.msg, /^wake \(turn:settled\) → '\[redacted \d+ chars\]'$/);
+});
+
+test("redactLogProse: wake:diag lines are untouched — ticket=#N is the diagnosis", () => {
+    const diag = JSON.stringify({
+        ts: "t", level: "info", tag: "x",
+        msg: "wake:diag kind=backlog-sink ticket=#1554 bundled=1 distinctTickets=0 series=#5 sinceLastWakeMs=17337",
+    });
+    assert.equal(redactLogProse(diag), diag);
+});
+
+test("redactLogProse: ordinary telemetry is untouched", () => {
+    const line = JSON.stringify({ ts: "t", level: "info", tag: "x", msg: "wakeMachine: wake:cleared reason=skipped" });
+    assert.equal(redactLogProse(line), line);
+});
+
+test("redactLogProse: unparseable lines pass through rather than being dropped", () => {
+    const text = "not json at all\n" + WAKE_LINE;
+    const out = redactLogProse(text);
+    assert.match(out, /^not json at all\n/);
+    assert.ok(!out.includes("rafale de wakes"), out);
+});
+
+test("redactLogProse: handles a payload with embedded newlines", () => {
+    const multi = JSON.stringify({
+        ts: "t", level: "info", tag: "x",
+        msg: "wake (turn:settled) → '#1017: some title — 2 updates:\nok doc (#jgfve8) by david'",
+    });
+    const out = redactLogProse(multi);
+    assert.ok(!out.includes("some title"), out);
+    assert.ok(!out.includes("jgfve8"), out);
+});
 
 // --- what MUST be redacted -------------------------------------------------
 
@@ -100,16 +156,29 @@ test("stampFor: no colons or dots — safe as a filename on every platform", () 
 // --- manifest --------------------------------------------------------------
 
 test("formatManifest: --raw says loudly that nothing was redacted", () => {
-    const m = formatManifest({ files: ["health.txt"], scrubbed: 0, skipped: 0, raw: true });
+    const m = formatManifest({ files: ["health.txt"], scrubbed: 0, skipped: 0, raw: true, paneCapturesDropped: false });
     assert.match(m, /NOTHING was redacted/);
 });
 
 test("formatManifest: flags files it couldn't read as text", () => {
-    const m = formatManifest({ files: ["a"], scrubbed: 3, skipped: 2, raw: false });
+    const m = formatManifest({ files: ["a"], scrubbed: 3, skipped: 2, raw: false, paneCapturesDropped: false });
     assert.match(m, /2 file\(s\) could not be read as text/);
 });
 
 test("formatManifest: always warns that prose isn't recognised", () => {
-    const m = formatManifest({ files: ["a"], scrubbed: 1, skipped: 0, raw: false });
-    assert.match(m, /loop\.log contains ticket titles/);
+    const m = formatManifest({ files: ["a"], scrubbed: 1, skipped: 0, raw: false, paneCapturesDropped: false });
+    assert.match(m, /prompt payload is dropped/);
+});
+
+// The shape a first pass missed: the wake prompt also lands, truncated, in a
+// `phrase="…"` field. Grepping a real bundle for a known title is what caught
+// it — hence a case pinned here.
+test("redactLogProse: wake:delivered phrase=\"…\" is redacted too", () => {
+    const line = JSON.stringify({
+        ts: "t", level: "info", tag: "x",
+        msg: 'wakeMachine: wake:delivered phrase="new ticket #1562: on va tester upstream sur nous meme" headMessageId=1562',
+    });
+    const out = redactLogProse(line);
+    assert.ok(!out.includes("tester upstream"), out);
+    assert.match(JSON.parse(out).msg, /phrase="\[redacted \d+ chars\]" headMessageId=1562/);
 });
