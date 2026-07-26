@@ -94,7 +94,11 @@ If you add a new table with FK references to either, follow the same split patte
 3. Verify: row counts, `PRAGMA foreign_key_check`, sample queries.
 4. Only then restart the daemon to apply on the live DB.
 
-The daemon's tsx-watch loop **does not** re-run migrations — `migrate()` only fires the first time `getDb()` is called per process. To trigger a migration you need a full process restart (`systemctl --user restart aiball` in the dev setup).
+`migrate()` fires once per process, on the first `getDb()` call. In the dev setup that is **more often than it sounds**: the daemon runs under `tsx watch`, and saving any imported `.ts` restarts the whole process — not just the changed module. So a save applies any pending migration to the **live** DB, with no explicit command. Verified on migration 0056: saving `src/schema.ts` applied it; no `aiball restart` was involved.
+
+Treat that as a discipline rather than a convenience: **a migration file plus its `_journal.json` entry sitting on disk is already armed**, and the next save ships it. Don't leave one half-finished while you keep editing — test it on a copy first (above), and add the journal entry only when you mean it to run.
+
+`aiball restart` remains the way to apply a migration without touching source, and the only way when the daemon is not running under `tsx watch`.
 
 ## Conventions checklist
 

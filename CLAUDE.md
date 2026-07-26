@@ -21,11 +21,14 @@ restart, what the daemon expects.
 - **Frontend edits need a rebuild**: `cd frontend && npm run build` —
   `tsx`/`vue-tsc` only typecheck, they don't emit `dist/` (which the daemon
   serves). Hard-reload the browser after.
-- **DB migrations only run at daemon boot.** A `tsx`-watch reload does NOT
-  re-run them — applying a migration needs a **hard restart**: `aiball restart`
-  (wraps `systemctl --user restart aiball`). Add the migration + journal entry
-  **before** committing code that reads the new column (else the live daemon
-  crashes). See [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+- **DB migrations run at daemon boot — and a `tsx`-watch reload IS a boot.**
+  Saving any imported `.ts` restarts the whole process, so `migrate()` fires
+  again and any pending migration lands on the **live** DB with no explicit
+  command. A migration file + its journal entry sitting on disk is already
+  armed. Write them **before** the code that reads the new column (that
+  ordering is what keeps the live daemon from crashing), and don't leave a
+  half-finished one on disk while you keep editing. `aiball restart` applies
+  one without touching source. See [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
 - **Daemon lifecycle (#407), mutualised with `claude-loop`:**
   - `aiball restart` (or `kill -HUP $(cat $AIBALL_HOME/daemon.pid)`) → **hard
     restart** — re-runs migrations, reloads all code + env, rebinds the socket.
