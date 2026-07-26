@@ -79,27 +79,3 @@ jobs:
       # typecheck + build breakage that today only surfaces when run by hand.
       - run: npm run build
         working-directory: frontend
-
-  contrib-build:
-    runs-on: ubuntu-latest
-    # The tutorial demo (contrib/mini-admin) imports the UI kit by path from
-    # frontend/. Building it here is what keeps docs/UI-KIT.md honest: a kit
-    # change that breaks the tutorial fails CI instead of rotting in silence.
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: contrib/mini-admin/package-lock.json
-      # The demo typechecks the kit files by path from frontend/src; their
-      # `import ... from "vue"` resolves (TS-side) against frontend/node_modules,
-      # not the demo's own — so the frontend deps must be installed too. (vite
-      # build alone wouldn't need them; vue-tsc does.) This is also what keeps
-      # the "kit change breaks the tutorial → CI red" guarantee honest.
-      - run: npm ci
-        working-directory: frontend
-      - run: npm ci
-        working-directory: contrib/mini-admin
-      - run: npm run build
-        working-directory: contrib/mini-admin

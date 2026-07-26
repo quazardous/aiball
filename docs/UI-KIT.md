@@ -1,229 +1,113 @@
-# UI kit — build a mini admin, step by step
+# Frontend structure
 
-This is a walkthrough for anyone about to build an admin screen with aiball's
-Vue components (`frontend/src/components/ui/`). It is deliberately **honest**:
-every step was actually built, and the places where the kit fought back are
-written down rather than smoothed over. The finished code lives in
-[`../contrib/mini-admin/`](../contrib/mini-admin), one commit per step, so you
-can read the diffs instead of trusting this page.
+How the aiball frontend (`frontend/`) is organized — the map a contributor
+needs before touching a screen: build & entry, routing, component layout, the
+data layer, styling, and the conventions that bite if you don't know them.
 
-Read it before your first panel. The kit is genuinely good at what it was
-built for — killing duplicated markup between panels — and genuinely absent
-everywhere else. Knowing which is which saves a day.
+It's a **Vue 3** app (`<script setup lang="ts">` single-file components) on
+**PrimeVue** (Aura theme). No Vue Router, no Pinia — routing and cross-component
+state are hand-rolled and small on purpose. All paths below are under `frontend/`.
 
-- [What the kit is](#what-the-kit-is)
-- [Step 1 — hello world](#step-1--hello-world)
-- [Step 2 — list and detail](#step-2--list-and-detail)
-- [Step 3 — rights](#step-3--rights)
-- [Step 4 — menu and breadcrumb](#step-4--menu-and-breadcrumb)
-- [Step 5 — children](#step-5--children)
-- [What to expect](#what-to-expect)
+> **Rebuild after every UI edit.** The daemon serves the *built* bundle from
+> `frontend/dist/` (gitignored), so source edits don't reach the browser until
+> `cd frontend && npm run build` regenerates it. `vue-tsc --noEmit` only
+> typechecks — it does **not** emit `dist/`. Hard-reload the browser after.
 
-## What the kit is
+## Build & entry
 
-Ten components, in two families.
+| Concern | File | Role |
+|---|---|---|
+| Build tool | `vite.config.ts` | Vite + `@vitejs/plugin-vue`. `base: "./"` (relative asset URLs so one build runs under any mount path). Injects `__AIBALL_VERSION__` from the repo-root `package.json`. Dev proxy: `/api`→daemon, `/ws`→websocket. Alias `@shared`→repo-root `src/`. |
+| Build script | `package.json` | `build` = `vue-tsc --noEmit && vite build`, output `dist/`. `dev` = vite dev server. |
+| HTML entry | `index.html` | Loads `/src/main.ts`; carries a trailing-slash probe/redirect for sub-path mounts. |
+| JS entry | `src/main.ts` | Creates the app, registers PrimeVue (Aura preset, `darkModeSelector: ".aiball-dark"`), `ToastService`, `ConfirmationService`; imports `style.css` + `styles/theme-dark.css`; mounts `#app`. |
+| Root | `src/App.vue` | The app shell + orchestrator: auth gate, filter/pagination state, top-level screen switching, websocket/bus wiring. There is no separate layout component — most top-level state lives here. |
+| Served by | repo-root `src/app.ts` (`express.static(dist)` + SPA fallback), from `src/daemon.ts` | The daemon serves `frontend/dist`; `dist/` is gitignored → rebuild required. |
 
-| Family | Components | What they give you |
-| --- | --- | --- |
-| Page scaffolding | `AdminDetailLayout`, `AdminDashboardLayout`, `DetailHeader`, `PanelHeader`, `SectionHeader` | the standard header / breadcrumb / card shapes |
-| Content | `DataList`, `AsyncState`, `FieldRow`, `FormField`, `StatusPill` | tables, the loading/error/empty triad, label+value and label+input rows |
+## Routing / screens
 
-What the kit is **not**: it has no inputs, no buttons, no app shell, no
-navigation, no router, no identity or permission concept. Those come from
-PrimeVue or from you.
+No router library. `src/lib/router.ts` is a custom **hash router** (`RouteState`,
+`buildUrl`/`parseUrl`, `useRouting(refs)` binding reactive refs to
+`location.hash`) so the served path stays the base regardless of mount point;
+`src/lib/base.ts` handles base-path detection + `pushRoute`/`resetToRoot`.
+Screen selection is `v-if`/`v-else-if` in `App.vue` driven by refs
+(`panel` / `openTicketId` / `projectPage` / `*EditId`). An auth mode
+(`loading | setup | login | ready`) gates the shell.
 
-## Step 1 — hello world
+| Route (hash) | Screen | Component |
+|---|---|---|
+| `/setup` | First-run install token | `SetupScreen.vue` |
+| `/login` | Login | `LoginScreen.vue` |
+| `/` | Inbox list | `InboxToolbar` + `InboxList` + `PaginationBar` + `BulkBar` |
+| `/b/<id>` (alias `/t/<id>`) | Ticket thread | `ThreadView.vue` |
+| `/new` | Compose ticket | `NewTicketPage.vue` |
+| `/general` | General settings | `GeneralSettingsPanel.vue` |
+| `/automation`, `/automation/rules/<id>` | Automation rules | `AutomationPanel.vue` → `AutomationRuleDetailPage.vue` |
+| `/tags` | Tag catalog | `TagsPanel.vue` |
+| `/projects` | Projects admin | `ProjectsPanel.vue` |
+| `/consumers`, `/consumers/<id>` | Consumers | `ConsumersPanel.vue` → `ConsumerEditPage.vue` |
+| `/nodes`, `/nodes/<id>` | Proxy nodes | `NodesPanel.vue` → `NodeDetailPage.vue` |
+| `/launchers` | Launchers | `LaunchersPanel.vue` |
+| `/usage` | Token usage | `UsagePanel.vue` |
+| `/overview` (+ legacy `/stats`,`/settings`,`/detail`, need `?p=`) | Per-project pages | `ProjectOverviewPage.vue` (tabs) + `ProjectStatsPage` / `ProjectSettingsPage` / `ProjectDetailPage` |
 
-Get a page on screen with one kit component. Read the commit: `mini-admin
-step 1`.
+Query params: `?p=` (project scope), `?status=`, `?open=`.
 
-You need a Vue app, and three things that are not obvious:
+## Components (`src/components/`)
 
-**The kit is not a package.** It is not published and has no entry point — you
-reach it by path. The demo aliases it once instead of spreading
-`../../../frontend/src/components/ui/…` everywhere, and the alias has to be
-declared **twice**, in `vite.config.ts` and in `tsconfig.json`:
+Mostly flat, with one nested feature dir (`automation/`) and the UI kit (`ui/`).
+By role:
 
-```ts
-// vite.config.ts
-const kit = fileURLToPath(new URL("../../frontend/src/components/ui", import.meta.url));
-export default defineConfig({
-    plugins: [vue()],
-    resolve: { alias: { "@kit": kit } },
-    // the import escapes the vite root, so allow the repo root explicitly
-    server: { fs: { allow: [fileURLToPath(new URL("../..", import.meta.url))] } },
-});
-```
+- **Shell / chrome** — `HeaderBar.vue` (connection pip, global badges, dark/snooze toggles), `Sidebar.vue` (project list + settings nav).
+- **Inbox** — `InboxList.vue`, `InboxToolbar.vue`, `InboxSearchResults.vue`, `ListRow.vue`, `PaginationBar.vue`, `BulkBar.vue`, `MobileProjectPicker.vue`.
+- **Thread** (children of `ThreadView.vue`) — `ThreadHeader`, `ThreadMetaHeader`, `ThreadToolbar`, `ThreadCommentsList`, `ThreadEditPanel`, `ThreadManagePanel`, `ThreadActionsDock`, `ThreadRelations`, `CommentNode`, `CommentVotes`, `RelationChip`, `RelationKindMenu`, `MessageComposer` (shared with compose).
+- **Compose** — `NewTicketPage.vue`, `MessageComposer.vue`, `IdentityPicker.vue`.
+- **Admin panels** — `GeneralSettingsPanel`, `AutomationPanel` / `AutomationRulesSection`, `TagsPanel` / `TagPicker` / `TagBadge`, `ConsumersPanel` / `ConsumerEditPage` / `ConsumerEditForm` / `ConsumerOverview`, `NodesPanel` / `NodeDetailPage`, `UsagePanel` / `TokenUsageChart`, `LaunchersPanel`, `ManagedConfig`, `ProjectsPanel` + the four `Project*Page.vue`.
+- **Automation rule builder** (`components/automation/`) — `RuleEditor`, `ActionBlock`, `ConditionNode`, `ConditionLeafBlock`, `ContainerBlock`.
+- **Shared display** — `MarkdownView.vue` (marked + DOMPurify + highlight.js), `PriorityIcon.vue`, `TerminalView.vue` (xterm).
 
-**The global stylesheet is a hard dependency.** Kit components ship no scoped
-styles of their own — their `.aiball-*` classes live in
-`frontend/src/style.css`. Import it or you get bare HTML:
+### The UI kit — `src/components/ui/`
 
-```ts
-import "@frontend/style.css";
-```
+Domain-agnostic layout/display primitives (a 3-level admin layout system). Use
+these when building a new admin screen instead of re-bespoking headers/tables/
+states — they're what keep the admin panels visually consistent.
 
-**PrimeVue is a hidden dependency, and it will not tell you.** The kit's CSS
-reads `--p-content-background`, `--p-text-color`, `--p-content-border-color`
-and friends. Nothing in this repo defines them: PrimeVue's Aura preset injects
-them at runtime. Without it, everything compiles, the classes are in the
-bundle, and the page renders shapeless. There is no error.
+| Component | Purpose |
+|---|---|
+| `PanelHeader.vue` | Admin panel header: title + `#actions` slot + explainer. |
+| `AsyncState.vue` | Loading / Error / Empty triad wrapper around async data. |
+| `DataList.vue` | Admin table shell (declarative columns or slot mode). |
+| `SectionHeader.vue` | In-page `<h3>` + hint pair. |
+| `AdminDashboardLayout.vue` | Full-width multi-section detail-page layout. |
+| `AdminDetailLayout.vue` | Narrow form-style single-entity page layout. |
+| `DetailHeader.vue` | Breadcrumb + title + `#actions` for detail/edit pages. |
+| `FieldRow.vue` | Read-only label/value row (detail pages). |
+| `FormField.vue` | Form field (label + input slot). |
+| `StatusPill.vue` | Colored liveness dot + label (generic 3-state). |
 
-```ts
-app.use(PrimeVue, { theme: { preset: Aura, options: { darkModeSelector: ".aiball-dark" } } });
-```
+All are genuinely reused across the panels above; none is an orphan.
 
-> **Trap.** `.aiball-main` is documented as the level-1 container in
-> `AdminDashboardLayout`'s header comment, and `style.css` even carries an index
-> comment pointing at it. It is defined inside the frontend's own `App.vue`, so
-> it does **not** exist outside that app. Reaching for it fails silently — no
-> build error, no typecheck error, just a page with no container. Define your
-> own.
+## State & data layer
 
-## Step 2 — list and detail
+- **API client** — `src/lib/api.ts`: a single `api` object of typed REST calls to `/api/*` plus the shared TS interfaces. Owns the auth token (`localStorage["aiball.token"]`, `setAuthToken`/`clearAuthToken`/`setUnauthorizedHandler`); URLs go through `withBase()`.
+- **Live updates** — `src/lib/ws.ts` (`useWs`, typed `WsEvent` union, reconnect on visibility) → `src/lib/inbox-ws.ts` (`useInboxWs` relays WS events onto the bus). WebSocket, no SSE.
+- **Event bus** — `src/lib/bus.ts`: a tiny typed pub/sub (`bus.emit` / `useBus`), deliberately chosen over a store. Cross-component reactions go through it; new events extend the `BusEvents` map (TS enforces the payload).
+- **Shared refs** — `src/lib/prefs.ts` (localStorage-synced preference refs); app-level state lives in `App.vue` refs.
+- **Composables** (`use*` in `lib/`) — `useRouting`, `useLoader`, `useNotifications`, `useBulkActions`, `useInboxWs`, `useThreadItems`, plus helpers (`autoMarkRead`, `now-ticker`, `node-liveness`, `mention-autocomplete`, …).
+- **Enums / labels / formatting** — `lib/domain.ts` re-exports the daemon's business enums via `@shared` (single source, no drift); `lib/labels.ts` (UI string/icon/option catalogs), `lib/format.ts` (pure formatters), `lib/formatting.ts` (config-driven linkifier for `MarkdownView`), plus `scope.ts`, `time.ts`, `relations.ts`, `decisions.ts`.
 
-`DataList` in columns mode plus a detail page. Read the commit: `mini-admin
-step 2`.
+## Styling
 
-```vue
-<DataList
-    :columns="columns"
-    :rows="rows"
-    :loading="loading"
-    :error="error"
-    :is-empty="rows.length === 0"
-    :row-key="(w: Widget) => w.id"
-    default-sort-key="name"
-    @row-click="(w: Widget) => emit('open', w.id)"
->
-    <template #cell-status="{ row }">…</template>
-    <template #empty>No widgets yet.</template>
-</DataList>
-```
+- **Tokens + global CSS** — `src/style.css`: `:root` defines font sizes (`--fs-*`), radii (`--radius-*`), `--font-mono`. Colors/surfaces come from PrimeVue Aura variables (`--p-*`).
+- **The `.aiball-*` convention** — app-level structural/utility classes are prefixed `.aiball-` (`.aiball-shell`, `.aiball-layout`, `.aiball-main`, `.aiball-section`, `.aiball-field`, `.aiball-explainer`, `.aiball-detail-page`, `.aiball-mono`, …). Component-specific rules live in each SFC's own `<style>` block; some ship a sibling `.css` file (e.g. `ThreadView.css`).
+- **Dark mode** — `src/styles/theme-dark.css` is **auto-generated** by `scripts/extract-theme-dark.mjs` (overrides scoped under `.aiball-dark`). Don't hand-edit it: edit the component `<style>` + rerun the script. Dark mode is toggled by adding `.aiball-dark` to `<html>` (App.vue), which also flips PrimeVue's `darkModeSelector`.
 
-Set `rowKey` on any list that sorts or removes rows, or Vue keys by index and
-loses DOM identity. Sorting is internal: declare `sortable` on a column and
-`DataList` handles the header clicks; pass `getSortValue` when a column's sort
-value is derived rather than a plain field.
+## Conventions & gotchas
 
-The detail side uses `AdminDetailLayout` (breadcrumb + card) with `AsyncState`
-inside it, `FieldRow` for read-only values and `FormField` around each input.
-
-> **Trap.** `FormField` gives you the label and the column — not the input. Its
-> own usage example is `<InputText v-model="name" />`, which is PrimeVue's. Any
-> form therefore drags PrimeVue in, which is what makes the hidden dependency
-> above unavoidable rather than optional. Budget for it: one list and one form
-> took the demo's bundle from 63 kB to 394 kB.
-
-> **Trap.** `StatusPill` calls itself domain-agnostic, but its three statuses
-> are `up` / `stale` / `down` — liveness words. If your entity is not "up", you
-> will be translating your vocabulary into someone else's at every call site.
-
-The kit is also inconsistent about where styles live, which matters the day you
-try to use one component without the others: `PanelHeader` has no styles at all
-(everything in `style.css`), `AdminDetailLayout` has a **non-scoped** `<style>`
-with no CSS-variable fallbacks, and `StatusPill` has a scoped `<style>` **with**
-fallbacks — so it degrades gracefully without PrimeVue while the others do not.
-
-## Step 3 — rights
-
-Rights in aiball live on the **server**: `bearerAuth` resolves a `consumer_id`
-and a `token_kind` per request, and the route decides. The frontend carries no
-permission model at all.
-
-That is a coherent design for an API and an awkward one for a screen: a client
-can only learn what it may do by being refused, and you cannot retroactively
-hide a button you should never have offered. So a permission-aware page ends up
-mirroring the server's rule client-side, and the rule now lives twice with
-nothing keeping the copies honest. The demo does this in `session.ts` and the
-duplication is deliberate — there is no better answer available today.
-
-The kit gives you nothing here. Expect to pay three times:
-
-- **No permission concept anywhere in the ten components.** Every caller
-  re-invents the same `v-if` around every action.
-- **Read and write are two unrelated components.** `FieldRow` (label + value)
-  and `FormField` (label + input), with no read-only mode on either. A page
-  whose rights vary at runtime **writes its whole body twice**. There is no
-  kit-level workaround.
-- **A refusal has no state.** `AsyncState` knows exactly `loading` / `error` /
-  `empty`, so a 403 can only be dressed as an error — in red, next to a network
-  failure. "You may not do this" and "the server broke" become the same screen,
-  and they are not the same situation for the person reading it.
-
-## Step 4 — menu and breadcrumb
-
-Neither is automatic, and the breadcrumb **cannot** be.
-
-`DetailHeader` takes `crumbs` as a **required prop** and never derives them. A
-breadcrumb needs a parent; `frontend/src/lib/router.ts` has no tree to give one.
-Its `RouteState` is a flat union of panel names with inbox concepts
-(`statusFilter`, `onlyOpen`, `openTicketId`) welded into the type, and
-`buildUrl` / `parseUrl` are two symmetric `if/else` chains over those literals.
-Adding a page means editing the union **and** both chains. Nothing in it is
-reusable by another app.
-
-The consequence is mechanical, not sloppy: every page hand-writes its chain, and
-the chains drift. Four sibling project pages already carry two different ones.
-
-If you are building outside the frontend, write your own router over a **table**
-and derive the chain by walking parents:
-
-```ts
-export const ROUTES: Route[] = [
-    { path: "/", label: "Home", inMenu: true },
-    { path: "/widgets", label: "Widgets", parent: "/", inMenu: true },
-    { path: "/widgets/:id", label: "Widget", parent: "/widgets" },
-];
-```
-
-Nine lines derive what eight pages type out by hand.
-
-There is no nav component either. The frontend's menu lives inside its own
-`App.vue`, non-scoped and unexported — the same shape as `.aiball-main`:
-readable, unusable.
-
-## Step 5 — children
-
-A child table inside the parent's detail card, and a child detail at a third
-breadcrumb level. This is the step that tests the previous four.
-
-**This is where the kit shines.** `DataList` and `SectionHeader` nest inside a
-detail card with no ceremony at all — purely additive, nothing reopened. If your
-screen is a table inside a section inside a card, the kit does exactly its job.
-
-**And it is where flat designs break.** Nesting is the first real test of
-anything you wrote earlier:
-
-- A crumb builder that emits `href: route.path` works until the parent carries
-  params — then it emits the literal `/widgets/:id`. The demo shipped this bug
-  in step 4 and only found it in step 5. Substitute the current match's params.
-- A flat `canEdit` boolean does not cascade. It knows nothing of "this widget"
-  or "its parts", so the child restates the parent's rule verbatim. The day
-  rights become per-entity, that `v-if` is a lie.
-- The read/write duplication from step 3 gets paid again, per page, forever.
-
-## What to expect
-
-The kit is additive exactly where it is a **visual shell** — tables, sections,
-headers, the loading triad — and never where a concern is **transversal**:
-bootstrap, rights, routing, identity. All four of those live privately inside
-the frontend's `App.vue`.
-
-That is the scope it was built for, not a failure: it exists to stop panels from
-duplicating markup, and at that it works. It was simply never asked to be a
-foundation, and until this demo it never had a second consumer to find out.
-
-Practically, for your first screen:
-
-- Copy the bootstrap from [`../contrib/mini-admin/src/main.ts`](../contrib/mini-admin/src/main.ts).
-  It is short, constant, and identical for everyone.
-- Do not reach for `.aiball-main`, the router, the nav, or any permission
-  helper. They are not there.
-- Reach for `DataList`, `AsyncState`, `SectionHeader`, the layouts. They are
-  good, and they compose.
-- Assume anything transversal is yours to build, and that adding it later will
-  reopen your earlier files.
-
-The demo is built in CI (`contrib-build`) and covered by `make typecheck`, so
-if the kit changes under it, this page breaks loudly instead of rotting.
+- **Rebuild after every UI edit** (see the banner up top) — the daemon serves `dist/`.
+- **Enums come from the backend** — never hand-mirror a business enum in the frontend; extend the repo-root `src/domain.ts` and consume via `lib/domain.ts` / `@shared`.
+- **Bus over stores** — cross-component reactions go through `lib/bus.ts`, not a global store.
+- **`theme-dark.css` is generated** — edit component styles + rerun the extractor, never the generated file.
+- **`App.vue` is the orchestrator** — a new screen = another `v-if` branch in `App.vue` + a route case in `lib/router.ts`.
+- **Hash routing under any base path** — assets are relative and the route lives in `location.hash`; don't assume absolute paths.
+- **Dead-code lint** — ESLint with `eslint-plugin-unused-imports` is configured; unused imports fail lint.
