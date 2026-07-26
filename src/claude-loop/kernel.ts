@@ -1029,7 +1029,7 @@ let lastSendAt = 0;
 let lastWakeDeliveryMs = 0;
 let wakeSeq = 0;
 const WAKE_SERIES_RESET_MS = 60_000;
-async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[], wakeTicketId?: number | null, bundleTicketCount?: number): Promise<void> {
+async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[], wakeTicketId?: number | null, bundleTicketCount?: number, hintTicketId?: number | null): Promise<void> {
     // Touch wake-in-flight BEFORE the actual send-keys so the
     // UserPromptSubmit hook can flag from_auto_wake=true (the marker
     // only flags the auto-wake, it's NOT a gate anymore — the post-wake
@@ -1071,7 +1071,17 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         // #1554 — distinctTickets is the direct detector for "multiple tickets in
         // ONE wake": same-ticket bundling → 1; >1 would be the bug.
         const distinct = bundleTicketCount ?? (headMessageId != null ? 1 : 0);
-        log(`wake:diag kind=${wkind} ticket=${wticket} bundled=${bundled} distinctTickets=${distinct} series=#${wakeSeq} sinceLastWakeMs=${sinceMs < 0 ? "-" : sinceMs}`);
+        // #1569 (david `fdsw2h` — « une glue artificielle ») — `distinctTickets`
+        // above CANNOT see this case: it is computed from a set already filtered
+        // to the head's ticket ("1 by construction"), and BEFORE the SSE hint is
+        // grafted onto the head at render time. So a wake that renders a comment
+        // from ticket A under the number of ticket B still reports 1. `glued`
+        // measures what was actually RENDERED — hint ticket vs wake ticket.
+        // Indicator only: it changes no behaviour, it just tells us how often
+        // the divergence happens before we pick a rule for it.
+        const glued = hintTicketId != null && wakeTicketId != null && hintTicketId !== wakeTicketId;
+        const hintPart = hintTicketId != null ? ` hintTicket=#${hintTicketId}${glued ? " GLUED" : ""}` : "";
+        log(`wake:diag kind=${wkind} ticket=${wticket} bundled=${bundled} distinctTickets=${distinct}${hintPart} series=#${wakeSeq} sinceLastWakeMs=${sinceMs < 0 ? "-" : sinceMs}`);
         // #879 — armBusyDefer redondant avec le cooldown state du
         // WakeMachine ; gardé pendant la transition pour que les
         // consumers externes (stop-hook etc.) qui lisent ipc.busyDeferUntilMs
@@ -1500,7 +1510,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // #881 — TurnController acteur : TURN_STARTED transitionne no_turn→in_turn
     // et clear idleSinceMs (bridge subscriber écrit setIpcIdleSince(null)).
     getTurnService().turnStarted(Date.now());
-    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount);
+    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount, hint?.ticket_id ?? null);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup). The legacy count watermark fallback was
     // dropped in #814 — its only writer wrote a file no one read.
