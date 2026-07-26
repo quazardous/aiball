@@ -608,7 +608,7 @@ function respawnKernel(reason: string): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null; extraSeenIds?: number[] }> {
+async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null; extraSeenIds?: number[]; wakeTicketId?: number | null; bundleTicketCount?: number }> {
     // #749 — every wake path (SSE direct, AFK-clear-drain, stop-hook
     // post-turn, heartbeat) routes through `buildContextPhrase` so the
     // content is uniform: pop the oldest unread FIFO event, fall back
@@ -1029,7 +1029,7 @@ let lastSendAt = 0;
 let lastWakeDeliveryMs = 0;
 let wakeSeq = 0;
 const WAKE_SERIES_RESET_MS = 60_000;
-async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[]): Promise<void> {
+async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[], wakeTicketId?: number | null, bundleTicketCount?: number): Promise<void> {
     // Touch wake-in-flight BEFORE the actual send-keys so the
     // UserPromptSubmit hook can flag from_auto_wake=true (the marker
     // only flags the auto-wake, it's NOT a gate anymore — the post-wake
@@ -1066,9 +1066,12 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         wakeSeq = (lastWakeDeliveryMs && sinceMs <= WAKE_SERIES_RESET_MS) ? wakeSeq + 1 : 1;
         lastWakeDeliveryMs = nowMs;
         const wkind = headMessageId != null ? "event" : (backlogTicketId != null ? "backlog-sink" : "other");
-        const wtarget = headMessageId != null ? `msg#${headMessageId}` : (backlogTicketId != null ? `#${backlogTicketId}` : "-");
+        const wticket = wakeTicketId != null ? `#${wakeTicketId}` : (backlogTicketId != null ? `#${backlogTicketId}` : "-");
         const bundled = 1 + (extraSeenIds?.length ?? 0);
-        log(`wake:diag kind=${wkind} target=${wtarget} bundled=${bundled} series=#${wakeSeq} sinceLastWakeMs=${sinceMs < 0 ? "-" : sinceMs}`);
+        // #1554 — distinctTickets is the direct detector for "multiple tickets in
+        // ONE wake": same-ticket bundling → 1; >1 would be the bug.
+        const distinct = bundleTicketCount ?? (headMessageId != null ? 1 : 0);
+        log(`wake:diag kind=${wkind} ticket=${wticket} bundled=${bundled} distinctTickets=${distinct} series=#${wakeSeq} sinceLastWakeMs=${sinceMs < 0 ? "-" : sinceMs}`);
         // #879 — armBusyDefer redondant avec le cooldown state du
         // WakeMachine ; gardé pendant la transition pour que les
         // consumers externes (stop-hook etc.) qui lisent ipc.busyDeferUntilMs
@@ -1454,7 +1457,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds } = await pickPhrase(hint);
+    const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount } = await pickPhrase(hint);
     // If there's nothing actionable to surface (no FIFO head, no backlog,
     // no triggered gate), don't fire — david: "si y a rien on dit rien".
     // Manual wakes and panic still go through; their content is the
@@ -1497,7 +1500,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // #881 — TurnController acteur : TURN_STARTED transitionne no_turn→in_turn
     // et clear idleSinceMs (bridge subscriber écrit setIpcIdleSince(null)).
     getTurnService().turnStarted(Date.now());
-    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId, extraSeenIds);
+    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup). The legacy count watermark fallback was
     // dropped in #814 — its only writer wrote a file no one read.

@@ -1486,6 +1486,14 @@ export interface ContextPhraseResult {
      *  so the per-consumer cooldown clock starts. Null when the wake
      *  fired a FIFO event, a lifecycle event, or the idle phrase. */
     backlogTicketId: number | null;
+    /** #1554 — the ticket this event-wake concerns (head ticket of a same-ticket
+     *  bundle). Null for backlog / idle. Surfaced so wake:diag can log the
+     *  ticket a delivered wake is about. */
+    wakeTicketId?: number | null;
+    /** #1554 — number of DISTINCT tickets in the delivered bundle. Same-ticket by
+     *  construction (=1); a value >1 would flag the "multiple tickets in one
+     *  wake" bug (#1554). 0 when there's no head (idle). */
+    bundleTicketCount?: number;
 }
 
 /**
@@ -1715,6 +1723,14 @@ export async function buildContextPhrase(
                 .map((m) => m.id)
                 .filter((v): v is number => typeof v === "number")
             : [];
+        // #1554 — expose the wake's ticket + the DISTINCT-ticket count of the
+        // delivered bundle for wake:diag. `sameTicket` is filtered to
+        // `headTicketId`, so the count is 1 by construction; a value >1 would be
+        // the "multiple tickets in one wake" bug this instruments for.
+        const wakeTicketId = headTicketId || null;
+        const bundleTicketCount = isBundleMode
+            ? new Set(sameTicket.map(ticketIdOf)).size
+            : (headTicketId ? 1 : 0);
         // Drop empty comments without a pending decision. The FIFO head
         // must carry actionable content (body, or a pending decision
         // proposal); otherwise treat as missing so the wake falls
@@ -2219,7 +2235,7 @@ export async function buildContextPhrase(
         // can start the per-consumer cooldown clock. Only when the
         // backlog branch actually fired (not on FIFO / lifecycle).
         const backlogTicketId = (backlogMode && head?.id) ? head.id : null;
-        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: bundleExtraSeenIds };
+        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: bundleExtraSeenIds, wakeTicketId, bundleTicketCount };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
@@ -2230,6 +2246,8 @@ export async function buildContextPhrase(
             hasContent: hasContent || gateResults.length > 0,
             backlogTicketId,
             extraSeenIds: bundleExtraSeenIds,
+            wakeTicketId,
+            bundleTicketCount,
         };
     } catch {
         return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null, extraSeenIds: [] };
