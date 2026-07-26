@@ -227,6 +227,12 @@ export interface AiballConfig {
          *  rest (no network/host) — required for fully autonomous (AFK) runs, but
          *  it's what blocks network/host commands like `make t1000-status`. */
         permission_mode: string;
+        /** Where `claude-loop bug` writes its diagnostic bundle. Empty = the
+         *  OS temp dir (`$TMPDIR`), which is what most reports want — the
+         *  archive is meant to be attached right away. Point it somewhere
+         *  durable if you keep bundles around; `--out <path>` overrides it
+         *  for a single run. */
+        dump_dir: string;
         /** Which PTY-proxy implementation to launch. "rust" (the DEFAULT
          *  since the Unix cutover) = the Rust `cl-pty-proxy` when it is built,
          *  else it falls back to Python, then to direct. "python" forces the
@@ -390,6 +396,9 @@ const DEFAULTS: AiballConfig = {
         // for unattended/AFK loops (auto-approve + sandbox). Empty by default so
         // host/network commands aren't silently sandboxed (e.g. make t1000-status).
         permission_mode: "",
+        // Empty = `os.tmpdir()`, resolved at use (not here) so the value
+        // stays portable across machines.
+        dump_dir: "",
         // "rust" = the Rust proxy on Unix (default since the cutover) when
         // built, else it transparently falls back to the Python proxy. Set
         // "python" per-project to force pty-proxy.py. Windows is always Rust.
@@ -679,7 +688,11 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.permission_mode === "string") {
                 cfg.claude_loop.permission_mode = cl.permission_mode.trim();
             }
-            // Which PTY proxy on Unix (empty/"python" default, "rust" opt-in).
+            // Where `claude-loop bug` drops its bundle (empty = $TMPDIR).
+            if (typeof cl.dump_dir === "string") {
+                cfg.claude_loop.dump_dir = cl.dump_dir.trim();
+            }
+            // Which PTY proxy on Unix ("rust" default, "python" to force).
             if (typeof cl.proxy_impl === "string") {
                 cfg.claude_loop.proxy_impl = cl.proxy_impl.trim().toLowerCase();
             }

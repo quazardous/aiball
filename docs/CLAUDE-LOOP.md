@@ -663,6 +663,26 @@ count like "5 checks failed" says nothing about how much is wrong.
 `SSE channel` reporting `disconnected` is the one failure worth ignoring once:
 the bus reconnects on the next heartbeat. Act only if it survives a re-run.
 
+### Reporting it
+
+If the gesture above doesn't fix it, `claude-loop bug` packages what someone
+else needs to diagnose it — the logs and pane captures, the `health` verdicts,
+and the environment — into one `.tar.gz` you can attach to a ticket:
+
+```
+claude-loop bug --note "what you were doing when it broke"
+```
+
+The archive lands in `claude_loop.dump_dir`, or `$TMPDIR` if that's unset
+(`--out <path>` for a one-off). It is assembled from a whitelist — the state
+dir's `env`, `env.local` and `claude-settings.json` are never included — and
+run through a best-effort secret scrub.
+
+**Read `MANIFEST.txt` inside before sending it.** The scrub recognises token
+shapes and `key: value` secrets, not confidential prose: `loop.log` carries
+ticket titles and bodies, which on a private project is content you may not
+want to hand to a stranger.
+
 ---
 
 ## Files

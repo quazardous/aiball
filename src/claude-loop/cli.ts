@@ -76,6 +76,7 @@ import { cmdHealth } from "./cmds/health.js";
 import { cmdDebug } from "./cmds/debug.js";
 import { cmdBacklog } from "./cmds/backlog.js";
 import { cmdSnapshot } from "./cmds/snapshot.js";
+import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 
 function die(msg: string): never {
@@ -2139,7 +2140,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "debug", "backlog", "snapshot", "crew", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "debug", "backlog", "snapshot", "bug", "crew", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -2286,6 +2287,12 @@ async function main(): Promise<void> {
         .option("--all", "supprime tous les snapshots (dry-run par défaut, --yes pour exécuter)")
         .option("--yes", "exécute --prune --all sans demander confirmation")
         .action((name: string | undefined, opts: { note?: string; list?: boolean; prune?: boolean; keep?: string; older?: string; all?: boolean; yes?: boolean }) => cmdSnapshot(name ?? resolveCurrentLoopName(), opts));
+    program.command("bug [name]")
+        .description("#1560 — build one .tar.gz to attach to a bug report: the snapshot (logs + pane captures), the `health` verdicts, and the environment. Assembled from a whitelist (env / env.local / claude-settings.json are never included) and secret-scrubbed. Written to `claude_loop.dump_dir` or $TMPDIR. Read MANIFEST.txt inside before sending it.")
+        .option("--note <text>", "what you were doing when it broke — goes in the bundle")
+        .option("--out <path>", "Output archive path (default: <dump_dir or $TMPDIR>/claude-loop-bug-<loop>-<ISO>.tar.gz)")
+        .option("--raw", "skip the secret scrub — for debugging the bundler, never for a report you hand to someone else")
+        .action((name: string | undefined, opts: { note?: string; out?: string; raw?: boolean }) => cmdBug(name ?? resolveCurrentLoopName(), opts));
     program.command("backlog")
         .description("Show the backlog of this loop's project + agent (resolved from .aiball.yaml / plate). Default = ticket backlog tiered hot → actionable → waiting (#791). `--events` = FIFO unread events (what the wake / MCP `unread()` would drain). `--counter-only` = print just `o:N b:N e:N` (same numbers the bar shows). `--cooled` = inclut les tickets en cooldown backlog wake (marker ⏳).")
         .option("--events", "Show the FIFO unread events instead of the ticket backlog")

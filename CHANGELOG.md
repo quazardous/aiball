@@ -23,6 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- `claude-loop bug` packages everything needed to diagnose a broken loop —
+  logs, pane captures, the `health` verdicts and the environment — into one
+  `.tar.gz` to attach to a report. It is built from a whitelist (credential
+  files in the state dir are never included) and secret-scrubbed, and ships a
+  manifest telling you to read it before sending. Lands in `$TMPDIR` by
+  default, or wherever `claude_loop.dump_dir` points.
+
 ### Fixed
 
 - `claude-loop health` no longer reports a dead PTY proxy on a perfectly
