@@ -218,12 +218,29 @@ program
             }
         }
 
+        // #1563 slice 3 — which wire upstream calls would take, and why.
+        // Probed ONLY when this project actually has bindings: a probe spawns
+        // `gh --version` + `gh auth status`, and every project without upstream
+        // coupling would otherwise pay two subprocesses per `check`.
+        const upstreamBindings = cfg.consumer.project ? (cfg.upstream[cfg.consumer.project] ?? []) : [];
+        let upstreamInfo: {
+            bindings: Array<{ kind: string; ref: string; default?: boolean; transport?: string }>;
+            choice: string;
+            probes: Array<{ id: string; ok: boolean; detail: string }>;
+        } | null = null;
+        if (upstreamBindings.length > 0) {
+            const { probeAllWires } = await import("./upstream-wire.js");
+            const { choice, probes } = await probeAllWires({ kind: "github" });
+            upstreamInfo = { bindings: upstreamBindings, choice, probes };
+        }
+
         const payload = {
             cwd: userCwd(),
             config: {
                 path: cfg.configPath,
                 found: !!cfg.configPath,
             },
+            upstream: upstreamInfo,
             autopoll: {
                 enabled: cfg.autopoll.enabled,
                 volatile: cfg.autopoll.volatile,
@@ -291,6 +308,29 @@ program
         process.stdout.write(`\nconsumer\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.project)} project: ${payload.consumer.project ?? "(unresolved)"} ${payload.consumer.project_source ? `[from ${payload.consumer.project_source}]` : ""}\n`);
+        if (payload.upstream) {
+            const u = payload.upstream;
+            // `auto` picks the first passing probe, gh first — mirror that here
+            // so the line says what WOULD happen, not just what is configured.
+            const picked = u.choice === "auto"
+                ? (u.probes.find((p) => p.ok)?.id ?? "http")
+                : u.choice;
+            process.stdout.write(`\nupstream\n`);
+            process.stdout.write(`  transport: ${u.choice}${u.choice === "auto" ? ` → ${picked}` : ""}\n`);
+            for (const p of u.probes) {
+                process.stdout.write(`  ${ok(p.ok)} ${p.detail}\n`);
+            }
+            for (const b of u.bindings) {
+                const over = b.transport ? ` [transport: ${b.transport}]` : "";
+                process.stdout.write(`  · ${b.ref}${b.default ? " (default)" : ""}${over}\n`);
+            }
+            if (u.choice !== "auto" && !u.probes.find((p) => p.id === u.choice)?.ok) {
+                // Explicit choice + failing probe = calls WILL fail. There is no
+                // silent fallback by design, so say it here rather than let it
+                // surface as a confusing error at import time.
+                process.stdout.write(`  ! transport "${u.choice}" is configured but not usable — upstream calls will fail (no silent fallback)\n`);
+            }
+        }
         process.stdout.write(`\ndaemon\n`);
         process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);
         if (payload.daemon.up && payload.consumer.agent) {

@@ -112,7 +112,22 @@ export function httpTransport(opts: {
 
 interface Ran { code: number; stdout: string; stderr: string }
 
-function run(cmd: string, args: string[], stdin?: string): Promise<Ran> {
+/**
+ * Hard ceiling on any `gh` invocation.
+ *
+ * A subprocess that never exits — a credential helper waiting on a prompt, a
+ * hung TLS connect — would otherwise leave a promise pending forever. That was
+ * survivable while every call was a human typing `ticket import`; it stops
+ * being survivable the moment a scheduled poller chains them, because the
+ * scheduler's overlap guard would then skip every subsequent tick, silently,
+ * for as long as the process hangs.
+ */
+export const GH_TIMEOUT_MS = 20_000;
+
+/** Exported so the timeout can be tested against a real hanging child rather
+ *  than a stub — `runImpl` replaces this function wholesale, so injecting a
+ *  stub would test everything except the guard that matters. */
+export function runCommand(cmd: string, args: string[], stdin?: string, timeoutMs = GH_TIMEOUT_MS): Promise<Ran> {
     return new Promise((resolve, reject) => {
         let child;
         try {
@@ -123,10 +138,21 @@ function run(cmd: string, args: string[], stdin?: string): Promise<Ran> {
         }
         let stdout = "";
         let stderr = "";
+        let settled = false;
+        const finish = (fn: () => void) => { if (!settled) { settled = true; clearTimeout(timer); fn(); } };
+        const timer = setTimeout(() => {
+            // SIGTERM first; a `gh` wedged on a credential prompt ignores it,
+            // so escalate. Both are best-effort — the promise rejects either way
+            // rather than staying pending, which is the whole point.
+            child.kill("SIGTERM");
+            setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* already gone */ } }, 2_000).unref();
+            finish(() => reject(new Error(`gh: timed out after ${timeoutMs}ms (killed)`)));
+        }, timeoutMs);
+        timer.unref();
         child.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
         child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-        child.on("error", (e) => reject(new Error(`gh: ${e.message}`)));
-        child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
+        child.on("error", (e) => finish(() => reject(new Error(`gh: ${e.message}`))));
+        child.on("close", (code) => finish(() => resolve({ code: code ?? -1, stdout, stderr })));
         if (stdin !== undefined) child.stdin.end(stdin);
         else child.stdin.end();
     });
@@ -157,8 +183,8 @@ export function ghStatusFrom(stdout: string, stderr: string): { status: number; 
     return { status: 0, json };
 }
 
-export function ghTransport(opts: { runImpl?: typeof run } = {}): UpstreamTransport {
-    const exec = opts.runImpl ?? run;
+export function ghTransport(opts: { runImpl?: typeof runCommand } = {}): UpstreamTransport {
+    const exec = opts.runImpl ?? runCommand;
     return {
         id: "gh",
         async probe(): Promise<TransportProbe> {

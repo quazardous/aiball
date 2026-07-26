@@ -39,6 +39,13 @@ dates are YYYY-MM-DD.
   safe. Ships a manifest listing what's inside and what was dropped. Lands in
   `$TMPDIR` by default, or wherever `claude_loop.dump_dir` points.
 
+- Upstream coupling can now reach GitHub through the `gh` CLI instead of the
+  API, borrowing that CLI's own credential — so a private repo works with **no
+  token stored in any aiball config**. It's the default when `gh` is installed
+  and logged in, and `aiball check` shows which wire was chosen and probes both.
+  Pin it host-wide with `upstream_transport:`, or per repo with `transport:` on
+  a binding. A pinned wire never silently falls back to the other one: that
+  would hide a broken setup until the day both break.
 - The health endpoint now reports the daemon's recurring jobs: for each one,
   when it last ran, how long it took, what it last failed with, and when it is
   next due. Answers "why hasn't that happened since this morning" without
@@ -57,6 +64,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A hung `gh` call can no longer block upstream work indefinitely: invocations
+  are capped and the child is killed, surfacing a timeout instead of a promise
+  that never settles.
 - Search now matches the current text of an edited ticket or comment. It was
   indexing the version as originally filed, so it missed everything an edit had
   added and still matched text an edit had removed.

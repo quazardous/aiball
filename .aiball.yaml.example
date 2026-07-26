@@ -216,6 +216,11 @@ project_type: public
 #     - kind: github
 #       ref: github:owner/repo
 #       default: true
+#       # Optional per-repo wire: auto (default) | gh | http. `gh` uses the
+#       # GitHub CLI's own credential (no token stored here); `http` calls the
+#       # API directly. Host-wide default: `upstream_transport:` in the global
+#       # config. A pinned wire never silently falls back — see docs/UPSTREAM.md.
+#       transport: gh
 
 # --- wake-CTA / state-prompt overrides ----------------------------------------
 # Shipped defaults at `config/defaults/claude-loop-pings.yaml` already

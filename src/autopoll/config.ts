@@ -89,6 +89,43 @@ export function upstreamToken(kind: string): string | null {
     return null;
 }
 
+/**
+ * #1563 slice 3 — which wire carries upstream calls.
+ *
+ * `auto` picks the first transport whose `probe()` passes, preferring `gh`:
+ * it borrows the CLI's keyring credential, so it reaches private repos with
+ * NO secret written into a config file — strictly better than an untokened
+ * HTTP wire, and safer than a plaintext token. Falls back to `http`, which is
+ * always usable (public repos, unauthenticated).
+ */
+export type TransportChoice = "auto" | "http" | "gh";
+
+export function isTransportChoice(v: unknown): v is TransportChoice {
+    return v === "auto" || v === "http" || v === "gh";
+}
+
+/**
+ * Host-level default transport, read from the GLOBAL config next to
+ * `upstream_auth` (it describes what THIS machine can reach — whether `gh` is
+ * installed and logged in — which is a property of the host, not of a repo):
+ *
+ *   upstream_transport: gh
+ *
+ * A per-binding `transport:` overrides it for one repo. Unset / malformed →
+ * `auto`.
+ */
+export function upstreamTransportChoice(): TransportChoice {
+    try {
+        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as {
+            upstream_transport?: unknown;
+        };
+        if (isTransportChoice(raw?.upstream_transport)) return raw.upstream_transport;
+    } catch {
+        // Missing / unparsable global config is the normal case.
+    }
+    return "auto";
+}
+
 export type AutopollTone = "hint" | "directive" | "imperative";
 const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
 
@@ -278,7 +315,7 @@ export interface AiballConfig {
      * only, no API/sync. Lives in the daemon's `.aiball.yaml`
      * (`/home/david/.config/aiball/config.yaml` or the daemon cwd).
      */
-    upstream: Record<string, Array<{ kind: string; ref: string; default?: boolean }>>;
+    upstream: Record<string, Array<{ kind: string; ref: string; default?: boolean; transport?: TransportChoice }>>;
     /**
      * #385 (david wstfea): the claude-loop tmux bar colour profile. Layered on
      * THREE levels (defaults → global `~/.config/aiball/config.yaml colors:` →
@@ -482,7 +519,7 @@ function readUpstreamBlock(path: string): AiballConfig["upstream"] {
         const out: AiballConfig["upstream"] = {};
         for (const [projName, rawList] of Object.entries(raw.upstream as Record<string, unknown>)) {
             if (!Array.isArray(rawList)) continue;
-            const valid: Array<{ kind: string; ref: string; default?: boolean }> = [];
+            const valid: Array<{ kind: string; ref: string; default?: boolean; transport?: TransportChoice }> = [];
             for (const entry of rawList as unknown[]) {
                 if (!entry || typeof entry !== "object") continue;
                 const e = entry as Record<string, unknown>;
@@ -491,6 +528,10 @@ function readUpstreamBlock(path: string): AiballConfig["upstream"] {
                     kind: e.kind,
                     ref: e.ref,
                     ...(typeof e.default === "boolean" ? { default: e.default } : {}),
+                    // #1563 — per-binding wire override. Unknown values are
+                    // dropped like any other malformed field, falling back to
+                    // the host-level choice.
+                    ...(isTransportChoice(e.transport) ? { transport: e.transport } : {}),
                 });
             }
             if (valid.length > 0) out[projName] = valid;

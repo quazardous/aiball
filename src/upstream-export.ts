@@ -9,7 +9,8 @@
  * Manual only, like import — nothing here runs on a timer. A ticket already
  * coupled is refused (unlink first) so we never fork a second remote issue.
  */
-import { loadConfig, upstreamToken } from "./autopoll/config.js";
+import { loadConfig, upstreamToken, type TransportChoice } from "./autopoll/config.js";
+import { resolveWire } from "./upstream-wire.js";
 import { getMessage } from "./db.js";
 import { setTicketUpstream } from "./db/upstream.js";
 import { AlreadyCoupledError } from "./upstream-import.js";
@@ -58,6 +59,10 @@ export async function exportUpstream(
     // Resolve the target repo: explicit `owner/repo` wins, else the project's
     // default binding for this provider.
     let target: UpstreamTarget | null = null;
+    // #1563 slice 3 — set when the target came from a binding, so its
+    // `transport:` override applies. An explicit `--repo` matches no binding
+    // and therefore rides the host-level choice.
+    let bindingTransport: TransportChoice | undefined;
     if (input.repo) {
         target = provider.parseRef(`${provider.id}:${input.repo}`);
         if (!target) throw new Error(`invalid repo "${input.repo}" for provider "${kind}" (expected owner/repo)`);
@@ -71,13 +76,20 @@ export async function exportUpstream(
         }
         target = provider.parseRef(def.ref);
         if (!target) throw new Error(`the default ${kind} binding for "${ticket.project}" is malformed: ${def.ref}`);
+        bindingTransport = def.transport;
     }
 
     const token = opts.token ?? upstreamToken(provider.id);
+    const { wire } = await resolveWire({
+        choice: bindingTransport,
+        kind: provider.id,
+        token,
+        fetchImpl: opts.fetchImpl,
+    });
     const external = await provider.createIssue(
         target,
         { title: ticket.title ?? `aiball ticket #${ticket.id}`, body: ticket.body ?? "" },
-        { token, fetchImpl: opts.fetchImpl },
+        { token, fetchImpl: opts.fetchImpl, transport: wire },
     );
 
     const canonicalRef = `${provider.id}:${target.owner}/${target.repo}`;

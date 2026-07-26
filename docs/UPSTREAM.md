@@ -33,7 +33,42 @@ upstream:
 With a default binding, `gh#123` resolves to `owner/repo#123`. Without one, use
 the self-contained explicit form `gh:owner/repo#123` — no binding required.
 
-### 2. Provide an API token (for private repos / higher rate limits)
+### 2. Choose how aiball reaches GitHub
+
+Two wires carry the same calls:
+
+- **`gh`** — runs the GitHub CLI, which brings its own credential from your
+  keyring. Reaches private repos with **no secret stored in any aiball config**.
+  Requires `gh` installed and `gh auth login` done.
+- **`http`** — talks to the API directly. Always available; without a token it
+  sees public repos only, at a lower rate limit.
+
+By default aiball picks for you (`auto`): it uses `gh` when that CLI is
+installed and authenticated, otherwise `http`. The choice is made once per run
+and logged, so you can always tell which wire was used. Pin it host-wide in the
+GLOBAL config if you'd rather decide:
+
+```yaml
+upstream_transport: gh    # auto (default) | gh | http
+```
+
+…or per repo, when one binding needs a different wire than the rest:
+
+```yaml
+upstream:
+  my-project:
+    - kind: github
+      ref: github:owner/repo
+      transport: gh
+      default: true
+```
+
+**A pinned wire is never silently swapped.** If you ask for `gh` and it isn't
+usable, calls fail with a message saying so — they don't quietly fall back to
+`http`, because that would hide a broken `gh` until the day both break.
+`aiball check` shows the resolved wire and probes each one.
+
+### 3. Provide an API token (only for the `http` wire)
 
 A token is a **host-level credential**, so it lives in the GLOBAL config
 (`~/.config/aiball/config.yaml`), never in a committable per-project
@@ -47,7 +82,8 @@ upstream_auth:
 
 Env fallback (handy for CI / one-off runs): GitHub reads `GITHUB_TOKEN`, then
 `GH_TOKEN`. Public repos import unauthenticated (subject to GitHub's rate
-limits).
+limits). On the `gh` wire you need none of this — the CLI's own credential is
+used.
 
 ## Import an external issue
 
@@ -90,9 +126,10 @@ surfaces gate it behind an explicit confirmation.
 - **HTTP** — `POST /api/tickets/:id/export` with an optional `{ "repo": "..." }`.
 
 The target repo is the project's default `github` binding unless you pass an
-explicit `repo`. Export needs a **write-scoped** token. A ticket that is
-already coupled is refused — unlink it first rather than forking a second
-remote issue.
+explicit `repo`. Export writes to the remote, so it needs write credentials: on
+the `http` wire that means a **write-scoped token**, while the `gh` wire uses
+the CLI's own login. A ticket that is already coupled is refused — unlink it
+first rather than forking a second remote issue.
 
 ## What's not here yet
 

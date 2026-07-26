@@ -13,6 +13,7 @@
  * a later slice's background poller; import itself just seeds the ticket.
  */
 import { loadConfig, upstreamToken } from "./autopoll/config.js";
+import { resolveWire } from "./upstream-wire.js";
 import { submitMessage } from "./messages.js";
 import { addMessageTag, getTagByName, insertTag } from "./db/tags.js";
 import { findCoupledTicket, setTicketUpstream } from "./db/upstream.js";
@@ -84,9 +85,20 @@ export async function importUpstream(
     if (existing) throw new AlreadyCoupledError(existing.id, canonicalRef, resolved.num);
 
     const token = opts.token ?? upstreamToken(provider.id);
+    // #1563 slice 3 — the wire. A per-binding `transport:` wins over the
+    // host-level choice; an explicit alien ref (`gh:other/repo#12`) matches no
+    // binding, so it rides the host default.
+    const binding = bindings.find((b) => b.kind === provider.id && b.default);
+    const { wire } = await resolveWire({
+        choice: binding?.transport,
+        kind: provider.id,
+        token,
+        fetchImpl: opts.fetchImpl,
+    });
     const external = await provider.fetchIssue(resolved.target, resolved.num, {
         token,
         fetchImpl: opts.fetchImpl,
+        transport: wire,
     });
 
     const ticket = submitMessage({
