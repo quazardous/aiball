@@ -10,6 +10,16 @@ checkout (the live runtime, frontend rebuild, hard restart for
 migrations…) live in [`CLAUDE.md`](./CLAUDE.md) — load it first, then
 come back here for the *how*.
 
+**Just here to report a bug?** You don't need the rest of this document.
+Run `claude-loop bug --note "what you were doing"` in the affected project
+and attach the `.tar.gz` it prints to a
+[new issue](https://github.com/quazardous/aiball/issues/new/choose) — it
+carries the logs, the `claude-loop health` verdicts and your environment,
+whitelisted and redacted. Read its `MANIFEST.txt` before sending. If the
+loop is misbehaving rather than broken,
+[Troubleshooting](./docs/CLAUDE-LOOP.md#troubleshooting--reading-claude-loop-health)
+is usually faster than filing.
+
 ## Sections
 
 1. [Multi-agent norms](#1-multi-agent-norms) — how agents collaborate via aiball tickets

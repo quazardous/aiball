@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in aiball or claude-loop doesn't behave as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **The most useful thing you can attach is a diagnostic bundle.** From the
+        affected project:
+
+        ```
+        claude-loop bug --note "what you were doing when it broke"
+        ```
+
+        It packages the logs, the `claude-loop health` verdicts and your
+        environment into one `.tar.gz`. It is built from a whitelist — your
+        credential files are never included — and redacted, including the wake
+        prompts that quote your ticket titles. **Read the `MANIFEST.txt` inside
+        before attaching it**; the redaction handles known shapes, not
+        confidential prose in general.
+
+        If the loop won't start at all and `claude-loop bug` can't run, describe
+        what you see and we'll work from there.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Diagnostic bundle
+      description: >-
+        Drag the `.tar.gz` from `claude-loop bug` into this field. If you'd
+        rather not share it, paste the output of `claude-loop health` instead
+        and say so.
+
+  - type: input
+    id: version
+    attributes:
+      label: aiball version
+      description: >-
+        `aiball --version`. Skip this if you attached the bundle — it's in
+        there, along with your Claude Code, node and tmux versions.
+      placeholder: "0.38.0"
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other / not sure

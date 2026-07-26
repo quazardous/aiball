@@ -1,0 +1,12 @@
+# Blank issues stay enabled on purpose: the bug form is a convenience, not a
+# gate. Questions, ideas and "I saw this weird thing once" reports are welcome
+# without ceremony — a form that turns those away costs more than it saves.
+blank_issues_enabled: true
+
+contact_links:
+  - name: Troubleshooting a loop that misbehaves
+    url: https://github.com/quazardous/aiball/blob/main/docs/CLAUDE-LOOP.md#troubleshooting--reading-claude-loop-health
+    about: How to read `claude-loop health` and what each failure means — often faster than filing.
+  - name: How aiball works
+    url: https://github.com/quazardous/aiball/blob/main/README.md
+    about: What aiball is, and the quickstart.
