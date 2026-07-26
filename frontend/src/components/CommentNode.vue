@@ -10,6 +10,7 @@ import MarkdownView from "./MarkdownView.vue";
 import CommentVotes from "./CommentVotes.vue";
 import { api, type Message } from "../lib/api";
 import { bus } from "../lib/bus";
+import { scopeIcon, scopeTitle } from "../lib/scope";
 import { ticketHref } from "../lib/base";
 import { attachPasteImage } from "../lib/pasteImage";
 import { questionStats as computeQuestionStats } from "../lib/questions";
@@ -80,6 +81,18 @@ const commentRef = computed(() => {
 // body (edited overrides original) — derives total / answered / open
 // from the `- [ ]` vs `- [x]` characters; markers are not needed at
 // the count level. Updates reactively when the body changes server-side.
+// #1561 — per-card scope picto. `scopeIcon` returns null for `default`, so the
+// common case stays visually quiet and only a narrowed (`internal`) or
+// amplified (`broadcast`) comment carries a glyph.
+const scopePicto = computed(() => scopeIcon(props.msg.scope ?? "default"));
+const scopeHint = computed(() => {
+    if (props.msg.scope !== "internal") return scopeTitle(props.msg.scope ?? "default");
+    // Spell out the limit rather than letting "internal" imply invisibility:
+    // it suppresses the notification, not the reading.
+    return "Posted without notifying — no ping was sent, so no agent was woken."
+        + " Agents can still read this comment when they open the thread.";
+});
+
 const questionStats = computed(() =>
     computeQuestionStats(props.msg.edited_body ?? props.msg.body ?? ""),
 );
@@ -365,6 +378,18 @@ async function doDelete() {
                 ·
             </span>
             <span v-if="msg.by_agent">by {{ msg.by_agent }}</span>
+            <!-- #1561 david `bf6cju`: "rien n'indique qu'un commentaire est
+                 invisible". The Message type carried `scope` and claimed to
+                 drive a per-card picto, but nothing rendered it here — so a
+                 comment posted with "post without notifying" looked exactly
+                 like one that pinged everybody. Same glyph as the inbox rows
+                 and the composer options (lib/scope.ts is the single source),
+                 shown only for the non-default scopes. -->
+            <i
+                v-if="scopePicto"
+                :class="['pi', scopePicto, 'scope-picto']"
+                :title="scopeHint"
+            />
             <Tag
                 v-if="questionStats.total > 0"
                 :value="`${questionStats.answered}/${questionStats.total} answered`"
@@ -583,6 +608,16 @@ async function doDelete() {
 </template>
 
 <style scoped>
+/* #1561 — scope picto in the comment header. Quiet by design: it marks the
+   exception (a comment that pinged nobody, or that reached followers), so it
+   sits at the same weight as the other header metadata rather than shouting. */
+.scope-picto {
+    margin-left: 0.4rem;
+    font-size: var(--fs-2xs);
+    opacity: 0.75;
+    cursor: help;
+}
+
 /* #309: muted placeholder shown in place of a deleted comment's body. */
 .comment-tombstone {
     display: flex;
