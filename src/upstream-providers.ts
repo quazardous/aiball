@@ -10,6 +10,8 @@
  * = drop another implementation in the registry.
  */
 
+import { httpTransport, type UpstreamTransport } from "./upstream-transport.js";
+
 /** Where the ref lives (provider-specific shape, kept extensible). */
 export interface UpstreamTarget {
     owner: string;
@@ -59,6 +61,17 @@ export interface FetchIssueOpts {
     token?: string | null;
     /** Override the global `fetch` (tests inject a stub). */
     fetchImpl?: typeof fetch;
+    /**
+     * #1563 — carry the request over this wire instead of the default HTTP
+     * one. Omitted, the provider builds `httpTransport({token, fetchImpl})`,
+     * so every pre-existing caller keeps its exact behaviour.
+     */
+    transport?: UpstreamTransport;
+}
+
+/** The wire for a call: the caller's, or HTTP built from the legacy opts. */
+function wireFor(opts: FetchIssueOpts): UpstreamTransport {
+    return opts.transport ?? httpTransport({ token: opts.token, fetchImpl: opts.fetchImpl });
 }
 
 /** Fields to create a new external issue (phase 2, export). */
@@ -108,25 +121,21 @@ export const githubProvider: UpstreamProvider = {
         return `https://github.com/${target.owner}/${target.repo}/issues/${num}`;
     },
     async fetchIssue(target, num, opts = {}): Promise<ExternalIssue> {
-        const doFetch = opts.fetchImpl ?? fetch;
-        const url = `https://api.github.com/repos/${target.owner}/${target.repo}/issues/${num}`;
-        const headers: Record<string, string> = {
-            "accept": "application/vnd.github+json",
-            "x-github-api-version": "2022-11-28",
-            // GitHub rejects requests without a User-Agent.
-            "user-agent": "aiball-upstream-coupling",
-        };
-        if (opts.token) headers["authorization"] = `Bearer ${opts.token}`;
-        const res = await doFetch(url, { headers });
-        if (!res.ok) {
+        const wire = wireFor(opts);
+        const res = await wire.request(`repos/${target.owner}/${target.repo}/issues/${num}`);
+        if (res.status < 200 || res.status >= 300) {
             const hint = res.status === 404
                 ? " (not found — private repo needs a token, or wrong owner/repo/num)"
                 : res.status === 401 || res.status === 403
                     ? " (auth — check the github token in ~/.config/aiball/config.yaml)"
                     : "";
-            throw new Error(`github: GET ${target.owner}/${target.repo}#${num} → HTTP ${res.status}${hint}`);
+            // The transport is named: with more than one wire, "github: failed"
+            // doesn't say which one did.
+            throw new Error(
+                `github via ${wire.id}: GET ${target.owner}/${target.repo}#${num} → HTTP ${res.status}${hint}`,
+            );
         }
-        const j = await res.json() as {
+        const j = res.json as {
             number: number;
             title: string;
             body: string | null;
@@ -153,33 +162,29 @@ export const githubProvider: UpstreamProvider = {
         };
     },
     async createIssue(target, input, opts = {}): Promise<ExternalIssue> {
-        if (!opts.token) {
+        const wire = wireFor(opts);
+        // A token is only the HTTP wire's problem: `gh` carries its own
+        // credential, so demanding one there would refuse a call that works.
+        if (wire.id === "http" && !opts.token) {
             throw new Error(
                 "github: creating an issue needs a write-scoped token — set upstream_auth.github.token in ~/.config/aiball/config.yaml",
             );
         }
-        const doFetch = opts.fetchImpl ?? fetch;
-        const url = `https://api.github.com/repos/${target.owner}/${target.repo}/issues`;
-        const res = await doFetch(url, {
+        const res = await wire.request(`repos/${target.owner}/${target.repo}/issues`, {
             method: "POST",
-            headers: {
-                "accept": "application/vnd.github+json",
-                "x-github-api-version": "2022-11-28",
-                "user-agent": "aiball-upstream-coupling",
-                "content-type": "application/json",
-                "authorization": `Bearer ${opts.token}`,
-            },
-            body: JSON.stringify({ title: input.title, body: input.body }),
+            body: { title: input.title, body: input.body },
         });
-        if (!res.ok) {
+        if (res.status < 200 || res.status >= 300) {
             const hint = res.status === 401 || res.status === 403
                 ? " (auth/scope — the token needs write access to this repo)"
                 : res.status === 404
                     ? " (repo not found, or the token can't see it)"
                     : "";
-            throw new Error(`github: POST ${target.owner}/${target.repo} issue → HTTP ${res.status}${hint}`);
+            throw new Error(
+                `github via ${wire.id}: POST ${target.owner}/${target.repo} issue → HTTP ${res.status}${hint}`,
+            );
         }
-        const j = await res.json() as {
+        const j = res.json as {
             number: number; title: string; body: string | null;
             state: string; html_url: string;
         };
