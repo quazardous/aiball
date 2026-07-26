@@ -211,6 +211,18 @@ export const tickets = sqliteTable("tickets", {
     upstreamRef: text("upstream_ref"),
     upstreamNum: integer("upstream_num"),
     upstreamSyncedAt: text("upstream_synced_at"),
+    /**
+     * #1566 — link watch, NOT a mirror. `upstreamSeenAt` is the remote's own
+     * `updated_at` as last observed (the watermark: a newer one means something
+     * moved, and an outgoing push advances it so our writes never echo back).
+     * `upstreamCheckedAt` stamps every ATTEMPT — its gap with `upstreamSyncedAt`
+     * (last success) is what makes a silently broken link visible.
+     * `upstreamError` carries the last failure, cleared on success.
+     * No content is stored here by design.
+     */
+    upstreamSeenAt: text("upstream_seen_at"),
+    upstreamCheckedAt: text("upstream_checked_at"),
+    upstreamError: text("upstream_error"),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),

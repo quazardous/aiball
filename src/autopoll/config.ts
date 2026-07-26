@@ -126,6 +126,37 @@ export function upstreamTransportChoice(): TransportChoice {
     return "auto";
 }
 
+/**
+ * #1566 — is a project's coupling WATCHED, or merely linked?
+ *
+ * `pull` (default) = a periodic probe announces upstream changes in the thread.
+ * `off` = the coupling still renders and still imports, nothing is watched.
+ *
+ * Layered like `upstream_transport`: a host-level `upstream_sync:` default that
+ * a per-binding `sync:` overrides — a project can watch one repo and ignore
+ * another. Note this never copies anything either way; it only decides whether
+ * we look.
+ */
+export type SyncMode = "pull" | "off";
+
+function isSyncMode(v: unknown): v is SyncMode {
+    return v === "pull" || v === "off";
+}
+
+export function upstreamSyncMode(project?: string | null): SyncMode {
+    let host: SyncMode = "pull";
+    try {
+        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { upstream_sync?: unknown };
+        if (isSyncMode(raw?.upstream_sync)) host = raw.upstream_sync;
+    } catch {
+        // No global config is the normal case.
+    }
+    if (!project) return host;
+    const bindings = loadConfig().upstream[project] ?? [];
+    const def = bindings.find((b) => b.default) ?? bindings[0];
+    return isSyncMode(def?.sync) ? def.sync : host;
+}
+
 export type AutopollTone = "hint" | "directive" | "imperative";
 const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
 
@@ -315,7 +346,7 @@ export interface AiballConfig {
      * only, no API/sync. Lives in the daemon's `.aiball.yaml`
      * (`/home/david/.config/aiball/config.yaml` or the daemon cwd).
      */
-    upstream: Record<string, Array<{ kind: string; ref: string; default?: boolean; transport?: TransportChoice }>>;
+    upstream: Record<string, Array<{ kind: string; ref: string; default?: boolean; transport?: TransportChoice; sync?: SyncMode }>>;
     /**
      * #385 (david wstfea): the claude-loop tmux bar colour profile. Layered on
      * THREE levels (defaults → global `~/.config/aiball/config.yaml colors:` →
@@ -519,7 +550,7 @@ function readUpstreamBlock(path: string): AiballConfig["upstream"] {
         const out: AiballConfig["upstream"] = {};
         for (const [projName, rawList] of Object.entries(raw.upstream as Record<string, unknown>)) {
             if (!Array.isArray(rawList)) continue;
-            const valid: Array<{ kind: string; ref: string; default?: boolean; transport?: TransportChoice }> = [];
+            const valid: Array<{ kind: string; ref: string; default?: boolean; transport?: TransportChoice; sync?: SyncMode }> = [];
             for (const entry of rawList as unknown[]) {
                 if (!entry || typeof entry !== "object") continue;
                 const e = entry as Record<string, unknown>;
@@ -532,6 +563,7 @@ function readUpstreamBlock(path: string): AiballConfig["upstream"] {
                     // dropped like any other malformed field, falling back to
                     // the host-level choice.
                     ...(isTransportChoice(e.transport) ? { transport: e.transport } : {}),
+                    ...(isSyncMode(e.sync) ? { sync: e.sync } : {}),
                 });
             }
             if (valid.length > 0) out[projName] = valid;

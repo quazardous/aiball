@@ -53,6 +53,16 @@ export interface ExternalIssue {
     labels: string[];
     /** Canonical web URL of the issue. */
     url: string;
+    /**
+     * #1566 — the remote's own `updated_at`. This is the WATERMARK the link
+     * watcher compares against; it is deliberately the only "when" we keep,
+     * because knowing THAT something moved needs no copy of what moved.
+     */
+    updatedAt?: string | null;
+    /** Login of whoever closed it, when closed. Free in the issue payload, so a
+     *  closure notice can name someone without an extra call. An identifier,
+     *  not content. */
+    closedBy?: string | null;
 }
 
 /** Options for a live fetch. `fetchImpl` is injectable for tests. */
@@ -145,6 +155,8 @@ export const githubProvider: UpstreamProvider = {
             html_url: string;
             labels?: Array<string | { name?: string }>;
             pull_request?: unknown;
+            updated_at?: string | null;
+            closed_by?: { login?: string | null } | null;
         };
         // A PR is also an "issue" in GitHub's API; refuse to import one as a
         // ticket (its lifecycle is different). Explicit over silent.
@@ -161,6 +173,8 @@ export const githubProvider: UpstreamProvider = {
             state: j.state === "closed" ? "closed" : "open",
             labels,
             url: j.html_url,
+            updatedAt: j.updated_at ?? null,
+            closedBy: j.closed_by?.login ?? null,
         };
     },
     async createIssue(target, input, opts = {}): Promise<ExternalIssue> {

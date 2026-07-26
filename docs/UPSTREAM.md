@@ -131,15 +131,57 @@ the `http` wire that means a **write-scoped token**, while the `gh` wire uses
 the CLI's own login. A ticket that is already coupled is refused — unlink it
 first rather than forking a second remote issue.
 
+## Watching a coupled issue
+
+Once a ticket is coupled, aiball keeps an eye on the issue — **without copying
+it**. The ticket keeps its own title and body; nothing upstream ever overwrites
+them. Every ten minutes each coupled ticket is checked, and when the issue has
+moved since the last check, a single note lands in the thread:
+
+> **Updated upstream** — `gh#86` was **closed** by **someone**.
+> → https://github.com/owner/repo/issues/86
+
+That's the whole mechanism: a pointer, not a mirror. The note quotes just enough
+to decide whether to go look, links out, and brings the ticket back into your
+actionable list. It is posted by `__system:upstream`, an identity that holds no
+token and takes no assignment.
+
+The first check after coupling is deliberately silent — it only records where
+the issue stood, so enabling the watch doesn't announce every long-standing
+coupling at once.
+
+Turn it off host-wide or per repo:
+
+```yaml
+upstream_sync: off        # global config: pull (default) | off
+```
+
+```yaml
+upstream:
+  my-project:
+    - kind: github
+      ref: github:owner/repo
+      sync: off           # this repo is linked, but not watched
+      default: true
+```
+
+A check that fails records the error against the ticket instead of retrying
+silently, and does **not** advance its watermark — so the change it failed to
+read is announced on the next successful check rather than lost.
+
 ## What's not here yet
 
 Coupling is being built in slices. Landed today: manual import + export.
 Planned next:
 
-- **Background sync** — a poller that keeps state and labels/tags in step on
-  *already-coupled* tickets (including closing a ticket when its upstream issue
-  closes). Conflicts resolve with one authoritative direction per link, not a
-  silent merge.
+- **Pushing back up** — sending an aiball comment to the coupled issue. It stays
+  an **editorial gesture**, one comment at a time, never a background loop: what
+  leaves your board towards a public issue is chosen, not scheduled.
 - **More providers** — GitLab / Gitea as additional drivers.
+
+Deliberately **not** planned: mirroring an issue's title, body or comments into
+the ticket. Coupling links the two; it does not duplicate one into the other,
+and that is what keeps conflicts, divergence and "which side wins" off the
+table entirely.
 
 See [`ROADMAP.md`](../ROADMAP.md) for the full direction.

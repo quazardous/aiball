@@ -221,6 +221,11 @@ project_type: public
 #       # API directly. Host-wide default: `upstream_transport:` in the global
 #       # config. A pinned wire never silently falls back — see docs/UPSTREAM.md.
 #       transport: gh
+#       # Watch this coupling? pull (default) = announce upstream changes in the
+#       # thread; off = stay linked but don't look. Host-wide default lives in
+#       # the global config as `upstream_sync:`. Nothing is ever copied either
+#       # way — see docs/UPSTREAM.md.
+#       sync: pull
 
 # --- wake-CTA / state-prompt overrides ----------------------------------------
 # Shipped defaults at `config/defaults/claude-loop-pings.yaml` already

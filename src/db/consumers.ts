@@ -11,7 +11,7 @@ import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isRemoteConsumer, type SeenVia } from "./remote-detect.js";
 
-export type ConsumerKind = "human" | "agent" | "sandbox";
+export type ConsumerKind = "human" | "agent" | "sandbox" | "system";
 
 export type ConsumerState = "boot" | "idle" | "busy";
 

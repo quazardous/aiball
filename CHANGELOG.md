@@ -39,6 +39,13 @@ dates are YYYY-MM-DD.
   safe. Ships a manifest listing what's inside and what was dropped. Lands in
   `$TMPDIR` by default, or wherever `claude_loop.dump_dir` points.
 
+- A coupled ticket is now watched: when its GitHub issue moves, a short note
+  lands in the thread ("Updated upstream — gh#86 was closed by …") with a link,
+  and the ticket returns to your actionable list. Nothing is copied — the
+  ticket keeps its own title and body, and no upstream text ever overwrites
+  them. The first check after coupling is silent, so enabling this doesn't
+  announce every old link at once. Turn it off host-wide with `upstream_sync:`
+  or per repo with `sync:` on a binding.
 - Upstream coupling can now reach GitHub through the `gh` CLI instead of the
   API, borrowing that CLI's own credential — so a private repo works with **no
   token stored in any aiball config**. It's the default when `gh` is installed

@@ -14,6 +14,7 @@
 import { captureTokenSnapshotIfDue } from "../db.js";
 import { checkSandboxPings } from "../sandbox/watcher.js";
 import { revealExpiredPostpones } from "./postpone.js";
+import { runUpstreamWatch } from "../upstream-watch-run.js";
 import type { CronTask } from "./runner.js";
 
 export { startScheduler, schedulerStatus } from "./runner.js";
@@ -50,5 +51,20 @@ export const CRON_TASKS: readonly CronTask[] = [
         // invisible.
         enabled: () => process.env.AIBALL_SANDBOX_WATCHER !== "0",
         run: checkSandboxPings,
+    },
+    {
+        // #1566 — the upstream LINK watch. The first async task in the table,
+        // which is the whole reason the runner owns an overlap guard and an
+        // async-rejection catch: one slow remote must not stack sweeps, and a
+        // network failure must not take the daemon down.
+        //
+        // 10 min: an upstream issue is not a live feed, and every coupled
+        // ticket costs one request per tick. `runAtBoot: false` — a restart is
+        // not a reason to hammer the remote, and under `tsx watch` restarts are
+        // frequent.
+        name: "upstream-watch",
+        everyMs: 10 * MINUTE,
+        runAtBoot: false,
+        run: async () => { await runUpstreamWatch(); },
     },
 ];
