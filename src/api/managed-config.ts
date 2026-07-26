@@ -29,6 +29,18 @@ import { consumerOf } from "./_helpers.js";
 
 export const managedConfigRouter = Router();
 
+/**
+ * #1550 — the DB config manager only owns DB overrides; the UI must never write
+ * the committed `.aiball.yaml`. A key sourced ONLY from file (no "db" source)
+ * can't take a legit DB override — such an override is inert (the runtime reads
+ * the file, not the DB, cf. getConfig vs getResolvedConfig). Reject writes/deletes
+ * on file-only keys until the config-service rework lands (see #1550 analysis).
+ */
+function isFileOnlyKey(entry: { sources?: readonly string[] }): boolean {
+    const s = entry.sources ?? ["db"];
+    return !s.includes("db");
+}
+
 managedConfigRouter.get("/managed-config", (req: Request, res: Response) => {
     const project = typeof req.query.project === "string" && req.query.project.trim() !== ""
         ? req.query.project.trim()
@@ -40,6 +52,9 @@ managedConfigRouter.put("/managed-config/:key", (req: Request, res: Response) =>
     const key = String(req.params.key ?? "");
     const entry = getSchemaEntry(key);
     if (!entry) return notFound(res, `unknown config key '${key}'`);
+    if (isFileOnlyKey(entry)) {
+        return badRequest(res, `key '${key}' is file-sourced (.aiball.yaml) — not editable via the DB config manager`);
+    }
 
     const body = (req.body ?? {}) as { value?: unknown; project?: unknown };
     const project = typeof body.project === "string" && body.project.trim() !== ""
@@ -72,6 +87,9 @@ managedConfigRouter.delete("/managed-config/:key", (req: Request, res: Response)
     const key = String(req.params.key ?? "");
     const entry = getSchemaEntry(key);
     if (!entry) return notFound(res, `unknown config key '${key}'`);
+    if (isFileOnlyKey(entry)) {
+        return badRequest(res, `key '${key}' is file-sourced (.aiball.yaml) — not editable via the DB config manager`);
+    }
     const project = typeof req.query.project === "string" && req.query.project.trim() !== ""
         ? req.query.project.trim()
         : "";

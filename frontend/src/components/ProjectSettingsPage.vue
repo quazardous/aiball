@@ -4,7 +4,6 @@ import Select from "primevue/select";
 import { api, type Strategy } from "../lib/api";
 import { useLoader } from "../lib/loader";
 import { STRATEGY_OPTIONS } from "../lib/labels";
-import ManagedConfig from "./ManagedConfig.vue";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 import AsyncState from "./ui/AsyncState.vue";
 import SectionHeader from "./ui/SectionHeader.vue";
@@ -113,16 +112,13 @@ watch(() => props.project, () => load());
                 </div>
             </section>
 
-            <!-- #449: project-scoped config keys (same component as Settings >
-                 General, in project mode → "Use global (currently X)" semantics). -->
-            <section class="project-settings__section">
-                <SectionHeader title="Project config">
-                    Override the project-scoped config keys for
-                    <strong>{{ project }}</strong>. Leave a key on "Use global" to
-                    follow the daemon-wide value.
-                </SectionHeader>
-                <ManagedConfig :project="project" />
-            </section>
+            <!-- #1550 — the editable "Project config" section (ManagedConfig) is
+                 hidden for now. The layered config service doesn't yet honor all
+                 layers coherently (the UI wrote DB overrides that the file-sourced
+                 runtime never read), and it's ambiguous under node-proxy where the
+                 file layer lives on another machine. Per-project config lives in
+                 `.aiball.yaml` until the config-service rework lands. Re-enable by
+                 restoring the ManagedConfig section (+ import). -->
         </AsyncState>
     </AdminDashboardLayout>
 </template>
