@@ -621,6 +621,50 @@ do. The wrapper doesn't try to know what "work" is.
 
 ---
 
+## Troubleshooting — reading `claude-loop health`
+
+`claude-loop health` runs ten checks against one loop and exits non-zero if any
+fails. A healthy loop looks like this:
+
+```
+✅ loop           pid 451577 running (tsx + kernel.ts)
+✅ loop source    SHA c06a489 (current)
+✅ loop.sock      responding (18ms round-trip)
+✅ proxy          pid 351910 running (cl-pty-proxy, rust)
+✅ tmux session   cl-aiball-89c365 exists
+✅ launcher       launcher pid 351745 present, session alive
+✅ ipc freshness  last push 0.2s ago
+✅ boot status    sealed
+✅ aiball daemon  up (v0.38.0)
+✅ SSE channel    connected, last event 26s ago
+```
+
+### Read the first failure, not the count
+
+The checks run from the most causal to the most derived, and **later ones fail
+as a consequence of earlier ones**. A dead kernel makes `loop.sock` disappear,
+and the three checks that need it (`ipc freshness`, `boot status`,
+`SSE channel`) then report `no UDS reply (skipped)`. That is one fault printed
+five times, not five faults.
+
+So: fix the topmost failing check, re-run `health`, and see what is left. A
+count like "5 checks failed" says nothing about how much is wrong.
+
+### What to do about it
+
+| The topmost failure | What it means | Gesture |
+|---|---|---|
+| `loop`, `loop.sock`, `ipc freshness`, `boot status`, or `loop source` | The kernel is dead, hung, wedged in boot, or running stale code. Claude itself is still alive in the pane. | `claude-loop reload <name>` — restarts the kernel, claude survives |
+| `proxy` not running | Keystroke and presence detection are gone, but the pane is intact. | `claude-loop reload <name>` |
+| `tmux session` missing, or `loop` reporting a recycled pid | Nothing is left to reload. | `claude-loop start` |
+| `launcher` — `orphan tmux launcher (pid N) — session dead` | A wedged `tmux new-session` survived a loop that never came up. It holds nothing, but it makes the loop look alive in `ps`. | `kill <N>`, then `claude-loop start` |
+| `aiball daemon` | Not a loop problem — the daemon is down, and every loop on this host sees it. | `aiball restart` |
+
+`SSE channel` reporting `disconnected` is the one failure worth ignoring once:
+the bus reconnects on the next heartbeat. Act only if it survives a re-run.
+
+---
+
 ## Files
 
 ```
@@ -635,11 +679,16 @@ src/claude-loop/
   pretooluse-hook.ts                    # gate AskUserQuestion in a headless loop
   kernel.ts                             # detached ticker; SM composition root; AiballClient fastpath
   error-backoff.ts                      # exponential retry on pane crash (rate-limit/api-error)
-  pty-proxy.py                          # Unix PTY proxy: live keystroke detection (see PTY-PROXY.md)
+  pty-proxy.py                          # Python PTY proxy, Unix fallback (see PTY-PROXY.md)
 config/defaults/claude-loop-pings.yaml  # default wake phrases + prompt templates
-windows/cl-pty-proxy/                    # Windows ConPTY proxy (Rust, named pipe)
+windows/cl-pty-proxy/                   # Rust PTY proxy — the default on Unix and Windows
 docs/CLAUDE-LOOP.md                     # this file
 ```
+
+Which proxy runs is `claude_loop.proxy_impl` (`rust` by default, falling back
+to Python then to no proxy); the `proxy` line of `health` names the one it
+found. Diagnosing a loop that reports failures: see
+[Troubleshooting](#troubleshooting--reading-claude-loop-health) above.
 
 Install symlinks `~/.local/bin/claude-loop` alongside `aiball` and
 `aiball-mcp` (see `install.sh`).
