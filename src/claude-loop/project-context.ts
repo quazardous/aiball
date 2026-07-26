@@ -51,7 +51,6 @@ export interface ProjectContext {
         wake_tempo_seconds: number;
         boot_grace_seconds: number;
         boot_min_seconds: number;
-        auto_resume: boolean;
         wake_in_flight_ttl_ms: number;
         esc_takeover: boolean;
         afk_key: string;

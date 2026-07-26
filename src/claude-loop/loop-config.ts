@@ -64,7 +64,6 @@ function applyEnvOverrides(cfg: AiballConfig): void {
     if ((ov = num(CL_ENV.WAKE_IN_FLIGHT_TTL_MS)) !== undefined) cl.wake_in_flight_ttl_ms = ov;
     if ((ov = num(CL_ENV.AFK_WINDOW_MS)) !== undefined) cl.afk_window_ms = ov;
     if ((ov = bool(CL_ENV.WAIT)) !== undefined) cl.wait = ov;
-    if ((ov = bool(CL_ENV.AUTO_RESUME)) !== undefined) cl.auto_resume = ov;
     if ((ov = bool(CL_ENV.ESC_TAKEOVER)) !== undefined) cl.esc_takeover = ov;
     if ((ov = str(CL_ENV.DRAINED_STRATEGY)) !== undefined) cl.drained_strategy = ov;
     if ((ov = str(CL_ENV.LOG_LEVEL)) !== undefined) cl.log_level = ov;

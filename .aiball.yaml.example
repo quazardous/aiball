@@ -84,13 +84,6 @@ claude_loop:
   # for a human take-over without typing --wait each time.
   wait: false
 
-  # AUTO-RESUME : when true (default), the loop auto-crosses the resume
-  # picker that `claude --resume` shows at startup — press Enter on the
-  # highlighted (most recent) session so unattended loops don't stick
-  # on the picker. Set false to require manual selection. The `--resume` /
-  # `--no-resume` CLI flags override this AND `claude.always_resume`.
-  auto_resume: true
-
   # How long the wake-in-flight marker stays "fresh" after the timer
   # touches it pre-send-keys (ms). The UserPromptSubmit hook uses this
   # to distinguish auto-wake from human input.
@@ -186,15 +179,6 @@ claude:
   session_mode: auto
   # Session id used only when session_mode is `fixed` (must be a valid UUID).
   # session_id: "00000000-0000-4000-8000-000000000000"
-
-# --- workflow hints -----------------------------------------------------------
-# claude-loop wraps `feature`-intent ticket wakes with a branch hint
-# ("Feature: build it in <branch>, not on main."). Request/other intents
-# get no hint.
-
-workflow:
-  hint_branch: false
-  hint_worktree: false
 
 # --- project type -------------------------------------------------------------
 # Picked up by the MCP `welcome` tool to choose the onboarding kit. Out of

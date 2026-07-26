@@ -182,13 +182,6 @@ export interface AiballConfig {
          *  arms it (or F9's first press / the reattach no-surprise seed).
          *  Hardcoded 600 since the grace collapse ; re-exposed as a knob. */
         presence_hold_seconds: number;
-        /** #639 david `uqdava` : when true (default), the loop auto-crosses
-         *  the resume picker that `claude --resume` shows at startup —
-         *  press Enter on the highlighted session so unattended/autonomous
-         *  loops aren't stuck on the picker. Set false to require manual
-         *  picker selection. The `--resume` / `--no-resume` CLI flags
-         *  override both this AND `claude.always_resume`. CL_AUTO_RESUME. */
-        auto_resume: boolean;
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
         wake_in_flight_ttl_ms: number;
         /** #722 — TTL window for `isInputHot`. After this many ms with no
@@ -267,17 +260,6 @@ export interface AiballConfig {
         /** #1549 — session id explicite pour `session_mode: fixed`. Ignoré
          *  hors mode fixed. Doit être un UUID valide. */
         session_id: string;
-    };
-    /**
-     * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
-     * tickets. Layered like the rest (defaults → project `.aiball.yaml`). Wording
-     * stays low-level/non-technical; `hint_worktree` off by default.
-     */
-    workflow: {
-        /** Hint to build feature tickets on a dedicated branch + PR. */
-        hint_branch: boolean;
-        /** Hint to use a git worktree (off by default — too technical). */
-        hint_worktree: boolean;
     };
     /**
      * #160 Phase 1 (david `f9agk3` + `#552 b4y2yx`) — upstream provider
@@ -376,7 +358,6 @@ const DEFAULTS: AiballConfig = {
         // #1132 — presence-hold (NOT AFK 10m) duration; 600s = the historical
         // collapsed grace window.
         presence_hold_seconds: 600,
-        auto_resume: true,
         wake_in_flight_ttl_ms: 2000,
         // #722 — input-hot + 2-rate pane probe defaults.
         input_hot_ttl_ms: 3000,
@@ -429,12 +410,6 @@ const DEFAULTS: AiballConfig = {
         // (or `fixed` + `session_id`). Crew agents are forced to `managed`.
         session_mode: "auto",
         session_id: "",
-    },
-    // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
-    // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
-    workflow: {
-        hint_branch: false,
-        hint_worktree: false,
     },
     // #160 Phase 1: no upstream bindings by default — opt-in per-project via
     // `.aiball.yaml upstream: { <project>: [...] }`. Without a binding,
@@ -596,7 +571,6 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         autopoll: { ...DEFAULTS.autopoll },
         consumer: { ...DEFAULTS.consumer },
         claude_loop: { ...DEFAULTS.claude_loop },
-        workflow: { ...DEFAULTS.workflow },
         upstream: { ...DEFAULTS.upstream },
         colors: { ...DEFAULTS.colors },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
@@ -678,9 +652,6 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.presence_hold_seconds === "number" && cl.presence_hold_seconds > 0) {
                 cfg.claude_loop.presence_hold_seconds = cl.presence_hold_seconds;
             }
-            if (typeof cl.auto_resume === "boolean") {
-                cfg.claude_loop.auto_resume = cl.auto_resume;
-            }
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }
@@ -755,10 +726,6 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // global layer déjà appliquée plus haut). Format yaml documenté
             // dans `readUpstreamBlock`.
             Object.assign(cfg.upstream, readUpstreamBlock(configPath));
-            // #319: workflow hint flags (layered like claude_loop above).
-            const wf = (raw.workflow ?? {}) as Record<string, unknown>;
-            if (typeof wf.hint_branch === "boolean") cfg.workflow.hint_branch = wf.hint_branch;
-            if (typeof wf.hint_worktree === "boolean") cfg.workflow.hint_worktree = wf.hint_worktree;
             // #385: per-project colour profile — wins over the global layer applied above.
             Object.assign(cfg.colors, pickColors(raw.colors));
             // #B.232 cpaez7: per-project prompt template overrides. The

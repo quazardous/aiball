@@ -46,7 +46,6 @@ Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
 `--check-cmd`, `--wait`/`--no-wait`) and `CL_*` env (which the loop's
 child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
 `boot_grace_seconds`, `boot_min_seconds`, `presence_hold_seconds`,
-`auto_resume`,
 `wake_in_flight_ttl_ms`, `input_hot_ttl_ms`, `pane_probe_fast_ms`,
 `pane_probe_slow_ms`, `esc_takeover`, `afk_key`, `afk_window_ms`, `wait`,
 `drained_strategy`, `log_level`, `permission_mode`, `gates`. See
@@ -65,10 +64,6 @@ only sees the terminal's **byte stream**, the supported subset is what
 maps to distinct bytes (`esc`, `ctrl+<char>`, f-keys, literals);
 `shift`/`alt+shift`/`ctrl+shift` aren't distinguishable without the
 kitty/win32 keyboard protocol.
-
-### Workflow hints — `workflow:` — *defaults → yaml*
-`hint_branch`, `hint_worktree` (both off by default). See
-[`WORKFLOW.md`](./WORKFLOW.md).
 
 ### Bar colour profile — `colors:` — *defaults → global → yaml*
 The claude-loop tmux status-bar colours. Code defaults →

@@ -267,9 +267,9 @@ interface StartOpts {
      *  the existing detection at the always_resume site sees the sentinel
      *  and skips the auto-inject. */
     noResume?: boolean;
-    /** #639 (david `uqdava`) : --resume → force both `claude.always_resume`
-     *  AND `claude_loop.auto_resume` to true for this invocation, regardless
-     *  of `.aiball.yaml`. Mirror of `noResume` for the positive case. */
+    /** #639 (david `uqdava`) : --resume → force `claude.always_resume` to true
+     *  for this invocation, regardless of `.aiball.yaml`. Mirror of `noResume`
+     *  for the positive case. */
     forceResume?: boolean;
     /** #749 david — start with the wake kill-switch ON. cmdStart touches the
      *  `zen` marker right after the state-dir is created so the first
@@ -2026,10 +2026,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
         .option("--no-resume", "#616: don't auto-inject `--resume` even when `.aiball.yaml claude.always_resume: true` says to. Per-invocation opt-out. Equivalent to `claude-loop start -- --no-resume`.")
-        // #639 (david `uqdava`): explicit `--resume` flag forces BOTH
-        // `claude.always_resume` AND `claude_loop.auto_resume` to true,
-        // regardless of what the per-project .aiball.yaml says.
-        .option("--resume", "#639: force resume mode for this invocation — overrides both `claude.always_resume` and `claude_loop.auto_resume` to true, regardless of yaml config. Mirror of `--no-resume` for the positive case.")
+        // #639 (david `uqdava`): explicit `--resume` flag forces
+        // `claude.always_resume` to true, regardless of what the per-project
+        // .aiball.yaml says.
+        .option("--resume", "#639: force resume mode for this invocation — overrides `claude.always_resume` to true, regardless of yaml config. Mirror of `--no-resume` for the positive case.")
         .option("--force", "Spawn even if another live loop already runs in this cwd")
         .addOption(new Option(
             "--resume-mode <mode>",

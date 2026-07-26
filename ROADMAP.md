@@ -159,6 +159,12 @@ if a use case actually demands it.
 
 ## Open ideas (not committed)
 
+- **Wake-time hint for `feature` tickets** — claude-loop could append a
+  posture reminder ("build this in a dedicated branch + PR, not on main")
+  when it wakes an agent on a `feature`-intent ticket. Config keys for this
+  once existed but nothing ever emitted the hint, so both were removed; the
+  posture stays a convention the agent follows on its own. Wire it only if
+  agents are seen ignoring it.
 - **claude-loop transcript reader** — instead of pane-scraping the
   `esc to interrupt` footer, read claude-code's JSONL transcript at
   `~/.claude/projects/<hash>/<id>.jsonl` for authoritative turn

@@ -25,20 +25,11 @@ switch there silently changes david's live runtime (and blips the daemon).
 `feature` work goes in a **separate worktree**; mainstream edits `main` in
 place. The runtime checkout always shows a stable `main`.
 
-## The wake hint (claude-loop)
+## Who applies the posture
 
-For a `feature`-intent ticket, claude-loop appends a branch hint to the wake
-prompt, e.g. `🌿 Feature: build it in a dedicated branch + PR, not on main.`
-The wording is **config-driven** via the layered `.aiball.yaml`:
-
-```yaml
-workflow:
-  hint_branch: false    # hint a dedicated branch + PR (default off — opt in)
-  hint_worktree: false  # also mention a worktree (default off — too technical)
-```
-
-**Both default to `false`** → no branch hint on feature wakes unless a project
-opts in. `request`/other intents never get a workflow hint.
+Nobody, automatically. `intent` is a marker the agent reads off the ticket —
+there is no wake-time hint and no enforcement. The rule above is a convention
+you and the agent both follow, not something the code checks.
 
 ## Deploy reality
 

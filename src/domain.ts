@@ -66,8 +66,9 @@ export type RuleDecision = typeof RULE_DECISIONS[number];
 
 // #319: `feature` is a workflow-posture marker (not just a label) — a feature
 // ticket is built isolated (branch + PR); `request` (default) & the rest are
-// mainstream (edit `main` live, small always-green increments). claude-loop
-// surfaces a config-driven branch hint for `feature` tickets at wake time.
+// mainstream (edit `main` live, small always-green increments). The posture is
+// a convention for whoever picks the ticket up; nothing in the code branches
+// on it.
 export const INTENTS = ["panic", "request", "question", "fyi", "feature"] as const;
 export type Intent = typeof INTENTS[number];
 
