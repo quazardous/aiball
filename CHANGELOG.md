@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- Releases are now cut by CI: pushing a `vX.Y.Z` tag builds the `cl-pty-proxy`
+  binaries for Linux and Windows and publishes the GitHub Release with them
+  attached, so a release no longer depends on what one machine can compile.
 - Couple a ticket to an external issue: `ticket import gh#123` (CLI), the
   `ticket_import` MCP tool, or the HTTP API pull an issue from GitHub and
   create a linked aiball ticket, mapping its labels to tags. Manual only —

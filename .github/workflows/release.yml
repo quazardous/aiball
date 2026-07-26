@@ -1,0 +1,136 @@
+name: Release
+
+# Cuts the GitHub Release when a `v*` tag is pushed.
+#
+# Why the tag and not a version bump on main: main is the live-runtime branch
+# and gets pushed to many times a day, so detecting a `package.json` bump there
+# would fire releases nobody asked for. Pushing the tag is the one gesture that
+# unambiguously means "release this".
+#
+# What the CI adds over `scripts/release.sh` (which now only tags and pushes):
+# the cross-platform `cl-pty-proxy` binaries. A single dev machine can't produce
+# the Windows one.
+#
+# `workflow_dispatch` is the escape hatch: re-run the build for a tag that
+# already exists (a failed run, a missing asset). It re-uploads assets onto the
+# existing Release instead of failing.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re)release, e.g. v0.37.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # Fail before paying for any build if the tag and the repo disagree. These are
+  # the same checks release.sh runs locally, repeated here so a release cut from
+  # another machine is protected too.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+
+      - name: tag matches package.json version
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          if [[ "${PKG}" != "${{ steps.resolve.outputs.version }}" ]]; then
+            echo "::error::tag ${{ steps.resolve.outputs.tag }} does not match package.json version ${PKG}"
+            exit 1
+          fi
+
+      # Same awk extraction as release.sh used to do: everything between this
+      # version's header and the next `## [`.
+      - name: extract CHANGELOG section
+        run: |
+          awk -v ver="## [${{ steps.resolve.outputs.version }}]" '
+            index($0, ver) == 1 { grab = 1; next }
+            grab && /^## \[/     { exit }
+            grab                 { print }
+          ' CHANGELOG.md > release-notes.md
+          if [[ ! -s release-notes.md ]] || ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::no CHANGELOG section '## [${{ steps.resolve.outputs.version }}]' found (or it is empty)"
+            exit 1
+          fi
+          cat release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  # The reason this workflow exists: binaries a local release can't build.
+  build-proxy:
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bin: cl-pty-proxy
+            asset: cl-pty-proxy-linux-x86_64
+          - os: windows-latest
+            bin: cl-pty-proxy.exe
+            asset: cl-pty-proxy-windows-x86_64.exe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows/cl-pty-proxy
+      # --bin: the crate also builds `fake-claude-log`, a test helper we don't ship.
+      - name: cargo build --release
+        run: cargo build --release --bin cl-pty-proxy --manifest-path windows/cl-pty-proxy/Cargo.toml
+      - name: stage asset
+        shell: bash
+        run: cp "windows/cl-pty-proxy/target/release/${{ matrix.bin }}" "${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  publish:
+    needs: [guard, build-proxy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Idempotent so a workflow_dispatch re-run repairs a partial release
+      # instead of erroring on an existing tag.
+      - name: create or update the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "→ release ${TAG} exists, re-uploading assets"
+            gh release upload "${TAG}" dist/cl-pty-proxy-* --clobber
+          else
+            gh release create "${TAG}" \
+              --title "${TAG}" \
+              --notes-file dist/release-notes.md \
+              dist/cl-pty-proxy-*
+          fi

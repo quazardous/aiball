@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# release.sh — tag the current version and publish a GitHub Release.
+# release.sh — tag the current version and hand off to CI.
 #
 # Precondition: you've already bumped package.json, moved the [Unreleased]
 # bullets under a dated ## [X.Y.Z] header in CHANGELOG.md, and committed +
@@ -8,11 +8,16 @@
 # or commits, so it's safe to run on the live-runtime checkout.
 #
 # What it does, from the version in package.json:
-#   1. sanity-checks (clean tree, on the release commit, tag absent, section present)
+#   1. sanity-checks (clean tree, tag absent, CHANGELOG section present)
 #   2. creates an annotated tag vX.Y.Z and pushes it
-#   3. cuts a GitHub Release whose notes are the CHANGELOG section for X.Y.Z
 #
-# Usage:  scripts/release.sh            # tag + release for package.json version
+# Pushing the tag is what triggers `.github/workflows/release.yml`, which
+# re-runs these same checks, builds the cl-pty-proxy binaries for Linux and
+# Windows, and cuts the GitHub Release with the CHANGELOG section as its notes.
+# There is deliberately only one way to publish a Release — this script does
+# not call `gh release create`.
+#
+# Usage:  scripts/release.sh            # tag + push for package.json version
 #         scripts/release.sh --dry-run  # print what it would do, touch nothing
 set -euo pipefail
 
@@ -53,15 +58,15 @@ echo "→ release notes:"
 echo "${NOTES}" | sed 's/^/    /'
 
 if [[ "$DRY" == 1 ]]; then
-  echo "(dry-run) would: git tag -a ${TAG} && git push origin ${TAG} && gh release create ${TAG}"
+  echo "(dry-run) would: git tag -a ${TAG} && git push origin ${TAG}"
+  echo "(dry-run) the push would then trigger .github/workflows/release.yml"
   exit 0
 fi
 
 # 2. tag + push --------------------------------------------------------------
+# The push is the release trigger: CI takes it from here (build + Release).
 git tag -a "${TAG}" -m "aiball ${VERSION}"
 git push origin "${TAG}"
 
-# 3. GitHub Release ----------------------------------------------------------
-printf '%s\n' "${NOTES}" | gh release create "${TAG}" --title "${TAG}" --notes-file -
-
-echo "✓ released ${TAG}"
+echo "✓ pushed ${TAG} — CI is now building the release"
+echo "  watch: gh run watch \$(gh run list --workflow=release.yml --limit=1 --json databaseId --jq '.[0].databaseId')"

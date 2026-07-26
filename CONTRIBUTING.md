@@ -422,11 +422,18 @@ are the human's call; agents propose them via tickets when relevant
 Cutting a release is two steps. First, by hand: bump `package.json`,
 move the `[Unreleased]` bullets under a dated `## [X.Y.Z] — YYYY-MM-DD`
 header, commit + push on `main`. Then run **`scripts/release.sh`** — it
-tags `vX.Y.Z` (annotated), pushes the tag, and publishes a GitHub
-Release whose notes are that CHANGELOG section. The script bumps/commits
-nothing, so it's safe on the live-runtime checkout; `--dry-run` prints
-what it would do. This is what keeps a stable tag adopters can clone
-instead of bleeding `main`.
+sanity-checks the tree, then tags `vX.Y.Z` (annotated) and pushes the
+tag. The script bumps/commits nothing, so it's safe on the live-runtime
+checkout; `--dry-run` prints what it would do.
+
+Pushing the tag is the release trigger: `.github/workflows/release.yml`
+re-runs the same checks, builds the `cl-pty-proxy` binaries for Linux
+and Windows, and publishes the GitHub Release with that CHANGELOG
+section as its notes and the binaries attached. Nothing else publishes a
+Release — re-run the workflow by hand (`workflow_dispatch`, with the tag
+as input) if a build fails; it repairs an existing Release rather than
+erroring. This is what keeps a stable tag adopters can clone instead of
+bleeding `main`.
 
 ### 3.5 Frontmatter & structure
 
