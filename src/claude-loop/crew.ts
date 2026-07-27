@@ -94,7 +94,7 @@ export function crewSkillStatus(shipped: string, installed: string | null): Crew
 
 function crewSkillPaths(worktree: string): { src: string; dest: string } {
     return {
-        src: join(installRoot(), "skill", "crew", "SKILL.md"),
+        src: join(installRoot(), "skills", "aiball-crew", "SKILL.md"),
         dest: join(worktree, ".claude", "skills", "aiball-crew", "SKILL.md"),
     };
 }

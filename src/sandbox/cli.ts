@@ -92,7 +92,7 @@ function installRoot(): string {
 }
 
 function hookTemplate(name: string): string {
-    return join(installRoot(), "skill", "hooks", name);
+    return join(installRoot(), "config", "sandbox-hooks", name);
 }
 
 function tmuxHasSession(name: string): boolean {

@@ -132,7 +132,7 @@ cat ~/.aiball-sandbox/<name>/env | grep -E 'AIBALL_(SOCK|TOKEN|URL)'
 
 **Claude hesitates ("Should I check the pings?")**
 
-That's a documented failure mode. The convention says: drain pings yourself, react, don't ask. If the sandbox keeps doing this, the brief in the SessionStart hook should be more aggressive. Check `skill/hooks/sandbox-session-start.sh` for the wording.
+That's a documented failure mode. The convention says: drain pings yourself, react, don't ask. If the sandbox keeps doing this, the brief in the SessionStart hook should be more aggressive. Check `config/sandbox-hooks/sandbox-session-start.sh` for the wording.
 
 **Anti-oscillation**
 

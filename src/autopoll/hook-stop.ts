@@ -22,7 +22,7 @@
  * block Claude due to a hook bug.
  *
  * Layout mirrors `src/sandbox/hook-stop.ts` — same TS-with-thin-bash
- * pattern (`skill/hooks/aiball-autopoll-stop.sh`).
+ * pattern (`config/sandbox-hooks/aiball-autopoll-stop.sh`).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

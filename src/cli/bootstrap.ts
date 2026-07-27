@@ -301,7 +301,7 @@ function patchIdentity(path: string, agent: string | undefined, project: string 
  */
 /**
  * #651 david `cbeqv3`+`ycajaf` — deploy the aiball Claude Code skill shipped
- * with the install (`<installRoot>/skill/SKILL.md`) into a destination
+ * with the install (`<installRoot>/skills/aiball/SKILL.md`) into a destination
  * `.claude/skills/aiball/SKILL.md` so the next Claude Code session has the
  * ticket-reply discipline + MCP usage rules in-context without relying on
  * memory alone. Default destination is global (`~/.claude/skills/`) since
@@ -323,11 +323,11 @@ export type SkillInstallVerdict =
 function copySkill(opts: { project: boolean; global: boolean; target?: string; force: boolean }): SkillInstallVerdict {
     // #651 fzsqeg fix : resolveInstallRoot() returns process.cwd() (where
     // the user invoked aiball from), not where aiball is actually
-    // installed. The shipped skill lives at <installRoot>/skill/SKILL.md
+    // installed. The shipped skill lives at <installRoot>/skills/aiball/SKILL.md
     // and `aiballInstallRoot()` walks up from the source file's URL to
     // find that path correctly across hard / symlink install modes.
     const installRoot = aiballInstallRoot();
-    const src = join(installRoot, "skill", "SKILL.md");
+    const src = join(installRoot, "skills", "aiball", "SKILL.md");
     if (!existsSync(src)) return { kind: "missing-source", src };
     let destDir: string;
     if (opts.target !== undefined) {
@@ -603,7 +603,7 @@ export function registerBootstrapCommands(program: Command): void {
         });
 
     // #651: `aiball init skill` — deploy the shipped aiball Claude Code skill
-    // (skill/SKILL.md in the install root) into a user's ~/.claude/skills/
+    // (skills/aiball/SKILL.md in the install root) into a user's ~/.claude/skills/
     // (global, default) or <cwd>/.claude/skills/ (--project). The skill
     // teaches the ticket-reply discipline (then:resolved/then:plan vs plain
     // comments) so the next session has the rules in-context without relying

@@ -222,7 +222,7 @@ tier it qualifies for** (`backlog_tier`, computed per consumer in
 - **Tier 4 — blocked.** Gated by an open `depends_on` blocker. Surfaced last so
   the agent can check the chain — the blocker may be snoozed or forgotten.
 
-A triage comment (§ in `skill/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
+A triage comment (§ in `skills/aiball/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
 moves the ticket **from tier 1 to tier 3** within the same backlog — the agent
 becomes the last actor, so the wake stops pointing at it as long as a
 higher-tier ticket exists. Tickets only drop OUT of the backlog on a lifecycle
