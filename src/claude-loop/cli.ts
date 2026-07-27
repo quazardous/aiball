@@ -1490,10 +1490,16 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         const hasWinProxy = existsSync(winProxyExe);
         process.stdout.write(`  ConPTY proxy   : ${
             hasWinProxy
-                // Wording mirrors the Unix branch below: the named-pipe
-                // injection path was folded onto loop.sock, and the symbols
-                // that implemented it are gone — only this string survived.
-                ? "✓ active (live human-typing detection + socket wake injection)"
+                // DO NOT "align" this with the Unix branch below. The two
+                // platforms genuinely differ: `injectWakePhrase` (state.ts)
+                // sends over `\\.\pipe\cl-inject-<loop>` on win32 and over
+                // loop.sock everywhere else, with no tmux fallback on Windows
+                // (#974). I broke this line once by grepping state.ts for
+                // `injectPipeName` and finding nothing — the file held a NUL
+                // byte, so grep silently skipped it as binary. The byte is
+                // escaped now, but the lesson stands: check state.ts before
+                // "correcting" this string.
+                ? "✓ active (live human-typing detection + named-pipe wake injection)"
                 : "— inactive → fallback direct launch (cl-pty-proxy.exe not built — run `cargo build --release` in windows/cl-pty-proxy); pane-diff detection, idle-only"
         }\n`);
     } else {

@@ -373,7 +373,7 @@ export function logPaneCapture(sd: string | undefined, text: string, cursor?: { 
     // (cursorX/cursorY) so a replay can tell real input from a ghost
     // suggestion. A cursor-only move reuses the previous .txt (no dup file).
     if (CAPTURE_ENABLED) {
-        const key = `${text} ${cursor ? `${cursor.x},${cursor.y}` : ""}`;
+        const key = `${text}\0${cursor ? `${cursor.x},${cursor.y}` : ""}`;
         if (key !== lastCaptureKey) {
             try {
                 let rel = lastPaneFile;
