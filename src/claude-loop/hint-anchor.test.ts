@@ -13,7 +13,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hintHasRenderableBody } from "./state.js";
+import { headTextFor, hintHasRenderableBody } from "./state.js";
 
 test("a hint carrying real text may anchor", () => {
     assert.equal(hintHasRenderableBody({ commentBody: "Revue faite, deux remarques." }), true);
@@ -43,4 +43,30 @@ test("the guarantee holds for a kind that does not exist yet", () => {
     // and it still can when it has one.
     assert.equal(hintHasRenderableBody({ commentBody: "" }), false);
     assert.equal(hintHasRenderableBody({ commentBody: "something to say" }), true);
+});
+
+// =====================================================================
+// #1582, the FIFO half — a comment-centric head must carry text
+// =====================================================================
+
+test("a body renders, stripped", () => {
+    assert.equal(headTextFor("**gras** et suite", "comment", "comment_added"), "gras et suite");
+});
+
+test("the bodyless pseudo-comments fall back to their label, never to nothing", () => {
+    // `ticket_sub_added` is what produced `(#1571 / #s34tvh)` in production.
+    assert.equal(headTextFor("", "sub-ticket added", "ticket_sub_added"), "sub-ticket added");
+    assert.equal(headTextFor(null, "referenced", "ticket_referenced"), "referenced");
+});
+
+test("an unlabelled kind falls back to the kind itself — still not empty", () => {
+    // The guarantee has to hold for a kind nobody has labelled yet, which is
+    // exactly how the two above slipped through a hand-kept list.
+    assert.equal(headTextFor("", undefined, "some_future_kind"), "some_future_kind");
+    assert.equal(headTextFor("   ", undefined, "some_future_kind"), "some_future_kind");
+});
+
+test("with neither body, label nor kind it still says something", () => {
+    assert.equal(headTextFor("", undefined, ""), "update");
+    assert.equal(headTextFor(undefined, undefined, ""), "update");
 });

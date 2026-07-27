@@ -1568,6 +1568,28 @@ export function hintHasRenderableBody(hint?: { commentBody?: string }): boolean 
 }
 
 /**
+ * #1582 — the text a comment-centric head renders. **Never empty.**
+ *
+ * The FIFO half of the same bug: `ticket_sub_added` / `ticket_referenced` are
+ * pseudo-comments whose body is `''`, so the head got a hashid and no text and
+ * the wake came out as a bare `(#N / #hashid)`.
+ *
+ * Muting them instead would starve the queue: the seen mark happens at inject
+ * time and an empty phrase is a hard skip, so the event would sit at the FIFO
+ * head forever, re-picked and re-skipped, blocking everything behind it. On the
+ * hint path suppression is safe because the FIFO is the fallback; the FIFO has
+ * no fallback.
+ *
+ * Same fallback chain as `renderEventLine` — body, else a known label, else the
+ * raw kind. Pure so "never empty" is pinned by a test rather than a comment.
+ */
+export function headTextFor(body: string | null | undefined, label: string | undefined, kind: string): string {
+    const trimmed = typeof body === "string" ? body.trim() : "";
+    if (trimmed) return stripMarkdown(trimmed);
+    return label || kind || "update";
+}
+
+/**
  * #1351 — how many unread events the wake builder fetches to look for a
  * same-ticket bundle. The head is still the oldest (messages[0]); the rest
  * of the window is scanned for other unread events on the head's ticket so
@@ -1868,6 +1890,11 @@ export async function buildContextPhrase(
             ...LIFECYCLE_VERBS,
             comment_added: "comment",
             ticket_created: "new ticket",
+            // #1582 — the two bodyless pseudo-comments. Without a label they
+            // fall back to their raw snake_case kind, which is readable but
+            // reads like a leak; these follow the convention of the two above.
+            ticket_sub_added: "sub-ticket added",
+            ticket_referenced: "referenced",
         };
         // #1351 + #1363 — render ONE event as a compact line, SAME content as
         // its standalone wake : a comment shows its markdown-stripped body
@@ -1923,8 +1950,21 @@ export async function buildContextPhrase(
             if (!isBundleMode && !isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.hashid === "string") {
                 headCommentHashid = unreadHead.hashid;
             }
-            if (!isBundleMode && !isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.body === "string" && unreadHead.body) {
-                headBody = stripMarkdown(unreadHead.body);
+            if (!isBundleMode && !isTicketRoot && !isLifecycle && !isDecisionEvent) {
+                // #1582 — the head is rendered comment-centric, so it MUST carry
+                // text. `ticket_sub_added` / `ticket_referenced` are pseudo-
+                // comments with `body: ''`: the hashid above was set, this stayed
+                // empty, and the wake came out as a bare `(#N / #hashid)`.
+                //
+                // Suppressing the hashid instead would be worse: the seen mark
+                // happens at inject time and an empty phrase is a hard skip, so
+                // the event would sit at the FIFO head forever, re-picked and
+                // re-skipped, starving everything behind it. Render, don't mute.
+                //
+                // Same fallback chain as `renderEventLine` (the bundle + backlog
+                // last-event line): body when there is one, else a known label,
+                // else the raw kind. Never nothing.
+                headBody = headTextFor(unreadHead.body, BUNDLE_LABELS[unreadKind], unreadKind);
             }
             // Title lookup for comment heads (the unread row doesn't carry
             // the parent ticket's title). Best-effort getTicket.
