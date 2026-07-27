@@ -1426,7 +1426,36 @@ export function afkGlyphChunk(sd: string | undefined): string {
 export function paneShowsActivity(paneText: string): boolean {
     const ELAPSED = /\((?:\d+m\s*)?\d+s\s*·/;
     const TOKENS = /[↓↑]\s*[\d.]+k?\s*tokens/i;
-    return paneText.split("\n").some((l) => ELAPSED.test(l) || TOKENS.test(l));
+    // The activity line OPENS its row: an optional spinner glyph or tool-result
+    // marker, a word, then the parenthesised timer. Anything further in is
+    // quoted text, not the live indicator.
+    //
+    // Whole-pane scope with a match-anywhere rule made the pane quote itself
+    // into a busy proof: reading a log, showing a capture, or diffing this very
+    // detector puts an activity line in a tool result, which then SITS IN
+    // SCROLLBACK after the turn ends. Caught on a live capture — the pane held
+    // two matches, one live spinner and one echoed from a command's output:
+    //
+    //     ⎿  rang -8 | ✻ Coalescing… (54s · ↓ 1.9k tokens)     ← quoted, stale
+    //     ✶ Whirring… (1m 52s · ↓ 4.5k tokens)                 ← the real one
+    //
+    // A stale match re-signals the proof every tick, so the authoritative
+    // release never fires again and busy sticks — the #992 failure it exists to
+    // prevent, and it silently gates the wake. Same shape as the prompt-line
+    // filter `footerOf` needed when a wake phrase quoted an error banner.
+    // Structural anchor: indent, an optional spinner glyph or `⎿` marker, ONE
+    // ellipsed word, then the parenthesis. The ellipsis is what every captured
+    // form carries — `Honking…`, `Smooshing…`, `Running…` — and it is what a
+    // quoted line lacks in that position: a rank, a pipe or a function call sits
+    // there instead. Without it, `assert.equal(paneShowsActivity("…"), true)`
+    // read as activity, which is a test file scrolling past.
+    //
+    // If Claude Code ever drops the ellipsis this misses a real line — a false
+    // NEGATIVE, which only falls back on the `esc` and `turn` proofs. That is
+    // the survivable direction; a false positive sticks busy forever.
+    const HEAD = /^\s*(?:\S\s+)?(?:⎿\s+)?[^\s(]*…\s*\(/u;
+    return paneText.split("\n").some((l) =>
+        HEAD.test(l) && (ELAPSED.test(l) || TOKENS.test(l)));
 }
 
 export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean {
