@@ -1402,6 +1402,33 @@ export function afkGlyphChunk(sd: string | undefined): string {
  * returns (#B.185). Shared by the heartbeat timer, the claude-loop
  * Stop hook, and the autopoll Stop hook (#B.192).
  */
+/**
+ * True iff the pane shows Claude Code's ACTIVITY line — the spinner row that
+ * carries an elapsed timer and/or a token counter, e.g.
+ *
+ *     ✻ Honking… (1m 7s · ↓ 2.3k tokens)
+ *     ⎿  Running… (27s · timeout 4m)
+ *
+ * #1580 — the busy stack used to rest entirely on `esc to interrupt`, which is
+ * an intermittent FOOTER HINT: measured on a live loop, present in 5 of 30
+ * captures while claude worked without pause, while this line was there 30/30.
+ * Resting a state on a hint that rotates is what let the bar go grey mid-turn.
+ *
+ * Anchored on the SHAPE, not the words: the gerund is randomised by Claude Code
+ * ("Honking", "Smooshing", …) and the spinner glyph cycles — and psmux degrades
+ * some of those glyphs anyway (`✻` arrives as `*`). What is stable is the
+ * parenthesised elapsed time and the arrowed token counter.
+ *
+ * Whole-pane scope on purpose: the activity line sits ABOVE the prompt box, so
+ * a footer-sized window (5 non-empty lines, two of which are box rules) misses
+ * it. It is specific enough not to need the scope.
+ */
+export function paneShowsActivity(paneText: string): boolean {
+    const ELAPSED = /\((?:\d+m\s*)?\d+s\s*·/;
+    const TOKENS = /[↓↑]\s*[\d.]+k?\s*tokens/i;
+    return paneText.split("\n").some((l) => ELAPSED.test(l) || TOKENS.test(l));
+}
+
 export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean {
     const footer = paneText
         .split("\n")

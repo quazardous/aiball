@@ -109,7 +109,7 @@ import {
     ResumingWatcher,
     CompactConfirmWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
@@ -173,8 +173,10 @@ import {
     seenProof,
     isBusy as busyStackActive,
     releaseAll as releaseBusyProofs,
+    mechanicalProofsLive,
     PROOF_TURN,
     PROOF_ESC,
+    PROOF_ACTIVITY,
     PROOF_COMPACTING,
     type BusyProofs,
 } from "./busy-stack.js";
@@ -700,6 +702,7 @@ const resumingW = new ResumingWatcher();
 const compactConfirmW = new CompactConfirmWatcher();
 const promptW = new PromptWatcher();
 const busyW = new BusyWatcher();
+const activityW = new ActivityWatcher();
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
@@ -711,7 +714,7 @@ const promptInputW = new PromptInputWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, interruptedW, idlePromptW, notLoggedInW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
+    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -956,10 +959,24 @@ function refreshPaneMarkers(): void {
     if (inTurn) busyProofs = seenProof(busyProofs, PROOF_TURN, nowBusy);
     if (escVisible) busyProofs = seenProof(busyProofs, PROOF_ESC, nowBusy);
     if (getCompactingDetector().snapshot().active) busyProofs = seenProof(busyProofs, PROOF_COMPACTING, nowBusy);
-    // pane-idle (cursor back at origin, esc gone) = authoritative release : drop
-    // every proof at once, no waiting for remanence. esc-visible wins (it only
-    // shows at the input origin, so arm precedence is preserved).
-    if (idlePromptVisible && !escVisible) busyProofs = releaseBusyProofs();
+    // #1580 — la preuve CONTINUE : la ligne d'activité est là tant que claude
+    // travaille, quand le hint `esc` ne l'est qu'un tick sur six.
+    if (activityW.snapshot().visible) busyProofs = seenProof(busyProofs, PROOF_ACTIVITY, nowBusy);
+    // pane-idle (cursor back at origin, no mechanical proof left) = authoritative
+    // release : drop every proof at once, no waiting for remanence.
+    //
+    // #1580 — this asked `!escVisible`, the INSTANTANEOUS signal. But `esc to
+    // interrupt` is an intermittent footer hint: measured on a live loop, present
+    // in 6 of 46 captures while claude worked without pause. So the release ran
+    // 4 ticks out of 5 mid-turn and wiped the whole stack, remanence and all —
+    // the bar went grey while claude was visibly working.
+    //
+    // Asking the REMANENCE instead of the instant closes that without weakening
+    // the guard: a proof that blinked out a second ago still holds, one genuinely
+    // past its window holds nothing. #992's anti-stuck-busy purpose is intact —
+    // it just applies after the remanence rather than before it.
+    const mechanicalLive = mechanicalProofsLive(busyProofs, nowBusy);
+    if (idlePromptVisible && !mechanicalLive) busyProofs = releaseBusyProofs();
     const composite = busyStackActive(busyProofs, nowBusy);
     if (composite !== getIpcState().paneBusy) setPaneBusy(sd, composite);
     // #1012 — pane-idle = 2nd source of turn-end (the Stop hook can be missed).
@@ -968,7 +985,9 @@ function refreshPaneMarkers(): void {
     // pane. This makes C1 robust (turn-during-boot closes even with no Stop hook)
     // → the session join can fire. One-shot : once turn:ended fires the observer
     // leaves in_turn so this won't re-fire.
-    if (idlePromptVisible && !escVisible && inTurn) {
+    // Same predicate as the release above, and for the same reason: closing a
+    // turn on a blinked-out hint would end it mid-work (#1580).
+    if (idlePromptVisible && !mechanicalLive && inTurn) {
         log("turn-end via pane-idle (Stop hook absent/late) → turnEnded");
         getTurnService().turnEnded(Date.now());
     }
