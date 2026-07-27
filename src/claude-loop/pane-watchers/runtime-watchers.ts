@@ -5,7 +5,7 @@
  */
 
 import { BoolWatcher } from "./bool-watcher.js";
-import { paneFooterShowsBusy, paneShowsInterrupted } from "../state.js";
+import { paneFooterShowsBusy, paneShowsActivity, paneShowsInterrupted } from "../state.js";
 import { footerOf } from "../error-backoff.js";
 import type { PaneScanCtx } from "./types.js";
 
@@ -26,6 +26,17 @@ export class BusyWatcher extends BoolWatcher {
     readonly name = "busy";
     protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
         return paneFooterShowsBusy(paneText);
+    }
+}
+
+/** #1580 — Claude Code's activity line (spinner + elapsed + token counter) is
+ *  visible. The busy signal that is actually CONTINUOUS while claude works,
+ *  unlike the `esc to interrupt` hint this complements: measured 30/30 against
+ *  5/30 on the same live trace. */
+export class ActivityWatcher extends BoolWatcher {
+    readonly name = "activity";
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        return paneShowsActivity(paneText);
     }
 }
 
