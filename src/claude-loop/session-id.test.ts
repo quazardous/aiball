@@ -144,7 +144,44 @@ test("fixed with invalid id → downgrade to auto + warning (uses persisted if a
     assert.deepEqual(p.args, []);
     assert.match(p.warning ?? "", /fixed/);
 
-    const p2 = resolveSession(inp({ mode: "fixed", configuredId: "nope", readPersistedId: persisted(UUID) }));
+    const p2 = resolveSession(inp({
+        mode: "fixed",
+        configuredId: "nope",
+        readPersistedId: persisted(UUID),
+        sessionExists: always,
+    }));
     assert.equal(p2.mode, "auto");
     assert.deepEqual(p2.args, ["--resume", UUID]);
+});
+
+// #1588 — the fallback says "falling back to auto", so it has to BE auto,
+// existence gate included. Reaching it needs a misconfiguration, which is
+// exactly why it matters: the person hitting it is already looking in the
+// wrong place, and a warning that only mentions `session_id` would convince
+// them the session handling is fine.
+test("fixed with invalid id AND a stale persisted id → no --resume, both causes named", () => {
+    const p = resolveSession(inp({
+        mode: "fixed",
+        configuredId: "nope",
+        readPersistedId: persisted(UUID),
+        sessionExists: never,
+    }));
+    assert.equal(p.mode, "auto");
+    assert.equal(p.sessionId, null, "must not resume a transcript that is gone");
+    assert.deepEqual(p.args, [], "the misconfigured-fixed path is gated like auto");
+    assert.match(p.warning ?? "", /session_id is missing\/invalid/, "names the config error");
+    assert.match(p.warning ?? "", /no longer exists/, "and names the stale session too");
+});
+
+test("the fixed fallback and auto agree, given the same inputs", () => {
+    // Anti-drift: the bug was a second copy of auto's logic. Whatever auto
+    // decides, the fallback must decide — only the warning may differ.
+    for (const exists of [always, never]) {
+        const over = { readPersistedId: persisted(UUID), sessionExists: exists };
+        const viaAuto = resolveSession(inp({ mode: "auto", ...over }));
+        const viaFixed = resolveSession(inp({ mode: "fixed", configuredId: "nope", ...over }));
+        assert.deepEqual(viaFixed.args, viaAuto.args);
+        assert.equal(viaFixed.sessionId, viaAuto.sessionId);
+        assert.equal(viaFixed.mode, "auto");
+    }
 });

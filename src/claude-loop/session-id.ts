@@ -107,6 +107,42 @@ export interface SessionResolvePlan {
  *  - `managed`/`fixed` → `--session-id <id>` on first run, `--resume <id>` when
  *               the session already exists.
  */
+/**
+ * The `auto` resolution, on its own so the `fixed` misconfiguration fallback
+ * can BE it rather than imitate it (#1588).
+ *
+ * Resume the persisted id only when its transcript is actually there. A
+ * well-formed id is not a live one: `.aiball-session_id` sits in the project
+ * cwd — deliberately, so continuity survives the state-dir wipe on restart —
+ * and therefore outlives the transcript it names, because claude prunes and
+ * rotates its own sessions on its own schedule. Handing claude
+ * `--resume <gone>` makes it exit on the spot, which kills the pane, which
+ * reaps the mux session, which stops the kernel on `watchdog:tmux-gone`: a loop
+ * that refuses to start with nothing on screen to say why (#1587).
+ */
+function resolveAuto(
+    readPersistedId: () => string | null,
+    sessionExists: (id: string) => boolean,
+): SessionResolvePlan {
+    const persisted = readPersistedId();
+    if (persisted && isValidUuid(persisted)) {
+        const id = persisted.toLowerCase();
+        if (sessionExists(id)) {
+            return { mode: "auto", sessionId: id, args: ["--resume", id], warning: null };
+        }
+        return {
+            mode: "auto",
+            sessionId: null,
+            args: [],
+            warning: `persisted session ${id} no longer exists — starting a fresh one `
+                + `(stale ${SESSION_ID_FILE}; the SessionStart hook will re-persist)`,
+        };
+    }
+    // First run (or file gone): pass nothing; the SessionStart hook detects the
+    // id claude creates and persists it for next time.
+    return { mode: "auto", sessionId: null, args: [], warning: null };
+}
+
 export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
     const { mode, configuredId, loopName, sessionExists, readPersistedId } = input;
 
@@ -115,31 +151,7 @@ export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
     }
 
     if (mode === "auto") {
-        const persisted = readPersistedId();
-        if (persisted && isValidUuid(persisted)) {
-            const id = persisted.toLowerCase();
-            // A well-formed id is not a live one. `.aiball-session_id` outlives
-            // the transcript it names — the file sits in the project cwd while
-            // claude prunes or rotates its own sessions — so `auto` could hand
-            // claude `--resume <gone>`. claude then exits on the spot, the pane
-            // dies, the mux session is reaped, and the kernel shuts down on
-            // `watchdog:tmux-gone`: a loop that refuses to start with no error
-            // anyone can see (#1587). managed/fixed already gate on this probe;
-            // auto was the one path that trusted the file.
-            if (sessionExists(id)) {
-                return { mode: "auto", sessionId: id, args: ["--resume", id], warning: null };
-            }
-            return {
-                mode: "auto",
-                sessionId: null,
-                args: [],
-                warning: `persisted session ${id} no longer exists — starting a fresh one `
-                    + `(stale ${SESSION_ID_FILE}; the SessionStart hook will re-persist)`,
-            };
-        }
-        // First run (or file gone): pass nothing; the SessionStart hook detects
-        // the id claude creates and persists it for next time.
-        return { mode: "auto", sessionId: null, args: [], warning: null };
+        return resolveAuto(readPersistedId, sessionExists);
     }
 
     let id: string;
@@ -148,15 +160,20 @@ export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
         if (!isValidUuid(trimmed)) {
             // Misconfigured fixed mode → fall back to auto (detect+persist)
             // rather than feed claude a bad id (which would abort the boot).
-            const persisted = readPersistedId();
-            const resumeArgs = persisted && isValidUuid(persisted)
-                ? ["--resume", persisted.toLowerCase()]
-                : [];
+            //
+            // #1588: this branch used to REBUILD auto's logic inline, and so
+            // missed the existence gate auto gained in #1587 — a fallback that
+            // named auto in its warning while behaving like auto-before-the-fix.
+            // Someone with a bad `session_id` AND a stale persisted id got the
+            // exact silent death #1587 fixed, told only that things were
+            // "falling back to auto". Call auto instead of imitating it: there
+            // is now one implementation to keep correct, not two.
+            const fallback = resolveAuto(readPersistedId, sessionExists);
+            const misconfig = `claude.session_mode=fixed but claude.session_id is missing/invalid `
+                + `("${configuredId}") — falling back to auto`;
             return {
-                mode: "auto",
-                sessionId: persisted && isValidUuid(persisted) ? persisted.toLowerCase() : null,
-                args: resumeArgs,
-                warning: `claude.session_mode=fixed but claude.session_id is missing/invalid ("${configuredId}") — falling back to auto`,
+                ...fallback,
+                warning: fallback.warning ? `${misconfig} ; ${fallback.warning}` : misconfig,
             };
         }
         id = trimmed.toLowerCase();
