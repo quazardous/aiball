@@ -698,7 +698,7 @@ does not recognise confidential prose in general.
 ## Files
 
 ```
-bin/claude-loop                         # thin bash launcher → tsx
+bin/claude-loop                         # thin Node entrypoint (shared bin/launcher.js)
 src/claude-loop/
   cli.ts                                # Commander CLI surface; wires hooks + PTY proxy
   state.ts                              # Plate + markers + grace/typing helpers + wake phrases

@@ -1,35 +1,8 @@
-#!/usr/bin/env bash
-# claude-loop — thin launcher that resolves the install root and execs
-# the TS CLI via tsx. The actual command surface lives in
-# src/claude-loop/cli.ts. Same launcher pattern as bin/aiball.
-set -eo pipefail
+#!/usr/bin/env node
+// claude-loop — the tmux wrapper's CLI. The command surface lives in
+// src/claude-loop/cli.ts. ./launcher.js resolves the same UDS/token transport
+// as bin/aiball: `claude-loop check` and the loops it spawns both talk to the
+// daemon through AiballClient, and without those vars they hit TCP and 401.
+import { launch } from "./launcher.js";
 
-SELF="$0"
-while [[ -L "$SELF" ]]; do
-    target="$(readlink "$SELF")"
-    if [[ "$target" = /* ]]; then SELF="$target"; else SELF="$(dirname "$SELF")/$target"; fi
-done
-BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
-ROOT="$(cd "$BIN_DIR/.." && pwd)"
-
-# Preserve the invoker's cwd so the CLI (loop state dir resolution,
-# tmux session cwd, bootstrapInit, MCP server) sees the right starting
-# point — we cd into $ROOT just below. Same var as bin/aiball (single
-# name across the whole aiball product surface).
-AIBALL_CWD="$PWD"
-export AIBALL_CWD
-cd "$ROOT"
-
-# Same UDS/auth resolution as bin/aiball (#B.149 follow-up). claude-loop
-# `check` and the loops it spawns both talk to the aiball daemon via
-# AiballClient; without these vars, they hit TCP and 401.
-AIBALL_HOME="${AIBALL_HOME:-$HOME/.local/share/aiball}"
-if [[ -z "${AIBALL_SOCK:-}" && -S "$AIBALL_HOME/sock" ]]; then
-    export AIBALL_SOCK="$AIBALL_HOME/sock"
-fi
-if [[ -z "${AIBALL_SOCK:-}" && -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
-    # shellcheck source=/dev/null
-    source "$AIBALL_HOME/cli-env"
-fi
-
-exec npx --no-install tsx "$ROOT/src/claude-loop/cli.ts" "$@"
+await launch("src/claude-loop/cli.ts");

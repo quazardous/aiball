@@ -13,6 +13,36 @@
     "url": "https://github.com/quazardous/aiball/issues"
   },
   "type": "module",
+  "bin": {
+    "aiball": "bin/aiball",
+    "aiball-daemon": "bin/aiball-daemon",
+    "aiball-mcp": "bin/aiball-mcp",
+    "claude-loop": "bin/claude-loop"
+  },
+  "files": [
+    "bin/aiball",
+    "bin/aiball-daemon",
+    "bin/aiball-mcp",
+    "bin/claude-loop",
+    "bin/launcher.js",
+    "bin/aiball.cmd",
+    "bin/aiball-mcp.cmd",
+    "bin/claude-loop.cmd",
+    "bin/aiball-tray.cmd",
+    "bin/aiball-tray.ps1",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/tests",
+    "drizzle",
+    "config",
+    "welcome",
+    "skill",
+    "systemd",
+    "assets",
+    "frontend/dist",
+    "windows/cl-pty-proxy",
+    "!windows/cl-pty-proxy/target"
+  ],
   "scripts": {
     "start": "tsx src/daemon.ts",
     "dev": "tsx watch src/daemon.ts",
@@ -22,7 +52,8 @@
     "lint:fix": "eslint . --fix",
     "test": "node --import tsx --import ./src/tests/setup-isolation.ts --test-force-exit --test \"src/**/*.test.ts\"",
     "test:watch": "node --import tsx --import ./src/tests/setup-isolation.ts --test-force-exit --test --watch \"src/**/*.test.ts\"",
-    "test:e2e": "bash tests/run-e2e.sh"
+    "test:e2e": "bash tests/run-e2e.sh",
+    "prepack": "npm --prefix frontend run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -31,6 +62,7 @@
     "drizzle-orm": "^0.45.2",
     "express": "^4.21.0",
     "marked": "^18.0.4",
+    "tsx": "^4.19.0",
     "ws": "^8.18.0",
     "xstate": "^5.32.0",
     "yaml": "^2.6.0",
@@ -44,7 +76,6 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^10.4.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.59.4"
   },

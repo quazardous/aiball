@@ -187,7 +187,8 @@ fi
 
 log "Installing npm dependencies (this can take ~30s)"
 ( cd "$PREFIX_LIB" && npm install --silent )
-# Note: tsx is in devDependencies. We need it at runtime, so install everything.
+# Note: tsx is a real dependency now (the entrypoints register it in-process),
+# so a production install no longer depends on dev dependencies being present.
 
 # --- symlink binaries ------------------------------------------------------
 

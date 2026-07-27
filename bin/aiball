@@ -1,35 +1,7 @@
-#!/usr/bin/env bash
-# aiball — thin launcher that resolves the install root and execs the TS
-# CLI via tsx. The actual command surface lives in src/cli.ts.
-set -eo pipefail
+#!/usr/bin/env node
+// aiball — CLI entrypoint. The command surface lives in src/cli.ts; the
+// install-root / cwd / transport resolution lives in ./launcher.js, shared
+// with every other command.
+import { launch } from "./launcher.js";
 
-# Resolve through symlinks (e.g. ~/.local/bin/aiball → install dir).
-SELF="$0"
-while [[ -L "$SELF" ]]; do
-    target="$(readlink "$SELF")"
-    if [[ "$target" = /* ]]; then SELF="$target"; else SELF="$(dirname "$SELF")/$target"; fi
-done
-BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
-ROOT="$(cd "$BIN_DIR/.." && pwd)"
-
-# Preserve the invoker's cwd so any subcommand that walks up from the
-# user's project (autopoll, check, …) sees the right starting point.
-# cli.ts reads AIBALL_CWD when set, falls back to process.cwd().
-AIBALL_CWD="$PWD"
-export AIBALL_CWD
-cd "$ROOT"
-
-# Local-trust transport (#B.94 follow-up). If the daemon's Unix socket
-# is present, route through it — same-uid trust (chmod 600), no token.
-# Fall back to the cli-env bearer token if the socket isn't there yet
-# (e.g. talking to an older daemon or a remote box via SSH tunnel).
-AIBALL_HOME="${AIBALL_HOME:-$HOME/.local/share/aiball}"
-if [[ -z "${AIBALL_SOCK:-}" && -S "$AIBALL_HOME/sock" ]]; then
-    export AIBALL_SOCK="$AIBALL_HOME/sock"
-fi
-if [[ -z "${AIBALL_SOCK:-}" && -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
-    # shellcheck source=/dev/null
-    source "$AIBALL_HOME/cli-env"
-fi
-
-exec npx --no-install tsx "$ROOT/src/cli.ts" "$@"
+await launch("src/cli.ts");

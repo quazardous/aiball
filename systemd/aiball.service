@@ -5,7 +5,10 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/.local/lib/aiball
-ExecStart=/usr/bin/env npx --no-install tsx %h/.local/lib/aiball/src/daemon.ts
+# The daemon has its own entrypoint (#1567): `npx --no-install tsx …/src/daemon.ts`
+# only resolved inside a checkout with dev dependencies installed, and npx had to
+# find tsx by walking up from the working directory.
+ExecStart=%h/.local/lib/aiball/bin/aiball-daemon
 # #354: bring up enabled+autostart remote-access providers (tailscale, …)
 # when the daemon starts. No-op when no `providers:` block is configured in
 # ~/.config/aiball/config.yaml. Leading `-` = never fail the unit on this.

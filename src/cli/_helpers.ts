@@ -23,8 +23,8 @@ export function die(msg: string): never {
 }
 
 /**
- * The invoker's working directory. `bin/aiball` does `cd "$ROOT"`
- * before exec'ing tsx, which corrupts `process.cwd()`. The wrapper
+ * The invoker's working directory. The `bin/` entrypoint chdir's into the
+ * install root before running us, which corrupts `process.cwd()`. It
  * preserves the original PWD in AIBALL_CWD so commands that walk
  * up from the project (autopoll, check, …) see the right tree.
  */
@@ -38,11 +38,11 @@ export function jsonline(value: unknown): void {
 }
 
 /**
- * Resolve the aiball install root. The `bin/aiball` wrapper cd's into
- * the install dir before exec'ing tsx, so process.cwd() AT STARTUP is
+ * Resolve the aiball install root. The `bin/` entrypoint chdir's into
+ * the install dir before running us, so process.cwd() AT STARTUP is
  * the install root — easier and faster than walking up looking for
  * package.json. Subcommands that need the user's invocation dir use
- * `userCwd()` (reads AIBALL_CWD which the wrapper preserves).
+ * `userCwd()` (reads AIBALL_CWD which the entrypoint preserves).
  */
 export function resolveInstallRoot(): string {
     return process.cwd();

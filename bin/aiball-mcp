@@ -1,35 +1,8 @@
-#!/usr/bin/env bash
-# aiball MCP server — stdio transport.
-# Resolves the project root (where package.json lives) and execs `tsx src/mcp.ts`.
-# Honors AIBALL_URL / AIBALL_HOME / AIBALL_AGENT env vars (see README).
-set -euo pipefail
+#!/usr/bin/env node
+// aiball MCP server — stdio transport. Honors AIBALL_URL / AIBALL_HOME /
+// AIBALL_AGENT (see README). ./launcher.js keeps the caller's PWD in
+// AIBALL_CWD so the welcome resolver finds the right `.aiball.yaml` by walking
+// up from the project the agent was launched in.
+import { launch } from "./launcher.js";
 
-# Resolve real path even through symlinks (e.g. ~/.local/bin/aiball-mcp).
-SELF="$0"
-while [[ -L "$SELF" ]]; do
-    target="$(readlink "$SELF")"
-    if [[ "$target" = /* ]]; then SELF="$target"; else SELF="$(dirname "$SELF")/$target"; fi
-done
-BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
-ROOT="$(cd "$BIN_DIR/.." && pwd)"
-
-# #591 — preserve the caller's PWD so the MCP server (welcome resolver
-# etc.) can find the right `.aiball.yaml` by walking up from the project
-# the agent was launched in, not from the install root we cd into below.
-AIBALL_CWD="$PWD"
-export AIBALL_CWD
-cd "$ROOT"
-
-# Local-trust transport (#B.94 follow-up). UDS first; fall back to the
-# cli-env bearer token if the socket isn't around (older daemon, remote
-# box, opt-out via AIBALL_SOCK="").
-AIBALL_HOME="${AIBALL_HOME:-$HOME/.local/share/aiball}"
-if [[ -z "${AIBALL_SOCK:-}" && -S "$AIBALL_HOME/sock" ]]; then
-    export AIBALL_SOCK="$AIBALL_HOME/sock"
-fi
-if [[ -z "${AIBALL_SOCK:-}" && -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
-    # shellcheck source=/dev/null
-    source "$AIBALL_HOME/cli-env"
-fi
-
-exec npx --no-install tsx "$ROOT/src/mcp.ts" "$@"
+await launch("src/mcp.ts");

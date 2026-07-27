@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+// aiball daemon — the long-running server (Express + SQLite). Split out as its
+// own entrypoint so the systemd unit has a stable ExecStart that survives
+// packaging: the unit used to hardcode `npx --no-install tsx …/src/daemon.ts`,
+// which only resolves inside a git checkout with dev dependencies installed.
+import { launch } from "./launcher.js";
+
+await launch("src/daemon.ts");
