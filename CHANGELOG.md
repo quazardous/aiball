@@ -85,6 +85,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An agent that cannot claim — a crew worker, or a project declaring itself
+  assignment-only — no longer sees the whole shared pool in its backlog and
+  gets woken for tickets it isn't allowed to take. Its backlog is now what was
+  actually handed to it. One exception, deliberately: naming an agent with an
+  explicit `@mention` still reaches it, so an assignment-only agent never
+  becomes unreachable. Nothing changes for agents that can claim.
 - `claude-loop check` and `claude-loop health` now print the loop's state
   directory, so reaching `loop.log` no longer means guessing a hash suffix or
   piping the JSON through `jq`. `check` also resolves the current directory's

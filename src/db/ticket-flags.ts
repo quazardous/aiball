@@ -267,10 +267,14 @@ export function buildTicketFlagsContext(args: {
     /** Cross-agent hot focus set (visible flag, computed by the caller
      *  via `computeHotFocus(ticketAgentLastActivity(ids), …)`. */
     crossAgentHot: Set<number>;
+    /** #1573 — effective claim capability for this consumer, as the route
+     *  already resolved it for `isClaimable` (DB flag AND NOT the no-claim
+     *  header hint). Optional: omitted → the rules read the DB flag. */
+    canClaim?: boolean;
 }): TicketFlagsContext {
     const db = getDb();
     const { consumerId, ticketIds, nowMs, cooldownSec, closedSet,
-        isClaimable, ownClaimIds, assignedToMeIds, claimedByOtherIds, crossAgentHot } = args;
+        isClaimable, ownClaimIds, assignedToMeIds, claimedByOtherIds, crossAgentHot, canClaim } = args;
 
     const unreadMap = ticketUnreadFlags(consumerId, ticketIds);
     const unreadIds = new Set<number>();
@@ -316,6 +320,10 @@ export function buildTicketFlagsContext(args: {
         nowMs,
         closedIds: closedSet,
         claimedByOtherIds,
+        // #1573 — the route resolved the EFFECTIVE value (DB flag AND NOT the
+        // no-claim header hint) for the claimable lens; pass the same one so
+        // backlog and claimable can't disagree.
+        canClaim,
     });
     return {
         consumerId,

@@ -23,6 +23,10 @@ function mkCtx(opts: Partial<BacklogRulesCtx> = {}): BacklogRulesCtx {
         closedIds: opts.closedIds ?? new Set(),
         snoozedIds: opts.snoozedIds ?? new Set(),
         claimedByOtherIds: opts.claimedByOtherIds ?? new Set(),
+        // #1573 — default to a normal (claim-able) consumer so every existing
+        // case keeps asserting the behaviour it was written for.
+        canClaim: opts.canClaim ?? true,
+        mentionsMeIds: opts.mentionsMeIds ?? new Set(),
     };
 }
 
@@ -198,4 +202,60 @@ test("self-authored-ticket + assigned-to-other compose : different targets, both
     assert.equal(defaultBacklogRules.excludes(ctx, item, "unread-list"), true);
     // assigned-to-other excludes from backlog-tier
     assert.equal(defaultBacklogRules.excludes(ctx, item, "backlog-tier"), true);
+});
+
+// =====================================================================
+//  #1573 — unassigned-for-no-claim (the pendant of assigned-to-other)
+// =====================================================================
+
+test("#1573 specialist: an UNASSIGNED ticket leaves backlog + wake", () => {
+    const rule = findRule("unassigned-for-no-claim");
+    const ctx = mkCtx({ consumerId: "spec", canClaim: false });
+    assert.equal(rule.when(ctx, { ticketId: 1, assignee: null }), true);
+    // …and via the engine, on both targets and only those.
+    const item: RuleItem = { ticketId: 1, assignee: null };
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "backlog-tier"), true);
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "fifo-wake"), true);
+    // Same convention as assigned-to-other: still visible, just not work.
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "unread-list"), false);
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "unread-count"), false);
+});
+
+test("#1573 specialist: a ticket assigned TO ME is kept", () => {
+    const rule = findRule("unassigned-for-no-claim");
+    const ctx = mkCtx({ consumerId: "spec", canClaim: false });
+    assert.equal(rule.when(ctx, { ticketId: 1, assignee: "spec" }), false);
+    assert.equal(
+        defaultBacklogRules.excludes(ctx, { ticketId: 1, assignee: "spec" }, "backlog-tier"),
+        false,
+    );
+});
+
+test("#1573 specialist: an explicit @mention still reaches an unassigned ticket", () => {
+    const ctx = mkCtx({ consumerId: "spec", canClaim: false, mentionsMeIds: new Set([7]) });
+    // Same shape, only the mention differs.
+    assert.equal(defaultBacklogRules.excludes(ctx, { ticketId: 7, assignee: null }, "fifo-wake"), false);
+    assert.equal(defaultBacklogRules.excludes(ctx, { ticketId: 8, assignee: null }, "fifo-wake"), true);
+});
+
+test("#1573 a normal consumer is strictly unaffected", () => {
+    const rule = findRule("unassigned-for-no-claim");
+    const ctx = mkCtx({ consumerId: "me", canClaim: true });
+    // The unassigned pool IS a claim-able consumer's work — never excluded.
+    assert.equal(rule.when(ctx, { ticketId: 1, assignee: null }), false);
+    assert.equal(rule.when(ctx, { ticketId: 1, assignee: "me" }), false);
+    assert.equal(rule.when(ctx, { ticketId: 1, assignee: "other" }), false);
+    assert.equal(
+        defaultBacklogRules.excludes(ctx, { ticketId: 1, assignee: null }, "backlog-tier"),
+        false,
+    );
+});
+
+test("#1573 a legacy ctx without the new fields does not fire the rule", () => {
+    const rule = findRule("unassigned-for-no-claim");
+    // A caller built before #1573 (CLI cache, older consumer) must degrade to
+    // the previous behaviour rather than silently emptying someone's backlog.
+    const legacy = { consumerId: "me", nowMs: Date.now(), closedIds: new Set<number>(),
+        snoozedIds: new Set<number>(), claimedByOtherIds: new Set<number>() } as unknown as BacklogRulesCtx;
+    assert.equal(rule.when(legacy, { ticketId: 1, assignee: null }), false);
 });

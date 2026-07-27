@@ -739,6 +739,8 @@ ticketsRouter.get("/tickets", (req, res) => {
         assignedToMeIds,
         claimedByOtherIds,
         crossAgentHot: crossAgentHotFocus,
+        // #1573 — same effective value the claimable lens uses just above.
+        canClaim: consumerCanClaim,
     });
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;

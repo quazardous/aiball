@@ -22,9 +22,11 @@
  * To retarget an existing rule : edit one `excludesFrom`.
  * To audit : `rules.rulesFor(target)` lists every rule that affects it.
  */
-import { and, asc, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
+import { mentions } from "../mentions.js";
 import { getDb, nowIso } from "./connection.js";
+import { getConsumer } from "./consumers.js";
 
 export type Target =
     | "unread-list"
@@ -46,6 +48,15 @@ export interface BacklogRulesCtx {
      *  `claimed-by-other` to keep these out of MY backlog + wake (= they
      *  belong to the claimant's work-order until they release). */
     claimedByOtherIds: Set<number>;
+    /** #1573 — false = "specialist" consumer (`can_claim=false`): the
+     *  `--role crew` worker or a project declaring `no_claim: true`. Such a
+     *  consumer consumes ONLY what is pushed to it. */
+    canClaim: boolean;
+    /** #1573 — tickets whose body, or any comment in the thread, addresses
+     *  this consumer by `@name`. Populated ONLY when `canClaim === false`
+     *  (the rule that reads it is inert otherwise), so a normal consumer
+     *  pays nothing for it. */
+    mentionsMeIds: Set<number>;
 }
 
 /**
@@ -146,6 +157,31 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         when: (ctx, item) => ctx.claimedByOtherIds?.has(item.ticketId) ?? false,
         excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
     },
+    {
+        // #1573 — le PENDANT de `assigned-to-other`, pour un consumer
+        // spécialiste (`can_claim=false`). Cette règle-là couvre « assigné à
+        // quelqu'un d'autre » ; il manquait « assigné à personne ». Pour un
+        // consumer normal, le non-assigné EST le pool claimable partagé, donc
+        // c'est son travail. Pour un spécialiste c'est exactement ce qu'il n'a
+        // pas le droit de prendre — d'où deux chemins qui divergeaient (le set
+        // claimable appliquait le contrat #508, le backlog l'ignorait).
+        //
+        // Exemption tranchée par david : une mention `@moi` explicite réveille
+        // quand même. S'adresser nommément à un agent doit porter, sinon un
+        // spécialiste devient injoignable hors assignment.
+        //
+        // Pas dans `unread-list`/`unread-count` — même convention que
+        // `assigned-to-other` : le thread reste visible, il ne peuple ni le
+        // work-order ni la FIFO.
+        name: "unassigned-for-no-claim",
+        when: (ctx, item) =>
+            ctx.canClaim === false
+            && item.assignee !== ctx.consumerId
+            // Defensive, comme claimed-by-other : un caller legacy peut passer
+            // un ctx construit avant #1573.
+            && !(ctx.mentionsMeIds?.has(item.ticketId) ?? false),
+        excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
+    },
 ]);
 
 export class BacklogRules {
@@ -183,12 +219,27 @@ export function buildBacklogRulesCtx(
         closedIds?: Set<number>;
         snoozedIds?: Set<number>;
         claimedByOtherIds?: Set<number>;
+        /**
+         * #1573 — the EFFECTIVE claim capability. Callers holding a request
+         * must pass it, because the effective value is `DB flag AND NOT the
+         * `x-aiball-no-claim` header hint` — and the claimable lens already
+         * resolves it that way. Passing it is what keeps backlog and claimable
+         * from diverging again, which is the whole bug. Omitted → read the DB
+         * flag (the case for callers with no request in hand).
+         */
+        canClaim?: boolean;
     } = {},
 ): BacklogRulesCtx {
     const nowMs = opts.nowMs ?? Date.now();
     const claimedByOtherIds = opts.claimedByOtherIds ?? new Set<number>();
+    const canClaim = opts.canClaim ?? (getConsumer(consumerId)?.can_claim !== false);
+    // Only a specialist reads this set, so only a specialist pays for it.
+    const mentionsMeIds = canClaim ? new Set<number>() : ticketsMentioning(consumerId);
     if (opts.closedIds && opts.snoozedIds) {
-        return { consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds, claimedByOtherIds };
+        return {
+            consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds,
+            claimedByOtherIds, canClaim, mentionsMeIds,
+        };
     }
     const db = getDb();
     let closedIds = opts.closedIds;
@@ -225,7 +276,43 @@ export function buildBacklogRulesCtx(
             .all();
         snoozedIds = new Set(rows.map((r) => r.id));
     }
-    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds };
+    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds };
+}
+
+/**
+ * #1573 — tickets that address `agent` by `@name`, in their own body or in any
+ * comment of the thread.
+ *
+ * Two steps on purpose. The SQL `LIKE` is a cheap superset filter — it also
+ * catches `@agentX`, and mentions buried in code fences — and it is the only
+ * part whose cost scales with the table. The exact `extractMentions` (the same
+ * one the ping fan-out runs, so a mention means one thing everywhere) then runs
+ * on the handful of rows that matched, not on the backlog. Measured on the live
+ * DB: ~15 ms for 13k messages, and only for a specialist consumer.
+ *
+ * No migration: persisting a "why" on the ping row was the alternative, and it
+ * would have bought the same answer at the price of a schema change.
+ */
+function ticketsMentioning(agent: string): Set<number> {
+    const db = getDb();
+    const like = `%@${agent}%`;
+    const rows = db.all<{ ticket_id: number; body: string | null }>(sql`
+        SELECT ${schema.tickets.id} AS ticket_id, ${schema.tickets.body} AS body
+          FROM ${schema.tickets}
+         WHERE ${schema.tickets.body} LIKE ${like}
+        UNION ALL
+        SELECT ${schema.messages.ticketId} AS ticket_id, ${schema.messages.body} AS body
+          FROM ${schema.messages}
+         WHERE ${schema.messages.body} LIKE ${like}
+           AND ${schema.messages.status} = 'approved'
+    `);
+    const out = new Set<number>();
+    for (const r of rows) {
+        if (r.ticket_id == null) continue;
+        if (out.has(r.ticket_id)) continue;
+        if (mentions(r.body, agent)) out.add(r.ticket_id);
+    }
+    return out;
 }
 
 /** Singleton with the default rule set. */

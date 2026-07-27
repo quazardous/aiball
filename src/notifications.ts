@@ -28,32 +28,9 @@ import {
     type Message,
 } from "./db.js";
 import { effectiveNotifyProjectBroadcasts, getConsumer } from "./db/consumers.js";
-
-/**
- * Extract `@<name>` mentions from a body. Code fences / inline-code spans
- * are stripped first so refs inside them don't fire. Names accept word
- * chars, dash and underscore, 2..64 long. Self-mentions (the author's own
- * consumer_id) are skipped.
- */
-function extractMentions(
-    body: string | null | undefined,
-    selfAgent: string | null,
-): string[] {
-    if (!body) return [];
-    const stripped = body
-        .replace(/```[\s\S]*?```/g, "")
-        .replace(/`[^`]*`/g, "");
-    const out = new Set<string>();
-    // Boundary: start of input or a non-word non-`@` char (so `email@x`
-    // and `@@name` don't get caught).
-    const re = /(?:^|[^\w@])@([a-zA-Z0-9_-]{2,64})\b/g;
-    for (const m of stripped.matchAll(re)) {
-        const name = m[1];
-        if (selfAgent && name === selfAgent) continue;
-        out.add(name);
-    }
-    return [...out];
-}
+// #1573 — moved to a leaf module so the backlog rules can ask the same
+// question ("does this body mention X?") without importing the fan-out.
+import { extractMentions } from "./mentions.js";
 
 /**
  * Fan out delivery rows (in the `pings` table) for every recipient that
