@@ -76,6 +76,38 @@ test("findPromptZone returns the indices of top / chevron / bottom", () => {
     assert.equal(zone!.bottom, 4);
 });
 
+// #1588 — the regression that mattered. Reproduced from a live capture of an
+// aiball loop: Claude Code writes the session label INTO the top rule, and the
+// old `/^─{20,}$/` full-match rejected it. `promptZoneW.visible` was then false
+// forever, which silently disarmed the authoritative busy release and the
+// pane-idle turn-end fallback. Measured 0/30 on real captures before the fix.
+const LABELLED_TOP = `${"─".repeat(40)} claude-aiball-dev ──`;
+const REAL_BOX = [
+    "  ⎿  Running…",
+    "",
+    "✻ Coalescing… (23s · ↓ 730 tokens)",
+    "",
+    LABELLED_TOP,
+    "❯ ",
+    BAR,
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt",
+].join("\n");
+
+test("detects the box when the top rule carries the session label", () => {
+    const zone = findPromptZone(REAL_BOX);
+    assert.ok(zone !== null, "a labelled top rule must not hide the box");
+    assert.equal(zone!.top, 4);
+    assert.equal(zone!.chevron, 5);
+    assert.equal(zone!.bottom, 6);
+});
+
+test("a labelled BOTTOM rule works too — the label is not top-specific", () => {
+    // Nothing guarantees which rule gets decorated; pinning only the observed
+    // side would re-create the same blind spot mirrored.
+    const pane = `${BAR}\n❯ \n${LABELLED_TOP}`;
+    assert.ok(findPromptZone(pane) !== null);
+});
+
 test("zone() snapshot returns the last detected geometry", () => {
     const w = new PromptZoneWatcher();
     w.observe(`pre\n${FULL_BOX}\npost`, CTX);

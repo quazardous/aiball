@@ -76,6 +76,8 @@ import { cmdHealth } from "./cmds/health.js";
 import { cmdDebug } from "./cmds/debug.js";
 import { cmdBacklog } from "./cmds/backlog.js";
 import { cmdSnapshot } from "./cmds/snapshot.js";
+import { cmdCapture } from "./cmds/capture.js";
+import { isKnownSubcommand } from "./subcommands.js";
 import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
@@ -2170,10 +2172,6 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "debug", "backlog", "snapshot", "bug", "crew", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
-    if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
-        die(`unknown subcommand: ${sub} (try --help)`);
-    }
 
     const program = new Command()
         .name("claude-loop")
@@ -2307,6 +2305,11 @@ async function main(): Promise<void> {
     program.command("debug <action> [name]")
         .description("#1032 — fault injection to TEST the reload/resync chantier. Actions: `kill-proxy` (SIGKILL pty-proxy.py → bar RED then reconnect+resync), `kill-kernel` (SIGKILL the kernel.ts kernel → bar freezes, recover via reload). Logs the kill into the central loop.log. Name optional — defaults to the current cwd's loop.")
         .action((action: string, name: string | undefined) => cmdDebug(action, name ?? resolveCurrentLoopName()));
+    program.command("capture [name]")
+        .description("Print the loop's pane as plain text. Default = capture it live through the multiplexer (works the same on tmux and psmux). `--last <n>` reads the last n frames of the rotating cache instead — see `claude_loop.pane_cache_frames`. Read-only.")
+        .option("--last <n>", "read the last n frames of the rotating cache instead of capturing live")
+        .option("--headers", "prefix each frame with its source (implied by --last for more than one frame)")
+        .action((name: string | undefined, opts: { last?: string; headers?: boolean }) => cmdCapture(name ?? resolveCurrentLoopName(), opts));
     program.command("snapshot [name]")
         .description("#963 — archive timer.log + pane-captures + hooks logs sous `<sd>/snapshots/<ISO>/`. Default = capture. `--list` = liste les snapshots. `--prune` = nettoie (default --keep 10).")
         .option("--note <text>", "ajoute un note.txt au snapshot capturé (annoter le repro)")
@@ -2393,6 +2396,18 @@ async function main(): Promise<void> {
             });
         });
 
+    // Reject an unknown subcommand rather than letting it fall into `start`,
+    // where it would become a loop name and quietly boot something nobody
+    // asked for.
+    //
+    // The set is DERIVED from the commands registered just above, not kept by
+    // hand. It used to be a literal list, and the failure mode was silent in
+    // the worst direction: `capture` was registered, worked, and still died on
+    // "unknown subcommand" because nobody remembered the second place. A list
+    // of cases needs whatever produced the cases to produce the list.
+    if (sub && !sub.startsWith("-") && !isKnownSubcommand(program, sub)) {
+        die(`unknown subcommand: ${sub} (try --help)`);
+    }
     // -h / --help at top level → root help, not start help.
     if (sub === "-h" || sub === "--help" || sub === "help") {
         program.outputHelp();

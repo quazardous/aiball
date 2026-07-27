@@ -695,6 +695,42 @@ does not recognise confidential prose in general.
 
 ---
 
+## Reading the pane
+
+Everything the loop knows about Claude's state — busy, idle prompt,
+compacting, a crash banner — it learns by matching text against a capture of
+the pane. So those rules are only ever as good as the screens they were
+written against, and a screen that has scrolled past is gone.
+
+```
+claude-loop capture [<name>]            # capture the pane right now
+claude-loop capture --last 20           # the last 20 frames of the cache
+claude-loop capture --last 1 --headers  # ... labelled with its timestamp
+```
+
+`capture` goes through the multiplexer the loop is already using, so it reads
+the same on tmux and on Windows' psmux. It is read-only.
+
+Live capture always works. `--last` needs the **rotating cache**, which is off
+until a project asks for it:
+
+```yaml
+claude_loop:
+  pane_cache_frames: 1000   # 0 = off (the default)
+```
+
+The cache keeps the newest N screens under `<state_dir>/pane-captures/`. Only
+a frame that *differs* from the previous one is written, so N counts distinct
+screens rather than ticks — an idle loop stops costing anything, and 1000
+frames is a real history rather than a thousand copies of the same idle
+prompt. `CL_PANE_CAPTURE_FRAMES=<n>` overrides it for a single run.
+
+Leave it off unless you are tuning the pane detectors for that project: the
+frames are verbatim screen dumps, which is exactly why `claude-loop bug`
+excludes them by default.
+
+---
+
 ## Files
 
 ```

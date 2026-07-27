@@ -12,6 +12,7 @@
  * qui voudraient connaître la ligne du chevron / du top / du bottom.
  */
 import { BoolWatcher } from "./bool-watcher.js";
+import { isFrameRule } from "../pane-decor.js";
 import type { PaneScanCtx } from "./types.js";
 
 export interface PromptZone {
@@ -20,23 +21,30 @@ export interface PromptZone {
     bottom: number;
 }
 
-/** Scan bottom-up : cherche une ligne pleine de `─` (≥20), puis un
- *  `❯` 1-5 lignes au-dessus, puis une autre ligne pleine de `─` 1-3
- *  lignes au-dessus du chevron. Retourne les indices ou `null`.
+/** Scan bottom-up : cherche une ligne qui COMMENCE par une longue série
+ *  de `─` (≥20), puis un `❯` 1-5 lignes au-dessus, puis une autre ligne
+ *  de cadre 1-3 lignes au-dessus du chevron. Retourne les indices ou `null`.
  *
  *  Seuil 20 `─` choisi pour éviter les false-positives sur des
  *  séparateurs courts dans la conversation (Claude Code écrit ses
- *  boxes en largeur terminal, donc largement >20). */
+ *  boxes en largeur terminal, donc largement >20).
+ *
+ *  #1588 — la règle exigeait un plein-match `/^─{20,}$/` sur les DEUX
+ *  barres. Or Claude Code écrit un LABEL dans la barre du haut (le nom de
+ *  session, que la loop lui passe en `-n <agent>`) : la barre du bas
+ *  passait, celle du haut jamais, et la box n'était plus détectée du tout
+ *  — mesuré 0/30 sur des captures réelles d'une loop en plein travail.
+ *  D'où `isFrameRule` : le préfixe porte la règle, ce qui suit est de la
+ *  décoration. */
 export function findPromptZone(paneText: string): PromptZone | null {
     const lines = paneText.split("\n");
     for (let i = lines.length - 1; i >= 2; i--) {
-        const bottom = lines[i].trim();
-        if (!/^─{20,}$/.test(bottom)) continue;
+        if (!isFrameRule(lines[i])) continue;
         for (let j = i - 1; j >= Math.max(1, i - 6); j--) {
             const inner = lines[j];
             if (!/^\s*❯/.test(inner)) continue;
             for (let k = j - 1; k >= Math.max(0, j - 4); k--) {
-                if (/^─{20,}$/.test(lines[k].trim())) {
+                if (isFrameRule(lines[k])) {
                     return { top: k, chevron: j, bottom: i };
                 }
             }

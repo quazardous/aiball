@@ -25,6 +25,16 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `claude-loop capture` prints the loop's pane as plain text, so a state
+  detector that starts lying can be argued about from the actual screen rather
+  than from memory. It reads through the same multiplexer the loop uses, which
+  makes it work identically on Linux and Windows — previously the only way out
+  was the multiplexer's own command, which meant no way at all on Windows.
+- An optional rotating pane cache, `claude_loop.pane_cache_frames`, keeps the
+  newest N screens so `claude-loop capture --last <n>` can reach the ones that
+  already scrolled past. Only screens that actually changed are stored, so an
+  idle loop costs nothing. Off by default; switch it on per project while you
+  are tuning that project's pane detection.
 - `aiball install --service` registers the daemon as a systemd user service,
   so trying aiball and adopting it stay two separate decisions: nothing runs
   in the background until you ask. `--dry-run` shows the unit first,
@@ -85,6 +95,16 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The loop sees Claude's input box again. It looked for two horizontal rules
+  framing the prompt and required them to be nothing but rule — but Claude
+  Code writes the session label into one of them, so the box went undetected
+  entirely. Two things quietly depended on seeing it: the rule that releases
+  the busy indicator when Claude goes quiet, and the fallback that closes a
+  turn when the end-of-turn signal is missed. Both were inert.
+- A `claude-loop` subcommand that exists is no longer rejected as unknown. The
+  gate consulted a second, hand-maintained list of command names, so adding a
+  command in one place and not the other made it unreachable; the gate now
+  derives the list from the commands themselves.
 - Restarting a crew loop no longer turns it back into the lead. Its role and
   identity were passed at launch and recorded nowhere, so a restart — including
   the one a `SIGHUP` triggers, without anyone typing a command — brought the

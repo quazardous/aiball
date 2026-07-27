@@ -187,8 +187,8 @@ of that seam:
 
 `CL_CAPTURE=1` is the single switch that records a whole session into
 `<state_dir>/capture/` so it can be replayed later. It supersedes the
-scattered debug logs (`CL_PROXY_LOG`, `CL_PANE_CAPTURE_LOG`,
-`CL_BAR_PAINT_LOG`), which keep working as deprecated aliases. Each
+scattered debug logs (`CL_PROXY_LOG`, `CL_BAR_PAINT_LOG`), which keep working
+as deprecated aliases. Each
 writer-process appends its own NDJSON timeline (one file per process keeps
 appends atomic), all stamped with the same epoch-seconds `t` so the streams
 merge into one timeline:
@@ -205,6 +205,13 @@ proxy stream (explicit legacy path). Enable it on a running loop with
 `claude-loop reload <name> --set CL_CAPTURE=1` (the env is patched before the
 respawn). The capture is append-only — it's scoped to the session you want
 to record, so delete the dir when done.
+
+That append-only shape is why it does **not** replace the rotating pane cache
+(`claude_loop.pane_cache_frames`, see [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md)).
+The two answer different questions: a capture records a repro you decided in
+advance to record, keeping the cursor alongside each frame; the cache runs in
+the background with a bounded window so there is always a recent corpus for a
+detector that started lying, whether or not anyone saw it coming.
 
 **Inspecting a capture — `bin/cl-capture`.** A whole capture dir is far too
 large to read raw (every keystroke + full-screen pane dumps). `cl-capture`

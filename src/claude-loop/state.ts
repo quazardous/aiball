@@ -316,9 +316,16 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
 // listing means the pane didn't change. Goal : trace retrospectively
 // what `capture-pane` actually sees during a /compact so we can update
 // the `classifyPaneSpecial` regex/live-signal once and for all.
-// #969 — rotation : on prune les frames > `CL_PANE_CAPTURE_WINDOW_MIN`
-// minutes (default 10) à chaque write. ISO format `YYYY-MM-DDTHH-MM-SS.<ms>Z`
+// #969 — rotation à chaque write. ISO format `YYYY-MM-DDTHH-MM-SS.<ms>Z`
 // est string-orderable donc compare-direct sur le nom, pas de stat.
+// #1588 — la rotation est passée du TEMPS au NOMBRE de frames, et le cache
+// est devenu un réglage de projet (`claude_loop.pane_cache_frames`) au lieu
+// d'un opt-in par variable d'env. Motif : le corpus sert à régler les
+// détecteurs qui lisent le pane, donc le projet qui fait ce travail le veut
+// en permanence pendant que tous les autres n'en veulent pas du tout. Une
+// fenêtre en minutes gardait des quantités de preuve très différentes selon
+// que la loop bossait ou dormait ; « les N derniers écrans » est ce que veut
+// quelqu'un qui lit le corpus.
 export function paneCaptureDir(sd: string): string { return join(sd, "pane-captures"); }
 
 // #990 — unified capture dir. `CL_CAPTURE=1` records a replayable session :
@@ -336,14 +343,39 @@ export function capturePanesDir(sd: string): string { return join(captureDir(sd)
 
 const CAPTURE_ENABLED = process.env[CL_ENV.CAPTURE] === "1";
 
-const PANE_CAPTURE_LOG_ENABLED = process.env[CL_ENV.PANE_CAPTURE_LOG] === "1";
-const PANE_CAPTURE_WINDOW_MIN = (() => {
-    const raw = process.env[CL_ENV.PANE_CAPTURE_WINDOW_MIN];
-    const n = raw === undefined ? NaN : Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : 10;
-})();
-const PANE_CAPTURE_WINDOW_MS = PANE_CAPTURE_WINDOW_MIN * 60_000;
-let lastPaneCaptureWritten: string | null = null; // legacy sink: text-only dedup
+/** Frames kept when the cache is switched on by the env flag alone (i.e. the
+ *  project has no `pane_cache_frames`). Same number as the config default a
+ *  project would write, so the two ways in behave alike. */
+const PANE_CACHE_ENV_DEFAULT = 1000;
+
+let PANE_CACHE_FRAMES: number | null = null;
+/** How many pane frames to keep, `0` = cache off.
+ *
+ *  `CL_PANE_CAPTURE_FRAMES` > `claude_loop.pane_cache_frames` > off, with
+ *  `CL_PANE_CAPTURE_LOG=1` kept as the historical on-switch (it now means
+ *  "on, at the default size"). Memoised: this is read on every capture tick
+ *  and the timer re-execs on `claude-loop reload`, so a stale value can't
+ *  outlive the config change that caused it. */
+function paneCacheFrames(): number {
+    if (PANE_CACHE_FRAMES !== null) return PANE_CACHE_FRAMES;
+    const envRaw = process.env[CL_ENV.PANE_CAPTURE_FRAMES];
+    const envN = envRaw === undefined ? NaN : Number(envRaw);
+    if (Number.isFinite(envN) && envN >= 0) {
+        PANE_CACHE_FRAMES = Math.floor(envN);
+        return PANE_CACHE_FRAMES;
+    }
+    let fromCfg = 0;
+    try {
+        fromCfg = loadConfig(projectCwd()).claude_loop.pane_cache_frames;
+    } catch { /* no config reachable → cache stays off */ }
+    if (!fromCfg && process.env[CL_ENV.PANE_CAPTURE_LOG] === "1") {
+        fromCfg = PANE_CACHE_ENV_DEFAULT;
+    }
+    PANE_CACHE_FRAMES = fromCfg > 0 ? fromCfg : 0;
+    return PANE_CACHE_FRAMES;
+}
+
+let lastPaneCaptureWritten: string | null = null; // rotating sink: text-only dedup
 // #993 unified-capture dedup : (text + cursor). A cursor-only move IS a new
 // frame (it's what tells real input from a ghost suggestion). `lastCaptureText`
 // + `lastPaneFile` let a cursor-only move reuse the previous .txt (no dup file).
@@ -352,20 +384,28 @@ let lastCaptureText: string | null = null;
 let lastPaneFile: string | null = null;
 let captureSeq = 0; // tie-breaker so two frames in the same ms don't collide
 
-export function prunePaneCaptures(dir: string, cutoffMs: number): void {
-    const cutoffIso = new Date(cutoffMs).toISOString().replace(/:/g, "-");
+/**
+ * Keep the newest `keepFrames` captures, drop the rest. Names are ISO stamps
+ * with `:` → `-`, which stay lexicographically ordered, so sorting the names
+ * orders them by time without a single `stat`.
+ *
+ * `keepFrames <= 0` clears the directory: it is the shape of "the cache was
+ * turned off", and leaving the old frames behind would be a corpus nobody is
+ * maintaining any more.
+ */
+export function prunePaneCaptures(dir: string, keepFrames: number): void {
     try {
-        for (const f of readdirSync(dir)) {
-            if (f.endsWith(".txt") && f < cutoffIso) {
-                try { unlinkSync(join(dir, f)); } catch { /* skip */ }
-            }
+        const frames = readdirSync(dir).filter((f) => f.endsWith(".txt")).sort();
+        const doomed = keepFrames > 0 ? frames.slice(0, Math.max(0, frames.length - keepFrames)) : frames;
+        for (const f of doomed) {
+            try { unlinkSync(join(dir, f)); } catch { /* skip */ }
         }
     } catch { /* dir gone */ }
 }
 
 export function logPaneCapture(sd: string | undefined, text: string, cursor?: { x: number; y: number } | null): void {
     if (!sd) return;
-    if (!PANE_CAPTURE_LOG_ENABLED && !CAPTURE_ENABLED) return;
+    if (paneCacheFrames() <= 0 && !CAPTURE_ENABLED) return;
     const nowMs = Date.now();
     // #990/#993 unified capture — write a timeline row when the text OR the
     // cursor changed. The frame is dumped as `panes/<ms>.txt` and the row
@@ -391,14 +431,23 @@ export function logPaneCapture(sd: string | undefined, text: string, cursor?: { 
             } catch { /* best-effort */ }
         }
     }
-    // #678/#969 legacy per-file rotated dump — deprecated alias, text-only dedup.
-    if (PANE_CAPTURE_LOG_ENABLED && text !== lastPaneCaptureWritten) {
+    // #678/#969/#1588 — the rotating per-file cache. Distinct from the unified
+    // capture above, which is append-only and scoped to a repro you chose to
+    // record ; this one runs in the background and keeps a bounded window, so
+    // there is always a recent corpus to check the pane detectors against
+    // without having known in advance that you would need it.
+    //
+    // The dedup is the whole reason a permanent cache is affordable: only a
+    // frame that DIFFERS from the previous one is written, so an idle loop
+    // costs nothing and `frames` counts distinct screens rather than ticks.
+    const keep = paneCacheFrames();
+    if (keep > 0 && text !== lastPaneCaptureWritten) {
         try {
             const dir = paneCaptureDir(sd);
             mkdirSync(dir, { recursive: true });
             const iso = new Date(nowMs).toISOString().replace(/:/g, "-");
             writeFileSync(join(dir, `${iso}.txt`), text);
-            prunePaneCaptures(dir, nowMs - PANE_CAPTURE_WINDOW_MS);
+            prunePaneCaptures(dir, keep);
             lastPaneCaptureWritten = text;
         } catch { /* best-effort */ }
     }

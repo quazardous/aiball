@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { armBusyDefer } from "./state.js";
 import { setIpcBusyDeferUntil } from "./ipc-state.js";
 import { CL_ENV } from "./env-vars.js";
+import { isFrameRule, isPromptLine } from "./pane-decor.js";
 
 /**
  * One recognized error type. `id` labels the log line / bar suffix;
@@ -66,13 +67,21 @@ export const ERROR_PATTERNS: ErrorPattern[] = [
  *  text can quote an error banner (e.g. a ticket title containing
  *  `API Error: Overloaded`). Matching it self-trips the backoff. The
  *  prompt-input lines never carry a backend error banner ; only
- *  claude's response / tool-result blocks do. */
+ *  claude's response / tool-result blocks do.
+ *
+ *  #1588 : drop the box-drawing rules too. They are non-empty lines that
+ *  carry no text a detector could ever want, and they cost budget — the two
+ *  rules framing the prompt plus the prompt line itself take THREE of the
+ *  five slots a short footer window has, which is enough to push a real
+ *  signal out of view. `isFrameRule` matches on the leading run, so it
+ *  catches the labelled rule as well as the pure one. */
 export function footerOf(text: string, footerLines: number): string {
     return text
         .split("\n")
         .map((l) => l.trimEnd())
         .filter((l) => l.length > 0)
-        .filter((l) => !/^[>❯]\s/.test(l))
+        .filter((l) => !isPromptLine(l))
+        .filter((l) => !isFrameRule(l))
         .slice(-footerLines)
         .join("\n");
 }

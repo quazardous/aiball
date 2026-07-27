@@ -301,6 +301,20 @@ export interface AiballConfig {
          *  durable if you keep bundles around; `--out <path>` overrides it
          *  for a single run. */
         dump_dir: string;
+        /** How many pane frames to keep in the rotating capture cache.
+         *  `0` (the default) = no cache at all.
+         *
+         *  Turning it on records every screen the loop captures under
+         *  `<state_dir>/pane-captures/`, keeping the newest N and dropping the
+         *  rest. Only frames that DIFFER from the previous one are written, so
+         *  N is a count of distinct screens, not of ticks — an idle loop stops
+         *  costing anything.
+         *
+         *  It lives in config rather than an env var because it is a
+         *  per-project decision: the detectors that read the pane are tuned
+         *  against real captures, and a project doing that work wants the
+         *  corpus permanently while every other project wants nothing. */
+        pane_cache_frames: number;
         /** Which PTY-proxy implementation to launch. "rust" (the DEFAULT
          *  since the Unix cutover) = the Rust `cl-pty-proxy` when it is built,
          *  else it falls back to Python, then to direct. "python" forces the
@@ -467,6 +481,10 @@ const DEFAULTS: AiballConfig = {
         // Empty = `os.tmpdir()`, resolved at use (not here) so the value
         // stays portable across machines.
         dump_dir: "",
+        // #1588 — off by default. A pane cache is a debugging corpus, so it
+        // costs disk on every project that isn't using it; opting in is the
+        // point.
+        pane_cache_frames: 0,
         // "rust" = the Rust proxy on Unix (default since the cutover) when
         // built, else it transparently falls back to the Python proxy. Set
         // "python" per-project to force pty-proxy.py. Windows is always Rust.
@@ -764,6 +782,15 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // Where `claude-loop bug` drops its bundle (empty = $TMPDIR).
             if (typeof cl.dump_dir === "string") {
                 cfg.claude_loop.dump_dir = cl.dump_dir.trim();
+            }
+            // #1588 — rotating pane-capture cache, in frames. Anything that
+            // isn't a finite number ≥ 0 leaves the default (off) rather than
+            // writing NaN frames to disk.
+            if (cl.pane_cache_frames !== undefined) {
+                const n = Number(cl.pane_cache_frames);
+                if (Number.isFinite(n) && n >= 0) {
+                    cfg.claude_loop.pane_cache_frames = Math.floor(n);
+                }
             }
             // Which PTY proxy on Unix ("rust" default, "python" to force).
             if (typeof cl.proxy_impl === "string") {

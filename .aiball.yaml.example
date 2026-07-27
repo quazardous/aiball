@@ -66,6 +66,22 @@ claude_loop:
   # earlier if it detects the prompt.
   boot_grace_seconds: 60
 
+  # Rotating pane-capture cache, in FRAMES. 0 (the default) = no cache.
+  #
+  # The loop reads its state — busy, idle prompt, compacting, crash banners —
+  # by matching text against a screen capture, so those rules are only as good
+  # as the screens they were written against. Turning this on keeps the newest
+  # N screens under `<state_dir>/pane-captures/`, ready to read back with
+  # `claude-loop capture --last <n>` when a detector starts lying.
+  #
+  # Only a frame that DIFFERS from the previous one is stored, so N counts
+  # distinct screens rather than ticks and an idle loop costs nothing.
+  #
+  # It is off by default because it is a debugging corpus: switch it on for a
+  # project whose pane detectors you are actively tuning, and leave it off
+  # everywhere else.
+  pane_cache_frames: 0
+
   # Floor INVIOLABLE — boot phase ne peut pas finir avant ce minimum
   # (default 30 s). Couvre le flicker au démarrage où des hooks early
   # peuvent prétendre que claude est ready avant qu'il ait vraiment

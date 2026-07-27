@@ -80,7 +80,11 @@ export const CL_ENV = {
     PROXY_DEBUG_TTY: "CL_PROXY_DEBUG_TTY",
     BAR_PAINT_LOG: "CL_BAR_PAINT_LOG",
     PANE_CAPTURE_LOG: "CL_PANE_CAPTURE_LOG",
-    PANE_CAPTURE_WINDOW_MIN: "CL_PANE_CAPTURE_WINDOW_MIN",
+    // #1588 — the cache size, in FRAMES. Overrides `claude_loop.pane_cache_frames`
+    // for one run. Replaces `CL_PANE_CAPTURE_WINDOW_MIN`: rotating on age meant
+    // a busy loop and an idle one kept wildly different amounts of evidence,
+    // and "keep the last N screens" is what someone reading the corpus wants.
+    PANE_CAPTURE_FRAMES: "CL_PANE_CAPTURE_FRAMES",
     // Unified record/replay capture (supersedes the scattered debug logs
     // above). `CL_CAPTURE=1` writes one NDJSON file per writer-process into
     // `<state_dir>/capture/` (timer → `panes.ndjson`, proxy → `proxy.ndjson`),
