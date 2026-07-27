@@ -63,16 +63,55 @@ test("auto, first run (no persisted id) → empty plan (fresh; hook will persist
     assert.deepEqual(p.args, []);
 });
 
-test("auto, persisted id present → --resume <id> (lowercased)", () => {
-    const p = resolveSession(inp({ mode: "auto", readPersistedId: persisted(UUID.toUpperCase()) }));
+test("auto, persisted id present AND its transcript exists → --resume <id> (lowercased)", () => {
+    const p = resolveSession(inp({
+        mode: "auto",
+        readPersistedId: persisted(UUID.toUpperCase()),
+        sessionExists: always,
+    }));
     assert.equal(p.sessionId, UUID);
     assert.deepEqual(p.args, ["--resume", UUID]);
+    assert.equal(p.warning, null);
 });
 
-test("auto, persisted garbage → treated as first run (empty)", () => {
-    const p = resolveSession(inp({ mode: "auto", readPersistedId: persisted("not-a-uuid") }));
+// #1587 — the case that cost a morning. `.aiball-session_id` lives in the
+// project cwd and outlives the transcript it names, so a well-formed id is not
+// a live one. Resuming a pruned session makes claude exit at once, the pane
+// dies, the mux session is reaped, and the kernel stops on `watchdog:tmux-gone`
+// — a loop that refuses to start with nothing on screen but the shell prompt.
+test("auto, persisted id whose transcript is GONE → fresh session + warning", () => {
+    const p = resolveSession(inp({
+        mode: "auto",
+        readPersistedId: persisted(UUID),
+        sessionExists: never,
+    }));
+    assert.equal(p.mode, "auto");
+    assert.equal(p.sessionId, null, "must not resume an id with no transcript");
+    assert.deepEqual(p.args, [], "no --resume at all — a fresh session is the fallback");
+    assert.match(p.warning ?? "", /no longer exists/);
+    assert.match(p.warning ?? "", new RegExp(UUID), "the warning names the stale id");
+});
+
+test("auto, the existence probe is asked for the PERSISTED id, not something else", () => {
+    const asked: string[] = [];
+    resolveSession(inp({
+        mode: "auto",
+        readPersistedId: persisted(UUID.toUpperCase()),
+        sessionExists: (id) => { asked.push(id); return true; },
+    }));
+    assert.deepEqual(asked, [UUID], "probed with the lowercased persisted id");
+});
+
+test("auto, persisted garbage → treated as first run (empty), probe not even consulted", () => {
+    let probed = false;
+    const p = resolveSession(inp({
+        mode: "auto",
+        readPersistedId: persisted("not-a-uuid"),
+        sessionExists: () => { probed = true; return true; },
+    }));
     assert.equal(p.sessionId, null);
     assert.deepEqual(p.args, []);
+    assert.equal(probed, false, "a malformed id is rejected before any fs probe");
 });
 
 test("managed, first run → --session-id <derived>", () => {
