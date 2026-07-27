@@ -31,6 +31,8 @@ import {
     stateDirFor,
     loopLogPath,
     loopPidPath,
+    readKernelPids,
+    writeKernelPids,
     tmuxName,
     loopSockPath,
     sendShutdownToTimer,
@@ -54,13 +56,44 @@ function tmuxAlive(name: string): boolean {
  * #783 — scan running processes for any timer / proxy / hook still bound to
  * `<sd>` via the `CL_STATE_DIR` env var, SIGKILL them. Catches orphans the
  * watchdog or bash trap couldn't reap (pre-fix code, kill -9 of bash before
- * the trap had wired up, etc.). Linux-only: reads /proc/<pid>/environ. On
- * other platforms the function is a silent no-op — the 2s watchdog covers
- * orphans spawned by post-fix code, and an installed-base sweep needs
- * platform-specific plumbing (mac libproc / windows WMI) we haven't built.
+ * the trap had wired up, etc.).
+ *
+ * Two strategies, because the question "which state dir does this process
+ * belong to?" is answerable very differently per OS:
+ *   - Linux reads `/proc/<pid>/environ` for `CL_STATE_DIR`, which catches ANY
+ *     satellite (timer, proxy, hook), hence the `kernelOnly` filter.
+ *   - Elsewhere a process cannot read another's environment, so the loop keeps
+ *     its own roll-call: each kernel registers its pid at boot (#1601). Only
+ *     kernels register, so `kernelOnly` is implicit there.
  */
 export function sweepOrphans(sd: string, opts: { kernelOnly?: boolean } = {}): { killed: number[] } {
-    if (process.platform !== "linux") return { killed: [] };
+    // #1601 — off Linux there is no `/proc/<pid>/environ` to ask which state dir
+    // a process belongs to, and a process cannot read another's environment on
+    // Windows. This returned early, so the sweep was a silent no-op there and
+    // orphans accumulated: a reload kills only the pid in `loop.pid`, leaving
+    // every kernel orphaned by an EARLIER reload alive. Observed live — three
+    // kernels for one loop, each painting the bar with its own AFK countdown (a
+    // flickering timer), each connected to the proxy (a link that read as
+    // flapping), each writing to the same log (pairs of events that read as one
+    // process misbehaving).
+    //
+    // The loop keeps its own roll-call instead of asking the OS: every kernel
+    // appends its pid at boot, and this kills whatever is still alive and is not
+    // us. `kernelOnly` is implicit — only kernels ever register.
+    if (process.platform !== "linux") {
+        const killed: number[] = [];
+        const survivors: number[] = [];
+        for (const pid of readKernelPids(sd)) {
+            if (pid === process.pid) { survivors.push(pid); continue; }
+            let alive = true;
+            try { process.kill(pid, 0); } catch { alive = false; }
+            if (!alive) continue; // dead already — drop it from the roll-call
+            try { process.kill(pid, "SIGKILL"); killed.push(pid); }
+            catch { survivors.push(pid); /* race, or not ours to kill */ }
+        }
+        writeKernelPids(sd, survivors);
+        return { killed };
+    }
     const killed: number[] = [];
     const marker = `CL_STATE_DIR=${sd}`;
     let entries: string[];
