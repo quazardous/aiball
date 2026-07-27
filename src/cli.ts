@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
-import { checkPrereqs } from "./sysdeps.js";
+import { checkPrereqs, checkShims } from "./sysdeps.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
 import { registerTicketCommands } from "./cli/ticket.js";
@@ -271,6 +271,12 @@ program
             // proxy launch uses — and each miss carries the install command for
             // THIS machine's package manager.
             dependencies: checkPrereqs(),
+            // #1583 — the commands as the SHELL sees them. Prerequisites say
+            // what the machine is missing; this says what the install has lost.
+            // Probed by running them, because a launcher whose target vanished
+            // still passes an existence test — that's how a whole Windows box
+            // went silent after the `.cmd` files were dropped.
+            shims: checkShims(),
             // #B.154: deprecation surface — `.mcp.json` env block is
             // the legacy identity-injection mechanism; users should
             // migrate to `.aiball.yaml consumer:*`. Independent of
@@ -348,6 +354,20 @@ program
                 : `missing — ${d.degraded}`;
             process.stdout.write(`  ${d.required ? "✗" : "·"} ${d.cmd}: ${verdict}\n`);
             if (d.install) process.stdout.write(`     install with: ${d.install}\n`);
+        }
+        const brokenShims = payload.shims.filter((s) => !s.works);
+        process.stdout.write(`\ninstalled commands\n`);
+        for (const s of payload.shims) {
+            process.stdout.write(`  ${ok(s.works)} ${s.cmd}: ${s.detail}\n`);
+        }
+        if (brokenShims.length > 0) {
+            // Naming the repair is the point — a command that vanishes from the
+            // PATH gives no clue on its own, and the MCP server failing this way
+            // reads as a network drop rather than a broken install.
+            process.stdout.write(
+                `  ! re-run the installer to rewrite these launchers `
+                + `(install.sh on Linux/macOS, install.ps1 on Windows)\n`,
+            );
         }
         if (payload.deprecation.mcp_json_env_block) {
             process.stdout.write(

@@ -21,6 +21,69 @@ export function commandExists(cmd: string): boolean {
     return spawnSync("command", ["-v", cmd], { shell: true, stdio: "ignore" }).status === 0;
 }
 
+/** Where the OS resolves `cmd`, or null when it isn't on PATH. */
+export function commandPath(cmd: string): string | null {
+    const r = process.platform === "win32"
+        ? spawnSync("where", [cmd], { encoding: "utf8" })
+        : spawnSync("command", ["-v", cmd], { shell: true, encoding: "utf8" });
+    if (r.status !== 0) return null;
+    const first = (r.stdout ?? "").split(/\r?\n/)[0]?.trim();
+    return first || null;
+}
+
+// =====================================================================
+// Installed commands, end to end (#1583)
+// =====================================================================
+
+export interface ShimStatus {
+    cmd: string;
+    /** What the OS resolves the name to; null when it isn't on PATH. */
+    path: string | null;
+    /** Did invoking it actually produce a working command? */
+    works: boolean;
+    detail: string;
+}
+
+/**
+ * Probe the installed commands by RUNNING them, not by looking at paths.
+ *
+ * #1583 — deleting the versioned `bin/*.cmd` left every Windows box whose
+ * shims were written by the older installer pointing at files that no longer
+ * exist. The shim itself was still there, so a path-existence check would have
+ * reported the broken machine as healthy: the failure is one level deeper, in
+ * what the shim hands off to. A dangling POSIX symlink fails at the other
+ * level. Executing the command is the only probe that catches both — and it
+ * covers the whole chain (shim → target → node → tsx) rather than one link.
+ *
+ * `aiball-mcp` is a stdio server with no `--version`, so asking for one would
+ * hang waiting on input. It gets an immediate EOF instead: a healthy server
+ * starts, sees the closed stdin and exits cleanly.
+ *
+ * Reports, never repairs — the fix differs per install mode and belongs to
+ * whoever owns the box.
+ */
+export function checkShims(timeoutMs = 15_000): ShimStatus[] {
+    const probe = (cmd: string, args: string[], input?: string): ShimStatus => {
+        const path = commandPath(cmd);
+        if (!path) {
+            return { cmd, path: null, works: false, detail: "not on PATH" };
+        }
+        const r = spawnSync(cmd, args, { encoding: "utf8", timeout: timeoutMs, input });
+        if (r.status === 0) return { cmd, path, works: true, detail: path };
+        // The shim resolved but running it failed — the classic shape is a
+        // launcher pointing at a target that has since moved or been deleted.
+        const why = r.error?.message
+            ?? (r.stderr ?? "").split(/\r?\n/).find((l) => l.trim())
+            ?? `exited ${r.status ?? "on a signal"}`;
+        return { cmd, path, works: false, detail: `${path} — ${why.trim()}` };
+    };
+    return [
+        probe("aiball", ["--version"]),
+        probe("claude-loop", ["--version"]),
+        probe("aiball-mcp", [], ""),
+    ];
+}
+
 // =====================================================================
 // Prerequisites a package cannot carry (#1567 phase 3)
 // =====================================================================
