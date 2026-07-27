@@ -125,8 +125,20 @@ is never bricked (the analogue of the Unix proxy's `os.execvp` fallback).
 - `state.ts::injectWakePhrase` — on `win32`, gate on `proxyIsAlive(sd)`
   (a named pipe can't be `stat`-ed) and write the wake to
   `injectPipeName(sd)` = `\\.\pipe\cl-inject-<name>` via Node `net`
-  (named pipes are first-class in Node `net`, no native dep). Falls back to
-  the psmux paste/`send-keys` path otherwise.
+  (named pipes are first-class in Node `net`, no native dep).
+
+  Two different outcomes hide behind that gate, and the distinction matters
+  when you are chasing a wake that never arrived:
+
+  | | |
+  |---|---|
+  | **no proxy** | fall back to the psmux paste/`send-keys` path |
+  | **proxy alive, the write fails** | return false and stop — **no fallback** |
+
+  When the proxy fronts claude, the pipe *is* the channel: a failed write is a
+  proxy bug to investigate, not a reason to reach for `send-keys`, which would
+  re-arm the ten-minute human-presence hold and silence the next wakes. So
+  there is no send-keys retry to look for in that case — look at the proxy.
 - `claude-loop check` — reports the ConPTY proxy as active/inactive on
   Windows, same probe the launch uses.
 
