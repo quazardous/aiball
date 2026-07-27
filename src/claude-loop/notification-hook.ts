@@ -45,21 +45,39 @@ const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
 if (!sd || !name) emit();
 
-// Same dual-write as `stop-hook.ts`: the UDS LOG channel puts the line in the
-// central `loop.log` (where it sits next to the Stop lines this spike has to be
-// compared against), and the local file catches what the timer misses while it
-// is down or respawning. The hook lives ~50ms, too short to await delivery.
+// Dual sink, like `stop-hook.ts`: the local file, and the UDS LOG channel that
+// puts the line in the central `loop.log` — where it can be read against the
+// Stop lines, which is the whole point of a timeline.
+//
+// The file write is synchronous; the UDS one is not, and that difference cost
+// the first run of this spike. `stop-hook` fires-and-forgets because it keeps
+// working afterwards, so its socket write has time to leave. This hook logs and
+// exits immediately, and `process.exit` killed every pending send: 0 of 4 lines
+// reached the centre while all 4 reached the file.
+//
+// So the line is buffered here and delivered with an AWAIT before exiting.
+const pending: string[] = [];
 const logger = createLogger({
     tag: `notification-hook:${name}`,
     write: (line) => {
-        void sendEventOnce(
-            loopSockPath(sd!),
-            { kind: LOOP_SOCK_KIND.LOG, data: { line } },
-            { timeoutMs: 100, throwOnError: false },
-        ).catch(() => { /* timer down — the file below is the fallback */ });
+        pending.push(line);
         try { appendFileSync(join(sd!, "notification-hook.log"), line); } catch { /* nowhere to log */ }
     },
 });
+
+/** Deliver the buffered lines to the timer, then give up quietly. The file
+ *  already has them, so a down timer costs visibility, never data. */
+async function flushToTimer(): Promise<void> {
+    for (const line of pending) {
+        try {
+            await sendEventOnce(
+                loopSockPath(sd!),
+                { kind: LOOP_SOCK_KIND.LOG, data: { line } },
+                { timeoutMs: 100, throwOnError: false },
+            );
+        } catch { /* timer down — the file is the fallback */ }
+    }
+}
 
 async function readStdin(): Promise<string> {
     const chunks: Buffer[] = [];
@@ -85,7 +103,9 @@ try {
         : "?";
     const keys = parsed ? Object.keys(parsed).sort().join(",") : "-";
     logger.info(`notification type=${type} keys=[${keys}] raw=${JSON.stringify(raw)}`);
+    await flushToTimer();
 } catch (e) {
     logger.info(`notification READ FAILED: ${e instanceof Error ? e.message : String(e)}`);
+    await flushToTimer();
 }
 emit();
