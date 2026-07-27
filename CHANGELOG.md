@@ -85,6 +85,14 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `claude-loop check` and `claude-loop health` now print the loop's state
+  directory, so reaching `loop.log` no longer means guessing a hash suffix or
+  piping the JSON through `jq`. `check` also resolves the current directory's
+  loop when you don't name one — it used to report "(no loop)" while sitting
+  inside a live one — which in turn makes `--config` work without an argument.
+- The Windows proxy line in `claude-loop check` claimed wake injection went
+  through a named pipe. That path was folded onto the loop socket a while ago;
+  only the message had survived.
 - A comment can no longer be announced under another ticket's number. When a
   comment arrived while the agent was busy and an unrelated ticket was next in
   the queue, the wake showed that comment's text under the other ticket's

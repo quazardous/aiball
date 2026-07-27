@@ -486,7 +486,12 @@ export async function cmdHealth(target: string | string[] | null | undefined, op
         process.stdout.write(JSON.stringify(reports, null, 2) + "\n");
     } else {
         for (const r of reports) {
-            if (reports.length > 1) process.stdout.write(`# ${r.loop_name}\n`);
+            // #1574 david : the header used to appear only in multi-loop runs,
+            // so the common single-loop case named neither the loop nor its
+            // state dir — and the dir carries `loop.log`, whose hash suffix is
+            // unguessable. Always print both (the synthetic orphan-launcher
+            // report has no dir; it just gets its name).
+            process.stdout.write(`# ${r.loop_name}${r.state_dir ? ` — ${r.state_dir}` : ""}\n`);
             process.stdout.write(formatReport(r) + "\n");
             if (reports.length > 1) process.stdout.write("\n");
         }

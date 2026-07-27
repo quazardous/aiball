@@ -425,14 +425,29 @@ function loopsForCwd(): { name: string; alive: boolean }[] {
     return matches;
 }
 
+/**
+ * The loop this cwd resolves to, or null when there is none (or the answer is
+ * ambiguous). Soft by design: `check` is a diagnostic that must still say
+ * something useful in a project with no loop at all, so it can't use the dying
+ * variant below. Single source for the resolution RULE — `resolveCurrentLoopName`
+ * only adds the error messages.
+ */
+function currentLoopNameOrNull(): string | null {
+    if (!existsSync(STATE_ROOT)) return null;
+    const matches = loopsForCwd();
+    if (matches.length === 1) return matches[0].name;
+    const alive = matches.filter((m) => m.alive);
+    return alive.length === 1 ? alive[0].name : null;
+}
+
 function resolveCurrentLoopName(): string {
+    const resolved = currentLoopNameOrNull();
+    if (resolved) return resolved;
+    // Nothing resolved — recompute just enough to say WHY.
     const cwd = canonicalCwd(process.env.AIBALL_CWD ?? process.cwd()); // #414 symlink-safe
     if (!existsSync(STATE_ROOT)) die(`no loops registered (state root ${STATE_ROOT} missing). Pass a name or start one first.`);
     const matches = loopsForCwd();
     if (matches.length === 0) die(`no claude-loop registered for cwd ${cwd}. Pass a name or run \`claude-loop list\`.`);
-    if (matches.length === 1) return matches[0].name;
-    const alive = matches.filter((m) => m.alive);
-    if (alive.length === 1) return alive[0].name;
     const names = matches.map((m) => `${m.name}${m.alive ? "" : " (dead)"}`).join(", ");
     die(`multiple loops in cwd ${cwd}: ${names}. Pass a name explicitly.`);
 }
@@ -1418,9 +1433,16 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     let plateCheckCmd: string | undefined;
     let plateName: string | undefined;
     let plate: Plate | null = null;
-    if (name) {
-        const sd = stateDirFor(name);
+    // #1574 david : resolve the cwd's loop when no name is given, like
+    // reload/restart/stop already do. Without this, `check` printed
+    // "(no loop)" while sitting inside a perfectly alive one — and never had
+    // a state dir to show.
+    const target = name ?? currentLoopNameOrNull() ?? undefined;
+    let stateDir: string | undefined;
+    if (target) {
+        const sd = stateDirFor(target);
         if (existsSync(platePath(sd))) {
+            stateDir = sd;
             try {
                 plate = readPlate(sd);
                 plateCheckCmd = plate.check_cmd;
@@ -1430,14 +1452,20 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     }
     const checkCmd = opts.checkCmd ?? plateCheckCmd ?? process.env[CL_ENV.CHECK_CMD] ?? DEFAULT_CHECK_CMD;
     process.stdout.write(`claude-loop check\n`);
-    process.stdout.write(`  loop name      : ${plateName ?? name ?? "(no loop)"}\n`);
+    process.stdout.write(`  loop name      : ${plateName ?? target ?? "(no loop)"}\n`);
+    // #1574 — the suffix is a hash of (cwd, agent): unguessable. Printing it
+    // next to `.aiball.yaml` is what makes `<state dir>/loop.log` reachable
+    // without `--json | jq`.
+    if (stateDir) {
+        process.stdout.write(`  state dir      : ${stateDir}\n`);
+    }
     process.stdout.write(`  check-cmd      : ${checkCmd}\n`);
     process.stdout.write(`  AIBALL_AGENT   : ${ctx.agent} (from ${ctx.agent_source})\n`);
     process.stdout.write(`  AIBALL_PROJECT : ${ctx.project ?? "(unset)"}\n`);
     if (ctx.config_path) {
         process.stdout.write(`  .aiball.yaml   : ${ctx.config_path}\n`);
     }
-    process.stdout.write(`  project cwd    : ${formatProjectCwd(name, plate)}\n`);
+    process.stdout.write(`  project cwd    : ${formatProjectCwd(target, plate)}\n`);
     // #269/#281 (david ftprf7): surface the PTY-proxy dependency. The proxy
     // gives live human-typing detection (busy included) + control-channel
     // wake injection. When inactive, `start` falls back to launching claude
@@ -1449,7 +1477,10 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         const hasWinProxy = existsSync(winProxyExe);
         process.stdout.write(`  ConPTY proxy   : ${
             hasWinProxy
-                ? "✓ active (live human-typing detection + named-pipe wake injection)"
+                // Wording mirrors the Unix branch below: the named-pipe
+                // injection path was folded onto loop.sock, and the symbols
+                // that implemented it are gone — only this string survived.
+                ? "✓ active (live human-typing detection + socket wake injection)"
                 : "— inactive → fallback direct launch (cl-pty-proxy.exe not built — run `cargo build --release` in windows/cl-pty-proxy); pane-diff detection, idle-only"
         }\n`);
     } else {
@@ -1462,9 +1493,9 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         // Beats the ambient config (a running loop baked its impl into
         // env.local at start time, which `check` from another shell can't see).
         let runningImpl: string | null = null;
-        if (name) {
+        if (target) {
             const pidRaw = (() => {
-                try { return readFileSync(proxyAlivePath(stateDirFor(name)), "utf8").trim(); }
+                try { return readFileSync(proxyAlivePath(stateDirFor(target)), "utf8").trim(); }
                 catch { return ""; }
             })();
             const pid = Number(pidRaw);
@@ -1509,11 +1540,11 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     // .aiball.yaml or a hook that didn't register without having to
     // dig into ~/.claude-loop/ by hand.
     if (opts.config) {
-        if (!name) {
+        if (!target) {
             process.stdout.write(`  config check needs a loop name (claude-loop check <name> --config)\n`);
         } else {
-            const sd = stateDirFor(name);
-            process.stdout.write(`  state dir: ${sd}\n`);
+            const sd = stateDirFor(target);
+            // The path itself is already in the header — list the contents.
             for (const f of ["plate.json", "env", "pings.yaml", "wake-requested", "loop.pid", "loop.log", "timer.pid", "timer.log"]) {
                 const p = join(sd, f);
                 process.stdout.write(`    ${f.padEnd(18)}  ${existsSync(p) ? "✓" : "—"}\n`);
