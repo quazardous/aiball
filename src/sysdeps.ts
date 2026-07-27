@@ -62,6 +62,42 @@ export interface ShimStatus {
  * Reports, never repairs — the fix differs per install mode and belongs to
  * whoever owns the box.
  */
+/**
+ * The line of a stderr dump that tells a human what went wrong.
+ *
+ * Taking the first non-empty line looks right and usually is not: a Node
+ * failure opens with the loader's own header, and the sentence is five lines
+ * further down.
+ *
+ *     node:internal/modules/cjs/loader:1386      ← what "first line" gives you
+ *       throw err;
+ *       ^
+ *
+ *     Error: Cannot find module '…/bin/aiball'   ← what you wanted
+ *         at Module._resolveFilename …
+ *
+ * `aiball check` exists to turn a mute failure into something legible, so
+ * naming a line of the module loader instead of "cannot find module" defeats
+ * the feature while looking like it works. Reported from the Windows side,
+ * where a dead shim is exactly this shape.
+ *
+ * Prefer a line that reads as a message; fall back to the first line that is
+ * not obviously scaffolding; fall back again to the first non-empty line, so a
+ * format nobody anticipated still surfaces something rather than nothing.
+ */
+export function firstUsefulStderrLine(stderr: string): string | undefined {
+    const lines = stderr.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+    if (lines.length === 0) return undefined;
+    const message = lines.find((l) => /^[A-Za-z_$][\w.$]*(Error|Exception)\b/.test(l));
+    if (message) return message;
+    const scaffolding = (l: string): boolean =>
+        /^at\s/.test(l)                  // stack frame
+        || /^node:internal\//.test(l)    // the loader's own header
+        || /^\^+$/.test(l)               // the caret pointing at the throw
+        || /^throw\s/.test(l);           // the rethrow line it points at
+    return lines.find((l) => !scaffolding(l)) ?? lines[0];
+}
+
 export function checkShims(timeoutMs = 15_000): ShimStatus[] {
     /**
      * Run an installed command the way the OS actually would.
@@ -98,7 +134,7 @@ export function checkShims(timeoutMs = 15_000): ShimStatus[] {
         // The shim resolved but running it failed — the classic shape is a
         // launcher pointing at a target that has since moved or been deleted.
         const why = r.error?.message
-            ?? (r.stderr ?? "").split(/\r?\n/).find((l) => l.trim())
+            ?? firstUsefulStderrLine(r.stderr ?? "")
             ?? `exited ${r.status ?? "on a signal"}`;
         return { cmd, path, works: false, detail: `${path} — ${why.trim()}` };
     };
