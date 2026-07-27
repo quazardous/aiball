@@ -54,6 +54,7 @@ import {
     isInternalCheckCmd,
     createLoopServer,
     loopSockPath,
+    proxyIsAlive,
     readLoopStateInput,
     setCompacting,
     setInterrupted,
@@ -1144,9 +1145,21 @@ function detectHumanTyping(): void {
         // wrong here (it would flag socket-injected wakes as human typing,
         // since recentlySentKeys only tracks tmux send-keys). The proxy owns
         // the marker; skip. Pane-diff stays the fallback for non-proxy loops.
-        // #730 step 3 — gate on `loop.sock` instead of the legacy
-        // `inject.sock` (folded into loop.sock).
-        if (existsSync(loopSockPath(sd!))) return;
+        //
+        // #1180 — ask whether the PROXY is alive, not whether a Unix socket
+        // file exists. `loopSockPath` is `<sd>/loop.sock`, which win32 never
+        // creates: there is no AF_UNIX there, the transport is loopback TCP
+        // behind a `loop.sock.addr` marker. So this guard was false on every
+        // Windows loop and the fallback ran under a live proxy — the case the
+        // comment above calls "redundant AND wrong" — firing every ~1.5s
+        // because the last pane lines move on their own (spinner, elapsed
+        // timer, rotating footer hint). The human-typing glyph never went out.
+        //
+        // `proxyIsAlive` is what `state.ts` already prescribes for exactly this
+        // ("can't be stat-ed like a file, so callers gate on proxyIsAlive()"),
+        // and it is stricter on Unix too: a stale `loop.sock` left by a dead
+        // proxy used to suppress the fallback that should have taken over.
+        if (proxyIsAlive(sd!)) return;
         if (readIdleSinceMs(sd!) === null) {
             // Mid-turn / streaming → reset baseline so the post-busy
             // prompt isn't diffed against a stale pre-busy capture.
