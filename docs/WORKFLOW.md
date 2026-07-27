@@ -25,6 +25,23 @@ switch there silently changes david's live runtime (and blips the daemon).
 `feature` work goes in a **separate worktree**; mainstream edits `main` in
 place. The runtime checkout always shows a stable `main`.
 
+### Where that worktree goes
+
+**Beside the checkout, never inside it**, one directory per ticket:
+
+```bash
+git worktree add ../aiball-worktrees/<ticket>-<slug> -b feat/<ticket>-<slug>
+```
+
+This is written down because it isn't guessable, and something will guess
+wrong otherwise: a worktree created inside the repo lands in the middle of the
+tree the installer copies, and tooling that walks the checkout starts seeing a
+second copy of everything. Crew agents are the one exception — they get
+`worktrees/<name>` inside the repo, provisioned by `claude-loop crew create`,
+and that path is what the crew write-guard recognises. Don't hand-roll a third
+location; if a tool offers to make a worktree for you somewhere else, it is
+not this convention.
+
 ## Who applies the posture
 
 Nobody, automatically. `intent` is a marker the agent reads off the ticket —
