@@ -53,6 +53,11 @@ export const HOOKS: HookSpec[] = [
     { event: "Stop", module: "../stop-hook.js" },
     { event: "UserPromptSubmit", module: "../user-prompt-submit-hook.js" },
     { event: "PreToolUse", matchers: ["AskUserQuestion"], module: "../pretooluse-hook.js" },
+    // #1315 S0 — a SPIKE, deliberately matcher-less. It changes no behaviour;
+    // it records which notification types actually reach a loop and when, which
+    // is the fact the rest of that ticket is waiting on. Registering it against
+    // the types the docs list would answer the question with its own premise.
+    { event: "Notification", module: "../notification-hook.js" },
 ];
 
 /** One `{matcher?, hooks}` entry in a Claude Code `settings.hooks[event]` array. */

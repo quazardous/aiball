@@ -10,13 +10,17 @@ const cmd = (script: string) => `TSX ${script}`;
 const BASE = cmd(HOOK_ENTRY);
 
 test("buildHookSettings: event key order matches the registry order", () => {
+    // Derived from HOOKS rather than spelled out: a literal list here is a
+    // second inventory to maintain, and it fails on the day someone registers a
+    // hook correctly — which teaches them the assertion is noise.
     const settings = buildHookSettings(HOOKS, cmd);
-    assert.deepEqual(Object.keys(settings), [
-        "SessionStart",
-        "Stop",
-        "UserPromptSubmit",
-        "PreToolUse",
-    ]);
+    assert.deepEqual(Object.keys(settings), HOOKS.map((h) => h.event));
+});
+
+test("every registered event reaches the settings exactly once", () => {
+    const settings = buildHookSettings(HOOKS, cmd);
+    assert.equal(Object.keys(settings).length, HOOKS.length, "no event silently collapsed");
+    assert.equal(new Set(HOOKS.map((h) => h.event)).size, HOOKS.length, "no duplicate event key");
 });
 
 test("buildHookSettings: every command routes through the single dispatcher + the event arg", () => {
@@ -33,11 +37,22 @@ test("buildHookSettings: every command routes through the single dispatcher + th
 
 test("buildHookSettings: matcher-less events emit a single entry with NO matcher key", () => {
     const settings = buildHookSettings(HOOKS, cmd);
-    for (const event of ["Stop", "UserPromptSubmit"]) {
+    const matcherless = HOOKS.filter((h) => !h.matchers?.length).map((h) => h.event);
+    assert.ok(matcherless.length > 0, "the case under test still exists in the registry");
+    for (const event of matcherless) {
         assert.equal(settings[event].length, 1, `${event} has one entry`);
         assert.ok(!("matcher" in settings[event][0]), `${event} entry has no matcher key`);
         assert.deepEqual(Object.keys(settings[event][0]), ["hooks"]);
     }
+});
+
+test("the Notification spike is registered with NO matcher, on purpose", () => {
+    // #1315 S0 asks which notification types actually reach a loop. Filtering on
+    // the types the docs happen to list would make the observation confirm its
+    // own premise, and a type nobody anticipated would never be seen.
+    const spike = HOOKS.find((h) => h.event === "Notification");
+    assert.ok(spike, "the spike is registered");
+    assert.equal(spike!.matchers, undefined, "a matcher here would narrow the spike silently");
 });
 
 test("buildHookSettings: matcher entries serialize matcher before hooks", () => {

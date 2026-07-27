@@ -32,9 +32,11 @@ Official event roster: <https://code.claude.com/docs/en/hooks.md>.
 
 ## Roster
 
-Status legend — **Used**: an aiball hook is wired to it today. **Candidate**: not
-wired, but there is a concrete pane-scrape / bespoke detector it would replace.
-**Not used**: no current usage and no concrete thing in aiball it would replace.
+Status legend — **Used**: an aiball hook is wired to it today. **Observed**:
+wired, but only to record what the event carries — it drives no behaviour yet.
+**Candidate**: not wired, but there is a concrete pane-scrape / bespoke detector
+it would replace. **Not used**: no current usage and no concrete thing in aiball
+it would replace.
 
 | Event | Status | Why (or why not) |
 |---|---|---|
@@ -43,7 +45,7 @@ wired, but there is a concrete pane-scrape / bespoke detector it would replace.
 | UserPromptSubmit | **Used** | Emits a turn-start timestamp (`user-prompt-submit-hook.ts`). The human-vs-injected-ping distinction is derived timer-side by time-correlation today; a deterministic distinction by payload content is the main candidate improvement. |
 | PreToolUse | **Used** | Gates the `AskUserQuestion` tool: when no human is present, deny + redirect the agent to the ticket thread (`hook-verdict.ts`), fail-open. Candidate to generalize to permission walls. |
 | StopFailure | **Candidate** | Turn ended on an API error. Would replace the error-banner scraping (`error-backoff.ts`, consumed in `stop-hook.ts`) so the loop never wakes into a dead-API turn. |
-| Notification | **Candidate** | An **outbound** Claude Code → user signal (`idle_prompt`, `agent_needs_input`, `permission_prompt`, `auth_success`, …), carrying a `message`. **Side-effect only — it observes, it cannot block** (exit 2 is ignored). So it *feeds state setters* — a reliable "Claude is actually waiting" to sharpen busy/idle, and replacing the login banner watcher (`pane-watchers/runtime-watchers.ts`) — while the actual gating stays in `PreToolUse`. |
+| Notification | **Observed** | An **outbound** Claude Code → user signal (`idle_prompt`, `agent_needs_input`, `permission_prompt`, `auth_success`, …), carrying a `message`. **Side-effect only — it observes, it cannot block** (exit 2 is ignored). So it *feeds state setters* — a reliable "Claude is actually waiting" to sharpen busy/idle, and replacing the login banner watcher (`pane-watchers/runtime-watchers.ts`) — while the actual gating stays in `PreToolUse`. **Wired today only to record what arrives** (`notification-hook.ts`): it changes nothing, and is registered with no matcher so an unanticipated type still shows up. The list of types above is read from the docs, not measured — which is exactly what the recording is for. |
 | PreCompact / PostCompact | **Candidate** | Deterministic start/end boundaries of compaction. Would remove the entire `compacting-detector.ts` pane-scrape and its grace timer. |
 | SessionEnd | **Candidate** | Deterministic teardown of `loop.sock` + state on a clean exit. Complements — does not replace — the crash/orphan detection in `cmds/health.ts` and `parent-liveness.ts` (a hard kill fires no SessionEnd). |
 | PermissionRequest / PermissionDenied | **Candidate** | Surface the permission wall: with an empty `permission_mode`, an autonomous loop stalls silently on the first permission prompt today, with no detector. `PermissionDenied` can return `retry: true`. |
