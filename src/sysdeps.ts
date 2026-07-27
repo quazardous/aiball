@@ -38,6 +38,12 @@ export function commandExists(cmd: string): boolean {
 export interface Prereq {
     /** Command probed on PATH. */
     cmd: string;
+    /**
+     * Other commands that satisfy the same need. `psmux` ships a `tmux` alias,
+     * so a box carrying either one can run a loop — probing only the canonical
+     * name would report a miss on a working install.
+     */
+    altCmds?: readonly string[];
     /** What breaks, or degrades, without it. */
     powers: string;
     /** What you lose. Empty when the thing simply does not run. */
@@ -47,7 +53,14 @@ export interface Prereq {
     packages?: Record<string, string>;
 }
 
-export const PREREQS: readonly Prereq[] = [
+/**
+ * The prerequisites differ per platform because the runtime does (#1571). On
+ * Windows the multiplexer is psmux, the PTY proxy is the Rust ConPTY one, and
+ * there is no Python proxy at all — reporting `python3: missing` there would
+ * name a degradation that cannot happen. The Windows list mirrors what
+ * `install.ps1` already provisions, so `check` and the installer agree.
+ */
+const POSIX_PREREQS: readonly Prereq[] = [
     {
         cmd: "tmux",
         powers: "claude-loop (every loop runs in a tmux session)",
@@ -70,6 +83,54 @@ export const PREREQS: readonly Prereq[] = [
     },
 ];
 
+const WIN32_PREREQS: readonly Prereq[] = [
+    {
+        cmd: "psmux",
+        // psmux ships a `tmux` alias, which is why claude-loop's default
+        // MUX_CMD=tmux resolves on Windows (install.ps1 accepts either).
+        altCmds: ["tmux"],
+        powers: "claude-loop (every loop runs in a psmux session)",
+        degraded: "",
+        required: true,
+        packages: { winget: "psmux" },
+    },
+    {
+        // claude-loop spawns `bash -lc 'source env; exec claude'`. winget's
+        // Git.Git puts git.exe on PATH via Git\cmd but NOT bash.exe, which
+        // lives in Git\bin — install.ps1 patches the user PATH for exactly
+        // this reason, so a miss here is worth naming explicitly.
+        cmd: "bash",
+        powers: "claude-loop's inner `bash -lc` launch (Git Bash provides it)",
+        degraded: "",
+        required: true,
+        packages: { winget: "Git.Git", scoop: "git", choco: "git" },
+    },
+    {
+        cmd: "cargo",
+        powers: "building cl-pty-proxy.exe, the Rust ConPTY proxy",
+        // No Python proxy on Windows — the fallback is a direct launch with
+        // pane-diff detection, which only sees an idle pane.
+        degraded: "the loop falls back to direct launch + pane-diff (idle-only)",
+        required: false,
+        packages: { winget: "Rustlang.Rustup", scoop: "rustup", choco: "rust" },
+    },
+];
+
+/**
+ * The prerequisite list for a given platform. Pure and explicit, for the same
+ * reason `renderUnit` builds posix paths and `renderDaemonLauncherCmd` builds
+ * win32 ones whatever host runs them: a list that can only be read on the
+ * platform it describes can only be asserted there, and the Windows lane is
+ * precisely the one we do not want to depend on to catch a mistake in the
+ * Windows list.
+ */
+export function prereqsFor(platform: NodeJS.Platform = process.platform): readonly Prereq[] {
+    return platform === "win32" ? WIN32_PREREQS : POSIX_PREREQS;
+}
+
+/** This host's list — what `checkPrereqs` probes. */
+export const PREREQS: readonly Prereq[] = prereqsFor();
+
 interface Manager {
     id: string;
     probe: string;
@@ -78,7 +139,9 @@ interface Manager {
 
 // Ordered by specificity, not popularity: a box with both `apt-get` and `brew`
 // is a Linux box where someone also installed Homebrew, so the native manager
-// is the right suggestion.
+// is the right suggestion. The Windows managers sit at the end because their
+// probes are mutually exclusive with the POSIX ones anyway — winget first, as
+// it ships with the OS and is what install.ps1 already drives.
 const MANAGERS: readonly Manager[] = [
     { id: "apt", probe: "apt-get", install: (p) => `sudo apt-get install ${p}` },
     { id: "dnf", probe: "dnf", install: (p) => `sudo dnf install ${p}` },
@@ -86,6 +149,14 @@ const MANAGERS: readonly Manager[] = [
     { id: "zypper", probe: "zypper", install: (p) => `sudo zypper install ${p}` },
     { id: "apk", probe: "apk", install: (p) => `sudo apk add ${p}` },
     { id: "brew", probe: "brew", install: (p) => `brew install ${p}` },
+    {
+        id: "winget",
+        probe: "winget",
+        install: (p) =>
+            `winget install ${p} --silent --accept-source-agreements --accept-package-agreements`,
+    },
+    { id: "scoop", probe: "scoop", install: (p) => `scoop install ${p}` },
+    { id: "choco", probe: "choco", install: (p) => `choco install ${p} -y` },
 ];
 
 let cachedManager: Manager | null | undefined;
@@ -110,7 +181,10 @@ export interface PrereqStatus extends Prereq {
 export function checkPrereqs(): PrereqStatus[] {
     const mgr = detectManager();
     return PREREQS.map((p) => {
-        const present = commandExists(p.cmd);
+        // Any of the accepted names counts: psmux and its tmux alias satisfy
+        // the same requirement, and a loop runs on either.
+        const present =
+            commandExists(p.cmd) || (p.altCmds ?? []).some((alt) => commandExists(alt));
         const pkg = (mgr && p.packages?.[mgr.id]) ?? p.cmd;
         return { ...p, present, install: present || !mgr ? null : mgr.install(pkg) };
     });

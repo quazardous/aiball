@@ -712,22 +712,29 @@ CreateObject("WScript.Shell").Run "cmd /c """ & "$TrayCmd" & """", 0, False
 Log "wrote tray launcher wrapper: $trayVbsPath"
 
 # --- .cmd shims in $PrefixBin ---------------------------------------------
-# Tiny wrappers that exec the real .cmd in $AppDir\bin. No symlink
+# Tiny wrappers that run the Node entrypoint in $AppDir\bin. No symlink
 # required — works without admin / Developer Mode. Same shim set under
-# -Minimal (points at $SrcDir\bin\*.cmd in that mode); without these
-# the user would have to type the full path to call aiball / claude-loop.
+# -Minimal (points at $SrcDir\bin in that mode); without these the user
+# would have to type the full path to call aiball / claude-loop.
+#
+# #1571: these used to call a versioned `bin\<name>.cmd` twin, which
+# re-implemented the launcher (root resolution, AIBALL_CWD, cli-env parsing)
+# a second time per command. `bin/launcher.js` now owns that once for both
+# platforms, so the twins are gone from the repo and the shim invokes the
+# Node entrypoint directly. npm's `bin` field generates the equivalent for
+# `npm i -g` installs; this loop covers the install.ps1 path.
 
 if (-not (Test-Path $PrefixBin)) { New-Item -ItemType Directory -Force -Path $PrefixBin | Out-Null }
 foreach ($name in $Shims) {
-    $target = Join-Path $AppDir "bin\$name.cmd"
+    $target = Join-Path $AppDir "bin\$name"
     if (-not (Test-Path $target)) {
-        Warn "expected shim source missing: $target — skipping $name.cmd"
+        Warn "expected entrypoint missing: $target — skipping $name.cmd"
         continue
     }
     $shimPath = Join-Path $PrefixBin "$name.cmd"
     $shimBody = @"
 @echo off
-"$target" %*
+node "$target" %*
 exit /b %errorlevel%
 "@
     [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
