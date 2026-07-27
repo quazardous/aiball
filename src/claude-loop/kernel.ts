@@ -183,6 +183,7 @@ import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
 import { fetchWakeContext, pingIsDeliverable } from "./wake-context.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
+import { resolveBashCmd } from "./resolve-bash.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
@@ -585,7 +586,11 @@ function respawnKernel(reason: string): void {
     // la régression #413 sur le chemin reload. Le NOUVEAU timer écrit son
     // propre `process.pid` à boot (ligne 196). Fenêtre de race ~1s
     // (spawn → tsx boot → write) acceptable, identique au boot initial.
-    spawn("bash", [
+    // `resolveBashCmd()` and not a bare "bash": the respawn inherits whatever
+    // PATH the kernel was started with, so on Windows this reaches the WSL
+    // launcher exactly as the initial start could — and fails just as silently
+    // (empty log, loop stuck in boot). Same helper as cli.ts (#1584).
+    spawn(resolveBashCmd(), [
         "-lc",
         `source ${shQuote(envPath(sd!))} && exec ${tsxBin} ${shQuote(timerScript)}`,
     ], { detached: true, stdio: ["ignore", logFd, logFd], env: respawnEnv }).unref();
