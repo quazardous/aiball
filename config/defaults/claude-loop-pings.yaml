@@ -144,7 +144,7 @@ prompts:
   # cultural ping now uses `{culture}` alone (one of ping_messages above).
   # #830 david — added `{head_decision_event}` branch for the 8 decision
   # event kinds (plan/resolution/wontfix/escalation × accepted/rejected) ;
-  # the agent's wake now says "Your plan was ACCEPTED on #X: TITLE by Y
+  # the agent's wake now says "The plan was ACCEPTED on #X: TITLE by Y
   # (#hashid)" instead of re-pulling the unchanged original proposal body.
   # #825 david `b63ez5` — `{no_head:+{culture}}` retired too : the no-head
   # cultural ping ("Anybody out there?") was noise. Wake now ALWAYS carries

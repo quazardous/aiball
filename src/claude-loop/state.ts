@@ -1800,11 +1800,19 @@ export async function buildContextPhrase(
         // DecisionKind (Record<DecisionKind, …>) so a new decision verb can't
         // ship without its wording — TS forces the entry. The flat
         // `<kind>_<transition>` → phrase map the branches read is built from it.
+        // #1577 david `pmuc8p` — IMPERSONAL wording. These phrases said "Your
+        // plan…", but the same event reaches the ticket's REPORTER, who is not
+        // always the decision's author: on a ticket handed to another agent,
+        // the reporter was told "Your plan was ACCEPTED — execute" about
+        // someone else's plan, on a ticket that agent holds a live claim on.
+        // "The" states the fact without assigning it to the reader; who should
+        // act follows from the claim and from `poll().plans_to_execute`, not
+        // from a possessive in a sentence.
         const DECISION_VERB_PHRASES: Record<DecisionKind, { accepted: string; rejected: string }> = {
-            plan: { accepted: "Your plan was ACCEPTED — execute", rejected: "REJECT — your plan, ball back in your court" },
-            resolution: { accepted: "Your resolution was ACCEPTED, ticket closed", rejected: "REJECT — your resolution, ticket stays open" },
-            wontfix: { accepted: "Your wontfix was ACCEPTED, ticket closed", rejected: "REJECT — your wontfix, ticket stays open" },
-            escalation: { accepted: "Your escalation was ACCEPTED", rejected: "REJECT — your escalation" },
+            plan: { accepted: "The plan was ACCEPTED — execute", rejected: "REJECT — the plan, ball back in its author's court" },
+            resolution: { accepted: "The resolution was ACCEPTED, ticket closed", rejected: "REJECT — the resolution, ticket stays open" },
+            wontfix: { accepted: "The wontfix was ACCEPTED, ticket closed", rejected: "REJECT — the wontfix, ticket stays open" },
+            escalation: { accepted: "The escalation was ACCEPTED", rejected: "REJECT — the escalation" },
         };
         const DECISION_EVENT_VERBS: Record<string, string> = Object.fromEntries(
             DECISION_KINDS.flatMap((k): Array<[string, string]> => [
@@ -1942,7 +1950,7 @@ export async function buildContextPhrase(
         // Un decision-event / lifecycle arrivé par hint (body vide) rendrait
         // « (#N / #hashid) » nu ; on le laisse tomber → l'empty-phrase guard
         // skippe le wake proprement, et l'event ressurgit via le FIFO (où sa
-        // branche decision-event rend « Your resolution was ACCEPTED »).
+        // branche decision-event rend « The resolution was ACCEPTED »).
         // #1569 — true when the wake anchors on the hint instead of the FIFO
         // head. Drives what gets marked seen: we must ack what we RENDER.
         let hintAnchored = false;
@@ -2176,7 +2184,7 @@ export async function buildContextPhrase(
             head_comment_hashid: headCommentHashid,
             head_body: headBody,
             // #830 — decision event branch vars. head_decision_event is the
-            // pre-formatted phrase ("Your plan was ACCEPTED" etc.) ; the
+            // pre-formatted phrase ("The plan was ACCEPTED" etc.) ; the
             // wake template wraps it with the ticket ref + decider + the
             // original proposal hashid for navigation.
             head_decision_event: headDecisionEvent,
