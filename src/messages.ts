@@ -239,6 +239,30 @@ function canAutoClaim(author: string, ticketProject: string): boolean {
     return subs.some((s) => s.project === ticketProject && s.role === "owner");
 }
 
+/**
+ * #1584 — does this comment carry a decision sidecar (`then:`)?
+ *
+ * The auto-claim's second narrowing. It is the only signal of intent the
+ * protocol already has: `plan` / `resolved` / `wontfix` / `escalate` mean the
+ * author is taking a position on the ticket, a bare comment does not.
+ * Deliberately NOT a new field — the first narrowing (#669) added a capability
+ * check; adding a `no_claim` flag here would put the burden back on the agent's
+ * memory, which is exactly what the auto-claim exists to avoid.
+ *
+ * Tolerant by design: unparseable or absent meta means "no decision", so the
+ * claim is skipped rather than granted on a malformed row.
+ */
+export function carriesDecision(meta: string | null | undefined): boolean {
+    if (!meta) return false;
+    try {
+        const parsed = JSON.parse(meta) as { decision?: { kind?: unknown } };
+        const kind = parsed?.decision?.kind;
+        return typeof kind === "string" && isDecisionKind(kind);
+    } catch {
+        return false;
+    }
+}
+
 function autoSubscribeAuthor(msg: Message): void {
     if (!msg.by_agent) return;
     const ticketId = msg.kind === "ticket_created" ? msg.id : msg.ticket_id;
@@ -603,7 +627,25 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // same exclusion as the hot-zone). Skipped when another agent's claim is
     // still live (we never steal); the window expiry + auto-release on close keep
     // it self-maintaining.
-    if (msg.kind === "comment_added" && msg.status === "approved" && msg.ticket_id != null) {
+    if (msg.kind === "comment_added" && msg.status === "approved" && msg.ticket_id != null
+        // #1584 david — …and the comment has to MEAN "I'm working this".
+        //
+        // "commented" was standing in for "worked", and the stand-in has now
+        // failed twice. #669 was the first: a cross-project commenter became
+        // claimant of a thread it had only weighed in on, fixed by requiring
+        // project ownership. That guard doesn't help someone who owns the
+        // project and merely holds an opinion — a lead reviewing another
+        // agent's ticket took it away from them while writing "this stays
+        // yours", and could not even announce handing it back, because the
+        // announcement re-claimed it.
+        //
+        // The protocol already carries the distinction, so nothing new is
+        // introduced: a `then:` says "I'm taking a position on this ticket",
+        // a bare comment says nothing of the sort. Questions, reviews and
+        // handoffs stop confiscating; plans and deliveries still claim, so
+        // the anti-collision stays structural — an agent that really works a
+        // ticket always ends up posting a decision.
+        && carriesDecision(msg.meta)) {
         const author = msg.by_agent;
         if (author && author !== "auto" && !isHuman(author)) {
             const t = getMessage(msg.ticket_id);
