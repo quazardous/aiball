@@ -289,6 +289,31 @@ feature. Resist:
 - Backwards-compat shims when you can just change the code (this
   codebase is single-deployment; there are no clients to keep happy).
 
+### 2.3b Lists of cases, and the word "all"
+
+Two habits, one failure. Both are cheap to avoid and both have already
+cost real bugs here.
+
+**A list of kinds needs a fallback.** Whenever you enumerate cases —
+message kinds, platforms, spawn sites, prerequisites — ask what happens
+to the case that isn't in your list. If the answer is "nothing good",
+the list is the wrong shape: derive it from the source of truth, or give
+it a default that degrades sensibly. Two wake bugs came from hand-kept
+lists of "kinds with no body" that each missed the same two entries; the
+fix was a fallback chain, and it covers kinds nobody has written yet.
+Likewise, prefer a test that iterates the canonical constant over one
+that retypes its members — a new member then can't ship unnoticed.
+
+**"All", "every", "the only" are claims, and they need enumeration.**
+Verifying the instance you just fixed does not verify the quantifier.
+Before writing one of those words in a commit message, a PR description
+or a review, run the search that counts the cases and paste it. If you
+can't write that search, the word is too strong: say "the two sites I
+found", which is both true and just as useful. Review catches this
+cheaply — one `grep` does it — for the uninteresting reason that the
+reviewer runs the search and the author didn't run it on their own
+claim.
+
 ### 2.4 Commits, branches, PRs
 
 **Commit messages** follow conventional-commits style with ticket
