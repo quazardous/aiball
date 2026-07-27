@@ -88,13 +88,27 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+          # This job installs BOTH trees, so both locks key the cache.
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
       - run: npm ci
+      # `prepack` runs `npm --prefix frontend run build`, i.e. `vue-tsc && vite
+      # build` — and the root `npm ci` does NOT populate frontend/node_modules.
+      # Without this the pack dies on `'vue-tsc' is not recognized`, which is
+      # not a packaging failure at all, just a missing install.
+      - run: npm ci
+        working-directory: frontend
       # `prepack` builds frontend/dist, which `files` ships.
       - name: npm pack
         shell: pwsh
         run: |
-          $tgz = (npm pack --silent | Select-Object -Last 1).Trim()
-          "TARBALL=$(Resolve-Path $tgz)" >> $env:GITHUB_ENV
+          $tgz = (npm pack --silent | Select-Object -Last 1)
+          # A failed pack leaves $tgz null, and `.Trim()` on null reports
+          # "cannot call a method on a null-valued expression" — which buries
+          # the real error. Name it instead.
+          if (-not $tgz) { throw "npm pack produced no tarball (see the prepack output above)" }
+          "TARBALL=$(Resolve-Path $tgz.Trim())" >> $env:GITHUB_ENV
       - name: install the tarball into a virgin directory
         shell: pwsh
         run: |
