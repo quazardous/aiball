@@ -12,7 +12,7 @@
  *                 it to `.aiball-session_id` (in the loop cwd). Next runs resume
  *                 that exact id (`--resume <id>`), PROVIDED its transcript is
  *                 still there — the persisted file outlives the session it names
- *                 (#1587), and resuming a pruned one kills the loop at boot.
+ *                 (#1549), and resuming a pruned one kills the loop at boot.
  *                 Detection, not imposition.
  *   - `legacy`  — do nothing: the historical `always_resume` path (`--resume` nu
  *                 → pick latest). No session-id management at all.
@@ -81,7 +81,7 @@ export interface SessionResolveInput {
     loopName: string;
     /** Does a session with this id already exist on disk (injected fs probe).
      *  Used by managed/fixed to pick create-vs-resume, and by `auto` to refuse
-     *  resuming an id whose transcript is gone (#1587). */
+     *  resuming an id whose transcript is gone (#1549). */
     sessionExists: (id: string) => boolean;
     /** Read the persisted `.claude-session_id` for this cwd (injected; `auto`
      *  only). Return null when absent/unreadable. */
@@ -109,7 +109,7 @@ export interface SessionResolvePlan {
  */
 /**
  * The `auto` resolution, on its own so the `fixed` misconfiguration fallback
- * can BE it rather than imitate it (#1588).
+ * can BE it rather than imitate it.
  *
  * Resume the persisted id only when its transcript is actually there. A
  * well-formed id is not a live one: `.aiball-session_id` sits in the project
@@ -118,7 +118,7 @@ export interface SessionResolvePlan {
  * rotates its own sessions on its own schedule. Handing claude
  * `--resume <gone>` makes it exit on the spot, which kills the pane, which
  * reaps the mux session, which stops the kernel on `watchdog:tmux-gone`: a loop
- * that refuses to start with nothing on screen to say why (#1587).
+ * that refuses to start with nothing on screen to say why.
  */
 function resolveAuto(
     readPersistedId: () => string | null,
@@ -161,13 +161,13 @@ export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
             // Misconfigured fixed mode → fall back to auto (detect+persist)
             // rather than feed claude a bad id (which would abort the boot).
             //
-            // #1588: this branch used to REBUILD auto's logic inline, and so
-            // missed the existence gate auto gained in #1587 — a fallback that
-            // named auto in its warning while behaving like auto-before-the-fix.
-            // Someone with a bad `session_id` AND a stale persisted id got the
-            // exact silent death #1587 fixed, told only that things were
-            // "falling back to auto". Call auto instead of imitating it: there
-            // is now one implementation to keep correct, not two.
+            // This branch used to REBUILD auto's logic inline, and so missed
+            // the existence gate auto had gained — a fallback that named auto
+            // in its warning while behaving like auto before that gate. Someone
+            // with a bad `session_id` AND a stale persisted id got the exact
+            // silent death the gate exists to prevent, told only that things
+            // were "falling back to auto". Call auto instead of imitating it:
+            // there is now one implementation to keep correct, not two.
             const fallback = resolveAuto(readPersistedId, sessionExists);
             const misconfig = `claude.session_mode=fixed but claude.session_id is missing/invalid `
                 + `("${configuredId}") — falling back to auto`;

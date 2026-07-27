@@ -74,7 +74,7 @@ test("auto, persisted id present AND its transcript exists → --resume <id> (lo
     assert.equal(p.warning, null);
 });
 
-// #1587 — the case that cost a morning. `.aiball-session_id` lives in the
+// #1549 — the case that cost a morning. `.aiball-session_id` lives in the
 // project cwd and outlives the transcript it names, so a well-formed id is not
 // a live one. Resuming a pruned session makes claude exit at once, the pane
 // dies, the mux session is reaped, and the kernel stops on `watchdog:tmux-gone`
@@ -154,7 +154,7 @@ test("fixed with invalid id → downgrade to auto + warning (uses persisted if a
     assert.deepEqual(p2.args, ["--resume", UUID]);
 });
 
-// #1588 — the fallback says "falling back to auto", so it has to BE auto,
+// The fallback says "falling back to auto", so it has to BE auto,
 // existence gate included. Reaching it needs a misconfiguration, which is
 // exactly why it matters: the person hitting it is already looking in the
 // wrong place, and a warning that only mentions `session_id` would convince
