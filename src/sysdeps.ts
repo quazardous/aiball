@@ -116,8 +116,20 @@ const WIN32_PREREQS: readonly Prereq[] = [
     },
 ];
 
-export const PREREQS: readonly Prereq[] =
-    process.platform === "win32" ? WIN32_PREREQS : POSIX_PREREQS;
+/**
+ * The prerequisite list for a given platform. Pure and explicit, for the same
+ * reason `renderUnit` builds posix paths and `renderDaemonLauncherCmd` builds
+ * win32 ones whatever host runs them: a list that can only be read on the
+ * platform it describes can only be asserted there, and the Windows lane is
+ * precisely the one we do not want to depend on to catch a mistake in the
+ * Windows list.
+ */
+export function prereqsFor(platform: NodeJS.Platform = process.platform): readonly Prereq[] {
+    return platform === "win32" ? WIN32_PREREQS : POSIX_PREREQS;
+}
+
+/** This host's list — what `checkPrereqs` probes. */
+export const PREREQS: readonly Prereq[] = prereqsFor();
 
 interface Manager {
     id: string;

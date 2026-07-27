@@ -68,7 +68,7 @@ jobs:
       # install.test.ts pins the generated systemd unit AND the generated
       # scheduled-task launchers (#1571); both render platform-independently,
       # so this lane is where the Windows half is actually asserted.
-      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts" "src/cli/install.test.ts"
+      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts" "src/cli/install.test.ts" "src/sysdeps.test.ts"
 
   # #1571 — the parity check that makes "aiball supports Windows" verifiable
   # instead of declared. Everything above runs from the checkout; this job runs
@@ -146,5 +146,11 @@ jobs:
           foreach ($p in 'python3') {
             if ($out -match "(?m)^\s*[^\s]+\s$p\:") { throw "POSIX prerequisite '$p' leaked into the Windows list" }
           }
-          # The proxy is not built on this lane; check must say so, not crash.
-          if ($out -notmatch 'cl-pty-proxy') { throw "check no longer mentions cl-pty-proxy" }
+          # This runner has no psmux, which makes it the virgin machine the dev
+          # boxes cannot simulate — so assert the DEGRADED path itself: a missing
+          # required prerequisite is marked, named, and paired with the command
+          # that fixes it, instead of the run falling over. (An earlier version
+          # matched the string 'cl-pty-proxy', which only ever tested the wording
+          # of a `powers` field and could not fail for the reason it claimed.)
+          if ($out -notmatch '(?m)^\s*✗ psmux: MISSING') { throw "a missing required prerequisite is no longer reported as MISSING" }
+          if ($out -notmatch '(?m)^\s*install with:.*psmux') { throw "a missing prerequisite no longer names the command that installs it" }
