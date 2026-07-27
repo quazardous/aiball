@@ -91,7 +91,7 @@ import {
     envPath,
     loopLogPath,
     loopPidPath,
-    registerKernelPid,
+    claimLoopAsKernel,
     type Plate,
     type WakeHint,
     type WakeEventHint,
@@ -272,7 +272,10 @@ try { writeFileSync(loopPidPath(sd!), `${process.pid}\n`); } catch { /* best eff
 // which is what `kill -HUP` targets; this records EVERY kernel that booted,
 // and that is what lets `sweepOrphans` reap one orphaned by an EARLIER reload
 // on a platform with no `/proc` to interrogate.
-registerKernelPid(sd!);
+const claimed = claimLoopAsKernel(sd!);
+if (claimed.killed.length > 0) {
+    log(`startup: claimed the loop — killed ${claimed.killed.length} older kernel(s): ${claimed.killed.join(", ")}`);
+}
 
 // #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → eager boot
 // drain, no boot-grace deferral. Default (--wait): during the first

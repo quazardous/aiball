@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sweepOrphans } from "./cmds/manage.js";
-import { registerKernelPid, readKernelPids, kernelPidsPath } from "./state.js";
+import { registerKernelPid, readKernelPids, kernelPidsPath, claimLoopAsKernel } from "./state.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 const isAlive = (pid: number): boolean => {
@@ -113,5 +113,36 @@ tt("un registre absent ne fait pas échouer le balayage", async () => {
     await withSd(async (sd) => {
         assert.equal(existsSync(kernelPidsPath(sd)), false);
         assert.deepEqual(sweepOrphans(sd).killed, []);
+    });
+});
+
+// --- claimLoopAsKernel : le balayage AU BOOT ------------------------------
+// Le sweep piloté par la CLI tourne avant qu'elle ne spawn, donc il ne peut
+// pas voir un kernel qui apparaît après — et il en apparaît un couramment :
+// modifier la source fait s'auto-recharger le kernel courant, et un
+// `claude-loop reload` lancé au même moment en ajoute un second. Mesuré après
+// exactement cette séquence : deux kernels vivants par loop, tous deux
+// enregistrés, aucun balayé. Le faire au boot est auto-réparateur.
+
+tt("claimLoopAsKernel tue les kernels plus anciens et garde le nouveau", async () => {
+    await withSd(async (sd) => {
+        const older = spawnVictim();
+        registerKernelPid(sd, older.pid);
+        await sleep(150);
+
+        const { killed } = claimLoopAsKernel(sd);
+        await sleep(300);
+
+        assert.deepEqual(killed, [older.pid], "l'ancien doit être tué");
+        assert.equal(isAlive(older.pid), false);
+        assert.deepEqual(readKernelPids(sd), [process.pid], "le nouveau reste seul inscrit");
+    });
+});
+
+tt("claimLoopAsKernel s'enregistre même quand il n'y a personne à tuer", async () => {
+    await withSd(async (sd) => {
+        const { killed } = claimLoopAsKernel(sd);
+        assert.deepEqual(killed, []);
+        assert.deepEqual(readKernelPids(sd), [process.pid], "un premier boot doit quand même s'inscrire");
     });
 });

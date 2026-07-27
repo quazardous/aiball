@@ -559,6 +559,33 @@ export function registerKernelPid(sd: string, pid: number = process.pid): void {
     try { appendFileSync(kernelPidsPath(sd), `${pid}\n`); } catch { /* best effort */ }
 }
 
+/**
+ * Claim the loop: register, then kill every OTHER kernel still holding it.
+ *
+ * A sweep driven by the CLI runs before it spawns, so it cannot see a kernel
+ * that appears afterwards — and one does, routinely: changing the source makes
+ * the running kernel self-reload, and a `claude-loop reload` issued around the
+ * same moment adds a second. Measured after exactly that sequence: two live
+ * kernels per loop, both registered, neither swept, both painting the bar.
+ *
+ * Doing it at boot instead is self-healing whatever spawned us, and the rule it
+ * enforces is the real invariant: one kernel per loop, and the newest wins —
+ * it holds the freshest source and the freshest state.
+ */
+export function claimLoopAsKernel(sd: string): { killed: number[] } {
+    registerKernelPid(sd);
+    const killed: number[] = [];
+    const survivors: number[] = [process.pid];
+    for (const pid of readKernelPids(sd)) {
+        if (pid === process.pid) continue;
+        try { process.kill(pid, 0); } catch { continue; } // already gone
+        try { process.kill(pid, "SIGKILL"); killed.push(pid); }
+        catch { survivors.push(pid); /* race, or not ours */ }
+    }
+    writeKernelPids(sd, survivors);
+    return { killed };
+}
+
 /** Every pid ever registered, de-duplicated, most recent last. */
 export function readKernelPids(sd: string): number[] {
     try {
