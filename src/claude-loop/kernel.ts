@@ -1203,8 +1203,28 @@ function detectHumanTyping(): void {
             log("human-typing detected (prompt area changed at idle)");
         }
         prevPaneTail = tail;
-        // Edge-repaint the bicolor chip when it appears / clears (the
-        // marker expires ~HUMAN_TYPING_TTL_SEC after the last keystroke).
+    } catch { /* never throw from the detection poll */ }
+}
+
+/**
+ * Edge-repaint the bicolor typing chip when it appears / clears — the marker
+ * expires ~HUMAN_TYPING_TTL_SEC after the last keystroke.
+ *
+ * #1180 follow-up, and a regression I introduced. This block used to sit at the
+ * BOTTOM of `detectHumanTyping`, after the pane-diff it has nothing to do with:
+ * it only mirrors a marker, whoever wrote it. When that function gained an
+ * early `return` for proxied loops, the repaint went with it — so on Windows
+ * the chip lit on the first real keystroke (the proxy sets the marker, it
+ * always did) and then never went out, because nothing was left to clear it.
+ * Measured on a live loop: last `touch_marker` at 16:16:36, chip still showing
+ * at 16:18:24, no re-emission in between. Not a stuck detector — a dead
+ * repaint.
+ *
+ * Separate function, called by the same poll, so the next guard added to the
+ * pane-diff fallback cannot take the chip down with it again.
+ */
+function repaintTypingChip(): void {
+    try {
         const showing = humanIsTyping(sd!);
         if (showing !== humanChipShown) {
             // #862 Slice 5 — setTmuxStatus(IDLE) retiré. paneBusy=false
@@ -1715,7 +1735,15 @@ async function mainSse(): Promise<void> {
     // #264: near-live human-typing detection poll (bicolor bar chip).
     // Independent of the wake heartbeat — fast cadence so the chip
     // tracks typing closely. Fail-safe (detectHumanTyping never throws).
-    setInterval(detectHumanTyping, HUMAN_POLL_MS);
+    setInterval(() => {
+        // Two independent jobs on one cadence: the pane-diff fallback (skipped
+        // under a live proxy) and the chip repaint (needed in BOTH modes — the
+        // proxy sets the marker but nobody else clears the glyph). Keeping them
+        // as separate calls is the point: #1180's guard on the first one used to
+        // silence the second (see repaintTypingChip).
+        detectHumanTyping();
+        repaintTypingChip();
+    }, HUMAN_POLL_MS);
     // #783 phase 3 + 5 — fast watchdog at 2s. Two responsibilities:
     //   - tmux liveness: orphaned timer collapses within seconds of
     //     pane death (covers the case where the bash trap didn't run —
