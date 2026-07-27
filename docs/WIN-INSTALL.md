@@ -353,7 +353,7 @@ boots straight to its prompt and `claude-loop start` works.
 > the one-time `claude` run is the reliable workaround.
 
 Skip this with `-NoClaudeLoop` if you only want the daemon + tray
-(the `claude-loop.cmd` shim still ships, but `start` will error out
+(the `claude-loop` shim is still written, but `start` will error out
 until psmux + bash are reachable).
 
 ### Optional: live human-typing detection (ConPTY proxy)

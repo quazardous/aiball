@@ -5,9 +5,10 @@
 
 .DESCRIPTION
     Mirror of install.sh, scoped to the daemon + aiball CLI + aiball-mcp.
-    claude-loop is also packaged (bin/claude-loop.cmd ships) but the loop
-    wrapper itself requires tmux and stays POSIX-only — the .cmd shim is
-    there for parity, not for use, until the psmux adapter lands (#B.178).
+    claude-loop is packaged too, and it runs here: the loop drives psmux
+    rather than tmux on this platform. This installer writes its PATH shim
+    like the others — there is no `bin/claude-loop.cmd` in the package any
+    more, the shim points at the Node launcher `bin/claude-loop`.
 
     What it does:
       1. Verifies prereqs (node>=20, npm, git) + warns on Node>=24
@@ -89,7 +90,7 @@
 
 .PARAMETER NoClaudeLoop
     Skip installing the claude-loop wrapper's runtime deps (psmux via
-    winget + Git Bash's bash.exe on PATH). The claude-loop.cmd shim is
+    winget + Git Bash's bash.exe on PATH). The claude-loop shim is
     still installed, but `claude-loop start` will error out until you
     install psmux + ensure bash is on PATH manually. Useful if you only
     want the daemon + tray and never plan to use the autonomous loop.
@@ -491,7 +492,7 @@ if ($Service) {
 }
 
 # --- claude-loop runtime deps: psmux + bash on PATH ------------------------
-# We ship the claude-loop.cmd shim in every install path, so ensure its
+# We write a claude-loop shim in every install path, so ensure its
 # deps are reachable. psmux ships a tmux alias, so claude-loop's
 # MUX_CMD=tmux (default) finds it. Git Bash provides bash for the inner
 # `bash -lc 'source env; exec claude'` command. -NoClaudeLoop opts out.
