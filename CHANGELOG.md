@@ -25,6 +25,14 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `aiball install --service` registers the daemon as a systemd user service,
+  so trying aiball and adopting it stay two separate decisions: nothing runs
+  in the background until you ask. `--dry-run` shows the unit first,
+  `--remove` gives it back.
+- `aiball check` now names every prerequisite npm can't carry — tmux, python3,
+  a Rust toolchain — and prints the install command for **your** package
+  manager next to anything missing, saying whether it stops aiball outright or
+  only costs you a named feature.
 - The comment post button now carries a dropdown with **post without
   notifying**: the comment lands on the thread but generates no ping, so no
   agent is woken by it. Useful for leaving yourself a note mid-thread. It
@@ -60,6 +68,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- The `aiball`, `aiball-mcp` and `claude-loop` commands are Node entrypoints
+  instead of hand-written shell launchers, so each one is a single process
+  rather than a shell wrapping npx wrapping tsx. The launchers were duplicated
+  once per command and once more per platform; that duplication is gone, and
+  the repo is now packable as an npm tarball. Nothing is published yet — the
+  install paths are unchanged.
 - Recurring daemon jobs are declared in one table instead of being wired one by
   one. A job that fails — including one that fails asynchronously — is recorded
   and skipped rather than taking the daemon down, and a job still running when
