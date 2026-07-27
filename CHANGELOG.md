@@ -85,6 +85,13 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Restarting a crew loop no longer turns it back into the lead. Its role and
+  identity were passed at launch and recorded nowhere, so a restart — including
+  the one a `SIGHUP` triggers, without anyone typing a command — brought the
+  loop back able to claim from the shared pool, under the maintainer's own
+  identity. Both are kept with the loop now, and `claude-loop check` shows the
+  role so a loop that lost it is visible instead of silent. Loops started
+  before this keep their previous behaviour until their next start.
 - An agent that cannot claim — a crew worker, or a project declaring itself
   assignment-only — no longer sees the whole shared pool in its backlog and
   gets woken for tickets it isn't allowed to take. Its backlog is now what was

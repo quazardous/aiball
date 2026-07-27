@@ -35,6 +35,7 @@ import {
     loopSockPath,
     sendShutdownToTimer,
     zenPath,
+    type Plate,
 } from "../state.js";
 import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
@@ -382,18 +383,25 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
  * timer traps SIGHUP and spawns THIS detached, so it survives killing its own
  * session.
  */
-export function cmdRestart(name: string): void {
-    const sd = stateDirFor(name);
-    if (!existsSync(platePath(sd))) {
-        die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);
-    }
-    const plate = readPlate(sd);
-    const bin = join(installRoot(), "bin", "claude-loop");
-    // Reconstruct the original `start` invocation from the persisted plate.
-    // (pings source isn't recoverable from the plate — plate.pings_path points
-    // into the state dir we're about to rm — so the relaunch falls back to the
-    // default ping phrases, which is fine for a restart.)
-    const startArgs = [
+/**
+ * Rebuild the `start` invocation a restart must replay, from the plate alone.
+ *
+ * Pure and exported so the replay is testable without spawning anything — the
+ * same split `crew.ts` uses (planning layer tested, git/spawn calls kept thin).
+ * #1576 is precisely a bug of omission in this list, and an omission is only
+ * visible in a test if the list is a value rather than an inline literal.
+ *
+ * Not recoverable from the plate, by design: the pings source
+ * (`plate.pings_path` points into the state dir we're about to rm), so the
+ * relaunch falls back to the default ping phrases.
+ */
+export function restartStartArgs(name: string, plate: Plate): string[] {
+    // #1576 — the launch identity, top-level, independent of `remote`. Falls
+    // back to the remote block for plates written before the top-level fields
+    // existed, so an older remote loop keeps replaying what it used to.
+    const consumer = plate.consumer ?? plate.remote?.consumer ?? null;
+    const project = plate.project ?? plate.remote?.project ?? null;
+    return [
         "start",
         "--name", name,
         "--interval", String(plate.interval),
@@ -402,12 +410,27 @@ export function cmdRestart(name: string): void {
         // remote loop stays remote (else it would fall back to a local socket).
         ...(plate.remote?.url ? ["--aiball-url", plate.remote.url] : []),
         ...(plate.remote?.token ? ["--aiball-token", plate.remote.token] : []),
-        ...(plate.remote?.consumer ? ["--consumer", plate.remote.consumer] : []),
-        ...(plate.remote?.project ? ["--project", plate.remote.project] : []),
+        // #1576: a crew loop carries these WITHOUT any remote. Dropping them
+        // brought it back as the lead — able to claim, under the lead's
+        // identity, because the worktree has no `.aiball.yaml` of its own and
+        // the config walk-up reaches the lead's.
+        ...(plate.role ? ["--role", plate.role] : []),
+        ...(consumer ? ["--consumer", consumer] : []),
+        ...(project ? ["--project", project] : []),
         "--force",
         "--no-attach",
         ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),
     ];
+}
+
+export function cmdRestart(name: string): void {
+    const sd = stateDirFor(name);
+    if (!existsSync(platePath(sd))) {
+        die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);
+    }
+    const plate = readPlate(sd);
+    const bin = join(installRoot(), "bin", "claude-loop");
+    const startArgs = restartStartArgs(name, plate);
     // Delegate the teardown+relaunch to a DETACHED, new-session helper (setsid
     // via detached:true). This is what lets a HARD restart survive being fired
     // from INSIDE the very session it kills — by the SIGHUP'd timer, OR by the

@@ -711,6 +711,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                   project: opts.project ?? ctx.project,
               }
             : null,
+        // #1576: the launch identity, so `restart` replays it. Only what was
+        // EXPLICITLY passed — re-deriving `ctx.agent` here would freeze into
+        // the plate an identity the config is free to change later.
+        role: opts.role ?? null,
+        consumer: opts.consumer ?? null,
+        project: opts.project ?? null,
     };
     writePlate(sd, plate);
 
@@ -1458,6 +1464,13 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     // without `--json | jq`.
     if (stateDir) {
         process.stdout.write(`  state dir      : ${stateDir}\n`);
+    }
+    // #1576 — a crew loop's role used to exist only in its launch flags, so
+    // nothing could tell you what a running loop was. Now that the plate keeps
+    // it, say it: "crew" means assignment-only, and a loop that lost it is the
+    // symptom of the promotion bug.
+    if (plate?.role) {
+        process.stdout.write(`  role           : ${plate.role}${plate.consumer ? ` (as ${plate.consumer})` : ""}\n`);
     }
     process.stdout.write(`  check-cmd      : ${checkCmd}\n`);
     process.stdout.write(`  AIBALL_AGENT   : ${ctx.agent} (from ${ctx.agent_source})\n`);

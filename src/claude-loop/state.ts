@@ -157,6 +157,30 @@ export interface Plate {
         consumer?: string;
         project?: string;
     } | null;
+    /**
+     * #1576 — the identity the loop was LAUNCHED with, when it wasn't the one
+     * the cwd resolves to on its own.
+     *
+     * A crew loop is `claude-loop start --cwd <worktree> --role crew --consumer
+     * <project>-crew-<name>`: all three live in the launch flags and nowhere
+     * else. `restart` rebuilds its invocation from this plate, so without them
+     * it came back WITHOUT the crew role and WITHOUT the crew consumer — and
+     * `.aiball.yaml` is gitignored, so the worktree has none and the config
+     * walk-up lands on the LEAD's. The crew returned able to claim, under the
+     * lead's identity, as a project owner.
+     *
+     * Kept OUT of `remote` on purpose: that block means "this loop talks to a
+     * remote daemon", which is orthogonal — a local crew has no remote, and
+     * that is exactly why its `--consumer` was being dropped.
+     *
+     * All optional: a plate written before this degrades to the previous
+     * behaviour rather than replaying flags it never recorded.
+     */
+    role?: string | null;
+    /** #1576 — `--consumer` as passed at launch (crew id, or an explicit override). */
+    consumer?: string | null;
+    /** #1576 — `--project` as passed at launch. */
+    project?: string | null;
 }
 
 /**
