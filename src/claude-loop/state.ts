@@ -534,6 +534,75 @@ export function proxyAlivePath(sd: string): string { return join(sd, "proxy-aliv
 // live state-dirs lives in `loop.ts` top-level (mv if old exists and new
 // doesn't).
 export function loopPidPath(sd: string): string { return join(sd, "loop.pid"); }
+/**
+ * Roll-call of every kernel that has ever booted for this loop (#1601).
+ *
+ * `loop.pid` names the CURRENT kernel, which is all a `kill -HUP` needs. It is
+ * not enough to clean up: a reload kills that one pid, so a kernel orphaned by
+ * an EARLIER reload is never reaped. On Linux `sweepOrphans` catches those by
+ * scanning `/proc/<pid>/environ` for `CL_STATE_DIR`; Windows has no equivalent
+ * — a process cannot read another's environment — so the sweep was a silent
+ * no-op there and orphans accumulated. Observed live: three kernels for one
+ * loop, all alive, all painting the bar with their own AFK countdown (hence a
+ * flickering timer) and all connecting to the proxy (hence a link that looked
+ * like it was flapping).
+ *
+ * So the loop keeps its own roll-call instead of asking the OS. Append-only,
+ * one pid per line; the sweep reads it, kills what is still alive and is not
+ * the caller, and rewrites it.
+ */
+export function kernelPidsPath(sd: string): string { return join(sd, "kernels.pids"); }
+
+/** Add `pid` to the roll-call. Best-effort: a lost line costs a missed sweep,
+ *  never a crash, so this must not throw into the boot path. */
+export function registerKernelPid(sd: string, pid: number = process.pid): void {
+    try { appendFileSync(kernelPidsPath(sd), `${pid}\n`); } catch { /* best effort */ }
+}
+
+/**
+ * Claim the loop: register, then kill every OTHER kernel still holding it.
+ *
+ * A sweep driven by the CLI runs before it spawns, so it cannot see a kernel
+ * that appears afterwards — and one does, routinely: changing the source makes
+ * the running kernel self-reload, and a `claude-loop reload` issued around the
+ * same moment adds a second. Measured after exactly that sequence: two live
+ * kernels per loop, both registered, neither swept, both painting the bar.
+ *
+ * Doing it at boot instead is self-healing whatever spawned us, and the rule it
+ * enforces is the real invariant: one kernel per loop, and the newest wins —
+ * it holds the freshest source and the freshest state.
+ */
+export function claimLoopAsKernel(sd: string): { killed: number[] } {
+    registerKernelPid(sd);
+    const killed: number[] = [];
+    const survivors: number[] = [process.pid];
+    for (const pid of readKernelPids(sd)) {
+        if (pid === process.pid) continue;
+        try { process.kill(pid, 0); } catch { continue; } // already gone
+        try { process.kill(pid, "SIGKILL"); killed.push(pid); }
+        catch { survivors.push(pid); /* race, or not ours */ }
+    }
+    writeKernelPids(sd, survivors);
+    return { killed };
+}
+
+/** Every pid ever registered, de-duplicated, most recent last. */
+export function readKernelPids(sd: string): number[] {
+    try {
+        const seen = new Set<number>();
+        for (const line of readFileSync(kernelPidsPath(sd), "utf8").split("\n")) {
+            const n = Number(line.trim());
+            if (Number.isInteger(n) && n > 0) seen.add(n);
+        }
+        return [...seen];
+    } catch { return []; }
+}
+
+/** Rewrite the roll-call to exactly `pids` (used after a sweep). */
+export function writeKernelPids(sd: string, pids: number[]): void {
+    try { writeFileSync(kernelPidsPath(sd), pids.map((p) => `${p}\n`).join("")); }
+    catch { /* best effort */ }
+}
 export function loopLogPath(sd: string): string { return join(sd, "loop.log"); }
 /**
  * Touched by the timer / stop-hook RIGHT BEFORE they `send-keys` an
