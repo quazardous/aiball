@@ -68,7 +68,12 @@ jobs:
       # install.test.ts pins the generated systemd unit AND the generated
       # scheduled-task launchers (#1571); both render platform-independently,
       # so this lane is where the Windows half is actually asserted.
-      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts" "src/cli/install.test.ts" "src/sysdeps.test.ts"
+      # cursor-args + prompt-input-watcher guard a bug that only bit on
+      # Windows (psmux ignoring `display-message -F`, so the cursor read as
+      # null and greyed ghost-suggestions passed for real input) — the guard
+      # belongs on the platform where it broke. Both are pure functions, no
+      # mux spawned.
+      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts" "src/cli/install.test.ts" "src/sysdeps.test.ts" "src/cursor-args.test.ts" "src/claude-loop/pane-watchers/prompt-input-watcher.test.ts"
 
   # #1571 — the parity check that makes "aiball supports Windows" verifiable
   # instead of declared. Everything above runs from the checkout; this job runs

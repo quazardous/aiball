@@ -100,6 +100,25 @@ export class PromptZoneWatcher extends BoolWatcher {
  * so "no non-whitespace after the chevron" means empty (can't tell a ghost
  * apart without the cursor — accepted in the cursor-less fallback).
  */
+/**
+ * Colonne 0-based où commence la saisie : le chevron PLUS son séparateur.
+ *
+ * On ne peut pas la déduire de la ligne capturée : `capture-pane` rase les
+ * blancs de fin, donc un prompt vide revient comme `❯` et non `❯ ` — le
+ * préfixe mesuré perd une colonne, et le curseur (parqué à l'origine, en 2)
+ * se lit alors comme « à droite du début », c'est-à-dire « en train de
+ * taper ». Un prompt vide devenait non-vide en permanence.
+ *
+ * Le séparateur est toujours présent À L'ÉCRAN, seule la capture le perd : on
+ * le compte donc inconditionnellement. Quand il survit (fixtures écrites à la
+ * main, autres muxers), le résultat est le même — la formule ne diverge que
+ * dans le cas rasé, qui est justement le cas réel.
+ */
+function inputOrigin(chevronLine: string): number {
+    const upToChevron = chevronLine.match(/^\s*❯/u)?.[0] ?? "";
+    return upToChevron.length + 1;
+}
+
 export function promptInputEmpty(
     paneText: string,
     ctx?: { cursorX?: number; cursorY?: number },
@@ -110,7 +129,7 @@ export function promptInputEmpty(
     const prefix = chevronLine.match(/^\s*❯[\s ]?/u)?.[0] ?? "";
     if (ctx && typeof ctx.cursorX === "number" && ctx.cursorY === zone.chevron) {
         // cursor at/before the input start = nothing actively typed.
-        return ctx.cursorX <= prefix.length;
+        return ctx.cursorX <= inputOrigin(chevronLine);
     }
     const after = chevronLine.slice(prefix.length).replace(/[\s ]/gu, "");
     return after.length === 0;

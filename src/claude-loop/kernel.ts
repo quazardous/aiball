@@ -46,6 +46,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
+import { captureCursorSync } from "../pane.js";
 import { drainOffload, listOffloadComponents } from "./offload.js";
 import { getKernelBus, bridgeActorToKernel } from "./kernel-bus.js";
 import {
@@ -501,17 +502,13 @@ function capturePane(): string {
 // #993 — tmux pane cursor (0-based, visible-screen relative). Needed to tell
 // real typed input apart from Claude's greyed ghost-suggestions in the prompt
 // box (typed text is left of the cursor, suggestion right). null on any error
-// → watchers fall back to text-only detection.
+// → watchers fall back to text-only detection, which CANNOT tell the two
+// apart. Le lecteur vit dans `pane.ts` (#531) : ce module en avait une copie
+// qui avait dérivé vers `-F`, forme que psmux ne comprend pas — donc `null` en
+// permanence sur Windows, et le repli aveugle pris à chaque poll. Une seule
+// implémentation, pas deux.
 function captureCursor(): { x: number; y: number } | null {
-    try {
-        const r = spawnSync(MUX_CMD, [
-            "display-message", "-p", "-t", `${tname}.0`, "-F", "#{cursor_x} #{cursor_y}",
-        ], { encoding: "utf8" });
-        const m = (r.stdout ?? "").trim().match(/^(\d+)\s+(\d+)$/);
-        return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
-    } catch {
-        return null;
-    }
+    return captureCursorSync(`${tname}.0`);
 }
 
 function shQuote(s: string): string {
