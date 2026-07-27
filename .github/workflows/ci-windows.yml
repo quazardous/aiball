@@ -17,6 +17,12 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      # The smoke job installs the tarball, so what the tarball CONTAINS is
+      # part of this lane's surface: the entrypoints, the packed frontend, and
+      # the `files`/`bin` fields themselves.
+      - 'bin/**'
+      - 'frontend/**'
+      - 'install.ps1'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig*.json'
@@ -24,6 +30,12 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      # The smoke job installs the tarball, so what the tarball CONTAINS is
+      # part of this lane's surface: the entrypoints, the packed frontend, and
+      # the `files`/`bin` fields themselves.
+      - 'bin/**'
+      - 'frontend/**'
+      - 'install.ps1'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig*.json'
@@ -53,4 +65,72 @@ jobs:
       # Curated win32-safe tests (see header). The ipc-events transport
       # layer (#739) is the headline coverage — it now binds + round-trips
       # on win32 via loopback TCP. UDS-specific cases self-skip on win32.
-      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts"
+      # install.test.ts pins the generated systemd unit AND the generated
+      # scheduled-task launchers (#1571); both render platform-independently,
+      # so this lane is where the Windows half is actually asserted.
+      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts" "src/cli/install.test.ts"
+
+  # #1571 — the parity check that makes "aiball supports Windows" verifiable
+  # instead of declared. Everything above runs from the checkout; this job runs
+  # from the TARBALL, in a directory that has never seen the repo. It is the
+  # only thing that would catch a `files` entry gone missing, and it runs on
+  # every PR rather than once per tag, because a parity verified at tag time
+  # drifts silently between tags (#1559 was exactly that).
+  #
+  # cl-pty-proxy is NOT built here (release.yml owns that). That is deliberate
+  # extra coverage: `aiball check` must NAME the missing proxy and still exit
+  # cleanly, rather than fall over.
+  smoke-tarball:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      # `prepack` builds frontend/dist, which `files` ships.
+      - name: npm pack
+        shell: pwsh
+        run: |
+          $tgz = (npm pack --silent | Select-Object -Last 1).Trim()
+          "TARBALL=$(Resolve-Path $tgz)" >> $env:GITHUB_ENV
+      - name: install the tarball into a virgin directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\smoke" | Out-Null
+          Set-Location "$env:RUNNER_TEMP\smoke"
+          npm init -y | Out-Null
+          npm install --no-audit --no-fund "$env:TARBALL"
+      - name: aiball --version matches package.json
+        shell: pwsh
+        run: |
+          Set-Location "$env:RUNNER_TEMP\smoke"
+          $expected = (Get-Content "$env:GITHUB_WORKSPACE\package.json" | ConvertFrom-Json).version
+          $got = (& ".\node_modules\.bin\aiball.cmd" --version).Trim()
+          if ($got -ne $expected) { throw "aiball --version = '$got', expected '$expected'" }
+          "aiball --version = $got"
+      # `check` talks to a daemon that isn't running here, so a non-zero exit is
+      # expected and not the signal. What we assert is that it RAN and produced
+      # the prerequisite block in its current shape — the Windows names, not the
+      # POSIX ones. A regression to tmux/python3 here means PREREQS lost its
+      # platform split.
+      - name: aiball check names the Windows prerequisites
+        shell: pwsh
+        run: |
+          Set-Location "$env:RUNNER_TEMP\smoke"
+          $out = (& ".\node_modules\.bin\aiball.cmd" check 2>&1 | Out-String)
+          # No daemon on this runner, so `check` exits non-zero by design. A
+          # pwsh step ends with `exit $LASTEXITCODE`, which would turn that
+          # expected exit into a red job — clear it and judge on the OUTPUT.
+          $global:LASTEXITCODE = 0
+          $out
+          if ($out -notmatch 'dependencies') { throw "no dependencies block in `aiball check` output" }
+          foreach ($p in 'psmux', 'bash', 'cargo') {
+            if ($out -notmatch [regex]::Escape($p)) { throw "prerequisite '$p' missing from check output" }
+          }
+          foreach ($p in 'python3') {
+            if ($out -match "(?m)^\s*[^\s]+\s$p\:") { throw "POSIX prerequisite '$p' leaked into the Windows list" }
+          }
+          # The proxy is not built on this lane; check must say so, not crash.
+          if ($out -notmatch 'cl-pty-proxy') { throw "check no longer mentions cl-pty-proxy" }
