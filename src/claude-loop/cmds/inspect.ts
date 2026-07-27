@@ -29,6 +29,10 @@ import {
 import { computeLoopView } from "../loop-state.js";
 import { getIpcState } from "../ipc-state.js";
 import { openEventChannel } from "../ipc-events.js";
+import { selectTransport } from "../transport/index.js";
+
+/** Platform default (UDS on Unix, loopback TCP on win32). */
+const transport = selectTransport();
 
 /**
  * #774 — pull the timer's live `ipcState` over `loop.sock`. The handler
@@ -40,7 +44,14 @@ import { openEventChannel } from "../ipc-events.js";
  */
 async function queryLoopState(sd: string, timeoutMs = 1000): Promise<LiveLoopSnapshot | null> {
     const sock = loopSockPath(sd);
-    if (!existsSync(sock)) return null;
+    // #1601 — ASK THE TRANSPORT, don't stat a file. `loop.sock` is the address
+    // on Unix only; win32 publishes `<sock>.addr` and never creates the file,
+    // so the old `existsSync` answered "down" on every Windows loop and this
+    // returned null. The caller then printed its zero-value fallbacks WITHOUT
+    // saying they were fallbacks — reporting `afk.mode "off"` while the bar
+    // rendered a live 496s AFK countdown. A diagnostic that invents values is
+    // worse than one that errors, because nothing looks wrong.
+    if (!transport.reachable(sock)) return null;
     const ch = openEventChannel(sock, { reconnectMs: 100 });
     try {
         // openEventChannel reconnects forever ; race against a deadline

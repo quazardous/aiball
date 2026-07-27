@@ -53,6 +53,11 @@ export const win32Transport: Transport = {
             },
         };
     },
+    reachable(socketPath) {
+        // No socket file here — the `.addr` marker is the address. If it
+        // parses into a port+token, a server published it.
+        return this.clientUrl(socketPath) !== null;
+    },
     clientUrl(socketPath) {
         try {
             const { port, token } = JSON.parse(readFileSync(addrPath(socketPath), "utf8")) as {

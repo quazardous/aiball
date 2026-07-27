@@ -34,6 +34,37 @@ const CASES: { name: string; transport: Transport; skip: boolean }[] = [
 for (const { name, transport, skip } of CASES) {
     const tt = skip ? test.skip : test;
 
+    // #1181/#1601 — `reachable` is the pre-flight both `inspect` and `health`
+    // used to roll by hand as `existsSync(loopSockPath(sd))`. That question is
+    // Unix-shaped: win32 has no socket FILE, so both tools answered "down" on
+    // every healthy Windows loop — health printed seven red checks, and inspect
+    // silently substituted zero values (reporting `afk.mode "off"` against a
+    // live AFK countdown). Pinned per transport, on the shared contract, so the
+    // next caller inherits the right answer instead of re-deriving a wrong one.
+    tt(`[${name}] reachable is false before bind, true after, false after close`, async () => {
+        await withTmpSock(name, async (sock) => {
+            assert.equal(transport.reachable(sock), false, "nothing bound yet");
+            const server = listenEvents(sock, () => {}, { transport });
+            await sleep(120);
+            assert.equal(transport.reachable(sock), true, "a bound server is reachable");
+            server.close();
+            await sleep(120);
+            assert.equal(transport.reachable(sock), false, "closed server is not reachable");
+        });
+    });
+
+    tt(`[${name}] reachable agrees with clientUrl on a live server`, async () => {
+        // The two answer the same underlying question; a caller that picks
+        // either must not get contradictory advice.
+        await withTmpSock(name, async (sock) => {
+            const server = listenEvents(sock, () => {}, { transport });
+            await sleep(120);
+            assert.equal(transport.reachable(sock), true);
+            assert.notEqual(transport.clientUrl(sock), null, "resolvable while reachable");
+            server.close();
+        });
+    });
+
     tt(`[${name}] listenEvents + sendEventOnce round-trip`, async () => {
         await withTmpSock(name, async (sock) => {
             const received: Event[] = [];

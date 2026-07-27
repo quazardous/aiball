@@ -29,6 +29,10 @@ import {
     type Plate,
 } from "../state.js";
 import { openEventChannel } from "../ipc-events.js";
+import { selectTransport } from "../transport/index.js";
+
+/** Platform default (UDS on Unix, loopback TCP on win32). */
+const transport = selectTransport();
 
 export type HealthStatus = "ok" | "warn" | "fail";
 export interface HealthCheck {
@@ -128,7 +132,11 @@ interface LiveLoopState {
 }
 async function queryUdsLoopState(sd: string, timeoutMs = 500): Promise<{ live: LiveLoopState | null; latencyMs: number; sockMissing: boolean }> {
     const sock = loopSockPath(sd);
-    if (!existsSync(sock)) return { live: null, latencyMs: -1, sockMissing: true };
+    // #1181 — same fix as inspect: win32 has no socket FILE, so this reported
+    // `loop.sock socket file missing` on every healthy Windows loop, and the
+    // four checks that need the live reply (ipc freshness, boot status, SSE
+    // channel, daemon) all failed behind it. Seven red checks on a working loop.
+    if (!transport.reachable(sock)) return { live: null, latencyMs: -1, sockMissing: true };
     const t0 = Date.now();
     const ch = openEventChannel(sock, { reconnectMs: 100 });
     try {
