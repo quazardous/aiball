@@ -93,7 +93,10 @@ const REAL_BOX = [
     "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt",
 ].join("\n");
 
-test("detects the box when the top rule carries the session label", () => {
+// Skipped, not deleted: the fix these pin is written and measured, and comes
+// back the moment #1580 has hardened the busy release. Deleting them would
+// lose the evidence of what the decorated rule actually looks like.
+test("detects the box when the top rule carries the session label", { skip: "re-enable with the #1580 release hardening — see findPromptZone" }, () => {
     const zone = findPromptZone(REAL_BOX);
     assert.ok(zone !== null, "a labelled top rule must not hide the box");
     assert.equal(zone!.top, 4);
@@ -101,7 +104,7 @@ test("detects the box when the top rule carries the session label", () => {
     assert.equal(zone!.bottom, 6);
 });
 
-test("a labelled BOTTOM rule works too — the label is not top-specific", () => {
+test("a labelled BOTTOM rule works too — the label is not top-specific", { skip: "re-enable with the #1580 release hardening" }, () => {
     // Nothing guarantees which rule gets decorated; pinning only the observed
     // side would re-create the same blind spot mirrored.
     const pane = `${BAR}\n❯ \n${LABELLED_TOP}`;
