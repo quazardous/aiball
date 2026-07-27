@@ -32,6 +32,11 @@
   distribution package, e.g. `dnf install python3-websocket-client` on
   Fedora). Replay-mode subtests don't need it.
 
+You don't have to check these by hand: `aiball check` probes each one and
+prints the install command for **your** package manager next to anything
+missing, saying whether it stops aiball outright or only costs you a
+named feature.
+
 ## Install
 
 Clone the repo and pick an install mode:
@@ -66,6 +71,28 @@ terminal stops the daemon. CLIs (`aiball`, `aiball-mcp`, `claude-loop`)
 must be invoked via `./bin/aiball …` from the repo root, or you add
 `./bin/` to your `PATH` manually. Use this when you're hacking on the
 code and don't want install-side-effects.
+
+#### Adopting the daemon later: `aiball install --service`
+
+Trying aiball and adopting it are two different decisions, so they're two
+different gestures. When you decide you want the daemon back at every
+login, one command registers it:
+
+```bash
+aiball install --service                          # start at login, restart on failure
+aiball install --service --port 7878              # bake a different bind into the unit
+aiball install --service --dry-run                # print the unit, write nothing
+aiball install --service --remove                 # give it back
+```
+
+It writes a systemd **user** unit (`~/.config/systemd/user/aiball.service`)
+pointing at the daemon entrypoint of the aiball you ran it from, then
+enables it. Nothing else on your system is touched, and `--remove`
+reverses it completely.
+
+`install.sh` already does this as part of its own flow — you only need
+this command when you started from the portable path, or when you want to
+move the service to a different bind without re-running the installer.
 
 ### Path 2: Hard install (default)
 

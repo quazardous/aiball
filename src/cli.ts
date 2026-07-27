@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
-import { commandExists } from "./sysdeps.js";
+import { checkPrereqs } from "./sysdeps.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
 import { registerTicketCommands } from "./cli/ticket.js";
@@ -22,6 +22,7 @@ import { registerAdminCommands } from "./cli/admin.js";
 import { registerAutopollCommands } from "./cli/autopoll.js";
 import { registerBootstrapCommands } from "./cli/bootstrap.js";
 import { registerConsumerCommands } from "./cli/consumer.js";
+import { registerInstallCommands } from "./cli/install.js";
 import { registerProviderCommands } from "./cli/providers.js";
 import { providersStatus } from "./providers.js";
 import { loadProxy } from "./proxy.js";
@@ -64,6 +65,7 @@ registerAdminCommands(program);
 registerAutopollCommands(program);
 registerConsumerCommands(program);
 registerProviderCommands(program);
+registerInstallCommands(program);
 
 // =====================================================================
 // status / drain
@@ -264,14 +266,11 @@ program
                 up: daemonUp,
                 unread_pings: pings,
             },
-            // #269 (david ftprf7): runtime deps. python3 powers the
-            // claude-loop PTY proxy (live human-typing detection + socket
-            // wake injection); without it the loop falls back to direct
-            // launch + pane-diff (idle-only). Same probe the proxy launch
-            // uses (src/sysdeps.ts).
-            dependencies: {
-                python3: commandExists("python3"),
-            },
+            // #269 (david ftprf7) then #1567 phase 3: the prerequisites npm
+            // cannot carry. Probed through src/sysdeps.ts — the same lookup the
+            // proxy launch uses — and each miss carries the install command for
+            // THIS machine's package manager.
+            dependencies: checkPrereqs(),
             // #B.154: deprecation surface — `.mcp.json` env block is
             // the legacy identity-injection mechanism; users should
             // migrate to `.aiball.yaml consumer:*`. Independent of
@@ -337,13 +336,19 @@ program
             process.stdout.write(`  ${ok(payload.daemon.unread_pings === 0)} unread pings for ${payload.consumer.agent}: ${payload.daemon.unread_pings ?? "?"}\n`);
         }
         process.stdout.write(`\ndependencies\n`);
-        process.stdout.write(
-            `  ${ok(payload.dependencies.python3)} python3: ${
-                payload.dependencies.python3
-                    ? "available (claude-loop PTY proxy enabled)"
-                    : "MISSING — claude-loop falls back to direct launch (no live human-typing detection)"
-            }\n`,
-        );
+        for (const d of payload.dependencies) {
+            if (d.present) {
+                process.stdout.write(`  ✓ ${d.cmd}: available — ${d.powers}\n`);
+                continue;
+            }
+            // A hard miss and a soft one read differently: one says the thing
+            // won't run, the other names exactly what you lose.
+            const verdict = d.required
+                ? `MISSING — required by ${d.powers}`
+                : `missing — ${d.degraded}`;
+            process.stdout.write(`  ${d.required ? "✗" : "·"} ${d.cmd}: ${verdict}\n`);
+            if (d.install) process.stdout.write(`     install with: ${d.install}\n`);
+        }
         if (payload.deprecation.mcp_json_env_block) {
             process.stdout.write(
                 `\ndeprecation\n` +
