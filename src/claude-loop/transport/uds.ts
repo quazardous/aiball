@@ -22,6 +22,10 @@ export const udsTransport: Transport = {
             },
         };
     },
+    reachable(socketPath) {
+        // The socket file IS the address on Unix: no file, no server.
+        return existsSync(socketPath);
+    },
     clientUrl(socketPath) {
         // `ws+unix:` scheme : socket path, then `:` + the http path. `ws`
         // uses the socket path to connect, the http path for the upgrade.

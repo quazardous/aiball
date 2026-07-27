@@ -38,4 +38,21 @@ export interface Transport {
      *  be resolved yet (server not up / address marker absent) — the
      *  caller treats null as "not connectable", same as a refused socket. */
     clientUrl(socketPath: string): string | null;
+    /**
+     * Is a server plausibly listening for `socketPath`? A cheap pre-flight
+     * so a caller can bail out instead of paying a connect timeout.
+     *
+     * #1181/#1601 — this exists because callers were rolling their own, and
+     * the shape they reached for was `existsSync(loopSockPath(sd))`. That is
+     * a Unix-only question: win32 never creates a socket FILE, it publishes
+     * `<socketPath>.addr`. So `claude-loop inspect` and `claude-loop health`
+     * both short-circuited to "down" on every Windows loop, however healthy —
+     * inspect then printed its zero-value fallbacks with no indication they
+     * were fallbacks, which is worse than an error: it reported `afk.mode
+     * "off"` while the bar was rendering a live 496s AFK countdown.
+     *
+     * Answering it here means each transport states its own truth, and the
+     * shared contract test checks both.
+     */
+    reachable(socketPath: string): boolean;
 }
