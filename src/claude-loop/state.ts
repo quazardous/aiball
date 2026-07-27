@@ -1546,6 +1546,28 @@ export interface WakeEventHint {
 }
 
 /**
+ * #1582 — may this hint anchor the wake at all?
+ *
+ * The precondition is content, not kind. Anchoring on a hint means rendering
+ * ITS body, so a hint with nothing to render produces a wake reduced to
+ * `(#N / #hashid)` — observed live on a `ticket_sub_added`, the bodyless
+ * pseudo-comment that records a sub-ticket on its parent's thread.
+ *
+ * The previous guard asked the opposite question — "is this kind one of the
+ * ones I know to be bodyless?" — over a list of three lifecycle kinds plus the
+ * decision events. Such a list silently reopens on every new bodyless kind,
+ * and it had already missed two (`ticket_sub_added`, `ticket_referenced`).
+ * Asking whether there is text closes the family, including kinds nobody has
+ * written yet, and also covers the case where the hint's fetch failed and
+ * returned neither kind nor body.
+ *
+ * Pure so the guarantee is pinned by a test rather than by a code comment.
+ */
+export function hintHasRenderableBody(hint?: { commentBody?: string }): boolean {
+    return !!hint?.commentBody?.trim();
+}
+
+/**
  * #1351 — how many unread events the wake builder fetches to look for a
  * same-ticket bundle. The head is still the oldest (messages[0]); the rest
  * of the window is scanned for other unread events on the head's ticket so
@@ -1958,7 +1980,27 @@ export async function buildContextPhrase(
             ? (!DECISION_EVENT_VERBS[eventHint.commentKind] && !LIFECYCLE_VERBS[eventHint.commentKind]
                 && eventHint.commentKind !== "ticket_created")
             : true; // kind inconnu (hint legacy) : comportement inchangé
-        if (eventHint?.commentHashid && hintIsComment
+        // #1582 — et surtout : le hint doit avoir QUELQUE CHOSE À DIRE.
+        //
+        // `hintIsComment` ci-dessus est une liste noire de kinds réputés sans
+        // corps. Elle en listait trois lifecycle + les décisions + ticket_created,
+        // et ratait `ticket_sub_added` — un pseudo-commentaire (trace de
+        // sous-ticket sur le fil parent, messages.ts) dont le body est `''` par
+        // construction. Résultat observé : un wake réduit à « (#1571 / #edxf9s) ».
+        // `ticket_referenced` a la même forme et portait le même bug.
+        //
+        // Une liste noire de kinds sans corps se rouvre à chaque nouveau kind
+        // sans corps, en silence. La précondition, elle, est fermée : on
+        // n'ancre que si le hint porte du texte. Les deux cohabitent parce
+        // qu'elles répondent à des questions différentes — `hintIsComment` dit
+        // QUELLE BRANCHE doit rendre l'événement, `hintHasBody` dit s'il y a
+        // matière à rendre.
+        //
+        // Ça ferme aussi un troisième chemin : quand `wake-context` échoue, il
+        // renvoie ni kind ni body — le kind inconnu passait par la branche
+        // « comportement inchangé » et s'ancrait sur du vide.
+        const hintHasBody = hintHasRenderableBody(eventHint);
+        if (eventHint?.commentHashid && hintIsComment && hintHasBody
             && !headCommentHashid && !headLifecycleVerb && !headDecisionEvent
             && head?.kind !== "new ticket") {
             headCommentHashid = eventHint.commentHashid;
