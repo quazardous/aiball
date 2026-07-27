@@ -63,12 +63,37 @@ export interface ShimStatus {
  * whoever owns the box.
  */
 export function checkShims(timeoutMs = 15_000): ShimStatus[] {
+    /**
+     * Run an installed command the way the OS actually would.
+     *
+     * On Windows neither obvious form works: `spawnSync("aiball", …)` fails
+     * with ENOENT because CreateProcess does no PATHEXT resolution — the name
+     * has no extension — and spawning the RESOLVED `.cmd` fails too, since Node
+     * refuses `.cmd`/`.bat` without a shell (the CVE-2024-27980 mitigation). So
+     * the probe reported every Windows box as broken, whatever its actual
+     * state, and told the user to re-run the installer for nothing. Exactly the
+     * shape `commandExists` above was already fixed for.
+     *
+     * A shell invocation is therefore the only form that runs a shim on
+     * Windows. The command line is assembled here rather than passed as an args
+     * array with `shell: true`, which concatenates without escaping (DEP0190) —
+     * safe with these fixed literals, but not a habit worth keeping.
+     */
+    const run = (cmd: string, args: string[], input?: string) => {
+        if (process.platform === "win32") {
+            return spawnSync([cmd, ...args].join(" "), {
+                encoding: "utf8", timeout: timeoutMs, input, shell: true,
+            });
+        }
+        return spawnSync(cmd, args, { encoding: "utf8", timeout: timeoutMs, input });
+    };
+
     const probe = (cmd: string, args: string[], input?: string): ShimStatus => {
         const path = commandPath(cmd);
         if (!path) {
             return { cmd, path: null, works: false, detail: "not on PATH" };
         }
-        const r = spawnSync(cmd, args, { encoding: "utf8", timeout: timeoutMs, input });
+        const r = run(cmd, args, input);
         if (r.status === 0) return { cmd, path, works: true, detail: path };
         // The shim resolved but running it failed — the classic shape is a
         // launcher pointing at a target that has since moved or been deleted.
