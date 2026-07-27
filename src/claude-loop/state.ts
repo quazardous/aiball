@@ -35,7 +35,7 @@ import {
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, uptime as osUptime } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -553,10 +553,40 @@ export function loopPidPath(sd: string): string { return join(sd, "loop.pid"); }
  */
 export function kernelPidsPath(sd: string): string { return join(sd, "kernels.pids"); }
 
-/** Add `pid` to the roll-call. Best-effort: a lost line costs a missed sweep,
- *  never a crash, so this must not throw into the boot path. */
+/**
+ * Identity of the current boot of the MACHINE, in whole seconds.
+ *
+ * `Date.now() - uptime` is the instant this machine came up, so it is the same
+ * value for every process in this boot and a different one after a restart.
+ * It drifts by a second or two as the clock is adjusted, hence the tolerance
+ * at the comparison rather than an equality test.
+ */
+export function bootEpochSec(): number {
+    return Math.round(Date.now() / 1000 - osUptime());
+}
+/** Two stamps belong to the same boot. The window absorbs clock adjustment,
+ *  and is far below any plausible interval between two machine boots. */
+const BOOT_EPOCH_TOLERANCE_SEC = 30;
+
+/**
+ * Add `pid` to the roll-call, STAMPED with this machine's boot.
+ *
+ * The stamp is what makes the roll-call safe to act on. `process.kill(pid, 0)`
+ * answers "a process with this number exists" — never "it is one of ours" — and
+ * the file outlives the processes it names: nothing rewrites it when the machine
+ * goes down. So after a reboot it holds a pid the OS has since handed to
+ * somebody else, and the next kernel to boot would SIGKILL a stranger. Windows
+ * recycles pids aggressively; Linux restarts its counter low, so a four-digit
+ * pid is reassigned within seconds of coming up.
+ *
+ * With the stamp, an entry from a previous boot is simply not ours to touch.
+ *
+ * Best-effort: a lost line costs a missed sweep, never a crash, so this must not
+ * throw into the boot path.
+ */
 export function registerKernelPid(sd: string, pid: number = process.pid): void {
-    try { appendFileSync(kernelPidsPath(sd), `${pid}\n`); } catch { /* best effort */ }
+    try { appendFileSync(kernelPidsPath(sd), `${pid} ${bootEpochSec()}\n`); }
+    catch { /* best effort */ }
 }
 
 /**
@@ -586,21 +616,42 @@ export function claimLoopAsKernel(sd: string): { killed: number[] } {
     return { killed };
 }
 
-/** Every pid ever registered, de-duplicated, most recent last. */
+/**
+ * Pids registered during THIS boot of the machine, de-duplicated, most recent
+ * last. Callers SIGKILL what this returns, so everything it cannot vouch for is
+ * left out:
+ *
+ *  - an entry from another boot — its pid now belongs to whatever the OS gave
+ *    the number to since;
+ *  - an entry with no stamp — written before this file carried one, so it says
+ *    nothing about which boot it came from.
+ *
+ * Dropping both loses at worst an orphan kernel, which costs a flickering bar
+ * until the next reload. Keeping them risks killing a process that has nothing
+ * to do with aiball, silently, at loop start. Those are not comparable.
+ */
 export function readKernelPids(sd: string): number[] {
+    const now = bootEpochSec();
     try {
         const seen = new Set<number>();
         for (const line of readFileSync(kernelPidsPath(sd), "utf8").split("\n")) {
-            const n = Number(line.trim());
-            if (Number.isInteger(n) && n > 0) seen.add(n);
+            const [rawPid, rawEpoch] = line.trim().split(/\s+/);
+            const pid = Number(rawPid);
+            const epoch = Number(rawEpoch);
+            if (!Number.isInteger(pid) || pid <= 0) continue;
+            if (!Number.isFinite(epoch)) continue; // unstamped legacy line
+            if (Math.abs(epoch - now) > BOOT_EPOCH_TOLERANCE_SEC) continue; // another boot
+            seen.add(pid);
         }
         return [...seen];
     } catch { return []; }
 }
 
-/** Rewrite the roll-call to exactly `pids` (used after a sweep). */
+/** Rewrite the roll-call to exactly `pids` (used after a sweep), re-stamping
+ *  them with the current boot — they are all live processes of it. */
 export function writeKernelPids(sd: string, pids: number[]): void {
-    try { writeFileSync(kernelPidsPath(sd), pids.map((p) => `${p}\n`).join("")); }
+    const stamp = bootEpochSec();
+    try { writeFileSync(kernelPidsPath(sd), pids.map((p) => `${p} ${stamp}\n`).join("")); }
     catch { /* best effort */ }
 }
 export function loopLogPath(sd: string): string { return join(sd, "loop.log"); }
