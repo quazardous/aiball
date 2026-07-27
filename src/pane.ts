@@ -5,7 +5,7 @@
  * `agents.ts` d'origine (#464/#472) — extrait tel quel pour pouvoir l'appeler
  * depuis le handler WS sans embarquer Express.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -70,6 +70,40 @@ export interface CaptureResult {
 }
 
 /**
+ * Argv du lecteur de curseur, partagé par les variantes async et sync.
+ *
+ * La forme POSITIONNELLE est obligatoire, pas un choix de style : psmux
+ * (Windows) ne connaît pas `-F` pour `display-message` et le traite comme un
+ * mot du message. Il répond alors `-F 2,36` — avec un `exit 0` — et le parse
+ * rejette la ligne. Le kernel avait sa propre copie en `-F` : sur Windows le
+ * curseur valait donc `null` à CHAQUE poll, silencieusement, et la règle
+ * curseur (celle qui distingue une suggestion grisée d'une vraie saisie) ne
+ * s'exécutait jamais. Une commande qui réussit sans rien faire.
+ */
+export function cursorArgs(target: string): string[] {
+    return ["display-message", "-p", "-t", target, "#{cursor_x},#{cursor_y}"];
+}
+
+export function parseCursor(stdout: string): { x: number; y: number } | null {
+    const m = /^(\d+),(\d+)$/.exec(stdout.trim());
+    return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
+}
+
+/**
+ * Variante synchrone, pour le poll du kernel (qui décide dans la foulée de la
+ * capture et n'a pas de point d'await). Même commande, même parse.
+ */
+export function captureCursorSync(target: string): { x: number; y: number } | null {
+    try {
+        const r = spawnSync(MUX_CMD, cursorArgs(target), { encoding: "utf8" });
+        if (r.status !== 0) return null;
+        return parseCursor(r.stdout ?? "");
+    } catch {
+        return null;
+    }
+}
+
+/**
  * #531 — fetch the pane's current cursor position (0-based column / row).
  * `psmux display-message -p '#{cursor_x},#{cursor_y}'` works on both psmux
  * (Windows) and tmux (Linux/macOS). Returns `null` on spawn / parse failure
@@ -79,7 +113,7 @@ export function captureCursor(target: string): Promise<{ x: number; y: number } 
     return new Promise((resolve) => {
         const child = spawn(
             MUX_CMD,
-            ["display-message", "-p", "-t", target, "#{cursor_x},#{cursor_y}"],
+            cursorArgs(target),
             { stdio: ["ignore", "pipe", "ignore"] },
         );
         const chunks: Buffer[] = [];
@@ -87,10 +121,7 @@ export function captureCursor(target: string): Promise<{ x: number; y: number } 
         child.on("error", () => resolve(null));
         child.on("close", (code) => {
             if (code !== 0) return resolve(null);
-            const out = Buffer.concat(chunks).toString("utf8").trim();
-            const m = /^(\d+),(\d+)$/.exec(out);
-            if (!m) return resolve(null);
-            resolve({ x: Number(m[1]), y: Number(m[2]) });
+            resolve(parseCursor(Buffer.concat(chunks).toString("utf8")));
         });
     });
 }
