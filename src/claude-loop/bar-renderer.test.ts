@@ -235,6 +235,39 @@ test("diffSnapshots: counters null vs {0,0,0} → diff (sémantique distinguée)
 
 // #862 Slice 3 — paint effectif via spawnSync spy.
 
+// #1180 — clearing a glyph must UNSET the option, never assign "".
+// `psmux set-option <opt> ""` silently keeps the previous value on Windows:
+// exit 0, empty stderr, option unchanged. Measured on a live session:
+//     set @probe "XXX" → get "XXX"
+//     set @probe ""    → get "XXX"
+// So no glyph could ever go out there — the typing `⌨` lit on the first
+// keystroke and stayed for the whole session, `@cl_human` with it. The repaint
+// was running and computing the right empty string the whole time; the write
+// was swallowed. Asserting the SHAPE of the clear is the only way this stays
+// caught, since the failure produces no error to observe.
+
+test("BarRenderer.paint: an empty value clears via -u, never by assigning \"\"", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+
+    const setOpts = calls.filter((c) => c.args[0] === "set-option");
+    assert.ok(setOpts.length > 0, "expected the initial tick to paint something");
+
+    // No call may end with an empty value argument — that is the silent no-op.
+    const assignsEmpty = setOpts.filter((c) => c.args.at(-1) === "" && !c.args.includes("-u"));
+    assert.deepEqual(assignsEmpty, [], "a glyph was cleared by assigning an empty string");
+
+    // And the clears that DO happen must carry -u.
+    const unsets = setOpts.filter((c) => c.args.includes("-u"));
+    for (const c of unsets) {
+        assert.equal(c.args.at(-1)?.startsWith("@"), true, `-u must target a user option, got ${JSON.stringify(c.args)}`);
+    }
+});
+
 test("BarRenderer.paint: initial tick → spawn set-option pour tous les fields", () => {
     const sd = mkSd();
     const { spawn, calls } = makeSpawnSpy();

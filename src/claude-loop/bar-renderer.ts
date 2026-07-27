@@ -382,6 +382,28 @@ export class BarRenderer {
     private paint(next: BarSnapshot, changed: (keyof BarSnapshot)[]): void {
         const tn = tmuxName(this.name);
         const setOpt = (opt: string, val: string): void => {
+            // An EMPTY value is how this renderer turns a glyph off — and on
+            // Windows `psmux set-option <opt> ""` silently keeps the previous
+            // value. It exits 0, writes nothing to stderr, and the option is
+            // unchanged. Measured:
+            //
+            //     set @probe "XXX"  → get "XXX"
+            //     set @probe ""     → get "XXX"   ← still there, status 0
+            //
+            // So no glyph could ever go out on win32: the typing `⌨` lit on the
+            // first keystroke and stayed for the session, and `@cl_human` with
+            // it. The repaint logic was running the whole time and computing the
+            // right empty string — the write was being swallowed.
+            //
+            // `-u` (unset) is the operation that actually means "no value", and
+            // an unset user option renders as empty in the status format, which
+            // is exactly what the caller wants. Tmux accepts the empty argument,
+            // so Unix behaviour is unchanged either way; routing both platforms
+            // through `-u` keeps one path rather than a win32 special case.
+            if (val === "") {
+                this.spawn(MUX_CMD, ["set-option", "-t", tn, "-u", opt], { stdio: "ignore" });
+                return;
+            }
             this.spawn(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
         };
         const changedSet = new Set(changed);
