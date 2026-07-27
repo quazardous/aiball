@@ -10,7 +10,10 @@
  *   - `auto`    — DEFAULT. First run: pass nothing, let claude create a session;
  *                 the SessionStart hook detects the real `session_id` and persists
  *                 it to `.aiball-session_id` (in the loop cwd). Next runs resume
- *                 that exact id (`--resume <id>`). Detection, not imposition.
+ *                 that exact id (`--resume <id>`), PROVIDED its transcript is
+ *                 still there — the persisted file outlives the session it names
+ *                 (#1587), and resuming a pruned one kills the loop at boot.
+ *                 Detection, not imposition.
  *   - `legacy`  — do nothing: the historical `always_resume` path (`--resume` nu
  *                 → pick latest). No session-id management at all.
  *   - `managed` — id DERIVED from the loop name (UUIDv5). Restart-proof (the loop
@@ -76,8 +79,9 @@ export interface SessionResolveInput {
     configuredId: string;
     /** Loop name — the stable identity the managed id is derived from. */
     loopName: string;
-    /** Does a session with this id already exist on disk (injected fs probe;
-     *  managed/fixed only). */
+    /** Does a session with this id already exist on disk (injected fs probe).
+     *  Used by managed/fixed to pick create-vs-resume, and by `auto` to refuse
+     *  resuming an id whose transcript is gone (#1587). */
     sessionExists: (id: string) => boolean;
     /** Read the persisted `.claude-session_id` for this cwd (injected; `auto`
      *  only). Return null when absent/unreadable. */
@@ -113,7 +117,25 @@ export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
     if (mode === "auto") {
         const persisted = readPersistedId();
         if (persisted && isValidUuid(persisted)) {
-            return { mode: "auto", sessionId: persisted.toLowerCase(), args: ["--resume", persisted.toLowerCase()], warning: null };
+            const id = persisted.toLowerCase();
+            // A well-formed id is not a live one. `.aiball-session_id` outlives
+            // the transcript it names — the file sits in the project cwd while
+            // claude prunes or rotates its own sessions — so `auto` could hand
+            // claude `--resume <gone>`. claude then exits on the spot, the pane
+            // dies, the mux session is reaped, and the kernel shuts down on
+            // `watchdog:tmux-gone`: a loop that refuses to start with no error
+            // anyone can see (#1587). managed/fixed already gate on this probe;
+            // auto was the one path that trusted the file.
+            if (sessionExists(id)) {
+                return { mode: "auto", sessionId: id, args: ["--resume", id], warning: null };
+            }
+            return {
+                mode: "auto",
+                sessionId: null,
+                args: [],
+                warning: `persisted session ${id} no longer exists — starting a fresh one `
+                    + `(stale ${SESSION_ID_FILE}; the SessionStart hook will re-persist)`,
+            };
         }
         // First run (or file gone): pass nothing; the SessionStart hook detects
         // the id claude creates and persists it for next time.
