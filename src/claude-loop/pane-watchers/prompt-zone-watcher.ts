@@ -12,6 +12,7 @@
  * qui voudraient connaître la ligne du chevron / du top / du bottom.
  */
 import { BoolWatcher } from "./bool-watcher.js";
+import { isFrameRule } from "../pane-decor.js";
 import type { PaneScanCtx } from "./types.js";
 
 export interface PromptZone {
@@ -20,7 +21,8 @@ export interface PromptZone {
     bottom: number;
 }
 
-/** Scan bottom-up : cherche une ligne faite UNIQUEMENT de `─` (≥20), puis
+/** Scan bottom-up : cherche une ligne qui COMMENCE par une longue série
+ *  de `─` (≥20), puis
  *  un `❯` 1-5 lignes au-dessus, puis une autre ligne de cadre 1-3 lignes
  *  au-dessus du chevron. Retourne les indices ou `null`.
  *
@@ -28,37 +30,34 @@ export interface PromptZone {
  *  séparateurs courts dans la conversation (Claude Code écrit ses
  *  boxes en largeur terminal, donc largement >20).
  *
- *  #1588 — la règle exige un plein-match `/^─{20,}$/` sur les DEUX barres.
- *  Or Claude Code écrit un LABEL dans la barre du haut (le nom de session,
- *  que la loop lui passe en `-n <agent>`) : la barre du bas passe, celle du
- *  haut jamais, et **la box n'est pas détectée du tout** — mesuré 0/30 sur
- *  Linux et 0/46 sur Windows.
+ *  #1588 — la règle a longtemps exigé un plein-match `/^─{20,}$/` sur les
+ *  DEUX barres. Or Claude Code écrit un LABEL dans celle du haut (le nom de
+ *  session, que la loop lui passe en `-n <agent>`) : la barre du bas passait,
+ *  celle du haut jamais, et la box n'était détectée nulle part — mesuré 0/30
+ *  sur Linux et 0/46 sur Windows. Trois consommateurs sont donc restés morts
+ *  en silence : le release autoritaire du busy, le filet de fin-de-turn
+ *  (#1012), et le glyphe `❯` de la barre.
  *
- *  ⚠️ NE PAS « RÉPARER » CECI SEUL. C'est un bug connu, laissé en place
- *  DÉLIBÉRÉMENT jusqu'à ce que #1580 ait durci le release du busy.
+ *  `isFrameRule` matche sur la série de TÊTE — ce qui suit est décoration.
  *
- *  Le correctif (accepter une barre décorée via `isFrameRule`, qui matche
- *  sur la série de tête) a été écrit, déployé, et retiré le 2026-07-27 :
- *  mesuré sur la machine de `aiball-win`, il fait passer `findPromptZone`
- *  de 0/46 à 32/32 — et donc le release autoritaire de `kernel.ts:961`
- *  de 0/46 à **26/32, soit 81 % des ticks**, parce que ce release n'est
- *  gardé que par la présence de `esc to interrupt` au tick, un signal
- *  mesuré entre 6/46 et 59/59 sur une même machine. `kernel.ts:970` ferme
- *  le turn au même instant, donc la preuve `turn` ne rattrape pas.
+ *  Ce correctif a été livré, retiré, puis remis, dans cet ordre et pour une
+ *  raison qui vaut d'être retenue. Livré seul, il armait d'un coup un release
+ *  qui n'avait jamais tourné et que gardait le seul hint `esc to interrupt` :
+ *  mesuré en production, 81 % des ticks vidaient la pile de preuves en plein
+ *  travail. Il a fallu durcir le release d'abord (#1580 : exiger l'absence de
+ *  toute preuve mécanique, ligne d'activité comprise) pour pouvoir le remettre.
  *
- *  Ce chemin n'a jamais tourné en production : le réparer l'allume d'un
- *  coup. L'ordre est donc : durcir le release (exiger l'absence de TOUTE
- *  preuve mécanique, pas du seul hint), PUIS remettre `isFrameRule` ici.
- *  Le prédicat est prêt et testé dans `pane-decor.ts`. */
+ *  Réparer un détecteur mort n'est pas une opération neutre : ça rallume tout
+ *  ce qui en dépendait, d'un coup, sans que rien ne l'ait jamais éprouvé. */
 export function findPromptZone(paneText: string): PromptZone | null {
     const lines = paneText.split("\n");
     for (let i = lines.length - 1; i >= 2; i--) {
-        if (!/^─{20,}$/.test(lines[i].trim())) continue;
+        if (!isFrameRule(lines[i])) continue;
         for (let j = i - 1; j >= Math.max(1, i - 6); j--) {
             const inner = lines[j];
             if (!/^\s*❯/.test(inner)) continue;
             for (let k = j - 1; k >= Math.max(0, j - 4); k--) {
-                if (/^─{20,}$/.test(lines[k].trim())) {
+                if (isFrameRule(lines[k])) {
                     return { top: k, chevron: j, bottom: i };
                 }
             }
