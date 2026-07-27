@@ -78,6 +78,7 @@ import { cmdBacklog } from "./cmds/backlog.js";
 import { cmdSnapshot } from "./cmds/snapshot.js";
 import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
+import { resolveBashCmd } from "./resolve-bash.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -97,24 +98,8 @@ function has(cmd: string): boolean {
     return commandExists(cmd);
 }
 
-/**
- * Convert a Windows path to its 8.3 short form (no spaces). psmux
- * splits the command at spaces when it rebuilds the CreateProcess
- * command line, so an absolute path like "C:\Program Files\Git\bin\
- * bash.exe" gets truncated to "C:\Program". The 8.3 name
- * ("C:\PROGRA~1\Git\bin\bash.exe") sidesteps that. No-op on non-Windows
- * or for paths that already lack spaces. Falls back to the input if
- * the conversion fails (8.3 generation disabled on the volume, etc.).
- */
-function toShortPathWin(p: string): string {
-    if (process.platform !== "win32" || !p.includes(" ")) return p;
-    try {
-        const out = spawnSync("cmd.exe", ["/c", `for %I in ("${p}") do @echo %~sI`], { encoding: "utf8" });
-        const short = (out.stdout ?? "").trim();
-        if (short && existsSync(short)) return short;
-    } catch { /* fall through to raw path */ }
-    return p;
-}
+// `toShortPathWin` + the Git Bash resolution moved to ./resolve-bash.ts so the
+// kernel spawns share them instead of re-deriving the answer (#1584).
 
 // Pick the local clipboard tool tmux should pipe selections into. OSC 52
 // (`set-clipboard on`) works in some terminals (Alacritty, Windows
@@ -1083,22 +1068,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const innerCmd = `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; source ${shQuote(trapPath)}; ${launch}`;
 
     const tname = tmuxName(name);
-    // Resolve bash via absolute path on Windows. The user's PATH is
-    // unreliable here: the WSL launcher (C:\Windows\System32\bash.exe)
-    // sits in machine PATH and preempts Git Bash; and psmux's server
-    // is persistent — once it started with a given PATH, subsequent
-    // new-session calls use that PATH, not the caller's. Hardcoding
-    // the Git Bash absolute path on Windows bypasses both issues —
-    // BUT psmux splits the command at spaces when it rebuilds the
-    // CreateProcess command line, so "C:\Program Files\…\bash.exe"
-    // becomes "C:\Program" + bogus args. Convert to the 8.3 short
-    // path (C:\PROGRA~1\…) which has no spaces.
-    let bashCmd = "bash";
-    if (process.platform === "win32") {
-        const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
-        if (existsSync(gitBash)) bashCmd = toShortPathWin(gitBash);
-        // else fall back to "bash" and hope the PATH is sane.
-    }
+    // Resolve bash via absolute path on Windows — the PATH is not trustworthy
+    // here (WSL preempts Git Bash), and psmux's server is persistent, so a
+    // new-session inherits the PATH the server started with rather than the
+    // caller's. `resolveBashCmd` owns both concerns, including the 8.3 form
+    // psmux needs. See ./resolve-bash.ts.
+    const bashCmd = resolveBashCmd();
     // The `--` separator is REQUIRED for psmux: without it, psmux
     // collects the positional command args and joins them with spaces
     // into one string, which destroys the `bash -lc "<multi-word cmd>"`
@@ -1279,7 +1254,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
     const logFd = openSync(loopLogPath(sd), "a");
     const loopScript = join(root, "src/claude-loop/kernel.ts");
-    const child = spawn("bash", [
+    // Same resolution as the claude launch above: a bare `bash` here reaches
+    // the WSL launcher from a PowerShell-launched `claude-loop`, which opens a
+    // console, fails to source a Windows path, and dies — leaving loop.log
+    // EMPTY because its output never crosses back to the inherited fd. The
+    // loop then sits in boot forever with nothing to read (#1584).
+    const child = spawn(resolveBashCmd(), [
         "-lc",
         // #B.228 defensive: same fix as the hook commands above —
         // call tsx via its absolute path so the timer can be respawned
