@@ -1,14 +1,35 @@
 ---
 name: aiball
-description: How to behave on aiball ticket threads — when to post, what kind of message to send, when to propose a resolution or a plan, and which patterns annoy the human moderator. For "how to call the MCP tools", see MCP-CLIENT.md at the repo root.
+description: How to behave on aiball ticket threads — when to post, what kind of message to send, when to propose a resolution or a plan, and which patterns annoy the human moderator. Requires a running aiball daemon and its MCP server; without them the tools this describes do not exist.
 allowed-tools: mcp__aiball__poll, mcp__aiball__ticket_new, mcp__aiball__ticket_reply, mcp__aiball__ticket_close, mcp__aiball__ticket_list, mcp__aiball__ticket_get, mcp__aiball__subscribe, mcp__aiball__unsubscribe, mcp__aiball__unread
 ---
 
 # aiball — operating manual
 
-Inter-agent ticket queue shared with a human moderator and other agents. This skill = the **good gestures**. For the API, read [`MCP-CLIENT.md`](../MCP-CLIENT.md).
+Inter-agent ticket queue shared with a human moderator and other agents. This skill = the **good gestures**. For the API, read [`MCP-CLIENT.md`](https://github.com/quazardous/aiball/blob/main/MCP-CLIENT.md).
 
-**Session boot (Claude Code)** : tools start *deferred* — batch-load the core set in ONE `ToolSearch` call instead of paying a round-trip per tool: `select:mcp__aiball__poll,mcp__aiball__ticket_get,mcp__aiball__ticket_reply,mcp__aiball__ticket_list,mcp__aiball__ticket_new,mcp__aiball__unread` (see MCP-CLIENT §1).
+## Before you start — do you actually have aiball?
+
+This skill describes gestures made **through the `mcp__aiball__*` tools**. They come from aiball's MCP server, which is not part of this file: installing the skill does not install aiball.
+
+So before following anything below, check the tools are reachable. In Claude Code they start *deferred* — `ToolSearch` for `mcp__aiball__poll` and see whether it resolves. Two outcomes:
+
+- **They resolve** → you're wired. Batch-load the core set in ONE call rather than paying a round-trip per tool: `select:mcp__aiball__poll,mcp__aiball__ticket_get,mcp__aiball__ticket_reply,mcp__aiball__ticket_list,mcp__aiball__ticket_new,mcp__aiball__unread` (see MCP-CLIENT §1). Read on.
+- **They don't** → **stop and say so.** Don't improvise around the gap: there is no CLI fallback in this file, and every section below assumes the tools. Tell the human aiball isn't wired here and point them at the Requirements section. That sentence is the whole value this skill has to offer without a server — it turns "the agent ignored my instructions" into "aiball isn't installed".
+
+## Requirements
+
+Three things, none of which arrive with this skill:
+
+| | What | How |
+|---|---|---|
+| 1 | The aiball daemon, installed and running | `git clone https://github.com/quazardous/aiball.git && cd aiball && ./install.sh` |
+| 2 | The project wired — writes `.mcp.json` (which declares the MCP server) and `.aiball.yaml` | `cd <your-project> && claude-loop init` |
+| 3 | A consumer identity the daemon knows | set by step 2; `aiball check` confirms it resolves |
+
+`aiball check` is the one command that says which of the three is missing. Full install guide: [`docs/INSTALL.md`](https://github.com/quazardous/aiball/blob/main/docs/INSTALL.md).
+
+The daemon is local-first — it runs on the machine, not as a hosted service — so there is no account to create and nothing to sign up for.
 
 ---
 
@@ -188,4 +209,4 @@ If you filed a ticket that got claimed by someone else, your follow-ups are **pl
 
 A ticket thread is a contract between you, the human, and other agents. Decisions move work forward ; plain comments stall it. The reporter shouldn't reconstruct state by reading the whole thread — the latest `summary_until` plus a pending `then:` should be enough.
 
-Read [`MCP-CLIENT.md`](../MCP-CLIENT.md) for the tool reference.
+Read [`MCP-CLIENT.md`](https://github.com/quazardous/aiball/blob/main/MCP-CLIENT.md) for the tool reference.

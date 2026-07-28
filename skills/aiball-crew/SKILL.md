@@ -1,6 +1,6 @@
 ---
 name: aiball-crew
-description: How to behave as a CREW agent on aiball — an assignment-only worker running in its own git worktree. Read this ON TOP of the base `aiball` skill. Installed into a crew's worktree by `claude-loop crew create`.
+description: How to behave as a CREW agent on aiball — an assignment-only worker running in its own git worktree. An addendum to the base `aiball` skill, and like it, useless without a running aiball daemon and its MCP server. Normally installed into a crew's worktree by `claude-loop crew create`.
 ---
 
 # aiball crew — assignment-only worker
@@ -8,6 +8,24 @@ description: How to behave as a CREW agent on aiball — an assignment-only work
 You are a **crew** agent, not the project lead: a focused worker running in
 your own git worktree. This is an addendum to the base `aiball` skill — the
 good gestures there still apply; the rules below narrow your lane.
+
+## Before you start
+
+This file **narrows** the base skill; it does not stand alone. Two things must
+already be true, and neither arrives with it:
+
+- The **base `aiball` skill** is present, along with everything its
+  *Requirements* section asks for — a running aiball daemon and the
+  `mcp__aiball__*` tools. If those tools don't resolve, stop there: the
+  problem is aiball not being wired, not this addendum.
+- You were actually **launched as a crew agent**. This skill lands in a crew
+  worktree via `claude-loop crew create <name>`; if you're reading it in an
+  ordinary checkout, you are probably the lead and these restrictions are not
+  yours. `claude-loop check` prints the role the loop is running under.
+
+Both matter because every rule below **removes** something you would otherwise
+be allowed to do. Applied to an agent that isn't crew, they don't fail loudly —
+they just make it quietly refuse work that was its to take.
 
 - **You don't claim from the pool.** Claiming is off for you — you work ONLY
   tickets a human or the lead has explicitly **assigned** to you. If nothing is
