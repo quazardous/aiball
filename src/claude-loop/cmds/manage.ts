@@ -105,10 +105,18 @@ export function sweepOrphans(sd: string, opts: { kernelOnly?: boolean } = {}): {
         let env: string;
         try { env = readFileSync(`/proc/${pid}/environ`, "utf8"); }
         catch { continue; } // process died, or no permission
-        // /proc/<pid>/environ is NUL-separated KEY=VAL entries. The match
-        // needs to be exact-key, not substring (e.g. CL_STATE_DIR_BACKUP
-        // shouldn't false-match), so anchor on `\0KEY=VAL\0` or at the
-        // start of the buffer.
+        // /proc/<pid>/environ is NUL-separated KEY=VAL entries, so the match
+        // anchors on `\0KEY=VAL\0` — or on the buffer start, since the first
+        // entry has no NUL before it. Each end guards a different false match:
+        //   - leading NUL: a key our own is a SUFFIX of. `OLD_CL_STATE_DIR=<sd>`
+        //     contains `CL_STATE_DIR=<sd>` verbatim.
+        //   - trailing NUL: a state dir ours is a PREFIX of. Sweeping `/x/ab`
+        //     would otherwise carry off the separate loop living in `/x/abcd`.
+        // Note `CL_STATE_DIR_BACKUP` — the example this comment used to give —
+        // is NOT one of them: `_BACKUP` sits before the `=`, so it can never
+        // false-match with or without the anchors. A test written on it passes
+        // either way; the two cases above are the ones that fail when the
+        // anchors go (measured, see sweep-orphans-proc.test.ts).
         if (!env.includes(`\0${marker}\0`) && !env.startsWith(`${marker}\0`)) continue;
         // #1059 — on a RELOAD the proxy + claude are ALIVE and must survive (the
         // proxy carries CL_STATE_DIR too, so an unfiltered sweep SIGKILLs it →
