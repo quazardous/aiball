@@ -50,7 +50,10 @@ function withSd<T>(fn: (sd: string) => Promise<T>): Promise<T> {
     });
 }
 
-// Le chemin Linux lit /proc et ignore le registre : ces cas ne le concernent pas.
+// Garde réservé aux cas `sweepOrphans` : sur Linux il lit `/proc` et ignore le
+// registre, donc ces cas-là n'y ont rien à vérifier. À NE PAS étendre au reste
+// du fichier par proximité — voir la section `claimLoopAsKernel` plus bas, qui
+// tourne sur toutes les plateformes et doit être testée sur toutes.
 const tt = process.platform === "linux" ? test.skip : test;
 
 tt("un kernel enregistré et encore vivant est tué", async () => {
@@ -123,8 +126,18 @@ tt("un registre absent ne fait pas échouer le balayage", async () => {
 // `claude-loop reload` lancé au même moment en ajoute un second. Mesuré après
 // exactement cette séquence : deux kernels vivants par loop, tous deux
 // enregistrés, aucun balayé. Le faire au boot est auto-réparateur.
+//
+// CES CAS TOURNENT PARTOUT, `test` et non `tt`. Le garde Linux plus haut vaut
+// pour `sweepOrphans`, qui lit `/proc` là-bas et ignore le registre. Il ne vaut
+// pas pour `claimLoopAsKernel`, appelé sans condition au boot du kernel
+// (`kernel.ts`) donc sur Linux aussi. Rangés d'abord sous le même garde par
+// commodité de fichier, ils n'y étaient jamais exécutés : une fonction qui
+// envoie des SIGKILL tournait sur la plateforme principale avec zéro test qui
+// s'y exécute, et la lane Linux était verte parce qu'elle n'en testait rien.
+// Rien ici ne dépend de la plateforme — on spawn de vrais processus et on
+// vérifie qu'ils meurent, ce qui se tient aussi bien des deux côtés.
 
-tt("claimLoopAsKernel tue les kernels plus anciens et garde le nouveau", async () => {
+test("claimLoopAsKernel tue les kernels plus anciens et garde le nouveau", async () => {
     await withSd(async (sd) => {
         const older = spawnVictim();
         registerKernelPid(sd, older.pid);
@@ -139,7 +152,7 @@ tt("claimLoopAsKernel tue les kernels plus anciens et garde le nouveau", async (
     });
 });
 
-tt("claimLoopAsKernel s'enregistre même quand il n'y a personne à tuer", async () => {
+test("claimLoopAsKernel s'enregistre même quand il n'y a personne à tuer", async () => {
     await withSd(async (sd) => {
         const { killed } = claimLoopAsKernel(sd);
         assert.deepEqual(killed, []);
