@@ -1,24 +1,23 @@
 /**
- * #1613 — la branche Linux de `sweepOrphans` (`cmds/manage.ts`), celle qui lit
- * `/proc/<pid>/environ` pour savoir à quel state dir un processus appartient.
+ * The Linux branch of `sweepOrphans` — the one that reads `/proc/<pid>/environ`
+ * to ask which state dir a process belongs to, then SIGKILLs.
  *
- * Elle n'était exécutée par AUCUN test : le seul fichier qui touchait
- * `sweepOrphans` skippe en entier sur Linux (son garde vise la branche registre,
- * qui n'a rien à vérifier là-bas), et sur Windows `/proc` n'existe pas. Du code
- * qui envoie des SIGKILL, sur la plateforme principale, sans un test qui s'y
- * exécute.
+ * No test executed it, on any platform. The only file touching `sweepOrphans`
+ * skips entirely on Linux (its guard is aimed at the roll-call branch, which
+ * has nothing to check there), and `/proc` does not exist anywhere else. Code
+ * that sends SIGKILL, on the main platform, with no test running against it.
  *
- * On teste `/proc` en le lisant vraiment plutôt qu'en injectant une fausse
- * racine : ce qui se casse ici n'est pas l'arborescence, c'est le FILTRAGE — la
- * comparaison exacte-clé et le garde `kernelOnly` — et une arborescence
- * fabriquée à la main encode nos propres hypothèses sur la forme d'`environ` au
- * lieu de les éprouver. On spawn donc de vrais processus, on relève leur
- * `environ` réel comme témoin, puis on vérifie qui meurt et qui survit.
+ * `/proc` is read for real here rather than through an injected root. What
+ * breaks in this branch is the FILTERING — the exact-key match and the
+ * `kernelOnly` guard — and a hand-built tree encodes our own assumptions about
+ * the shape of `environ` instead of testing them. So: spawn real processes,
+ * record their actual `environ` as a witness, then check who dies and who
+ * survives.
  *
- * Le témoin n'est pas décoratif : un survivant qui survit parce que son env
- * n'a jamais été posé ressemble trait pour trait à un filtre qui marche.
+ * The witness is not decoration. A survivor that survives because its env was
+ * never set looks exactly like a filter that works.
  *
- * Lancer : `npx tsx --test src/claude-loop/sweep-orphans-proc.test.ts`
+ * Run: `npx tsx --test src/claude-loop/sweep-orphans-proc.test.ts`
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -28,7 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sweepOrphans } from "./cmds/manage.js";
 
-// `/proc` n'existe pas ailleurs — la branche testée ici y est inatteignable.
+// `/proc` exists nowhere else — the branch under test is unreachable there.
 const tt = process.platform === "linux" ? test : test.skip;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -36,28 +35,25 @@ const isAlive = (pid: number): boolean => {
     try { process.kill(pid, 0); return true; } catch { return false; }
 };
 
-type Victim = { pid: number; environ: string; cmdline: string; kill: () => void };
+type Victim = { pid: number; environ: string; cmdline: string };
 
 let victims: ChildProcess[] = [];
 
 /**
- * Un processus jetable portant `stateDir` dans son env, et `kernelLike` près
- * dans sa ligne de commande.
+ * A disposable process carrying `env`, and `kernel.ts` in its command line when
+ * asked.
  *
- * L'env est construit à la main plutôt qu'hérité : cette session tourne
- * elle-même sous un `claude-loop`, donc `process.env` porte le `CL_STATE_DIR`
- * du loop VIVANT. Le propager à des processus jetables les rendrait ramassables
- * par un vrai balayage.
+ * The env is built by hand rather than inherited: this session itself runs
+ * under a `claude-loop`, so `process.env` holds the LIVE loop's `CL_STATE_DIR`.
+ * Passing that down would make throwaway processes reapable by a real sweep.
  *
- * `kernelLike` passe le chemin en argument positionnel — `kernel.ts` n'a besoin
- * d'être que dans la ligne de commande, qui est tout ce que le filtre regarde,
- * et un argument suffit là où exécuter un vrai fichier `.ts` dépendrait du
- * détourage de types de la version de node.
+ * `kernelLike` puts the path in a positional argument — `kernel.ts` only has to
+ * appear in the command line, which is all the filter reads, and an argument
+ * does that without depending on the node version's type stripping.
  *
- * `first` décide si le marqueur est la PREMIÈRE entrée d'`environ`, donc s'il
- * est précédé d'un NUL ou non. Les deux positions empruntent des clauses
- * différentes du filtre (`includes` vs `startsWith`) : sans les deux, une moitié
- * n'est jamais exécutée.
+ * `first` decides whether the marker is the FIRST entry of `environ`, i.e.
+ * whether a NUL precedes it. The two positions take different clauses of the
+ * filter (`includes` vs `startsWith`); without both, one half never runs.
  */
 async function spawnVictim(
     opts: { env: Record<string, string>; kernelLike?: boolean; first?: boolean; sd: string },
@@ -72,8 +68,8 @@ async function spawnVictim(
     victims.push(c);
     const pid = c.pid as number;
 
-    // `/proc/<pid>/environ` n'est lisible qu'une fois l'exec fait ; on attend le
-    // témoin plutôt qu'un délai au jugé.
+    // `/proc/<pid>/environ` only becomes readable once the exec has happened;
+    // wait for the witness rather than guessing a delay.
     let environ = "", cmdline = "";
     for (let i = 0; i < 50 && environ === ""; i++) {
         try {
@@ -81,63 +77,63 @@ async function spawnVictim(
             cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
         } catch { await sleep(20); }
     }
-    assert.notEqual(environ, "", `témoin illisible : /proc/${pid}/environ`);
-    return { pid, environ, cmdline, kill: () => { try { c.kill("SIGKILL"); } catch { /* déjà mort */ } } };
+    assert.notEqual(environ, "", `witness unreadable: /proc/${pid}/environ`);
+    return { pid, environ, cmdline };
 }
 
 function withSd<T>(fn: (sd: string) => Promise<T>): Promise<T> {
     const sd = mkdtempSync(join(tmpdir(), "sweep-proc-"));
     victims = [];
     return fn(sd).finally(() => {
-        for (const c of victims) { try { c.kill("SIGKILL"); } catch { /* déjà mort */ } }
+        for (const c of victims) { try { c.kill("SIGKILL"); } catch { /* already dead */ } }
         victims = [];
         try { rmSync(sd, { recursive: true, force: true }); } catch { /* ignore */ }
     });
 }
 
-tt("un satellite du state dir est tué pour de vrai", async () => {
+tt("a satellite of the state dir is actually killed", async () => {
     await withSd(async (sd) => {
         const v = await spawnVictim({ env: { CL_STATE_DIR: sd }, sd });
-        assert.ok(v.environ.includes(`CL_STATE_DIR=${sd}`), "témoin : la victime porte bien le marqueur");
-        assert.equal(isAlive(v.pid), true, "témoin : elle tourne avant le balayage");
+        assert.ok(v.environ.includes(`CL_STATE_DIR=${sd}`), "witness: the victim carries the marker");
+        assert.equal(isAlive(v.pid), true, "witness: it is running before the sweep");
 
         const { killed } = sweepOrphans(sd);
         await sleep(300);
 
         assert.deepEqual(killed, [v.pid]);
-        assert.equal(isAlive(v.pid), false, "l'orphelin doit être MORT, pas seulement listé");
+        assert.equal(isAlive(v.pid), false, "the orphan must be DEAD, not merely listed");
     });
 });
 
-tt("une clé dont la nôtre est le SUFFIXE ne matche pas", async () => {
-    // Le piège que le NUL de tête attrape, et le seul de ce côté :
-    // `OLD_CL_STATE_DIR=<sd>` contient `CL_STATE_DIR=<sd>` mot pour mot, donc un
-    // `includes` non ancré le prend pour nous.
+tt("a key ours is a SUFFIX of does not match", async () => {
+    // The trap the leading NUL catches, and the only one on that side:
+    // `OLD_CL_STATE_DIR=<sd>` contains `CL_STATE_DIR=<sd>` verbatim, so an
+    // unanchored `includes` reads it as ours.
     //
-    // À ne pas confondre avec `CL_STATE_DIR_BACKUP=<sd>`, l'exemple que donnait
-    // le commentaire du code : celui-là ne peut PAS faux-matcher, le `_BACKUP`
-    // s'intercalant avant le `=`. Un cas écrit là-dessus passe avec ou sans
-    // l'ancrage — mesuré : il survit à la mutation qui retire le NUL.
+    // Not to be confused with `CL_STATE_DIR_BACKUP=<sd>`, the example the code
+    // comment used to give: that one CANNOT false-match, `_BACKUP` sitting
+    // before the `=`. A case written on it passes with or without the anchor —
+    // measured: it survives the mutation that drops the NUL.
     await withSd(async (sd) => {
         const v = await spawnVictim({ env: { OLD_CL_STATE_DIR: sd }, sd });
-        assert.ok(v.environ.includes(`CL_STATE_DIR=${sd}`), "témoin : le leurre contient bien notre marqueur en sous-chaîne");
+        assert.ok(v.environ.includes(`CL_STATE_DIR=${sd}`), "witness: the decoy does contain our marker as a substring");
 
         const { killed } = sweepOrphans(sd);
         await sleep(300);
 
-        assert.deepEqual(killed, [], "aucune victime : la clé n'est pas la nôtre");
-        assert.equal(isAlive(v.pid), true, "un porteur de clé homonyme doit SURVIVRE");
+        assert.deepEqual(killed, [], "no victim: the key is not ours");
+        assert.equal(isAlive(v.pid), true, "a look-alike key must SURVIVE");
     });
 });
 
-tt("le marqueur en PREMIÈRE entrée d'environ est tout de même reconnu", async () => {
-    // La première variable d'`environ` n'est précédée d'aucun NUL, donc le
-    // `includes(`\0…`)` la manque : c'est ce que rattrape la clause
-    // `startsWith`. Sans ce cas, la moitié du filtre n'est jamais exécutée et un
-    // orphelin réel survivrait selon l'ordre de son env.
+tt("the marker as the FIRST entry of environ is still recognised", async () => {
+    // The first variable in `environ` has no NUL before it, so
+    // `includes(`\0…`)` misses it — that is what the `startsWith` clause
+    // catches. Without this case half the filter never runs, and a real orphan
+    // would survive depending on the order of its env.
     await withSd(async (sd) => {
         const v = await spawnVictim({ env: { CL_STATE_DIR: sd }, sd, first: true });
-        assert.ok(v.environ.startsWith(`CL_STATE_DIR=${sd}\0`), "témoin : le marqueur est bien en tête d'environ");
+        assert.ok(v.environ.startsWith(`CL_STATE_DIR=${sd}\0`), "witness: the marker leads environ");
 
         const { killed } = sweepOrphans(sd);
         await sleep(300);
@@ -147,42 +143,42 @@ tt("le marqueur en PREMIÈRE entrée d'environ est tout de même reconnu", async
     });
 });
 
-tt("un state dir voisin dont le nôtre est un préfixe survit", async () => {
-    // `/tmp/sweep-proc-ab` et `/tmp/sweep-proc-abcd` : deux loops distincts. Sans
-    // le `\0` de fin, balayer le premier emporterait le second.
+tt("a neighbouring state dir ours is a prefix of survives", async () => {
+    // `/tmp/sweep-proc-ab` and `/tmp/sweep-proc-abcd`: two separate loops.
+    // Without the trailing NUL, sweeping the first carries off the second.
     await withSd(async (sd) => {
-        const neighbour = `${sd}-voisin`;
+        const neighbour = `${sd}-neighbour`;
         const v = await spawnVictim({ env: { CL_STATE_DIR: neighbour }, sd });
-        assert.ok(v.environ.includes(`CL_STATE_DIR=${neighbour}`), "témoin : le voisin porte bien son propre state dir");
+        assert.ok(v.environ.includes(`CL_STATE_DIR=${neighbour}`), "witness: the neighbour carries its own state dir");
 
         const { killed } = sweepOrphans(sd);
         await sleep(300);
 
-        assert.deepEqual(killed, [], "le balayage d'un loop ne déborde pas sur son voisin");
+        assert.deepEqual(killed, [], "sweeping one loop does not spill onto its neighbour");
         assert.equal(isAlive(v.pid), true);
     });
 });
 
-tt("kernelOnly épargne le proxy et n'emporte que les kernels", async () => {
-    // #1059 : au RELOAD le proxy est vivant et porte le même `CL_STATE_DIR`. Un
-    // balayage non filtré le tue → le PTY de claude meurt avec lui.
+tt("kernelOnly spares the proxy and takes only kernels", async () => {
+    // On a RELOAD the proxy is alive and carries the same `CL_STATE_DIR`. An
+    // unfiltered sweep kills it, and claude's PTY dies with it.
     await withSd(async (sd) => {
         const proxy = await spawnVictim({ env: { CL_STATE_DIR: sd }, sd });
         const kernel = await spawnVictim({ env: { CL_STATE_DIR: sd }, sd, kernelLike: true });
-        assert.ok(!/kernel\.ts/.test(proxy.cmdline), "témoin : le proxy n'a pas kernel.ts en ligne de commande");
-        assert.ok(/kernel\.ts/.test(kernel.cmdline), "témoin : le kernel, si");
+        assert.ok(!/kernel\.ts/.test(proxy.cmdline), "witness: the proxy has no kernel.ts in its command line");
+        assert.ok(/kernel\.ts/.test(kernel.cmdline), "witness: the kernel does");
 
         const { killed } = sweepOrphans(sd, { kernelOnly: true });
         await sleep(300);
 
-        assert.deepEqual(killed, [kernel.pid], "seul le kernel tombe");
+        assert.deepEqual(killed, [kernel.pid], "only the kernel falls");
         assert.equal(isAlive(kernel.pid), false);
-        assert.equal(isAlive(proxy.pid), true, "le proxy doit SURVIVRE au reload");
+        assert.equal(isAlive(proxy.pid), true, "the proxy must SURVIVE a reload");
     });
 });
 
-tt("sans kernelOnly le balayage emporte tout le state dir", async () => {
-    // Le cas `cmdStart` : démarrage à froid, rien de vivant à protéger.
+tt("without kernelOnly the sweep takes the whole state dir", async () => {
+    // The `cmdStart` case: cold start, nothing live to protect.
     await withSd(async (sd) => {
         const a = await spawnVictim({ env: { CL_STATE_DIR: sd }, sd });
         const b = await spawnVictim({ env: { CL_STATE_DIR: sd }, sd, kernelLike: true });
@@ -190,7 +186,7 @@ tt("sans kernelOnly le balayage emporte tout le state dir", async () => {
         const { killed } = sweepOrphans(sd);
         await sleep(300);
 
-        assert.equal(killed.length, 2, `attendu 2 tués, obtenu ${JSON.stringify(killed)}`);
+        assert.equal(killed.length, 2, `expected 2 killed, got ${JSON.stringify(killed)}`);
         assert.equal(isAlive(a.pid), false);
         assert.equal(isAlive(b.pid), false);
     });
