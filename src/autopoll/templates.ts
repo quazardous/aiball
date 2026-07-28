@@ -3,7 +3,7 @@
  *
  * Calibration is empirical — Claude responds differently to "consider"
  * vs "should" vs "YOU MUST" depending on the session's system prompt.
- * Project owners pick via `.aiball.json` → `autopoll.tone`.
+ * Project owners pick via `.aiball.yaml` → `autopoll.tone`.
  *
  * - `hint`       : polite, easy to override by the agent. Use when the
  *                  system prompt already nudges proactivity.

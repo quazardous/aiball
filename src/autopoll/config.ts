@@ -607,7 +607,7 @@ export function findConfigUpwards(start: string): string | null {
 }
 
 /**
- * Last-resort: if `.aiball.json` doesn't carry a `consumer.agent`,
+ * Last-resort: if `.aiball.yaml` doesn't carry a `consumer.agent`,
  * peek at `.mcp.json` in the same dir for `mcpServers.aiball.env.AIBALL_AGENT`.
  * Most users already have aiball wired there, so this avoids
  * duplicating the value.
@@ -693,7 +693,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     //         default: true
     Object.assign(cfg.upstream, readUpstreamBlock(globalConfigPath()));
 
-    // No .aiball.json → autopoll disabled. The hook wiring in
+    // No .aiball.yaml → autopoll disabled. The hook wiring in
     // ~/.claude/settings.json is global; per-project opt-in lives in
     // the file. Drop a `{}` in at the project root to activate with
     // sensible defaults; override individual fields as needed.

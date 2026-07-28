@@ -240,7 +240,14 @@ export async function bootstrapInit(opts: {
     // gets it (it delegates to bootstrapInit) — david's expectation.
     maybeInstallSkillGlobal();
     process.stdout.write(`\n${await resolveIdentityHint()}\n`);
-    process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
+    // Deliberately `aiball check` and not `claude-loop check`, including when
+    // this ran as `claude-loop init` — the two answer different questions. This
+    // one verifies what init just wrote (config, hooks, identity, daemon);
+    // `claude-loop check` diagnoses what a loop's wake gate would do, and its
+    // config half refuses without a loop name. Right after init there is no
+    // loop, so pointing there would send the newcomer at a command that cannot
+    // answer. Both binaries install together, so the cross-surface hint is safe.
+    process.stdout.write(`Run \`aiball check\` to verify the config, hooks and daemon resolve.\n`);
 }
 
 /**

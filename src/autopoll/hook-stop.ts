@@ -5,7 +5,7 @@
  *
  * Fires when Claude wants to stop responding. We:
  *   1. Walk up from cwd (or $CLAUDE_PROJECT_DIR if set) to find
- *      `.aiball.json`. If missing or `autopoll.enabled === false` → release.
+ *      `.aiball.yaml`. If missing or `autopoll.enabled === false` → release.
  *   2. Resolve the agent id (config > env > .mcp.json). If unresolved → release.
  *   3. Check the throttle file. If we polled recently → release.
  *   4. Query the daemon for unread ping count for this agent + the N

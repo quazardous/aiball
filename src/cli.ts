@@ -183,7 +183,7 @@ program
 program
     .command("check")
     .description(
-        "Project-level health check: .aiball.json, hook wiring, agent id resolution, daemon reachability.",
+        "Project-level health check: .aiball.yaml, hook wiring, agent id resolution, daemon reachability, prerequisites, installed commands.",
     )
     .option("--json", "Machine-readable JSON output")
     .action(async (opts: { json?: boolean }, cmd) => {
