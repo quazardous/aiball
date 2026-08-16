@@ -51,6 +51,18 @@ const connected = ref<boolean>(false);
 const lastCapturedAt = ref<string | null>(null);
 const truncated = ref<boolean>(false);
 const isFullscreen = ref<boolean>(false);
+// #1740 — the source pane's grid, as reported by the daemon. Drives the
+// miniature : we size the terminal to THIS, not to the container.
+const paneGeometry = ref<{ cols: number; rows: number } | null>(null);
+// Scale factor applied to the rendered grid so the whole pane fits the
+// embedded box. 1 = no reduction (pane narrower than the box, or fullscreen).
+const miniScale = ref<number>(1);
+// Height the embedded box takes once scaled — the pane's aspect ratio, so
+// there's no dead band under a short pane and no clipping on a tall one.
+const miniHeight = ref<number | null>(null);
+/** Ceiling for the embedded miniature (px). A 200-row pane would otherwise
+ *  push the whole admin page down; past this we trade scale for height. */
+const MINI_MAX_HEIGHT = 480;
 // #472 — read-write mode toggle. Default OFF (read-only) so the user can't
 // accidentally type into a live claude session just by focusing the
 // browser tab. The toggle is a labeled button ("Enable typing" / "Disable
@@ -101,6 +113,11 @@ interface PaneFrame {
      *  snapshot doesn't always carry a positioning escape at its tail (psmux
      *  on Windows is one such case). Optional for backwards-compat. */
     cursor?: { x: number; y: number } | null;
+    /** #1740 — the SOURCE pane's grid size. Without it the terminal can only
+     *  be sized to its own container, which shows a window onto the pane
+     *  rather than the pane. Optional : an older daemon (or a psmux that
+     *  doesn't know `#{pane_width}`) omits it and we fall back to fitting. */
+    geometry?: { cols: number; rows: number } | null;
 }
 interface PaneError {
     error: string;
@@ -229,7 +246,16 @@ async function startAfkRemote() { await postAfkAction("off"); }
 // F9 in the pane keeps cycling through if needed.
 async function stopAfkRemote() { await postAfkAction("arm_inf"); }
 
-function toggleReadWrite() {
+async function toggleReadWrite() {
+    // #1740 — typing needs full-size cells. In the miniature a cell can be
+    // ~5px wide, and a click lands on the wrong column of a live claude
+    // session ; xterm maps pointer coordinates through a CSS transform it
+    // doesn't know about. So enabling typing takes you to fullscreen first
+    // rather than being refused.
+    if (!isReadWrite.value && isMiniature.value) {
+        isFullscreen.value = true;
+        await settleAndFit();
+    }
     if (isReadWrite.value) {
         // Disabling : no confirm — going BACK to safe (read-only) is fine.
         isReadWrite.value = false;
@@ -320,6 +346,14 @@ function openStream() {
     es.onmessage = (e) => {
         try {
             const frame = JSON.parse(e.data) as PaneFrame;
+            // #1740 — adopt the source grid before painting, so the snapshot
+            // lands in a terminal that has the pane's shape. A pane can be
+            // resized under us (the human drags the tmux window), hence the
+            // check on every frame rather than once on connect.
+            const g = frame.geometry;
+            const changed = !!g && (paneGeometry.value?.cols !== g.cols || paneGeometry.value?.rows !== g.rows);
+            if (g) paneGeometry.value = { cols: g.cols, rows: g.rows };
+            if (changed) relayoutMiniature();
             applyFrame(frame.text, frame.cursor);
             lastCapturedAt.value = frame.captured_at;
             truncated.value = !!frame.truncated;
@@ -363,6 +397,54 @@ function closeStream() {
     connected.value = false;
 }
 
+/**
+ * #1740 — miniature mode : we know the source pane's grid, so render it whole
+ * and shrink it, instead of fitting the container and cropping.
+ *
+ * Only active in the embedded view. Fullscreen keeps the historical `fit()`
+ * path : there the container IS big enough, so matching the viewport gives
+ * real-size, readable text — that's what fullscreen is for.
+ */
+const isMiniature = computed(() => !isFullscreen.value && paneGeometry.value !== null);
+
+/**
+ * Size the terminal to the source grid, then compute the reduction that makes
+ * it fit the box.
+ *
+ * The scale is driven by WIDTH, with height only acting as a ceiling. A
+ * terminal is much wider than tall, so width is what binds in practice, and
+ * letting the height follow keeps the pane's aspect ratio instead of leaving
+ * a dead band. `Math.min(…, 1)` is deliberate : a pane narrower than the box
+ * is left at its natural size rather than blown up — an upscaled terminal is
+ * blurry and gains nothing.
+ *
+ * Measurement uses `offsetWidth` / `offsetHeight` on purpose : those are
+ * LAYOUT values, unaffected by the CSS transform we're about to (re)apply.
+ * `getBoundingClientRect()` would return the already-scaled box and the
+ * factor would compound on every tick.
+ */
+function relayoutMiniature(): void {
+    const host = containerRef.value;
+    const g = paneGeometry.value;
+    if (!term || !host || !g) return;
+    if (term.cols !== g.cols || term.rows !== g.rows) {
+        try { term.resize(g.cols, g.rows); } catch { /* noop */ }
+    }
+    const screen = host.querySelector(".xterm") as HTMLElement | null;
+    if (!screen) return;
+    const naturalW = screen.offsetWidth;
+    const naturalH = screen.offsetHeight;
+    if (!naturalW || !naturalH) return;
+    const cs = getComputedStyle(host);
+    const padX = parseFloat(cs.paddingLeft || "0") + parseFloat(cs.paddingRight || "0");
+    const padY = parseFloat(cs.paddingTop || "0") + parseFloat(cs.paddingBottom || "0");
+    const boxW = host.clientWidth - padX;
+    if (boxW <= 0) return;
+    const k = Math.min(1, boxW / naturalW, MINI_MAX_HEIGHT / naturalH);
+    miniScale.value = k;
+    miniHeight.value = Math.round(naturalH * k + padY);
+}
+
 async function settleAndFit(): Promise<void> {
     // #533 (david repro claude-in-chrome Win DPI 1.25) — chicken-egg
     // mesure : canvas xterm conserve sa taille fullscreen tant que pas
@@ -379,6 +461,20 @@ async function settleAndFit(): Promise<void> {
     //  3. nextTick + RAF avant fit() pour laisser Vue + browser settle.
     //  4. scrollToBottom : si rows-count shrinke (60→24), garde le contenu
     //     récent visible au lieu du scrollback haut (vide-en-bas perçu).
+    //
+    // #1740 — the whole pre-shrink dance below only concerns the `fit()`
+    // path. In miniature mode we never measure the wrapper to derive a grid
+    // (the grid comes from the daemon), so the chicken-egg it works around
+    // cannot happen : we just re-run the scale computation.
+    if (isMiniature.value) {
+        // No reset of the current scale first : `relayoutMiniature` measures
+        // layout boxes, which the transform doesn't touch. Zeroing it here
+        // would only flash the pane at full size for one frame.
+        await nextTick();
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        relayoutMiniature();
+        return;
+    }
     if (!isFullscreen.value) {
         try { term?.resize(80, 24); } catch { /* noop */ }
     }
@@ -406,6 +502,12 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 function onWindowResize() {
+    // #1740 — in miniature mode the grid is fixed by the source pane ; only
+    // the reduction has to be recomputed when the box width changes.
+    if (isMiniature.value) {
+        relayoutMiniature();
+        return;
+    }
     fitAddon?.fit();
 }
 
@@ -520,7 +622,17 @@ onBeforeUnmount(() => {
                 @click="toggleFullscreen"
             />
         </div>
-        <div ref="containerRef" class="terminal-view__xterm" />
+        <!-- #1740 — in miniature mode the grid is the source pane's, and the
+             whole thing is scaled down to fit. The height follows the pane's
+             aspect ratio instead of the fixed 22rem window. -->
+        <div
+            ref="containerRef"
+            class="terminal-view__xterm"
+            :class="{ 'terminal-view__xterm--mini': isMiniature }"
+            :style="isMiniature
+                ? { '--cl-mini-scale': String(miniScale), height: miniHeight ? `${miniHeight}px` : undefined }
+                : undefined"
+        />
     </div>
 </template>
 
@@ -621,5 +733,22 @@ onBeforeUnmount(() => {
 .terminal-view--fullscreen .terminal-view__xterm {
     min-height: 0;
     max-height: none;
+}
+/* #1740 — miniature : the grid is rendered at the SOURCE pane's size and
+   shrunk to fit, so the operator sees the whole pane instead of a window cut
+   out of it. The 22rem clamp is what made it a window ; here the height is
+   computed from the pane's aspect ratio and set inline.
+
+   `transform` is the right tool rather than a computed font-size because no
+   WebGL/canvas renderer addon is loaded : xterm falls back to its DOM
+   renderer, and DOM text under `scale()` stays vector — small but crisp,
+   where a scaled canvas would be a stretched bitmap. */
+.terminal-view__xterm--mini {
+    min-height: 0;
+    max-height: none;
+}
+.terminal-view__xterm--mini :deep(.xterm) {
+    transform: scale(var(--cl-mini-scale, 1));
+    transform-origin: top left;
 }
 </style>

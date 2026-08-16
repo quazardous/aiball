@@ -469,6 +469,9 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
             // ; forward it so papy's SSE consumer (TerminalView.vue) can
             // re-position after writing the snapshot.
             if (r.cursor !== undefined) frame.cursor = r.cursor;
+            // #1740 — same forwarding for the pane's grid size, so a remote
+            // node's pane renders as a scaled miniature like a local one.
+            if (r.geometry !== undefined) frame.geometry = r.geometry;
             send(frame);
         };
         void tick();

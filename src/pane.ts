@@ -63,10 +63,24 @@ export interface CaptureResult {
      *  rendering the snapshot. `null` when the lookup fails (target gone,
      *  spawn errored). */
     cursor?: { x: number; y: number } | null;
+    /** #1740 — the pane's own grid size. The snapshot is just text, so a
+     *  consumer that renders it has no way to know how wide the source pane
+     *  actually is : it can only size its terminal to its own container and
+     *  show a WINDOW onto the pane. Carrying the geometry lets the frontend
+     *  render the full grid and scale it down instead of cropping it.
+     *  `null` when the lookup fails — the consumer then falls back to
+     *  fitting its container, which is the pre-#1740 behaviour. */
+    geometry?: PaneGeometry | null;
     /** #505 debug : exit code + stderr du `capture-pane` (utile pour repérer
      *  les sessions invalides ou les flags non supportés par psmux/Windows
      *  qui sortent 0 mais avec stdout vide). */
     debug?: { exit_code: number | null; stderr: string };
+}
+
+/** #1740 — pane grid size in cells (`#{pane_width}` × `#{pane_height}`). */
+export interface PaneGeometry {
+    cols: number;
+    rows: number;
 }
 
 /**
@@ -90,6 +104,61 @@ export function parseCursor(stdout: string): { x: number; y: number } | null {
 }
 
 /**
+ * #1740 — argv du lecteur de géométrie. Même forme positionnelle obligatoire
+ * que `cursorArgs`, et pour la même raison (psmux ignore `-F`).
+ *
+ * C'est un appel SÉPARÉ de celui du curseur, pas un format à quatre champs :
+ * si une version de psmux ne connaît pas `#{pane_width}`, elle répondra une
+ * ligne que le parse rejette. Fusionner les deux ferait donc retomber le
+ * curseur à `null` sur Windows — exactement la panne silencieuse que le
+ * commentaire de `cursorArgs` documente. Deux appels, deux échecs
+ * indépendants : perdre la miniature ne coûte pas le curseur.
+ */
+export function geometryArgs(target: string): string[] {
+    return ["display-message", "-p", "-t", target, "#{pane_width},#{pane_height}"];
+}
+
+/**
+ * Rejette zéro autant que le non-numérique : un pane à 0 colonne n'existe pas,
+ * et le consommateur divise par ces valeurs pour calculer son échelle.
+ */
+export function parseGeometry(stdout: string): PaneGeometry | null {
+    const m = /^(\d+),(\d+)$/.exec(stdout.trim());
+    if (!m) return null;
+    const cols = Number(m[1]);
+    const rows = Number(m[2]);
+    return cols > 0 && rows > 0 ? { cols, rows } : null;
+}
+
+/**
+ * Spawn d'un `display-message -p` et récupération de son stdout. Partagé par
+ * les lecteurs de curseur et de géométrie — même commande, même mode d'échec
+ * (spawn raté ou exit non-nul → `null`, le lecteur retombe sur son défaut).
+ */
+function readDisplayMessage(args: string[]): Promise<string | null> {
+    return new Promise((resolve) => {
+        const child = spawn(MUX_CMD, args, { stdio: ["ignore", "pipe", "ignore"] });
+        const chunks: Buffer[] = [];
+        child.stdout.on("data", (b: Buffer) => chunks.push(b));
+        child.on("error", () => resolve(null));
+        child.on("close", (code) => {
+            if (code !== 0) return resolve(null);
+            resolve(Buffer.concat(chunks).toString("utf8"));
+        });
+    });
+}
+
+/**
+ * #1740 — fetch the pane's grid size (columns × rows). `null` on spawn /
+ * parse failure ; the caller renders without geometry, which is the
+ * pre-#1740 behaviour rather than an error.
+ */
+export async function captureGeometry(target: string): Promise<PaneGeometry | null> {
+    const out = await readDisplayMessage(geometryArgs(target));
+    return out === null ? null : parseGeometry(out);
+}
+
+/**
  * Variante synchrone, pour le poll du kernel (qui décide dans la foulée de la
  * capture et n'a pas de point d'await). Même commande, même parse.
  */
@@ -109,21 +178,9 @@ export function captureCursorSync(target: string): { x: number; y: number } | nu
  * (Windows) and tmux (Linux/macOS). Returns `null` on spawn / parse failure
  * — the caller falls back to whatever the snapshot positioned (or nothing).
  */
-export function captureCursor(target: string): Promise<{ x: number; y: number } | null> {
-    return new Promise((resolve) => {
-        const child = spawn(
-            MUX_CMD,
-            cursorArgs(target),
-            { stdio: ["ignore", "pipe", "ignore"] },
-        );
-        const chunks: Buffer[] = [];
-        child.stdout.on("data", (b: Buffer) => chunks.push(b));
-        child.on("error", () => resolve(null));
-        child.on("close", (code) => {
-            if (code !== 0) return resolve(null);
-            resolve(parseCursor(Buffer.concat(chunks).toString("utf8")));
-        });
-    });
+export async function captureCursor(target: string): Promise<{ x: number; y: number } | null> {
+    const out = await readDisplayMessage(cursorArgs(target));
+    return out === null ? null : parseCursor(out);
 }
 
 /**
@@ -140,12 +197,15 @@ export async function captureOnce(target: string): Promise<CaptureResult | { err
     // #531 — fetch content + cursor in parallel. capture-pane is the slow
     // call ; display-message is essentially free (~1 ms). Running them in
     // parallel keeps the tick latency at ~capture-pane's cost.
-    const [contentR, cursor] = await Promise.all([
+    // #1740 — the geometry read joins the same batch, for the same reason.
+    const [contentR, cursor, geometry] = await Promise.all([
         captureContent(target),
         captureCursor(target),
+        captureGeometry(target),
     ]);
     if ("error" in contentR) return contentR;
     contentR.cursor = cursor;
+    contentR.geometry = geometry;
     return contentR;
 }
 

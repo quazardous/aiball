@@ -23,6 +23,14 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Changed
+
+- The embedded terminal view now shows the agent's **whole** pane, scaled down
+  to fit, instead of a fixed-size window cut out of it — a wide pane no longer
+  loses most of its columns off-screen. Fullscreen is unchanged and stays the
+  place to read at real size; enabling typing switches to it, since the
+  miniature's cells are too small to click accurately.
+
 ## [0.39.0] — 2026-07-28
 
 ### Added

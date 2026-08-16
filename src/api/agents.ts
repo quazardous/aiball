@@ -31,7 +31,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { MUX_CMD, tmuxName, loopSockPath } from "../claude-loop/state.js";
 import { sendEventOnce } from "../claude-loop/ipc-events.js";
-import { captureCursor } from "../pane.js";
+import { captureCursor, captureGeometry } from "../pane.js";
 import { getConsumer } from "../db.js";
 import {
     getNodeSocketForConsumerIp,
@@ -237,6 +237,10 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
         // explicitly re-position the cursor after writing the snapshot or it
         // lands wherever the last char of the snapshot left it.
         const cursorPromise = captureCursor(target);
+        // #1740 — same trick for the pane's grid size. The frontend needs it to
+        // render the WHOLE pane scaled down ; without it, it can only size the
+        // terminal to its own container and crop.
+        const geometryPromise = captureGeometry(target);
         child.on("error", (e) => {
             if (stopped) return;
             send({ error: `spawn failed : ${e.message}` }, "error");
@@ -249,7 +253,8 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
             }
             const text = Buffer.concat(chunks).toString("utf8");
             const cursor = await cursorPromise;
-            send({ text, target, truncated, captured_at: new Date().toISOString(), cursor });
+            const geometry = await geometryPromise;
+            send({ text, target, truncated, captured_at: new Date().toISOString(), cursor, geometry });
         });
     }
 
