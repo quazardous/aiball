@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A wake now says how old the thing it announces is — "7 days ago" — when it
+  has been waiting more than an hour. Fresh wakes are unchanged, so the marker
+  showing up is itself the signal that something sat in the queue. Matters when
+  the loop runs unattended: what surfaces then is backlog, and an undated
+  imperative reads like it just happened.
+
 - The embedded terminal view now shows the agent's **whole** pane, scaled down
   to fit, instead of a fixed-size window cut out of it — a wide pane no longer
   loses most of its columns off-screen. Fullscreen is unchanged and stays the

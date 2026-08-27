@@ -73,6 +73,42 @@ export function tmuxName(name: string): string {
 }
 
 /**
+ * #1820 — how old the event a wake announces actually is.
+ *
+ * Rendered ONLY past `WAKE_AGE_MIN_MS`, and that threshold is the whole
+ * point rather than a tuning detail. A wake fired thirty seconds after the
+ * event would read "0 hours ago", the marker would appear on every wake,
+ * and it would stop being read. Emitting nothing while the event is fresh
+ * makes its mere PRESENCE the signal: this one waited.
+ *
+ * It matters because a wake speaks the grammar of the urgent. While a human
+ * is at the terminal that is fine — everything is fresh. Once the loop runs
+ * unattended, what surfaces is backlog, and an undated imperative presents
+ * a week-old decision exactly like a one-minute-old one. Two such cases
+ * were measured on the same day, both a full week late: a plan acceptance
+ * and a human asking whether a ticket could be closed.
+ *
+ * Relative rather than absolute on purpose: `2026-08-20T11:42Z` makes the
+ * reader subtract before learning anything, and the reader is an agent
+ * mid-turn. "7 days ago" is the answer, not the input to it.
+ */
+export const WAKE_AGE_MIN_MS = 60 * 60 * 1000;
+
+export function formatWakeAge(createdAt: string | null | undefined, nowMs: number): string {
+    if (!createdAt) return "";
+    const at = Date.parse(createdAt);
+    if (!Number.isFinite(at)) return "";
+    const ageMs = nowMs - at;
+    // Also covers a future timestamp (clock skew between daemon and loop):
+    // a negative age is below the threshold, so nothing renders.
+    if (ageMs < WAKE_AGE_MIN_MS) return "";
+    const hours = Math.floor(ageMs / 3_600_000);
+    if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+    const days = Math.floor(hours / 24);
+    return days === 1 ? "1 day ago" : `${days} days ago`;
+}
+
+/**
  * #414 — canonicalise un cwd pour servir d'IDENTITÉ de loop (clé de lock +
  * guard anti-doublon + résolution par cwd). Deux alias du même dossier (un
  * chemin symlinké vs sa cible, ou `..`) doivent retomber sur UNE seule clé :
@@ -1880,6 +1916,11 @@ export async function buildContextPhrase(
                     // parent_message_id = original proposal id → hashid).
                     by_agent?: string | null;
                     parent_message_id?: number | null;
+                    // #1820 — when the event happened. Already on the wire
+                    // (listUnread filters on it); it was simply absent from
+                    // this narrowed shape, so the wake could never say how
+                    // old the thing it announces is.
+                    created_at?: string | null;
                 }>;
             }>).catch(() => ({ messages: [] })),
             // #397: this loop's own consumer row → its micro_prompt, exposed as
@@ -2503,6 +2544,12 @@ export async function buildContextPhrase(
             head_bundle: headBundle,
             head_decision_decider: headDecisionDecider,
             head_decision_ref_hashid: headDecisionRefHashid,
+            // #1820 — age of the announced event, empty while it is fresh.
+            // One source covers both cases david named: a decision event is
+            // a real server-emitted row (`/decide` only), so its own
+            // created_at IS the moment of the decision — no need to reach
+            // into the original proposal's `decided_at`.
+            head_age: formatWakeAge(unreadHead?.created_at, Date.now()),
             project_scope: scope,
             // #1215 david `go` — le CTA backlog reflète qu'un commentaire attend
             // une réponse en NOMMANT le dernier acteur (≠ moi). Remplace l'ancien
@@ -2549,10 +2596,10 @@ export async function buildContextPhrase(
             // a single suffix paren. Still truncation-safe : `head_body` is
             // truncated upstream and the ref paren is template-appended after it,
             // so the marker (inside that paren) always survives.
-            "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }#{head_id} / #{head_comment_hashid})}"
+            "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }#{head_id} / #{head_comment_hashid}{head_age:+ · {head_age}})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_fyi:+ (fyi — action is not mandatory)}}"
-            + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_bundle:+{head_bundle}{head_fyi:+ (fyi — action is not mandatory)}}"
             // #1470 — the backlog leg closes with a TIER-AWARE instruction. The
             // rotation (and its pressure) is unchanged: same head, same cadence.
