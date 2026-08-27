@@ -37,6 +37,13 @@ export interface InboxAgg {
     pendingPlan: boolean;
     latestEscalationId: number;
     pendingEscalation: boolean;
+    /** #1835 — the FOURTH decision kind. `wontfix` awaits the reporter's
+     *  accept/reject exactly like a resolution, and gates `actionable` the
+     *  same way (it shares resolution's gate semantics). It was the only
+     *  kind this aggregate never looked at, so a ticket left the agent's
+     *  pool while the inbox row showed nothing to do. */
+    latestWontfixId: number;
+    pendingWontfix: boolean;
     lastSpeaker: string | null;
     lastSpeakerId: number;
 }
@@ -57,6 +64,8 @@ export function emptyAgg(): InboxAgg {
         pendingPlan: false,
         latestEscalationId: 0,
         pendingEscalation: false,
+        latestWontfixId: 0,
+        pendingWontfix: false,
         lastSpeaker: null,
         lastSpeakerId: 0,
     };
@@ -122,6 +131,15 @@ export function buildInboxAgg(project: string | undefined): Map<number, InboxAgg
                 if (cur.latestEscalationId === 0 || m.id > cur.latestEscalationId) {
                     cur.latestEscalationId = m.id;
                     cur.pendingEscalation = d.status === "pending";
+                }
+            }
+            // #1835 — wontfix. Missing here meant a pending "close without
+            // resolution" gated the ticket out of the agent's pool and lit
+            // nothing for the human, so nobody was looking at it.
+            if (d?.kind === "wontfix") {
+                if (cur.latestWontfixId === 0 || m.id > cur.latestWontfixId) {
+                    cur.latestWontfixId = m.id;
+                    cur.pendingWontfix = d.status === "pending";
                 }
             }
         }

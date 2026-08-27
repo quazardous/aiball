@@ -130,6 +130,11 @@ export function attentionOf(r: InboxRow): Attention {
     // urgence ; le liseré dit en plus "il faut que tu agisses sur cette
     // ligne dans ton inbox".
     if (r.pending_escalation) return "resolution";
+    // #1835 — wontfix is the fourth decision kind and awaits the reporter
+    // exactly like the three above. It was the only one lighting nothing,
+    // while still gating the ticket out of the agent's pool: the row looked
+    // idle precisely when it had become the human's call.
+    if (r.pending_wontfix) return "resolution";
     if (r.pending_comment_count > 0) return "comments";
     return null;
 }

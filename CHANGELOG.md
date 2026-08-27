@@ -33,6 +33,14 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Tickets waiting on **your** decision are highlighted again in the inbox. Two
+  kinds slipped through: a "wontfix" proposal, and any decision filed together
+  with the ticket rather than in a later comment. Both already removed the
+  ticket from the agent's queue, so the row went quiet exactly when it became
+  your call and nobody was looking at it.
+- The accept button on a wontfix said "keep open" while accepting one closes
+  the ticket — the dropdown right beside it said so correctly.
+
 - The header's go-to-ticket field now switches project when the ticket you jump
   to lives in another one. It used to navigate by id alone, so the thread opened
   while the sidebar, the inbox and every scoped count stayed behind — visible

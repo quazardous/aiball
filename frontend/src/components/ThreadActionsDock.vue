@@ -22,6 +22,31 @@ import SplitButton from "primevue/splitbutton";
 import type { Message, TicketSummary } from "../lib/api";
 import type { CommentDecision } from "../lib/decisions";
 
+/**
+ * #1835 — what accepting each decision kind actually DOES to the ticket.
+ *
+ * This was a nested ternary whose fallback read "keep open", so `wontfix` —
+ * the only kind not named in it — promised the opposite of what happens:
+ * accepting a wontfix auto-closes the ticket server-side. The dropdown beside
+ * this button said "close without resolution" all along, so the two halves of
+ * the same control disagreed.
+ *
+ * A total record instead of a fallback, deliberately: a fifth decision kind
+ * would fail to compile here rather than inherit a sentence that happens to be
+ * wrong about it. Twice today a switch narrower than the decision model failed
+ * silently and toward "nothing to do".
+ */
+const ACCEPT_LABELS: Record<CommentDecision["kind"], string> = {
+    resolution: "accept resolution → close",
+    wontfix: "accept wontfix → close",
+    escalation: "accept escalation → action done",
+    plan: "accept plan → keep open",
+};
+
+function acceptLabel(kind: CommentDecision["kind"]): string {
+    return ACCEPT_LABELS[kind];
+}
+
 interface MenuItem {
     label: string;
     icon: string;
@@ -110,11 +135,7 @@ const emit = defineEmits<{
             @click="emit('reject-active')"
         />
         <SplitButton
-            :label="activeDecision.decision.kind === 'resolution'
-                ? 'accept resolution → close'
-                : activeDecision.decision.kind === 'escalation'
-                    ? 'accept escalation → action done'
-                    : `accept ${activeDecision.decision.kind} → keep open`"
+            :label="acceptLabel(activeDecision.decision.kind)"
             icon="pi pi-verified"
             severity="success"
             size="small"

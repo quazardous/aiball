@@ -83,6 +83,32 @@ export const ticketsRouter = Router();
  *  via `last_actor_at`, donc 20 min sliding suffit). Read once per
  *  ticket_list (the sort), not per row, so the yaml parse is cheap.
  *  Falls back to the default on any read/parse error. */
+/**
+ * #1835 — a decision can live on the TICKET, not only on a comment.
+ * `ticket_new({then:"plan"})` stores it in the ticket's own `meta`, and the
+ * inbox aggregate only ever walks `comment_added` rows — so those tickets
+ * showed no pending flag at all while the thread view happily rendered an
+ * "accept plan" button from the same data.
+ *
+ * That mattered more than a missing tint: a pending decision GATES the ticket
+ * out of the agent's actionable pool. The ticket left the agent's queue and
+ * signalled nothing to the human, so nobody was looking at it.
+ *
+ * `kind === null` asks "is there any pending decision here", used where only
+ * the existence matters.
+ */
+export function ticketDecision(t: { meta?: string | null }, kind: string | null): boolean {
+    if (!t.meta) return false;
+    try {
+        const d = (JSON.parse(t.meta) as { decision?: { kind?: string; status?: string } }).decision;
+        if (!d || d.status !== "pending") return false;
+        return kind === null ? true : d.kind === kind;
+    } catch {
+        // A malformed meta must never take a row down with it.
+        return false;
+    }
+}
+
 const DEFAULT_HOT_WINDOW_SEC = 1200;
 function hotWindowSec(): number {
     try {
@@ -397,7 +423,7 @@ ticketsRouter.get("/inbox", (req, res) => {
             // that the reporter still has to accept-and-close or reject.
             // Stays false once the ticket is closed (the close auto-promotes
             // any dangling pending resolved, see submitMessage).
-            pending_resolution: agg.pendingResolution && !(agg.closed || t.status === "rejected"),
+            pending_resolution: (agg.pendingResolution || ticketDecision(t, "resolution")) && !(agg.closed || t.status === "rejected"),
             /** #B.168 follow-up: latest resolution was rejected →
                 flag for a `× rejected` badge on the inbox row. Same
                 suppression as pending_resolution (cleared once
@@ -414,11 +440,16 @@ ticketsRouter.get("/inbox", (req, res) => {
                 show "you have a plan to accept/reject" the same way
                 it shows pending resolutions. Cleared once the ticket
                 is closed/rejected. */
-            pending_plan: agg.pendingPlan && !(agg.closed || t.status === "rejected"),
+            pending_plan: (agg.pendingPlan || ticketDecision(t, "plan")) && !(agg.closed || t.status === "rejected"),
             /** #737 — pending ESCALATION flag. Symmetric to pending_plan.
                 Drives the red ESCALATED badge on the inbox row. Cleared
                 once the ticket is closed/rejected. */
-            pending_escalation: agg.pendingEscalation && !(agg.closed || t.status === "rejected"),
+            pending_escalation: (agg.pendingEscalation || ticketDecision(t, "escalation")) && !(agg.closed || t.status === "rejected"),
+            /** #1835 — pending WONTFIX. The fourth decision kind, and the one
+                nothing surfaced: it gates the ticket out of the agent's pool
+                like a resolution does, so without this the row looked idle
+                while it was in fact waiting on the reporter. */
+            pending_wontfix: (agg.pendingWontfix || ticketDecision(t, "wontfix")) && !(agg.closed || t.status === "rejected"),
             /** #656 david `2c9qm4`: true iff a pending decision exists
                 AND the decision-bearing comment IS the latest comment
                 on the thread (no newer activity past the proposal).
@@ -431,8 +462,13 @@ ticketsRouter.get("/inbox", (req, res) => {
                 const pendingId = agg.pendingEscalation ? agg.latestEscalationId
                     : agg.pendingPlan ? agg.latestPlanId
                     : agg.pendingResolution ? agg.latestResolutionId
+                    : agg.pendingWontfix ? agg.latestWontfixId
                     : 0;
-                return pendingId > 0 && pendingId === agg.lastSpeakerId;
+                if (pendingId > 0) return pendingId === agg.lastSpeakerId;
+                // #1835 — a decision filed WITH the ticket (`ticket_new({then})`)
+                // has no comment to compare ids against. It is the freshest
+                // signal exactly while nobody has spoken since.
+                return ticketDecision(t, null) && agg.commentCount === 0;
             })(),
             scope: t.scope,
             // Per-consumer unread flag (≥1 unseen ping on the thread for

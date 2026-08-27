@@ -437,6 +437,9 @@ export interface InboxRow {
      *  inbox row paints a red ESCALATED badge. Cleared once the ticket
      *  is closed/rejected. */
     pending_escalation?: boolean;
+    /** #1835 — pending wontfix (close without resolution), awaiting the
+     *  reporter. Same green attention band as plan / resolution. */
+    pending_wontfix?: boolean;
     /** #656 david `2c9qm4`: true iff a pending decision exists AND
      *  the decision-bearing comment IS the latest comment on the
      *  thread (no newer activity past it). UI uses this to keep
