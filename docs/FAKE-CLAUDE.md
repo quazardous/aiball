@@ -91,6 +91,11 @@ Two things to know before firing one, both learned by getting them wrong:
   settings were generated *from that branch*. Copying a live loop's settings
   into a scratch state dir runs the installed code and silently proves nothing
   about your change.
+
+  The remedy is to generate the file where the scenario will read it, from the
+  checkout under test — `buildHookSettings(HOOKS, …)` with that checkout as the
+  root, written to `$CL_STATE_DIR/claude-settings.json`. Then the commands
+  point at the branch, and what fires is what you wrote.
 - **A real hook talks to the real daemon.** `Stop` in particular queries the
   board and can decide to wake — from a scenario, against production. Fire it
   against a state dir you are willing to have side effects in, and do not
