@@ -73,13 +73,13 @@ export function tmuxName(name: string): string {
 }
 
 /**
- * #1820 — how old the event a wake announces actually is.
+ * #1820 — WHEN the event a wake announces happened.
  *
- * Rendered ONLY past `WAKE_AGE_MIN_MS`, and that threshold is the whole
- * point rather than a tuning detail. A wake fired thirty seconds after the
- * event would read "0 hours ago", the marker would appear on every wake,
- * and it would stop being read. Emitting nothing while the event is fresh
- * makes its mere PRESENCE the signal: this one waited.
+ * Rendered ONLY past `WAKE_AGE_MIN_MS`, and that threshold is the whole point
+ * rather than a tuning detail. Stamping every wake would put a timestamp on
+ * events that just happened, the marker would appear everywhere, and it would
+ * stop being read. Emitting nothing while the event is fresh makes its mere
+ * PRESENCE the signal: this one waited.
  *
  * It matters because a wake speaks the grammar of the urgent. While a human
  * is at the terminal that is fine — everything is fresh. Once the loop runs
@@ -88,24 +88,27 @@ export function tmuxName(name: string): string {
  * were measured on the same day, both a full week late: a plan acceptance
  * and a human asking whether a ticket could be closed.
  *
- * Relative rather than absolute on purpose: `2026-08-20T11:42Z` makes the
- * reader subtract before learning anything, and the reader is an agent
- * mid-turn. "7 days ago" is the answer, not the input to it.
+ * Absolute rather than relative, on david's call: a wall-clock stamp says
+ * exactly when, and stays true wherever it is later re-read — a log, a
+ * transcript, a ticket quote. A relative age is only true at the instant it
+ * was rendered.
+ *
+ * Local time on purpose: a loop runs on one machine, for one operator, and
+ * `2026-08-20 11:42` is what he can match against his own day.
  */
 export const WAKE_AGE_MIN_MS = 60 * 60 * 1000;
 
-export function formatWakeAge(createdAt: string | null | undefined, nowMs: number): string {
+export function formatWakeStamp(createdAt: string | null | undefined, nowMs: number): string {
     if (!createdAt) return "";
     const at = Date.parse(createdAt);
     if (!Number.isFinite(at)) return "";
-    const ageMs = nowMs - at;
     // Also covers a future timestamp (clock skew between daemon and loop):
     // a negative age is below the threshold, so nothing renders.
-    if (ageMs < WAKE_AGE_MIN_MS) return "";
-    const hours = Math.floor(ageMs / 3_600_000);
-    if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
-    const days = Math.floor(hours / 24);
-    return days === 1 ? "1 day ago" : `${days} days ago`;
+    if (nowMs - at < WAKE_AGE_MIN_MS) return "";
+    const d = new Date(at);
+    const pad = (n: number): string => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+        + ` ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /**
@@ -2549,7 +2552,7 @@ export async function buildContextPhrase(
             // a real server-emitted row (`/decide` only), so its own
             // created_at IS the moment of the decision — no need to reach
             // into the original proposal's `decided_at`.
-            head_age: formatWakeAge(unreadHead?.created_at, Date.now()),
+            head_age: formatWakeStamp(unreadHead?.created_at, Date.now()),
             project_scope: scope,
             // #1215 david `go` — le CTA backlog reflète qu'un commentaire attend
             // une réponse en NOMMANT le dernier acteur (≠ moi). Remplace l'ancien
@@ -2597,10 +2600,10 @@ export async function buildContextPhrase(
             // truncated upstream and the ref paren is template-appended after it,
             // so the marker (inside that paren) always survives.
             "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }#{head_id} / #{head_comment_hashid}{head_age:+ · {head_age}})}"
-            + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
-            + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}{head_age:+ · {head_age}}}"
+            + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
-            + "{head_bundle:+{head_bundle}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_bundle:+{head_bundle}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
             // #1470 — the backlog leg closes with a TIER-AWARE instruction. The
             // rotation (and its pressure) is unchanged: same head, same cadence.
             // Only the ask changes, so a re-surfaced ticket gets the re-examination

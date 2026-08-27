@@ -30,8 +30,8 @@ dates are YYYY-MM-DD.
   of trusting its own account of itself. Companion to the age marker below: the
   marker shows the gap, this explains what to do about it.
 
-- A wake now says how old the thing it announces is — "7 days ago" — when it
-  has been waiting more than an hour. Fresh wakes are unchanged, so the marker
+- A wake now stamps the event it announces — "2026-08-20 11:42" — when it has
+  been waiting more than an hour. Fresh wakes are unchanged, so the stamp
   showing up is itself the signal that something sat in the queue. Matters when
   the loop runs unattended: what surfaces then is backlog, and an undated
   imperative reads like it just happened.
