@@ -1885,7 +1885,7 @@ export async function buildContextPhrase(
         // Pre-Phase-A the gate often resurfaced the same ticket post-drain
         // (no prune-on-consult), so the claimable-head was a safer bet.
         // With Phase A's prune, the unread FIFO drains naturally.
-        const [pingsR, projects, unreadR, consumerR] = await Promise.all([
+        const [pingsR, projects, unreadR, consumerR, standingR] = await Promise.all([
             client.pingsCount() as Promise<{ unread?: number }>,
             client.listProjectsDetailed() as Promise<Array<{
                 name: string;
@@ -1929,6 +1929,14 @@ export async function buildContextPhrase(
             // #397: this loop's own consumer row → its micro_prompt, exposed as
             // the `{consumer_prompt}` placeholder. Best-effort (null on failure).
             client.getConsumer(client.agentId).catch(() => null) as Promise<{ micro_prompt?: string | null } | null>,
+            // #1832: the PROJECT's standing instruction. Fetched per wake, not
+            // cached — the operator sets it precisely so the next wake carries
+            // it. Null when the loop has no single project in scope, and
+            // best-effort like the row above: a failed lookup costs the
+            // reminder, never the wake.
+            project
+                ? (client.getProjectStandingPrompt(project).catch(() => null) as Promise<{ standing_prompt?: string | null } | null>)
+                : Promise.resolve(null),
         ]);
         // Resolve the head's ticket id : a `ticket_created` msg IS the
         // ticket ; a `comment_added` / lifecycle msg points at it via
@@ -1960,6 +1968,11 @@ export async function buildContextPhrase(
         // `{consumer_prompt}` placeholder renders to nothing (opt-in; the
         // operator puts the placeholder in their wake template where they want).
         const consumerPrompt = (consumerR?.micro_prompt ?? "").trim();
+        // #1832 — the project's standing instruction. Rendered BEFORE the
+        // consumer's: the project one says "what matters here, right now", the
+        // consumer one says "how you work in general", and the situational
+        // instruction is the one that should be read first.
+        const standingPrompt = (standingR?.standing_prompt ?? "").trim();
         // #374 (#kjsejy): open and actionable are DISTINCT counts. We always
         // state the TRUE open count when waking so a gated backlog (open>0,
         // actionable=0) never reads as "nothing to do"; `actionableCount`
@@ -2574,9 +2587,22 @@ export async function buildContextPhrase(
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
             // decision branches so a watcher isn't pushed to over-act.
             head_fyi: headFyi,
+            // #1832: {standing_prompt} = the PROJECT's standing instruction,
+            // rendered at the head of every wake — event and backlog alike,
+            // since it precedes the mutually exclusive branches rather than
+            // living inside one. Empty → renders to nothing, so a project
+            // without one gets byte-identical wakes.
+            standing_prompt: standingPrompt,
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
-            // empty → renders to nothing). David puts the placeholder in his
-            // wake_master override where he wants it.
+            // empty → renders to nothing).
+            //
+            // #1832 — until now NO shipped template rendered this, so the
+            // field was editable in the UI, fetched on every wake, and thrown
+            // away. It is placed in the default template alongside the project
+            // one, which costs a token and revives it. David's instruction was
+            // explicit: do not REPAIR it if that turns out not to be enough.
+            // The feature he asked for is the project-scoped instruction; this
+            // one is a nearly-free bonus, and a bonus does not justify digging.
             consumer_prompt: consumerPrompt,
         };
         // Unified FIFO-pop wake. Five mutually exclusive branches:
@@ -2599,7 +2625,12 @@ export async function buildContextPhrase(
             // a single suffix paren. Still truncation-safe : `head_body` is
             // truncated upstream and the ref paren is template-appended after it,
             // so the marker (inside that paren) always survives.
-            "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }#{head_id} / #{head_comment_hashid}{head_age:+ · {head_age}})}"
+            // #1832 — the standing instructions lead, before the five
+            // mutually exclusive head branches. That placement is what
+            // makes them show on an EVENT wake and a BACKLOG wake alike:
+            // a prefix precedes branches, it does not pick one.
+            "{standing_prompt:+{standing_prompt} · }{consumer_prompt:+{consumer_prompt} · }"
+            + "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }#{head_id} / #{head_comment_hashid}{head_age:+ · {head_age}})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}{head_age:+ · {head_age}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"

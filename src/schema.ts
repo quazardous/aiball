@@ -74,6 +74,9 @@ export const projects = sqliteTable("projects", {
      * `src/preferences.ts` SDK.
      */
     defaultStrategy: text("default_strategy"),
+    /** #1832 — standing instruction shown at the head of every wake on
+     *  this project. Set before going AFK, cleared on return. NULL = none. */
+    standingPrompt: text("standing_prompt"),
 });
 
 export const tickets = sqliteTable("tickets", {

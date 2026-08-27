@@ -768,6 +768,17 @@ export class AiballClient {
         );
     }
 
+    /** #1832: the project's standing instruction, shown at the head of every
+     *  wake. Fetched per wake like the consumer's micro-prompt — the operator
+     *  edits it precisely so the NEXT wake picks it up, so a cached value
+     *  would defeat the point. */
+    getProjectStandingPrompt(project: string) {
+        return this.http<{ project: string; standing_prompt?: string | null }>(
+            "GET",
+            `/api/projects/${encodeURIComponent(project)}/standing-prompt`,
+        );
+    }
+
     /** #404: push a turn's token-usage delta onto a ticket (additive). Called
      *  best-effort by the Stop-hook's token-capture; failures are swallowed. */
     postTokenUsage(ticketId: number, u: { in: number; out: number; cacheW: number; cacheR: number }) {

@@ -1,0 +1,16 @@
+-- #1832 — a standing instruction the operator leaves for a project, shown at
+-- the head of every wake.
+--
+-- The use case is leaving: "priorité au debug léger, pas de grosse évolution,
+-- ajoute des then:plan si pas fait" typed once before going AFK, and recalled
+-- on every wake until it is cleared. So it lives on the project, not on the
+-- consumer — it describes what matters HERE, NOW, not who the agent is.
+--
+-- A column rather than a blob, per the ProjectPrefs contract: preferences are
+-- real columns so they surface in PRAGMA table_info and stay queryable.
+--
+-- Deliberately free text with no length limit at this layer. The brevity that
+-- matters is ergonomic, not structural — david asked for a single-line text
+-- input precisely so the widget is what keeps it short, rather than a
+-- validation rejecting a paste after the fact.
+ALTER TABLE `projects` ADD COLUMN `standing_prompt` text;

@@ -28,6 +28,11 @@ export interface ProjectPrefs {
     /** Per-project moderation strategy override (#B.127, rebased
      *  here in #B.224). NULL/undefined → fall back to the global. */
     strategy?: Strategy;
+    /** #1832 — a standing instruction prepended to every wake on this
+     *  project ("priorité au debug léger, pas de grosse évolution"). Free
+     *  text, trimmed; empty clears it. NULL/undefined → nothing is shown,
+     *  and the wake reads exactly as it does today. */
+    standingPrompt?: string;
 }
 
 export type ProjectPrefKey = keyof ProjectPrefs;
@@ -61,7 +66,24 @@ const PREF_DEFS: { [K in ProjectPrefKey]: PrefDef<K> } = {
             return v;
         },
     },
+    standingPrompt: {
+        column: "standingPrompt",
+        // Empty string reads as "unset" rather than as an empty instruction:
+        // clearing the field in the UI has to mean the wake goes back to what
+        // it was, not that it renders a blank line.
+        read: (r) => (r.standingPrompt && r.standingPrompt.trim()) ? r.standingPrompt : undefined,
+        encode: (v) => {
+            if (v === null || v === undefined) return null;
+            const s = String(v).trim();
+            return s ? s : null;
+        },
+    },
 };
+
+/** #1832 — exposed for tests only: the encode/read pair is where a mistake
+ *  would be silent (an empty string stored as a value renders a blank lead on
+ *  every wake, and nothing looks wrong). */
+export const PREF_DEFS_FOR_TEST = PREF_DEFS;
 
 /**
  * Read one preference. Returns `undefined` when the project doesn't

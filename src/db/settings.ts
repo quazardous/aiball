@@ -53,6 +53,18 @@ export function setProjectStrategy(project: string, s: Strategy | null): void {
     setPref(project, "strategy", s);
 }
 
+/** #1832 — the standing instruction shown at the head of every wake on this
+ *  project. `null` when unset, which is what makes the wake render unchanged. */
+export function getProjectStandingPrompt(project: string): string | null {
+    if (!project) return null;
+    return getPref(project, "standingPrompt") ?? null;
+}
+
+export function setProjectStandingPrompt(project: string, text: string | null): void {
+    if (!project) throw new Error("project required");
+    setPref(project, "standingPrompt", text);
+}
+
 /** Effective strategy used by the rule engine: per-project override
  *  takes precedence over the global default. */
 export function effectiveStrategy(project: string): Strategy {

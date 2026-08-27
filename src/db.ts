@@ -40,6 +40,8 @@ export {
     setStrategy,
     getProjectStrategy,
     setProjectStrategy,
+    getProjectStandingPrompt,
+    setProjectStandingPrompt,
     effectiveStrategy,
     UPLOAD_HARD_CAP_BYTES,
     DEFAULT_UPLOAD_MAX_BYTES,

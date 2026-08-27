@@ -23,6 +23,8 @@ import {
     isHuman,
     type Strategy,
     addProjectTokenUsage,
+    getProjectStandingPrompt,
+    setProjectStandingPrompt,
 } from "./db.js";
 import { captureTokenSnapshotIfDue, getTokenTimeseries } from "./db.js";
 import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
@@ -152,6 +154,36 @@ api.patch("/projects/:project/strategy", (req: Request, res: Response) => {
     setProjectStrategy(project, s as Strategy);
     broadcast({ type: "strategy_changed", data: { project, strategy: s } });
     res.json({ project, strategy: s, global: getStrategy() });
+});
+
+// #1832 — the project's standing instruction, shown at the head of every wake.
+// Mirrors the per-project strategy pair above: GET returns the current value,
+// PATCH sets it, and passing null (or an empty string) clears it.
+//
+// No length cap here on purpose. Brevity is carried by the UI using a
+// single-line text input rather than a textarea — david's call, so that the
+// widget reminds him to stay short instead of a validator rejecting a paste
+// after the fact.
+api.get("/projects/:project/standing-prompt", (req: Request, res: Response) => {
+    const project = String(req.params.project ?? "");
+    if (!project) return badRequest(res, "project required");
+    res.json({ project, standing_prompt: getProjectStandingPrompt(project) });
+});
+
+api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) => {
+    const project = String(req.params.project ?? "");
+    if (!project) return badRequest(res, "project required");
+    const v = req.body?.standing_prompt;
+    if (v !== null && v !== undefined && typeof v !== "string") {
+        return badRequest(res, "standing_prompt must be a string or null");
+    }
+    setProjectStandingPrompt(project, v ?? null);
+    // No broadcast. The strategy pair above emits one because moderation
+    // strategy changes what every open board does next; this only changes what
+    // the next wake says, it is edited from a single page, and that page
+    // re-reads on load. Adding a WS event type for a decorative field would
+    // cost more than it carries.
+    res.json({ project, standing_prompt: getProjectStandingPrompt(project) });
 });
 
 /**

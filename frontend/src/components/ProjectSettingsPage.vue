@@ -57,10 +57,77 @@ async function applyStrategy(v: StrategyChoice) {
     }
 }
 
+// #1832 — the standing instruction shown at the head of every wake on this
+// project. Typed before going AFK ("priorité au debug léger, pas de grosse
+// évolution"), cleared on return.
+//
+// A single-line <input>, not a <textarea>, on david's call: the widget is what
+// keeps it short. The instruction rides on EVERY wake, so length is a running
+// cost — a validator rejecting a long paste afterwards would be a worse way to
+// say the same thing than a field that never invites one.
+const standingPrompt = ref("");
+const standingSaved = ref("");
+const standingBusy = ref(false);
+
+// History lives in the browser. It is a typing convenience, not data: it never
+// needs to reach the daemon, survive a reinstall, or be read by an agent.
+// Consequence to know rather than discover — it does not follow to another
+// device, and clearing site data forgets it.
+const HISTORY_KEY = "aiball.standingPrompt.history";
+const HISTORY_MAX = 12;
+const history = ref<string[]>([]);
+
+function readHistory(): string[] {
+    try {
+        const raw = localStorage.getItem(`${HISTORY_KEY}.${props.project}`);
+        const parsed: unknown = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+    } catch {
+        // A private window, cleared storage, or a browser that refuses it: the
+        // field still works, it just stops suggesting.
+        return [];
+    }
+}
+
+/** Newest first, deduplicated, bounded. Clearing the FIELD must never clear
+ *  the history — the whole point is to type a recurring instruction once and
+ *  pick it back next time. */
+function rememberInHistory(value: string): void {
+    const v = value.trim();
+    if (!v) return;
+    const next = [v, ...history.value.filter((h) => h !== v)].slice(0, HISTORY_MAX);
+    history.value = next;
+    try {
+        localStorage.setItem(`${HISTORY_KEY}.${props.project}`, JSON.stringify(next));
+    } catch { /* storage refused — suggestions are optional */ }
+}
+
+async function applyStandingPrompt() {
+    const next = standingPrompt.value.trim();
+    if (next === standingSaved.value) return;
+    standingBusy.value = true;
+    try {
+        const r = await api.setProjectStandingPrompt(props.project, next || null);
+        standingSaved.value = r.standing_prompt ?? "";
+        standingPrompt.value = standingSaved.value;
+        rememberInHistory(standingSaved.value);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        standingBusy.value = false;
+    }
+}
+
 const { loading, load } = useLoader(async () => {
-    const r = await api.getProjectStrategy(props.project);
-    strategy.value = r.strategy;
-    strategyGlobal.value = r.global;
+    const [s, sp] = await Promise.all([
+        api.getProjectStrategy(props.project),
+        api.getProjectStandingPrompt(props.project),
+    ]);
+    strategy.value = s.strategy;
+    strategyGlobal.value = s.global;
+    standingSaved.value = sp.standing_prompt ?? "";
+    standingPrompt.value = standingSaved.value;
+    history.value = readHistory();
 }, { error, mountLoad: true });
 
 watch(() => props.project, () => load());
@@ -75,6 +142,38 @@ watch(() => props.project, () => load());
         @close-to-inbox="emit('back')"
     >
         <AsyncState :loading="loading" :error="error">
+            <section class="project-settings__section">
+                <SectionHeader title="Standing instruction">
+                    A short note prepended to <strong>every</strong> wake on
+                    <strong>{{ project }}</strong> — event and backlog alike.
+                    Leave one before stepping away
+                    (&ldquo;priorité au debug léger, pas de grosse évolution&rdquo;)
+                    and clear it when you are back. Empty means wakes read
+                    exactly as they do today.
+                </SectionHeader>
+                <input
+                    v-model="standingPrompt"
+                    list="standing-prompt-history"
+                    type="text"
+                    class="project-settings__standing-input"
+                    placeholder="e.g. priorité au debug léger, pas de grosse évolution"
+                    :disabled="standingBusy"
+                    @blur="applyStandingPrompt"
+                    @keyup.enter="applyStandingPrompt"
+                >
+                <datalist id="standing-prompt-history">
+                    <option v-for="h in history" :key="h" :value="h" />
+                </datalist>
+                <div class="project-settings__state">
+                    <template v-if="standingSaved">
+                        Active — every wake starts with this.
+                    </template>
+                    <template v-else>
+                        None. Wakes are unchanged.
+                    </template>
+                </div>
+            </section>
+
             <section class="project-settings__section">
                 <SectionHeader title="Moderation strategy">
                     Choose how new comments and tickets are moderated in
@@ -156,6 +255,16 @@ watch(() => props.project, () => load());
     margin: 0;
     font-size: 0.88rem;
     color: var(--p-text-muted-color);
+}
+.project-settings__standing-input {
+    width: 100%;
+    max-width: 42rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--p-inputtext-border-color, var(--p-surface-300));
+    border-radius: var(--p-border-radius, 6px);
+    background: var(--p-inputtext-background, transparent);
+    color: inherit;
+    font: inherit;
 }
 .project-settings__strategy-select {
     min-width: 14rem;

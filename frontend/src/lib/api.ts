@@ -747,6 +747,17 @@ export const api = {
             `/api/projects/${encodeURIComponent(name)}/strategy`,
             { strategy },
         ),
+    getProjectStandingPrompt: (name: string) =>
+        req<{ project: string; standing_prompt: string | null }>(
+            "GET",
+            `/api/projects/${encodeURIComponent(name)}/standing-prompt`,
+        ),
+    setProjectStandingPrompt: (name: string, standing_prompt: string | null) =>
+        req<{ project: string; standing_prompt: string | null }>(
+            "PATCH",
+            `/api/projects/${encodeURIComponent(name)}/standing-prompt`,
+            { standing_prompt },
+        ),
     mentionSuggestions: () =>
         req<{ projects: string[]; agents: string[] }>(
             "GET",
