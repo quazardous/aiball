@@ -33,7 +33,8 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "../log.js";
 import { CL_ENV } from "./env-vars.js";
-import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
+import { LOOP_SOCK_KIND, loopSockPath, readLoopStateInput } from "./state.js";
+import { computeLoopView } from "./loop-state.js";
 import { sendEventOnce } from "./ipc-events.js";
 
 function emit(): never {
@@ -85,6 +86,46 @@ async function readStdin(): Promise<string> {
     return Buffer.concat(chunks).toString("utf8");
 }
 
+/**
+ * #1315 — `idle_prompt` as an independent witness that the session is at rest.
+ *
+ * Measured before this was written, which changed what it is for. Across four
+ * loops on 2026-08-27, `idle_prompt` landed 61.0-61.4 s after the last `Stop`,
+ * four times out of four; the `Stop`s that produced none were each followed by
+ * another `Stop` inside that minute, resetting the count. So it is NOT a
+ * turn-end corroboration — `Stop` already marks that, exactly, a minute
+ * earlier. It is an inactivity threshold: "nothing has happened for ~60 s".
+ *
+ * That makes it useless for sharpening busy -> idle, and useful for something
+ * else: catching the moment our own busy flag is LYING. The pane-scraped busy
+ * latch goes stale in practice — `clearing stale paneBusy latch` appears 20
+ * times in one day's logs across the loops — and today that is only noticed
+ * when `turn:settled` happens to fire. Claude Code telling us the session has
+ * been quiet for a minute, while our state still says busy, is proof the latch
+ * is stale, from a source that cannot be fooled by pane text.
+ *
+ * This REPORTS the contradiction and changes nothing. No rule is rewritten, no
+ * latch is cleared here: the detector has to earn trust in the log before
+ * anything is allowed to act on it, and a hook must never affect a turn.
+ */
+function reportQuiescenceMismatch(type: string): void {
+    if (type !== "idle_prompt") return;
+    try {
+        const view = computeLoopView(readLoopStateInput(sd!));
+        if (view.phase === "busy") {
+            logger.info(
+                `notification idle_prompt WHILE state=busy — the busy latch is stale`
+                + ` (claude reports ~60s of quiet ; nothing is cleared here)`,
+            );
+        } else {
+            logger.info(`notification idle_prompt agrees with state=${view.phase}`);
+        }
+    } catch (e) {
+        // Never let an observation break the hook.
+        logger.info(`notification idle_prompt: state read failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+
 try {
     const raw = (await readStdin()).trim();
     // Parse for greppable fields, but never let a parse failure lose the bytes:
@@ -103,6 +144,7 @@ try {
         : "?";
     const keys = parsed ? Object.keys(parsed).sort().join(",") : "-";
     logger.info(`notification type=${type} keys=[${keys}] raw=${JSON.stringify(raw)}`);
+    reportQuiescenceMismatch(type);
     await flushToTimer();
 } catch (e) {
     logger.info(`notification READ FAILED: ${e instanceof Error ? e.message : String(e)}`);
