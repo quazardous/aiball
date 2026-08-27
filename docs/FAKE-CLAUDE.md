@@ -83,6 +83,19 @@ the state dir, never reconstructed: a reimplementation would drift from the
 real wiring, and the drift would look like a passing test. Requires running
 under claude-loop, since that is what creates the state dir.
 
+Two things to know before firing one, both learned by getting them wrong:
+
+- **You run the handlers the settings point at, not the ones you are editing.**
+  Reading the real `claude-settings.json` is what keeps the simulator honest,
+  and it also means a branch's version of a hook is not what fires unless the
+  settings were generated *from that branch*. Copying a live loop's settings
+  into a scratch state dir runs the installed code and silently proves nothing
+  about your change.
+- **A real hook talks to the real daemon.** `Stop` in particular queries the
+  board and can decide to wake — from a scenario, against production. Fire it
+  against a state dir you are willing to have side effects in, and do not
+  assume "it is only a simulator" buys you isolation.
+
 **Write scenarios from a captured trace, not from the docs.** Generate a real
 log first, read what actually happened, then ask how to reproduce it. The
 shipped `hook-idle-prompt.yaml` is built that way, and its comments carry the
