@@ -23,6 +23,14 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- A per-project **standing instruction**, set from the project's settings page
+  and shown at the head of every wake — event and backlog alike. Leave one
+  before stepping away ("light debugging only, no big changes") and clear it
+  when you are back; empty means wakes read exactly as they did. The field is a
+  single-line input, and past entries are suggested from the browser.
+
 ### Fixed
 
 - The header's go-to-ticket field now switches project when the ticket you jump
