@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- The post-boot reminder and the aiball skill now both say that what surfaces
+  may be old rather than new, and how to check a thread's current state instead
+  of trusting its own account of itself. Companion to the age marker below: the
+  marker shows the gap, this explains what to do about it.
+
 - A wake now says how old the thing it announces is — "7 days ago" — when it
   has been waiting more than an hour. Fresh wakes are unchanged, so the marker
   showing up is itself the signal that something sat in the queue. Matters when

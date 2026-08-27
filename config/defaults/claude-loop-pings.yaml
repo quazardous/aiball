@@ -173,7 +173,7 @@ prompts:
   # IdleController idle:settled emit). Pas prepend (= ancien mécanisme
   # `121a042` qui leakait sur d'autres messages, désactivé en #882).
   # Empty string → opt-out. Override per-project via `.aiball.yaml`.
-  post_boot_skill_reminder: "Check the /aiball skill to triage your queue."
+  post_boot_skill_reminder: "Check the /aiball skill to triage your queue — some of what surfaces is old, so re-check the current state before acting on it."
 
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same

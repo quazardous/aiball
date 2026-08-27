@@ -143,6 +143,33 @@ answer — say so in a line rather than re-posting.
 
 NOT triage : `ticket_get(N)` then silence. `last_actor` is still the reporter, the wake re-fires next heartbeat.
 
+### What resurfaces is OLD — check the state before you act on it
+
+The pool re-offers threads that have been sitting, sometimes for weeks. A wake
+is **not** proof that something just happened : it is an old item being handed
+back to you. That matters most when no human is around, because then almost
+everything reaching you is backlog rather than fresh signal.
+
+So the thread's own account of itself may have been overtaken, in two ways :
+
+- **The code moved under it.** The bug it reports may no longer have a subject.
+- **A later instruction reversed it.** Then it isn't stale, it is *overruled* —
+  nothing to fix, a decision to record. This one leaves no trace in the code,
+  which makes it the one you miss.
+
+Verify the CURRENT state rather than the narrative :
+
+- `summary_until` is a **dated snapshot**, not today's truth. Starting point, never conclusion.
+- `your_latest_decision` only sees **your** decisions. Another agent's proposal on
+  the same ticket — pending *or* already accepted — lives in that comment's
+  `meta.decision`. Reading only your own field will tell you "nothing moved" while
+  the blocker was lifted a week ago.
+- Compare `last_actor_at` with the date of your own last comment. A gap means
+  someone acted and the thread never narrated it.
+
+When a wake says how old the item is ("7 days ago"), take it seriously : that
+marker only appears once something has actually been waiting.
+
 ---
 
 ## How unread events reach you — don't drain blindly
