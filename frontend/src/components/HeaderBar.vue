@@ -35,6 +35,45 @@ const HASHID_RE = /^#?[Cc]?\.?([a-hjkmnp-z2-9]{4,8})$/;
  */
 const GIT_SHA_RE = /^#?([0-9a-f]{7,40})$/i;
 
+/**
+ * #1821 — jumping by id has to carry the ticket's PROJECT, not just its id.
+ *
+ * The route keeps the project in `?p=`, and `apply()` only touches the project
+ * ref when that key is present (`if ("project" in state)`). A bare `/b/N` is
+ * therefore read as "same project, different ticket": the thread opens while
+ * the sidebar, the inbox and every scoped count stay on the project you were
+ * in. It looked intermittent because it is only visible when the target lives
+ * somewhere else — jump inside the current project and nothing is wrong.
+ */
+function navigateToTicket(id: number, project: string | null): void {
+    pushRoute(project ? `/b/${id}?p=${encodeURIComponent(project)}` : `/b/${id}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    gotoInput.value = "";
+}
+
+/**
+ * Resolve which project a numeric id belongs to, then navigate. The hashid
+ * path already fetches and gets this for free; the numeric path never asked,
+ * which is why it was the one that broke.
+ *
+ * A failed lookup still navigates. Losing the project switch is the bug we
+ * came from — refusing to move at all would be worse than reproducing it.
+ */
+async function gotoTicket(id: number): Promise<void> {
+    let project: string | null = null;
+    try {
+        const tok = localStorage.getItem("aiball.token");
+        const headers: Record<string, string> = {};
+        if (tok) headers["authorization"] = `Bearer ${tok}`;
+        const res = await fetch(withBase(`/api/tickets/${id}`), { headers });
+        if (res.ok) {
+            const data = await res.json();
+            if (typeof data?.ticket?.project === "string") project = data.ticket.project;
+        }
+    } catch { /* fall through — navigate without the switch */ }
+    navigateToTicket(id, project);
+}
+
 async function submitGoto() {
     const raw = gotoInput.value.trim();
     if (!raw) return;
@@ -43,9 +82,12 @@ async function submitGoto() {
     const numeric = raw.replace(/^#/, "");
     const id = parseInt(numeric, 10);
     if (!Number.isNaN(id) && id > 0 && String(id) === numeric) {
-        pushRoute(`/b/${id}`);
-        window.dispatchEvent(new PopStateEvent("popstate"));
-        gotoInput.value = "";
+        gotoBusy.value = true;
+        try {
+            await gotoTicket(id);
+        } finally {
+            gotoBusy.value = false;
+        }
         return;
     }
     // Comment hashid — resolve via the backend, then navigate to the
@@ -79,9 +121,9 @@ async function submitGoto() {
             gotoError.value = `not found : ${hashid}`;
             return;
         }
-        pushRoute(`/b/${data.ticket.id}`);
-        window.dispatchEvent(new PopStateEvent("popstate"));
-        gotoInput.value = "";
+        // The lookup already carries the ticket — including its project, which
+        // is the whole point of #1821. No second request.
+        navigateToTicket(data.ticket.id, typeof data.ticket.project === "string" ? data.ticket.project : null);
     } catch (e) {
         gotoError.value = (e as Error).message;
     } finally {

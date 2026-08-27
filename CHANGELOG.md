@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- The header's go-to-ticket field now switches project when the ticket you jump
+  to lives in another one. It used to navigate by id alone, so the thread opened
+  while the sidebar, the inbox and every scoped count stayed behind — visible
+  only when jumping across projects, which is what made it look intermittent.
+
 ### Changed
 
 - The post-boot reminder and the aiball skill now both say that what surfaces
