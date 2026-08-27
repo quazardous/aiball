@@ -55,6 +55,41 @@ bin/fake-claude --list-screens
 
 Exit: `Ctrl+Q` or `Ctrl+C` (textual standard binding).
 
+## Firing hooks
+
+Painting a screen exercises the pane scrapers. It does **not** exercise the
+hook events — `Stop`, `Notification`, `SessionStart` — which is the half of
+the runtime that deterministic-signal work depends on, and the half nobody can
+provoke on demand: an API failure or a quota pause will not happen because you
+want one.
+
+A `hook:` step fires a real handler the way Claude Code would — the payload on
+stdin, `CL_STATE_DIR` / `CL_NAME` in the environment:
+
+```yaml
+steps:
+  - hook: Stop
+  - sleep: 61
+  - hook:
+      event: Notification
+      matcher: ""            # optional — pins ONE branch; omit to fire all
+      payload:
+        notification_type: idle_prompt
+        message: "Claude is waiting for your input"
+```
+
+The command is read from the `claude-settings.json` claude-loop generated in
+the state dir, never reconstructed: a reimplementation would drift from the
+real wiring, and the drift would look like a passing test. Requires running
+under claude-loop, since that is what creates the state dir.
+
+**Write scenarios from a captured trace, not from the docs.** Generate a real
+log first, read what actually happened, then ask how to reproduce it. The
+shipped `hook-idle-prompt.yaml` is built that way, and its comments carry the
+timeline it came from — including the discriminating case an invented scenario
+would have missed, where a second `Stop` inside the minute cancels the
+notification entirely.
+
 ## Built-in screens
 
 Available without declaring anything in your scenario:

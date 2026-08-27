@@ -1,0 +1,58 @@
+# Reproduit une trace RÉELLE, pas une hypothèse.
+#
+# Relevé le 2026-08-27 sur cl-m2m-infra-ba7910, en interleavant les lignes
+# `hook:stop` et `notification type=idle_prompt` du même loop.log :
+#
+#   08:42:56.231  hook:stop
+#   08:43:57.586  idle_prompt          (+61,4 s)
+#   08:49:26.792  hook:stop
+#   08:50:26.219  hook:stop            (< 60 s après le précédent)
+#   08:51:27.285  idle_prompt          (+61,1 s APRÈS LE SECOND)
+#   08:56:42.703  hook:stop
+#   08:57:43.720  idle_prompt          (+61,0 s)
+#
+# Ce que la trace établit, et que ce scénario rejoue :
+#   1. `idle_prompt` suit le DERNIER `Stop` d'environ 61 s — ce n'est pas
+#      une fin de tour, c'est un seuil d'inactivité.
+#   2. Un `Stop` suivi d'un autre dans la minute ne produit AUCUNE
+#      notification : le compteur repart. C'est le comportement
+#      discriminant, celui qu'une simulation inventée aurait raté.
+#
+# Durée ~2 min : les délais sont ceux de la trace. Les raccourcir
+# simulerait autre chose que ce qui a été observé.
+meta:
+  name: hook-idle-prompt
+  describes: "trace réelle : Stop → 61s → idle_prompt, et le Stop qui annule"
+  expects_input: false
+steps:
+  - screen: boot.loading
+  - screen: main.idle
+
+  # --- cas 1 : un Stop isolé, la notification tombe ---
+  - screen: main.busy
+  - sleep: 2
+  - screen: main.idle
+  - hook: Stop
+  - sleep: 61
+  - hook:
+      event: Notification
+      payload:
+        notification_type: idle_prompt
+        message: "Claude is waiting for your input"
+
+  # --- cas 2 : deux Stop rapprochés, rien ne tombe après le premier ---
+  - screen: main.busy
+  - sleep: 2
+  - screen: main.idle
+  - hook: Stop
+  - sleep: 30
+  - screen: main.busy
+  - sleep: 2
+  - screen: main.idle
+  - hook: Stop
+  - sleep: 61
+  - hook:
+      event: Notification
+      payload:
+        notification_type: idle_prompt
+        message: "Claude is waiting for your input"
