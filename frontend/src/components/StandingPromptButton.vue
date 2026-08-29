@@ -13,9 +13,12 @@
  * because a stale instruction left behind after coming back is the failure
  * mode here, not a missing one.
  *
- * Hidden entirely when no project is selected. The instruction is per-project,
- * so on the cross-project inbox there is nothing this control could act on,
- * and a button that can never do anything is noise.
+ * Always rendered, disabled when no project is in scope. The first version
+ * hid it in that case — "a button that can never do anything is noise" — and
+ * that was wrong the moment david went looking for it and found nothing.
+ * Invisible is worse than disabled when someone is hunting for a control: a
+ * greyed icon with a reason teaches where it lives, an absent one reads as
+ * "not shipped".
  */
 import { ref, watch } from "vue";
 import Button from "primevue/button";
@@ -83,7 +86,6 @@ async function clear(): Promise<void> {
 </script>
 
 <template>
-    <template v-if="project">
         <Button
             icon="pi pi-megaphone"
             severity="secondary"
@@ -92,12 +94,17 @@ async function clear(): Promise<void> {
             rounded
             class="standing-prompt-btn"
             :class="{ 'standing-prompt-btn--set': !!saved }"
-            :aria-label="saved
-                ? `Standing instruction active on ${project} — click to edit`
-                : `Set a standing instruction for ${project}`"
-            :title="saved
-                ? `Every wake on ${project} starts with: “${saved}”`
-                : `No standing instruction on ${project}. Wakes read as usual.`"
+            :disabled="!project"
+            :aria-label="!project
+                ? 'Standing instruction — pick a project first'
+                : saved
+                    ? `Standing instruction active on ${project} — click to edit`
+                    : `Set a standing instruction for ${project}`"
+            :title="!project
+                ? 'Standing instruction — per project, so pick one first (sidebar or a ticket).'
+                : saved
+                    ? `Every wake on ${project} starts with: “${saved}”`
+                    : `No standing instruction on ${project}. Wakes read as usual.`"
             @click="open"
         />
         <Popover ref="popoverRef">
@@ -134,8 +141,7 @@ async function clear(): Promise<void> {
                     <Button label="save" size="small" :loading="busy" @click="save" />
                 </div>
             </div>
-        </Popover>
-    </template>
+    </Popover>
 </template>
 
 <style scoped>

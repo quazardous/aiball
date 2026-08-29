@@ -4,6 +4,7 @@ import Button from "primevue/button";
 import IdentityPicker from "./IdentityPicker.vue";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
 import { pushRoute, withBase } from "../lib/base";
+import StandingPromptButton from "./StandingPromptButton.vue";
 
 // #540 / #570 — goto ticket : input compact qui accepte
 //   - un id ticket numérique (avec ou sans `#`) → /b/N direct
