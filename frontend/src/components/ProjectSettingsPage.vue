@@ -4,6 +4,7 @@ import Select from "primevue/select";
 import { api, type Strategy } from "../lib/api";
 import { useLoader } from "../lib/loader";
 import { STRATEGY_OPTIONS } from "../lib/labels";
+import { readStandingPromptHistory, rememberStandingPrompt } from "../lib/standing-prompt";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 import AsyncState from "./ui/AsyncState.vue";
 import SectionHeader from "./ui/SectionHeader.vue";
@@ -69,38 +70,10 @@ const standingPrompt = ref("");
 const standingSaved = ref("");
 const standingBusy = ref(false);
 
-// History lives in the browser. It is a typing convenience, not data: it never
-// needs to reach the daemon, survive a reinstall, or be read by an agent.
-// Consequence to know rather than discover — it does not follow to another
-// device, and clearing site data forgets it.
-const HISTORY_KEY = "aiball.standingPrompt.history";
-const HISTORY_MAX = 12;
+// History is shared with the header popover via lib/standing-prompt — one
+// storage key and one dedup rule, so the two entry points cannot drift into
+// suggesting different things.
 const history = ref<string[]>([]);
-
-function readHistory(): string[] {
-    try {
-        const raw = localStorage.getItem(`${HISTORY_KEY}.${props.project}`);
-        const parsed: unknown = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-    } catch {
-        // A private window, cleared storage, or a browser that refuses it: the
-        // field still works, it just stops suggesting.
-        return [];
-    }
-}
-
-/** Newest first, deduplicated, bounded. Clearing the FIELD must never clear
- *  the history — the whole point is to type a recurring instruction once and
- *  pick it back next time. */
-function rememberInHistory(value: string): void {
-    const v = value.trim();
-    if (!v) return;
-    const next = [v, ...history.value.filter((h) => h !== v)].slice(0, HISTORY_MAX);
-    history.value = next;
-    try {
-        localStorage.setItem(`${HISTORY_KEY}.${props.project}`, JSON.stringify(next));
-    } catch { /* storage refused — suggestions are optional */ }
-}
 
 async function applyStandingPrompt() {
     const next = standingPrompt.value.trim();
@@ -110,7 +83,7 @@ async function applyStandingPrompt() {
         const r = await api.setProjectStandingPrompt(props.project, next || null);
         standingSaved.value = r.standing_prompt ?? "";
         standingPrompt.value = standingSaved.value;
-        rememberInHistory(standingSaved.value);
+        history.value = rememberStandingPrompt(props.project, standingSaved.value);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -127,7 +100,7 @@ const { loading, load } = useLoader(async () => {
     strategyGlobal.value = s.global;
     standingSaved.value = sp.standing_prompt ?? "";
     standingPrompt.value = standingSaved.value;
-    history.value = readHistory();
+    history.value = readStandingPromptHistory(props.project);
 }, { error, mountLoad: true });
 
 watch(() => props.project, () => load());

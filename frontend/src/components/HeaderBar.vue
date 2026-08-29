@@ -138,6 +138,10 @@ async function submitGoto() {
 // moved out of the header into Settings > General, same rationale.
 defineProps<{
     connected: boolean;
+    /** #1832 — the project in scope, so the standing-instruction control
+     *  knows what it edits. Null on the cross-project inbox, where the
+     *  control hides itself rather than offering nothing. */
+    project?: string | null;
     globalPendingCount: number;
     globalResolvedCount: number;
     globalUnreadCount: number;
@@ -212,6 +216,7 @@ const emit = defineEmits<{
                 @input="gotoError = null"
             />
         </form>
+        <StandingPromptButton :project="project ?? null" />
         <IdentityPicker />
         <Button
             :icon="dark ? 'pi pi-sun' : 'pi pi-moon'"

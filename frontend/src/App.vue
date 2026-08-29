@@ -665,6 +665,7 @@ watch(showSnoozed, (v) => {
             :global-snoozed-count="globalSnoozedCount"
             :global-open-count="globalOpenCount"
             :show-snoozed="showSnoozed"
+            :project="project"
             :dark="dark"
             @update:show-snoozed="showSnoozed = $event"
             @update:dark="dark = $event"

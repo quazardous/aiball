@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The standing instruction is also reachable from the header, next to the
+  go-to field: one click, type, save. Its icon turns green while an instruction
+  is live on the project, so one left behind after coming back is visible
+  without opening anything.
+
 - A per-project **standing instruction**, set from the project's settings page
   and shown at the head of every wake — event and backlog alike. Leave one
   before stepping away ("light debugging only, no big changes") and clear it
