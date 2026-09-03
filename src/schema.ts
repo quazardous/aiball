@@ -849,5 +849,70 @@ export type NewConsumerRow = typeof consumers.$inferInsert;
 export type Token = typeof tokens.$inferSelect;
 export type NewTokenRow = typeof tokens.$inferInsert;
 
+/**
+ * #1992 — the COMPILED graph: ticket references pulled out of prose.
+ *
+ * PURE CACHE. Every row is derived from the append-only message log, so the
+ * table can be dropped and rebuilt whenever, and no migration ever has to
+ * preserve it. That is also why it carries no foreign keys: the compiler wipes
+ * and refills it wholesale, and it only ever emits ids it read from `tickets`.
+ *
+ * The point of compiling rather than curating: hand-typed relations captured
+ * ~19% of the links people had already written in prose, and a compiler can be
+ * unit-tested where diligence cannot.
+ */
+export const graphEdges = sqliteTable("graph_edges", {
+    /** The ticket whose prose carries the reference. */
+    srcTicketId: integer("src_ticket_id").notNull(),
+    /** The ticket it names. Directed — a consumer can symmetrise cheaply. */
+    dstTicketId: integer("dst_ticket_id").notNull(),
+    /** "mentions" today; typed relations can fold in here later. */
+    kind: text("kind").notNull(),
+    /** Times the pair is named. Once is often decoration, twice is a link. */
+    weight: integer("weight").notNull().default(1),
+    /**
+     * THE CITATION — the message this was read from, null when it came from
+     * the source ticket's own body/title. An edge nobody can cite is worse
+     * than a missing one: a missing edge is visible, a false one is not.
+     */
+    derivedMessageId: integer("derived_message_id"),
+    /** Offset of the `#` in that text, so the citation lands on the phrase. */
+    derivedOffset: integer("derived_offset"),
+}, (t) => [
+    primaryKey({ columns: [t.srcTicketId, t.dstTicketId, t.kind] }),
+    index("idx_graph_edges_dst").on(t.dstTicketId),
+]);
+
+/**
+ * #1992 — the watermark, so a recompile only happens when something moved.
+ *
+ * Not a content hash: computing one means reading the prose the watermark
+ * exists to avoid reading. The log is append-only with monotonic ids, so three
+ * integers say both THAT it changed and BY HOW MUCH — which is what allows a
+ * threshold instead of a recompile per comment.
+ */
+export const graphMeta = sqliteTable("graph_meta", {
+    /** Single pinned row: the artifact has no history worth keeping. */
+    id: integer("id").primaryKey(),
+    /** max(_messages.id) — appends. */
+    compiledThroughId: integer("compiled_through_id").notNull(),
+    /** count(*) — deletions, which leave max(id) untouched. */
+    compiledMessageCount: integer("compiled_message_count").notNull(),
+    /**
+     * count(original_body IS NOT NULL) — a body edited in place, which moves
+     * neither of the two above. Known gap, stated rather than hidden: a SECOND
+     * edit of an already-edited message moves nothing, so its edges wait for
+     * the next recompile any other event triggers.
+     */
+    compiledEditedCount: integer("compiled_edited_count").notNull(),
+    compiledAt: text("compiled_at").notNull(),
+    edgeCount: integer("edge_count").notNull(),
+});
+
 export type TicketTokenUsage = typeof ticketTokenUsage.$inferSelect;
 export type ProjectTokenUsage = typeof projectTokenUsage.$inferSelect;
+
+export type GraphEdge = typeof graphEdges.$inferSelect;
+export type NewGraphEdgeRow = typeof graphEdges.$inferInsert;
+
+export type GraphMeta = typeof graphMeta.$inferSelect;
