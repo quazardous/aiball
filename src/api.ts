@@ -499,6 +499,12 @@ api.post("/projects/:name/rename", (req, res) => {
 // #1992 — the compiled graph. Both routes recompile lazily when the message log
 // has moved (~320 ms on the whole corpus) and report that in `freshness`, so a
 // caller can tell a fresh answer from a cached one instead of guessing.
+//
+// The graph is compiled corpus-wide, because references cross projects and a
+// per-project compile could not see them. What each consumer READS is a
+// projection of it: their own projects in full, and past that only the fact
+// that a link crosses. Hence `consumerId` on both calls — without it these
+// routes returned another project's ticket titles to anyone who asked.
 api.get("/graph/neighbors", (req: Request, res: Response) => {
     const ticketId = Number(req.query.ticket_id);
     if (!Number.isSafeInteger(ticketId) || ticketId <= 0) {
@@ -508,13 +514,13 @@ api.get("/graph/neighbors", (req: Request, res: Response) => {
         ? Number(req.query.min_weight) || undefined
         : undefined;
     const limit = typeof req.query.limit === "string" ? Number(req.query.limit) || undefined : undefined;
-    return res.json(ticketNeighbors(ticketId, { minWeight, limit }));
+    return res.json(ticketNeighbors(ticketId, { minWeight, limit, consumerId: consumerOf(req) }));
 });
 
 api.get("/graph/audit", (req: Request, res: Response) => {
     const project = typeof req.query.project === "string" ? req.query.project : undefined;
     const limit = typeof req.query.limit === "string" ? Number(req.query.limit) || undefined : undefined;
-    return res.json(graphAudit({ project, limit }));
+    return res.json(graphAudit({ project, limit, consumerId: consumerOf(req) }));
 });
 
 api.get("/search", (req: Request, res: Response) => {

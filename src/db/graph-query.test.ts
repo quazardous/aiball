@@ -16,7 +16,8 @@ const { sql } = await import("drizzle-orm");
 const { getDb } = await import("./connection.js");
 const schema = await import("../schema.js");
 const { createProject } = await import("./projects.js");
-const { graphAudit, ticketNeighbors, LINK_WEIGHT } = await import("./graph-query.js");
+const { graphAudit, ticketNeighbors, LINK_WEIGHT, scopeOf } = await import("./graph-query.js");
+const { upsertSubscription } = await import("./subscriptions.js");
 
 const db = getDb();
 const ACTOR = "claude-aiball-dev";
@@ -139,4 +140,49 @@ test("the audit writes nothing — it reports candidates, it does not act", () =
     graphAudit();
     const after = count();
     assert.equal(after, before, "no lifecycle event, no comment, no proposal");
+});
+
+// #1992 david `bzejyu` — "il faut quand même respecter les frontières projet :
+// un agent voit une projection, avec éventuellement les limites communes".
+//
+// The graph is compiled corpus-wide (references cross projects, so a
+// per-project compile could not see them). The READ is what must be bounded.
+// These pin that an agent subscribed to `alpha` alone learns that a link
+// leaves its project, and nothing about what is on the other side.
+
+test("the human sees everything — no boundary", () => {
+    assert.equal(scopeOf(undefined), null);
+    assert.equal(scopeOf("human"), null);
+});
+
+test("an agent's projection is the projects it subscribes to", () => {
+    upsertSubscription("agent-alpha", "alpha", "owner");
+    const sc = scopeOf("agent-alpha");
+    assert.ok(sc, "a real agent is bounded");
+    assert.equal(sc.has("alpha"), true);
+    assert.equal(sc.has("beta"), false);
+});
+
+test("a link leaving the projection is reported, but only as a boundary", () => {
+    const res = ticketNeighbors(800, { consumerId: "agent-alpha" });
+    const n = res.neighbors.find((x) => x.ticket_id === 801);
+    assert.ok(n, "the LINK still shows — a dependency you cannot see is the one that hurts");
+    assert.equal(n.beyond_scope, true);
+    assert.equal(n.project, "beta", "…named by project, which is the shared limit");
+    assert.equal(n.title, "", "but nothing about what is on the other side");
+    assert.equal(n.stage, null);
+});
+
+test("asking about a ticket outside the projection returns nothing at all", () => {
+    const res = ticketNeighbors(801, { consumerId: "agent-alpha" });
+    assert.equal(res.out_of_scope, true);
+    assert.deepEqual(res.neighbors, []);
+    assert.equal(res.project, null, "not even which project it lives in");
+});
+
+test("the audit only reports findings ABOUT tickets in the projection", () => {
+    const mine = graphAudit({ consumerId: "agent-alpha" });
+    const ids = new Set(mine.findings.flatMap((f) => f.ticket_ids));
+    assert.equal(ids.has(801), false, "beta's tickets are not agent-alpha's business");
+    assert.ok(mine.scanned < graphAudit().scanned, "…and the scan itself is narrower");
 });

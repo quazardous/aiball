@@ -13,6 +13,8 @@ import { getDb } from "./connection.js";
 import * as schema from "../schema.js";
 import { getTicketStages, type TicketStage } from "./tickets.js";
 import { listTypedRelationsForTicket } from "./messages.js";
+import { listSubscriptions } from "./subscriptions.js";
+import { isHuman } from "./consumers.js";
 import { ensureGraphFresh, MENTION_KIND, type FreshResult } from "./graph-compile.js";
 
 /**
@@ -29,6 +31,24 @@ const MIN_CLUSTER = 3;
 const MIN_STALE_NEIGHBOURS = 3;
 
 const isClosed = (stage: TicketStage | undefined) => stage === "closed" || stage === "closed-resolved";
+
+/**
+ * The projects a consumer may see in full. `null` means no boundary — the
+ * human moderator, who already sees every project in the web UI.
+ *
+ * The graph is compiled corpus-wide because references cross projects and a
+ * per-project compile could not see them. What must NOT cross is the READ:
+ * an agent gets a PROJECTION of that graph — its own projects in full, and
+ * beyond them only the fact that a link exists. Without this, both tools
+ * happily returned another project's ticket titles to anyone who asked.
+ */
+export function scopeOf(consumerId: string | undefined): Set<string> | null {
+    if (!consumerId || isHuman(consumerId)) return null;
+    return new Set(listSubscriptions(consumerId).map((sub) => sub.project));
+}
+
+const inScope = (scope: Set<string> | null, project: string | undefined) =>
+    scope === null || (!!project && scope.has(project));
 
 /** Who holds a ticket, if anyone. Undefined when it is genuinely unattended. */
 function holderOf(t: { claimant: string | null; assignee: string | null }):
@@ -84,6 +104,12 @@ export interface NeighborRow {
     foreign_project: boolean;
     /** Present when a typed relation ALSO exists, so the two views can be compared. */
     typed_kind?: string;
+    /**
+     * The neighbour lives outside what this consumer may read. The LINK is
+     * still reported — a dependency you cannot see is the one that hurts —
+     * but reduced to its boundary: id and project, no title, no stage.
+     */
+    beyond_scope?: true;
 }
 
 export interface NeighborsResult {
@@ -91,6 +117,9 @@ export interface NeighborsResult {
     project: string | null;
     neighbors: NeighborRow[];
     freshness: FreshResult;
+    /** True when the SUBJECT itself is outside the consumer's projects: no
+     *  neighbourhood is returned, since the projection has nothing to stand on. */
+    out_of_scope?: true;
 }
 
 /**
@@ -100,9 +129,10 @@ export interface NeighborsResult {
  */
 export function ticketNeighbors(
     ticketId: number,
-    opts: { minWeight?: number; limit?: number } = {},
+    opts: { minWeight?: number; limit?: number; consumerId?: string } = {},
 ): NeighborsResult {
     const db = getDb();
+    const scope = scopeOf(opts.consumerId);
     const freshness = ensureGraphFresh(db);
     const minWeight = opts.minWeight ?? 1;
 
@@ -160,9 +190,30 @@ export function ticketNeighbors(
         typed.set(rel.target_ticket_id, rel.kind);
     }
 
+    // The subject is outside the projection → nothing to project from.
+    if (!inScope(scope, self?.project)) {
+        return { ticket_id: ticketId, project: null, neighbors: [], freshness, out_of_scope: true };
+    }
+
     const neighbors = [...acc.values()].map((n) => {
         const m = meta.get(n.ticket_id);
         const kind = typed.get(n.ticket_id);
+        const visible = inScope(scope, m?.project);
+        if (!visible) {
+            // The boundary itself: say that a link crosses, and where to, but
+            // nothing about what is on the other side. The citation survives
+            // ONLY when the sentence was written in a thread the consumer can
+            // read — which is exactly the "out" direction.
+            return {
+                ...n,
+                project: m?.project ?? "",
+                title: "",
+                stage: null,
+                foreign_project: true,
+                beyond_scope: true as const,
+                citation: n.direction === "in" ? null : n.citation,
+            };
+        }
         return {
             ...n,
             project: m?.project ?? "",
@@ -221,8 +272,11 @@ export interface AuditResult {
  * proposes nothing, and never feeds a wake on its own — that would be a
  * behaviour rule, and this is an indicator.
  */
-export function graphAudit(opts: { project?: string; limit?: number } = {}): AuditResult {
+export function graphAudit(
+    opts: { project?: string; limit?: number; consumerId?: string } = {},
+): AuditResult {
     const db = getDb();
+    const scope = scopeOf(opts.consumerId);
     const freshness = ensureGraphFresh(db);
 
     const openRows = db.select({
@@ -237,7 +291,11 @@ export function graphAudit(opts: { project?: string; limit?: number } = {}): Aud
             : eq(schema.tickets.status, "approved"))
         .all();
     const allStages = getTicketStages(openRows.map((r) => r.id));
-    const open = openRows.filter((r) => !isClosed(allStages.get(r.id)) && allStages.get(r.id) !== "rejected");
+    // Findings are only ever ABOUT a ticket the consumer may read. A cluster or
+    // a stale candidate in someone else's project is not their business — the
+    // one thing that legitimately crosses is a LINK, handled per-finding below.
+    const open = openRows.filter((r) =>
+        !isClosed(allStages.get(r.id)) && allStages.get(r.id) !== "rejected" && inScope(scope, r.project));
     const openIds = new Set(open.map((r) => r.id));
     const projectOf = new Map(openRows.map((r) => [r.id, r.project] as const));
     const titleOf = new Map(openRows.map((r) => [r.id, r.title ?? ""] as const));
@@ -299,6 +357,13 @@ export function graphAudit(opts: { project?: string; limit?: number } = {}): Aud
 
     // 3 — two OPEN tickets in different projects writing about each other, with
     // no typed relation to make it visible anywhere in the UI.
+    //
+    // Both sides must be inside the projection (`open` is already scoped, and
+    // `openIds` derives from it). A pair whose far side the consumer cannot
+    // read is deliberately NOT a finding here: the audit reasons inside the
+    // projection, and the crossing itself is what `ticket_neighbors` reports as
+    // a boundary when you look at the ticket. Splitting it that way keeps one
+    // rule per tool instead of a half-redacted finding in both.
     const seenPair = new Set<string>();
     for (const t of open) {
         const nb = adj.get(t.id);

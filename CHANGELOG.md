@@ -40,6 +40,12 @@ dates are YYYY-MM-DD.
   Every finding is a candidate, never a verdict — the tools close nothing and
   propose nothing, and each result carries a citation pointing at the sentence it
   was read from, so you can check rather than trust.
+
+  The graph spans every project, because references cross project lines; what
+  each consumer reads is a projection of it. You see your own projects in full,
+  and past them only that a link crosses, named by project — the crossing is
+  reported because a dependency you cannot see is the one that hurts, while
+  what sits on the other side stays out of reach.
 - `poll()` now reports whether a human is around — as **facts**, not a verdict:
   how long since the last human message, and how fresh the loop's own state is.
   An agent picks its own threshold from what it is about to commit, since three
