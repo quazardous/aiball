@@ -143,6 +143,42 @@ export function registerTicketReadTools(server: McpServer): void {
     );
 
     server.registerTool(
+        "ticket_neighbors",
+        {
+            description:
+                "What to read before touching a ticket. Returns the tickets it is written about (and that write about it), pulled from ticket references in prose rather than from hand-typed relations — which matters because typed relations capture only a fraction of the links people actually write: measured on this corpus, 152 of 156 typed relations were ALSO stated in prose, while thousands of prose links were never typed. Each neighbour carries `weight` (how many times the pair is named — once is often decoration, twice or more is a real link), `direction`, the neighbour's `stage` (so you see at a glance that a dependency already closed), `foreign_project: true` when it lives in ANOTHER project (the case nothing else surfaces today), `typed_kind` when a typed relation also exists, and a `citation` (`message_id` + `offset`) pointing at the sentence the link was read from — so you can go check instead of trusting. Sorted by weight. Use it before editing a ticket you haven't read in a while, and to find cross-project dependencies that no relation records. This is a READ: it changes nothing.",
+            inputSchema: {
+                ticket_id: z.number().int().describe("The ticket to look around."),
+                min_weight: z
+                    .number()
+                    .int()
+                    .min(1)
+                    .optional()
+                    .describe("Only neighbours named at least this many times. Default 1 (everything); pass 2 to drop passing mentions."),
+                limit: z.number().int().min(1).max(200).optional().describe("Max neighbours, highest weight first."),
+            },
+        },
+        async ({ ticket_id, min_weight, limit }) => {
+            return asText(await client.graphNeighbors({ ticket_id, min_weight, limit }));
+        },
+    );
+
+    server.registerTool(
+        "graph_audit",
+        {
+            description:
+                "Hygiene report over the ticket corpus, computed from the compiled reference graph. Four kinds of finding: `stale_open` (an open ticket where every ticket it repeatedly names has closed — its cohort finished without it, which no keyword search can express because it is a property of the neighbourhood, not of the text), `orphan_child` (open child under a closed parent), `cross_project_open_pair` (two OPEN tickets in different projects writing about each other with no typed relation — invisible everywhere else), and `root_cause_cluster` (a small knot of open tickets that are all one investigation; deliberately capped, since the unbounded version is a 153-ticket hairball that tells nobody anything).\n\n**Every finding is a CANDIDATE, never a verdict.** This tool closes nothing, proposes nothing and writes nothing — it hands you a `citation` (`message_id` + `offset`) so you can read the sentence and judge. Treat `stale_open` as 'worth checking whether this is still live', not as 'close it'. `scanned` reports how many open tickets were considered, so an empty result reads as clean rather than broken, and `freshness` says whether this call had to recompile.",
+            inputSchema: {
+                project: z.string().optional().describe("Scope to one project. Default: every project the consumer can see."),
+                limit: z.number().int().min(1).max(200).optional().describe("Max findings."),
+            },
+        },
+        async ({ project, limit }) => {
+            return asText(await client.graphAudit({ project, limit }));
+        },
+    );
+
+    server.registerTool(
         "ticket_get",
         {
             description:

@@ -25,6 +25,21 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- Two MCP tools that read the links people write but never record. `ticket_neighbors`
+  answers "what should I read before touching this", and surfaces neighbours in other
+  projects — which nothing else showed. `graph_audit` reports corpus hygiene: open
+  tickets whose whole cohort has closed, open children under closed parents,
+  cross-project pairs that reference each other with no typed relation, and small
+  knots of tickets that are really one investigation.
+
+  Both read a graph compiled from `#N` references in ticket bodies and comments,
+  rebuilt whenever the message log moves. The motivation was a measurement: typed
+  relations are curated by hand, and all but four of them were already stated in
+  prose, while thousands of prose links had never been typed.
+
+  Every finding is a candidate, never a verdict — the tools close nothing and
+  propose nothing, and each result carries a citation pointing at the sentence it
+  was read from, so you can check rather than trust.
 - `poll()` now reports whether a human is around — as **facts**, not a verdict:
   how long since the last human message, and how fresh the loop's own state is.
   An agent picks its own threshold from what it is about to commit, since three

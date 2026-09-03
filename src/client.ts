@@ -405,6 +405,20 @@ export class AiballClient {
         if (opts.since) q.since = opts.since;
         return this.http("GET", `/api/search${query(q)}`);
     }
+    /** #1992 — what to read before touching a ticket, from the compiled graph. */
+    graphNeighbors(opts: { ticket_id: number; min_weight?: number; limit?: number }) {
+        const q: Record<string, string | undefined> = { ticket_id: String(opts.ticket_id) };
+        if (opts.min_weight !== undefined) q.min_weight = String(opts.min_weight);
+        if (opts.limit !== undefined) q.limit = String(opts.limit);
+        return this.http("GET", `/api/graph/neighbors${query(q)}`);
+    }
+    /** #1992 — the hygiene report. Candidates only; it never acts. */
+    graphAudit(opts: { project?: string; limit?: number } = {}) {
+        const q: Record<string, string | undefined> = {};
+        if (opts.project) q.project = opts.project;
+        if (opts.limit !== undefined) q.limit = String(opts.limit);
+        return this.http("GET", `/api/graph/audit${query(q)}`);
+    }
     listMessages(q: Record<string, string | number | undefined> = {}) {
         return this.http("GET", `/api/messages${query(q)}`);
     }

@@ -36,6 +36,7 @@ import { broadcast } from "./ws.js";
 import { outboxPath, AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "./paths.js";
 import { loadLaunchers, getLauncher } from "./launchers.js";
 import { searchMessages } from "./search.js";
+import { graphAudit, ticketNeighbors } from "./db/graph-query.js";
 import { bearerAuth } from "./auth.js";
 import { badRequest, consumerOf } from "./api/_helpers.js";
 import { schedulerStatus } from "./cron/index.js";
@@ -493,6 +494,27 @@ api.post("/projects/:name/rename", (req, res) => {
         if (msg.includes("already exists")) return res.status(409).json({ error: msg });
         return res.status(400).json({ error: msg });
     }
+});
+
+// #1992 — the compiled graph. Both routes recompile lazily when the message log
+// has moved (~320 ms on the whole corpus) and report that in `freshness`, so a
+// caller can tell a fresh answer from a cached one instead of guessing.
+api.get("/graph/neighbors", (req: Request, res: Response) => {
+    const ticketId = Number(req.query.ticket_id);
+    if (!Number.isSafeInteger(ticketId) || ticketId <= 0) {
+        return res.status(400).json({ error: "ticket_id required" });
+    }
+    const minWeight = typeof req.query.min_weight === "string"
+        ? Number(req.query.min_weight) || undefined
+        : undefined;
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) || undefined : undefined;
+    return res.json(ticketNeighbors(ticketId, { minWeight, limit }));
+});
+
+api.get("/graph/audit", (req: Request, res: Response) => {
+    const project = typeof req.query.project === "string" ? req.query.project : undefined;
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) || undefined : undefined;
+    return res.json(graphAudit({ project, limit }));
 });
 
 api.get("/search", (req: Request, res: Response) => {
