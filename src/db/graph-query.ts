@@ -30,6 +30,14 @@ const MIN_STALE_NEIGHBOURS = 3;
 
 const isClosed = (stage: TicketStage | undefined) => stage === "closed" || stage === "closed-resolved";
 
+/** Who holds a ticket, if anyone. Undefined when it is genuinely unattended. */
+function holderOf(t: { claimant: string | null; assignee: string | null }):
+    { claimant?: string; assignee?: string } | undefined {
+    if (t.claimant) return { claimant: t.claimant };
+    if (t.assignee) return { assignee: t.assignee };
+    return undefined;
+}
+
 interface EdgeRow {
     src: number;
     dst: number;
@@ -189,6 +197,16 @@ export interface Finding {
     /** One line a human can act on without opening anything. */
     detail: string;
     citation: Citation | null;
+    /**
+     * Who already holds the ticket, when someone does. Reported rather than
+     * filtered on, and that choice comes from the first real run: all six
+     * `stale_open` candidates on this project turned out to be held — five
+     * claimed by the agent itself, one assigned to a machine that had been
+     * offline for weeks. Dropping them would have destroyed the most useful
+     * reading ("you have been sitting on this and its cohort left"); saying
+     * nothing let it be mistaken for "nobody noticed". So it says which.
+     */
+    held_by?: { claimant?: string; assignee?: string };
 }
 
 export interface AuditResult {
@@ -211,6 +229,8 @@ export function graphAudit(opts: { project?: string; limit?: number } = {}): Aud
         id: schema.tickets.id,
         project: schema.tickets.project,
         title: schema.tickets.title,
+        claimant: schema.tickets.claimant,
+        assignee: schema.tickets.assignee,
     }).from(schema.tickets)
         .where(opts.project
             ? and(eq(schema.tickets.status, "approved"), eq(schema.tickets.project, opts.project))
@@ -244,11 +264,16 @@ export function graphAudit(opts: { project?: string; limit?: number } = {}): Aud
         if (!nb || nb.size < MIN_STALE_NEIGHBOURS) continue;
         const dead = [...nb.keys()].every((n) => isClosed(neighbourStages.get(n)));
         if (!dead) continue;
+        const held = holderOf(t);
         findings.push({
             kind: "stale_open",
             ticket_ids: [t.id],
-            detail: `open, but all ${nb.size} tickets it names repeatedly are closed — its cohort left without it`,
+            detail: `open, but all ${nb.size} tickets it names repeatedly are closed`
+                + (held
+                    ? ` — held by ${held.claimant ?? held.assignee}, so it is parked rather than forgotten`
+                    : " — its cohort left without it, and nobody is holding it"),
             citation: [...nb.values()][0] ?? null,
+            ...(held ? { held_by: held } : {}),
         });
     }
 

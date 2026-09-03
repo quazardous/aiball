@@ -74,6 +74,24 @@ test("an open ticket whose whole cohort closed is a candidate", () => {
     assert.ok(hit.citation, "…and it says where it read that");
 });
 
+test("a stale candidate says who holds it, instead of being hidden or misread", () => {
+    // From the first real run: all six candidates on aiball were held — five
+    // claimed by the agent itself, one assigned to a machine offline for weeks.
+    // Filtering them would have destroyed the useful reading ("you have been
+    // sitting on this"); saying nothing let it read as "nobody noticed".
+    const unheld = graphAudit().findings.find((f) => f.kind === "stale_open" && f.ticket_ids[0] === 700);
+    assert.ok(unheld);
+    assert.equal(unheld.held_by, undefined, "#700 is held by nobody");
+    assert.match(unheld.detail, /nobody is holding it/);
+
+    db.update(schema.tickets).set({ claimant: "someone-else" })
+        .where(sql`id = 700`).run();
+    const held = graphAudit().findings.find((f) => f.kind === "stale_open" && f.ticket_ids[0] === 700);
+    assert.equal(held?.held_by?.claimant, "someone-else");
+    assert.match(held.detail, /parked rather than forgotten/);
+    db.update(schema.tickets).set({ claimant: null }).where(sql`id = 700`).run();
+});
+
 test("a ticket with a living neighbour is not stale", () => {
     const stale = graphAudit().findings.filter((f) => f.kind === "stale_open");
     assert.equal(stale.some((f) => f.ticket_ids[0] === 900), false);
