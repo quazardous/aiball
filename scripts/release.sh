@@ -35,6 +35,18 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+# The Claude Code plugin manifest carries its own `version`, and Claude Code
+# only hands users an update when that string changes — so it cannot be left
+# behind. package.json stays the single source of truth; this just refuses to
+# tag when the copy has drifted, rather than letting a release ship a manifest
+# that silently pins the previous version.
+PLUGIN_VERSION="$(node -p "require('./.claude-plugin/plugin.json').version")"
+if [[ "${PLUGIN_VERSION}" != "${VERSION}" ]]; then
+  echo "✗ .claude-plugin/plugin.json says ${PLUGIN_VERSION}, package.json says ${VERSION}." >&2
+  echo "  Bump the plugin manifest to match, then re-run." >&2
+  exit 1
+fi
+
 if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
   echo "✗ tag ${TAG} already exists. Nothing to do (bump package.json for a new release)." >&2
   exit 1

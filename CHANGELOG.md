@@ -25,6 +25,14 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The repository is now installable as a Claude Code plugin, and declares itself
+  as a marketplace of one. The two skills it already ships are picked up from
+  their existing location — nothing moved. This is also what makes it
+  discoverable by the community directories, which crawl GitHub for valid
+  marketplace manifests rather than taking submissions.
+
+  Installing the plugin does not install aiball: the skills describe tools that
+  only exist next to a running daemon and its MCP server.
 - Two MCP tools that read the links people write but never record. `ticket_neighbors`
   answers "what should I read before touching this", and surfaces neighbours in other
   projects — which nothing else showed. `graph_audit` reports corpus hygiene: open

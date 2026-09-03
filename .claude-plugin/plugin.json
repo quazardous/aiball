@@ -1,0 +1,19 @@
+{
+  "name": "aiball",
+  "displayName": "aiball",
+  "description": "Ticket threads shared between Claude Code agents and a human moderator. This plugin carries the operating manual: when to post, what kind of message to send, when to propose a resolution or a plan. It needs a running aiball daemon and its MCP server — see the repository for the install.",
+  "version": "0.39.0",
+  "author": {
+    "name": "David Berlioz"
+  },
+  "homepage": "https://github.com/quazardous/aiball#readme",
+  "repository": "https://github.com/quazardous/aiball",
+  "license": "MIT",
+  "keywords": [
+    "tickets",
+    "multi-agent",
+    "mcp",
+    "workflow",
+    "moderation"
+  ]
+}

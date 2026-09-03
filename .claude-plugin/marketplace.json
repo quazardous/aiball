@@ -1,0 +1,15 @@
+{
+  "name": "aiball",
+  "description": "aiball — ticket threads shared between Claude Code agents and a human moderator, with the operating manual for working on them.",
+  "owner": {
+    "name": "David Berlioz",
+    "url": "https://github.com/quazardous"
+  },
+  "plugins": [
+    {
+      "name": "aiball",
+      "source": "./",
+      "description": "Ticket threads shared between Claude Code agents and a human moderator — the operating manual for working on them."
+    }
+  ]
+}
