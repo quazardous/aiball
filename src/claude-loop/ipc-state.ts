@@ -212,6 +212,11 @@ export interface IpcState {
      *  10/10 failure or a false positive can't freeze the loop; the resumed
      *  wake then self-heals the flag via the busy-begin clear. */
     apiUnreachableSinceMs: number | null;
+    /** #1990 — last tick on which the retry banner was still ON SCREEN.
+     *  `SinceMs` is the start of the outage and stays that (the bar reads it
+     *  as "unreachable since"); the wake-hold measures from HERE instead, so
+     *  a long outage keeps holding while the banner is visible. */
+    apiUnreachableSeenMs: number | null;
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
@@ -270,6 +275,7 @@ const state: IpcState = {
     daemonDown: false,
     notLoggedIn: false,
     apiUnreachable: false,
+    apiUnreachableSeenMs: null,
     apiUnreachableSinceMs: null,
     bootDeadlineMs: null,
     counters: null,
@@ -467,8 +473,26 @@ export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
 export function setIpcApiUnreachable(apiUnreachable: boolean, atMs?: number): void {
     if (state.apiUnreachable === apiUnreachable) return;
     state.apiUnreachable = apiUnreachable;
-    state.apiUnreachableSinceMs = apiUnreachable ? (atMs ?? Date.now()) : null;
+    const at = atMs ?? Date.now();
+    state.apiUnreachableSinceMs = apiUnreachable ? at : null;
+    state.apiUnreachableSeenMs = apiUnreachable ? at : null;
     notifyIpcChanged();
+}
+
+/**
+ * #1990 — the banner is still there. Refreshes the wake-hold's clock without
+ * touching the flag.
+ *
+ * Deliberately NOT notifying: this fires on every pane tick for as long as the
+ * outage lasts, and the flag itself has not changed — publishing that on the
+ * bus would flood it to repaint an identical bar.
+ *
+ * A no-op when the flag is down, so a stray call can never resurrect a hold
+ * that busy-begin has already cleared.
+ */
+export function refreshIpcApiUnreachableSeen(atMs?: number): void {
+    if (!state.apiUnreachable) return;
+    state.apiUnreachableSeenMs = atMs ?? Date.now();
 }
 
 /** David `<chat>` : push le deadline boot (watcher-driven). Pas pubsub-

@@ -119,6 +119,9 @@ export interface LoopStateInput {
      *  10/10 failure or a false positive must never freeze the loop; the
      *  resumed wake self-heals the flag via the busy-begin clear. */
     apiUnreachableSinceMs: number | null;
+    /** #1990 — last tick the retry banner was still visible. The wake-hold is
+     *  measured from HERE, not from the start of the outage. */
+    apiUnreachableSeenMs: number | null;
     /** TTL for the hold above (`CL_API_UNREACHABLE_TTL_MS`, default 2 min). */
     apiUnreachableTtlMs: number;
 
@@ -346,7 +349,17 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     // never freeze the loop) ; the resumed wake self-heals the stale flag via
     // the busy-begin clear. Blocks even manual wakes while live.
     if (input.apiUnreachableSinceMs !== null) {
-        const heldMs = input.nowMs - input.apiUnreachableSinceMs;
+        // #1990 david : the hold used to be measured from the START of the
+        // outage, so a 5-minute one resumed waking after 2 — into a dead API,
+        // which is the screenshot he filed. It now runs from the LAST tick the
+        // banner was seen, so the hold lasts as long as the outage shows.
+        //
+        // The anti-freeze guarantee is untouched: the window still expires
+        // `apiUnreachableTtlMs` after the banner STOPS being observed, so a
+        // latch left stuck by a scraped detector still self-heals. Falls back
+        // to `SinceMs` for a state mirrored from a pre-#1990 timer.
+        const seenMs = input.apiUnreachableSeenMs ?? input.apiUnreachableSinceMs;
+        const heldMs = input.nowMs - seenMs;
         if (heldMs < input.apiUnreachableTtlMs) {
             const leftS = Math.ceil((input.apiUnreachableTtlMs - heldMs) / 1000);
             return { allowed: false, reason: `API unreachable (claude retrying — fail-open in ${leftS}s)` };

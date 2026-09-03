@@ -58,6 +58,7 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         paneInterrupted: false,
         notLoggedIn: false,
         apiUnreachableSinceMs: null,
+        apiUnreachableSeenMs: null,
         apiUnreachableTtlMs: 120 * SEC,
         noWait: false,
         humanTypingAtMs: null,

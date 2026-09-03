@@ -162,6 +162,7 @@ import {
     setIpcDaemonDown,
     setIpcNotLoggedIn,
     setIpcApiUnreachable,
+    refreshIpcApiUnreachableSeen,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -883,6 +884,18 @@ if (sd) {
     apiUnreachableW.on("begin", () => {
         log("watcher: api_unreachable begin → setIpcApiUnreachable(true)");
         setIpcApiUnreachable(true);
+    });
+    // #1990 david — keep the wake-hold alive for as long as the banner is
+    // actually there. `seen` fires on EVERY tick the classification holds
+    // (bool-watcher), which is exactly the signal the hold was missing: it used
+    // to be measured from the outage's start, so a 5-minute one resumed waking
+    // after 2, into an API that was still down.
+    //
+    // Not logged: this ticks once a second for the whole outage, and a line per
+    // tick would bury the very episode it documents. `begin` and the clears
+    // already bracket it in the journal.
+    apiUnreachableW.on("seen", () => {
+        refreshIpcApiUnreachableSeen();
     });
     // #1119 / #1116 — clear on `busy begin` too, not just the Stop hook (below).
     // A turn that STARTS proves claude reached the API (= logged in AND the API

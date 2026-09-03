@@ -38,6 +38,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Wake-ups now stay paused for as long as an API outage actually lasts. The
+  hold was measured from the moment the outage started, so it expired two
+  minutes in and the loop resumed waking into an API that was still down. It
+  now runs from the last time the retry banner was seen — and still expires
+  once that banner is gone, so a detector left stuck can't freeze the loop.
+
 - Tickets waiting on **your** decision are highlighted again in the inbox. Two
   kinds slipped through: a "wontfix" proposal, and any decision filed together
   with the ticket rather than in a later comment. Both already removed the

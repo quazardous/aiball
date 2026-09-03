@@ -1229,6 +1229,7 @@ export function readLoopStateInput(
         paneInterrupted: ipc.paneInterrupted ?? false,
         notLoggedIn: ipc.notLoggedIn ?? false,
         apiUnreachableSinceMs: ipc.apiUnreachableSinceMs ?? null,
+        apiUnreachableSeenMs: ipc.apiUnreachableSeenMs ?? null,
         apiUnreachableTtlMs: API_UNREACHABLE_TTL_MS,
         noWait,
         humanTypingAtMs: ipc.humanTypingAtMs,
