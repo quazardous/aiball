@@ -33,6 +33,12 @@ function stubClient(over: Partial<Record<string, unknown>> = {}): AiballClient {
         // backlog head when the FIFO is empty.
         listTickets: async () => [{ id: 977, title: "backlog ticket" }],
         getTicket: async () => ({ ticket: { title: "Parent ticket title" } }),
+        // #1991 — only reached when a NON-NULL project is passed, which no test
+        // did before this ticket: every scenario above uses `null`, so the
+        // project-aware half of buildContextPhrase went unexercised and a stub
+        // missing this method silently degraded the phrase to the bare culture
+        // line instead of failing loudly.
+        getProjectStandingPrompt: async () => null,
         ...over,
     };
     return base as unknown as AiballClient;
@@ -575,4 +581,83 @@ test("#1569 hint on the SAME ticket as the head keeps the bundle intact", async 
     // No divergence → the pre-existing same-ticket bundling is untouched.
     assert.equal(res.wakeTicketId, 1565);
     assert.deepEqual(res.extraSeenIds, [1013334], "the sibling event is still folded in");
+});
+
+// #1991 — a wake that names a ticket from ANOTHER project used to render a bare
+// `#N`, indistinguishable from a local one. The fan-out itself is deliberate
+// (#800: the FIFO is consumer-scoped so a cross-project event isn't lost); what
+// was missing is saying where the ticket lives. david read the ambiguity as
+// mixed-up data and suspected a regression — the real cost of a display that
+// doesn't announce itself as ambiguous.
+//
+// The marker is filled ONLY on a mismatch, so these tests pin both halves:
+// the foreign case gains `[project]`, the local case must not move at all.
+
+function foreignProjectHead(kind: string, extra: Record<string, unknown> = {}): AiballClient {
+    return stubClient({
+        listProjectsDetailed: async () => [
+            { name: "BookShepherd", open_count: 3, actionable_count: 1 },
+            { name: "aiball", open_count: 9, actionable_count: 2 },
+        ],
+        unread: async () => ({
+            messages: [{
+                id: 1016400,
+                kind,
+                ticket_id: 1819,
+                project: "aiball",
+                hashid: "p6cdhk",
+                body: "the MCP doesn't say whether the human is around",
+                ...extra,
+            }],
+        }),
+    });
+}
+
+test("#1991 comment head on another project → the ref carries [project]", async () => {
+    const res = await buildContextPhrase(foreignProjectHead("comment_added"), "BookShepherd", PINGS_YAML);
+    assert.match(res.phrase, /\[aiball\] ?#1819/, "the project must sit right before the ref");
+});
+
+test("#1991 decision-event head on another project → same marker (david's exact case)", async () => {
+    // What he actually saw: "#1819: … resolution ACCEPTED (#p6cdhk) by david"
+    // inside the BookShepherd loop, with nothing saying #1819 is an aiball ticket.
+    const res = await buildContextPhrase(
+        foreignProjectHead("resolution_accepted", { body: "", by_agent: "david" }),
+        "BookShepherd",
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /\[aiball\] ?#1819/, "the decision branch needs it too");
+});
+
+test("#1991 lifecycle head on another project → same marker", async () => {
+    const res = await buildContextPhrase(
+        foreignProjectHead("ticket_closed", { body: "" }),
+        "BookShepherd",
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /\[aiball\] ?#1819/);
+});
+
+test("#1991 new-ticket head on another project → same marker", async () => {
+    // A ticket_created msg IS the ticket, so its own id is the ref.
+    const res = await buildContextPhrase(
+        foreignProjectHead("ticket_created", { id: 1016401, ticket_id: null, title: "a foreign ticket", body: "" }),
+        "BookShepherd",
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /new ticket \[aiball\] #1016401/);
+});
+
+test("#1991 a head on the loop's OWN project renders no marker at all", async () => {
+    const res = await buildContextPhrase(foreignProjectHead("comment_added"), "aiball", PINGS_YAML);
+    assert.doesNotMatch(res.phrase, /\[aiball\]/, "the local case must not gain a marker");
+    assert.doesNotMatch(res.phrase, /\[/, "…nor any bracket at all");
+    assert.match(res.phrase, /#1819/, "the ref itself is untouched");
+});
+
+test("#1991 a loop with no single project in scope gets no marker", async () => {
+    // Deliberate: with nothing to differ from, EVERY ref would carry a marker,
+    // which is noise rather than signal. Pinned so it reads as a choice.
+    const res = await buildContextPhrase(foreignProjectHead("comment_added"), null, PINGS_YAML);
+    assert.doesNotMatch(res.phrase, /\[aiball\]/);
 });

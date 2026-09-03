@@ -44,6 +44,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A wake announcing a ticket from another project now names that project, as a
+  `[name]` marker before the reference. Cross-project wakes are deliberate — a
+  decision on a ticket you filed elsewhere still reaches you — but the bare `#N`
+  was indistinguishable from a local ticket, and read as mixed-up data. Wakes
+  about your own project are unchanged.
 - Wake-ups now stay paused for as long as an API outage actually lasts. The
   hold was measured from the moment the outage started, so it expired two
   minutes in and the loop resumed waking into an API that was still down. It

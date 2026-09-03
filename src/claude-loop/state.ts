@@ -1925,6 +1925,13 @@ export async function buildContextPhrase(
                     // this narrowed shape, so the wake could never say how
                     // old the thing it announces is.
                     created_at?: string | null;
+                    // #1991 — which project the event belongs to. Same story as
+                    // `created_at` above: the row carries it (verified on the
+                    // wire), the narrowed shape simply dropped it, so the wake
+                    // rendered a bare `#N` for a FOREIGN ticket exactly like a
+                    // local one. That ambiguity doesn't announce itself as
+                    // ambiguity — david read it as mixed-up data.
+                    project?: string | null;
                 }>;
             }>).catch(() => ({ messages: [] })),
             // #397: this loop's own consumer row → its micro_prompt, exposed as
@@ -2524,6 +2531,19 @@ export async function buildContextPhrase(
             } catch { /* best-effort — no marker on failure */ }
         }
         const headFyi = headIsEvent && headActionable === true && headClaimable === false ? "1" : "";
+        // #1991 — the head's project, populated ONLY when it differs from this
+        // loop's. The wake FIFO is consumer-scoped on purpose (#800), so a
+        // fan-out from another project legitimately lands here; what was missing
+        // is saying so. Filling it only on a mismatch is what keeps the local
+        // case byte-identical — and it means the marker's mere PRESENCE carries
+        // "this ticket isn't from here", with no wording to read.
+        //
+        // A loop with no single project in scope (`project` null) gets no
+        // marker: nothing to differ from. Deliberate, not an oversight — every
+        // ref would carry one, which is noise rather than signal.
+        const headProject = project && unreadHead?.project && unreadHead.project !== project
+            ? unreadHead.project
+            : "";
         const vars = {
             culture,
             ping_count: pingCount || "",
@@ -2567,6 +2587,10 @@ export async function buildContextPhrase(
             // created_at IS the moment of the decision — no need to reach
             // into the original proposal's `decided_at`.
             head_age: formatWakeStamp(unreadHead?.created_at, Date.now()),
+            // #1991 — the announced ticket's project, empty when it's this
+            // loop's own. Rendered as a `[name]` marker immediately before the
+            // ref, where the eye already looks for the ticket's identity.
+            head_project: headProject,
             project_scope: scope,
             // #1215 david `go` — le CTA backlog reflète qu'un commentaire attend
             // une réponse en NOMMANT le dernier acteur (≠ moi). Remplace l'ancien
@@ -2630,12 +2654,16 @@ export async function buildContextPhrase(
             // mutually exclusive head branches. That placement is what
             // makes them show on an EVENT wake and a BACKLOG wake alike:
             // a prefix precedes branches, it does not pick one.
+            // #1991 — `{head_project:+[{head_project}] }` sits immediately
+            // before the ref in every event branch (the bundle's own text opens
+            // with `#N`, so prefixing it lands in the same spot). Empty for a
+            // local ticket → those wakes don't move by a single character.
             "{standing_prompt:+{standing_prompt} · }{consumer_prompt:+{consumer_prompt} · }"
-            + "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }#{head_id} / #{head_comment_hashid}{head_age:+ · {head_age}})}"
-            + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}{head_age:+ · {head_age}}}"
-            + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
-            + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
-            + "{head_bundle:+{head_bundle}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_comment_hashid:+{head_body:+{head_body} }({head_fyi:+fyi — action is not mandatory · }{head_project:+[{head_project}] }#{head_id} / #{head_comment_hashid}{head_age:+ · {head_age}})}"
+            + "{head_kind:+new ticket {head_project:+[{head_project}] }#{head_id}{head_title:+: {head_title}}{head_age:+ · {head_age}}}"
+            + "{head_lifecycle:+{head_project:+[{head_project}] }#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_decision_event:+{head_decision_event} on {head_project:+[{head_project}] }#{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
+            + "{head_bundle:+{head_project:+[{head_project}] }{head_bundle}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
             // #1470 — the backlog leg closes with a TIER-AWARE instruction. The
             // rotation (and its pressure) is unchanged: same head, same cadence.
             // Only the ask changes, so a re-surfaced ticket gets the re-examination
