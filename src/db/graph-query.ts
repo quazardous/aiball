@@ -338,9 +338,16 @@ export function graphAudit(
     // 2 — open child under a closed parent. Typed relations are the authority
     // here, so we ask the canonical replay per ticket rather than re-deriving
     // its last-wins semantics a second time.
+    // Typed relations, read ONCE per open ticket. Two findings need them, and
+    // asking twice meant 2×N replays per audit — half the wall-clock of a
+    // human-scoped run for nothing. `listTypedRelationsForTicket` stays the
+    // single authority on last-wins semantics; only the repetition goes.
+    const typedByTicket = new Map<number, ReturnType<typeof listTypedRelationsForTicket>>();
+    for (const t of open) typedByTicket.set(t.id, listTypedRelationsForTicket(t.id));
+
     const childOf: Array<[number, number]> = [];
     for (const t of open) {
-        for (const rel of listTypedRelationsForTicket(t.id)) {
+        for (const rel of typedByTicket.get(t.id) ?? []) {
             if (rel.kind === "child_of") childOf.push([t.id, rel.target_ticket_id]);
         }
     }
@@ -368,7 +375,7 @@ export function graphAudit(
     for (const t of open) {
         const nb = adj.get(t.id);
         if (!nb) continue;
-        const typed = new Set(listTypedRelationsForTicket(t.id).map((r) => r.target_ticket_id));
+        const typed = new Set((typedByTicket.get(t.id) ?? []).map((r) => r.target_ticket_id));
         for (const [other, cite] of nb) {
             if (!openIds.has(other)) continue;
             if (projectOf.get(other) === projectOf.get(t.id)) continue;
