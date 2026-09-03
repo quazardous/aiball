@@ -195,6 +195,13 @@ export function registerInboxTools(server: McpServer): void {
                 plansToExecute = (r.plans ?? []).filter((p) =>
                     !scopeProject || (p as { project?: string }).project === scopeProject);
             } catch { /* degrade silently */ }
+            // #1819 — best-effort: a failed lookup costs the presence facts,
+            // never the poll. Silence here reads as "unknown", which is the
+            // honest answer when we could not ask.
+            let presence: unknown = null;
+            try {
+                presence = await client.presence(scopeProject ?? null);
+            } catch { /* degrade silently */ }
             const myPendingCommentsOut = projectionPending(myPendingComments);
             // Build the response object — fields are conditionally included
             // based on the opt-in flags. Slim by default per #B.68 user spec.
@@ -226,6 +233,21 @@ export function registerInboxTools(server: McpServer): void {
                 /** #1164 S1 — accepted plans awaiting MY execution (latest
                  *  plan decision = accepted, and I haven't acted since). */
                 plans_to_execute: plansToExecute,
+                /** #1819 — is a human around? FACTS, not a verdict.
+                 *
+                 *  `last_human_message_age_sec` is the one to reason on: pick
+                 *  your own threshold from what you are about to commit, since
+                 *  three minutes is enough to decide a rename and nowhere near
+                 *  enough for a refactor. A boolean here would have frozen that
+                 *  threshold for every agent and every gesture.
+                 *
+                 *  `loop_state_age_sec` is the guard against reading a dead
+                 *  timer as a departed human: a stale heartbeat means UNKNOWN,
+                 *  not absent. And `loop_presence_word` measures presence AT
+                 *  THE TERMINAL, which is not the same as availability — david
+                 *  pilots from the web UI while deliberately leaving the loop
+                 *  AFK, and in that regime the word reads `loop`. */
+                presence,
                 my_pending_tickets: myPendingOut,
                 /** Pending comments authored by this agent (#B.69). Needed
                  *  even in `auto-reply` since the strategy can flip to

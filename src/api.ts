@@ -24,6 +24,7 @@ import {
     type Strategy,
     addProjectTokenUsage,
     getProjectStandingPrompt,
+    getPresenceFacts,
     setProjectStandingPrompt,
 } from "./db.js";
 import { captureTokenSnapshotIfDue, getTokenTimeseries } from "./db.js";
@@ -154,6 +155,17 @@ api.patch("/projects/:project/strategy", (req: Request, res: Response) => {
     setProjectStrategy(project, s as Strategy);
     broadcast({ type: "strategy_changed", data: { project, strategy: s } });
     res.json({ project, strategy: s, global: getStrategy() });
+});
+
+// #1819 — the facts an agent needs to judge whether a human is around, with
+// no verdict derived from them. Elapsed time rather than a boolean, because
+// the threshold depends on what the agent is about to commit, and that
+// knowledge lives in the agent, not here.
+api.get("/presence", (req: Request, res: Response) => {
+    const project = typeof req.query.project === "string" && req.query.project
+        ? req.query.project
+        : undefined;
+    res.json(getPresenceFacts(consumerOf(req), project));
 });
 
 // #1832 — the project's standing instruction, shown at the head of every wake.

@@ -261,3 +261,4 @@ export {
     type Token,
     type TokenKind,
 } from "./db/tokens.js";
+export { getPresenceFacts, type PresenceFacts } from "./db/presence.js";

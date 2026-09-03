@@ -768,6 +768,19 @@ export class AiballClient {
         );
     }
 
+    /** #1819: the facts for judging whether a human is around — elapsed
+     *  times, no verdict. `project` scopes the human-message lookup. */
+    presence(project?: string | null) {
+        const qs = project ? `?project=${encodeURIComponent(project)}` : "";
+        return this.http<{
+            last_human_message_at?: string | null;
+            last_human_message_age_sec?: number | null;
+            loop_presence_word?: string | null;
+            loop_human_flag?: boolean | null;
+            loop_state_age_sec?: number | null;
+        }>("GET", `/api/presence${qs}`);
+    }
+
     /** #1832: the project's standing instruction, shown at the head of every
      *  wake. Fetched per wake like the consumer's micro-prompt — the operator
      *  edits it precisely so the NEXT wake picks it up, so a cached value

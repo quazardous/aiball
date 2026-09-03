@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `poll()` now reports whether a human is around — as **facts**, not a verdict:
+  how long since the last human message, and how fresh the loop's own state is.
+  An agent picks its own threshold from what it is about to commit, since three
+  minutes is enough to decide a rename and nowhere near enough for a refactor.
+  A stale heartbeat reads as unknown, not absent.
+
 - The standing instruction is also reachable from the header, next to the
   go-to field: one click, type, save. Its icon turns green while an instruction
   is live on the project, so one left behind after coming back is visible
