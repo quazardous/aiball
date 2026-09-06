@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- Ticket mutations now return the updated ticket alongside their existing
+  acknowledgement, so a client can refresh what it shows without asking for the
+  list again. The row is built by the same code the list uses, which is what
+  keeps the two from drifting apart.
 - The board loads one page of the inbox instead of the whole thing. It used to
   fetch every ticket ever filed — 2071 rows, 2.26 MB — to display 25 of them,
   and the page now weighs 27 KB. Sorting, the unread filter and paging all

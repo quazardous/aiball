@@ -1,0 +1,232 @@
+// #2072 — ONE builder for an inbox row, so the list and the mutations cannot
+// drift apart.
+//
+// The row shape was assembled inline inside the `/inbox` handler. That was fine
+// while only the list produced it; it stops being fine the moment a mutation
+// has to return "the updated object", because the front caches inbox rows and
+// patches them. Two hand-kept shapes would diverge on the first field added to
+// one and not the other — silently, since a missing field just renders as
+// absent.
+//
+// So: the maps that decorate a row are gathered once (`buildInboxRowContext`),
+// and the row itself is built from them (`buildInboxRow`). The list builds a
+// context for a whole page; a mutation builds one for a single id. Same code,
+// same shape, by construction rather than by discipline.
+
+import { readFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
+import type { Message } from "../db.js";
+import {
+    getTicketTokenUsage,
+    tagsForMessages,
+    ticketAgentLastActivity,
+    ticketUnreadFlags,
+} from "../db.js";
+import { computeHotFocus } from "../db/work-order.js";
+import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
+import { globalConfigPath } from "../autopoll/config.js";
+
+/**
+ * True when the TICKET ITSELF carries a pending decision — `ticket_new({then})`
+ * files one in the ticket's own meta, with no comment to find it on.
+ *
+ * `kind === null` asks "is there any pending decision here", used where only
+ * the existence matters.
+ *
+ * Lives here rather than in tickets.ts so the row builder does not import the
+ * router that imports it back.
+ */
+export function ticketDecision(t: { meta?: string | null }, kind: string | null): boolean {
+    if (!t.meta) return false;
+    try {
+        const d = (JSON.parse(t.meta) as { decision?: { kind?: string; status?: string } }).decision;
+        if (!d || d.status !== "pending") return false;
+        return kind === null ? true : d.kind === kind;
+    } catch {
+        // A malformed meta must never take a row down with it.
+        return false;
+    }
+}
+
+const DEFAULT_HOT_WINDOW_SEC = 1200;
+/** Same rationale as `ticketDecision`: moved here to keep the imports acyclic. */
+export function hotWindowSec(): number {
+    try {
+        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { hot_window_sec?: unknown };
+        const v = Number(raw?.hot_window_sec);
+        return Number.isFinite(v) && v > 0 ? v : DEFAULT_HOT_WINDOW_SEC;
+    } catch {
+        return DEFAULT_HOT_WINDOW_SEC;
+    }
+}
+
+export interface InboxRowContext {
+    byTicket: ReturnType<typeof getInboxAgg>;
+    tagsMap: ReturnType<typeof tagsForMessages>;
+    unreadMap: ReturnType<typeof ticketUnreadFlags>;
+    tokenUsageMap: ReturnType<typeof getTicketTokenUsage>;
+    crossAgentHotFocus: ReturnType<typeof computeHotFocus>;
+    nowStr: string;
+}
+
+/**
+ * Gather everything a row needs. `project` narrows the memoized aggregate; pass
+ * it when the caller already knows the scope, omit it for a single ticket.
+ */
+export function buildInboxRowContext(
+    tickets: Message[],
+    consumerId: string,
+    project?: string,
+): InboxRowContext {
+    const ids = tickets.map((m) => m.id);
+    return {
+        byTicket: getInboxAgg(project),
+        tagsMap: tagsForMessages(ids),
+        unreadMap: ticketUnreadFlags(consumerId, ids),
+        tokenUsageMap: getTicketTokenUsage(ids),
+        crossAgentHotFocus: computeHotFocus(
+            ticketAgentLastActivity(ids),
+            Date.now(),
+            hotWindowSec() * 1000,
+        ),
+        nowStr: new Date().toISOString(),
+    };
+}
+
+/** One inbox row, exactly as the list has always produced it. */
+export function buildInboxRow(t: Message, ctx: InboxRowContext) {
+    const { byTicket, tagsMap, unreadMap, tokenUsageMap, crossAgentHotFocus, nowStr } = ctx;
+    const agg = byTicket.get(t.id) ?? emptyAgg();
+    const postponedUntil = t.postponed_until ?? null;
+    const postponed =
+        !!postponedUntil && postponedUntil > nowStr;
+    return {
+        id: t.id,
+        project: t.project,
+        title: t.title,
+        // #2071 — `summary` is NOT sent: measured at 203 KB (8.4%) of the
+        // payload, and the inbox row never reads it (`titleOf` falls back
+        // to a literal, not to the summary). It stays on the per-ticket
+        // endpoints, where it is actually rendered.
+        // #1161 S1 — list rows carry a SNIPPET, not the full body : bodies
+        // were 75 % of the payload while the UI renders 140 chars max
+        // (`snippetOf`). Full bodies stay on the per-ticket endpoints.
+        snippet: (() => {
+            const raw = (t.body ?? "").replace(/\s+/g, " ").trim();
+            return raw.length > 140 ? raw.slice(0, 140) + "…" : raw || null;
+        })(),
+        by_agent: t.by_agent,
+        created_at: t.created_at,
+        status: t.status,
+        intent: t.intent,
+        priority: t.priority ?? "normal",
+        closed: agg.closed || t.status === "rejected",
+        // Same rationale as the /tickets/:id handler: resolved stays
+        // true after close so the UI can distinguish "closed because
+        // resolved" from "closed without explicit resolution".
+        resolved: agg.resolved,
+        // Agent-signalled "blocked, your call" (#B.119). Same rationale
+        // as resolved: stays true after close so the UI can still show
+        // *why* the ticket ended up closed.
+        blocked: agg.blocked,
+        // True iff there is a pending ticket_resolved on this ticket
+        // that the reporter still has to accept-and-close or reject.
+        // Stays false once the ticket is closed (the close auto-promotes
+        // any dangling pending resolved, see submitMessage).
+        pending_resolution: (agg.pendingResolution || ticketDecision(t, "resolution")) && !(agg.closed || t.status === "rejected"),
+        /** #B.168 follow-up: latest resolution was rejected →
+            flag for a `× rejected` badge on the inbox row. Same
+            suppression as pending_resolution (cleared once
+            ticket is closed/rejected). */
+        latest_resolution_rejected: agg.latestResolutionRejected && !(agg.closed || t.status === "rejected"),
+        /** #B.173: same flag for plan decisions. David: reject
+            plan wasn't surfaced in the list view the way reject
+            resolution is. Symmetric to latest_resolution_rejected
+            — cleared once the ticket is closed/rejected so the
+            badge represents "live unresolved rejection". */
+        latest_plan_rejected: agg.latestPlanRejected && !(agg.closed || t.status === "rejected"),
+        /** #656 david: pending PLAN flag. Symmetric to
+            pending_resolution — surfaced so the inbox row can
+            show "you have a plan to accept/reject" the same way
+            it shows pending resolutions. Cleared once the ticket
+            is closed/rejected. */
+        pending_plan: (agg.pendingPlan || ticketDecision(t, "plan")) && !(agg.closed || t.status === "rejected"),
+        /** #737 — pending ESCALATION flag. Symmetric to pending_plan.
+            Drives the red ESCALATED badge on the inbox row. Cleared
+            once the ticket is closed/rejected. */
+        pending_escalation: (agg.pendingEscalation || ticketDecision(t, "escalation")) && !(agg.closed || t.status === "rejected"),
+        /** #1835 — pending WONTFIX. The fourth decision kind, and the one
+            nothing surfaced: it gates the ticket out of the agent's pool
+            like a resolution does, so without this the row looked idle
+            while it was in fact waiting on the reporter. */
+        pending_wontfix: (agg.pendingWontfix || ticketDecision(t, "wontfix")) && !(agg.closed || t.status === "rejected"),
+        /** #656 david `2c9qm4`: true iff a pending decision exists
+            AND the decision-bearing comment IS the latest comment
+            on the thread (no newer activity past the proposal).
+            Drives the visual : fresh proposal = solid attention
+            band, stale proposal (conversation continued past it)
+            = dashed band. Null/false on rows with no pending
+            decision. */
+        pending_decision_is_latest: ((): boolean => {
+            if (agg.closed || t.status === "rejected") return false;
+            const pendingId = agg.pendingEscalation ? agg.latestEscalationId
+                : agg.pendingPlan ? agg.latestPlanId
+                : agg.pendingResolution ? agg.latestResolutionId
+                : agg.pendingWontfix ? agg.latestWontfixId
+                : 0;
+            if (pendingId > 0) return pendingId === agg.lastSpeakerId;
+            // #1835 — a decision filed WITH the ticket (`ticket_new({then})`)
+            // has no comment to compare ids against. It is the freshest
+            // signal exactly while nobody has spoken since.
+            return ticketDecision(t, null) && agg.commentCount === 0;
+        })(),
+        scope: t.scope,
+        // Per-consumer unread flag (≥1 unseen ping on the thread for
+        // the caller, resolved from the X-Aiball-Consumer header).
+        unread: unreadMap.get(t.id) ?? false,
+        // #405/#532 (sfbsdy + s2sjxz) + #657 david — visibility cross-
+        // agent : 🔥 s'allume sur activité récente (< hot_window_sec)
+        // OR claim récent (claimed_at < hot_window_sec). Le claim
+        // récent est un signal fort « un agent vient de prendre
+        // ça » même avant qu il poste quoi que ce soit ; le filtre
+        // sur hot_window_sec évite la régression #509 (s2sjxz —
+        // claim 15h vieux marquant hot indéfiniment). Le bookmark-
+        // fill chip distincte dans le meta slot reste pour exposer
+        // QUI claim (info que `hot` seul perd).
+        hot: crossAgentHotFocus.has(t.id)
+            || (typeof t.claimed_at === "string"
+                && Date.now() - new Date(t.claimed_at).getTime() < hotWindowSec() * 1000),
+        // Snooze (#B.329). `postponed=true` means the deadline hasn't
+        // passed yet — UI hides the row from the open inbox the same
+        // way `closed=true` does. `postponed_until` is the deadline
+        // itself, surfaced as a chip on the row when relevant.
+        postponed,
+        postponed_until: postponedUntil,
+        comment_count: agg.commentCount,
+        pending_comment_count: agg.pendingCount,
+        last_activity:
+            agg.lastActivity && agg.lastActivity > t.created_at
+                ? agg.lastActivity
+                : t.created_at,
+        // #B.132: who spoke last on this thread. Fallback to the
+        // ticket creator when there are no comments yet — the
+        // discrete "you spoke last" cue should still apply to
+        // freshly created tickets the consumer just authored.
+        last_speaker: agg.lastSpeaker ?? t.by_agent,
+        tags: tagsMap.get(t.id) ?? [],
+        // #427: accumulated token-effort tally (null until any usage is
+        // captured) so the inbox row can surface the cost-equiv chip.
+        token_usage: tokenUsageMap.get(t.id) ?? null,
+        // #429: who currently holds this ticket, so the list can render a
+        // compact claim/assign icon + tooltip naming the holder (parity
+        // with the thread header). Two distinct holds (#436) — a row can
+        // carry both: CLAIM (focus, agent self-declared) and ASSIGNMENT
+        // (responsibility, a human push).
+        claimant: t.claimant ?? null,
+        claimed_at: t.claimed_at ?? null,
+        assignee: t.assignee ?? null,
+        assigned_at: t.assigned_at ?? null,
+    };
+}
+
+export type InboxRow = ReturnType<typeof buildInboxRow>;

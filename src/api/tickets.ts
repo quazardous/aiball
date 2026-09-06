@@ -60,13 +60,31 @@ import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.
 import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
-import { globalConfigPath, assignWindowSec } from "../autopoll/config.js";
-import { readFileSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
+import { assignWindowSec } from "../autopoll/config.js";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
-import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
+
+import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
+
+/**
+ * #2072 — the ticket's state AFTER a mutation, in the exact shape the list
+ * uses. david: "quand le front pousse une modif sur un endpoint de l'API,
+ * l'API renvoie les données à jour de tout l'objet".
+ *
+ * Returned ALONGSIDE each endpoint's existing acknowledgement rather than
+ * instead of it: the acknowledgements are a subset, and replacing them would
+ * break every caller for no gain. A front that wants to patch its cache reads
+ * `ticket`; one that doesn't ignores it.
+ *
+ * Null when the ticket vanished under us — a caller that just mutated it will
+ * still get its acknowledgement.
+ */
+function ticketStateAfter(id: number, consumerId: string) {
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return null;
+    return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
+}
 import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotes } from "./_helpers.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
@@ -97,28 +115,10 @@ export const ticketsRouter = Router();
  * `kind === null` asks "is there any pending decision here", used where only
  * the existence matters.
  */
-export function ticketDecision(t: { meta?: string | null }, kind: string | null): boolean {
-    if (!t.meta) return false;
-    try {
-        const d = (JSON.parse(t.meta) as { decision?: { kind?: string; status?: string } }).decision;
-        if (!d || d.status !== "pending") return false;
-        return kind === null ? true : d.kind === kind;
-    } catch {
-        // A malformed meta must never take a row down with it.
-        return false;
-    }
-}
-
-const DEFAULT_HOT_WINDOW_SEC = 1200;
-function hotWindowSec(): number {
-    try {
-        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { hot_window_sec?: unknown };
-        const v = Number(raw?.hot_window_sec);
-        return Number.isFinite(v) && v > 0 ? v : DEFAULT_HOT_WINDOW_SEC;
-    } catch {
-        return DEFAULT_HOT_WINDOW_SEC;
-    }
-}
+// #2072 — both moved next to the row builder that needs them, so it does not
+// import the router that imports it back. Re-exported: every existing caller
+// keeps its import path.
+export { ticketDecision, hotWindowSec } from "./inbox-row.js";
 
 /**
  * #352: change a ticket's owner (= its `by_agent` / reporter — no model
@@ -136,7 +136,7 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     setTicketOwner(id, by_agent);
     upsertTicketSubscription(by_agent, id);
-    res.json({ ticket_id: id, by_agent });
+    res.json({ ticket_id: id, by_agent, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 /**
@@ -269,7 +269,7 @@ ticketsRouter.post("/tickets/:id/release", (req: Request, res: Response) => {
     // #448: broadcast so the holder icon clears live (same fix as assign).
     const updated = getMessage(id);
     if (updated) broadcast({ type: "message_edited", data: updated });
-    res.json({ ticket_id: id, released: true });
+    res.json({ ticket_id: id, released: true, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 /**
@@ -370,164 +370,10 @@ ticketsRouter.get("/inbox", (req, res) => {
     const consumerId = consumerOf(req);
 
     const tickets = listMessages({ kind: "ticket_created", project });
-    // #1167 — the per-ticket aggregation (comment counts, lifecycle
-    // replay, latest plan/resolution/escalation, lastSpeaker) is memoized
-    // per project (write-invalidated + TTL ceiling) instead of replaying
-    // the whole history on every hit. See db/inbox-agg.ts.
-    const byTicket = getInboxAgg(project);
-    const tagsMap = tagsForMessages(tickets.map((m) => m.id));
-    const unreadMap = ticketUnreadFlags(consumerId, tickets.map((m) => m.id));
-    // #427: per-ticket token-effort tally for the inbox row (one batched
-    // query for the whole page). Absent for tickets with no captured usage
-    // yet — the row renders the bolt chip only when estTokenCost > 0.
-    const tokenUsageMap = getTicketTokenUsage(tickets.map((m) => m.id));
-    // #405/#408/#532 (david `sfbsdy` + `neg428`) — VISIBILITY hot focus :
-    // agrégé sur l'activité de TOUS les agents (#408 cross-agent restauré),
-    // OR-é avec « ticket actuellement claimé par un agent » (david `neg428` :
-    // « avec le claim ça devrait etre plus simple à flag »). Tous les viewers
-    // (humans inclus) voient le même 🔥 → david peut spot « les tickets hot
-    // de vos agents » sans imperonser. Pas de sort tiebreak dans /inbox donc
-    // pas de selfHotFocus ici (utilisé dans /tickets pour le sort, là-bas
-    // séparé pour préserver le ranking per-agent #532 `bmzpfr`).
-    const crossAgentHotFocus = computeHotFocus(
-        ticketAgentLastActivity(tickets.map((m) => m.id)),
-        Date.now(),
-        hotWindowSec() * 1000,
-    );
-    const nowStr = new Date().toISOString();
-    let rows = tickets.map((t) => {
-        const agg = byTicket.get(t.id) ?? emptyAgg();
-        const postponedUntil = t.postponed_until ?? null;
-        const postponed =
-            !!postponedUntil && postponedUntil > nowStr;
-        return {
-            id: t.id,
-            project: t.project,
-            title: t.title,
-            // #2071 — `summary` is NOT sent: measured at 203 KB (8.4%) of the
-            // payload, and the inbox row never reads it (`titleOf` falls back
-            // to a literal, not to the summary). It stays on the per-ticket
-            // endpoints, where it is actually rendered.
-            // #1161 S1 — list rows carry a SNIPPET, not the full body : bodies
-            // were 75 % of the payload while the UI renders 140 chars max
-            // (`snippetOf`). Full bodies stay on the per-ticket endpoints.
-            snippet: (() => {
-                const raw = (t.body ?? "").replace(/\s+/g, " ").trim();
-                return raw.length > 140 ? raw.slice(0, 140) + "…" : raw || null;
-            })(),
-            by_agent: t.by_agent,
-            created_at: t.created_at,
-            status: t.status,
-            intent: t.intent,
-            priority: t.priority ?? "normal",
-            closed: agg.closed || t.status === "rejected",
-            // Same rationale as the /tickets/:id handler: resolved stays
-            // true after close so the UI can distinguish "closed because
-            // resolved" from "closed without explicit resolution".
-            resolved: agg.resolved,
-            // Agent-signalled "blocked, your call" (#B.119). Same rationale
-            // as resolved: stays true after close so the UI can still show
-            // *why* the ticket ended up closed.
-            blocked: agg.blocked,
-            // True iff there is a pending ticket_resolved on this ticket
-            // that the reporter still has to accept-and-close or reject.
-            // Stays false once the ticket is closed (the close auto-promotes
-            // any dangling pending resolved, see submitMessage).
-            pending_resolution: (agg.pendingResolution || ticketDecision(t, "resolution")) && !(agg.closed || t.status === "rejected"),
-            /** #B.168 follow-up: latest resolution was rejected →
-                flag for a `× rejected` badge on the inbox row. Same
-                suppression as pending_resolution (cleared once
-                ticket is closed/rejected). */
-            latest_resolution_rejected: agg.latestResolutionRejected && !(agg.closed || t.status === "rejected"),
-            /** #B.173: same flag for plan decisions. David: reject
-                plan wasn't surfaced in the list view the way reject
-                resolution is. Symmetric to latest_resolution_rejected
-                — cleared once the ticket is closed/rejected so the
-                badge represents "live unresolved rejection". */
-            latest_plan_rejected: agg.latestPlanRejected && !(agg.closed || t.status === "rejected"),
-            /** #656 david: pending PLAN flag. Symmetric to
-                pending_resolution — surfaced so the inbox row can
-                show "you have a plan to accept/reject" the same way
-                it shows pending resolutions. Cleared once the ticket
-                is closed/rejected. */
-            pending_plan: (agg.pendingPlan || ticketDecision(t, "plan")) && !(agg.closed || t.status === "rejected"),
-            /** #737 — pending ESCALATION flag. Symmetric to pending_plan.
-                Drives the red ESCALATED badge on the inbox row. Cleared
-                once the ticket is closed/rejected. */
-            pending_escalation: (agg.pendingEscalation || ticketDecision(t, "escalation")) && !(agg.closed || t.status === "rejected"),
-            /** #1835 — pending WONTFIX. The fourth decision kind, and the one
-                nothing surfaced: it gates the ticket out of the agent's pool
-                like a resolution does, so without this the row looked idle
-                while it was in fact waiting on the reporter. */
-            pending_wontfix: (agg.pendingWontfix || ticketDecision(t, "wontfix")) && !(agg.closed || t.status === "rejected"),
-            /** #656 david `2c9qm4`: true iff a pending decision exists
-                AND the decision-bearing comment IS the latest comment
-                on the thread (no newer activity past the proposal).
-                Drives the visual : fresh proposal = solid attention
-                band, stale proposal (conversation continued past it)
-                = dashed band. Null/false on rows with no pending
-                decision. */
-            pending_decision_is_latest: ((): boolean => {
-                if (agg.closed || t.status === "rejected") return false;
-                const pendingId = agg.pendingEscalation ? agg.latestEscalationId
-                    : agg.pendingPlan ? agg.latestPlanId
-                    : agg.pendingResolution ? agg.latestResolutionId
-                    : agg.pendingWontfix ? agg.latestWontfixId
-                    : 0;
-                if (pendingId > 0) return pendingId === agg.lastSpeakerId;
-                // #1835 — a decision filed WITH the ticket (`ticket_new({then})`)
-                // has no comment to compare ids against. It is the freshest
-                // signal exactly while nobody has spoken since.
-                return ticketDecision(t, null) && agg.commentCount === 0;
-            })(),
-            scope: t.scope,
-            // Per-consumer unread flag (≥1 unseen ping on the thread for
-            // the caller, resolved from the X-Aiball-Consumer header).
-            unread: unreadMap.get(t.id) ?? false,
-            // #405/#532 (sfbsdy + s2sjxz) + #657 david — visibility cross-
-            // agent : 🔥 s'allume sur activité récente (< hot_window_sec)
-            // OR claim récent (claimed_at < hot_window_sec). Le claim
-            // récent est un signal fort « un agent vient de prendre
-            // ça » même avant qu il poste quoi que ce soit ; le filtre
-            // sur hot_window_sec évite la régression #509 (s2sjxz —
-            // claim 15h vieux marquant hot indéfiniment). Le bookmark-
-            // fill chip distincte dans le meta slot reste pour exposer
-            // QUI claim (info que `hot` seul perd).
-            hot: crossAgentHotFocus.has(t.id)
-                || (typeof t.claimed_at === "string"
-                    && Date.now() - new Date(t.claimed_at).getTime() < hotWindowSec() * 1000),
-            // Snooze (#B.329). `postponed=true` means the deadline hasn't
-            // passed yet — UI hides the row from the open inbox the same
-            // way `closed=true` does. `postponed_until` is the deadline
-            // itself, surfaced as a chip on the row when relevant.
-            postponed,
-            postponed_until: postponedUntil,
-            comment_count: agg.commentCount,
-            pending_comment_count: agg.pendingCount,
-            last_activity:
-                agg.lastActivity && agg.lastActivity > t.created_at
-                    ? agg.lastActivity
-                    : t.created_at,
-            // #B.132: who spoke last on this thread. Fallback to the
-            // ticket creator when there are no comments yet — the
-            // discrete "you spoke last" cue should still apply to
-            // freshly created tickets the consumer just authored.
-            last_speaker: agg.lastSpeaker ?? t.by_agent,
-            tags: tagsMap.get(t.id) ?? [],
-            // #427: accumulated token-effort tally (null until any usage is
-            // captured) so the inbox row can surface the cost-equiv chip.
-            token_usage: tokenUsageMap.get(t.id) ?? null,
-            // #429: who currently holds this ticket, so the list can render a
-            // compact claim/assign icon + tooltip naming the holder (parity
-            // with the thread header). Two distinct holds (#436) — a row can
-            // carry both: CLAIM (focus, agent self-declared) and ASSIGNMENT
-            // (responsibility, a human push).
-            claimant: t.claimant ?? null,
-            claimed_at: t.claimed_at ?? null,
-            assignee: t.assignee ?? null,
-            assigned_at: t.assigned_at ?? null,
-        };
-    });
+    // #2072 — the row is built by the shared builder, so a mutation that
+    // returns "the updated object" returns exactly what the list holds.
+    const rowCtx = buildInboxRowContext(tickets, consumerId, project);
+    let rows = tickets.map((t) => buildInboxRow(t, rowCtx));
 
     if (status === "pending") {
         rows = rows.filter((r) => r.status === "pending" || r.pending_comment_count > 0);
@@ -987,7 +833,7 @@ ticketsRouter.post("/tickets/:id/mark-read", (req: Request, res: Response) => {
     const upToId = req.body?.up_to_id;
     const opts = typeof upToId === "number" && upToId > 0 ? { upTo: upToId } : undefined;
     const r = markTicketSeen(consumerOf(req), id, opts);
-    res.json({ ticket_id: id, ...(opts ? { up_to_id: upToId } : {}), ...r });
+    res.json({ ticket_id: id, ...(opts ? { up_to_id: upToId } : {}), ...r, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 ticketsRouter.post("/tickets/:id/mark-unread", (req: Request, res: Response) => {
@@ -995,7 +841,7 @@ ticketsRouter.post("/tickets/:id/mark-unread", (req: Request, res: Response) => 
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const r = markTicketUnseen(consumerOf(req), id);
-    res.json({ ticket_id: id, ...r });
+    res.json({ ticket_id: id, ...r, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 /**
@@ -1037,7 +883,7 @@ ticketsRouter.post("/tickets/:id/postpone", (req: Request, res: Response) => {
     if (!ok) return notFound(res, "ticket not found");
     const updated = getMessage(id);
     if (updated) broadcast({ type: "message_edited", data: updated });
-    res.json({ ticket_id: id, postponed_until: iso });
+    res.json({ ticket_id: id, postponed_until: iso, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 ticketsRouter.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
@@ -1055,7 +901,7 @@ ticketsRouter.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
     setTicketPostpone(id, null);
     const updated = getMessage(id);
     if (updated) broadcast({ type: "message_edited", data: updated });
-    res.json({ ticket_id: id, postponed_until: null });
+    res.json({ ticket_id: id, postponed_until: null, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 /**
@@ -1149,7 +995,7 @@ ticketsRouter.get("/tickets/:id/relations", (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
-    res.json({ ticket_id: id, relations: listTypedRelationsForTicket(id) });
+    res.json({ ticket_id: id, relations: listTypedRelationsForTicket(id), ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
