@@ -36,6 +36,10 @@ import {
 } from "../questions.js";
 import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionStatus } from "../decisions.js";
 import { getConfig } from "./config-overrides.js"; // #449: config-driven default priority
+// #2070 — inferring a cross-project deposit. The rule is pure and lives apart;
+// only the lookup of who-belongs-where happens here.
+import { originProjectFor } from "./origin-project.js";
+import { listSubscriptions } from "./subscriptions.js";
 
 /**
  * #374: record `actor` as the ticket's last actor at time `at`. Called from
@@ -135,8 +139,25 @@ export function insertMessage(m: NewMessage): Message {
                 // #B.245 tristate. Omit when caller didn't specify so
                 // the column default ('default') applies.
                 ...(m.scope ? { scope: m.scope } : {}),
-                // #697 F4 — explicit cross-project origin (NULL = intra-project).
-                fromProject: m.from_project ?? null,
+                // #697 F4 — cross-project origin (NULL = intra-project).
+                //
+                // #2070 — inferred when the caller didn't say. The field has
+                // existed since #697 and renders a "from X" badge on the
+                // reading side, but it was NULL on every ticket ever filed:
+                // it only got set when an agent thought to pass it, and none
+                // did. So filing next door and filing next door BY MISTAKE
+                // produced exactly the same silence — which is how two `jbx`
+                // design tickets ended up in a project their author has no
+                // role in, indistinguishable from the deliberate announcement
+                // the same author had filed there three days earlier.
+                //
+                // An explicit value always wins: the caller knows something we
+                // don't. Inference only fills the blank, and stays silent
+                // whenever the origin is ambiguous — a false badge sends the
+                // reader after a relationship that does not exist, while a
+                // missing one merely reads as ordinary.
+                fromProject: m.from_project
+                    ?? (m.by_agent ? originProjectFor(m.project, listSubscriptions(m.by_agent)) : null),
             }).returning().get();
             return ticketRowToMessage(inserted);
         }

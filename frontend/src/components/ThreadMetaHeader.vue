@@ -45,6 +45,17 @@ function statusSeverity(s: "pending" | "approved" | "rejected"): Severity {
             @keydown.space.prevent="emit('copy')"
         />
         <Tag :value="ticket.project" severity="info" />
+        <!-- #2070 : l'origine, quand le ticket vient d'ailleurs. Rendue
+             seulement sur un dépôt cross-projet — donc rare, donc sans bruit
+             sur le cas courant, comme le badge de scope juste en dessous.
+             Déposer chez le voisin est légitime ; ce qui manquait, c'est de
+             pouvoir le distinguer d'un égarement. -->
+        <Tag
+            v-if="ticket.from_project"
+            :value="`from ${ticket.from_project}`"
+            severity="secondary"
+            :title="`Filed from ${ticket.from_project} — its author does not belong to ${ticket.project}`"
+        />
         <!-- #362 : l'intent vit dans la cartouche du haut (avec projet
              + statut), plus dans la bande de tags sous le titre. -->
         <Tag

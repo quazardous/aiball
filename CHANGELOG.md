@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A ticket filed into a project its author doesn't belong to now records where
+  it came from, and the thread shows a "from X" tag. Filing next door is
+  legitimate — it's the first reason to open a ticket at all — but until now it
+  looked exactly like filing there by mistake. The field existed and was never
+  set; nothing fills it when the origin is ambiguous, since a wrong origin is
+  worse than none.
 - The repository is now installable as a Claude Code plugin, and declares itself
   as a marketplace of one. The two skills it already ships are picked up from
   their existing location — nothing moved. This is also what makes it

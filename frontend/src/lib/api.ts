@@ -283,6 +283,13 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 export interface TicketSummary {
     id: number;
     project: string;
+    /**
+     * #2070 — the project this ticket was filed FROM, when its author does not
+     * belong to `project`. Null for an ordinary intra-project ticket, and null
+     * too whenever the origin is ambiguous: a wrong "from X" sends the reader
+     * after a relationship that does not exist.
+     */
+    from_project?: string | null;
     title: string | null;
     /** Agent-authored one-line summary (#B.87). Falls back to title. */
     summary?: string | null;
