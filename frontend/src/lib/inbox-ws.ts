@@ -106,15 +106,22 @@ export function useInboxWs(opts: {
         // `message_decided`, `message_edited`, `message_noted`).
         const data = ev.data as Message | undefined;
         if (!data || typeof data !== "object") return;
+        // #2072 — `message.arrived` / `message.decided` carry the message, so
+        // the board can decide whether to touch one row or re-read the page.
+        // They therefore do NOT also fire the blanket `inbox.refresh`, which
+        // would re-read unconditionally and undo the whole point.
+        //
+        // `message_edited` and `message_noted` have no precise lane yet, so
+        // they keep the blanket refresh: a coarse update beats a missed one.
         if (ev.type === "message_created") bus.emit("message.arrived", data);
         else if (ev.type === "message_decided") bus.emit("message.decided", data);
+        else bus.emit("inbox.refresh");
         if (data.ticket_id !== null && data.ticket_id !== undefined) {
             bus.emit("thread.refresh", { ticketId: data.ticket_id });
         }
         if (data.kind === "ticket_created") {
             bus.emit("thread.refresh", { ticketId: data.id });
         }
-        bus.emit("inbox.refresh");
         bus.emit("projects.refresh");
     });
 

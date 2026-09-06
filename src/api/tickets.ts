@@ -370,7 +370,17 @@ ticketsRouter.get("/inbox", (req, res) => {
     // (≥1 unseen ping on the thread for that consumer).
     const consumerId = consumerOf(req);
 
-    const tickets = listMessages({ kind: "ticket_created", project });
+    let tickets = listMessages({ kind: "ticket_created", project });
+    // #2072 — `ids` narrows to specific tickets so a client can refresh ONE row
+    // instead of a page. Every other filter still applies, and that is the
+    // useful part: an empty answer means "this ticket no longer belongs in this
+    // view", which is exactly what a cache needs to hear to drop the row.
+    // Paging is skipped for an id query — the caller already named the set.
+    const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
+    const wantedIds = idsParam
+        ? new Set(idsParam.split(",").map((n) => Number(n.trim())).filter(Number.isSafeInteger))
+        : null;
+    if (wantedIds) tickets = tickets.filter((t) => wantedIds.has(t.id));
     // #2072 — the row is built by the shared builder, so a mutation that
     // returns "the updated object" returns exactly what the list holds.
     const rowCtx = buildInboxRowContext(tickets, consumerId, project);
@@ -442,7 +452,7 @@ ticketsRouter.get("/inbox", (req, res) => {
     // which is what every non-UI consumer still asks for.
     const total = rows.length;
     res.setHeader("X-Total-Count", String(total));
-    const limit = Number(req.query.limit);
+    const limit = wantedIds ? NaN : Number(req.query.limit);
     if (Number.isFinite(limit) && limit > 0) {
         const offset = Math.max(0, Number(req.query.offset) || 0);
         rows = rows.slice(offset, offset + limit);

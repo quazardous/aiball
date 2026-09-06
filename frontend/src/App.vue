@@ -3,12 +3,13 @@ import { computed, onMounted, provide, ref, watch } from "vue";
 import Toast from "primevue/toast";
 import ConfirmDialog from "primevue/confirmdialog";
 import { useToast } from "primevue/usetoast";
-import { api, type InboxRow, type ProjectMeta, type Strategy } from "./lib/api";
+import { api, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
 import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
 import { resetToRoot, stripBase } from "./lib/base";
 import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
+import { decideInboxUpdate } from "./lib/inbox-patch";
 import { useLoader } from "./lib/loader";
 import BulkBar from "./components/BulkBar.vue";
 import { type BulkAction, useBulkActions } from "./lib/ticket-actions";
@@ -363,6 +364,49 @@ const { connected } = useInboxWs({ strategy, openTicketId });
 // Local consumers — same effects as before, just driven by the bus now.
 useBus("projects.refresh", () => { loadProjects(); });
 useBus("inbox.refresh", () => { loadRows(); });
+
+// #2072 — a live event touches ONE row when it can, and re-reads the page when
+// membership might have moved. `inbox-patch` holds the rule and explains the
+// bias; this is only the plumbing.
+//
+// The patch path costs ~1 KB against the ~26 KB of a page — and the page was
+// 2.26 MB before #2071, so the same event is now three orders of magnitude
+// cheaper than it was this morning.
+async function applyInboxEvent(m: Message): Promise<void> {
+    if (!inListView.value || searchActive.value) return;
+    const decision = decideInboxUpdate(m, { visible: new Set(rows.value.map((r) => r.id)) });
+    if (decision.kind === "ignore") return;
+    if (decision.kind === "refetch") { loadRows(); return; }
+    try {
+        const { rows: fresh } = await api.inbox({
+            ids: [decision.ticketId],
+            status: statusFilter.value === "all" || statusFilter.value === "unread"
+                ? undefined
+                : statusFilter.value,
+            project: project.value ?? undefined,
+            open: onlyOpen.value,
+            include_postponed: showSnoozed.value,
+            ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
+            ...(statusFilter.value === "unread" ? { unread: true } : {}),
+        });
+        const updated = fresh[0];
+        if (!updated) {
+            // The row no longer matches this view — it left. Something from the
+            // next page should take its place, and only the server knows what.
+            loadRows();
+            return;
+        }
+        const i = rows.value.findIndex((r) => r.id === updated.id);
+        if (i >= 0) rows.value[i] = updated;
+        else loadRows();
+    } catch {
+        // A failed patch must never leave a stale row on screen: fall back to
+        // re-reading the page, which is exactly the behaviour this replaced.
+        loadRows();
+    }
+}
+useBus("message.arrived", (m) => { void applyInboxEvent(m); });
+useBus("message.decided", (m) => { void applyInboxEvent(m); });
 useBus("message.arrived", (m) => { notifyArrival(m); });
 useBus("message.decided", (m) => { notifyArrival(m); });
 useBus("project.deleted", ({ project: deleted }) => {

@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A live update now refreshes the one row it concerns — about a kilobyte —
+  instead of re-reading the list. The list is still re-read when an event can
+  change *which* tickets belong on the page (a ticket opening or closing, or
+  activity on one that isn't shown), because a browser holding one page cannot
+  know that on its own, and a list that quietly disagrees with the server is
+  worse than one extra read.
 - Ticket mutations now return the updated ticket alongside their existing
   acknowledgement, so a client can refresh what it shows without asking for the
   list again. The row is built by the same code the list uses, which is what

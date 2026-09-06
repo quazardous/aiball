@@ -825,6 +825,10 @@ export const api = {
             sort?: string;
             limit?: number;
             offset?: number;
+            /** #2072 — narrow to specific tickets, to refresh ONE row (~1 KB)
+             *  instead of a page. An id that comes back missing no longer
+             *  belongs in this view, which is how a cache learns to drop it. */
+            ids?: number[];
         } = {},
     ): Promise<{ rows: InboxRow[]; total: number }> => {
         const qs = new URLSearchParams();
@@ -840,6 +844,7 @@ export const api = {
         // travels with the request rather than living in the endpoint.
         if (params.limit) qs.set("limit", String(params.limit));
         if (params.offset) qs.set("offset", String(params.offset));
+        if (params.ids?.length) qs.set("ids", params.ids.join(","));
         const q = qs.toString();
         const res = await rawReq("GET", `/api/inbox${q ? "?" + q : ""}`);
         const rows = (await res.json()) as InboxRow[];
