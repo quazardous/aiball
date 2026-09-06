@@ -301,7 +301,8 @@ ticketsRouter.post("/tickets/:id/token-usage", (req: Request, res: Response) => 
     const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
     addTicketTokenUsage(id, { in: n(b.in), out: n(b.out), cacheW: n(b.cache_w), cacheR: n(b.cache_r) });
     // #439: surface both so a stale-marker vs claim-anchor mismatch is debuggable.
-    res.json({ ticket_id: id, marker_id: markerId, ok: true });
+    // #2072 — usage changes the row's token chip, so the row comes back too.
+    res.json({ ticket_id: id, marker_id: markerId, ok: true, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 /**
@@ -929,7 +930,11 @@ ticketsRouter.post("/tickets/:id/move", (req: Request, res: Response) => {
         return badRequest(res, `ticket is already in project "${target}"`);
     }
     const updated = moveTicketTo(id, target, caller);
-    res.json(updated);
+    // #2072 — the move returns a raw Message, which is what callers have always
+    // read. The canonical row rides alongside so a cache patches from the SAME
+    // shape here as everywhere else — and a move is precisely when it matters,
+    // since changing project can take the row out of the view entirely.
+    res.json({ ...updated, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 // ---- Typed inter-ticket relations (#B.123 phase B) ------------------------
