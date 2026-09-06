@@ -23,6 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Changed
+
+- The board loads one page of the inbox instead of the whole thing. It used to
+  fetch every ticket ever filed — 2071 rows, 2.26 MB — to display 25 of them,
+  and the page now weighs 27 KB. Sorting, the unread filter and paging all
+  happen on the server, in the order the list displays, so rows arrive where the
+  eye expects them. Selecting rows is now cleared when you change page, since a
+  selection can only act on what is loaded.
+
 ### Added
 
 - A ticket filed into a project its author doesn't belong to now records where

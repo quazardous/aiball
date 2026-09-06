@@ -254,7 +254,13 @@ export function setUnauthorizedHandler(fn: () => void): void {
     onUnauthorized = fn;
 }
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+/**
+ * The shared core: auth, base path, error handling. Returns the Response so a
+ * caller that needs a HEADER can read one — #2071's pager needs the total row
+ * count, which cannot travel in a body that must stay a plain array for every
+ * other consumer.
+ */
+async function rawReq(method: string, path: string, body?: unknown): Promise<Response> {
     const headers: Record<string, string> = {
         "x-aiball-consumer": currentConsumer(),
     };
@@ -276,6 +282,11 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
         const text = await res.text();
         throw new Error(`${method} ${path} → ${res.status}: ${text}`);
     }
+    return res;
+}
+
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const res = await rawReq(method, path, body);
     if (res.status === 204) return undefined as T;
     return res.json() as Promise<T>;
 }
@@ -793,7 +804,16 @@ export const api = {
         const q = qs.toString();
         return req<TicketSummary[]>("GET", `/api/tickets${q ? "?" + q : ""}`);
     },
-    inbox: (
+    /**
+     * #2071 — one page of the inbox, filtered and sorted BY THE SERVER.
+     *
+     * It used to fetch the whole board and slice client-side, which was fine
+     * when the comment justifying it was written ("~63 rows total today") and
+     * had quietly become 2071 rows and 2.26 MB to display 25. Returns the page
+     * plus the total, the latter read from a header so the body stays a plain
+     * array for every other consumer.
+     */
+    inbox: async (
         params: {
             project?: string;
             status?: string;
@@ -801,8 +821,12 @@ export const api = {
             intent?: string;
             priority?: Priority;
             include_postponed?: boolean;
+            unread?: boolean;
+            sort?: string;
+            limit?: number;
+            offset?: number;
         } = {},
-    ) => {
+    ): Promise<{ rows: InboxRow[]; total: number }> => {
         const qs = new URLSearchParams();
         if (params.project) qs.set("project", params.project);
         if (params.status) qs.set("status", params.status);
@@ -810,8 +834,17 @@ export const api = {
         if (params.intent) qs.set("intent", params.intent);
         if (params.priority) qs.set("priority", params.priority);
         if (params.include_postponed) qs.set("include_postponed", "1");
+        if (params.unread) qs.set("unread", "1");
+        if (params.sort) qs.set("sort", params.sort);
+        // The page size is the reader's own preference, not a constant — so it
+        // travels with the request rather than living in the endpoint.
+        if (params.limit) qs.set("limit", String(params.limit));
+        if (params.offset) qs.set("offset", String(params.offset));
         const q = qs.toString();
-        return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
+        const res = await rawReq("GET", `/api/inbox${q ? "?" + q : ""}`);
+        const rows = (await res.json()) as InboxRow[];
+        const header = Number(res.headers.get("X-Total-Count"));
+        return { rows, total: Number.isFinite(header) ? header : rows.length };
     },
     markTicketRead: (id: number, upToId?: number) =>
         req<{ ticket_id: number; updated: number; up_to_id?: number }>(

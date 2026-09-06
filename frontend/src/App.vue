@@ -308,26 +308,30 @@ const { loading, load: runLoadRows } = useLoader(async () => {
         return;
     }
     searchHits.value = [];
-    // `unread` is a per-consumer view, not a server-side moderation
-    // status. Don't forward it to the API — fetch the full set under
-    // the other filters, then narrow on the row's `unread` flag
-    // client-side. Same payload, smaller pile.
+    // #2071 — `unread` now travels to the API. It used to be narrowed here,
+    // and that single client-side filter is why the endpoint had to return the
+    // whole board: you cannot page before a filter without ragged pages. The
+    // flag was always computed server-side; only the filter was missing.
     const apiStatus =
         statusFilter.value === "all" || statusFilter.value === "unread"
             ? undefined
             : statusFilter.value;
-    let fetched = await api.inbox({
+    const { rows: fetched, total: count } = await api.inbox({
         status: apiStatus,
         project: project.value ?? undefined,
         open: onlyOpen.value,
         include_postponed: showSnoozed.value,
         // #B.222: forward priority filter; "all" → no narrowing.
         ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
+        ...(statusFilter.value === "unread" ? { unread: true } : {}),
+        // The board asks for the page it displays, in the order it displays —
+        // filling out of order would insert rows above the one being read.
+        sort: sortBy.value,
+        limit: pageSize.value,
+        offset: (page.value - 1) * pageSize.value,
     });
-    if (statusFilter.value === "unread") {
-    fetched = fetched.filter((r) => r.unread);
-    }
     rows.value = fetched;
+    total.value = count;
 }, {
     onError: (detail) => toast.add({ severity: "error", summary: "Failed to load inbox", detail, life: 8000 }),
 });
@@ -403,49 +407,36 @@ watch(searchQuery, () => {
     }, 220);
 });
 
-// #B.222 sxrz48: priority-aware client-side sort. Weight mirrors the
-// backend's /api/tickets order so the inbox + sidebar + wake-CTA all
-// agree on what "urgent first" means.
-const PRIORITY_WEIGHT: Record<string, number> = {
-    urgent: 4,
-    high: 3,
-    normal: 2,
-    low: 1,
-};
+// #2071 — the client's copy of the priority weights is gone with the
+// client-side sort. It "mirrored the backend's order so the inbox, sidebar and
+// wake-CTA all agree on what urgent first means" — two tables that had to be
+// kept in step by hand. One table now, on the side that sorts.
 
-const sortedRows = computed(() => {
-    const r = [...rows.value];
-    if (sortBy.value === "created_desc") {
-        r.sort((a, b) => b.created_at.localeCompare(a.created_at));
-    } else if (sortBy.value === "created_asc") {
-        r.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    } else if (sortBy.value === "priority") {
-        r.sort((a, b) => {
-            const wA = PRIORITY_WEIGHT[a.priority ?? "normal"] ?? 2;
-            const wB = PRIORITY_WEIGHT[b.priority ?? "normal"] ?? 2;
-            if (wA !== wB) return wB - wA;
-            return b.created_at.localeCompare(a.created_at);
-        });
-    }
-    // "activity" is the API default; rows already arrive sorted that way.
-    return r;
-});
+// #2071 — the server sorts now, in the same three orders the toolbar offers.
+// Re-sorting here would only reorder the 25 rows of the current page, which
+// looks like sorting and isn't: the other 2000 rows are not in the browser.
 
-// Client-side pagination of the inbox (#B.74). Server still returns
-// everything because the "unread" filter is computed client-side from
-// the per-row flag — paginating before that filter would yield ragged
-// pages. With ~63 rows total today, paying the bandwidth is trivial.
+// Pagination of the inbox (#B.74), SERVER-SIDE since #2071.
+//
+// It was client-side, and the reason was written right here: the "unread"
+// filter was computed in the browser, and paging before a filter yields ragged
+// pages. The justification ended with "with ~63 rows total today, paying the
+// bandwidth is trivial" — true when written, and quietly false ever since. The
+// board reached 2071 rows and 2.26 MB to display 25 of them, and nothing said
+// so, because a slow page looks exactly like a normal one.
+//
+// Moving the `unread` filter to the API removed the obstacle; the page size
+// stays a reader preference and travels with each request.
 const DEFAULT_PAGE_SIZE = 25;
 const pageSize = ref<number>(
     Number(localStorage.getItem("aiball.page_size")) || DEFAULT_PAGE_SIZE,
 );
 const page = ref(1);
-const pagedRows = computed(() =>
-    sortedRows.value.slice(
-        (page.value - 1) * pageSize.value,
-        page.value * pageSize.value,
-    ),
-);
+/** Total rows matching the filters, from the response header — the page alone
+ *  cannot say how many there are, and the pager needs to know. */
+const total = ref(0);
+/** What the server returned IS the page: no slicing left to do. */
+const pagedRows = computed(() => rows.value);
 
 // #B.213 phase A.1: bulk-selection state + dispatch wired now that
 // both `rows` and `pagedRows` are in scope. selectAllVisible needs
@@ -468,6 +459,24 @@ watch([statusFilter, onlyOpen, project, showSnoozed, sortBy, searchQuery, priori
 watch(pageSize, (v) => {
     localStorage.setItem("aiball.page_size", String(v));
     page.value = 1;
+});
+
+// #2071 — these three now decide what the SERVER returns, so each has to
+// re-fetch. Before, paging and sorting rearranged rows already in the browser;
+// there are no longer 2000 of them to rearrange.
+//
+// Changing a filter while on page > 1 can fetch twice: once from the filter
+// watcher above, once when the page resets to 1. Left as is on purpose — a
+// page is 26 KB now, and a debouncer would be more machinery than the waste it
+// saves.
+watch([page, pageSize, sortBy], () => {
+    // The selection is resolved against the rows in memory, and those are now
+    // one page. Without this, a row ticked on page 1 would vanish from the
+    // batch on page 2 — silently, which is the worst way for it to happen.
+    // Clearing matches what the code already intended: `selectAllVisible`
+    // documents "visible = the current page's rows".
+    clearSelection();
+    if (inListView.value) loadRows();
 });
 
 useRouting({
@@ -830,10 +839,10 @@ watch(showSnoozed, (v) => {
                     />
 
                     <PaginationBar
-                        v-if="!searchActive && sortedRows.length > 0"
+                        v-if="!searchActive && total > 0"
                         :page="page"
                         :page-size="pageSize"
-                        :total="sortedRows.length"
+                        :total="total"
                         @update:page="page = $event"
                         @update:page-size="pageSize = $event"
                     />

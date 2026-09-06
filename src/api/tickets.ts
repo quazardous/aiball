@@ -342,6 +342,13 @@ ticketsRouter.get("/tickets/bookends", (req, res) => {
  *   - "rejected" → tickets with status=rejected
  *   - undefined  → every ticket regardless of status
  */
+/**
+ * Priority ranks, shared by the inbox sort (#2071) and the work-order sort.
+ * One table: two copies would be a place for the two orderings to disagree
+ * without anyone noticing.
+ */
+const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
+
 ticketsRouter.get("/inbox", (req, res) => {
     const project = req.query.project as string | undefined;
     const status = req.query.status as MessageStatus | undefined;
@@ -397,7 +404,10 @@ ticketsRouter.get("/inbox", (req, res) => {
             id: t.id,
             project: t.project,
             title: t.title,
-            summary: t.summary ?? null,
+            // #2071 — `summary` is NOT sent: measured at 203 KB (8.4%) of the
+            // payload, and the inbox row never reads it (`titleOf` falls back
+            // to a literal, not to the summary). It stays on the per-ticket
+            // endpoints, where it is actually rendered.
             // #1161 S1 — list rows carry a SNIPPET, not the full body : bodies
             // were 75 % of the payload while the UI renders 140 chars max
             // (`snippetOf`). Full bodies stay on the per-ticket endpoints.
@@ -546,7 +556,50 @@ ticketsRouter.get("/inbox", (req, res) => {
         rows = rows.filter((r) => (r.priority ?? "normal") === priorityFilter);
     }
 
-    rows.sort((a, b) => b.last_activity.localeCompare(a.last_activity));
+    // #2071 — the UNREAD filter, server-side. This is the one that unblocks
+    // everything else: the client computed it from the per-row flag, and the
+    // code said so where it paginated ("paginating before that filter would
+    // yield ragged pages"), so the endpoint had to return the whole board.
+    // The flag was already computed here; only the filter was missing.
+    if (req.query.unread === "1") {
+        rows = rows.filter((r) => r.unread);
+    }
+
+    // #2071 — sort server-side, in the order the board displays. Paging in any
+    // other order makes rows insert themselves above the one being read, which
+    // is why loading "smallest project first" was the wrong idea however much
+    // faster each chunk arrived (david `x3k3pr`). The three orders mirror the
+    // client's own; `activity` stays the default the API always had.
+    const sortBy = typeof req.query.sort === "string" ? req.query.sort : "activity";
+    if (sortBy === "created_desc") {
+        rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    } else if (sortBy === "created_asc") {
+        rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    } else if (sortBy === "priority") {
+        rows.sort((a, b) => {
+            const w = (p: string | null | undefined) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2;
+            const d = w(b.priority) - w(a.priority);
+            return d !== 0 ? d : b.created_at.localeCompare(a.created_at);
+        });
+    } else {
+        rows.sort((a, b) => b.last_activity.localeCompare(a.last_activity));
+    }
+
+    // #2071 — page AFTER filtering and sorting, never before. The total goes in
+    // a header rather than wrapping the body in an envelope: every existing
+    // consumer keeps receiving a plain array, and the pager gets its count.
+    //
+    // The page SIZE comes from the caller (david `x3k3pr`): it is a user
+    // preference kept in localStorage, so hardcoding 25 here would silently
+    // ignore whatever the reader chose. No limit at all = the whole list,
+    // which is what every non-UI consumer still asks for.
+    const total = rows.length;
+    res.setHeader("X-Total-Count", String(total));
+    const limit = Number(req.query.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+        const offset = Math.max(0, Number(req.query.offset) || 0);
+        rows = rows.slice(offset, offset + limit);
+    }
 
     res.json(rows);
 });
@@ -890,7 +943,6 @@ ticketsRouter.get("/tickets", (req, res) => {
     // The `open`/`actionable` filters above only SUBSET the rows; this orders
     // whatever's left. Sets are nested: unread ⊂ actionable ⊂ open.
     {
-        const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
         // #402/#405/#532 : pour le sort tiebreak on prend SELF (per-agent), pas
         // cross-agent. Le ranking d'un agent suit son propre focus, pas celui
         // des autres (préserve la sémantique #532 `bmzpfr`). Le `hot` row flag
