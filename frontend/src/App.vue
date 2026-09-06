@@ -3,13 +3,13 @@ import { computed, onMounted, provide, ref, watch } from "vue";
 import Toast from "primevue/toast";
 import ConfirmDialog from "primevue/confirmdialog";
 import { useToast } from "primevue/usetoast";
-import { api, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
+import { api, type InboxRow, type ProjectMeta, type Strategy } from "./lib/api";
 import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
 import { resetToRoot, stripBase } from "./lib/base";
 import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
-import { decideInboxUpdate } from "./lib/inbox-patch";
+import { useInboxCache } from "./lib/inbox-cache";
 import { useLoader } from "./lib/loader";
 import BulkBar from "./components/BulkBar.vue";
 import { type BulkAction, useBulkActions } from "./lib/ticket-actions";
@@ -152,7 +152,6 @@ const myConsumerId = (() => {
 const project = ref<string | null>(
     localStorage.getItem("aiball.project") || null,
 );
-const rows = ref<InboxRow[]>([]);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
 // Routed as /consumers/<id> via lib/router.ts (#B.193).
@@ -305,34 +304,15 @@ const { loading, load: runLoadRows } = useLoader(async () => {
             open: onlyOpen.value,
             limit: 100,
         });
-        rows.value = []; // we render searchHits in this mode
+        inbox.clear(); // we render searchHits in this mode
         return;
     }
     searchHits.value = [];
-    // #2071 — `unread` now travels to the API. It used to be narrowed here,
-    // and that single client-side filter is why the endpoint had to return the
-    // whole board: you cannot page before a filter without ragged pages. The
-    // flag was always computed server-side; only the filter was missing.
-    const apiStatus =
-        statusFilter.value === "all" || statusFilter.value === "unread"
-            ? undefined
-            : statusFilter.value;
-    const { rows: fetched, total: count } = await api.inbox({
-        status: apiStatus,
-        project: project.value ?? undefined,
-        open: onlyOpen.value,
-        include_postponed: showSnoozed.value,
-        // #B.222: forward priority filter; "all" → no narrowing.
-        ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
-        ...(statusFilter.value === "unread" ? { unread: true } : {}),
-        // The board asks for the page it displays, in the order it displays —
-        // filling out of order would insert rows above the one being read.
-        sort: sortBy.value,
-        limit: pageSize.value,
-        offset: (page.value - 1) * pageSize.value,
-    });
-    rows.value = fetched;
-    total.value = count;
+    // #2072 — the query, the paging and the live-event handling all live in
+    // `useInboxCache`. This is the user-initiated read, wrapped by the loader
+    // so it shows the spinner; the cache's own event-driven reads deliberately
+    // don't, since a background refresh shouldn't flash one.
+    await inbox.fetchPage();
 }, {
     onError: (detail) => toast.add({ severity: "error", summary: "Failed to load inbox", detail, life: 8000 }),
 });
@@ -363,50 +343,8 @@ const { connected } = useInboxWs({ strategy, openTicketId });
 
 // Local consumers — same effects as before, just driven by the bus now.
 useBus("projects.refresh", () => { loadProjects(); });
-useBus("inbox.refresh", () => { loadRows(); });
-
-// #2072 — a live event touches ONE row when it can, and re-reads the page when
-// membership might have moved. `inbox-patch` holds the rule and explains the
-// bias; this is only the plumbing.
-//
-// The patch path costs ~1 KB against the ~26 KB of a page — and the page was
-// 2.26 MB before #2071, so the same event is now three orders of magnitude
-// cheaper than it was this morning.
-async function applyInboxEvent(m: Message): Promise<void> {
-    if (!inListView.value || searchActive.value) return;
-    const decision = decideInboxUpdate(m, { visible: new Set(rows.value.map((r) => r.id)) });
-    if (decision.kind === "ignore") return;
-    if (decision.kind === "refetch") { loadRows(); return; }
-    try {
-        const { rows: fresh } = await api.inbox({
-            ids: [decision.ticketId],
-            status: statusFilter.value === "all" || statusFilter.value === "unread"
-                ? undefined
-                : statusFilter.value,
-            project: project.value ?? undefined,
-            open: onlyOpen.value,
-            include_postponed: showSnoozed.value,
-            ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
-            ...(statusFilter.value === "unread" ? { unread: true } : {}),
-        });
-        const updated = fresh[0];
-        if (!updated) {
-            // The row no longer matches this view — it left. Something from the
-            // next page should take its place, and only the server knows what.
-            loadRows();
-            return;
-        }
-        const i = rows.value.findIndex((r) => r.id === updated.id);
-        if (i >= 0) rows.value[i] = updated;
-        else loadRows();
-    } catch {
-        // A failed patch must never leave a stale row on screen: fall back to
-        // re-reading the page, which is exactly the behaviour this replaced.
-        loadRows();
-    }
-}
-useBus("message.arrived", (m) => { void applyInboxEvent(m); });
-useBus("message.decided", (m) => { void applyInboxEvent(m); });
+// #2072 — the inbox's own bus lanes live in `useInboxCache`: it is the only
+// writer of the rows, so it is the only thing that needs to hear about them.
 useBus("message.arrived", (m) => { notifyArrival(m); });
 useBus("message.decided", (m) => { notifyArrival(m); });
 useBus("project.deleted", ({ project: deleted }) => {
@@ -476,9 +414,19 @@ const pageSize = ref<number>(
     Number(localStorage.getItem("aiball.page_size")) || DEFAULT_PAGE_SIZE,
 );
 const page = ref(1);
-/** Total rows matching the filters, from the response header — the page alone
- *  cannot say how many there are, and the pager needs to know. */
-const total = ref(0);
+
+// #2072 — the cache. Created here because it reads every filter above, and
+// before the readers below. It owns `rows` and `total` and is the only thing
+// that writes them; the list, the pager and the bulk bar just read.
+const inbox = useInboxCache({
+    filters: { statusFilter, project, onlyOpen, showSnoozed, priorityFilter, sortBy, page, pageSize },
+    // A thread or a search owns the screen — the cache then ignores live
+    // events rather than fetching pages nobody is looking at.
+    enabled: computed(() => inListView.value && !searchActive.value),
+});
+const { rows, total } = inbox;
+// #2072 — `rows` and `total` moved into `useInboxCache`, created below once
+// every filter it reads exists. One writer, many readers.
 /** What the server returned IS the page: no slicing left to do. */
 const pagedRows = computed(() => rows.value);
 

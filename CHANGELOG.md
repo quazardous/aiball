@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- The inbox rows now have a single owner. Whatever changes them — a live event,
+  a filter, a page turn — goes through one place, and every other part of the
+  board reads from it. A background refresh no longer flashes the loading
+  spinner, since nobody asked for it.
 - A live update now refreshes the one row it concerns — about a kilobyte —
   instead of re-reading the list. The list is still re-read when an event can
   change *which* tickets belong on the page (a ticket opening or closing, or
