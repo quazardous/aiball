@@ -9,7 +9,28 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveInitSize, formatInitSize } from "./init-size.js";
+import { resolveInitSize, formatInitSize, newSessionSizeArgs } from "./init-size.js";
+
+test("the session is created at the terminal's size, not the multiplexer default", () => {
+    // The measurement that forced this: with the session created detached, the
+    // proxy's resize poll read the 120-column default ~200 ms after claude was
+    // born and shrank it back, so handing the size to the proxy alone changed
+    // nothing the user could see.
+    assert.deepEqual(newSessionSizeArgs(133, 37), ["-x", "133", "-y", "37"]);
+});
+
+test("no terminal means no size flags — the default is then correct", () => {
+    // A piped or service start has nothing to copy; forcing a guessed geometry
+    // onto the session would be worse than letting the multiplexer decide.
+    assert.deepEqual(newSessionSizeArgs(undefined, undefined), []);
+    assert.deepEqual(newSessionSizeArgs(133, undefined), []);
+});
+
+test("a geometry we would refuse to send is also one we refuse to create with", () => {
+    for (const [c, r] of [[0, 37], [133, 0], [-1, 37], [2001, 37]]) {
+        assert.deepEqual(newSessionSizeArgs(c, r), [], `${c}x${r} must be refused`);
+    }
+});
 
 test("a real terminal yields the rows,cols the proxy parses", () => {
     assert.equal(resolveInitSize(200, 50), "50,200");

@@ -41,9 +41,44 @@ export function resolveInitSize(
     cols: number | undefined,
     rows: number | undefined,
 ): string | null {
+    const size = terminalSize(cols, rows);
+    return size ? formatInitSize(size.rows, size.cols) : null;
+}
+
+/** The measured terminal, or `null` when there is no terminal to measure. */
+export function terminalSize(
+    cols: number | undefined,
+    rows: number | undefined,
+): { rows: number; cols: number } | null {
     if (!Number.isInteger(cols) || !Number.isInteger(rows)) return null;
     const c = cols as number;
     const r = rows as number;
     if (c <= 0 || r <= 0 || c > 2000 || r > 2000) return null;
-    return formatInitSize(r, c);
+    return { rows: r, cols: c };
+}
+
+/**
+ * `-x`/`-y` for `new-session`, so the pane is born the size of the terminal.
+ *
+ * This is the fix; `CL_INIT_SIZE` was only ever half of one. Handing the size
+ * to the proxy made claude OPEN correctly, but the session was still created
+ * detached, so ~200 ms later the proxy's resize poll read the pane — still the
+ * multiplexer's 120-column default, because nobody had attached yet — and
+ * shrank claude back to it. Measured: claude was at 120 by the child's first
+ * `tput cols`. The reflow was not removed, only moved.
+ *
+ * Sizing the SESSION removes the disagreement at its source rather than
+ * defending against it: the pane, the proxy's probe, claude, and the resize
+ * poll all see the same number from the first instant. Nothing has to win a
+ * race, and no boot-grace heuristic has to guess how long an attach takes.
+ *
+ * Empty off a TTY — a piped or service start has no terminal to copy, and the
+ * multiplexer's default is then exactly the right answer.
+ */
+export function newSessionSizeArgs(
+    cols: number | undefined,
+    rows: number | undefined,
+): string[] {
+    const size = terminalSize(cols, rows);
+    return size ? ["-x", String(size.cols), "-y", String(size.rows)] : [];
 }
