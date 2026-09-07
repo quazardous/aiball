@@ -106,6 +106,12 @@ export class AiballClient {
         if (process.env.AIBALL_ROLE) {
             headers["x-aiball-role"] = process.env.AIBALL_ROLE;
         }
+        // #2099 — say what this machine is, so a ticket filed from here can be
+        // tagged with it. The daemon cannot deduce it: behind a proxy node the
+        // connection carries the NODE's platform, not the agent's. Same shape
+        // as the two hints above — the client states a fact about itself, the
+        // daemon decides what to do with it (a closed three-value map).
+        headers["x-aiball-platform"] = process.platform;
         const payload = body ? JSON.stringify(body) : undefined;
         // #855 — retry-with-backoff on transient daemon-down errors so
         // an `aiball restart` (or tsx-watch reload) doesn't kill in-flight

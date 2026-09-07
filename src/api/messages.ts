@@ -52,8 +52,39 @@ import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
 import { emitLifecycle } from "../event-bus.js";
 import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
+import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
+import { platformTagName } from "../db/platform-tag.js";
 
 export const messagesRouter = Router();
+
+/**
+ * #2099 — stamp the filing machine's platform on a new ticket.
+ *
+ * Applied here rather than in the MCP tool so it cannot be forgotten by a
+ * client: the CLI, the MCP and anything else that files a ticket go through
+ * this route. Creation only — a comment inherits its thread's tags by being on
+ * it, and tagging each one would say nothing new.
+ *
+ * Best-effort by construction. A ticket that exists is worth more than a
+ * ticket that is perfectly labelled, so a failure here is logged and the
+ * creation still succeeds.
+ */
+function applyPlatformTag(msg: { id: number; kind: string }, req: Request): void {
+    if (msg.kind !== "ticket_created") return;
+    const header = req.headers["x-aiball-platform"];
+    const name = platformTagName(typeof header === "string" ? header : null);
+    // No header, or a platform we have no name for: nothing happens, and a
+    // client that never sends it files tickets exactly as it always has.
+    if (!name) return;
+    try {
+        // Created on first use. Safe only because `platformTagName` is a total
+        // server-side map onto three names — see its module doc.
+        const tag = getTagByName(name) ?? insertTag({ name, note: "Set automatically from the filing machine's platform." });
+        addMessageTag(msg.id, tag.id, "aiball");
+    } catch (e) {
+        console.error(`[platform-tag] could not apply ${name} to #${msg.id}:`, e);
+    }
+}
 
 messagesRouter.post("/messages", (req: Request, res: Response) => {
     const v = validateNewMessage(req.body);
@@ -75,6 +106,7 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     if (!v.by_agent) v.by_agent = consumerOf(req);
     try {
         const msg = submitMessage(v);
+        applyPlatformTag(msg, req);
         return res.status(201).json(withTagsOne(msg));
     } catch (err) {
         const code = (err as { code?: string }).code;

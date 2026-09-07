@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A ticket filed by an agent is tagged with the platform that agent runs on
+  (`os:linux`, `os:win`, `os:mac`), so a report can be read against the machine
+  it came from. Only the client knows this — behind a proxy node the connection
+  carries the relay's platform, not the agent's — so the client states it and
+  the daemon maps it onto three names it chose itself. Tickets you create
+  yourself are untouched.
 - **A loop will no longer start without its PTY proxy.** Until now, a missing
   proxy silently fell through to launching claude directly. The pane came up and
   claude answered, so it looked like it worked — while the loop had quietly lost
