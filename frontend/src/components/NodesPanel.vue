@@ -180,7 +180,15 @@ const { loading, error, load } = useLoader(async () => {
     const [ns, es] = await Promise.all([api.listNodes(), api.listNodeEnrollments()]);
     nodes.value = ns;
     enrollments.value = es;
-});
+    // #2087 — the enrolment window rides the same refresh, so opening or
+    // shutting it anywhere reaches this panel too. It swallows its own errors,
+    // so it can never fail the list.
+    await refreshPairingWindow();
+    // #2085 — and this is what makes a revocation show as revoked without a
+    // reload: the daemon broadcasts on revoke, the WS relays it onto
+    // `consumers.refresh`, and this panel was the one consumer surface not
+    // listening. Same wiring as ConsumersPanel rather than a hand-rolled one.
+}, { refreshOn: ["consumers.refresh"] });
 
 function fmt(ts: string | null): string {
     if (!ts) return "—";
@@ -190,7 +198,7 @@ function fmt(ts: string | null): string {
 
 // #502 — la pastille est dérivée de `last_used_at` + l'horloge courante.
 const nowMs = useNowTicker(15_000);
-onMounted(() => { load(); void refreshPairingWindow(); });
+onMounted(() => { load(); });
 
 function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
     return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));

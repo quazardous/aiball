@@ -128,6 +128,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Revoking a node marks the row as revoked straight away. The nodes panel was
+  the one place that didn't listen for the update it was already being sent, so
+  the change only showed after a reload. Opening or shutting the pairing window
+  from another tab now reaches it too.
 - Pairing a node no longer depends on the two machines agreeing about what time
   it is. A node whose clock ran ahead treated every request as already expired
   and gave up before asking the hub even once, so an approval a human had

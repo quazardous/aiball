@@ -66,14 +66,21 @@ aiball proxy pair --url https://<A-host>:7777
 # on A — a clickable toast appears, and the request is also listed under Nodes.
 #         Open it, CHECK THE CODE MATCHES the one printed on B, and approve.
 
-# on B — nothing. It writes its config and restarts itself as a relay.
+# on B — nothing, on Linux. It writes its config and restarts itself as a relay.
+#         On Windows it writes the config and asks you to restart it (see below).
 ```
 
-There is no third step on B, and you do not have to stay in front of it: the
-request is written down on B, so if the terminal is closed — or the approval
-lands after you have walked away — B's own daemon finishes the job on its next
-tick and comes back as a relay. Whichever of the two gets there first consumes
-the request, so it happens exactly once.
+You do not have to stay in front of B: the request is written down there, so if
+the terminal is closed — or the approval lands after you have walked away — B's
+own daemon finishes the job on its next tick. Whichever of the two gets there
+first consumes the request, so it happens exactly once.
+
+**The restart is automatic only where there is a supervisor to ask.** Today that
+means a systemd user service, which is the standard Linux install. Everywhere
+else — Windows, a dev checkout, a hand-launched daemon — the config is written
+and the daemon tells you to restart it the way you launched it. So on Windows
+the pairing is still two gestures on the node: run the command, then restart
+from the tray once it is approved.
 
 Comparing the code is the point of the flow: it is what ties the request you
 approve to the machine you are standing at, rather than to someone else's
