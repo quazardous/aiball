@@ -294,9 +294,13 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 /** #2074 — state of the enrolment switch. */
 export interface PairingWindow {
     open: boolean;
+    /** The deadline. Count down from THIS rather than from `seconds_left`,
+     *  which is only true at the instant the response was built. */
     open_until: string | null;
     seconds_left: number;
     opened_by: string | null;
+    /** What "open" opens it for, in seconds — the server owns the duration. */
+    default_seconds: number;
 }
 
 /**

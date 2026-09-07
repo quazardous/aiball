@@ -467,7 +467,7 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
             // wrong one.
             return die(
                 "proxy pair: the hub is not accepting pairing right now.\n"
-                + "  Open aiball on the hub → Nodes → \"Allow pairing for 10 min\", then run this again.",
+                + "  Open aiball on the hub → Nodes → the \"Allow pairing\" button, then run this again.",
             );
         }
         if (!res.ok) die(`proxy pair: the hub refused the request (${res.status}) — ${await res.text()}`);

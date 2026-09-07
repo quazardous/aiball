@@ -56,7 +56,7 @@ The node asks, and you approve it in the web UI. No token is copied between
 machines.
 
 ```bash
-# on A — open the pairing window: web UI → Nodes → "Allow pairing for 10 min"
+# on A — open the pairing window: web UI → Nodes → "Allow pairing"
 #         (it is shut by default, and shuts itself again after the window)
 
 # on B — ask to be enrolled

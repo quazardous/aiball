@@ -33,6 +33,9 @@ export interface PairingWindow {
     seconds_left: number;
     /** Who opened it, for the panel to show. Null when shut. */
     opened_by: string | null;
+    /** How long `open` opens it for, so a UI can say so without hardcoding
+     *  a duration this module owns. */
+    default_seconds: number;
 }
 
 export function pairingWindow(nowMs: number = Date.now()): PairingWindow {
@@ -42,6 +45,7 @@ export function pairingWindow(nowMs: number = Date.now()): PairingWindow {
         open_until: open ? new Date(openUntilMs).toISOString() : null,
         seconds_left: open ? Math.ceil((openUntilMs - nowMs) / 1000) : 0,
         opened_by: open ? openedBy : null,
+        default_seconds: DEFAULT_PAIRING_WINDOW_MS / 1000,
     };
 }
 

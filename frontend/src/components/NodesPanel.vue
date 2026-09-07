@@ -39,9 +39,30 @@ async function refreshPairingWindow(): Promise<void> {
     pairingWin.value = await api.getPairingWindow().catch(() => null);
 }
 async function togglePairingWindow(): Promise<void> {
-    const open = pairingWin.value?.open === true;
-    pairingWin.value = await api.setPairingWindow(open ? "close" : "open");
+    pairingWin.value = await api.setPairingWindow(pairingOpen.value ? "close" : "open");
 }
+
+// The window is a DEADLINE, not a number fetched once. Reading `seconds_left`
+// straight from the response made the panel say "10 more min" for ten minutes
+// and keep claiming the door was open long after it had shut — the snapshot was
+// only true at the instant it was built. Everything below is derived from
+// `open_until` against a live clock, so the countdown moves and the panel closes
+// itself at zero without waiting for the next fetch.
+const pairingNow = useNowTicker(1_000);
+const pairingLeftSec = computed(() => {
+    const until = pairingWin.value?.open_until;
+    if (!until) return 0;
+    const left = Math.ceil((Date.parse(until) - pairingNow.value) / 1000);
+    return Number.isFinite(left) ? Math.max(0, left) : 0;
+});
+const pairingOpen = computed(() => pairingLeftSec.value > 0);
+const pairingCountdown = computed(() => {
+    const s = pairingLeftSec.value;
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+});
+// The duration belongs to the server, which is also what `open` will apply.
+const pairingDefaultMin = computed(() =>
+    Math.round((pairingWin.value?.default_seconds ?? 600) / 60));
 const toast = useToast();
 const nodes = ref<NodeView[]>([]);
 
@@ -195,21 +216,21 @@ function sortValue(n: NodeView, key: string): string | number {
              the pairing route answers at all. Shut is the normal state: this is
              the one public write route in the API, for a gesture done a few
              times a year. -->
-        <div class="pairing-window" :class="{ 'pairing-window--open': pairingWin?.open }">
+        <div class="pairing-window" :class="{ 'pairing-window--open': pairingOpen }">
             <div class="pairing-window__state">
-                <i :class="pairingWin?.open ? 'pi pi-lock-open' : 'pi pi-lock'" />
-                <span v-if="pairingWin?.open">
-                    Accepting pairing requests for
-                    {{ Math.ceil((pairingWin.seconds_left ?? 0) / 60) }} more min
-                    <span class="pairing-window__by">— opened by {{ pairingWin.opened_by }}</span>
+                <i :class="pairingOpen ? 'pi pi-lock-open' : 'pi pi-lock'" />
+                <span v-if="pairingOpen">
+                    Accepting pairing requests —
+                    <span class="pairing-window__left">{{ pairingCountdown }}</span> left
+                    <span class="pairing-window__by">— opened by {{ pairingWin?.opened_by }}</span>
                 </span>
                 <span v-else>Not accepting pairing requests</span>
             </div>
             <Button
-                :label="pairingWin?.open ? 'Close now' : 'Allow pairing for 10 min'"
-                :icon="pairingWin?.open ? 'pi pi-lock' : 'pi pi-lock-open'"
-                :severity="pairingWin?.open ? 'secondary' : undefined"
-                :outlined="pairingWin?.open"
+                :label="pairingOpen ? 'Close now' : `Allow pairing for ${pairingDefaultMin} min`"
+                :icon="pairingOpen ? 'pi pi-lock' : 'pi pi-lock-open'"
+                :severity="pairingOpen ? 'secondary' : undefined"
+                :outlined="pairingOpen"
                 size="small"
                 @click="togglePairingWindow"
             />
@@ -394,4 +415,6 @@ function sortValue(n: NodeView, key: string): string | number {
 }
 .pairing-window__state { display: flex; align-items: center; gap: .5rem; }
 .pairing-window__by { opacity: .7; }
+/* Tabular figures so a ticking countdown doesn't jiggle the line. */
+.pairing-window__left { font-variant-numeric: tabular-nums; font-weight: 600; }
 </style>
