@@ -25,8 +25,35 @@
  * without mocks. The impure factory `buildTicketFlagsContext` is the
  * single place where DB reads happen.
  */
+import { inArray } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
+
+/**
+ * #2102 — the incremental bucket, in one place.
+ *
+ * A mutation asks about ONE ticket and used to pay a full-table scan for it.
+ * Scoping the read to the ids asked for is the whole fix — but only up to a
+ * point: SQLite binds each id as a parameter, and a full inbox load asks about
+ * a thousand of them, which is where a scan stops being the wasteful option
+ * and becomes the cheap one. Above the threshold we read everything, exactly
+ * as before.
+ *
+ * The number is a boundary, not a tuning knob: it sits below SQLite's default
+ * parameter ceiling with room to spare, and well above the handful of ids any
+ * mutation or single-row refresh ever asks about.
+ */
+export const SCOPED_READ_MAX_IDS = 200;
+
+function scoped<Q extends { where(cond: unknown): Q }>(
+    q: Q,
+    col: SQLiteColumn,
+    ids: readonly number[],
+): Q {
+    if (ids.length === 0 || ids.length > SCOPED_READ_MAX_IDS) return q;
+    return q.where(inArray(col, [...ids]));
+}
 import {
     computeActionableTicketIds,
     lastActorExclusions,
@@ -310,23 +337,33 @@ export function buildTicketFlagsContext(args: {
     // the "until" timestamp for the row. Read the log once.
     const cooledWakeAt = new Map<number, string>();
     if (cooledIds.size > 0) {
-        const rows = db.select({
-            ticketId: schema.backlogWakeLog.ticketId,
-            wakeAt: schema.backlogWakeLog.wakeAt,
-        }).from(schema.backlogWakeLog)
-            .all();
+        const rows = scoped(
+            db.select({
+                ticketId: schema.backlogWakeLog.ticketId,
+                wakeAt: schema.backlogWakeLog.wakeAt,
+            }).from(schema.backlogWakeLog).$dynamic(),
+            schema.backlogWakeLog.ticketId,
+            ticketIds,
+        ).all();
         for (const r of rows) {
             if (cooledIds.has(r.ticketId)) cooledWakeAt.set(r.ticketId, r.wakeAt);
         }
     }
     // Per-ticket (last_actor, last_actor_at) for UI/agent introspection.
-    // Read once; the table is denorm so this is a cheap scan even on
-    // large boards.
-    const lastActorRows = db.select({
-        id: schema.tickets.id,
-        actor: schema.tickets.lastActor,
-        at: schema.tickets.lastActorAt,
-    }).from(schema.tickets).all();
+    // #2102 — SCOPED to the ids asked for. This used to read the whole
+    // `tickets` table with a comment calling it "a cheap scan even on large
+    // boards"; measured on 1010 tickets, this function cost 448 ms to answer
+    // about ONE ticket, and a mutation pays it on every click. The scan was
+    // the assumption, not the measurement.
+    const lastActorRows = scoped(
+        db.select({
+            id: schema.tickets.id,
+            actor: schema.tickets.lastActor,
+            at: schema.tickets.lastActorAt,
+        }).from(schema.tickets).$dynamic(),
+        schema.tickets.id,
+        ticketIds,
+    ).all();
     const lastActorByTicket = new Map<number, { actor: string | null; at: string | null }>();
     for (const r of lastActorRows) {
         lastActorByTicket.set(r.id, { actor: r.actor ?? null, at: r.at ?? null });
