@@ -21,8 +21,25 @@
  */
 import { ref, type Ref } from "vue";
 import { useToast } from "primevue/usetoast";
+import type { ToastMessageOptions } from "primevue/toast";
 import type { Message } from "./api";
 import { formatTicketRef } from "./formatting";
+
+/**
+ * #2080 — what a notification is ABOUT, so it can be opened instead of only
+ * read. `id` is the message's own id: for a new ticket that is the ticket, and
+ * for a comment the API resolves it up to its thread and hands back a
+ * `focus_message_id`, so the same field lands the reader on the comment itself.
+ */
+export interface NotificationTarget {
+    id: number;
+    project: string;
+}
+
+/** A toast that knows what it is about. PrimeVue's options type has no field
+ *  for a payload, but the object reaches the `#message` slot untouched, so the
+ *  target travels with it rather than through a parallel ref. */
+export type TicketToastOptions = ToastMessageOptions & { target?: NotificationTarget };
 
 function shortKindLabel(m: Message): string {
     switch (m.kind) {
@@ -36,9 +53,14 @@ function shortKindLabel(m: Message): string {
     return m.kind;
 }
 
-export function useNotifications(opts: { project: Ref<string | null> }) {
+export function useNotifications(opts: {
+    project: Ref<string | null>;
+    /** #2080 — open what the notification is about. Given here rather than
+     *  returned, so the OS notification can use the same path as the toast. */
+    onOpen?: (target: NotificationTarget) => void;
+}) {
     const toast = useToast();
-    const { project } = opts;
+    const { project, onOpen } = opts;
 
     // OS notifications: lazily ask permission on first interaction so we don't
     // spam the user with a permission popup at boot.
@@ -64,13 +86,23 @@ export function useNotifications(opts: { project: Ref<string | null> }) {
         return notifAllowed.value;
     }
 
-    function fireOsNotif(title: string, body: string) {
+    function fireOsNotif(title: string, body: string, target?: NotificationTarget) {
         if (notifMuted.value) return;
         if (typeof Notification === "undefined") return;
         if (Notification.permission !== "granted") return;
         if (document.hasFocus()) return; // page already visible, toast is enough
         try {
-            new Notification(title, { body, tag: "aiball" });
+            const n = new Notification(title, { body, tag: "aiball" });
+            // #2080 — the OS notification fires precisely when the page is NOT
+            // in front, so being able to click straight through to the thread
+            // is worth more here than in the toast.
+            if (target && onOpen) {
+                n.onclick = () => {
+                    window.focus();
+                    onOpen(target);
+                    n.close();
+                };
+            }
         } catch {
             /* ignore */
         }
@@ -116,13 +148,20 @@ export function useNotifications(opts: { project: Ref<string | null> }) {
                 : `#C.${m.hashid ?? m.id}`;
         const detail = `${who} · ${ref} · ${m.project}`;
 
-        toast.add({
+        // #2080 — its own group so the toast can be rendered as something you
+        // click. A notice about a ticket that makes you go and find the ticket
+        // is the slow path, and the id is right there.
+        const target: NotificationTarget = { id: m.id, project: m.project };
+        const opts: TicketToastOptions = {
+            group: "ticket",
             severity: m.status === "pending" ? "warn" : "info",
             summary: `${k}${m.status === "pending" ? " pending review" : ""}: ${summary}`,
             detail,
             life: 8000,
-        });
-        fireOsNotif(`aiball — ${k}`, `${summary}\n${detail}`);
+            target,
+        };
+        toast.add(opts);
+        fireOsNotif(`aiball — ${k}`, `${summary}\n${detail}`, target);
     }
 
     function notifyArrival(m: Message) {

@@ -329,7 +329,24 @@ const {
     toggleMute,
     ensureNotifPermission,
     notifyArrival,
-} = useNotifications({ project });
+} = useNotifications({ project, onOpen: openNotificationTarget });
+
+/**
+ * #2080 — open what a ticket notification is about. The id is the message's
+ * own: a new ticket opens itself, and a comment is resolved server-side up to
+ * its thread with a `focus_message_id`, so the reader lands on the comment
+ * rather than at the top of a long one.
+ *
+ * The project scope follows, otherwise a toast for another project opens a
+ * thread the surrounding list does not contain — the board would disagree with
+ * itself about where the reader is.
+ */
+function openNotificationTarget(target: { id: number; project: string }): void {
+    if (project.value && project.value !== target.project) project.value = target.project;
+    panel.value = null;
+    openTicketId.value = target.id;
+    toast.removeGroup("ticket");
+}
 
 // WS handler is now a thin relay: turn WebSocket events into high-level
 // `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
@@ -915,6 +932,27 @@ watch(showSnoozed, (v) => {
         </div>
 
         <Toast position="top-right" />
+        <!-- #2080 — a ticket toast opens the thread it is about. Same reasoning
+             as the pairing one below: a notice you can only read, and must then
+             go hunting for, is the slow path — and here the id is right there.
+             The close button stays reachable because PrimeVue renders it
+             outside this slot. -->
+        <Toast position="top-right" group="ticket">
+            <template #message="{ message }">
+                <div
+                    class="ticket-toast"
+                    :class="`ticket-toast--${message.severity}`"
+                    role="button"
+                    tabindex="0"
+                    title="Open this thread"
+                    @click="message.target && openNotificationTarget(message.target)"
+                    @keyup.enter="message.target && openNotificationTarget(message.target)"
+                >
+                    <div class="ticket-toast__title">{{ message.summary }}</div>
+                    <div class="ticket-toast__detail">{{ message.detail }}</div>
+                </div>
+            </template>
+        </Toast>
         <!-- #2074 — pairing gets its own toast group so it can be CLICKABLE.
              A node is standing at a prompt waiting for a person; a notice you
              can only read, and must then go hunting for, is the slow path. -->
@@ -1156,4 +1194,10 @@ watch(showSnoozed, (v) => {
     margin: .2rem 0 .35rem;
 }
 .pairing-toast__hint { font-size: .8rem; opacity: .75; }
+/* #2080 — the ticket toast reuses PrimeVue's severity colours from its own
+   container; the slot only supplies the text and the affordance. */
+.ticket-toast { cursor: pointer; width: 100%; }
+.ticket-toast:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.ticket-toast__title { font-weight: 600; }
+.ticket-toast__detail { font-size: .85rem; opacity: .8; margin-top: .2rem; }
 </style>

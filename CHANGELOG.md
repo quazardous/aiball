@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A notification about a ticket now opens it. Clicking the toast — or the
+  desktop notification, which only appears when the board isn't in front of you
+  — goes to the thread, landing on the comment itself when the notice was about
+  one, instead of leaving you to go and find it.
 - The inbox rows now have a single owner. Whatever changes them — a live event,
   a filter, a page turn — goes through one place, and every other part of the
   board reads from it. A background refresh no longer flashes the loading
