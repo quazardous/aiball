@@ -16,6 +16,13 @@ on:
     paths:
       - 'windows/cl-pty-proxy/**'
       - '.github/workflows/cl-pty-proxy-build.yml'
+  # On demand. The path filters above mean a run only happens when the proxy
+  # source changes — which can be weeks apart, while the artifact it produces
+  # expires in fourteen days. A machine that cannot compile (Smart App Control,
+  # a linker-only toolchain) would then find nothing to download precisely when
+  # it needs it, since #102 made the proxy required to start a loop. This makes
+  # a fresh binary askable rather than something you wait for.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -34,3 +41,22 @@ jobs:
         run: cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
       - name: cargo test
         run: cargo test --manifest-path windows/cl-pty-proxy/Cargo.toml
+
+      # Keep the binary this job just built. The proxy is now REQUIRED to start
+      # a loop, and some machines cannot produce one themselves: a Windows box
+      # under Smart App Control refuses to execute rustup's MSVC `rustc.exe`
+      # (os error 4551), and rustup's GNU toolchain ships a linker-only gcc with
+      # no assembler, so `dlltool` cannot build the import libraries either.
+      # Downloading what CI built is the only route left on such a box — and
+      # without this step the artifact existed for 90 seconds and was discarded.
+      # Release builds stay owned by release.yml; this is the per-commit one,
+      # which is also what lets a PR touching the proxy be tried before merge.
+      - name: upload the built proxy
+        uses: actions/upload-artifact@v4
+        with:
+          name: cl-pty-proxy-${{ matrix.os }}
+          path: |
+            windows/cl-pty-proxy/target/release/cl-pty-proxy
+            windows/cl-pty-proxy/target/release/cl-pty-proxy.exe
+          if-no-files-found: error
+          retention-days: 14
