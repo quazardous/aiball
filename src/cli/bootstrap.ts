@@ -21,6 +21,7 @@ import { globalConfigPath } from "../autopoll/config.js";
 import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
 import { resolveDisplayHost } from "../proxy-host-providers.js";
 import { deriveSubAgentName } from "./sub-agent-name.js";
+import { resolveSubAgentPreset } from "./sub-agent-preset.js";
 import { savePairingRequest } from "../node-pairing-request.js";
 import { collectPendingPairing } from "../node-pairing-collect.js";
 import { restartViaSupervisor, supervisorHint } from "../supervisor-restart.js";
@@ -44,6 +45,21 @@ import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
  */
 /** #2091 — the project this checkout already declares, if any. Same read
  *  `runMigrateFrom` does below; a malformed yaml is simply "no answer". */
+/** The agent this checkout already declares, if any. Re-running `--sub-agent`
+ *  must not rename an existing one — see `resolveSubAgentPreset`. */
+function readYamlAgent(): string | null {
+    const yamlPath = join(userCwd(), ".aiball.yaml");
+    if (!existsSync(yamlPath)) return null;
+    try {
+        const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as
+            | { consumer?: { agent?: string } }
+            | null;
+        return parsed?.consumer?.agent?.trim() || null;
+    } catch {
+        return null;
+    }
+}
+
 function readYamlProject(): string | null {
     const yamlPath = join(userCwd(), ".aiball.yaml");
     if (!existsSync(yamlPath)) return null;
@@ -186,6 +202,14 @@ export async function bootstrapInit(opts: {
      *  When undefined, the existing field is left untouched (init respecte
      *  les param déjà posés sauf si dans la ligne de flag). */
     noClaim?: boolean;
+    /** Seed `consumer.role: lead|crew` into .aiball.yaml. Undefined leaves the
+     *  existing field untouched, like `noClaim`.
+     *
+     *  The key already existed — `autopoll/config.ts` reads `lead`/`crew`, and
+     *  `start` has a `--role` flag — but `init` could not WRITE it. So a role
+     *  had to be typed into the yaml by hand, and `--sub-agent` could not
+     *  produce the thing it names. See `subAgent`. */
+    role?: "lead" | "crew";
     /** #701 (david) : rename the project from this name to the new project
      *  name BEFORE the rest of the init runs. The new name is resolved from
      *  `--project` if passed, else from an existing `.aiball.yaml`'s
@@ -195,8 +219,9 @@ export async function bootstrapInit(opts: {
      *  subs / rules / etc. lands inside the daemon's transaction. */
     migrateFrom?: string;
     /** #2091 — the one-gesture sub-agent. `true` (bare `--sub-agent`) derives a
-     *  name; a string uses it verbatim. Either way it implies assignment-only,
-     *  which is what makes it a sub-agent rather than a peer. */
+     *  name; a string uses it verbatim. Either way it implies assignment-only
+     *  AND `role: crew`, which together are what make it a sub-agent rather
+     *  than a peer. */
     subAgent?: string | boolean;
 }): Promise<void> {
     const force = opts.force === true;
@@ -205,16 +230,17 @@ export async function bootstrapInit(opts: {
     // --agent or --no-claim still wins: the preset fills blanks, it does not
     // overrule what was actually asked for.
     if (opts.subAgent !== undefined && opts.subAgent !== false) {
-        if (!opts.consumer) {
-            opts.consumer = typeof opts.subAgent === "string" && opts.subAgent.trim()
-                ? opts.subAgent.trim()
-                : deriveSubAgentName({
-                    project: opts.project ?? readYamlProject(),
-                    dirBase: basename(userCwd()),
-                    host: resolveDisplayHost()?.host ?? null,
-                });
-        }
-        if (opts.noClaim === undefined) opts.noClaim = true;
+        const resolved = resolveSubAgentPreset({
+            ...opts,
+            yamlConsumer: readYamlAgent(),
+        }, opts.subAgent, () => deriveSubAgentName({
+            project: opts.project ?? readYamlProject(),
+            dirBase: basename(userCwd()),
+            host: resolveDisplayHost()?.host ?? null,
+        }));
+        opts.consumer = resolved.consumer;
+        opts.noClaim = resolved.noClaim;
+        opts.role = resolved.role;
     }
     if (opts.migrateFrom) {
         await runMigrateFrom(opts.migrateFrom, opts.project);
@@ -224,7 +250,8 @@ export async function bootstrapInit(opts: {
     // .aiball.yaml.example; the bootstrap stays tight.
     const yamlPath = join(userCwd(), ".aiball.yaml");
     const yamlExists = existsSync(yamlPath);
-    const hasIdentity = !!opts.consumer || !!opts.project || opts.noClaim !== undefined;
+    const hasIdentity = !!opts.consumer || !!opts.project || opts.noClaim !== undefined
+        || opts.role !== undefined;
     const hasProjectType = opts.private === true;
     if (yamlExists && !force) {
         // #603 (4dzxp2) + #612 : even when the yaml exists, patch in
@@ -233,7 +260,7 @@ export async function bootstrapInit(opts: {
         // yaml Document API (`init respecte les param déjà posés sauf si
         // dans la ligne de flag` — david #612).
         if (hasIdentity) {
-            patchIdentity(yamlPath, opts.consumer, opts.project, opts.noClaim);
+            patchIdentity(yamlPath, opts.consumer, opts.project, opts.noClaim, opts.role);
         }
         // #685 — `--private` was silently ignored on existing yaml (only the
         // FRESH-create branch honored it). Mirror patchIdentity : patch
@@ -257,6 +284,7 @@ export async function bootstrapInit(opts: {
                 + (opts.consumer ? `  agent: ${opts.consumer}\n` : "")
                 + (opts.project ? `  project: ${opts.project}\n` : "")
                 + (opts.noClaim !== undefined ? `  no_claim: ${opts.noClaim}\n` : "")
+                + (opts.role !== undefined ? `  role: ${opts.role}\n` : "")
             : "";
         const body =
             "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
@@ -270,6 +298,7 @@ export async function bootstrapInit(opts: {
         if (opts.consumer) tags.push(`consumer.agent: ${opts.consumer}`);
         if (opts.project) tags.push(`consumer.project: ${opts.project}`);
         if (opts.noClaim !== undefined) tags.push(`consumer.no_claim: ${opts.noClaim}`);
+        if (opts.role !== undefined) tags.push(`consumer.role: ${opts.role}`);
         process.stdout.write(`${yamlExists && force ? "overwrote" : "created"} ${yamlPath} (${tags.join(", ")})\n`);
     }
     // #651 david `fzsqeg` — drop the aiball Claude Code skill into the
@@ -321,7 +350,13 @@ function patchProjectType(path: string, value: string): void {
     process.stdout.write(`${path}: patched project_type='${value}'${prev ? ` (was '${prev}')` : ""}\n`);
 }
 
-function patchIdentity(path: string, agent: string | undefined, project: string | undefined, noClaim: boolean | undefined): void {
+function patchIdentity(
+    path: string,
+    agent: string | undefined,
+    project: string | undefined,
+    noClaim: boolean | undefined,
+    role: "lead" | "crew" | undefined,
+): void {
     let doc;
     try {
         doc = parseDocument(readFileSync(path, "utf8"));
@@ -337,6 +372,7 @@ function patchIdentity(path: string, agent: string | undefined, project: string 
     if (agent) { consumer.set("agent", agent); changed.push(`agent=${agent}`); }
     if (project) { consumer.set("project", project); changed.push(`project=${project}`); }
     if (noClaim !== undefined) { consumer.set("no_claim", noClaim); changed.push(`no_claim=${noClaim}`); }
+    if (role !== undefined) { consumer.set("role", role); changed.push(`role=${role}`); }
     writeFileSync(path, String(doc));
     process.stdout.write(`${path}: patched consumer (${changed.join(", ")})\n`);
 }
