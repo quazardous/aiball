@@ -45,6 +45,10 @@ dates are YYYY-MM-DD.
   happen on the server, in the order the list displays, so rows arrive where the
   eye expects them. Selecting rows is now cleared when you change page, since a
   selection can only act on what is loaded.
+- The board has one create control: the button still opens the new-ticket form,
+  and the other ways to create a ticket — importing a GitHub issue, when the
+  project has an upstream — sit behind its chevron instead of taking their own
+  spot in the toolbar.
 
 ### Added
 
@@ -112,6 +116,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The pairing window now counts down. It used to show the remaining time as it
+  stood when the page loaded, so it said "10 more min" for ten minutes and went
+  on claiming the hub was accepting pairing after it had stopped.
 - A wake announcing a ticket from another project now names that project, as a
   `[name]` marker before the reference. Cross-project wakes are deliberate — a
   decision on a ticket you filed elsewhere still reaches you — but the bare `#N`
