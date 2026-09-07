@@ -82,7 +82,7 @@ import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { resolveProxyLaunch } from "./proxy-launch.js";
-import { resolveInitSize } from "./init-size.js";
+import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -1096,8 +1096,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // raw argv and execs it directly. Harmless on Linux tmux (standard
     // getopt end-of-options marker). Verified on Windows: `sleep` stays
     // alive with `--`, dies instantly without.
+    // Create the pane at the size of the terminal we were launched from. A
+    // detached session otherwise gets the multiplexer's default (120 cols), so
+    // claude is born narrow and everything downstream — the proxy's probe, its
+    // resize poll — agrees on the wrong number until a client attaches. Empty
+    // off a TTY; see `newSessionSizeArgs`.
+    const sizeArgs = newSessionSizeArgs(process.stdout.columns, process.stdout.rows);
     const r = spawnSync(MUX_CMD, [
-        "new-session", "-d", "-s", tname, "-c", cwd, "--", bashCmd, "-lc", innerCmd,
+        "new-session", "-d", "-s", tname, "-c", cwd, ...sizeArgs, "--", bashCmd, "-lc", innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
 
