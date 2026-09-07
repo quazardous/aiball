@@ -104,8 +104,12 @@ export function listEnrollments(): EnrollmentView[] {
     const now = Date.now();
     return getDb().select().from(schema.nodeEnrollments)
         .all()
-        .filter((r) => !isForgettable(
-            { status: r.status, expires_at: r.expiresAt, delivered_at: r.deliveredAt }, now))
+        .filter((r) => !isForgettable({
+            status: r.status,
+            expires_at: r.expiresAt,
+            delivered_at: r.deliveredAt,
+            decided_at: r.decidedAt,
+        }, now))
         .map((r) => toView(r, now))
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }

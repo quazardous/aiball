@@ -487,10 +487,19 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
         return die(`proxy pair: cannot reach ${base} — ${(e as Error).message}`);
     }
 
+    // #2083 — say HOW LONG, not at what o'clock. Printing the UTC wall clock
+    // read as two hours out to anyone standing in Paris, and a deadline that
+    // looks already past reads as a broken hub. A duration has no timezone to
+    // get wrong, and "how long do I have" is the actual question; the local
+    // time comes after it, in the reader's own zone, for anyone who wants it.
+    const leftMin = Math.max(1, Math.round((Date.parse(req.expires_at) - Date.now()) / 60_000));
+    const localAt = new Date(req.expires_at).toLocaleTimeString(undefined, {
+        hour: "2-digit", minute: "2-digit",
+    });
     process.stdout.write(
         `\n  Pairing code:  ${req.code}\n\n`
         + `  Open aiball on the hub, find this request under Nodes, check the code\n`
-        + `  matches, and approve it. Waiting…  (expires ${req.expires_at.slice(11, 16)} UTC)\n\n`,
+        + `  matches, and approve it. Waiting…  (expires in ${leftMin} min, at ${localAt} local time)\n\n`,
     );
 
     // Poll until a human decides. Every second: this is someone clicking a

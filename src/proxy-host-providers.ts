@@ -41,7 +41,12 @@ export const tailscaleProvider: HostProvider = {
             });
             if (r.status !== 0 || !r.stdout) return null;
             const parsed = JSON.parse(r.stdout) as { Self?: { HostName?: string } };
-            const h = parsed.Self?.HostName?.trim();
+            // #2081 : `HostName` suit le hostname de la machine, qui n'est PAS
+            // toujours court — vu en vrai `classy.tail525625.ts.net`, soit
+            // exactement le bruit de tailnet que david avait tranché d'écarter
+            // (`5w37f2`). On garde donc la première étiquette : c'est la forme
+            // décidée, quelle que soit celle que la machine se donne.
+            const h = parsed.Self?.HostName?.trim().split(".")[0];
             return h ? { host: h, provider: "tailscale" } : null;
         } catch {
             return null;

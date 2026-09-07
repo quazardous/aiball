@@ -83,10 +83,25 @@ type Row = PendingRow | NodeRow;
 function isPending(row: unknown): row is PendingRow {
     return (row as Row).row_kind === "pending";
 }
-/** #2079 — a request that ran out of time is still shown, but it is not a door
- *  any more: nothing to approve, only something to know about. */
-function isExpired(row: unknown): boolean {
-    return isPending(row) && Date.parse(row.expires_at) <= pairingNow.value;
+/**
+ * How a request ended, or that it hasn't. A finished one is still shown for a
+ * while — #2079 for the expiry nobody witnessed, #2082 because refusing made
+ * the row vanish with no sign of what had been done — but it is no longer a
+ * door: nothing to approve, only something to know.
+ *
+ * Read against the live clock rather than the state the server reported, so a
+ * request that runs out while the panel sits open turns grey in place instead
+ * of staying falsely approvable.
+ */
+function outcomeOf(row: unknown): "waiting" | "expired" | "refused" | null {
+    if (!isPending(row)) return null;
+    if (row.state === "rejected") return "refused";
+    return Date.parse(row.expires_at) <= pairingNow.value ? "expired" : "waiting";
+}
+/** Finished, whichever way. */
+function isDone(row: unknown): boolean {
+    const o = outcomeOf(row);
+    return o === "expired" || o === "refused";
 }
 function asNode(row: unknown): NodeView {
     return row as NodeView;
@@ -94,11 +109,11 @@ function asNode(row: unknown): NodeView {
 
 const rows = computed<Row[]>(() => [
     ...enrollments.value
-        // #2079: pending AND recently expired. The server decides how long an
-        // expired one keeps being served; here the live clock decides which of
-        // the two a row currently is, so one that runs out while the panel sits
-        // open turns grey in place rather than staying falsely approvable.
-        .filter((e) => e.state === "pending" || e.state === "expired")
+        // Waiting, or recently finished with nothing to show for it. An
+        // APPROVED one is left out on purpose: its outcome is the node that
+        // just appeared in this same list. The server decides how long each
+        // kind keeps being served.
+        .filter((e) => e.state === "pending" || e.state === "expired" || e.state === "rejected")
         .map((e) => ({ ...e, row_kind: "pending" as const })),
     ...nodes.value.map((n) => ({ ...n, row_kind: "node" as const })),
 ]);
@@ -206,7 +221,7 @@ function sortValue(row: Row, key: string): string | number {
             // Below `down`, so sorting by status ascending — "problems first" —
             // puts the row actually waiting on a human at the top. An expired
             // one goes past `up` instead: it is a trace, not a thing to do.
-            case "status": return isExpired(row) ? 3 : -1;
+            case "status": return isDone(row) ? 3 : -1;
             case "node": return (row.label ?? row.code).toLowerCase();
             // Sort on what the column actually shows.
             case "host": return (row.claimed_host ?? row.requested_ip ?? "").toLowerCase();
@@ -273,6 +288,10 @@ function sortValue(row: Row, key: string): string | number {
                 This request expired before anyone answered it. Run
                 <code>aiball proxy pair</code> again on that machine to ask afresh.
             </p>
+            <p v-else-if="pairing.state === 'rejected'" class="aiball-explainer aiball-explainer--muted">
+                Refused{{ pairing.decided_by ? ` by ${pairing.decided_by}` : "" }} — no token was
+                minted, and this request can't be revived. The node has to ask again.
+            </p>
             <p v-else class="aiball-explainer aiball-explainer--muted">
                 Already decided — nothing left to do here.
             </p>
@@ -326,12 +345,14 @@ function sortValue(row: Row, key: string): string | number {
             :rows="rows"
             :row-key="(r: Row) => (isPending(r) ? `enroll:${r.id}` : r.node_id)"
             :row-title="(r: Row) => (isPending(r)
-                ? (isExpired(r)
-                    ? `This pairing request from ${r.label || 'an unnamed node'} expired unanswered — run the pair command again on that machine`
-                    : `Review the pairing request from ${r.label || 'an unnamed node'} — code ${r.code}`)
+                ? ({
+                    refused: `You refused this pairing request from ${r.label || 'an unnamed node'} — no token was minted`,
+                    expired: `This pairing request from ${r.label || 'an unnamed node'} expired unanswered — run the pair command again on that machine`,
+                    waiting: `Review the pairing request from ${r.label || 'an unnamed node'} — code ${r.code}`,
+                }[outcomeOf(r) ?? 'waiting'])
                 : `View node ${r.label || r.node_id}${r.relayed_count ? ` — ${r.relayed_count} relayed consumer${r.relayed_count > 1 ? 's' : ''}` : ''}`)"
             :row-class="(r: Row) => (isPending(r)
-                ? (isExpired(r) ? 'dl-clickable nodes-row--expired' : 'dl-clickable nodes-row--pending')
+                ? (isDone(r) ? 'dl-clickable nodes-row--done' : 'dl-clickable nodes-row--pending')
                 : 'dl-clickable')"
             :get-sort-value="sortValue"
             default-sort-key="last_activity"
@@ -354,7 +375,13 @@ function sortValue(row: Row, key: string): string | number {
                 <!-- A request has no liveness to report: it is not a node yet.
                      What it has is a human waiting to be asked. -->
                 <StatusPill
-                    v-if="isExpired(row)"
+                    v-if="outcomeOf(row) === 'refused'"
+                    status="error"
+                    label="refused"
+                    title="You refused this request — no token was minted"
+                />
+                <StatusPill
+                    v-else-if="outcomeOf(row) === 'expired'"
                     status="down"
                     label="expired"
                     title="Nobody approved it in time — run the pair command again on that machine"
@@ -377,7 +404,11 @@ function sortValue(row: Row, key: string): string | number {
                     <span class="nodes-label">{{ row.label || "(unnamed node)" }}</span>
                     <code class="nodes-id">
                         code {{ row.code }} —
-                        {{ isExpired(row) ? "expired, run `aiball proxy pair` again" : "not paired yet" }}
+                        {{ {
+                            refused: "refused, no token was minted",
+                            expired: "expired, run `aiball proxy pair` again",
+                            waiting: "not paired yet",
+                        }[outcomeOf(row) ?? "waiting"] }}
                     </code>
                 </template>
                 <template v-else>
@@ -425,9 +456,11 @@ function sortValue(row: Row, key: string): string | number {
             <template #cell-last_activity="{ row }">
                 <span
                     v-if="isPending(row)"
-                    :title="isExpired(row)
-                        ? `expired ${fmt(row.expires_at)}`
-                        : `expires ${fmt(row.expires_at)} — an unattended request stops being a door`"
+                    :title="{
+                        refused: `refused ${fmt(row.decided_at)}${row.decided_by ? ` by ${row.decided_by}` : ''}`,
+                        expired: `expired ${fmt(row.expires_at)}`,
+                        waiting: `expires ${fmt(row.expires_at)} — an unattended request stops being a door`,
+                    }[outcomeOf(row) ?? 'waiting']"
                 >asked {{ fmt(row.created_at) }}</span>
                 <span v-else :title="`created ${fmt(asNode(row).created_at)}`">{{ fmt(asNode(row).last_used_at) }}</span>
             </template>
@@ -463,10 +496,11 @@ function sortValue(row: Row, key: string): string | number {
     border: 1px dashed var(--p-surface-300);
     font-style: italic;
 }
-/* #2079 — an expired request is kept for a while so a human who wasn't at the
-   screen still learns it happened. Greyed out: it is a trace, not a thing to
-   act on, and it must not read like a row still waiting for a click. */
-:deep(tr.nodes-row--expired) {
+/* #2079/#2082 — a finished request is kept for a while: an expiry nobody
+   witnessed, or a refusal whose only trace used to be the row disappearing.
+   Greyed out — it is something to know, not something to act on, and it must
+   not read like a row still waiting for a click. */
+:deep(tr.nodes-row--done) {
     opacity: 0.5;
 }
 .nodes-version {

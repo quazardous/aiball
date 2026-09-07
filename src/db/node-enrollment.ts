@@ -47,10 +47,30 @@ export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
  */
 export const ENROLLMENT_RETENTION_MS = 12 * 60 * 60 * 1000;
 
-/** Whether a request is old enough to stop being shown at all. */
+/**
+ * #2082 — how long a REFUSED request stays visible. Shorter, and for a
+ * different reason: refusing made the row vanish with no trace of what had
+ * happened, so what is owed here is an acknowledgement to the person who just
+ * clicked — not a record outliving their afternoon. Nobody was there for an
+ * expiry; someone was there for this.
+ */
+export const REJECTED_RETENTION_MS = 60 * 60 * 1000;
+
+/** Whether a request is old enough to stop being shown at all. Only ever true
+ *  of requests that ended in NOTHING: an approval is the trace of a credential
+ *  coming into existence, and retention must not quietly prune that. */
 export function isForgettable(row: EnrollmentRow, nowMs: number): boolean {
-    return enrollmentState(row, nowMs) === "expired"
-        && Date.parse(row.expires_at) <= nowMs - ENROLLMENT_RETENTION_MS;
+    const state = enrollmentState(row, nowMs);
+    if (state === "expired") {
+        return Date.parse(row.expires_at) <= nowMs - ENROLLMENT_RETENTION_MS;
+    }
+    if (state === "rejected") {
+        // No decision date on a legacy row: keep it rather than guess.
+        return row.decided_at
+            ? Date.parse(row.decided_at) <= nowMs - REJECTED_RETENTION_MS
+            : false;
+    }
+    return false;
 }
 
 /**
@@ -67,6 +87,8 @@ export interface EnrollmentRow {
     status: string;
     expires_at: string;
     delivered_at?: string | null;
+    /** When a human answered. Only retention reads it. */
+    decided_at?: string | null;
 }
 
 export type EnrollmentState =

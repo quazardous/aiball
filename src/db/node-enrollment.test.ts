@@ -13,6 +13,7 @@ import {
     isDecidable,
     isForgettable,
     makePairingCode,
+    REJECTED_RETENTION_MS,
 } from "./node-enrollment.js";
 
 const NOW = Date.parse("2026-09-07T10:00:00.000Z");
@@ -79,12 +80,39 @@ test("past the retention window it is forgotten", () => {
     );
 });
 
-test("only an expired request is ever forgotten", () => {
-    // A decided one is the panel's own audit of a credential coming into
-    // existence; retention must not quietly prune that.
+// #2082 — refusing used to make the row vanish, leaving no sign of what had
+// been done. It is kept too, but briefly: the person who clicked is owed an
+// acknowledgement, not a record outliving their afternoon.
+test("a refusal stays visible for a while after the click", () => {
+    const row = { status: "rejected", expires_at: at(-60_000), decided_at: at(-60_000) };
+    assert.equal(enrollmentState(row, NOW), "rejected");
+    assert.equal(isForgettable(row, NOW), false);
+});
+
+test("a refusal is forgotten sooner than an unwitnessed expiry", () => {
+    const rejected = (ms: number) =>
+        ({ status: "rejected", expires_at: at(ms), decided_at: at(ms) });
+    assert.equal(isForgettable(rejected(-REJECTED_RETENTION_MS), NOW), true);
+    assert.equal(isForgettable(rejected(-REJECTED_RETENTION_MS + 1000), NOW), false);
+    // The same age still shows as an expiry: nobody was there for that one.
+    assert.equal(
+        isForgettable({ status: "pending", expires_at: at(-REJECTED_RETENTION_MS) }, NOW),
+        false,
+    );
+});
+
+test("a refusal with no decision date is kept rather than guessed at", () => {
+    assert.equal(
+        isForgettable({ status: "rejected", expires_at: at(-ENROLLMENT_RETENTION_MS * 10) }, NOW),
+        false,
+    );
+});
+
+test("an approval is never forgotten", () => {
+    // It is the trace of a credential coming into existence; retention must not
+    // quietly prune that.
     const old = at(-ENROLLMENT_RETENTION_MS * 10);
     assert.equal(isForgettable({ status: "approved", expires_at: old }, NOW), false);
-    assert.equal(isForgettable({ status: "rejected", expires_at: old }, NOW), false);
     assert.equal(
         isForgettable({ status: "approved", expires_at: old, delivered_at: old }, NOW),
         false,

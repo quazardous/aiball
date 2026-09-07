@@ -9,7 +9,10 @@
  * label. Garde le ld-tag system (chips agent state) intact — c'est une autre
  * UX (chip rectangulaire VS dot rond).
  */
-type Status = "up" | "stale" | "down";
+/** `error` (#2082) : un état négatif VOULU — quelque chose a été refusé ou a
+ *  échoué, par opposition à `down` qui ne dit que « pas là ». Rouge estompé :
+ *  il informe, il n'alarme pas. */
+type Status = "up" | "stale" | "down" | "error";
 defineProps<{
     status: Status;
     /** Texte affiché à droite du dot. Si vide, le dot seul s'affiche. */
@@ -48,4 +51,8 @@ defineProps<{
 .aiball-pill--up   .aiball-pill__dot { background: var(--p-green-500,  #22c55e); }
 .aiball-pill--stale .aiball-pill__dot { background: var(--p-yellow-500, #eab308); }
 .aiball-pill--down .aiball-pill__dot { background: var(--p-surface-400, #9ca3af); }
+.aiball-pill--error .aiball-pill__dot { background: var(--p-red-400, #f87171); }
+/* Le label suit la couleur, en atténué : « refusé » doit se lire comme une
+   information, pas comme une alerte. */
+.aiball-pill--error .aiball-pill__label { color: var(--p-red-400, #f87171); }
 </style>

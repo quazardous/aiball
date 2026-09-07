@@ -119,6 +119,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Refusing a pairing request no longer makes the row vanish with no sign of what
+  happened: it stays for an hour, greyed out, marked "refused", saying no token
+  was minted and that the node has to ask again.
+- `aiball proxy pair` now says how long the request has left rather than the
+  time it expires in UTC — read from another timezone, that deadline looked as
+  if it had already passed.
 - A pairing request now shows which machine it came from by name — the node
   resolves it the same way a paired one does, over Tailscale when that is how it
   reaches the hub. It is shown as something the machine claims, not as something
