@@ -116,6 +116,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A node waiting to be paired now appears in the nodes list, marked "to confirm",
+  instead of existing only as a toast. Missing the notification no longer puts
+  the request out of reach; the row leaves the list once it is approved, refused,
+  or expires.
 - The pairing window now counts down. It used to show the remaining time as it
   stood when the page loaded, so it said "10 more min" for ten minutes and went
   on claiming the hub was accepting pairing after it had stopped.

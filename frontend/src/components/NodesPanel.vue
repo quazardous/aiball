@@ -7,6 +7,7 @@ import { computed, ref, onMounted, watch } from "vue";
 import { api, type NodeEnrollment, type NodeView, type PairingWindow } from "../lib/api";
 import { formatActivityAge } from "../lib/format";
 import { useNowTicker } from "../lib/now-ticker";
+import { useBus } from "../lib/bus";
 import { useLoader } from "../lib/loader";
 import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
@@ -66,6 +67,41 @@ const pairingDefaultMin = computed(() =>
 const toast = useToast();
 const nodes = ref<NodeView[]>([]);
 
+// #2078 — a pairing request belongs on the LIST, not only in a toast. A toast
+// is a notification: miss it and the request becomes unreachable, even though
+// it is the one thing on this screen actively waiting on a human. So a node
+// that has asked to pair shows up here straight away, in a "to confirm" state,
+// and leaves the list by being approved (it becomes a real node) or refused.
+const enrollments = ref<NodeEnrollment[]>([]);
+
+/** A row is either a node, or a request to become one. Those are different
+ *  things with different powers, hence a discriminant rather than a
+ *  half-filled NodeView. */
+type PendingRow = NodeEnrollment & { row_kind: "pending" };
+type NodeRow = NodeView & { row_kind: "node" };
+type Row = PendingRow | NodeRow;
+function isPending(row: unknown): row is PendingRow {
+    return (row as Row).row_kind === "pending";
+}
+function asNode(row: unknown): NodeView {
+    return row as NodeView;
+}
+
+const rows = computed<Row[]>(() => [
+    ...enrollments.value
+        // Against the live clock, not the state the server reported: a request
+        // that expires while the panel sits open must leave the list on its
+        // own, rather than offering a row that can no longer be approved.
+        .filter((e) => e.state === "pending" && Date.parse(e.expires_at) > pairingNow.value)
+        .map((e) => ({ ...e, row_kind: "pending" as const })),
+    ...nodes.value.map((n) => ({ ...n, row_kind: "node" as const })),
+]);
+
+// A request arriving — or being decided from another tab — repaints the list.
+// The daemon already broadcasts it for the toast; the list hears the same thing
+// rather than relying on the human still being on the page when it landed.
+useBus("node.pairing", () => { void load(); });
+
 // #2074 — the same route carries pairing requests, prefixed so a request id can
 // never be mistaken for a node id: they are different things with different
 // powers, and one of them does not exist yet.
@@ -101,7 +137,9 @@ async function decide(verdict: "approve" | "reject"): Promise<void> {
     if (!id) return;
     try {
         pairing.value = await api.decideNodeEnrollment(id, verdict);
-        if (verdict === "approve") await load();
+        // Reload either way: approving adds a node, refusing removes a row that
+        // is no longer waiting on anyone.
+        await load();
     } catch (e) {
         // A 409 means someone already decided, or it expired while the panel
         // sat open — say so instead of leaving a dead button.
@@ -112,7 +150,9 @@ async function decide(verdict: "approve" | "reject"): Promise<void> {
 }
 
 const { loading, error, load } = useLoader(async () => {
-    nodes.value = await api.listNodes();
+    const [ns, es] = await Promise.all([api.listNodes(), api.listNodeEnrollments()]);
+    nodes.value = ns;
+    enrollments.value = es;
 });
 
 function fmt(ts: string | null): string {
@@ -154,7 +194,21 @@ const columns: DataListColumn[] = [
     { key: "last_activity", label: "Last activity", sortable: true, defaultDir: "desc" },
 ];
 
-function sortValue(n: NodeView, key: string): string | number {
+function sortValue(row: Row, key: string): string | number {
+    if (isPending(row)) {
+        switch (key) {
+            // Below `down`, so sorting by status ascending — "problems first" —
+            // puts the row actually waiting on a human at the top.
+            case "status": return -1;
+            case "node": return (row.label ?? row.code).toLowerCase();
+            case "host": return (row.requested_ip ?? "").toLowerCase();
+            // A request is minutes old, so the default sort (newest activity
+            // first) floats it up without needing a special case.
+            case "last_activity": return Date.parse(row.created_at);
+            default: return "";
+        }
+    }
+    const n: NodeView = row;
     switch (key) {
         // down < stale < up so asc surfaces problems first.
         case "status": {
@@ -245,55 +299,84 @@ function sortValue(n: NodeView, key: string): string | number {
         <DataList
             table-class="nodes-table"
             :columns="columns"
-            :rows="nodes"
-            :row-key="(n: NodeView) => n.node_id"
-            :row-title="(n: NodeView) => `View node ${n.label || n.node_id}${n.relayed_count ? ` — ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? 's' : ''}` : ''}`"
-            :row-class="() => 'dl-clickable'"
+            :rows="rows"
+            :row-key="(r: Row) => (isPending(r) ? `enroll:${r.id}` : r.node_id)"
+            :row-title="(r: Row) => (isPending(r)
+                ? `Review the pairing request from ${r.label || 'an unnamed node'} — code ${r.code}`
+                : `View node ${r.label || r.node_id}${r.relayed_count ? ` — ${r.relayed_count} relayed consumer${r.relayed_count > 1 ? 's' : ''}` : ''}`)"
+            :row-class="(r: Row) => (isPending(r) ? 'dl-clickable nodes-row--pending' : 'dl-clickable')"
             :get-sort-value="sortValue"
             default-sort-key="last_activity"
             default-sort-dir="desc"
-            :loading="loading && !nodes.length"
+            :loading="loading && !rows.length"
             :error="error"
-            :is-empty="!nodes.length"
-            @row-click="(n: NodeView) => emit('open-edit', n.node_id)"
+            :is-empty="!rows.length"
+            @row-click="(r: Row) => emit('open-edit', isPending(r) ? `enroll:${r.id}` : r.node_id)"
         >
             <template #empty>
                 <div class="aiball-empty">
                     <i class="pi pi-sitemap" style="font-size: 1.6rem" />
-                    <p>No proxy nodes. Mint one on this host with <code>aiball auth issue --node</code>.</p>
+                    <p>
+                        No proxy nodes. Run <code>aiball proxy pair</code> on the node and approve
+                        it here, or mint a token on this host with <code>aiball auth issue --node</code>.
+                    </p>
                 </div>
             </template>
             <template #cell-status="{ row }">
+                <!-- A request has no liveness to report: it is not a node yet.
+                     What it has is a human waiting to be asked. -->
                 <StatusPill
-                    :status="liveness((row as NodeView).last_used_at)"
-                    :label="nodeLivenessLabel(liveness((row as NodeView).last_used_at))"
-                    :title="livenessTitle((row as NodeView).last_used_at)"
+                    v-if="isPending(row)"
+                    status="stale"
+                    label="to confirm"
+                    title="This node asked to pair — approve or refuse it"
+                />
+                <StatusPill
+                    v-else
+                    :status="liveness(asNode(row).last_used_at)"
+                    :label="nodeLivenessLabel(liveness(asNode(row).last_used_at))"
+                    :title="livenessTitle(asNode(row).last_used_at)"
                 />
             </template>
             <template #cell-node="{ row }">
-                <span class="nodes-label">{{ (row as NodeView).label || "(unlabelled)" }}</span>
-                <code class="nodes-id">{{ (row as NodeView).node_id }}</code>
-                <code
-                    v-if="(row as NodeView).ws_state?.connected && proxyVersionShort((row as NodeView).ws_state!)"
-                    class="nodes-version"
-                    :title="`proxy version (${(row as NodeView).ws_state?.node_version ?? '?'} commit ${(row as NodeView).ws_state?.node_commit ?? '?'})`"
-                >{{ proxyVersionShort((row as NodeView).ws_state!) }}</code>
+                <template v-if="isPending(row)">
+                    <span class="nodes-label">{{ row.label || "(unnamed node)" }}</span>
+                    <code class="nodes-id">code {{ row.code }} — not paired yet</code>
+                </template>
+                <template v-else>
+                    <span class="nodes-label">{{ asNode(row).label || "(unlabelled)" }}</span>
+                    <code class="nodes-id">{{ asNode(row).node_id }}</code>
+                    <code
+                        v-if="asNode(row).ws_state?.connected && proxyVersionShort(asNode(row).ws_state!)"
+                        class="nodes-version"
+                        :title="`proxy version (${asNode(row).ws_state?.node_version ?? '?'} commit ${asNode(row).ws_state?.node_commit ?? '?'})`"
+                    >{{ proxyVersionShort(asNode(row).ws_state!) }}</code>
+                </template>
             </template>
             <template #cell-host="{ row }">
-                <template v-if="(row as NodeView).display_host">
-                    <span class="nodes-host" :title="(row as NodeView).last_seen_ip ? `peer ip ${(row as NodeView).last_seen_ip}` : undefined">
-                        {{ (row as NodeView).display_host }}
+                <template v-if="isPending(row)">
+                    <span class="nodes-host" title="where the request came from — the one thing this hub observed itself">
+                        {{ row.requested_ip ?? "—" }}
+                    </span>
+                </template>
+                <template v-else-if="asNode(row).display_host">
+                    <span class="nodes-host" :title="asNode(row).last_seen_ip ? `peer ip ${asNode(row).last_seen_ip}` : undefined">
+                        {{ asNode(row).display_host }}
                     </span>
                     <span
-                        v-if="(row as NodeView).display_host_provider"
+                        v-if="asNode(row).display_host_provider"
                         class="nodes-host-provider"
-                        :title="`resolved by provider '${(row as NodeView).display_host_provider}'`"
-                    >{{ (row as NodeView).display_host_provider }}</span>
+                        :title="`resolved by provider '${asNode(row).display_host_provider}'`"
+                    >{{ asNode(row).display_host_provider }}</span>
                 </template>
-                <template v-else>{{ (row as NodeView).last_seen_ip ?? "—" }}</template>
+                <template v-else>{{ asNode(row).last_seen_ip ?? "—" }}</template>
             </template>
             <template #cell-last_activity="{ row }">
-                <span :title="`created ${fmt((row as NodeView).created_at)}`">{{ fmt((row as NodeView).last_used_at) }}</span>
+                <span
+                    v-if="isPending(row)"
+                    :title="`expires ${fmt(row.expires_at)} — an unattended request stops being a door`"
+                >asked {{ fmt(row.created_at) }}</span>
+                <span v-else :title="`created ${fmt(asNode(row).created_at)}`">{{ fmt(asNode(row).last_used_at) }}</span>
             </template>
         </DataList>
     </div>
@@ -306,6 +389,19 @@ function sortValue(n: NodeView, key: string): string | number {
     color: var(--p-primary-color);
 }
 .nodes-id { display: block; font-size: var(--fs-2xs); opacity: 0.5; }
+/* #2078 — a request is not a node: mark the row so the difference reads before
+   a single word does. `:deep` because the row itself is rendered by DataList;
+   an inset bar rather than a background fill, so it holds up whatever the theme
+   paints behind it. The code stays legible — it is what the human compares with
+   the screen on the other machine. */
+:deep(tr.nodes-row--pending) {
+    box-shadow: inset 3px 0 0 var(--p-yellow-500, #eab308);
+}
+:deep(tr.nodes-row--pending) .nodes-id {
+    opacity: 0.85;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
 .nodes-version {
     display: block;
     font-size: var(--fs-2xs);
