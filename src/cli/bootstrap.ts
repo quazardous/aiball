@@ -12,7 +12,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import type { Command } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
 import { die, userCwd } from "./_helpers.js";
@@ -441,6 +441,64 @@ function initTailscale(opts: { http: boolean; port?: number; autostart: boolean 
  * existing keys + comments are preserved; only `proxy` is set. Host-level
  * (every local client on this host relays), so it's global, not per-project.
  */
+/**
+ * #2074 — `aiball proxy pair`: ask the hub to be enrolled, instead of carrying
+ * a 48-hex secret across two machines by hand.
+ *
+ * The node has no credential yet, so the request goes to the hub's public
+ * enrolment route. It comes back with a short code, which this prints and a
+ * human compares against the one shown in the aiball UI before approving —
+ * that comparison is what ties the row they click to the machine you are
+ * standing at. Nothing here can grant anything; it waits for a person.
+ */
+async function pairProxy(opts: { url: string; label?: string; strict?: boolean }): Promise<void> {
+    const base = opts.url.replace(/\/+$/, "");
+    const label = opts.label?.trim() || hostname();
+    let req: { id: string; code: string; expires_at: string };
+    try {
+        const res = await fetch(`${base}/api/nodes/enroll`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ label }),
+        });
+        if (!res.ok) die(`proxy pair: the hub refused the request (${res.status}) — ${await res.text()}`);
+        req = await res.json() as typeof req;
+    } catch (e) {
+        return die(`proxy pair: cannot reach ${base} — ${(e as Error).message}`);
+    }
+
+    process.stdout.write(
+        `\n  Pairing code:  ${req.code}\n\n`
+        + `  Open aiball on the hub, find this request under Nodes, check the code\n`
+        + `  matches, and approve it. Waiting…  (expires ${req.expires_at.slice(11, 16)} UTC)\n\n`,
+    );
+
+    // Poll until a human decides. Every second: this is someone clicking a
+    // button, not a machine, so a slower interval only makes it feel broken.
+    const deadline = Date.parse(req.expires_at) + 60_000;
+    for (;;) {
+        await new Promise((r) => setTimeout(r, 1000));
+        let state: { state: string; token?: string };
+        try {
+            const res = await fetch(`${base}/api/nodes/enroll/${req.id}`);
+            state = await res.json() as typeof state;
+        } catch {
+            continue; // a blip on the way to the hub is not a refusal
+        }
+        if (state.state === "approved" && state.token) {
+            initProxy({ url: base, token: state.token, strict: opts.strict === true });
+            process.stdout.write("  Approved. Restart the daemon to relay:  systemctl --user restart aiball\n\n");
+            return;
+        }
+        if (state.state === "rejected") return die("proxy pair: the request was refused on the hub.");
+        if (state.state === "expired") return die("proxy pair: nobody approved it in time — run the command again.");
+        if (state.state === "delivered") {
+            return die("proxy pair: this request's token was already collected — run the command again.");
+        }
+        if (Date.now() > deadline) return die("proxy pair: gave up waiting — run the command again.");
+    }
+}
+
 function initProxy(opts: { url: string; token: string; strict?: boolean }): void {
     const path = globalConfigPath();
     let doc;
@@ -660,6 +718,16 @@ export function registerBootstrapCommands(program: Command): void {
         .option("--strict", "Never inject the node token: every relayed request must carry its own per-consumer bearer (else 401). Closes the cross-host weak point (#394).")
         .action((o: { url: string; token?: string; strict?: boolean }) => {
             initProxy({ url: o.url, token: o.token ?? "", strict: o.strict === true });
+        });
+
+    proxy
+        .command("pair")
+        .description("Ask the hub to enrol this node — a human approves it in the aiball UI (no token to copy)")
+        .requiredOption("--url <url>", "Remote aiball URL to relay to (e.g. https://A-host:7777)")
+        .option("--label <label>", "How this node names itself in the UI (default: hostname)")
+        .option("--strict", "Never inject the node token: every relayed request must carry its own per-consumer bearer")
+        .action(async (o: { url: string; label?: string; strict?: boolean }) => {
+            await pairProxy({ url: o.url, label: o.label, strict: o.strict === true });
         });
 
     // #394 node-managed token store: map LOCAL tokens → upstream per-consumer
