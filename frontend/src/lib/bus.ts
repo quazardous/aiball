@@ -50,6 +50,9 @@ export interface BusEvents {
     "message.arrived": Message;
     /** A pending message was approved or rejected by a moderator. */
     "message.decided": Message;
+    /** #2074 — a proxy node is asking to be paired, or its request was decided.
+     *  Carries the request so a toast can name it without a round-trip. */
+    "node.pairing": { id: string; code: string; label: string | null; state: string };
     /** A project was deleted server-side; consumers should drop references. */
     "project.deleted": { project: string };
     /** Read state for a ticket flipped; sidebar/list badges may need refresh. */

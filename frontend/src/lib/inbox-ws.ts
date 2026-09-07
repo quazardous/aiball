@@ -69,6 +69,14 @@ export function useInboxWs(opts: {
             return;
         }
         if (ev.type === "consumer_changed") {
+            // #2074 — a pairing request rides the consumer lane (it is a node
+            // credential matter). Split out here so a toast can fire without
+            // the consumer surfaces having to know about pairing at all.
+            const enr = (ev.data as { enrollment?: { id: string; code: string; label: string | null; state: string } } | undefined)?.enrollment;
+            if (enr) {
+                bus.emit("node.pairing", enr);
+                return;
+            }
             // Dedicated lane: a loop presence/state event repaints the
             // consumer surfaces only. The old fallthrough emitted
             // inbox.refresh + projects.refresh on EVERY heartbeat of every

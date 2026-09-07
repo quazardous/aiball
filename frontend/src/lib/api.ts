@@ -291,6 +291,26 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     return res.json() as Promise<T>;
 }
 
+/**
+ * #2074 — a proxy node's pairing request. Never carries the token: that is
+ * minted at approval and collected by the node itself, once.
+ */
+export interface NodeEnrollment {
+    id: string;
+    /** Compared against the code printed on the node — that comparison is what
+     *  ties this row to the machine in front of you. */
+    code: string;
+    /** What the node calls itself. Chosen by the asker, so a hint, not proof. */
+    label: string | null;
+    /** Where it came from — the one thing the hub observed rather than was told. */
+    requested_ip: string | null;
+    created_at: string;
+    expires_at: string;
+    state: "pending" | "approved" | "rejected" | "delivered" | "expired";
+    decided_at: string | null;
+    decided_by: string | null;
+}
+
 export interface TicketSummary {
     id: number;
     project: string;
@@ -1282,6 +1302,12 @@ export const api = {
         ),
     /** #424: proxy-node tokens + the consumers each relays (moderator-only). */
     listNodes: () => req<NodeView[]>("GET", "/api/nodes"),
+    /** #2074 — proxy nodes asking to be paired, waiting on a human. */
+    listNodeEnrollments: () => req<NodeEnrollment[]>("GET", "/api/nodes/enrollments"),
+    /** #2074 — approve mints the node's token; reject is final. Both refuse a
+     *  request that is no longer pending, so a stale panel cannot double-mint. */
+    decideNodeEnrollment: (id: string, verdict: "approve" | "reject") =>
+        req<NodeEnrollment>("POST", `/api/nodes/enrollments/${encodeURIComponent(id)}/${verdict}`),
     /** #424: revoke a node by its non-secret handle (deletes the node token). */
     revokeNode: (node_id: string) =>
         req<{ node_id: string; revoked: boolean }>("DELETE", `/api/nodes/${encodeURIComponent(node_id)}`),

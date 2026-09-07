@@ -3,11 +3,14 @@
 // last activity and last peer IP — each row links to the node detail page.
 // Read-only list; revoke + relayed consumers live on the detail page (#452).
 // The token value is never exposed — a node is keyed by a non-secret `node_id`.
-import { ref, onMounted } from "vue";
-import { api, type NodeView } from "../lib/api";
+import { computed, ref, onMounted, watch } from "vue";
+import { api, type NodeEnrollment, type NodeView } from "../lib/api";
 import { formatActivityAge } from "../lib/format";
 import { useNowTicker } from "../lib/now-ticker";
 import { useLoader } from "../lib/loader";
+import Button from "primevue/button";
+import { useConfirm } from "primevue/useconfirm";
+import { useToast } from "primevue/usetoast";
 import NodeDetailPage from "./NodeDetailPage.vue";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
@@ -27,7 +30,54 @@ const emit = defineEmits<{
     (e: "close-to-inbox"): void;
 }>();
 
+const confirm = useConfirm();
+const toast = useToast();
 const nodes = ref<NodeView[]>([]);
+
+// #2074 — the same route carries pairing requests, prefixed so a request id can
+// never be mistaken for a node id: they are different things with different
+// powers, and one of them does not exist yet.
+const pairingId = computed(() =>
+    props.editNodeId?.startsWith("enroll:") ? props.editNodeId.slice("enroll:".length) : null);
+const pairing = ref<NodeEnrollment | null>(null);
+
+watch(pairingId, async (id: string | null) => {
+    pairing.value = null;
+    if (!id) return;
+    const all = await api.listNodeEnrollments().catch(() => [] as NodeEnrollment[]);
+    pairing.value = all.find((e) => e.id === id) ?? null;
+}, { immediate: true });
+
+function confirmApprove(): void {
+    // Double confirmation, asked for explicitly: this is the moment a
+    // credential comes into existence, and the dialog names what it can do
+    // rather than asking "are you sure?".
+    confirm.require({
+        header: "Approve this node?",
+        message: `This mints a node token for "${pairing.value?.label ?? "this node"}". `
+            + "A node token can act as ANY consumer on this hub. Only approve it if the code "
+            + `${pairing.value?.code} is showing on the machine you are pairing.`,
+        icon: "pi pi-exclamation-triangle",
+        acceptLabel: "Approve and mint",
+        rejectLabel: "Cancel",
+        accept: () => { void decide("approve"); },
+    });
+}
+
+async function decide(verdict: "approve" | "reject"): Promise<void> {
+    const id = pairingId.value;
+    if (!id) return;
+    try {
+        pairing.value = await api.decideNodeEnrollment(id, verdict);
+        if (verdict === "approve") await load();
+    } catch (e) {
+        // A 409 means someone already decided, or it expired while the panel
+        // sat open — say so instead of leaving a dead button.
+        pairing.value = null;
+        toast.add({ severity: "warn", summary: "Pairing request is no longer pending",
+            detail: (e as Error).message, life: 8000 });
+    }
+}
 
 const { loading, error, load } = useLoader(async () => {
     nodes.value = await api.listNodes();
@@ -88,8 +138,43 @@ function sortValue(n: NodeView, key: string): string | number {
 </script>
 
 <template>
+    <!-- #2074 — a PAIRING REQUEST is not a node yet, so it gets its own view on
+         the same route. The code is the biggest thing on screen: comparing it
+         with what the node printed is the one check that matters, and the
+         approve button is deliberately behind a second confirmation because it
+         mints a credential that can impersonate any consumer. -->
+    <div v-if="pairingId" class="nodes-panel">
+        <PanelHeader title="Pair a proxy node">
+            <p class="aiball-explainer aiball-explainer--muted">
+                A node asked to be enrolled. Approving mints its <strong>node token</strong> —
+                a credential that can act as any consumer — so check the code below
+                matches the one printed on that machine before you accept.
+            </p>
+        </PanelHeader>
+        <div v-if="pairing" class="pairing">
+            <div class="pairing__code">{{ pairing.code }}</div>
+            <dl class="pairing__facts">
+                <dt>Calls itself</dt><dd>{{ pairing.label ?? "—" }} <span class="pairing__caveat">(chosen by the node)</span></dd>
+                <dt>Coming from</dt><dd>{{ pairing.requested_ip ?? "—" }} <span class="pairing__caveat">(observed by this hub)</span></dd>
+                <dt>Asked at</dt><dd>{{ new Date(pairing.created_at).toLocaleString() }}</dd>
+                <dt>Status</dt><dd>{{ pairing.state }}</dd>
+            </dl>
+            <div v-if="pairing.state === 'pending'" class="pairing__actions">
+                <Button label="Approve — mint this node's token" icon="pi pi-check" @click="confirmApprove" />
+                <Button label="Refuse" icon="pi pi-times" severity="secondary" outlined @click="decide('reject')" />
+            </div>
+            <p v-else class="aiball-explainer aiball-explainer--muted">
+                Already decided — nothing left to do here.
+            </p>
+        </div>
+        <p v-else class="aiball-explainer aiball-explainer--muted">
+            This pairing request no longer exists. It may have expired: an unattended
+            request stops being a door after a few minutes.
+        </p>
+        <Button label="Back" icon="pi pi-arrow-left" text @click="emit('close-edit')" />
+    </div>
     <NodeDetailPage
-        v-if="props.editNodeId"
+        v-else-if="props.editNodeId"
         :node-id="props.editNodeId"
         @close="emit('close-edit')"
         @close-to-inbox="emit('close-to-inbox')"
@@ -245,4 +330,20 @@ function sortValue(n: NodeView, key: string): string | number {
         padding-right: 0;
     }
 }
+
+/* #2074 — the pairing view. The code dominates on purpose: comparing it with
+   the node's screen is the only check standing between a stranger's request
+   and a credential that can act as anyone. */
+.pairing { max-width: 34rem; }
+.pairing__code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 2.4rem;
+    letter-spacing: .18em;
+    margin: .5rem 0 1rem;
+}
+.pairing__facts { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem; margin-bottom: 1.25rem; }
+.pairing__facts dt { opacity: .7; }
+.pairing__facts dd { margin: 0; }
+.pairing__caveat { opacity: .6; font-size: .85em; }
+.pairing__actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
 </style>

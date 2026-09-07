@@ -343,6 +343,31 @@ const { connected } = useInboxWs({ strategy, openTicketId });
 
 // Local consumers — same effects as before, just driven by the bus now.
 useBus("projects.refresh", () => { loadProjects(); });
+// #2074 — a node asking to be paired. The toast carries the code so the two
+// screens can be compared before anything is approved; clicking it opens the
+// request rather than making the human go and find it.
+function openPairing(id: string): void {
+    panel.value = "nodes";
+    nodeEditId.value = `enroll:${id}`;
+    toast.removeGroup("pairing");
+}
+/** The request the toast is currently about. One at a time is the reality:
+ *  a person pairs one machine, looking at it. */
+const pendingPairing = ref<{ id: string; code: string; label: string | null } | null>(null);
+useBus("node.pairing", (e) => {
+    if (e.state !== "pending") {
+        if (pendingPairing.value?.id === e.id) { pendingPairing.value = null; toast.removeGroup("pairing"); }
+        return;
+    }
+    pendingPairing.value = { id: e.id, code: e.code, label: e.label };
+    toast.add({
+        group: "pairing",
+        severity: "info",
+        summary: `${e.label ?? "A node"} wants to pair`,
+        life: 120000,
+    });
+});
+
 // #2072 — the inbox's own bus lanes live in `useInboxCache`: it is the only
 // writer of the rows, so it is the only thing that needs to hear about them.
 useBus("message.arrived", (m) => { notifyArrival(m); });
@@ -890,6 +915,24 @@ watch(showSnoozed, (v) => {
         </div>
 
         <Toast position="top-right" />
+        <!-- #2074 — pairing gets its own toast group so it can be CLICKABLE.
+             A node is standing at a prompt waiting for a person; a notice you
+             can only read, and must then go hunting for, is the slow path. -->
+        <Toast position="top-right" group="pairing">
+            <template #message="{ message }">
+                <div
+                    v-if="pendingPairing"
+                    class="pairing-toast"
+                    @click="openPairing(pendingPairing.id)"
+                >
+                    <div class="pairing-toast__title">
+                        <i class="pi pi-link" /> {{ message.summary }}
+                    </div>
+                    <div class="pairing-toast__code">{{ pendingPairing.code }}</div>
+                    <div class="pairing-toast__hint">Click to review and approve</div>
+                </div>
+            </template>
+        </Toast>
         <!-- #309: global confirm dialog (used by the comment delete button). -->
         <ConfirmDialog />
     </div>
@@ -1101,4 +1144,16 @@ watch(showSnoozed, (v) => {
     border: 0 !important;
     box-shadow: none !important;
 }
+
+/* #2074 — the pairing toast. The code is the largest thing in it: comparing it
+   with the node's screen is the only action that matters before approving. */
+.pairing-toast { cursor: pointer; width: 100%; }
+.pairing-toast__title { font-weight: 600; margin-bottom: .35rem; }
+.pairing-toast__code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 1.5rem;
+    letter-spacing: .12em;
+    margin: .2rem 0 .35rem;
+}
+.pairing-toast__hint { font-size: .8rem; opacity: .75; }
 </style>
