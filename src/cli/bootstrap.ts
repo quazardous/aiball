@@ -20,6 +20,7 @@ import { applyBootstrapOptions } from "./bootstrap-options.js";
 import { globalConfigPath } from "../autopoll/config.js";
 import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
 import { resolveDisplayHost } from "../proxy-host-providers.js";
+import { deriveSubAgentName } from "./sub-agent-name.js";
 import { savePairingRequest } from "../node-pairing-request.js";
 import { collectPendingPairing } from "../node-pairing-collect.js";
 import { restartViaSupervisor } from "../supervisor-restart.js";
@@ -41,6 +42,21 @@ import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
  * `.aiball.yaml` `consumer.project` → `basename(userCwd())`. Same chain
  * `resolveIdentityHint` uses for the post-init hint.
  */
+/** #2091 — the project this checkout already declares, if any. Same read
+ *  `runMigrateFrom` does below; a malformed yaml is simply "no answer". */
+function readYamlProject(): string | null {
+    const yamlPath = join(userCwd(), ".aiball.yaml");
+    if (!existsSync(yamlPath)) return null;
+    try {
+        const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as
+            | { consumer?: { project?: string } }
+            | null;
+        return parsed?.consumer?.project?.trim() || null;
+    } catch {
+        return null;
+    }
+}
+
 async function runMigrateFrom(oldName: string, projectFlag: string | undefined): Promise<void> {
     let newName = projectFlag?.trim() ?? "";
     if (!newName) {
@@ -178,8 +194,28 @@ export async function bootstrapInit(opts: {
      *  `aiball project rename` CLI uses, so the cascade across tickets /
      *  subs / rules / etc. lands inside the daemon's transaction. */
     migrateFrom?: string;
+    /** #2091 — the one-gesture sub-agent. `true` (bare `--sub-agent`) derives a
+     *  name; a string uses it verbatim. Either way it implies assignment-only,
+     *  which is what makes it a sub-agent rather than a peer. */
+    subAgent?: string | boolean;
 }): Promise<void> {
     const force = opts.force === true;
+    // #2091 — resolve the preset BEFORE anything reads `consumer` / `noClaim`,
+    // so the rest of the function has a single shape to handle. An explicit
+    // --agent or --no-claim still wins: the preset fills blanks, it does not
+    // overrule what was actually asked for.
+    if (opts.subAgent !== undefined && opts.subAgent !== false) {
+        if (!opts.consumer) {
+            opts.consumer = typeof opts.subAgent === "string" && opts.subAgent.trim()
+                ? opts.subAgent.trim()
+                : deriveSubAgentName({
+                    project: opts.project ?? readYamlProject(),
+                    dirBase: basename(userCwd()),
+                    host: resolveDisplayHost()?.host ?? null,
+                });
+        }
+        if (opts.noClaim === undefined) opts.noClaim = true;
+    }
     if (opts.migrateFrom) {
         await runMigrateFrom(opts.migrateFrom, opts.project);
     }

@@ -70,6 +70,16 @@ export const BOOTSTRAP_OPTIONS: ReadonlyArray<BootstrapOption> = [
         forwardKey: "noClaim",
     },
     {
+        flag: "--sub-agent [name]",
+        description:
+            "#2091: stand up a SUB-AGENT here in one gesture — seeds `consumer.agent` "
+            + "(derived from the project + this host when no name is given) and "
+            + "`consumer.no_claim: true`, so it works on what it is assigned rather "
+            + "than on what it picks. For a peer instead, use --agent <id> without "
+            + "this flag (no_claim is only ever set, never cleared, by init).",
+        forwardKey: "subAgent",
+    },
+    {
         flag: "--migrate-from <name>",
         description: "#701: rename the project from <name> to the new project name BEFORE the init body runs. Typo-recovery in one shot.",
         forwardKey: "migrateFrom",

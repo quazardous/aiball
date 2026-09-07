@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- `aiball init --sub-agent` (and `claude-loop init --sub-agent`) stands up a
+  subordinate agent in one gesture: it names it after the project and the
+  machine it runs on when you don't pass a name, and marks it as working on what
+  it is assigned rather than on what it picks.
 - Pairing a proxy node is two steps instead of three: ask on the node, approve
   in the UI. The node writes its config and restarts itself as a relay, and you
   no longer have to stay in front of its terminal — the request is remembered on
