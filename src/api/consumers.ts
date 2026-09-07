@@ -340,10 +340,19 @@ consumersRouter.post("/nodes/enroll", (req: Request, res: Response) => {
     if (enrollRateLimited(ip)) {
         return res.status(429).json({ error: "too many pairing requests — wait a minute" });
     }
-    const { label } = (req.body ?? {}) as { label?: unknown };
+    const { label, display_host, display_host_provider } = (req.body ?? {}) as {
+        label?: unknown; display_host?: unknown; display_host_provider?: unknown;
+    };
+    // #2081 — the node resolves its own name (tailscale, then hostname) the way
+    // a paired one does in its WS hello, because the hub sees only the peer IP
+    // and a local reverse proxy makes that 127.0.0.1 every time. Stored as a
+    // CLAIM, next to the label: nothing here has been proved.
+    const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
     const view = createEnrollment({
-        label: typeof label === "string" && label.trim() ? label.trim() : null,
+        label: str(label),
         ip,
+        claimed_host: str(display_host),
+        claimed_host_provider: str(display_host_provider),
     });
     // The panel should light up without waiting for a poll: this is the moment
     // a human is expected to act, and the node is standing at a prompt.

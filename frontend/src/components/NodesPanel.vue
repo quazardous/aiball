@@ -208,7 +208,8 @@ function sortValue(row: Row, key: string): string | number {
             // one goes past `up` instead: it is a trace, not a thing to do.
             case "status": return isExpired(row) ? 3 : -1;
             case "node": return (row.label ?? row.code).toLowerCase();
-            case "host": return (row.requested_ip ?? "").toLowerCase();
+            // Sort on what the column actually shows.
+            case "host": return (row.claimed_host ?? row.requested_ip ?? "").toLowerCase();
             // A request is minutes old, so the default sort (newest activity
             // first) floats it up without needing a special case.
             case "last_activity": return Date.parse(row.created_at);
@@ -248,6 +249,16 @@ function sortValue(row: Row, key: string): string | number {
             <div class="pairing__code">{{ pairing.code }}</div>
             <dl class="pairing__facts">
                 <dt>Calls itself</dt><dd>{{ pairing.label ?? "—" }} <span class="pairing__caveat">(chosen by the node)</span></dd>
+                <!-- #2081 — two lines on purpose. The hub observed one of these
+                     and was told the other; on the screen where a credential is
+                     about to be minted, that difference is the whole point. -->
+                <dt>Says it runs on</dt>
+                <dd>
+                    {{ pairing.claimed_host ?? "—" }}
+                    <span class="pairing__caveat">
+                        (claimed by the node{{ pairing.claimed_host_provider ? `, via ${pairing.claimed_host_provider}` : "" }})
+                    </span>
+                </dd>
                 <dt>Coming from</dt><dd>{{ pairing.requested_ip ?? "—" }} <span class="pairing__caveat">(observed by this hub)</span></dd>
                 <dt>Asked at</dt><dd>{{ new Date(pairing.created_at).toLocaleString() }}</dd>
                 <dt>Status</dt><dd>{{ pairing.state }}</dd>
@@ -380,10 +391,24 @@ function sortValue(row: Row, key: string): string | number {
                 </template>
             </template>
             <template #cell-host="{ row }">
+                <!-- #2081 — a request shows the name the machine gave for itself,
+                     with the same provider chip a paired node gets, because the
+                     peer IP is 127.0.0.1 whenever a local reverse proxy sits in
+                     front. The chip is marked "says" and the tooltip carries the
+                     IP: this is a claim by a caller that has proved nothing, and
+                     it must not read like the verified host below. -->
                 <template v-if="isPending(row)">
-                    <span class="nodes-host" title="where the request came from — the one thing this hub observed itself">
-                        {{ row.requested_ip ?? "—" }}
-                    </span>
+                    <span
+                        class="nodes-host"
+                        :title="row.claimed_host
+                            ? `the machine says it is called '${row.claimed_host}' — unverified; this hub only observed the address ${row.requested_ip ?? 'unknown'}`
+                            : 'the address this hub observed — a local reverse proxy makes this 127.0.0.1'"
+                    >{{ row.claimed_host ?? row.requested_ip ?? "—" }}</span>
+                    <span
+                        v-if="row.claimed_host"
+                        class="nodes-host-provider nodes-host-provider--claimed"
+                        :title="`says it resolved this itself via '${row.claimed_host_provider ?? 'unknown'}'`"
+                    >says {{ row.claimed_host_provider ?? "?" }}</span>
                 </template>
                 <template v-else-if="asNode(row).display_host">
                     <span class="nodes-host" :title="asNode(row).last_seen_ip ? `peer ip ${asNode(row).last_seen_ip}` : undefined">
@@ -429,6 +454,14 @@ function sortValue(row: Row, key: string): string | number {
     opacity: 0.85;
     font-weight: 600;
     letter-spacing: 0.04em;
+}
+/* #2081 — the provider chip on a REQUEST is a claim, not a resolution the hub
+   made. Outlined rather than filled, so it reads differently at a glance from
+   the chip a paired node earns. */
+.nodes-host-provider--claimed {
+    background: transparent;
+    border: 1px dashed var(--p-surface-300);
+    font-style: italic;
 }
 /* #2079 — an expired request is kept for a while so a human who wasn't at the
    screen still learns it happened. Greyed out: it is a trace, not a thing to

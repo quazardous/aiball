@@ -19,6 +19,7 @@ import { die, userCwd } from "./_helpers.js";
 import { applyBootstrapOptions } from "./bootstrap-options.js";
 import { globalConfigPath } from "../autopoll/config.js";
 import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
+import { resolveDisplayHost } from "../proxy-host-providers.js";
 import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
 
 /**
@@ -454,12 +455,22 @@ function initTailscale(opts: { http: boolean; port?: number; autostart: boolean 
 async function pairProxy(opts: { url: string; label?: string; strict?: boolean }): Promise<void> {
     const base = opts.url.replace(/\/+$/, "");
     const label = opts.label?.trim() || hostname();
+    // #2081 — say what this machine is called, resolved by the same provider
+    // chain a paired node uses in its WS hello (tailscale first, plain hostname
+    // otherwise). The hub cannot work this out on its own: it sees the peer IP,
+    // and a local reverse proxy turns that into 127.0.0.1 every time. The hub
+    // stores it as a claim — this request has proved nothing yet.
+    const dh = resolveDisplayHost();
     let req: { id: string; code: string; expires_at: string };
     try {
         const res = await fetch(`${base}/api/nodes/enroll`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ label }),
+            body: JSON.stringify({
+                label,
+                display_host: dh?.host ?? null,
+                display_host_provider: dh?.provider ?? null,
+            }),
         });
         if (res.status === 403) {
             // #2074 — the window is shut. Say which of the two machines to go

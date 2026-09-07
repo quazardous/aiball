@@ -928,6 +928,12 @@ export const nodeEnrollments = sqliteTable("node_enrollments", {
     label: text("label"),
     /** Where it came from — the one thing the hub observes rather than is told. */
     requestedIp: text("requested_ip"),
+    /** #2081: what the asking machine says it is called, resolved on ITS side by
+     *  the same provider chain a paired node uses. A claim, like the label —
+     *  the IP above stays the only observed fact. */
+    claimedHost: text("claimed_host"),
+    /** Which provider resolved it there ('tailscale', 'hostname', …). */
+    claimedHostProvider: text("claimed_host_provider"),
     createdAt: text("created_at").notNull(),
     /** An unattended request stops being a door. */
     expiresAt: text("expires_at").notNull(),

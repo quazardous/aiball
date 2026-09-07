@@ -112,6 +112,12 @@ kept narrow on purpose:
   machine you are standing at.
 - **Requests expire**, and an approved token is handed over exactly once — after
   which the request keeps no copy.
+- **What the caller says about itself is shown as a claim.** A request carries a
+  label and the host name the machine resolved for itself, which make the row
+  recognisable — but they are chosen by a caller that has proved nothing, and
+  the panel marks them as such. The address the hub observed is the only fact
+  it did not receive from the asker; the short code, compared on both screens,
+  is what actually ties the row to your machine.
 
 **Minting by hand** (`aiball auth issue --node`) stays available and is the
 right tool for scripted installs. The trade is the one this page warns about

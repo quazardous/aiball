@@ -22,6 +22,11 @@ export interface EnrollmentView {
     code: string;
     label: string | null;
     requested_ip: string | null;
+    /** #2081 — what the machine says it is called, and which provider on ITS
+     *  side worked it out. A claim, exactly like the label: the request is
+     *  unauthenticated, so `requested_ip` stays the only observed fact. */
+    claimed_host: string | null;
+    claimed_host_provider: string | null;
     created_at: string;
     expires_at: string;
     state: EnrollmentState;
@@ -35,6 +40,8 @@ function toView(r: typeof schema.nodeEnrollments.$inferSelect, nowMs: number): E
         code: r.code,
         label: r.label,
         requested_ip: r.requestedIp,
+        claimed_host: r.claimedHost,
+        claimed_host_provider: r.claimedHostProvider,
         created_at: r.createdAt,
         expires_at: r.expiresAt,
         state: enrollmentState(
@@ -51,13 +58,22 @@ function toView(r: typeof schema.nodeEnrollments.$inferSelect, nowMs: number): E
  * unauthenticated route: the worst a stranger achieves is a row a human will
  * not recognise and will not approve.
  */
-export function createEnrollment(input: { label?: string | null; ip?: string | null }): EnrollmentView {
+export function createEnrollment(input: {
+    label?: string | null;
+    ip?: string | null;
+    claimed_host?: string | null;
+    claimed_host_provider?: string | null;
+}): EnrollmentView {
     const now = Date.now();
     const row = {
         id: randomBytes(16).toString("hex"),
         code: makePairingCode(),
         label: input.label?.slice(0, 120) ?? null,
         requestedIp: input.ip ?? null,
+        // Truncated like the label: this is text an unauthenticated caller
+        // chose, and it ends up on a human's screen.
+        claimedHost: input.claimed_host?.slice(0, 120) ?? null,
+        claimedHostProvider: input.claimed_host_provider?.slice(0, 40) ?? null,
         createdAt: new Date(now).toISOString(),
         expiresAt: new Date(now + ENROLLMENT_TTL_MS).toISOString(),
         status: "pending",

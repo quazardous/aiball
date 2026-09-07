@@ -119,6 +119,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A pairing request now shows which machine it came from by name — the node
+  resolves it the same way a paired one does, over Tailscale when that is how it
+  reaches the hub. It is shown as something the machine claims, not as something
+  the hub verified: the address remains the only observed fact, and the short
+  code is still what ties the row to the machine in front of you.
 - A pairing request that expires unanswered stays in the list for half a day,
   greyed out, saying to ask again from the node. Expiring is the normal outcome
   when nobody is at the screen — which is exactly when the human most needs to

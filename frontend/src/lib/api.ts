@@ -316,6 +316,10 @@ export interface NodeEnrollment {
     label: string | null;
     /** Where it came from — the one thing the hub observed rather than was told. */
     requested_ip: string | null;
+    /** #2081 — what the machine says it is called, resolved on its own side the
+     *  way a paired node does. A claim like the label, never evidence. */
+    claimed_host: string | null;
+    claimed_host_provider: string | null;
     created_at: string;
     expires_at: string;
     state: "pending" | "approved" | "rejected" | "delivered" | "expired";
