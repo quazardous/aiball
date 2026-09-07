@@ -47,6 +47,7 @@ import { authRouter } from "./api/auth.js";
 import { consumersRouter } from "./api/consumers.js";
 import { configRouter } from "./api/config.js";
 import { messagesRouter } from "./api/messages.js";
+import { payloadsRouter } from "./api/payloads.js";
 import { pingsRouter } from "./api/pings.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
 import { rulesRouter } from "./api/rules.js";
@@ -603,6 +604,7 @@ api.get("/search", (req: Request, res: Response) => {
 // sub-routes (mark-read/unread, postpone/unsnooze, relations, PATCH
 // broadcast, brief/digest/full thread fetch) all moved to
 // ./api/tickets.ts (#B.213 phase 1.G).
+api.use(payloadsRouter);
 api.use(ticketsRouter);
 
 // -------- consumers (#B.79) -----------------------------------------------

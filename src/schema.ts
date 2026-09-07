@@ -971,3 +971,27 @@ export type GraphEdge = typeof graphEdges.$inferSelect;
 export type NewGraphEdgeRow = typeof graphEdges.$inferInsert;
 
 export type GraphMeta = typeof graphMeta.$inferSelect;
+
+/**
+ * #2109 — the payload zone a ticket may carry (see migration 0063).
+ *
+ * Deliberately NOT part of `tickets`: nothing joins this table, so no existing
+ * read path can return a payload by accident. `schema` lists the PUBLIC keys,
+ * which makes "no schema => everything secret" a consequence of an empty list
+ * rather than a rule someone has to remember.
+ */
+export const ticketPayloads = sqliteTable("ticket_payloads", {
+    ticketId: integer("ticket_id").primaryKey(),
+    /** JSON object, key -> value. NULL once revoked. */
+    payload: text("payload"),
+    /** JSON array of PUBLIC key names. NULL/[] => every key is secret. */
+    schema: text("schema"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    byAgent: text("by_agent"),
+    revokedAt: text("revoked_at"),
+    revokedBy: text("revoked_by"),
+    /** Key names copied at revocation, so the tombstone can still say WHICH
+     *  credential was destroyed. Non-secret by construction. */
+    revokedKeys: text("revoked_keys"),
+});

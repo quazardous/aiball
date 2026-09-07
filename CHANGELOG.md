@@ -23,6 +23,28 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- A ticket can now carry a **payload zone**: a small set of key/value pairs
+  alongside the thread, for the tickets that hold a thing rather than a
+  conversation — a handover, a configuration, a credential. Tickets without one
+  are unchanged.
+
+  Its schema lists the keys that are **public**; everything it doesn't name is
+  secret. So providing no schema means "all of it is secret", which is what an
+  empty list already says rather than a rule anyone has to remember. Keys stay
+  visible to everyone who can read the ticket, with secret values shown as a
+  short fixed prefix — an unreadable secret should still be an auditable one,
+  which is also why a key name must never carry its value.
+
+  The values themselves come back only to the reporter, the assignee or a
+  moderator, and only through `aiball payload dump`, which writes to a file
+  (mode 0600) and refuses stdout unless asked twice. Claiming a ticket does not
+  grant access; being *assigned* one does, so handing a secret to another agent
+  stays a human gesture. Closing the ticket ends access and reopening restores
+  it; revoking destroys the values and keeps a note of when, by whom, and which
+  keys were held. See `docs/PAYLOADS.md`.
+
 ### Fixed
 
 - Reading a ticket over MCP marks its events read again. The acknowledgement was

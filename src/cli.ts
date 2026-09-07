@@ -17,6 +17,7 @@ import { checkPrereqs, checkShims } from "./sysdeps.js";
 import { restartViaSupervisor, supervisorHint } from "./supervisor-restart.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
+import { registerPayloadCommands } from "./cli/payload.js";
 import { registerTicketCommands } from "./cli/ticket.js";
 import { registerAdminCommands } from "./cli/admin.js";
 import { registerAutopollCommands } from "./cli/autopoll.js";
@@ -61,6 +62,7 @@ program
 // autopoll subcommands → ./cli/autopoll.ts (#B.213 phase 3.E).
 // =====================================================================
 registerTicketCommands(program);
+registerPayloadCommands(program);
 registerAdminCommands(program);
 registerAutopollCommands(program);
 registerConsumerCommands(program);

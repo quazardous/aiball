@@ -227,6 +227,35 @@ export class AiballClient {
         }
     }
 
+    // =================================================================
+    //  #2109 — the ticket's payload zone
+    // =================================================================
+
+    /** The FILTERED view: keys always, values only where the schema says. */
+    ticketPayload(ticketId: number) {
+        return this.http("GET", `/api/tickets/${ticketId}/payload`);
+    }
+
+    /** Deposit or replace. `publicKeys` names the keys that are NOT secret. */
+    setTicketPayload(ticketId: number, payload: Record<string, unknown>, publicKeys: string[]) {
+        return this.http("PUT", `/api/tickets/${ticketId}/payload`, { payload, schema: publicKeys });
+    }
+
+    /**
+     * The values themselves — the deliberate gesture.
+     *
+     * POST, not GET: a secret should not sit in a URL that proxies log and
+     * shells keep in history.
+     */
+    dumpTicketPayload(ticketId: number) {
+        return this.http("POST", `/api/tickets/${ticketId}/payload/dump`, {});
+    }
+
+    /** Revoke: destroy the values, keep the trace that they existed. */
+    revokeTicketPayload(ticketId: number) {
+        return this.http("DELETE", `/api/tickets/${ticketId}/payload`);
+    }
+
     /** Per-project subscriber + content stats (« nobody is listening » hint). */
     projectStats(project: string) {
         return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);

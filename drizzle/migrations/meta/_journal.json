@@ -442,6 +442,20 @@
       "when": 1782700000011,
       "tag": "0062_node_revocations",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1782700000012,
+      "tag": "0063_ticket_payloads",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1782700000013,
+      "tag": "0064_ticket_payload_revoked_keys",
+      "breakpoints": true
     }
   ]
 }

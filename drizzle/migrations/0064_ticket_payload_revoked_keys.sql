@@ -1,0 +1,14 @@
+-- #2109 — what a revoked payload can still say about itself.
+--
+-- Revoking nulls `payload`, and the key list was derived from it, so a
+-- tombstone could only say "something was here" — not which credential. On a
+-- ticket that carried several, that is the difference between an audit and a
+-- shrug.
+--
+-- Same move migration 0062 made for node revocations, which copies `label` and
+-- `display_host` onto the tombstone so the row still reads like the node it
+-- replaces rather than like a bare hash. Here the equivalent is the key names,
+-- which are non-secret by construction: the design already requires that a key
+-- name never carry its value, since keys stay visible to everyone precisely so
+-- that an unreadable payload is still an auditable one.
+ALTER TABLE ticket_payloads ADD COLUMN revoked_keys TEXT;
