@@ -23,6 +23,23 @@
 
 export type ConsumerRole = "lead" | "crew";
 
+/** The two roles, in one place, so the flag and the reader agree on them. */
+export const CONSUMER_ROLES: readonly ConsumerRole[] = ["lead", "crew"];
+
+/**
+ * Whether a value is a role the runtime will actually honour.
+ *
+ * The flag takes a free string, and `autopoll/config.ts` accepts only `lead`
+ * and `crew` — anything else leaves the resolved role NULL, which behaves as
+ * lead. So a typo would be written into the yaml, displayed back, and then
+ * quietly ignored: the file claims a standing the daemon does not give. That
+ * is the same silent shape this whole fix is about, one layer up, and it is
+ * cheaper to refuse than to explain.
+ */
+export function isConsumerRole(v: unknown): v is ConsumerRole {
+    return typeof v === "string" && (CONSUMER_ROLES as readonly string[]).includes(v);
+}
+
 export interface SubAgentGiven {
     /** `--agent` / `--consumer`, when the user gave an id explicitly. */
     consumer?: string;

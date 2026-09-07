@@ -21,7 +21,7 @@ import { globalConfigPath } from "../autopoll/config.js";
 import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
 import { resolveDisplayHost } from "../proxy-host-providers.js";
 import { deriveSubAgentName } from "./sub-agent-name.js";
-import { resolveSubAgentPreset } from "./sub-agent-preset.js";
+import { resolveSubAgentPreset, isConsumerRole } from "./sub-agent-preset.js";
 import { savePairingRequest } from "../node-pairing-request.js";
 import { collectPendingPairing } from "../node-pairing-collect.js";
 import { restartViaSupervisor, supervisorHint } from "../supervisor-restart.js";
@@ -225,6 +225,16 @@ export async function bootstrapInit(opts: {
     subAgent?: string | boolean;
 }): Promise<void> {
     const force = opts.force === true;
+    // #2097 — refuse a role the runtime would ignore. The flag takes a free
+    // string; `autopoll/config.ts` honours only `lead` and `crew` and leaves
+    // anything else null, which behaves as lead. Accepting a typo would write
+    // it to the yaml and print it back, while the daemon gave the agent the
+    // opposite standing — a file that says one thing and a runtime that does
+    // another. Refusing costs one line.
+    const givenRole: unknown = opts.role;
+    if (givenRole !== undefined && !isConsumerRole(givenRole)) {
+        die(`--role must be 'lead' or 'crew' (got '${String(givenRole)}')`);
+    }
     // #2091 — resolve the preset BEFORE anything reads `consumer` / `noClaim`,
     // so the rest of the function has a single shape to handle. An explicit
     // --agent or --no-claim still wins: the preset fills blanks, it does not

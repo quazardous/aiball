@@ -7,7 +7,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveSubAgentPreset } from "./sub-agent-preset.js";
+import { resolveSubAgentPreset, isConsumerRole } from "./sub-agent-preset.js";
 
 const derive = () => "derived-name";
 const never = () => {
@@ -98,5 +98,26 @@ test("a blank id after the flag falls back to the derivation", () => {
     // let two agents share one.
     for (const blank of ["", "   "]) {
         assert.equal(resolveSubAgentPreset({}, blank, derive).consumer, "derived-name");
+    }
+});
+
+// The flag takes a free string and the config reader honours only two values,
+// leaving anything else null — which behaves as lead. So a value that is not a
+// role must be refused at the flag rather than written to the file and ignored
+// later: otherwise the yaml claims a standing the daemon does not grant.
+test("only the two real roles are accepted", () => {
+    assert.equal(isConsumerRole("lead"), true);
+    assert.equal(isConsumerRole("crew"), true);
+});
+
+test("anything else is refused, including the near-misses", () => {
+    for (const v of ["boss", "Crew", "CREW", "leader", "follower", "owner", "", " crew"]) {
+        assert.equal(isConsumerRole(v), false, `${JSON.stringify(v)} must be refused`);
+    }
+});
+
+test("a non-string is refused without throwing", () => {
+    for (const v of [undefined, null, 0, 1, true, {}, ["crew"]]) {
+        assert.equal(isConsumerRole(v), false);
     }
 });
