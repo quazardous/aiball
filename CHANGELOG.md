@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Reading a ticket over MCP marks its events read again. The acknowledgement was
+  bounded by the highest id in the response, but the ticket's own id was mixed
+  into that calculation — and on a header-only read it was the only one, so the
+  bound landed far below every event id and nothing was ever marked read. Events
+  on a thread an agent had consulted, even a closed one, stayed in its unread
+  queue indefinitely.
 - The Windows loop bar no longer prints raw format markup where the window chip
   should be blank. Blanking it with an empty value made the multiplexer fall
   back to its own default and render half of it literally, so a fragment like
