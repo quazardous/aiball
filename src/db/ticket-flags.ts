@@ -116,6 +116,12 @@ export interface TicketFlagsContext {
     /** Visibility flag: tickets currently in the agent-hot zone
      *  (cross-agent view — same flag is shown to every requester). */
     crossAgentHot: Set<number>;
+    /** #2073 — hot because SOMEONE ELSE is working, mine excluded. Drives the
+     *  backlog TIER, where the visible flag turned into a loop: my own comment
+     *  made a ticket hot, hot outranks "I spoke last", and the ticket came
+     *  straight back to me. Optional so a caller that doesn't order a backlog
+     *  (a human's inbox) can leave it out and change nothing. */
+    othersHot?: Set<number>;
     /** Per-ticket `(last_actor, last_actor_at)` denorm from the tickets
      *  table. Surfaced on the row for UI/agent introspection. */
     lastActorByTicket: Map<number, { actor: string | null; at: string | null }>;
@@ -189,7 +195,14 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         const waiting = lastActorMe && !gated_by_decision;
         const blocked = ctx.gatedByBlockerIds.has(t.id);
         const inPool = actionable || followUp || waiting || blocked;
-        if (hot && inPool) {
+        // #2073 — the TIER reads heat caused by someone else. Answering "there
+        // is nothing to do here" used to buy the next wake on the same ticket:
+        // the comment relit `hot`, `hot` outranked `waiting`, and the only way
+        // out of the loop was silence — precisely what the manual tells an
+        // agent not to do. The visible 🔥 below is untouched: as visibility it
+        // was always right.
+        const hotForTier = (ctx.othersHot ?? ctx.crossAgentHot).has(t.id);
+        if (hotForTier && inPool) {
             backlog_tier = 0;
         } else if (actionable) {
             // Tier 1 — ball in my court (formal).
@@ -267,6 +280,10 @@ export function buildTicketFlagsContext(args: {
     /** Cross-agent hot focus set (visible flag, computed by the caller
      *  via `computeHotFocus(ticketAgentLastActivity(ids), …)`. */
     crossAgentHot: Set<number>;
+    /** #2073 — same computation over `ticketOthersLastActivity(ids, me)`.
+     *  Omitted → the tier falls back to the visible set, i.e. the old
+     *  behaviour. */
+    othersHot?: Set<number>;
     /** #1573 — effective claim capability for this consumer, as the route
      *  already resolved it for `isClaimable` (DB flag AND NOT the no-claim
      *  header hint). Optional: omitted → the rules read the DB flag. */
@@ -274,7 +291,8 @@ export function buildTicketFlagsContext(args: {
 }): TicketFlagsContext {
     const db = getDb();
     const { consumerId, ticketIds, nowMs, cooldownSec, closedSet,
-        isClaimable, ownClaimIds, assignedToMeIds, claimedByOtherIds, crossAgentHot, canClaim } = args;
+        isClaimable, ownClaimIds, assignedToMeIds, claimedByOtherIds, crossAgentHot,
+        othersHot, canClaim } = args;
 
     const unreadMap = ticketUnreadFlags(consumerId, ticketIds);
     const unreadIds = new Set<number>();
@@ -336,6 +354,7 @@ export function buildTicketFlagsContext(args: {
         ownClaimIds,
         assignedToMeIds,
         crossAgentHot,
+        othersHot,
         lastActorByTicket,
         closedSet,
         rulesCtx,

@@ -284,6 +284,45 @@ test("tier 0 hot — actionable + crossAgentHot promotes to focus", () => {
     assert.equal(flags.hot, true);
 });
 
+// #2073 — the loop: my own comment made the ticket hot, hot outranked "I spoke
+// last", and the ticket came straight back to me. Measured at five wakes on one
+// ticket in a morning. What the tier reads is now heat caused by SOMEONE ELSE;
+// the visible flag is unchanged, because as visibility it was always right.
+test("#2073 my own heat no longer promotes a ticket I'm waiting on", () => {
+    const flags = computeTicketFlags(
+        buildRow(),
+        buildCtx({
+            lastActorMeIds: new Set([1]),
+            crossAgentHot: new Set([1]),   // visible: someone (me) is working
+            othersHot: new Set(),          // but nobody ELSE is
+        }),
+    );
+    assert.equal(flags.backlog_tier, 3, "tier 3 — chase them, or let it ride");
+    assert.equal(flags.hot, true, "the flag david reads is untouched");
+});
+
+test("#2073 someone else's heat still promotes — that is real news", () => {
+    const flags = computeTicketFlags(
+        buildRow(),
+        buildCtx({
+            lastActorMeIds: new Set([1]),
+            crossAgentHot: new Set([1]),
+            othersHot: new Set([1]),
+        }),
+    );
+    assert.equal(flags.backlog_tier, 0);
+});
+
+test("#2073 a caller that doesn't compute it keeps the old behaviour", () => {
+    // `othersHot` omitted → falls back to the visible set. A human's inbox
+    // orders no backlog, and an older caller must not change shape.
+    const flags = computeTicketFlags(
+        buildRow(),
+        buildCtx({ lastActorMeIds: new Set([1]), crossAgentHot: new Set([1]) }),
+    );
+    assert.equal(flags.backlog_tier, 0);
+});
+
 test("tier 0 hot — waiting-on-them + hot also promotes", () => {
     const flags = computeTicketFlags(
         buildRow(),

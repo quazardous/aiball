@@ -515,7 +515,34 @@ export function ticketSelfLastActivity(consumer_id: string, ticket_ids: number[]
  * (used for the PER-AGENT work-order tiebreak, #532 david `bmzpfr`). Both
  * coexist : self for ranking, agent for visibility.
  */
+/**
+ * #2073 — the same measure, MINUS the caller's own messages.
+ *
+ * `hot` served two purposes at once and the second one was hurting. As
+ * visibility it is right: david wants the 🔥 whoever is working. As an input to
+ * a consumer's OWN backlog ordering it is a loop — my comment makes the ticket
+ * hot, hot outranks "I spoke last", so the ticket comes back to me, and
+ * answering it buys the next wake. Measured: five wakes on one ticket in a
+ * morning, each one caused by my previous answer.
+ *
+ * Not a set difference on the visible one: a ticket can be hot from my activity
+ * AND someone else's at the same time, and subtracting would hide a peer's real
+ * signal. So the exclusion happens in the query, on the author.
+ */
+export function ticketOthersLastActivity(
+    ticket_ids: number[],
+    consumer_id: string,
+): Map<number, string> {
+    return agentLastActivity(ticket_ids, consumer_id);
+}
+
 export function ticketAgentLastActivity(ticket_ids: number[]): Map<number, string> {
+    return agentLastActivity(ticket_ids, null);
+}
+
+/** Shared body: last non-human activity per ticket, optionally ignoring one
+ *  author. Kept private so the two callers above stay self-describing. */
+function agentLastActivity(ticket_ids: number[], exclude: string | null): Map<number, string> {
     const out = new Map<number, string>();
     if (ticket_ids.length === 0) return out;
     const db = getDb();
@@ -524,8 +551,9 @@ export function ticketAgentLastActivity(ticket_ids: number[]): Map<number, strin
         .where(eq(schema.consumers.kind, "human"))
         .all()
         .map((r) => r.id);
+    const ignored = exclude ? [...humanIds, exclude] : humanIds;
     const conds = [inArray(schema.messages.ticketId, ticket_ids)];
-    if (humanIds.length > 0) conds.push(notInArray(schema.messages.byAgent, humanIds));
+    if (ignored.length > 0) conds.push(notInArray(schema.messages.byAgent, ignored));
     const rows = db.select({
         ticketId: schema.messages.ticketId,
         last: sql<string>`MAX(${schema.messages.createdAt})`,

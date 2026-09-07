@@ -14,7 +14,7 @@ import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
 import { checkPrereqs, checkShims } from "./sysdeps.js";
-import { restartViaSupervisor } from "./supervisor-restart.js";
+import { restartViaSupervisor, supervisorHint } from "./supervisor-restart.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
 import { registerTicketCommands } from "./cli/ticket.js";
@@ -429,9 +429,8 @@ program
         // it without evidence that something restarts it.
         if (!restartViaSupervisor()) {
             die(
-                "could not reach a supervisor for the daemon (no systemd user service, and no tray " +
-                    "heartbeat on Windows). Restart the daemon the way you launched it. For " +
-                    "config-only changes, `aiball reload` works with no downtime.",
+                `could not restart the daemon: ${supervisorHint()} ` +
+                    "For config-only changes, `aiball reload` works with no downtime.",
             );
         }
         out(

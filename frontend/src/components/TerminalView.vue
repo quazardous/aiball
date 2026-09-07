@@ -60,6 +60,19 @@ const miniScale = ref<number>(1);
 // Height the embedded box takes once scaled — the pane's aspect ratio, so
 // there's no dead band under a short pane and no clipping on a tall one.
 const miniHeight = ref<number | null>(null);
+/**
+ * #2086 — how far in the scaled pane sits, in pixels.
+ *
+ * On a tall pane the reduction is bound by the height ceiling rather than the
+ * width, so the grid is narrower than its card and the room left over reads as
+ * a gap. Centring turns it into a margin.
+ *
+ * A pixel offset rather than a `transform-origin`: the origin centres the
+ * ELEMENT, and the element here is not the thing you see — `.xterm` fills the
+ * container while the grid inside overflows it. Centring on the wrapper shifted
+ * the pane right and clipped its own right edge.
+ */
+const miniOffsetX = ref<number>(0);
 /** Ceiling for the embedded miniature (px). A 200-row pane would otherwise
  *  push the whole admin page down; past this we trade scale for height. */
 const MINI_MAX_HEIGHT = 480;
@@ -430,10 +443,18 @@ function relayoutMiniature(): void {
     if (term.cols !== g.cols || term.rows !== g.rows) {
         try { term.resize(g.cols, g.rows); } catch { /* noop */ }
     }
-    const screen = host.querySelector(".xterm") as HTMLElement | null;
-    if (!screen) return;
-    const naturalW = screen.offsetWidth;
-    const naturalH = screen.offsetHeight;
+    // #2086 — measure the GRID, not the box around it. `.xterm` is a block:
+    // its width is the container's (it fills it), while the rendered grid lives
+    // in `.xterm-screen` and overflows it — measured live at 1071 vs 1654 for
+    // the same pane. Reading the wrapper made `boxW / naturalW` come out at ~1,
+    // so the width leg of the min() could never bind and the true width of the
+    // content was never known. Height was right by accident: `.xterm` has no
+    // height constraint, so it grows to its content.
+    const outer = host.querySelector(".xterm") as HTMLElement | null;
+    if (!outer) return;
+    const grid = host.querySelector(".xterm-screen") as HTMLElement | null;
+    const naturalW = grid?.offsetWidth || outer.offsetWidth;
+    const naturalH = grid?.offsetHeight || outer.offsetHeight;
     if (!naturalW || !naturalH) return;
     const cs = getComputedStyle(host);
     const padX = parseFloat(cs.paddingLeft || "0") + parseFloat(cs.paddingRight || "0");
@@ -443,6 +464,10 @@ function relayoutMiniature(): void {
     const k = Math.min(1, boxW / naturalW, MINI_MAX_HEIGHT / naturalH);
     miniScale.value = k;
     miniHeight.value = Math.round(naturalH * k + padY);
+    // Centre what is left over, in pixels of the CONTENT — an origin keyed on
+    // the wrapper would centre a box that isn't the thing you see, which is
+    // exactly how the first attempt pushed the pane off its own right edge.
+    miniOffsetX.value = Math.max(0, Math.round((boxW - naturalW * k) / 2));
 }
 
 async function settleAndFit(): Promise<void> {
@@ -630,7 +655,11 @@ onBeforeUnmount(() => {
             class="terminal-view__xterm"
             :class="{ 'terminal-view__xterm--mini': isMiniature }"
             :style="isMiniature
-                ? { '--cl-mini-scale': String(miniScale), height: miniHeight ? `${miniHeight}px` : undefined }
+                ? {
+                    '--cl-mini-scale': String(miniScale),
+                    '--cl-mini-x': `${miniOffsetX}px`,
+                    height: miniHeight ? `${miniHeight}px` : undefined,
+                }
                 : undefined"
         />
     </div>
@@ -758,7 +787,10 @@ onBeforeUnmount(() => {
     flex: none;
 }
 .terminal-view__xterm--mini :deep(.xterm) {
-    transform: scale(var(--cl-mini-scale, 1));
+    /* #2086 — slide first, then scale, both from the top-left corner: the
+       offset is already expressed in final pixels, so it must not be scaled
+       too. Zero when nothing was shrunk, which leaves the pane where it was. */
+    transform: translateX(var(--cl-mini-x, 0)) scale(var(--cl-mini-scale, 1));
     transform-origin: top left;
 }
 </style>

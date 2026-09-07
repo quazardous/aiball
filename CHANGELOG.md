@@ -47,7 +47,10 @@ dates are YYYY-MM-DD.
   itself; attaching then resized everything a fraction of a second later. The
   loop now measures the terminal you launched it from and starts claude at that
   size. Launched without a terminal (a pipe, a service), it behaves as before.
-
+- A wake announcing something another agent wrote now says so, and asks for
+  restraint: reply only if you add something new. Agreeing with a peer costs a
+  turn on both sides and says nothing. Wakes from a human are untouched, and so
+  are wakes from a daemon too old to report who wrote what.
 - `aiball init --sub-agent` (and `claude-loop init --sub-agent`) stands up a
   subordinate agent in one gesture: it names it after the project and the
   machine it runs on when you don't pass a name, and marks it as working on what
@@ -155,6 +158,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A ticket no longer comes back to the top of an agent's backlog because that
+  agent just said there was nothing to do on it. Its own comment counted as
+  "recent activity", which outranked "I spoke last", so answering bought the
+  next reminder and the only way out was silence. Activity by someone else
+  still promotes a ticket — there, it is real news. The 🔥 you see is unchanged.
 - `aiball reload` no longer kills the daemon on Windows. It sent a signal to the
   daemon's process id, and Windows has no signals — the call terminates the
   target instead — so the one command that promises no downtime was the one that
@@ -174,6 +182,10 @@ dates are YYYY-MM-DD.
   and gave up before asking the hub even once, so an approval a human had
   already given reached nobody. The hub owns the deadline and says how long the
   request has, rather than when it ends on its own clock.
+- The embedded terminal is centred in its card, and the room the height ceiling
+  leaves over now reads as a margin instead of a gap on the right. The reduction
+  was also being computed from the box around the grid rather than the grid
+  itself, so the pane never knew its own width.
 - The embedded terminal no longer runs off the bottom of the page. It was
   reserving room for the pane at full size while drawing it shrunk, leaving a
   tall band of dead black under the content.

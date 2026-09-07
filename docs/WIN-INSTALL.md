@@ -196,6 +196,12 @@ seconds. It only does that while the tray is proven alive (a heartbeat file it
 writes each tick). Quit the tray, or run the daemon by hand, and those commands
 say so rather than stopping a daemon nothing would bring back.
 
+> **After upgrading aiball, quit and relaunch the tray once.** PowerShell reads
+> the tray script when it starts, so a tray left running from before the upgrade
+> keeps executing the old one — including not writing that heartbeat, which
+> makes the restart commands refuse. They name this as the reason when it
+> happens.
+
 Want the daemon **without** a tray? `install.ps1 -NoTray` (task runs the daemon
 directly, no icon) or `-Service` (true background service, survives logout).
 

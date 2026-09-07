@@ -37,11 +37,23 @@ readTrackingRouter.get("/unread", (req: Request, res: Response) => {
     // consumer-scoped FIFO (the design truth — a fan-out from another
     // project must reach this consumer's queue).
     const messages = listUnread(consumer_id, project, limit, since);
+    // #2042 — stamp WHO wrote each event: a human, or another agent. The wake
+    // uses it to add a restraint clause on agent-to-agent traffic ("reply only
+    // if you add something new"), and only the daemon can answer it — `isHuman`
+    // is consumer authority, and the loop has no access to it. Same shape as
+    // every other field the wake needs: derivable server-side, simply not
+    // surfaced. Cached per author because one FIFO page repeats a handful.
+    const humanBy = new Map<string, boolean>();
+    const stamped = messages.map((m) => {
+        const who = m.by_agent ?? "";
+        if (!humanBy.has(who)) humanBy.set(who, isHuman(who));
+        return { ...m, author_is_human: humanBy.get(who) === true };
+    });
     res.json({
         consumer_id,
         project,
         count: unreadCount(consumer_id, project),
-        messages: withTags(messages),
+        messages: withTags(stamped),
     });
 });
 
