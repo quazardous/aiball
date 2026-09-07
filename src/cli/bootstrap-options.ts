@@ -78,10 +78,10 @@ export const BOOTSTRAP_OPTIONS: ReadonlyArray<BootstrapOption> = [
         forwardKey: "role",
     },
     {
-        flag: "--sub-agent [name]",
+        flag: "--sub-agent [id]",
         description:
             "#2091: stand up a SUB-AGENT here in one gesture — seeds `consumer.agent` "
-            + "(derived from the project + this host when no name is given), "
+            + "(derived from the project + this host when no id is given), "
             + "`consumer.no_claim: true` AND `consumer.role: crew`, so it works on "
             + "what it is assigned rather than on what it picks, and is subscribed "
             + "as a follower rather than as a project owner. For a peer instead, use "

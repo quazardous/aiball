@@ -24,20 +24,20 @@
 export type ConsumerRole = "lead" | "crew";
 
 export interface SubAgentGiven {
-    /** `--agent` / `--consumer`, when the user named one explicitly. */
+    /** `--agent` / `--consumer`, when the user gave an id explicitly. */
     consumer?: string;
     /** `--no-claim`, when passed. */
     noClaim?: boolean;
     /** `--role`, when passed. */
     role?: ConsumerRole;
     /**
-     * The name already written in this checkout's `.aiball.yaml`, if any.
+     * The id already written in this checkout's `.aiball.yaml`, if any.
      *
      * Re-running `--sub-agent` on a project that already has one must NOT
-     * rename it (david `<chat>`: "si on relance claude-loop --sub-agent et que
+     * change it (david `<chat>`: "si on relance claude-loop --sub-agent et que
      * le nom est deja set on le re ecrase pas"). A consumer id is an identity
      * the daemon has rows against — tickets authored, subscriptions, assignment
-     * history — so silently deriving a fresh name would orphan all of it, and
+     * history — so silently deriving a fresh one would orphan all of it, and
      * the derivation is host-dependent, meaning the same checkout re-inited
      * from a different machine would drift to a different agent.
      */
@@ -57,17 +57,18 @@ export interface SubAgentResolved {
  * `--no-claim` or `--role` wins, because the preset is sugar for the common
  * case and not a policy.
  *
- * The name resolves in decreasing order of how deliberate it is:
+ * The id resolves in decreasing order of how deliberate it is:
  *
  *   1. `--agent <id>` — typed on this command line, so it is the intent now;
- *   2. the name after `--sub-agent <name>` — also typed on this command line;
+ *   2. the id after `--sub-agent <id>` — also typed on this command line, so
+ *      the two spellings are equivalent by construction;
  *   3. `consumer.agent` already in `.aiball.yaml` — a decision made earlier
  *      that a re-run has no business undoing (#612's rule: init respects what
  *      is already set unless a flag says otherwise);
  *   4. the derivation, for a genuinely new sub-agent.
  *
  * `derive` is called only when it is actually reached, so a caller need not
- * compute a name it will not use.
+ * compute an id it will not use.
  */
 export function resolveSubAgentPreset(
     given: SubAgentGiven,

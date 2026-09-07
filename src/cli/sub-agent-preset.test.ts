@@ -11,7 +11,7 @@ import { resolveSubAgentPreset } from "./sub-agent-preset.js";
 
 const derive = () => "derived-name";
 const never = () => {
-    throw new Error("derive() must not be called when a name was given");
+    throw new Error("derive() must not be called when an id was given");
 };
 
 test("a bare --sub-agent is assignment-only AND a follower", () => {
@@ -25,7 +25,7 @@ test("a bare --sub-agent is assignment-only AND a follower", () => {
     });
 });
 
-test("the name typed after the flag is used verbatim, without deriving one", () => {
+test("the id typed after the flag is used verbatim, without deriving one", () => {
     assert.deepEqual(resolveSubAgentPreset({}, "  worker-a  ", never), {
         consumer: "worker-a",
         noClaim: true,
@@ -33,10 +33,20 @@ test("the name typed after the flag is used verbatim, without deriving one", () 
     });
 });
 
-test("an explicit --agent wins over both the flag's name and the derivation", () => {
+test("an explicit --agent wins over both the flag's id and the derivation", () => {
     assert.equal(
         resolveSubAgentPreset({ consumer: "chosen" }, "ignored", never).consumer,
         "chosen",
+    );
+});
+
+test("`--agent <id> --sub-agent` and `--sub-agent <id>` are the same thing", () => {
+    // Both are an id typed on this command line, so they share a rank. Pinned
+    // because it is the first question a reader asks of two spellings, and a
+    // future reorder of the chain could silently split them.
+    assert.deepEqual(
+        resolveSubAgentPreset({ consumer: "w1" }, true, never),
+        resolveSubAgentPreset({}, "w1", never),
     );
 });
 
@@ -50,7 +60,7 @@ test("an explicit --no-claim false is not overruled either", () => {
     assert.equal(resolveSubAgentPreset({ noClaim: false }, true, derive).noClaim, false);
 });
 
-test("re-running on a project that already has a name keeps it", () => {
+test("re-running on a project that already has an id keeps it", () => {
     // A consumer id is an identity the daemon holds rows against — tickets
     // authored, subscriptions, assignment history. Deriving a fresh one on a
     // re-run would orphan all of it, silently.
@@ -60,9 +70,9 @@ test("re-running on a project that already has a name keeps it", () => {
     );
 });
 
-test("but a name typed on this command line still wins over the existing one", () => {
+test("but an id typed on this command line still wins over the existing one", () => {
     // #612's rule: init respects what is already set UNLESS a flag says
-    // otherwise. Both ways of typing a name count as saying otherwise.
+    // otherwise. Both ways of typing an id count as saying otherwise.
     assert.equal(
         resolveSubAgentPreset({ yamlConsumer: "old" }, "new-name", never).consumer,
         "new-name",
@@ -73,7 +83,7 @@ test("but a name typed on this command line still wins over the existing one", (
     );
 });
 
-test("a blank or absent yaml name is not mistaken for a decision", () => {
+test("a blank or absent yaml id is not mistaken for a decision", () => {
     for (const empty of [null, undefined, "", "   "]) {
         assert.equal(
             resolveSubAgentPreset({ yamlConsumer: empty }, true, derive).consumer,
@@ -82,7 +92,7 @@ test("a blank or absent yaml name is not mistaken for a decision", () => {
     }
 });
 
-test("a blank name after the flag falls back to the derivation", () => {
+test("a blank id after the flag falls back to the derivation", () => {
     // `--sub-agent ""` and `--sub-agent "   "` are the bare flag in disguise;
     // an empty consumer would hand the loop the global default identity and
     // let two agents share one.
