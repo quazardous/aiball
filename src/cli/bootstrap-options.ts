@@ -70,13 +70,22 @@ export const BOOTSTRAP_OPTIONS: ReadonlyArray<BootstrapOption> = [
         forwardKey: "noClaim",
     },
     {
-        flag: "--sub-agent [name]",
+        flag: "--role <lead|crew>",
+        description:
+            "Seed `consumer.role` in .aiball.yaml. `crew` = follower subscription "
+            + "+ assignment-only; `lead` = owner subscription, can claim. Omit to "
+            + "leave an existing value untouched.",
+        forwardKey: "role",
+    },
+    {
+        flag: "--sub-agent [id]",
         description:
             "#2091: stand up a SUB-AGENT here in one gesture — seeds `consumer.agent` "
-            + "(derived from the project + this host when no name is given) and "
-            + "`consumer.no_claim: true`, so it works on what it is assigned rather "
-            + "than on what it picks. For a peer instead, use --agent <id> without "
-            + "this flag (no_claim is only ever set, never cleared, by init).",
+            + "(derived from the project + this host when no id is given), "
+            + "`consumer.no_claim: true` AND `consumer.role: crew`, so it works on "
+            + "what it is assigned rather than on what it picks, and is subscribed "
+            + "as a follower rather than as a project owner. For a peer instead, use "
+            + "--agent <id> without this flag (init only ever sets these, never clears them).",
         forwardKey: "subAgent",
     },
     {

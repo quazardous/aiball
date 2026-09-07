@@ -23,6 +23,20 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- A sub-agent no longer receives the whole project's backlog. `init --sub-agent`
+  marked it assignment-only but left it subscribed to the project as an *owner*,
+  and project owners are exactly who events fan out to — so it was woken for
+  everything, like the maintainer it was meant to work under, while being unable
+  to claim any of it. It is now subscribed as a follower, which is what a
+  sub-agent was always meant to be. Existing sub-agents pick this up by
+  re-running the command, and doing so no longer renames one that already has a
+  name.
+- `init` can now write `consumer.role` at all, and a new `--role lead|crew` flag
+  exposes it directly. The key was already read from config and settable on
+  `start`, but nothing could put it in the file, so it had to be typed by hand.
+
 ### Changed
 
 - A ticket filed by an agent is tagged with the platform that agent runs on

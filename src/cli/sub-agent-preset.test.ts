@@ -1,0 +1,123 @@
+/**
+ * The preset decides an agent's standing in a project, so the cases that
+ * matter are the two ways it can be wrong: filling too little (the bug this
+ * fixes — `no_claim` without `role`, which left the agent an owner and fed it
+ * the whole project backlog) and filling too much (overruling a flag the user
+ * actually typed).
+ */
+import test from "node:test";
+import assert from "node:assert/strict";
+import { resolveSubAgentPreset, isConsumerRole } from "./sub-agent-preset.js";
+
+const derive = () => "derived-name";
+const never = () => {
+    throw new Error("derive() must not be called when an id was given");
+};
+
+test("a bare --sub-agent is assignment-only AND a follower", () => {
+    // Both halves, together. `no_claim` alone was the bug: it shuts the claim
+    // door while `subscriptionRoleFor` still maps a missing role to `owner`,
+    // and default-scope events fan out to project owners.
+    assert.deepEqual(resolveSubAgentPreset({}, true, derive), {
+        consumer: "derived-name",
+        noClaim: true,
+        role: "crew",
+    });
+});
+
+test("the id typed after the flag is used verbatim, without deriving one", () => {
+    assert.deepEqual(resolveSubAgentPreset({}, "  worker-a  ", never), {
+        consumer: "worker-a",
+        noClaim: true,
+        role: "crew",
+    });
+});
+
+test("an explicit --agent wins over both the flag's id and the derivation", () => {
+    assert.equal(
+        resolveSubAgentPreset({ consumer: "chosen" }, "ignored", never).consumer,
+        "chosen",
+    );
+});
+
+test("`--agent <id> --sub-agent` and `--sub-agent <id>` are the same thing", () => {
+    // Both are an id typed on this command line, so they share a rank. Pinned
+    // because it is the first question a reader asks of two spellings, and a
+    // future reorder of the chain could silently split them.
+    assert.deepEqual(
+        resolveSubAgentPreset({ consumer: "w1" }, true, never),
+        resolveSubAgentPreset({}, "w1", never),
+    );
+});
+
+test("an explicit --role is not overruled by the preset", () => {
+    // Someone who asks for a lead sub-agent gets one; the preset fills blanks.
+    assert.equal(resolveSubAgentPreset({ role: "lead" }, true, derive).role, "lead");
+});
+
+test("an explicit --no-claim false is not overruled either", () => {
+    // `false` is a value, not an absence — `??` must not treat it as unset.
+    assert.equal(resolveSubAgentPreset({ noClaim: false }, true, derive).noClaim, false);
+});
+
+test("re-running on a project that already has an id keeps it", () => {
+    // A consumer id is an identity the daemon holds rows against — tickets
+    // authored, subscriptions, assignment history. Deriving a fresh one on a
+    // re-run would orphan all of it, silently.
+    assert.equal(
+        resolveSubAgentPreset({ yamlConsumer: "already-there" }, true, never).consumer,
+        "already-there",
+    );
+});
+
+test("but an id typed on this command line still wins over the existing one", () => {
+    // #612's rule: init respects what is already set UNLESS a flag says
+    // otherwise. Both ways of typing an id count as saying otherwise.
+    assert.equal(
+        resolveSubAgentPreset({ yamlConsumer: "old" }, "new-name", never).consumer,
+        "new-name",
+    );
+    assert.equal(
+        resolveSubAgentPreset({ consumer: "flagged", yamlConsumer: "old" }, true, never).consumer,
+        "flagged",
+    );
+});
+
+test("a blank or absent yaml id is not mistaken for a decision", () => {
+    for (const empty of [null, undefined, "", "   "]) {
+        assert.equal(
+            resolveSubAgentPreset({ yamlConsumer: empty }, true, derive).consumer,
+            "derived-name",
+        );
+    }
+});
+
+test("a blank id after the flag falls back to the derivation", () => {
+    // `--sub-agent ""` and `--sub-agent "   "` are the bare flag in disguise;
+    // an empty consumer would hand the loop the global default identity and
+    // let two agents share one.
+    for (const blank of ["", "   "]) {
+        assert.equal(resolveSubAgentPreset({}, blank, derive).consumer, "derived-name");
+    }
+});
+
+// The flag takes a free string and the config reader honours only two values,
+// leaving anything else null — which behaves as lead. So a value that is not a
+// role must be refused at the flag rather than written to the file and ignored
+// later: otherwise the yaml claims a standing the daemon does not grant.
+test("only the two real roles are accepted", () => {
+    assert.equal(isConsumerRole("lead"), true);
+    assert.equal(isConsumerRole("crew"), true);
+});
+
+test("anything else is refused, including the near-misses", () => {
+    for (const v of ["boss", "Crew", "CREW", "leader", "follower", "owner", "", " crew"]) {
+        assert.equal(isConsumerRole(v), false, `${JSON.stringify(v)} must be refused`);
+    }
+});
+
+test("a non-string is refused without throwing", () => {
+    for (const v of [undefined, null, 0, 1, true, {}, ["crew"]]) {
+        assert.equal(isConsumerRole(v), false);
+    }
+});
