@@ -224,7 +224,9 @@ best-to-worst :
   `ipc.humanTypingAtMs`. Works even while claude is streaming, and the
   proxy's own socket-injected wakes never trip it. Full mechanism in
   [`PTY-PROXY.md`](./PTY-PROXY.md).
-- **Degraded pane-diff (fallback).** With no proxy, the timer's
+- **Degraded pane-diff (residual fallback).** A start with no
+  proxy REFUSES, so this path is no longer reachable from a fresh loop — it
+  covers a proxy that dies mid-run. The timer's
   `detectHumanTyping` poll captures the pane every ~1.5s and stamps
   `ipc.humanTypingAtMs` when the prompt area changes at idle. Idle-only,
   and can't separate your keystrokes from the loop's own injection as
@@ -752,7 +754,7 @@ docs/CLAUDE-LOOP.md                     # this file
 ```
 
 Which proxy runs is `claude_loop.proxy_impl` (`rust` by default, falling back
-to Python then to no proxy); the `proxy` line of `health` names the one it
+to Python, then REFUSING to start); the `proxy` line of `health` names the one it
 found. Diagnosing a loop that reports failures: see
 [Troubleshooting](#troubleshooting--reading-claude-loop-health) above.
 

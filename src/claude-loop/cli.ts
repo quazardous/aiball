@@ -81,6 +81,8 @@ import { isKnownSubcommand } from "./subcommands.js";
 import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
+import { resolveProxyLaunch } from "./proxy-launch.js";
+import { resolveInitSize } from "./init-size.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -515,6 +517,27 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // agents auto-get distinct names. Explicit --name still wins.
     // #594 — pass cwd so the hash is stable per (cwd, agent).
     const name = opts.name ?? defaultName(ctx.project, ctx.agent, startCwd ?? process.cwd());
+    // The proxy gate runs HERE, before the state-dir is touched, and
+    // not next to the launch-string it feeds (l. ~1000). A refusal must leave
+    // the machine exactly as it found it: further down we would already have
+    // wiped a stale state-dir and registered the project, so `claude-loop list`
+    // would show a `dead` loop the user never started. Deciding early costs a
+    // few lines of distance and buys a refusal with no debris.
+    const proxy = resolveProxyLaunch({
+        platform: process.platform,
+        proxyImpl: (process.env[CL_ENV.PROXY_IMPL] ?? ctx.claude_loop.proxy_impl ?? "")
+            .trim().toLowerCase(),
+        // Platform-aware Rust binary name — `cl-pty-proxy` on Unix, `.exe` on
+        // Windows (a Unix `cargo build` never produces the `.exe`).
+        rustProxyBin: join(
+            selfRoot(), "windows", "cl-pty-proxy", "target", "release",
+            process.platform === "win32" ? "cl-pty-proxy.exe" : "cl-pty-proxy",
+        ),
+        pyProxy: join(selfRoot(), "src/claude-loop/pty-proxy.py"),
+        exists: existsSync,
+        hasPython3: has("python3"),
+    });
+    if (proxy.kind === "refuse") die(proxy.reason);
     const sd = stateDirFor(name);
     if (existsSync(sd)) {
         // #602 — with the deterministic naming (#594), restarting from the
@@ -771,6 +794,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #508 phase A2 — propagate the project-yaml no_claim flag so the
         // claude process + every API call from it carries the no-claim hint.
         ...(ctx.no_claim ? [`export AIBALL_NO_CLAIM=1`] : []),
+        // Hand the proxy the size of the terminal we were launched
+        // from. The session is created DETACHED, so without this claude boots
+        // at the multiplexer's default width and visibly reflows the moment
+        // the user attaches. Null off a TTY (piped / service start) — the
+        // proxy then probes as before.
+        ...((): string[] => {
+            const size = resolveInitSize(process.stdout.columns, process.stdout.rows);
+            return size ? [`export ${CL_ENV.INIT_SIZE}=${shQuote(size)}`] : [];
+        })(),
         // #1435 slice 1 — propagate the multi-agent role so the spawned MCP
         // subscribes with the right role (crew = follower, not owner).
         ...(ctx.role ? [`export AIBALL_ROLE=${shQuote(ctx.role)}`] : []),
@@ -998,20 +1030,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // loop start" bug (a DCS terminal reply read as a bare ESC) sat in BOTH,
     // and only the Rust one was actually running. One engine, one place to fix.
     // Either proxy ALSO self-falls-back to exec-claude if PTY init fails —
-    // the pane is never bricked. Missing proxy → launch claude directly.
-    const pyProxy = join(root, "src/claude-loop/pty-proxy.py");
-    // Platform-aware Rust binary name — `cl-pty-proxy` on Unix, `.exe` on
-    // Windows (a Unix `cargo build` never produces the `.exe`).
-    const rustProxyBin = join(
-        root, "windows", "cl-pty-proxy", "target", "release",
-        process.platform === "win32" ? "cl-pty-proxy.exe" : "cl-pty-proxy",
-    );
+    // the pane is never bricked. A MISSING proxy, on the other hand,
+    // is now fatal: the decision (and its refusal) lives in `resolveProxyLaunch`.
     // Which proxy backend on Unix. Env `CL_PROXY_IMPL` overrides the config
     // (`claude_loop.proxy_impl`); empty/"rust" = the Rust proxy when it's built
     // (default), "python" = force the deprecated Python fallback. Windows is
-    // always Rust.
-    const proxyImpl = (process.env[CL_ENV.PROXY_IMPL] ?? ctx.claude_loop.proxy_impl ?? "")
-        .trim().toLowerCase();
+    // always Rust. The choice itself was made at the top of `start` (`proxy`),
+    // before anything on disk was touched — all that is left here is to turn it
+    // into a command line.
     // #783 — kill-on-exit. Drop the `exec` prefix so bash stays alive as the
     // parent of the proxy/claude chain, then run a trap on bash EXIT that
     // SIGKILLs the timer + proxy and sweeps the transient state markers.
@@ -1019,26 +1045,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // hits EXIT and tears the satellites down before tmux reaps the session.
     // No `exec` means one extra bash process per pane (cheap; same model the
     // shell uses for any login session).
-    let launch: string;
-    const wantsPython = proxyImpl === "python";
-    if (process.platform === "win32" && existsSync(rustProxyBin)) {
-        launch = `${hookPath(rustProxyBin)} -- ${claudeCmd}`;
-    } else if (process.platform !== "win32" && !wantsPython && existsSync(rustProxyBin)) {
-        // Same control contract (loop.sock, proxy-alive), so the loop is unaffected.
-        launch = `${hookPath(rustProxyBin)} -- ${claudeCmd}`;
-    } else if (process.platform !== "win32" && has("python3") && existsSync(pyProxy)) {
-        // Deprecated path. Say so out loud — a silent fallback is how the two
-        // implementations drifted apart in the first place.
-        process.stdout.write(
-            wantsPython
-                ? "claude-loop: using the DEPRECATED Python PTY proxy (proxy_impl: python).\n"
-                : "claude-loop: Rust PTY proxy not built — falling back to the DEPRECATED Python proxy.\n"
-                  + "  Build it with: cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml\n",
-        );
-        launch = `python3 -B ${shQuote(pyProxy)} -- ${claudeCmd}`;
-    } else {
-        launch = claudeCmd;
-    }
+    if (proxy.kind === "python") process.stdout.write(proxy.notice);
+    // Same control contract either way (loop.sock, proxy-alive), so nothing
+    // downstream of here needs to know which engine won.
+    const launch = proxy.kind === "rust"
+        ? `${hookPath(proxy.bin)} -- ${claudeCmd}`
+        : `python3 -B ${shQuote(proxy.script)} -- ${claudeCmd}`;
     // Trap stored in a file under the state-dir, sourced from innerCmd —
     // keeps the tmux command line short and dodges multi-line quoting.
     const trapPath = join(sd, "kill-on-exit.sh");
@@ -1482,7 +1494,8 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 // escaped now, but the lesson stands: check state.ts before
                 // "correcting" this string.
                 ? "✓ active (live human-typing detection + named-pipe wake injection)"
-                : "— inactive → fallback direct launch (cl-pty-proxy.exe not built — run `cargo build --release` in windows/cl-pty-proxy); pane-diff detection, idle-only"
+                // No longer a degradation to describe: `start` refuses.
+                : "✗ NOT built → `claude-loop start` will REFUSE (run `cargo build --release` in windows/cl-pty-proxy; see docs/WIN-INSTALL.md if dlltool fails)"
         }\n`);
     } else {
         // The impl a FRESH start would pick (env override → config → default).
@@ -1523,14 +1536,15 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
             process.stdout.write(`  Rust proxy     : ${
                 hasRust
                     ? "✓ built (live human-typing detection + socket wake injection)"
-                    : "— NOT built → run `cargo build --release` in windows/cl-pty-proxy (a fresh start falls back to python)"
+                    : "— NOT built → run `cargo build --release` in windows/cl-pty-proxy (a fresh start falls back to python, or REFUSES if python3 is missing too)"
             }\n`);
         } else {
             process.stdout.write(`  python3        : ${hasPython ? "✓ available" : "— MISSING"}\n`);
             process.stdout.write(`  PTY proxy      : ${
                 hasPython
                     ? "✓ active (live human-typing detection + socket wake injection)"
-                    : "— inactive → fallback direct launch (python3 missing); pane-diff detection, idle-only"
+                    // With the Rust proxy unbuilt too, `start` refuses.
+                    : "✗ inactive (python3 missing) → `claude-loop start` REFUSES unless the Rust proxy is built"
             }\n`);
         }
     }

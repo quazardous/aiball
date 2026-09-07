@@ -25,6 +25,28 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **A loop will no longer start without its PTY proxy.** Until now, a missing
+  proxy silently fell through to launching claude directly. The pane came up and
+  claude answered, so it looked like it worked — while the loop had quietly lost
+  the three things only the proxy provides: it could no longer tell you were
+  typing while claude was busy, the AFK combo key did nothing, and wake phrases
+  were injected as raw keystrokes into your input box instead of through the
+  control channel. Every one of those fails silently, which made the fallback
+  worse than an error: the loop kept running and misreported what it could see.
+  `claude-loop start` now refuses, naming the build command for your platform.
+  There is deliberately no way to opt back in. On Linux and macOS the deprecated
+  Python proxy still counts as a proxy, so only a machine with neither is
+  affected; on Windows the ConPTY proxy is the only engine, so it must be built.
+  Windows install notes now cover the toolchain gap that made that build fail —
+  rustup's bundled GNU toolchain has no assembler, so real MinGW binutils are
+  needed.
+
+- claude no longer starts narrow and visibly reflows a moment after
+  `claude-loop start`. The loop creates its terminal session detached, so the
+  pane was still at the multiplexer's default width when claude first painted
+  itself; attaching then resized everything a fraction of a second later. The
+  loop now measures the terminal you launched it from and starts claude at that
+  size. Launched without a terminal (a pipe, a service), it behaves as before.
 - A wake announcing something another agent wrote now says so, and asks for
   restraint: reply only if you add something new. Agreeing with a peer costs a
   turn on both sides and says nothing. Wakes from a human are untouched, and so
