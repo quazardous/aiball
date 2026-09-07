@@ -7,6 +7,7 @@
  */
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { getCachedDecisionGate, getCachedActionable } from "./flags-cache.js";
+import { idScope } from "./scope-ids.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
@@ -1345,22 +1346,32 @@ export interface ActionableTicketSet {
  * awaiting you" (counterpart exists → gate me out) from "my own untouched
  * task" (sole participant → keep it actionable, the #370 backlog case).
  */
-function foreignActorTickets(consumerId: string): Set<number> {
+function foreignActorTickets(consumerId: string, ticketIds?: readonly number[]): Set<number> {
     const db = getDb();
     const out = new Set<number>();
+    // #2102 — bounded to the tickets in question. Both reads answer "does this
+    // ticket have a counterpart", which is a per-ticket question; scanning
+    // every message of the base to answer it about one is the cost this ticket
+    // is removing.
+    const ticketScope = idScope(schema.tickets.id, ticketIds);
     for (const t of db.select({
         id: schema.tickets.id,
         byAgent: schema.tickets.byAgent,
-    }).from(schema.tickets).all()) {
+    }).from(schema.tickets).where(ticketScope).all()) {
         if (isForeignActor(t.byAgent, consumerId)) out.add(t.id);
     }
+    // The status filter and the id scope are composed with `and`: replacing
+    // one with the other would quietly widen the read to pending rows.
     for (const m of db.select({
         ticketId: schema.messages.ticketId,
         byAgent: schema.messages.byAgent,
         kind: schema.messages.kind,
         status: schema.messages.status,
         meta: schema.messages.meta,
-    }).from(schema.messages).where(eq(schema.messages.status, "approved")).all()) {
+    }).from(schema.messages).where(and(
+        eq(schema.messages.status, "approved"),
+        idScope(schema.messages.ticketId, ticketIds),
+    )).all()) {
         if (m.ticketId == null) continue;
         let decisionStatus: string | null = null;
         let decidedBy: string | null = null;
@@ -1390,13 +1401,17 @@ function foreignActorTickets(consumerId: string): Set<number> {
  * missed). When C is the sole participant (their own un-answered task), the
  * ticket stays actionable — the #370 backlog case.
  */
-export function lastActorExclusions(consumerId: string): Set<number> {
+export function lastActorExclusions(consumerId: string, ticketIds?: readonly number[]): Set<number> {
     const db = getDb();
+    // #2102 — answer about the tickets asked for. Every caller only ever LOOKS
+    // UP ids it already has, so computing the whole board to hand back a set
+    // that will be probed once is the waste this ticket is about. Measured at
+    // 95 ms uncached, paid by every mutation.
     const rows = db.select({
         id: schema.tickets.id,
         lastActor: schema.tickets.lastActor,
-    }).from(schema.tickets).all();
-    const hasForeign = foreignActorTickets(consumerId);
+    }).from(schema.tickets).where(idScope(schema.tickets.id, ticketIds)).all();
+    const hasForeign = foreignActorTickets(consumerId, ticketIds);
     const out = new Set<number>();
     for (const r of rows) {
         if (isExcludedForConsumer(r.lastActor, hasForeign.has(r.id), consumerId)) out.add(r.id);

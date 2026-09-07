@@ -164,10 +164,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
-- Accepting or closing a ticket is about twice as fast. Answering a question
-  about one ticket was reading the whole board first — measured at 2.7-5.2s per
-  click on a thousand-ticket project, now 1.9-2.2s. The rest of that cost is the
-  caches a write throws away and immediately rebuilds; that is the next step.
+- Answering a question about one ticket no longer reads the whole board. Four
+  derived-state queries scanned every ticket or every message to report on the
+  handful they were asked about — the cost every accept, close and inbox refresh
+  paid, growing with the corpus. Warm, that work went from 94ms to 3ms; cold,
+  from 563ms to 394ms.
 - A ticket no longer comes back to the top of an agent's backlog because that
   agent just said there was nothing to do on it. Its own comment counted as
   "recent activity", which outranked "I spoke last", so answering bought the
