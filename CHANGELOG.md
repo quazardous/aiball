@@ -136,6 +136,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A ticket no longer comes back to the top of an agent's backlog because that
+  agent just said there was nothing to do on it. Its own comment counted as
+  "recent activity", which outranked "I spoke last", so answering bought the
+  next reminder and the only way out was silence. Activity by someone else
+  still promotes a ticket — there, it is real news. The 🔥 you see is unchanged.
 - `aiball reload` no longer kills the daemon on Windows. It sent a signal to the
   daemon's process id, and Windows has no signals — the call terminates the
   target instead — so the one command that promises no downtime was the one that

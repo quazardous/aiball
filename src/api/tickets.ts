@@ -38,6 +38,7 @@ import {
     markTicketUnseen,
     ticketUnreadFlags,
     ticketAgentLastActivity,
+    ticketOthersLastActivity,
     addTicketTokenUsage,
     getTicketTokenUsage,
     isHuman,
@@ -666,6 +667,16 @@ ticketsRouter.get("/tickets", (req, res) => {
             Date.now(),
             hotWinMs,
         );
+    // #2073 — heat caused by SOMEONE ELSE, which is what a backlog tier should
+    // react to. Undefined for a human: the tier then falls back to the visible
+    // set, exactly as before, and no human orders a backlog anyway.
+    const othersHotFocus = isHuman(consumerId)
+        ? undefined
+        : computeHotFocus(
+            ticketOthersLastActivity(createdIds, consumerId),
+            Date.now(),
+            hotWinMs,
+        );
     // #791 — centralised flag computation. The route used to build
     // 5-6 independent Sets and combine them inline; the route now
     // delegates to `computeTicketFlags(row, ctx)`. Adding a new
@@ -685,6 +696,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         assignedToMeIds,
         claimedByOtherIds,
         crossAgentHot: crossAgentHotFocus,
+        othersHot: othersHotFocus,
         // #1573 — same effective value the claimable lens uses just above.
         canClaim: consumerCanClaim,
     });
