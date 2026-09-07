@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The Windows loop bar no longer prints raw format markup where the window chip
+  should be blank. Blanking it with an empty value made the multiplexer fall
+  back to its own default and render half of it literally, so a fragment like
+  `#{window_flags}` sat in the middle of the bar. Running loops pick this up on
+  their next start.
 - A sub-agent no longer receives the whole project's backlog. `init --sub-agent`
   marked it assignment-only but left it subscribed to the project as an *owner*,
   and project owners are exactly who events fan out to — so it was woken for

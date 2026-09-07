@@ -1159,8 +1159,23 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // don't pick, so the chip carries no useful signal — just visual noise
     // ("c'est quoi ? pour moi ça sert à rien"). window-status-format is a
     // WINDOW option, so scope to the loop window (-t tname targets it).
-    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-format", ""], { stdio: "ignore" });
-    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-current-format", ""], { stdio: "ignore" });
+    //
+    // The value is a SPACE, not the empty string, and not `-u`. Given an empty
+    // format psmux falls back to its default and expands it only halfway: the
+    // simple placeholders resolve, the ternary prints literally. Measured on the
+    // rendered bar (psmux 3.3.8, default `#I:#W#{?window_flags,#{window_flags}, }`):
+    //
+    //     format " "  -> `[sess]                                       `  <- wanted
+    //     format ""   -> `[sess] 0:cmd#{?window_flags,#{window_flags}, }`
+    //
+    // the second line being the `#{window_flags}` garbage seen in the loop bar on
+    // Windows. `-u` is the right fix for a USER option (`@cl_*`, cf. the setOpt
+    // note in BarRenderer) and the wrong one here: on a built-in option it
+    // restores the DEFAULT, so the chip comes back in full. A one-space format is
+    // the only value that renders as nothing on both muxes; on tmux it costs one
+    // blank column between status-left and status-right.
+    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-format", " "], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-current-format", " "], { stdio: "ignore" });
     // #776 david : on win32 the running binary is `cl-pty-proxy.exe` and
     // tmux's auto-rename leaks `0:cl-pty-proxy` into the bar despite the
     // empty window-status-format (terminal-emulator title bars + edge
