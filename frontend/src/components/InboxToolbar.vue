@@ -3,7 +3,6 @@ import { computed, ref, onMounted, onUnmounted } from "vue";
 import Button from "primevue/button";
 import SplitButton from "primevue/splitbutton";
 import Select from "primevue/select";
-import ToggleButton from "primevue/togglebutton";
 import InputText from "primevue/inputtext";
 import Dialog from "primevue/dialog";
 import { useToast } from "primevue/usetoast";
@@ -207,15 +206,6 @@ async function doImport() {
                     class="filter-select"
                     @update:model-value="(v: StatusFilter) => emit('update:statusFilter', v)"
                 />
-                <ToggleButton
-                    :model-value="onlyOpen"
-                    on-label="open only"
-                    off-label="all"
-                    on-icon="pi pi-folder-open"
-                    off-icon="pi pi-folder"
-                    size="small"
-                    @update:model-value="(v: boolean) => emit('update:onlyOpen', v)"
-                />
                 <Select
                     :model-value="sortBy"
                     :options="sortOptions"
@@ -265,6 +255,23 @@ async function doImport() {
                         <i class="pi pi-times" />
                     </button>
                 </span>
+                <!-- #2076 — open/all is a setting you set once and forget, not
+                     a filter you sweep through. It reads as text at the far end
+                     of the bar instead of a button competing with the filters
+                     next to it. -->
+                <button
+                    type="button"
+                    class="filter-open-only"
+                    :class="{ 'filter-open-only--on': onlyOpen }"
+                    :aria-pressed="onlyOpen"
+                    :title="onlyOpen
+                        ? 'Showing open tickets only — click to include closed ones'
+                        : 'Showing every ticket — click to hide the closed ones'"
+                    @click="emit('update:onlyOpen', !onlyOpen)"
+                >
+                    <i :class="onlyOpen ? 'pi pi-folder-open' : 'pi pi-folder'" />
+                    {{ onlyOpen ? "open only" : "all" }}
+                </button>
         </div>
         <span class="spacer" />
     </div>
@@ -359,6 +366,32 @@ async function doImport() {
        lets each child be a direct flex item of filters-bar). */
     display: contents;
 }
+/* #2076 — open/all, quiet and at the end of the bar. It was a filled
+   ToggleButton sitting second in the row, which gave a rarely-touched setting
+   the same weight as the filters people actually sweep through. `margin-left:
+   auto` works because `.filters-body` is `display: contents` here, so this
+   button is a direct flex item of the bar and the auto margin eats every
+   remaining pixel before it. */
+.filter-open-only {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.4rem;
+    border: 0;
+    background: transparent;
+    color: var(--p-text-muted-color);
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    user-select: none;
+}
+.filter-open-only:hover {
+    color: var(--p-text-color);
+}
+.filter-open-only--on {
+    color: var(--p-primary-color);
+}
 @media (max-width: 720px) {
     .filter-mobile-only {
         display: inline-flex;
@@ -400,6 +433,14 @@ async function doImport() {
     .filters-chip,
     .filter-new-ticket {
         order: 0;
+    }
+    /* #2076 — on mobile the search takes the whole width, so a button placed
+       after it would wrap onto a line of its own. The filters row is exactly
+       where a line was clawed back, so open/all goes back to the head of that
+       row instead of the end of it. */
+    .filter-open-only {
+        margin-left: 0;
+        order: -1;
     }
     /* Compact filters-bar layout on mobile: search wide, new ticket
        icon-only (label hidden), spacer collapses. */

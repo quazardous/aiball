@@ -45,6 +45,9 @@ dates are YYYY-MM-DD.
   happen on the server, in the order the list displays, so rows arrive where the
   eye expects them. Selecting rows is now cleared when you change page, since a
   selection can only act on what is loaded.
+- The open/all switch is quieter, and sits at the end of the toolbar. It is a
+  setting you set once, not a filter you sweep through, so it no longer carries
+  the same weight as the ones next to it.
 - The board has one create control: the button still opens the new-ticket form,
   and the other ways to create a ticket — importing a GitHub issue, when the
   project has an upstream — sit behind its chevron instead of taking their own
