@@ -481,6 +481,14 @@ export class AiballClient {
     listProjects() {
         return this.http("GET", "/api/projects");
     }
+    /** #2089 — soft config reload, in band. `aiball reload` used to send
+     *  SIGUSR2 to the pidfile, which on Windows terminates the daemon instead
+     *  of reloading it. */
+    reloadDaemon() {
+        return this.http<{ reloaded: boolean; global_config: string; hot_window_sec: unknown }>(
+            "POST", "/api/daemon/reload", {},
+        );
+    }
     /**
      * Explicitly register a project (#B.216 phase A pass 2). The CLI's
      * `aiball project init` and the Web UI's "Create project" button

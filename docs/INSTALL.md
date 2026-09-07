@@ -228,6 +228,13 @@ soft path: it triggers an in-place config reload with no downtime —
 useful when most config is already read fresh per request and you only
 need to revalidate boot-cached entries.
 
+Both commands work the same on every platform, but the signals in the
+table above are Linux-only: `restart` goes through the service manager
+here and through the tray on Windows, and `reload` asks the running
+daemon over its local socket rather than signalling it. Run them on the
+machine hosting the daemon — `reload` is local-only, exactly like
+sending it a signal used to be.
+
 No `--no-systemd` daemon? Start it manually:
 
 ```bash

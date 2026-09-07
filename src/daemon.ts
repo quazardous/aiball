@@ -1,11 +1,10 @@
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { unlinkSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { unlinkSync, chmodSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { parse as parseYaml } from "yaml";
-import { globalConfigPath } from "./autopoll/config.js";
 import { createApp, frontendDistDir } from "./app.js";
 import { DAEMON_PID_PATH } from "./paths.js";
+import { reloadConfig } from "./config-reload.js";
 import { attachWs } from "./ws.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
@@ -31,18 +30,13 @@ import { attachProxyWs } from "./proxy-ws.js";
  * single extension point for any future boot-cached config. It is wrapped so a
  * reload error can NEVER take the daemon down.
  */
-function reloadConfig(): void {
+// #2089 — the body moved to `config-reload.ts` so the route can run the same
+// thing. Signals are a Linux-only door to it, and this daemon also runs on
+// Windows, where there are none.
+function onSigusr2(): void {
     try {
         console.log("[sigusr2] reloading config…");
-        const gp = globalConfigPath();
-        let hotWin: unknown;
-        try {
-            const raw = parseYaml(readFileSync(gp, "utf8")) as { hot_window_sec?: unknown } | null;
-            hotWin = raw?.hot_window_sec;
-        } catch {
-            // Missing/empty global config is the normal case — not an error.
-        }
-        console.log(`[sigusr2] config reloaded (most config is read fresh per request; global=${gp}, hot_window_sec=${hotWin ?? "default"})`);
+        reloadConfig();
     } catch (e) {
         console.error("[sigusr2] config reload failed (daemon stays up):", e);
     }
@@ -193,7 +187,7 @@ function main(): void {
     // #407: HUP = hard restart, identical to the loop's kill-HUP (david 8q4pu5).
     process.on("SIGHUP", hardRestart);
     // #407: USR2 = soft config reload, no downtime (driven by `aiball reload`).
-    process.on("SIGUSR2", reloadConfig);
+    process.on("SIGUSR2", onSigusr2);
 }
 
 main();

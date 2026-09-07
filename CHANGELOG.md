@@ -128,6 +128,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `aiball reload` no longer kills the daemon on Windows. It sent a signal to the
+  daemon's process id, and Windows has no signals — the call terminates the
+  target instead — so the one command that promises no downtime was the one that
+  stopped it. It now asks the running daemon over its local socket, on every
+  platform.
 - Restarting the daemon now works on Windows, where there is no service manager
   to ask: the tray already watches the daemon and starts it again if it stops,
   so `aiball restart` — and the restart that completes a node pairing — use it.

@@ -38,6 +38,7 @@ import { loadLaunchers, getLauncher } from "./launchers.js";
 import { searchMessages } from "./search.js";
 import { graphAudit, ticketNeighbors } from "./db/graph-query.js";
 import { bearerAuth } from "./auth.js";
+import { reloadConfig } from "./config-reload.js";
 import { badRequest, consumerOf } from "./api/_helpers.js";
 import { schedulerStatus } from "./cron/index.js";
 import { AIBALL_VERSION } from "./version.js";
@@ -100,6 +101,42 @@ api.get("/health", (_req, res) => {
         version: AIBALL_VERSION,
         cron: schedulerStatus(),
     });
+});
+
+/**
+ * #2089 — ask the daemon to reload its config, in band.
+ *
+ * `aiball reload` used to be a SIGUSR2 to the pidfile. Signals do not exist on
+ * Windows, where `process.kill` ignores the name and terminates the target — so
+ * the one command that promises "no downtime" was the one that stopped the
+ * daemon. This route is the mechanism that exists on both platforms; the signal
+ * stays as its Linux plumbing.
+ *
+ * LOCAL-TRUST, not moderator: the mechanism it replaces was a signal to the
+ * pidfile, which anyone running as the same uid could send — and gating on
+ * `isHuman` broke exactly that, since a CLI run inside a project resolves to
+ * that project's agent and got a 403. The Unix socket IS that same-uid
+ * boundary, so it is the honest equivalent. A remote caller cannot reload,
+ * which also matches what it replaces: you needed the pidfile, locally.
+ *
+ * It deserves no more than that: it re-reads a config file and reports what it
+ * read. It mints nothing, exposes nothing, and cannot fail in a way that takes
+ * the daemon down.
+ */
+api.post("/daemon/reload", (req: Request, res: Response) => {
+    const local = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
+    if (!local) {
+        return res.status(403).json({
+            error: "daemon reload is local-only — run `aiball reload` on the machine "
+                + "running the daemon (it goes over the Unix socket)",
+        });
+    }
+    try {
+        res.json({ reloaded: true, ...reloadConfig() });
+    } catch (e) {
+        // The daemon stays up; say what happened rather than dying.
+        res.status(500).json({ reloaded: false, error: (e as Error).message });
+    }
 });
 
 api.get("/strategy", (_req, res) => {
