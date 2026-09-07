@@ -11,6 +11,7 @@ import {
     enrollmentState,
     isCollectable,
     isDecidable,
+    isForgettable,
     makePairingCode,
     type EnrollmentState,
 } from "./node-enrollment.js";
@@ -78,14 +79,18 @@ export function getEnrollment(id: string): EnrollmentView | null {
 
 /**
  * Everything a human might still act on, plus what was decided recently so the
- * panel doesn't blink an approval out of existence the moment it lands.
+ * panel doesn't blink an approval out of existence the moment it lands — and,
+ * since #2079, requests that expired within the retention window: an expiry
+ * nobody saw is the normal case, so dropping it on the spot hid exactly what
+ * the human needed to know.
  */
 export function listEnrollments(): EnrollmentView[] {
     const now = Date.now();
     return getDb().select().from(schema.nodeEnrollments)
         .all()
+        .filter((r) => !isForgettable(
+            { status: r.status, expires_at: r.expiresAt, delivered_at: r.deliveredAt }, now))
         .map((r) => toView(r, now))
-        .filter((v) => v.state !== "expired")
         .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 

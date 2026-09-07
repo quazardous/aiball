@@ -35,6 +35,25 @@ const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
 export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 
 /**
+ * #2079 — how long an expired request stays VISIBLE after it stopped being a
+ * door. Two different things: the ten minutes above are how long the request
+ * can be approved, this is how long a human can still learn that it happened.
+ *
+ * Dropping it the instant it expired was silent in the worst way — the request
+ * exists precisely because someone isn't at the screen, so the case where it
+ * expires unseen is the normal one, not the edge one. Half a day means someone
+ * pairing in the morning still sees it after lunch, and the row says what to do
+ * about it: ask again from the node.
+ */
+export const ENROLLMENT_RETENTION_MS = 12 * 60 * 60 * 1000;
+
+/** Whether a request is old enough to stop being shown at all. */
+export function isForgettable(row: EnrollmentRow, nowMs: number): boolean {
+    return enrollmentState(row, nowMs) === "expired"
+        && Date.parse(row.expires_at) <= nowMs - ENROLLMENT_RETENTION_MS;
+}
+
+/**
  * A code a human can compare at a glance: `K7F-M92`. Grouped because an
  * ungrouped run of six is read wrong far more often than two runs of three.
  */

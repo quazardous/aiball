@@ -119,6 +119,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A pairing request that expires unanswered stays in the list for half a day,
+  greyed out, saying to ask again from the node. Expiring is the normal outcome
+  when nobody is at the screen — which is exactly when the human most needs to
+  learn that a node asked at all.
 - A node waiting to be paired now appears in the nodes list, marked "to confirm",
   instead of existing only as a toast. Missing the notification no longer puts
   the request out of reach; the row leaves the list once it is approved, refused,

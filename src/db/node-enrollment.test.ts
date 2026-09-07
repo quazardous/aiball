@@ -6,10 +6,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+    ENROLLMENT_RETENTION_MS,
     ENROLLMENT_TTL_MS,
     enrollmentState,
     isCollectable,
     isDecidable,
+    isForgettable,
     makePairingCode,
 } from "./node-enrollment.js";
 
@@ -53,6 +55,41 @@ test("a refusal is final, whatever else is true of the row", () => {
         enrollmentState({ status: "rejected", expires_at: at(-1), delivered_at: at(-5) }, NOW),
         "rejected",
     );
+});
+
+// #2079 — expiring and being forgotten are two different moments. A request
+// stops being a door after ten minutes; it stops being NEWS much later, because
+// the human it was waiting for is by definition not always at the screen.
+test("an expired request is still worth showing for a while", () => {
+    const row = { status: "pending", expires_at: at(-60_000) };
+    assert.equal(enrollmentState(row, NOW), "expired", "no longer a door…");
+    assert.equal(isDecidable(row, NOW), false, "…and not approvable…");
+    assert.equal(isForgettable(row, NOW), false, "…but still shown");
+});
+
+test("past the retention window it is forgotten", () => {
+    assert.equal(
+        isForgettable({ status: "pending", expires_at: at(-ENROLLMENT_RETENTION_MS) }, NOW),
+        true,
+        "forgotten at the boundary, not after it",
+    );
+    assert.equal(
+        isForgettable({ status: "pending", expires_at: at(-ENROLLMENT_RETENTION_MS + 1000) }, NOW),
+        false,
+    );
+});
+
+test("only an expired request is ever forgotten", () => {
+    // A decided one is the panel's own audit of a credential coming into
+    // existence; retention must not quietly prune that.
+    const old = at(-ENROLLMENT_RETENTION_MS * 10);
+    assert.equal(isForgettable({ status: "approved", expires_at: old }, NOW), false);
+    assert.equal(isForgettable({ status: "rejected", expires_at: old }, NOW), false);
+    assert.equal(
+        isForgettable({ status: "approved", expires_at: old, delivered_at: old }, NOW),
+        false,
+    );
+    assert.equal(isForgettable({ status: "pending", expires_at: at(60_000) }, NOW), false);
 });
 
 test("the code avoids the characters people read back wrongly", () => {
