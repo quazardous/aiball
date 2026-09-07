@@ -281,12 +281,25 @@ export function registerTicketReadTools(server: McpServer): void {
             // the read snapshot (id > upToId) keep their unseen ping so a
             // racing comment lands as a fresh wake instead of being
             // silently flagged as already-consulted.
+            //
+            // The bound is built from MESSAGE ids ONLY. It used to seed `ids`
+            // with `snapshot.ticket.id` too, which is a different id space:
+            // on a header-only read (the DEFAULT mode — no comments in the
+            // response) that was the only id present, so the bound collapsed
+            // to the ticket id (e.g. 1567) while the pings to ack carried
+            // message ids (1016506+). `mark-read` then ran, returned success,
+            // and acked nothing — measured: reading a closed ticket left its
+            // four events unread forever, so the wake FIFO kept pointing at a
+            // thread nobody could clear.
+            //
+            // It also killed the fallback below: `upToId === undefined` means
+            // "no snapshot to race against, ack the whole thread", which is
+            // the right move precisely when the response carries no comments.
+            // With the ticket id always in `ids`, that branch was unreachable.
             const snapshot = payload as {
-                ticket?: { id?: number };
                 comments?: Array<{ id?: number }>;
             };
             const ids: number[] = [];
-            if (typeof snapshot.ticket?.id === "number") ids.push(snapshot.ticket.id);
             if (Array.isArray(snapshot.comments)) {
                 for (const c of snapshot.comments) {
                     if (typeof c?.id === "number") ids.push(c.id);
