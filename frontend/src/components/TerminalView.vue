@@ -746,6 +746,16 @@ onBeforeUnmount(() => {
 .terminal-view__xterm--mini {
     min-height: 0;
     max-height: none;
+    /* #2077 — and `flex: none`, which is the one that actually decides. The
+       base rule sets `flex: 1`, i.e. `flex-basis: 0` + grow, and in a flex
+       column that makes the computed `height` below IRRELEVANT: the item takes
+       whatever the container gives it. Nothing constrains the container, so it
+       sized itself to the UNSCALED grid — measured live at 949px for a box the
+       aspect ratio had put at 493 — and the pane ran off the bottom of the page
+       with ~450px of dead black under the content, since the scale is a
+       transform and doesn't shrink the layout box. Opting out of the grow is
+       what lets the inline height mean something. */
+    flex: none;
 }
 .terminal-view__xterm--mini :deep(.xterm) {
     transform: scale(var(--cl-mini-scale, 1));

@@ -119,6 +119,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The embedded terminal no longer runs off the bottom of the page. It was
+  reserving room for the pane at full size while drawing it shrunk, leaving a
+  tall band of dead black under the content.
 - Revoking a node leaves a receipt: the row stays for an hour, greyed out and
   marked "revoked", saying when and by whom. The token itself is destroyed
   exactly as before — what is kept is the trace, never the credential.
