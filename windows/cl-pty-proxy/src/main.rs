@@ -449,7 +449,17 @@ fn real_main() -> i32 {
     let child_args: Vec<String> = args[1..].to_vec();
 
     let console = ConsoleIo::setup();
-    let (rows, cols) = console.window_size().unwrap_or((30, 120));
+    // The initial geometry comes from claude-loop when it has one to
+    // give (`CL_INIT_SIZE="<rows>,<cols>"`), and only falls back to probing the
+    // console otherwise. At this instant the mux session is still DETACHED, so
+    // the probe reports the multiplexer's default width however well we measure
+    // it — claude would paint itself narrow, then visibly reflow a tick after
+    // the user attaches. The loop is the side that knows what the pane became
+    // last time, so it hands the answer down rather than making us guess.
+    let (rows, cols) = core::boot_size(
+        console.window_size(),
+        env::var("CL_INIT_SIZE").ok().as_deref().and_then(core::parse_size),
+    );
 
     // Allocate the nested ConPTY + spawn claude. On ANY failure, fail-safe
     // to a direct (un-proxied) run so the pane is never bricked.

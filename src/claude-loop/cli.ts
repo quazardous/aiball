@@ -82,6 +82,7 @@ import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { resolveProxyLaunch } from "./proxy-launch.js";
+import { resolveInitSize } from "./init-size.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -793,6 +794,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #508 phase A2 — propagate the project-yaml no_claim flag so the
         // claude process + every API call from it carries the no-claim hint.
         ...(ctx.no_claim ? [`export AIBALL_NO_CLAIM=1`] : []),
+        // Hand the proxy the size of the terminal we were launched
+        // from. The session is created DETACHED, so without this claude boots
+        // at the multiplexer's default width and visibly reflows the moment
+        // the user attaches. Null off a TTY (piped / service start) — the
+        // proxy then probes as before.
+        ...((): string[] => {
+            const size = resolveInitSize(process.stdout.columns, process.stdout.rows);
+            return size ? [`export ${CL_ENV.INIT_SIZE}=${shQuote(size)}`] : [];
+        })(),
         // #1435 slice 1 — propagate the multi-agent role so the spawned MCP
         // subscribes with the right role (crew = follower, not owner).
         ...(ctx.role ? [`export AIBALL_ROLE=${shQuote(ctx.role)}`] : []),

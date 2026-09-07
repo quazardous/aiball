@@ -41,6 +41,13 @@ dates are YYYY-MM-DD.
   rustup's bundled GNU toolchain has no assembler, so real MinGW binutils are
   needed.
 
+- claude no longer starts narrow and visibly reflows a moment after
+  `claude-loop start`. The loop creates its terminal session detached, so the
+  pane was still at the multiplexer's default width when claude first painted
+  itself; attaching then resized everything a fraction of a second later. The
+  loop now measures the terminal you launched it from and starts claude at that
+  size. Launched without a terminal (a pipe, a service), it behaves as before.
+
 - `aiball init --sub-agent` (and `claude-loop init --sub-agent`) stands up a
   subordinate agent in one gesture: it names it after the project and the
   machine it runs on when you don't pass a name, and marks it as working on what

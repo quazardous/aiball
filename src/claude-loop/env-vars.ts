@@ -25,6 +25,9 @@ export const CL_ENV = {
     RESUME_PICK: "CL_RESUME_PICK",
     CLAUDE_CMD: "CL_CLAUDE_CMD",
     PROXY_IMPL: "CL_PROXY_IMPL",
+    /** `<rows>,<cols>` measured in the user's terminal at `start`,
+     *  so the proxy opens claude's PTY at the size it will end up with. */
+    INIT_SIZE: "CL_INIT_SIZE",
     DRAINED_STRATEGY: "CL_DRAINED_STRATEGY",
     ESC_TAKEOVER: "CL_ESC_TAKEOVER",
 

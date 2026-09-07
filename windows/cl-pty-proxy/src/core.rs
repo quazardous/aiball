@@ -657,6 +657,50 @@ impl Decider {
     }
 }
 
+// --- boot geometry ----------------------------------------------------------
+
+/// What the proxy falls back to when it can measure nothing at all. Matches
+/// the historical `unwrap_or` in `main.rs` so this refactor changes no
+/// behaviour on a machine with no persisted size and no readable console.
+pub const FALLBACK_SIZE: (u16, u16) = (30, 120);
+
+/// Why the size is handed down rather than measured here.
+///
+/// `claude-loop start` creates the mux session DETACHED, so at the instant the
+/// proxy opens claude's ConPTY there is no client and the pane reports the
+/// multiplexer's default (120 cols). claude boots and paints itself at that
+/// width. The user then attaches, the pane jumps to the real terminal width,
+/// and the resize poll propagates it one tick later — which is the visible
+/// reflow a fraction of a second after launch (david `<chat>` 2026-09-07).
+///
+/// The reflow cannot be removed by measuring better: at boot the small size is
+/// not a misreading, it is the truth — the pane really is that wide, because
+/// nobody is attached yet. The size worth having is the one the USER's terminal
+/// has, and only claude-loop can see it: `claude-loop start` runs in that
+/// terminal, so it reads its own stdout geometry and hands it down in
+/// `CL_INIT_SIZE`. This side stays a dumb executor: parse it, prefer it.
+///
+/// If the loop has nothing to give (started from a pipe, a service, a script),
+/// or the user later attaches from a different terminal, the resize poll
+/// corrects it on the next tick — exactly what happens today. So preferring the
+/// handed-down value is free in the common case and never worse in any other.
+pub fn boot_size(probed: Option<(u16, u16)>, handed_down: Option<(u16, u16)>) -> (u16, u16) {
+    handed_down.or(probed).unwrap_or(FALLBACK_SIZE)
+}
+
+/// Parse `<rows>,<cols>`. Rejects zero and absurd values rather than handing
+/// `openpty` a geometry that would brick the pane: a malformed `CL_INIT_SIZE`
+/// must degrade to "no hint", never to a broken terminal.
+pub fn parse_size(raw: &str) -> Option<(u16, u16)> {
+    let (r, c) = raw.trim().split_once(',')?;
+    let rows: u16 = r.trim().parse().ok()?;
+    let cols: u16 = c.trim().parse().ok()?;
+    if rows == 0 || cols == 0 || rows > 2000 || cols > 2000 {
+        return None;
+    }
+    Some((rows, cols))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1187,4 +1231,49 @@ mod tests {
         let total: usize = units.iter().map(|u| u.raw.len()).sum::<usize>() + pending.len();
         assert!(total >= 1, "parser must consume or buffer some byte, got nothing");
     }
+    // --- boot geometry ------------------------------------------------------
+
+    #[test]
+    fn the_terminal_size_beats_the_detached_default() {
+        // The whole point: at boot the probe is honest and useless — the pane
+        // really is 120 wide because nobody is attached yet.
+        let probed = Some((30, 120));
+        let from_claude_loop = Some((50, 200));
+        assert_eq!(boot_size(probed, from_claude_loop), (50, 200));
+    }
+
+    #[test]
+    fn without_a_hint_the_probe_still_wins_over_the_fallback() {
+        assert_eq!(boot_size(Some((40, 160)), None), (40, 160));
+    }
+
+    #[test]
+    fn with_neither_we_land_on_the_historical_fallback() {
+        // Pins the historical behaviour, so a machine that can measure nothing
+        // is no worse off than before.
+        assert_eq!(boot_size(None, None), FALLBACK_SIZE);
+        assert_eq!(FALLBACK_SIZE, (30, 120));
+    }
+
+    #[test]
+    fn the_wire_format_claude_loop_sends_is_understood() {
+        // `CL_INIT_SIZE` is written by cli.ts as `<rows>,<cols>`; this is the
+        // contract between the two sides and the only reason parse_size exists.
+        assert_eq!(parse_size("50,200"), Some((50, 200)));
+    }
+
+    #[test]
+    fn a_corrupt_or_absurd_value_degrades_to_no_hint() {
+        // Never hand openpty a broken geometry: the failure mode of a bad
+        // CL_INIT_SIZE must be 'ignore it', not 'wreck the pane'.
+        for raw in ["", "garbage", "50", "50,", ",200", "0,200", "50,0", "-1,80", "9999,80", "50,9999"] {
+            assert_eq!(parse_size(raw), None, "{raw:?} must not parse");
+        }
+    }
+
+    #[test]
+    fn whitespace_around_the_pair_is_tolerated() {
+        assert_eq!(parse_size(" 50 , 200 \n"), Some((50, 200)));
+    }
+
 }
