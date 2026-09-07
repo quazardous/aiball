@@ -132,7 +132,7 @@ is never bricked (the analogue of the Unix proxy's `os.execvp` fallback).
 
   | | |
   |---|---|
-  | **no proxy** | fall back to the psmux paste/`send-keys` path |
+  | **no proxy** | can no longer happen at start (`claude-loop start` refuses); the branch survives only for a loop whose proxy died mid-run, and falls back to the psmux paste/`send-keys` path |
   | **proxy alive, the write fails** | return false and stop — **no fallback** |
 
   When the proxy fronts claude, the pipe *is* the channel: a failed write is a

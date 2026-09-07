@@ -363,16 +363,21 @@ Skip this with `-NoClaudeLoop` if you only want the daemon + tray
 (the `claude-loop` shim is still written, but `start` will error out
 until psmux + bash are reachable).
 
-### Optional: live human-typing detection (ConPTY proxy)
+### Required: the ConPTY proxy
 
-By default, claude-loop on Windows detects "a human is typing in the pane"
-by diffing `capture-pane` — which only works while claude is idle. For
-**live** detection (busy included) plus cleaner wake injection, build the
-Rust ConPTY proxy (`windows/cl-pty-proxy` — see
-[`docs/PTY-PROXY-WINDOWS.md`](PTY-PROXY-WINDOWS.md)):
+**`claude-loop start` refuses to run without it.** The proxy is what lets the
+loop tell your keystrokes apart from claude's output at the PTY layer; without
+it there is no live human-typing detection while claude is busy, no AFK combo
+(the detector lives in the proxy), and wakes are injected as raw keystrokes into
+your input box. Those failures are all silent, so a loop running without a proxy
+looks fine and isn't — which is why the fallback that used to launch claude
+directly was removed rather than warned about.
+
+The binary isn't committed (it's platform-specific; `target/` is gitignored), so
+each machine builds it once:
 
 ```powershell
-# One time: Rust GNU toolchain (no MSVC / VS Build Tools needed).
+# One time: the Rust GNU toolchain.
 winget install Rustlang.Rustup        # or: rustup-init -y --default-host x86_64-pc-windows-gnu
 rustup default stable-x86_64-pc-windows-gnu
 
@@ -380,10 +385,38 @@ rustup default stable-x86_64-pc-windows-gnu
 cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
 ```
 
-It's an optional enhancement — without it claude-loop still works, just
-with idle-only typing detection. `claude-loop check` reports whether the
-proxy is active. The binary isn't committed (it's platform-specific;
-`target/` is gitignored), so each machine builds it once.
+`claude-loop check` reports whether the binary is built. Note that `aiball check`
+only probes for `cargo` — the toolchain, not the artifact.
+
+#### If the build fails on `dlltool`
+
+```
+error: error calling dlltool 'dlltool.exe': program not found
+```
+
+or, once it is on PATH:
+
+```
+dlltool.exe: CreateProcess
+error: dlltool could not create import library with ... kernel32.dll_imports.def
+```
+
+Both come from the same gap, and neither means aiball itself needs MSYS2 or
+Cygwin. `windows-sys` builds import libraries with `dlltool`, which in turn
+spawns the GNU assembler `as`. rustup ships a *partial* GNU toolchain in
+`…/lib/rustlib/x86_64-pc-windows-gnu/bin/self-contained/` — `dlltool.exe`,
+`ld.exe` and a gcc that its own `GCC-WARNING.txt` describes as "only used as a
+linker". There is no `as.exe` in it.
+
+So a bare `rustup` install cannot build the proxy, whatever this page used to
+imply. You need real MinGW-w64 binutils on PATH — for example
+`winget install MSYS2.MSYS2` then `pacman -S mingw-w64-x86_64-binutils`, or a
+WinLibs toolchain.
+
+The MSVC toolchain is the other way out (`cargo +stable-x86_64-pc-windows-msvc
+build --release`) and needs no `dlltool` at all — but a machine under an
+application-control policy may refuse to execute rustup's `rustc.exe`
+(`os error 4551`), in which case GNU + binutils is the only route.
 
 ## What's NOT in the Windows path
 
