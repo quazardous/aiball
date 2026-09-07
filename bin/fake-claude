@@ -171,6 +171,26 @@ BUILTIN_SCREENS: dict[str, dict] = {
 DEFAULT_SCENARIO_PATH = Path(__file__).resolve().parent.parent / "examples" / "fake-claude" / "scenarios" / "default.yaml"
 
 
+def select_hook_commands(settings: dict, event: str, matcher=None) -> list:
+    """Which commands Claude Code would run for `event`.
+
+    Pure, and separated from the spawning so it can be tested without a loop,
+    a TTY or a subprocess. Mirrors Claude Code's rule: every entry whose
+    matcher fits, and an empty matcher fits everything. `matcher=None` means
+    "whatever the scenario did not pin", so all entries run; passing one pins
+    a single branch, which is how a scenario exercises `SessionStart:compact`
+    without also firing `startup`.
+    """
+    out = []
+    for entry in settings.get("hooks", {}).get(event, []) or []:
+        if matcher is not None and entry.get("matcher", "") != matcher:
+            continue
+        for hook in entry.get("hooks", []) or []:
+            if hook.get("type") == "command" and hook.get("command"):
+                out.append(hook["command"])
+    return out
+
+
 class FakeClaudeApp(App):
     """Textual app — fakes claude's interactive UI for claude-loop debugging.
 
@@ -314,6 +334,76 @@ class FakeClaudeApp(App):
         else:
             await self._write(f"[fake-claude] unknown screen kind: {kind!r}")
 
+    async def _fire_hook(self, step: dict) -> None:
+        """Fire a Claude Code hook the way Claude Code would.
+
+        The simulator painted screens and nothing else, which mirrored the
+        wrong half of aiball: pane text is the layer being migrated AWAY from,
+        while `Stop`, `Notification` and friends — the layer being migrated TO
+        — could not be exercised at all without a real Claude and real luck.
+        Some of them cannot be provoked on demand even then: nobody can make
+        an API error, or a quota pause, happen when they want one.
+
+        Fidelity matters more than convenience here, so the command is read
+        from the `claude-settings.json` claude-loop actually generated rather
+        than reconstructed. A reimplementation would drift from the real wiring
+        and the drift would look like a passing test.
+
+        The payload is whatever the scenario declares, plus the fields every
+        event carries. Nothing is invented: a hook that receives a field the
+        real one never sends would teach us something false.
+        """
+        import json as _json
+        import os as _os
+        import subprocess as _sp
+
+        spec = step["hook"]
+        if isinstance(spec, str):
+            spec = {"event": spec}
+        event = str(spec.get("event", "")).strip()
+        if not event:
+            await self._write("[fake-claude] 'hook' needs an event name")
+            return
+
+        sd = _os.environ.get("CL_STATE_DIR")
+        name = _os.environ.get("CL_NAME")
+        if not sd:
+            await self._write("[fake-claude] hook: no CL_STATE_DIR — run me under claude-loop")
+            return
+
+        settings_path = _os.path.join(sd, "claude-settings.json")
+        try:
+            with open(settings_path) as fh:
+                entries = _json.load(fh).get("hooks", {}).get(event, [])
+        except OSError as exc:
+            await self._write(f"[fake-claude] hook: cannot read {settings_path}: {exc}")
+            return
+
+        matcher = spec.get("matcher")
+        payload = {
+            "session_id": _os.environ.get("CLAUDE_SESSION_ID", "fake-claude"),
+            "cwd": _os.getcwd(),
+            "hook_event_name": event,
+            **(spec.get("payload") or {}),
+        }
+        raw = _json.dumps(payload)
+
+        fired = 0
+        for command in select_hook_commands({"hooks": {event: entries}}, event, matcher):
+            if True:
+                try:
+                    proc = _sp.run(
+                        command, shell=True, input=raw, text=True,
+                        capture_output=True, timeout=30,
+                        env={**_os.environ, "CL_STATE_DIR": sd, **({"CL_NAME": name} if name else {})},
+                    )
+                    fired += 1
+                    await self._write(f"[fake-claude] hook {event} → exit {proc.returncode}")
+                except Exception as exc:  # a simulator must not die on a hook
+                    await self._write(f"[fake-claude] hook {event} failed: {exc}")
+        if fired == 0:
+            await self._write(f"[fake-claude] hook {event}: no matching handler in claude-settings.json")
+
     async def _play_steps(self, steps: list) -> None:
         for step in steps:
             if "sleep" in step:
@@ -327,6 +417,8 @@ class FakeClaudeApp(App):
                     await self._write(f"[fake-claude] unknown screen '{slug}'")
                     continue
                 await self._play_screen(spec)
+            elif "hook" in step:
+                await self._fire_hook(step)
             elif "loop" in step:
                 inner = step["loop"]
                 if not isinstance(inner, list):
