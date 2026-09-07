@@ -912,6 +912,37 @@ export const graphMeta = sqliteTable("graph_meta", {
 export type TicketTokenUsage = typeof ticketTokenUsage.$inferSelect;
 export type ProjectTokenUsage = typeof projectTokenUsage.$inferSelect;
 
+/**
+ * #2074 — a proxy node asking to be paired, waiting on a human.
+ *
+ * NOT a credential table. A row is an intent: the token is minted in `tokens`
+ * at approval, by the same authority that minted it by hand before, and is
+ * referenced here only long enough to be collected once.
+ */
+export const nodeEnrollments = sqliteTable("node_enrollments", {
+    /** Opaque handle for the node to poll with. Watching is not approving. */
+    id: text("id").primaryKey(),
+    /** The code compared on both screens — it protects the human, not the door. */
+    code: text("code").notNull(),
+    /** What the node calls itself: chosen by the asker, so a hint, not evidence. */
+    label: text("label"),
+    /** Where it came from — the one thing the hub observes rather than is told. */
+    requestedIp: text("requested_ip"),
+    createdAt: text("created_at").notNull(),
+    /** An unattended request stops being a door. */
+    expiresAt: text("expires_at").notNull(),
+    status: text("status").notNull().default("pending"),
+    decidedAt: text("decided_at"),
+    decidedBy: text("decided_by"),
+    /** Minted at approval, nulled on collection so it can never be served twice. */
+    token: text("token"),
+    deliveredAt: text("delivered_at"),
+}, (t) => [
+    index("idx_node_enrollments_status").on(t.status),
+]);
+
+export type NodeEnrollment = typeof nodeEnrollments.$inferSelect;
+
 export type GraphEdge = typeof graphEdges.$inferSelect;
 export type NewGraphEdgeRow = typeof graphEdges.$inferInsert;
 

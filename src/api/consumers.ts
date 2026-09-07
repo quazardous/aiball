@@ -18,6 +18,14 @@ import {
     type ConsumerKind,
 } from "../db.js";
 import { listNodes, revokeNode } from "../db/nodes.js";
+import {
+    approveEnrollment,
+    collectEnrollmentToken,
+    createEnrollment,
+    getEnrollment,
+    listEnrollments,
+    rejectEnrollment,
+} from "../db/node-enrollments.js";
 import { getProxyNodeWsState } from "../proxy-ws.js";
 import { broadcast } from "../ws.js";
 import { emitControl } from "../event-bus.js";
@@ -280,6 +288,94 @@ consumersRouter.get("/nodes", (req: Request, res: Response) => {
         ws_state: getProxyNodeWsState(n.node_id),
     }));
     res.json(decorated);
+});
+
+/**
+ * #2074 — PAIRING. The two routes below are the only UNAUTHENTICATED ones in
+ * this file, and necessarily so: a node asking to be enrolled has no credential
+ * yet — that is the thing it is asking for.
+ *
+ * What keeps the door narrow is that neither route can produce a credential.
+ * `POST /nodes/enroll` records an intent; `GET /nodes/enroll/:id` hands over a
+ * token only if a HUMAN already approved that exact request. The worst a
+ * stranger achieves is a row in a list that david will not recognise.
+ *
+ * The rate limit is per-IP and deliberately small. It is not a defence against
+ * a determined caller — nothing here is — but it stops an accident or a script
+ * from filling the panel with rows and burying a real request among them.
+ */
+const ENROLL_WINDOW_MS = 60_000;
+const ENROLL_MAX_PER_WINDOW = 5;
+const enrollHits = new Map<string, number[]>();
+
+function enrollRateLimited(ip: string): boolean {
+    const now = Date.now();
+    const hits = (enrollHits.get(ip) ?? []).filter((t) => now - t < ENROLL_WINDOW_MS);
+    hits.push(now);
+    enrollHits.set(ip, hits);
+    // Bounded: one entry per active IP, pruned as it is read.
+    if (enrollHits.size > 500) {
+        for (const [k, v] of enrollHits) if (v.every((t) => now - t >= ENROLL_WINDOW_MS)) enrollHits.delete(k);
+    }
+    return hits.length > ENROLL_MAX_PER_WINDOW;
+}
+
+consumersRouter.post("/nodes/enroll", (req: Request, res: Response) => {
+    const ip = req.ip ?? req.socket.remoteAddress ?? "unknown";
+    if (enrollRateLimited(ip)) {
+        return res.status(429).json({ error: "too many pairing requests — wait a minute" });
+    }
+    const { label } = (req.body ?? {}) as { label?: unknown };
+    const view = createEnrollment({
+        label: typeof label === "string" && label.trim() ? label.trim() : null,
+        ip,
+    });
+    // The panel should light up without waiting for a poll: this is the moment
+    // a human is expected to act, and the node is standing at a prompt.
+    broadcast({ type: "consumer_changed", data: { enrollment: view } });
+    // The code goes back so the node can PRINT it — comparing the two screens
+    // is the whole point, and it cannot be compared if only one side shows it.
+    res.status(201).json({ id: view.id, code: view.code, expires_at: view.expires_at });
+});
+
+consumersRouter.get("/nodes/enroll/:id", (req: Request, res: Response) => {
+    const view = getEnrollment(String(req.params.id));
+    if (!view) return notFound(res, "pairing request not found");
+    if (view.state === "approved") {
+        const token = collectEnrollmentToken(view.id);
+        // Collected once. A second poll gets `delivered` and nothing else.
+        if (token) return res.json({ state: "approved", token });
+        return res.json({ state: "delivered" });
+    }
+    // Everything else says only where the request stands — never why, and never
+    // anything the asker didn't already tell us.
+    res.json({ state: view.state });
+});
+
+/** #2074 — the human side. Moderator-only, like every other node surface. */
+consumersRouter.get("/nodes/enrollments", (req: Request, res: Response) => {
+    if (!isHuman(consumerOf(req))) {
+        return res.status(403).json({ error: "pairing requests are moderator-only" });
+    }
+    res.json(listEnrollments());
+});
+
+consumersRouter.post("/nodes/enrollments/:id/:verdict", (req: Request, res: Response) => {
+    const caller = consumerOf(req);
+    if (!isHuman(caller)) {
+        return res.status(403).json({ error: "approving a node is moderator-only" });
+    }
+    const verdict = String(req.params.verdict);
+    if (verdict !== "approve" && verdict !== "reject") {
+        return badRequest(res, "verdict must be approve or reject");
+    }
+    const id = String(req.params.id);
+    const view = verdict === "approve" ? approveEnrollment(id, caller) : rejectEnrollment(id, caller);
+    // Null means the request was no longer decidable — expired, or already
+    // decided. Saying so beats silently minting a second token.
+    if (!view) return res.status(409).json({ error: "pairing request is no longer pending" });
+    broadcast({ type: "consumer_changed", data: { enrollment: view } });
+    res.json(view);
 });
 
 /** #424: revoke a node by its non-secret handle (deletes the underlying node

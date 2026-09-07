@@ -116,7 +116,26 @@ const PUBLIC_PATHS = new Set<string>([
     "/auth/setup",
     "/auth/login",
     "/auth/status",
+    // #2074 — a node asking to be paired has no credential yet; that is what it
+    // is asking for. This route records an INTENT and can mint nothing, so the
+    // worst an unauthenticated caller achieves is a row a human won't approve.
+    "/nodes/enroll",
 ]);
+
+/**
+ * #2074 — the pairing POLL, which carries a request id and so cannot be an
+ * exact match. Public for the same reason as `/nodes/enroll`, and safe for a
+ * narrower one: it serves a token ONLY for a request a human already approved,
+ * exactly once. Knowing an id lets you watch a request, never create or
+ * approve one.
+ *
+ * A prefix rather than a regex over the whole path: `startsWith` here can only
+ * ever widen to routes we deliberately put under this one segment.
+ */
+function isPublicPath(path: string): boolean {
+    if (PUBLIC_PATHS.has(path)) return true;
+    return path.startsWith("/nodes/enroll/");
+}
 
 function readBearerToken(req: Request): string | null {
     const auth = req.header("authorization");
@@ -138,7 +157,7 @@ function readBearerToken(req: Request): string | null {
 }
 
 export function bearerAuth(req: Request, res: Response, next: NextFunction): void {
-    if (PUBLIC_PATHS.has(req.path)) {
+    if (isPublicPath(req.path)) {
         next();
         return;
     }
