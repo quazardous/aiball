@@ -155,6 +155,10 @@ dates are YYYY-MM-DD.
   and gave up before asking the hub even once, so an approval a human had
   already given reached nobody. The hub owns the deadline and says how long the
   request has, rather than when it ends on its own clock.
+- The embedded terminal is centred in its card, and the room the height ceiling
+  leaves over now reads as a margin instead of a gap on the right. The reduction
+  was also being computed from the box around the grid rather than the grid
+  itself, so the pane never knew its own width.
 - The embedded terminal no longer runs off the bottom of the page. It was
   reserving room for the pane at full size while drawing it shrunk, leaving a
   tall band of dead black under the content.
