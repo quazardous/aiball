@@ -4,7 +4,7 @@
 // Read-only list; revoke + relayed consumers live on the detail page (#452).
 // The token value is never exposed — a node is keyed by a non-secret `node_id`.
 import { computed, ref, onMounted, watch } from "vue";
-import { api, type NodeEnrollment, type NodeView } from "../lib/api";
+import { api, type NodeEnrollment, type NodeView, type PairingWindow } from "../lib/api";
 import { formatActivityAge } from "../lib/format";
 import { useNowTicker } from "../lib/now-ticker";
 import { useLoader } from "../lib/loader";
@@ -31,6 +31,17 @@ const emit = defineEmits<{
 }>();
 
 const confirm = useConfirm();
+
+// #2074 — the enrolment switch. The public pairing route only answers while
+// this is open; shut is the default, and a restart shuts it again.
+const pairingWin = ref<PairingWindow | null>(null);
+async function refreshPairingWindow(): Promise<void> {
+    pairingWin.value = await api.getPairingWindow().catch(() => null);
+}
+async function togglePairingWindow(): Promise<void> {
+    const open = pairingWin.value?.open === true;
+    pairingWin.value = await api.setPairingWindow(open ? "close" : "open");
+}
 const toast = useToast();
 const nodes = ref<NodeView[]>([]);
 
@@ -91,7 +102,7 @@ function fmt(ts: string | null): string {
 
 // #502 — la pastille est dérivée de `last_used_at` + l'horloge courante.
 const nowMs = useNowTicker(15_000);
-onMounted(() => { load(); });
+onMounted(() => { load(); void refreshPairingWindow(); });
 
 function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
     return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));
@@ -180,6 +191,29 @@ function sortValue(n: NodeView, key: string): string | number {
         @close-to-inbox="emit('close-to-inbox')"
     />
     <div v-else class="nodes-panel">
+        <!-- #2074 — the enrolment switch, at the top because it decides whether
+             the pairing route answers at all. Shut is the normal state: this is
+             the one public write route in the API, for a gesture done a few
+             times a year. -->
+        <div class="pairing-window" :class="{ 'pairing-window--open': pairingWin?.open }">
+            <div class="pairing-window__state">
+                <i :class="pairingWin?.open ? 'pi pi-lock-open' : 'pi pi-lock'" />
+                <span v-if="pairingWin?.open">
+                    Accepting pairing requests for
+                    {{ Math.ceil((pairingWin.seconds_left ?? 0) / 60) }} more min
+                    <span class="pairing-window__by">— opened by {{ pairingWin.opened_by }}</span>
+                </span>
+                <span v-else>Not accepting pairing requests</span>
+            </div>
+            <Button
+                :label="pairingWin?.open ? 'Close now' : 'Allow pairing for 10 min'"
+                :icon="pairingWin?.open ? 'pi pi-lock' : 'pi pi-lock-open'"
+                :severity="pairingWin?.open ? 'secondary' : undefined"
+                :outlined="pairingWin?.open"
+                size="small"
+                @click="togglePairingWindow"
+            />
+        </div>
         <PanelHeader title="Proxy nodes">
             <p class="aiball-explainer aiball-explainer--muted">
                 Each row is a <strong>node token</strong> (<code>aiball auth issue --node</code>) that relays
@@ -346,4 +380,18 @@ function sortValue(n: NodeView, key: string): string | number {
 .pairing__facts dd { margin: 0; }
 .pairing__caveat { opacity: .6; font-size: .85em; }
 .pairing__actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+
+/* #2074 — the switch. Muted when shut (the normal state), and unmistakably
+   lit when open, because an open door left open is the thing to notice. */
+.pairing-window {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .6rem .9rem; margin-bottom: 1rem;
+    border: 1px solid var(--p-content-border-color); border-radius: 6px;
+}
+.pairing-window--open {
+    border-color: var(--p-orange-400);
+    background: color-mix(in srgb, var(--p-orange-400) 8%, transparent);
+}
+.pairing-window__state { display: flex; align-items: center; gap: .5rem; }
+.pairing-window__by { opacity: .7; }
 </style>

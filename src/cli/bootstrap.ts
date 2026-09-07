@@ -461,6 +461,15 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ label }),
         });
+        if (res.status === 403) {
+            // #2074 — the window is shut. Say which of the two machines to go
+            // to: a bare "refused" here costs ten minutes of looking at the
+            // wrong one.
+            return die(
+                "proxy pair: the hub is not accepting pairing right now.\n"
+                + "  Open aiball on the hub → Nodes → \"Allow pairing for 10 min\", then run this again.",
+            );
+        }
         if (!res.ok) die(`proxy pair: the hub refused the request (${res.status}) — ${await res.text()}`);
         req = await res.json() as typeof req;
     } catch (e) {

@@ -291,6 +291,14 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     return res.json() as Promise<T>;
 }
 
+/** #2074 — state of the enrolment switch. */
+export interface PairingWindow {
+    open: boolean;
+    open_until: string | null;
+    seconds_left: number;
+    opened_by: string | null;
+}
+
 /**
  * #2074 — a proxy node's pairing request. Never carries the token: that is
  * minted at approval and collected by the node itself, once.
@@ -1302,6 +1310,11 @@ export const api = {
         ),
     /** #424: proxy-node tokens + the consumers each relays (moderator-only). */
     listNodes: () => req<NodeView[]>("GET", "/api/nodes"),
+    /** #2074 — the enrolment switch: the public pairing route only answers
+     *  while this window is open. Shut by default, and shut again on restart. */
+    getPairingWindow: () => req<PairingWindow>("GET", "/api/nodes/pairing"),
+    setPairingWindow: (verb: "open" | "close", minutes?: number) =>
+        req<PairingWindow>("POST", `/api/nodes/pairing/${verb}`, verb === "open" ? { minutes } : undefined),
     /** #2074 — proxy nodes asking to be paired, waiting on a human. */
     listNodeEnrollments: () => req<NodeEnrollment[]>("GET", "/api/nodes/enrollments"),
     /** #2074 — approve mints the node's token; reject is final. Both refuse a

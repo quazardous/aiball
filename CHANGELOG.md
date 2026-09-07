@@ -48,6 +48,16 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A proxy node can ask to be paired instead of being handed a token. Run
+  `aiball proxy pair` on the node, compare the short code it prints with the one
+  in the clickable notice on the hub, and approve — no credential is copied
+  between machines. Approving is what creates the token, and the node collects
+  it once.
+
+  The hub only listens for pairing while you have opened a short window, from
+  the Nodes panel. It is shut by default and shuts again on restart: this is the
+  one route in aiball that writes for a caller who has not proved anything, and
+  it exists for a gesture you make a few times a year.
 - A ticket filed into a project its author doesn't belong to now records where
   it came from, and the thread shows a "from X" tag. Filing next door is
   legitimate — it's the first reason to open a ticket at all — but until now it

@@ -88,6 +88,36 @@ consumer). So:
   not opening a delegation endpoint to third parties.
 - Keep `proxy.token` **chmod 600**; **never commit** it.
 
+### How a node gets its token
+
+Two ways, and both end with a human deciding.
+
+**Pairing** (`aiball proxy pair`) exists so the token never travels by hand.
+The node asks; a moderator approves in the web UI; the node collects the token
+itself, once. Approving is what mints it — before that, a request holds no
+credential at all.
+
+That flow needs one route to answer a caller who has proved nothing, since a
+node has no credential yet. It is the only such write route in aiball, and it is
+kept narrow on purpose:
+
+- **It can mint nothing.** It records an intent. The worst an unknown caller
+  achieves is a row you will not recognise and will not approve.
+- **It answers only inside a window** a moderator opened, minutes long, shut by
+  default and shut again by any restart. A gate should fail closed.
+- **It is rate-limited per IP**, so an accident cannot bury a real request among
+  hundreds of fake ones.
+- **The short code is compared on both screens.** It is not a secret and does
+  not protect the route; it protects *you*, by tying the row you approve to the
+  machine you are standing at.
+- **Requests expire**, and an approved token is handed over exactly once — after
+  which the request keeps no copy.
+
+**Minting by hand** (`aiball auth issue --node`) stays available and is the
+right tool for scripted installs. The trade is the one this page warns about
+everywhere else: you are then responsible for moving a credential between two
+machines without it being seen or kept.
+
 ---
 
 ## Mitigation — carry your own token *through* the proxy (QW-A)

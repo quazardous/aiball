@@ -27,6 +27,12 @@ import {
     rejectEnrollment,
 } from "../db/node-enrollments.js";
 import { getProxyNodeWsState } from "../proxy-ws.js";
+import {
+    DEFAULT_PAIRING_WINDOW_MS,
+    closePairingWindow,
+    openPairingWindow,
+    pairingWindow,
+} from "../node-pairing-window.js";
 import { broadcast } from "../ws.js";
 import { emitControl } from "../event-bus.js";
 import { isPresent, presenceRunning } from "../live-presence.js";
@@ -321,6 +327,15 @@ function enrollRateLimited(ip: string): boolean {
 }
 
 consumersRouter.post("/nodes/enroll", (req: Request, res: Response) => {
+    // #2074 — the switch. Shut, this route writes nothing and says so plainly:
+    // a node refused here looks like a broken hub unless the message names the
+    // real reason, and that confusion is the whole cost of having a window.
+    if (!pairingWindow().open) {
+        return res.status(403).json({
+            error: "the hub is not accepting pairing right now — open the window "
+                + "in aiball under Nodes, then run this again",
+        });
+    }
     const ip = req.ip ?? req.socket.remoteAddress ?? "unknown";
     if (enrollRateLimited(ip)) {
         return res.status(429).json({ error: "too many pairing requests — wait a minute" });
@@ -350,6 +365,39 @@ consumersRouter.get("/nodes/enroll/:id", (req: Request, res: Response) => {
     // Everything else says only where the request stands — never why, and never
     // anything the asker didn't already tell us.
     res.json({ state: view.state });
+});
+
+/**
+ * #2074 — the enrolment switch. Ordinary moderator-only routes, and that is the
+ * point: the one structurally-public route in the API becomes conditional on an
+ * authenticated decision, instead of standing open on its own.
+ */
+consumersRouter.get("/nodes/pairing", (req: Request, res: Response) => {
+    if (!isHuman(consumerOf(req))) {
+        return res.status(403).json({ error: "pairing window is moderator-only" });
+    }
+    res.json(pairingWindow());
+});
+
+consumersRouter.post("/nodes/pairing/:verb", (req: Request, res: Response) => {
+    const caller = consumerOf(req);
+    if (!isHuman(caller)) {
+        return res.status(403).json({ error: "pairing window is moderator-only" });
+    }
+    const verb = String(req.params.verb);
+    if (verb !== "open" && verb !== "close") return badRequest(res, "verb must be open or close");
+    if (verb === "close") {
+        const w = closePairingWindow();
+        broadcast({ type: "consumer_changed", data: { pairing_window: w } });
+        return res.json(w);
+    }
+    const { minutes } = (req.body ?? {}) as { minutes?: unknown };
+    const ms = typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0
+        ? minutes * 60_000
+        : DEFAULT_PAIRING_WINDOW_MS;
+    const w = openPairingWindow(caller, ms);
+    broadcast({ type: "consumer_changed", data: { pairing_window: w } });
+    res.json(w);
 });
 
 /** #2074 — the human side. Moderator-only, like every other node surface. */

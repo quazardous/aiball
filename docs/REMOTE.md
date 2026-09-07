@@ -50,7 +50,45 @@ A under **one node token**, so loops, MCP, CLI and the web UI on B all stay
 token-less (localhost / UDS, SSE included) — no per-client remote config.
 Recommended for a busy host.
 
-### Quickstart
+### Quickstart — pairing
+
+The node asks, and you approve it in the web UI. No token is copied between
+machines.
+
+```bash
+# on A — open the pairing window: web UI → Nodes → "Allow pairing for 10 min"
+#         (it is shut by default, and shuts itself again after the window)
+
+# on B — ask to be enrolled
+aiball proxy pair --url https://<A-host>:7777
+#   → prints a short code, e.g.  SG7-CQ6, and waits
+
+# on A — a clickable toast appears. Open it, CHECK THE CODE MATCHES the one
+#         printed on B, and approve. B writes its config and returns.
+
+# on B
+systemctl --user restart aiball     # boot as a relay
+```
+
+Comparing the code is the point of the flow: it is what ties the request you
+approve to the machine you are standing at, rather than to someone else's
+request that arrived in the same minute. It is not a secret — it protects you,
+not the door.
+
+The window matters too. `POST /api/nodes/enroll` is the only route in aiball
+that writes without the caller having proved anything, so it answers **only**
+while a moderator has opened the window; the rest of the time it refuses, and
+the node says so in as many words. A restart shuts it: a gate should fail
+closed.
+
+Approving is what mints the token — until then a request is an intent and
+nothing else. The node collects its token exactly once, and the request keeps
+no copy afterwards.
+
+### Quickstart — the manual way
+
+Still there, and still right when you already hold a token (scripted installs,
+or re-pointing a node you control):
 
 ```bash
 # on A — mint the node service token (no consumer; it's the node's credential)
