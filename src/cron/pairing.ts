@@ -12,7 +12,7 @@
  * deliberate gestures, one of them on this very host, precede it.
  */
 import { collectPendingPairing } from "../node-pairing-collect.js";
-import { restartViaSupervisor } from "../supervisor-restart.js";
+import { restartViaSupervisor, supervisorHint } from "../supervisor-restart.js";
 
 export async function runPairingCollect(): Promise<void> {
     const r = await collectPendingPairing();
@@ -37,9 +37,8 @@ export async function runPairingCollect(): Promise<void> {
             // restart is this process exiting for the tray to catch.
             if (!restartViaSupervisor({ selfIsDaemon: true })) {
                 console.warn(
-                    "[pairing] the proxy config is written, but nothing supervises this daemon "
-                    + "(no systemd user service, no tray) so it could not restart itself. "
-                    + "Restart it the way you launched it.",
+                    `[pairing] the proxy config is written, but this daemon could not restart `
+                    + `itself: ${supervisorHint()}`,
                 );
             }
             return;

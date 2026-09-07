@@ -79,8 +79,26 @@ function stopDaemonForWatchdog(selfIsDaemon: boolean): boolean {
 }
 
 /**
- * Restart the daemon. Returns false when no supervisor could be reached, so
- * the caller says what to do by hand instead of pretending it worked.
+ * Why a restart was refused, in words the person in front of it can act on.
+ *
+ * #2089 follow-up — the first real Windows pairing hit exactly this and the
+ * message did not say the one thing that mattered: the tray reads its script at
+ * launch, so a tray started before the upgrade is still running the old one and
+ * writes no heartbeat. "Nothing supervises this daemon" is true and useless;
+ * "quit and relaunch the tray" is the action.
+ */
+export function supervisorHint(): string {
+    if (process.platform === "win32") {
+        return "no live tray heartbeat at " + TRAY_HEARTBEAT_PATH + ". The tray supervises the "
+            + "daemon here, but it reads its script when it starts — quit it from the tray icon "
+            + "and launch it again, then retry. Without a tray, restart the daemon by hand.";
+    }
+    return "could not reach a systemd user service. Restart the daemon the way you launched it.";
+}
+
+/**
+ * Restart the daemon. Returns false when no supervisor could be reached, so the
+ * caller says what to do by hand — `supervisorHint()` above is that wording.
  *
  * `selfIsDaemon` says whether the caller IS the daemon process. It changes
  * nothing on Linux; on Windows it is the difference between exiting and

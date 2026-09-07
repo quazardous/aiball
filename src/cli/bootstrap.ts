@@ -23,7 +23,7 @@ import { resolveDisplayHost } from "../proxy-host-providers.js";
 import { deriveSubAgentName } from "./sub-agent-name.js";
 import { savePairingRequest } from "../node-pairing-request.js";
 import { collectPendingPairing } from "../node-pairing-collect.js";
-import { restartViaSupervisor } from "../supervisor-restart.js";
+import { restartViaSupervisor, supervisorHint } from "../supervisor-restart.js";
 import { writeProxyConfig } from "../proxy-config-write.js";
 import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
 
@@ -589,8 +589,8 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
             process.stdout.write("  Done. Check with:  aiball status\n\n");
         } else {
             process.stdout.write(
-                "  The config is written, but nothing supervises the daemon here —\n"
-                + "  restart it the way you launched it.\n\n",
+                `  The config is written, but the daemon could not restart itself:\n`
+                + `  ${supervisorHint()}\n\n`,
             );
         }
         return;
