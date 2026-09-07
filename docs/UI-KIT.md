@@ -83,7 +83,7 @@ states — they're what keep the admin panels visually consistent.
 | `DetailHeader.vue` | Breadcrumb + title + `#actions` for detail/edit pages. |
 | `FieldRow.vue` | Read-only label/value row (detail pages). |
 | `FormField.vue` | Form field (label + input slot). |
-| `StatusPill.vue` | Colored liveness dot + label (generic 3-state). |
+| `StatusPill.vue` | Colored dot + label. Four generic states: `up` / `stale` / `down` (liveness), plus `error` for a deliberate negative outcome — something refused or destroyed, as opposed to `down`, which only means "not there". |
 
 All are genuinely reused across the panels above; none is an orphan.
 

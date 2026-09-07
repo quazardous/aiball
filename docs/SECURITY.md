@@ -119,6 +119,15 @@ kept narrow on purpose:
   it did not receive from the asker; the short code, compared on both screens,
   is what actually ties the row to your machine.
 
+One consequence worth stating plainly: **an approved pairing restarts the node's
+daemon**. Relaying is decided when the daemon builds its HTTP app, so it cannot
+be switched on in place. That restart is bounded on both ends — it happens only
+when a request written by an explicit `aiball proxy pair` on that machine is
+approved by a human on the hub, and the node's own record of the request is
+consumed by every outcome, so nothing left on disk can make it reconfigure
+itself twice. That record holds no secret: the handle in it can watch a request,
+never approve one.
+
 **Minting by hand** (`aiball auth issue --node`) stays available and is the
 right tool for scripted installs. The trade is the one this page warns about
 everywhere else: you are then responsible for moving a credential between two

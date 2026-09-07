@@ -90,6 +90,25 @@ Approving is what mints the token — until then a request is an intent and
 nothing else. The node collects its token exactly once, and the request keeps
 no copy afterwards.
 
+**What the node keeps while it waits.** Asking writes a small file on the node
+(`$AIBALL_HOME/pairing-request.json`) holding the hub's URL, the request handle,
+the code and the deadline. It carries no secret: the handle lets you *watch* a
+request, never approve one, and the token it eventually yields goes straight
+into the config. It is what lets the daemon finish the job when the terminal is
+gone, and it is consumed on the way out — granted, refused, expired or
+unreadable, every outcome deletes it. A node that already has a `proxy:` block
+ignores it entirely, so a leftover can never make a machine reconfigure itself
+in a loop.
+
+**Why the node restarts itself.** Proxy mode is decided when the daemon builds
+its HTTP app: the whole application is replaced by a forwarder, which is not
+something that can be swapped in place — hence a restart rather than a config
+reload. It happens only when a request written by an explicit `aiball proxy
+pair` **on that machine** has been approved by a human **on the hub**: two
+deliberate gestures, one of them local, precede it. Without a supervisor to ask
+(a dev checkout, Windows, a hand-launched daemon) the config is still written
+and the daemon says to restart it the way you launched it.
+
 ### Quickstart — the manual way
 
 Still there, and still right when you already hold a token (scripted installs,
