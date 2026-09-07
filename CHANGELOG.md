@@ -119,6 +119,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Revoking a node leaves a receipt: the row stays for an hour, greyed out and
+  marked "revoked", saying when and by whom. The token itself is destroyed
+  exactly as before — what is kept is the trace, never the credential.
 - Refusing a pairing request no longer makes the row vanish with no sign of what
   happened: it stays for an hour, greyed out, marked "refused", saying no token
   was minted and that the node has to ask again.

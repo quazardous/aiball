@@ -435,6 +435,13 @@
       "when": 1782700000010,
       "tag": "0061_enrollment_display_host",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1782700000011,
+      "tag": "0062_node_revocations",
+      "breakpoints": true
     }
   ]
 }

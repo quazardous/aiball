@@ -17,7 +17,7 @@ import {
     type Consumer,
     type ConsumerKind,
 } from "../db.js";
-import { listNodes, revokeNode } from "../db/nodes.js";
+import { listNodesWithRevoked, revokeNode } from "../db/nodes.js";
 import {
     approveEnrollment,
     collectEnrollmentToken,
@@ -289,9 +289,11 @@ consumersRouter.get("/nodes", (req: Request, res: Response) => {
     // #510 — décorer chaque node avec son état WS reverse courant. Lecture
     // mémoire (proxy-ws map) — pas de coût DB. Le NodeView reste compatible
     // back-compat ; les anciens clients ignorent le champ ws_state.
-    const decorated = listNodes().map((n) => ({
+    // #2085 — plus the nodes revoked recently: the click that destroyed a
+    // credential deserves a receipt, not a row quietly disappearing.
+    const decorated = listNodesWithRevoked().map((n) => ({
         ...n,
-        ws_state: getProxyNodeWsState(n.node_id),
+        ws_state: n.revoked_at ? null : getProxyNodeWsState(n.node_id),
     }));
     res.json(decorated);
 });
@@ -442,7 +444,7 @@ consumersRouter.delete("/nodes/:node_id", (req: Request, res: Response) => {
         return res.status(403).json({ error: "node revoke is moderator-only" });
     }
     const node_id = String(req.params.node_id);
-    if (!revokeNode(node_id)) return notFound(res, "node not found");
+    if (!revokeNode(node_id, consumerOf(req))) return notFound(res, "node not found");
     broadcast({ type: "consumer_changed", data: { node_id, revoked: true } });
     res.json({ node_id, revoked: true });
 });

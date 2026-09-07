@@ -98,10 +98,16 @@ function outcomeOf(row: unknown): "waiting" | "expired" | "refused" | null {
     if (row.state === "rejected") return "refused";
     return Date.parse(row.expires_at) <= pairingNow.value ? "expired" : "waiting";
 }
-/** Finished, whichever way. */
+/** #2085 — a node row that is a receipt rather than a node: revoked, so there
+ *  is nothing left to open. */
+function isRevoked(row: unknown): boolean {
+    return !isPending(row) && !!(row as NodeView).revoked_at;
+}
+/** Finished, whichever way — a request that ended, or a node that was revoked.
+ *  These are the rows shown greyed: something to know, nothing to click. */
 function isDone(row: unknown): boolean {
     const o = outcomeOf(row);
-    return o === "expired" || o === "refused";
+    return o === "expired" || o === "refused" || isRevoked(row);
 }
 function asNode(row: unknown): NodeView {
     return row as NodeView;
@@ -235,6 +241,9 @@ function sortValue(row: Row, key: string): string | number {
     switch (key) {
         // down < stale < up so asc surfaces problems first.
         case "status": {
+            // A revoked node sorts past `up`, with the expired requests: a
+            // receipt is not a problem to fix.
+            if (isRevoked(n)) return 3;
             const order = { down: 0, stale: 1, up: 2 } as const;
             return order[liveness(n.last_used_at)];
         }
@@ -350,17 +359,21 @@ function sortValue(row: Row, key: string): string | number {
                     expired: `This pairing request from ${r.label || 'an unnamed node'} expired unanswered — run the pair command again on that machine`,
                     waiting: `Review the pairing request from ${r.label || 'an unnamed node'} — code ${r.code}`,
                 }[outcomeOf(r) ?? 'waiting'])
-                : `View node ${r.label || r.node_id}${r.relayed_count ? ` — ${r.relayed_count} relayed consumer${r.relayed_count > 1 ? 's' : ''}` : ''}`)"
+                : isRevoked(r)
+                    ? `Revoked${r.revoked_by ? ` by ${r.revoked_by}` : ''} — this node's token no longer exists`
+                    : `View node ${r.label || r.node_id}${r.relayed_count ? ` — ${r.relayed_count} relayed consumer${r.relayed_count > 1 ? 's' : ''}` : ''}`)"
             :row-class="(r: Row) => (isPending(r)
                 ? (isDone(r) ? 'dl-clickable nodes-row--done' : 'dl-clickable nodes-row--pending')
-                : 'dl-clickable')"
+                // A revoked node has no detail page left to open, so it does not
+                // pretend to be clickable.
+                : isRevoked(r) ? 'nodes-row--done' : 'dl-clickable')"
             :get-sort-value="sortValue"
             default-sort-key="last_activity"
             default-sort-dir="desc"
             :loading="loading && !rows.length"
             :error="error"
             :is-empty="!rows.length"
-            @row-click="(r: Row) => emit('open-edit', isPending(r) ? `enroll:${r.id}` : r.node_id)"
+            @row-click="(r: Row) => { if (!isRevoked(r)) emit('open-edit', isPending(r) ? `enroll:${r.id}` : r.node_id); }"
         >
             <template #empty>
                 <div class="aiball-empty">
@@ -392,6 +405,14 @@ function sortValue(row: Row, key: string): string | number {
                     label="to confirm"
                     title="This node asked to pair — approve or refuse it"
                 />
+                <!-- #2085 — a revoked node reports no liveness: there is nothing
+                     left to be alive. The pill is the receipt for the click. -->
+                <StatusPill
+                    v-else-if="isRevoked(row)"
+                    status="error"
+                    label="revoked"
+                    :title="`Its token was destroyed ${fmt(asNode(row).revoked_at ?? null)}${asNode(row).revoked_by ? ` by ${asNode(row).revoked_by}` : ''} — the node can no longer relay`"
+                />
                 <StatusPill
                     v-else
                     :status="liveness(asNode(row).last_used_at)"
@@ -413,7 +434,9 @@ function sortValue(row: Row, key: string): string | number {
                 </template>
                 <template v-else>
                     <span class="nodes-label">{{ asNode(row).label || "(unlabelled)" }}</span>
-                    <code class="nodes-id">{{ asNode(row).node_id }}</code>
+                    <code class="nodes-id">
+                        {{ asNode(row).node_id }}{{ isRevoked(row) ? " — token destroyed" : "" }}
+                    </code>
                     <code
                         v-if="asNode(row).ws_state?.connected && proxyVersionShort(asNode(row).ws_state!)"
                         class="nodes-version"
@@ -462,6 +485,10 @@ function sortValue(row: Row, key: string): string | number {
                         waiting: `expires ${fmt(row.expires_at)} — an unattended request stops being a door`,
                     }[outcomeOf(row) ?? 'waiting']"
                 >asked {{ fmt(row.created_at) }}</span>
+                <span
+                    v-else-if="isRevoked(row)"
+                    :title="`last seen ${fmt(asNode(row).last_used_at)}`"
+                >revoked {{ fmt(asNode(row).revoked_at ?? null) }}</span>
                 <span v-else :title="`created ${fmt(asNode(row).created_at)}`">{{ fmt(asNode(row).last_used_at) }}</span>
             </template>
         </DataList>

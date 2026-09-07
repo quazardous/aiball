@@ -1361,4 +1361,9 @@ export interface NodeView {
         node_version?: string | null;
         node_commit?: string | null;
     };
+    /** #2085 — set on a node that no longer exists: the credential is gone and
+     *  this row is the receipt for the click that destroyed it. Shown greyed
+     *  for an hour, then forgotten. Absent/null on a live node. */
+    revoked_at?: string | null;
+    revoked_by?: string | null;
 }

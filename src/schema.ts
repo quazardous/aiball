@@ -949,6 +949,24 @@ export const nodeEnrollments = sqliteTable("node_enrollments", {
 
 export type NodeEnrollment = typeof nodeEnrollments.$inferSelect;
 
+/** #2085 — what a revoked node leaves behind. A tombstone, not a flag on
+ *  `tokens`: revocation stays a DELETE, so no authentication path has to learn
+ *  a new rule to keep refusing it. Carries no secret — `node_id` is the same
+ *  truncated hash the panel already shows. */
+export const nodeRevocations = sqliteTable("node_revocations", {
+    nodeId: text("node_id").primaryKey(),
+    label: text("label"),
+    displayHost: text("display_host"),
+    displayHostProvider: text("display_host_provider"),
+    lastSeenIp: text("last_seen_ip"),
+    createdAt: text("created_at"),
+    lastUsedAt: text("last_used_at"),
+    revokedAt: text("revoked_at").notNull(),
+    revokedBy: text("revoked_by"),
+});
+
+export type NodeRevocation = typeof nodeRevocations.$inferSelect;
+
 export type GraphEdge = typeof graphEdges.$inferSelect;
 export type NewGraphEdgeRow = typeof graphEdges.$inferInsert;
 

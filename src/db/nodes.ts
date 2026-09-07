@@ -33,7 +33,20 @@ export interface NodeView {
     /** Consumers this node relays (matched by last_seen_ip). */
     relayed: RelayedConsumer[];
     relayed_count: number;
+    /** #2085 — set on a node that no longer exists: its credential is gone, and
+     *  this row is the receipt for the click that destroyed it. Shown greyed
+     *  for a while, then forgotten. NULL on a live node. */
+    revoked_at?: string | null;
+    revoked_by?: string | null;
 }
+
+/**
+ * #2085 — how long a revoked node stays on the list. Short, for the same reason
+ * a refused pairing request is: someone was there and pressed the button, so
+ * what is owed is an acknowledgement, not a record outliving their afternoon.
+ * The permanent audit of a credential's life is not this panel's job.
+ */
+export const REVOKED_RETENTION_MS = 60 * 60 * 1000;
 
 /** Non-secret handle for a node token (never expose the token value). */
 export function nodeId(token: string): string {
@@ -81,15 +94,68 @@ export function listNodes(): NodeView[] {
     });
 }
 
-/** Revoke a node by its non-secret handle (deletes the underlying token). */
-export function revokeNode(node_id: string): boolean {
+/**
+ * #2085 — live nodes plus the ones revoked recently enough to still be news.
+ * A tombstone can never relay anything, so it carries no consumers; everything
+ * else is what the panel last showed, copied at revocation so the row still
+ * reads like the node it replaces.
+ */
+export function listNodesWithRevoked(nowMs: number = Date.now()): NodeView[] {
+    const cutoff = new Date(nowMs - REVOKED_RETENTION_MS).toISOString();
+    const tombs = getDb().select().from(schema.nodeRevocations).all()
+        .filter((r) => r.revokedAt > cutoff)
+        .map((r): NodeView => ({
+            node_id: r.nodeId,
+            label: r.label,
+            created_at: r.createdAt ?? r.revokedAt,
+            last_used_at: r.lastUsedAt,
+            last_seen_ip: r.lastSeenIp,
+            display_host: r.displayHost,
+            display_host_provider: r.displayHostProvider,
+            relayed: [],
+            relayed_count: 0,
+            revoked_at: r.revokedAt,
+            revoked_by: r.revokedBy,
+        }));
+    return [...listNodes(), ...tombs];
+}
+
+/**
+ * Revoke a node by its non-secret handle. The token row is DELETED, exactly as
+ * before — the credential ceases to exist and no lookup has to learn a new rule
+ * to keep refusing it. #2085 only adds a tombstone first, so the panel can show
+ * for an hour that this is what happened, instead of a row silently vanishing.
+ */
+export function revokeNode(node_id: string, by?: string | null): boolean {
     const db = getDb();
-    const nodes = db.select({ token: schema.tokens.token })
+    const nodes = db.select()
         .from(schema.tokens)
         .where(eq(schema.tokens.kind, "node"))
         .all();
     const match = nodes.find((n) => nodeId(n.token) === node_id);
     if (!match) return false;
     const r = db.delete(schema.tokens).where(eq(schema.tokens.token, match.token)).run();
-    return r.changes > 0;
+    if (r.changes === 0) return false;
+    // After the delete, and best-effort: a tombstone that fails to be written
+    // must never leave a credential alive. `onConflictDoUpdate` so re-minting
+    // and revoking the same node twice overwrites rather than throws.
+    try {
+        const row = {
+            nodeId: node_id,
+            label: match.label ?? null,
+            displayHost: match.displayHost ?? null,
+            displayHostProvider: match.displayHostProvider ?? null,
+            lastSeenIp: match.lastSeenIp ?? null,
+            createdAt: match.createdAt ?? null,
+            lastUsedAt: match.lastUsedAt ?? null,
+            revokedAt: new Date().toISOString(),
+            revokedBy: by ?? null,
+        };
+        db.insert(schema.nodeRevocations).values(row)
+            .onConflictDoUpdate({ target: schema.nodeRevocations.nodeId, set: row })
+            .run();
+    } catch (e) {
+        console.error("node revocation tombstone failed (the token IS revoked):", e);
+    }
+    return true;
 }
