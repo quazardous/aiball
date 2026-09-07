@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from "vue";
 import Button from "primevue/button";
+import SplitButton from "primevue/splitbutton";
 import Select from "primevue/select";
 import ToggleButton from "primevue/togglebutton";
 import InputText from "primevue/inputtext";
@@ -85,6 +86,18 @@ const canImportUpstream = computed<boolean>(() => {
     const bindings = upstreamBindings.value[props.project];
     return !!bindings && bindings.some((b) => b.kind === "github" && b.default);
 });
+// #2075 — the secondary ways to create a ticket hang off the create
+// button as a dropdown instead of sitting beside it. The model is empty
+// when the project has no upstream, and an empty model is why the
+// template still falls back to a plain Button: a chevron that opens
+// nothing is worse than no chevron.
+const createActions = computed(() => {
+    const items: { label: string; icon: string; command: () => void }[] = [];
+    if (canImportUpstream.value) {
+        items.push({ label: "Import from GitHub", icon: "pi pi-github", command: openImport });
+    }
+    return items;
+});
 const importOpen = ref(false);
 const importRef = ref("");
 const importBusy = ref(false);
@@ -162,26 +175,27 @@ async function doImport() {
         <!-- #259: full "New Ticket" on desktop, short "New" on phone
              (the pi-plus icon already conveys "create" where room is
              scarce). #B.258 shortened it everywhere; now responsive. -->
+        <!-- #2075: one create control. Clicking it still opens the new-ticket
+             form; the chevron carries the other ways in (#1542 GitHub import,
+             offered only when the project has a default upstream binding). -->
+        <SplitButton
+            v-if="createActions.length"
+            class="filter-new-ticket"
+            :label="isPhone ? 'New' : 'New Ticket'"
+            icon="pi pi-plus"
+            size="small"
+            :model="createActions"
+            title="New ticket"
+            @click="emit('new-ticket')"
+        />
         <Button
+            v-else
             class="filter-new-ticket"
             :label="isPhone ? 'New' : 'New Ticket'"
             icon="pi pi-plus"
             size="small"
             title="New ticket"
             @click="emit('new-ticket')"
-        />
-        <!-- #1542 — import a GitHub issue as a coupled ticket. Only when the
-             current project has a default upstream binding. -->
-        <Button
-            v-if="canImportUpstream"
-            class="filter-import-upstream"
-            :label="isPhone ? '' : 'Import'"
-            icon="pi pi-github"
-            size="small"
-            severity="secondary"
-            outlined
-            title="Import a GitHub issue as a coupled ticket"
-            @click="openImport"
         />
         <div class="filters-body" :class="{ 'filters-body--collapsed': !filtersExpanded }">
                 <Select
@@ -429,7 +443,12 @@ async function doImport() {
         font-size: 0.94rem;        /* 0.78 × 1.2 — size kept */
         padding: 0.24rem 0.15rem;  /* horizontal squeezed hard (david's ask) */
     }
-    .filter-new-ticket {
+    /* #2075: the create control is a bare Button when nothing hangs off
+       it and a SplitButton when something does — size the button itself in
+       both cases, never the SplitButton's wrapper (padding there would
+       show up as a gap around the pair). */
+    .filter-new-ticket.p-button,
+    .filter-new-ticket .p-splitbutton-button {
         font-size: 0.95rem;
         padding: 0.42rem 0.6rem;
     }
