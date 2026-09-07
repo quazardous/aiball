@@ -18,6 +18,7 @@ import {
     type ConsumerKind,
 } from "../db.js";
 import { listNodesWithRevoked, revokeNode } from "../db/nodes.js";
+import { ENROLLMENT_TTL_MS } from "../db/node-enrollment.js";
 import {
     approveEnrollment,
     collectEnrollmentToken,
@@ -361,7 +362,15 @@ consumersRouter.post("/nodes/enroll", (req: Request, res: Response) => {
     broadcast({ type: "consumer_changed", data: { enrollment: view } });
     // The code goes back so the node can PRINT it — comparing the two screens
     // is the whole point, and it cannot be compared if only one side shows it.
-    res.status(201).json({ id: view.id, code: view.code, expires_at: view.expires_at });
+    //
+    // #2088 — `ttl_seconds` alongside the instant: a duration crosses machines,
+    // an instant on this hub's clock does not.
+    res.status(201).json({
+        id: view.id,
+        code: view.code,
+        expires_at: view.expires_at,
+        ttl_seconds: Math.round(ENROLLMENT_TTL_MS / 1000),
+    });
 });
 
 consumersRouter.get("/nodes/enroll/:id", (req: Request, res: Response) => {

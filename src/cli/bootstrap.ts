@@ -465,7 +465,7 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
     // and a local reverse proxy turns that into 127.0.0.1 every time. The hub
     // stores it as a claim — this request has proved nothing yet.
     const dh = resolveDisplayHost();
-    let req: { id: string; code: string; expires_at: string };
+    let req: { id: string; code: string; expires_at: string; ttl_seconds?: number };
     try {
         const res = await fetch(`${base}/api/nodes/enroll`, {
             method: "POST",
@@ -491,12 +491,11 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
         return die(`proxy pair: cannot reach ${base} — ${(e as Error).message}`);
     }
 
-    // #2083 — say HOW LONG, not at what o'clock. Printing the UTC wall clock
-    // read as two hours out to anyone standing in Paris, and a deadline that
-    // looks already past reads as a broken hub. A duration has no timezone to
-    // get wrong, and "how long do I have" is the actual question; the local
-    // time comes after it, in the reader's own zone, for anyone who wants it.
-    const leftMin = Math.max(1, Math.round((Date.parse(req.expires_at) - Date.now()) / 60_000));
+    // #2083 — say HOW LONG, not at what o'clock: "how long do I have" is the
+    // actual question, and a duration has no timezone to get wrong.
+    // #2088 — the hub reports that duration, rather than us subtracting its
+    // deadline from our own clock.
+    const ttlMin = Math.max(1, Math.round((req.ttl_seconds ?? 600) / 60));
     const localAt = new Date(req.expires_at).toLocaleTimeString(undefined, {
         hour: "2-digit", minute: "2-digit",
     });
@@ -517,7 +516,7 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
     process.stdout.write(
         `\n  Pairing code:  ${req.code}\n\n`
         + `  Open aiball on the hub, find this request under Nodes, check the code\n`
-        + `  matches, and approve it. Waiting…  (expires in ${leftMin} min, at ${localAt} local time)\n`
+        + `  matches, and approve it. Waiting…  (expires in ${ttlMin} min, at ${localAt} on the hub)\n`
         + `  You can close this — the daemon on this machine will finish on its own.\n\n`,
     );
 
@@ -525,13 +524,17 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
     // button, not a machine, so a slower interval only makes it feel broken.
     // The daemon polls the same request on its own timer; whichever gets there
     // first consumes the marker, and the other reads a settled state.
-    const deadline = Date.parse(req.expires_at) + 60_000;
+    // #2088 — give up after an ELAPSED wait, not at the hub's instant plus a
+    // grace: that form was already past on the first tick of a node whose clock
+    // ran ahead, so the command quit before polling once.
+    const startedAt = Date.now();
+    const giveUpAfterMs = (req.ttl_seconds ?? 600) * 1000 + 60_000;
     for (;;) {
         await new Promise((r) => setTimeout(r, 1000));
         const r = await collectPendingPairing();
         if (r.kind === "waiting" || r.kind === "unreachable") {
             // A blip on the way to the hub is not a refusal.
-            if (Date.now() > deadline) {
+            if (Date.now() - startedAt > giveUpAfterMs) {
                 return die("proxy pair: gave up waiting — the daemon will keep trying, or run the command again.");
             }
             continue;

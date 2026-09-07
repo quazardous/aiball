@@ -128,6 +128,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Pairing a node no longer depends on the two machines agreeing about what time
+  it is. A node whose clock ran ahead treated every request as already expired
+  and gave up before asking the hub even once, so an approval a human had
+  already given reached nobody. The hub owns the deadline and says how long the
+  request has, rather than when it ends on its own clock.
 - The embedded terminal no longer runs off the bottom of the page. It was
   reserving room for the pane at full size while drawing it shrunk, leaving a
   tall band of dead black under the content.

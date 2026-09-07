@@ -33,12 +33,18 @@ export interface PairingRequestMarker {
     id: string;
     /** Shown so a log line can say which request this was. */
     code: string;
-    /** After this, the hub will not grant it — stop asking. */
+    /** The hub's deadline, on the HUB's clock. Display only — #2088: the hub
+     *  is what decides whether a request is still live. */
     expires_at: string;
     /** #394: don't inject the node token; every request carries its own. */
     strict?: boolean;
+    /** Written here, so elapsed time since it is measurable without involving
+     *  the hub's clock. */
     created_at: string;
 }
+
+/** Stop polling a hub that never answers. Not an expiry — the hub owns that. */
+export const PAIRING_ABANDON_AFTER_MS = 60 * 60 * 1000;
 
 export function pairingRequestPath(): string {
     return join(AIBALL_HOME, "pairing-request.json");
@@ -82,8 +88,19 @@ export function clearPairingRequest(): void {
     }
 }
 
-/** Whether the hub can still grant this. Past it, the marker is a leftover. */
-export function isPairingRequestLive(m: PairingRequestMarker, nowMs: number = Date.now()): boolean {
-    const t = Date.parse(m.expires_at);
-    return Number.isFinite(t) ? t > nowMs : false;
+/**
+ * Whether to stop trying, having never reached the hub at all. This is NOT the
+ * expiry: #2088 removed a local expiry check that compared the hub's
+ * `expires_at` to this machine's clock, which made every request look expired
+ * on a node whose clock ran ahead. The hub answers `expired` itself.
+ *
+ * An undatable marker counts as abandoned rather than immortal.
+ */
+export function isPairingRequestAbandoned(
+    m: PairingRequestMarker,
+    nowMs: number = Date.now(),
+): boolean {
+    const started = Date.parse(m.created_at);
+    if (!Number.isFinite(started)) return true;
+    return nowMs - started >= PAIRING_ABANDON_AFTER_MS;
 }

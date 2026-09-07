@@ -33,7 +33,7 @@ import { loadProxy } from "./proxy.js";
 import { writeProxyConfig } from "./proxy-config-write.js";
 import {
     clearPairingRequest,
-    isPairingRequestLive,
+    isPairingRequestAbandoned,
     loadPairingRequest,
     type PairingRequestMarker,
 } from "./node-pairing-request.js";
@@ -74,18 +74,17 @@ export async function collectPendingPairing(): Promise<PairingCollectOutcome> {
         return { kind: "already-configured" };
     }
 
-    if (!isPairingRequestLive(m)) {
-        clearPairingRequest();
-        return { kind: "over", reason: "the request expired before anyone answered it", code: m.code };
-    }
-
+    // #2088 — ASK THE HUB. A local expiry check used to run first, comparing
+    // the hub's `expires_at` to this machine's clock; on a node whose clock ran
+    // ahead it destroyed the marker before the hub had been asked once. The hub
+    // owns the deadline and answers `expired` itself.
     let state: { state?: string; token?: string } | null;
     try {
         state = await pollHub(m);
     } catch (e) {
-        return { kind: "unreachable", error: (e as Error).message, code: m.code };
+        return giveUpOrRetry(m, (e as Error).message);
     }
-    if (!state) return { kind: "unreachable", error: "the hub answered with an error", code: m.code };
+    if (!state) return giveUpOrRetry(m, "the hub answered with an error");
 
     if (state.state === "approved" && state.token) {
         // Config BEFORE consuming: the token is served once, so a crash here
@@ -107,4 +106,18 @@ export async function collectPendingPairing(): Promise<PairingCollectOutcome> {
         return { kind: "over", reason, code: m.code };
     }
     return { kind: "waiting", code: m.code };
+}
+
+/** An unreachable hub is worth retrying — that is why the marker outlives the
+ *  terminal — but not forever. */
+function giveUpOrRetry(m: PairingRequestMarker, error: string): PairingCollectOutcome {
+    if (isPairingRequestAbandoned(m)) {
+        clearPairingRequest();
+        return {
+            kind: "over",
+            reason: `the hub stayed unreachable (${error})`,
+            code: m.code,
+        };
+    }
+    return { kind: "unreachable", error, code: m.code };
 }

@@ -17,10 +17,11 @@ const home = mkdtempSync(join(tmpdir(), "aiball-pairing-"));
 process.env.AIBALL_HOME = home;
 const {
     clearPairingRequest,
-    isPairingRequestLive,
+    isPairingRequestAbandoned,
     loadPairingRequest,
     pairingRequestPath,
     savePairingRequest,
+    PAIRING_ABANDON_AFTER_MS,
 } = await import("./node-pairing-request.js");
 
 const NOW = Date.parse("2026-09-07T10:00:00.000Z");
@@ -67,17 +68,23 @@ test("a marker missing its handle is dropped too", () => {
     assert.equal(existsSync(pairingRequestPath()), false);
 });
 
-test("liveness follows the deadline, not the file", () => {
-    assert.equal(isPairingRequestLive(marker(1), NOW), true);
-    assert.equal(isPairingRequestLive(marker(0), NOW), false, "dead at the boundary");
-    assert.equal(isPairingRequestLive(marker(-60_000), NOW), false);
+// #2088 — the give-up is for a hub that never answers, and it is NOT the
+// expiry: the hub owns that. The check this replaced compared the hub's
+// `expires_at` to the node's clock, so a node running ahead abandoned every
+// request before asking once.
+test("a hub deadline in the past does not abandon the request", () => {
+    const ahead = { ...marker(-2 * 60 * 60_000), created_at: new Date(NOW).toISOString() };
+    assert.equal(isPairingRequestAbandoned(ahead, NOW), false);
 });
 
-test("an unparseable deadline counts as dead", () => {
-    // Better to stop asking than to poll a hub forever about a request whose
-    // expiry nobody can read.
+test("it gives up once it has been trying for an hour", () => {
+    assert.equal(isPairingRequestAbandoned(marker(600_000), NOW), false);
+    assert.equal(isPairingRequestAbandoned(marker(600_000), NOW + PAIRING_ABANDON_AFTER_MS), true);
+});
+
+test("an undatable marker counts as abandoned rather than immortal", () => {
     assert.equal(
-        isPairingRequestLive({ ...marker(600_000), expires_at: "not a date" }, NOW),
-        false,
+        isPairingRequestAbandoned({ ...marker(600_000), created_at: "not a date" }, NOW),
+        true,
     );
 });
