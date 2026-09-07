@@ -15,6 +15,7 @@ import { captureTokenSnapshotIfDue } from "../db.js";
 import { checkSandboxPings } from "../sandbox/watcher.js";
 import { revealExpiredPostpones } from "./postpone.js";
 import { runUpstreamWatch } from "../upstream-watch-run.js";
+import { runPairingCollect } from "./pairing.js";
 import type { CronTask } from "./runner.js";
 
 export { startScheduler, schedulerStatus } from "./runner.js";
@@ -66,5 +67,19 @@ export const CRON_TASKS: readonly CronTask[] = [
         everyMs: 10 * MINUTE,
         runAtBoot: false,
         run: async () => { await runUpstreamWatch(); },
+    },
+    {
+        // #2084 — finish a pairing this machine asked for, even with nobody in
+        // front of the terminal. Runs at boot on purpose: the daemon may have
+        // been restarted (or the machine rebooted) while a human was walking
+        // over to approve it, and that is exactly the case this exists for.
+        //
+        // 10s because the other side of this wait is a person who has just
+        // clicked approve and is watching for something to happen. It costs one
+        // request, and only while a marker exists — with none, the task reads a
+        // missing file and returns.
+        name: "pairing-collect",
+        everyMs: 10_000,
+        run: async () => { await runPairingCollect(); },
     },
 ];

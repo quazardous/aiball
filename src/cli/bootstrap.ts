@@ -20,6 +20,10 @@ import { applyBootstrapOptions } from "./bootstrap-options.js";
 import { globalConfigPath } from "../autopoll/config.js";
 import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
 import { resolveDisplayHost } from "../proxy-host-providers.js";
+import { savePairingRequest } from "../node-pairing-request.js";
+import { collectPendingPairing } from "../node-pairing-collect.js";
+import { restartViaSupervisor } from "../supervisor-restart.js";
+import { writeProxyConfig } from "../proxy-config-write.js";
 import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
 
 /**
@@ -496,53 +500,74 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
     const localAt = new Date(req.expires_at).toLocaleTimeString(undefined, {
         hour: "2-digit", minute: "2-digit",
     });
+    // #2084 — write the request down BEFORE saying anything about it. From here
+    // on this terminal is a convenience, not a requirement: if it is closed, or
+    // the approval lands after the human has walked away, the node's own daemon
+    // finishes the job on its next tick. The token is collectable once, and it
+    // used to be collectable only by a process someone was still watching.
+    savePairingRequest({
+        url: base,
+        id: req.id,
+        code: req.code,
+        expires_at: req.expires_at,
+        strict: opts.strict === true,
+        created_at: new Date().toISOString(),
+    });
+
     process.stdout.write(
         `\n  Pairing code:  ${req.code}\n\n`
         + `  Open aiball on the hub, find this request under Nodes, check the code\n`
-        + `  matches, and approve it. Waiting…  (expires in ${leftMin} min, at ${localAt} local time)\n\n`,
+        + `  matches, and approve it. Waiting…  (expires in ${leftMin} min, at ${localAt} local time)\n`
+        + `  You can close this — the daemon on this machine will finish on its own.\n\n`,
     );
 
     // Poll until a human decides. Every second: this is someone clicking a
     // button, not a machine, so a slower interval only makes it feel broken.
+    // The daemon polls the same request on its own timer; whichever gets there
+    // first consumes the marker, and the other reads a settled state.
     const deadline = Date.parse(req.expires_at) + 60_000;
     for (;;) {
         await new Promise((r) => setTimeout(r, 1000));
-        let state: { state: string; token?: string };
-        try {
-            const res = await fetch(`${base}/api/nodes/enroll/${req.id}`);
-            state = await res.json() as typeof state;
-        } catch {
-            continue; // a blip on the way to the hub is not a refusal
+        const r = await collectPendingPairing();
+        if (r.kind === "waiting" || r.kind === "unreachable") {
+            // A blip on the way to the hub is not a refusal.
+            if (Date.now() > deadline) {
+                return die("proxy pair: gave up waiting — the daemon will keep trying, or run the command again.");
+            }
+            continue;
         }
-        if (state.state === "approved" && state.token) {
-            initProxy({ url: base, token: state.token, strict: opts.strict === true });
-            process.stdout.write("  Approved. Restart the daemon to relay:  systemctl --user restart aiball\n\n");
+        if (r.kind === "over") return die(`proxy pair: ${r.reason}. Run the command again to ask afresh.`);
+        if (r.kind === "none" || r.kind === "already-configured") {
+            // The daemon got there first — which is the point of the marker.
+            process.stdout.write("  Approved and configured by the daemon on this machine.\n\n");
             return;
         }
-        if (state.state === "rejected") return die("proxy pair: the request was refused on the hub.");
-        if (state.state === "expired") return die("proxy pair: nobody approved it in time — run the command again.");
-        if (state.state === "delivered") {
-            return die("proxy pair: this request's token was already collected — run the command again.");
+        // #2084 — and finish the job. Telling someone standing right here to go
+        // and type one more command was the third step david wanted gone.
+        // Proxy mode is decided when the app is built, so it takes a restart.
+        process.stdout.write(`  Approved → relaying to ${r.url}. Restarting the daemon…\n`);
+        if (restartViaSupervisor()) {
+            process.stdout.write("  Done. Check with:  aiball status\n\n");
+        } else {
+            process.stdout.write(
+                "  The config is written, but this host isn't a systemd user service —\n"
+                + "  restart the daemon the way you launched it.\n\n",
+            );
         }
-        if (Date.now() > deadline) return die("proxy pair: gave up waiting — run the command again.");
+        return;
     }
 }
 
 function initProxy(opts: { url: string; token: string; strict?: boolean }): void {
-    const path = globalConfigPath();
-    let doc;
+    // #2084 — the write itself lives in `proxy-config-write.ts`: the node's own
+    // daemon performs the same one when it finishes a pairing, and two places
+    // writing the same block would drift.
+    let path: string;
     try {
-        doc = parseDocument(existsSync(path) ? readFileSync(path, "utf8") : "");
-    } catch {
-        die(`proxy init: ${path} exists but isn't valid YAML — fix or remove it first`);
+        path = writeProxyConfig(opts);
+    } catch (e) {
+        return die(`proxy init: ${(e as Error).message}`);
     }
-    doc.setIn(["proxy", "url"], opts.url);
-    if (opts.token) doc.setIn(["proxy", "token"], opts.token);
-    // #394 « tuer le point faible » : strict ⇒ pas d'injection du token node ;
-    // chaque requête doit porter son propre bearer per-consumer, sinon 401.
-    if (opts.strict) doc.setIn(["proxy", "strict"], true);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, doc.toString(), "utf8");
 
     process.stdout.write(
         [

@@ -63,12 +63,17 @@ machines.
 aiball proxy pair --url https://<A-host>:7777
 #   → prints a short code, e.g.  SG7-CQ6, and waits
 
-# on A — a clickable toast appears. Open it, CHECK THE CODE MATCHES the one
-#         printed on B, and approve. B writes its config and returns.
+# on A — a clickable toast appears, and the request is also listed under Nodes.
+#         Open it, CHECK THE CODE MATCHES the one printed on B, and approve.
 
-# on B
-systemctl --user restart aiball     # boot as a relay
+# on B — nothing. It writes its config and restarts itself as a relay.
 ```
+
+There is no third step on B, and you do not have to stay in front of it: the
+request is written down on B, so if the terminal is closed — or the approval
+lands after you have walked away — B's own daemon finishes the job on its next
+tick and comes back as a relay. Whichever of the two gets there first consumes
+the request, so it happens exactly once.
 
 Comparing the code is the point of the flow: it is what ties the request you
 approve to the machine you are standing at, rather than to someone else's

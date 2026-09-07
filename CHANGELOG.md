@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- Pairing a proxy node is two steps instead of three: ask on the node, approve
+  in the UI. The node writes its config and restarts itself as a relay, and you
+  no longer have to stay in front of its terminal — the request is remembered on
+  that machine, so its own daemon finishes the job if the approval lands after
+  you walked away.
 - A notification about a ticket now opens it. Clicking the toast — or the
   desktop notification, which only appears when the board isn't in front of you
   — goes to the thread, landing on the comment itself when the notice was about
