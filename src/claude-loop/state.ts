@@ -1919,6 +1919,11 @@ export async function buildContextPhrase(
                     // their dedicated template branch (by_agent = decider,
                     // parent_message_id = original proposal id → hashid).
                     by_agent?: string | null;
+                    // #2042 — whether that author is a HUMAN. Stamped by the
+                    // daemon because `isHuman` is consumer authority and lives
+                    // there; optional, since an older daemon omits it and the
+                    // wake must then behave exactly as before.
+                    author_is_human?: boolean;
                     parent_message_id?: number | null;
                     // #1820 — when the event happened. Already on the wire
                     // (listUnread filters on it); it was simply absent from
@@ -2591,6 +2596,14 @@ export async function buildContextPhrase(
             // loop's own. Rendered as a `[name]` marker immediately before the
             // ref, where the eye already looks for the ticket's identity.
             head_project: headProject,
+            // #2042 david — "1" when the announced event was written by another
+            // AGENT, so the template can add a restraint clause: agreeing costs
+            // a turn on both sides and says nothing. Deliberately requires an
+            // explicit `false` from the daemon: an older one omits the field,
+            // and treating "unknown" as "from an agent" would rewrite every
+            // wake, including david's own. Empty in backlog mode, where there
+            // is no unread head to have an author.
+            head_from_agent: unreadHead?.author_is_human === false ? "1" : "",
             project_scope: scope,
             // #1215 david `go` — le CTA backlog reflète qu'un commentaire attend
             // une réponse en NOMMANT le dernier acteur (≠ moi). Remplace l'ancien
@@ -2664,6 +2677,12 @@ export async function buildContextPhrase(
             + "{head_lifecycle:+{head_project:+[{head_project}] }#{head_id} {head_lifecycle}{head_title:+: {head_title}}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_decision_event:+{head_decision_event} on {head_project:+[{head_project}] }#{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
             + "{head_bundle:+{head_project:+[{head_project}] }{head_bundle}{head_age:+ · {head_age}}{head_fyi:+ (fyi — action is not mandatory)}}"
+            // #2042 david — the restraint clause for agent-to-agent traffic,
+            // his rule in his words: "je réponds que si j'apporte un élément
+            // nouveau". A suffix, not a branch: it applies to whichever of the
+            // five event branches fired, and never in backlog mode, where the
+            // head has no author to be an agent.
+            + "{head_from_agent:+ · another agent wrote this — reply only if you add something new; agreeing needs no turn.}"
             // #1470 — the backlog leg closes with a TIER-AWARE instruction. The
             // rotation (and its pressure) is unchanged: same head, same cadence.
             // Only the ask changes, so a re-surfaced ticket gets the re-examination

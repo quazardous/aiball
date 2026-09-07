@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A wake announcing something another agent wrote now says so, and asks for
+  restraint: reply only if you add something new. Agreeing with a peer costs a
+  turn on both sides and says nothing. Wakes from a human are untouched, and so
+  are wakes from a daemon too old to report who wrote what.
 - `aiball init --sub-agent` (and `claude-loop init --sub-agent`) stands up a
   subordinate agent in one gesture: it names it after the project and the
   machine it runs on when you don't pass a name, and marks it as working on what
