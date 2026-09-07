@@ -16,6 +16,13 @@ on:
     paths:
       - 'windows/cl-pty-proxy/**'
       - '.github/workflows/cl-pty-proxy-build.yml'
+  # On demand. The path filters above mean a run only happens when the proxy
+  # source changes — which can be weeks apart, while the artifact it produces
+  # expires in fourteen days. A machine that cannot compile (Smart App Control,
+  # a linker-only toolchain) would then find nothing to download precisely when
+  # it needs it, since #102 made the proxy required to start a loop. This makes
+  # a fresh binary askable rather than something you wait for.
+  workflow_dispatch:
 
 jobs:
   build:
