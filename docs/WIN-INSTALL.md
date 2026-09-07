@@ -189,6 +189,13 @@ scheduled task launches the **tray** at logon; the tray then starts, supervises
 icon for *Ouvrir / Redémarrer le daemon / Quitter aiball*. The Start/Stop-task
 commands below still drive the autostart, but day-to-day you use the tray.
 
+Because it supervises, the tray is also what makes `aiball restart` — and the
+automatic restart after a node is paired — work here: there is no service
+manager to ask, so the daemon stops and the tray starts it again within a few
+seconds. It only does that while the tray is proven alive (a heartbeat file it
+writes each tick). Quit the tray, or run the daemon by hand, and those commands
+say so rather than stopping a daemon nothing would bring back.
+
 Want the daemon **without** a tray? `install.ps1 -NoTray` (task runs the daemon
 directly, no icon) or `-Service` (true background service, survives logout).
 

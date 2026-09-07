@@ -8,13 +8,13 @@
  * (default "human"), so a single CLI invocation can play either side.
  */
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
 import { checkPrereqs, checkShims } from "./sysdeps.js";
+import { restartViaSupervisor } from "./supervisor-restart.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
 import { registerTicketCommands } from "./cli/ticket.js";
@@ -425,25 +425,26 @@ program
         "Hard-restart the daemon — re-runs DB migrations, reloads ALL code + env, " +
             "rebinds the socket (#407). Use this for the cases `aiball reload` can't " +
             "cover (schema migrations above all). Same as `kill -HUP` on the daemon — " +
-            "identical to the loop's kill-HUP (#388). Under the standard systemd-user " +
-            "install this runs `systemctl --user restart aiball`; on other deploys " +
-            "(Windows, dev) restart the daemon the way you launched it.",
+            "identical to the loop's kill-HUP (#388). Goes through whatever supervises " +
+            "the daemon: `systemctl --user restart aiball` on Linux, the tray on Windows " +
+            "(#2089). With no supervisor (portable / dev) it says so instead of stopping " +
+            "a daemon nothing would bring back.",
     )
     .action((_opts, cmd) => {
-        // Canonical deploy = systemd user service (see docs/WIN-INSTALL.md for the
-        // Windows path). A clean SIGTERM would NOT auto-relaunch under
-        // Restart=on-failure, so the hard restart has to go through the supervisor.
-        const r = spawnSync("systemctl", ["--user", "restart", "aiball"], { stdio: "inherit" });
-        if (r.error || r.status !== 0) {
+        // #2089 — one path for both platforms: ask the supervisor on Linux, stop
+        // the daemon for the tray to catch on Windows. Either way we never stop
+        // it without evidence that something restarts it.
+        if (!restartViaSupervisor()) {
             die(
-                "could not `systemctl --user restart aiball` (not a systemd-user install, or systemctl missing). " +
-                    "Restart the daemon the way you launched it. For config-only changes, `aiball reload` works with no downtime.",
+                "could not reach a supervisor for the daemon (no systemd user service, and no tray " +
+                    "heartbeat on Windows). Restart the daemon the way you launched it. For " +
+                    "config-only changes, `aiball reload` works with no downtime.",
             );
         }
         out(
             { restarted: true },
             gOpts(cmd),
-            () => "daemon hard-restarted (systemctl --user restart aiball)",
+            () => "daemon hard-restarted through its supervisor",
         );
     });
 

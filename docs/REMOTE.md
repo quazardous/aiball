@@ -66,8 +66,7 @@ aiball proxy pair --url https://<A-host>:7777
 # on A — a clickable toast appears, and the request is also listed under Nodes.
 #         Open it, CHECK THE CODE MATCHES the one printed on B, and approve.
 
-# on B — nothing, on Linux. It writes its config and restarts itself as a relay.
-#         On Windows it writes the config and asks you to restart it (see below).
+# on B — nothing. It writes its config and restarts itself as a relay.
 ```
 
 You do not have to stay in front of B: the request is written down there, so if
@@ -75,12 +74,16 @@ the terminal is closed — or the approval lands after you have walked away — 
 own daemon finishes the job on its next tick. Whichever of the two gets there
 first consumes the request, so it happens exactly once.
 
-**The restart is automatic only where there is a supervisor to ask.** Today that
-means a systemd user service, which is the standard Linux install. Everywhere
-else — Windows, a dev checkout, a hand-launched daemon — the config is written
-and the daemon tells you to restart it the way you launched it. So on Windows
-the pairing is still two gestures on the node: run the command, then restart
-from the tray once it is approved.
+**The restart goes through whatever supervises the daemon**, because relaying is
+decided when the daemon builds its HTTP app and cannot be switched on in place.
+On Linux that is the systemd user service. On Windows the tray is the watchdog —
+it checks the daemon every few seconds and starts it again when nothing answers
+— so there the daemon simply stops and the tray brings it back.
+
+With **no** supervisor (a portable run, a dev checkout, a daemon launched by
+hand) nothing would bring it back, so it refuses to stop: the config is written
+and it tells you to restart it the way you launched it. It never stops without
+evidence that something is watching.
 
 Comparing the code is the point of the flow: it is what ties the request you
 approve to the machine you are standing at, rather than to someone else's

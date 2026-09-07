@@ -553,8 +553,8 @@ async function pairProxy(opts: { url: string; label?: string; strict?: boolean }
             process.stdout.write("  Done. Check with:  aiball status\n\n");
         } else {
             process.stdout.write(
-                "  The config is written, but this host isn't a systemd user service —\n"
-                + "  restart the daemon the way you launched it.\n\n",
+                "  The config is written, but nothing supervises the daemon here —\n"
+                + "  restart it the way you launched it.\n\n",
             );
         }
         return;

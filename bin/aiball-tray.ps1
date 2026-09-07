@@ -41,6 +41,31 @@ $aiballLocal = Join-Path $env:LOCALAPPDATA 'aiball'
 $daemonVbs   = Join-Path $aiballLocal 'daemon-launcher.vbs'
 $daemonCmd   = Join-Path $aiballLocal 'daemon-launcher.cmd'
 
+# #2089 -- heartbeat. The daemon restarts itself after a pairing by simply
+# stopping, and letting the supervision below start it again. It must only do
+# that when supervision actually exists, so this file is the proof: written
+# every tick, and read by the daemon before it stops. No heartbeat (portable
+# run, dev checkout, tray not started) means the daemon refuses to stop and
+# tells the user to restart it by hand, which is the safe answer.
+#
+# Same directory the daemon calls home, resolved the same way it resolves it:
+# AIBALL_HOME when set, else the Linux-style default the per-user install
+# deliberately reuses on Windows.
+$aiballHome = if ($env:AIBALL_HOME) { $env:AIBALL_HOME }
+              else { Join-Path $env:USERPROFILE '.local\share\aiball' }
+$heartbeatFile = Join-Path $aiballHome 'tray.alive'
+function Write-Heartbeat {
+    try {
+        if (-not (Test-Path $aiballHome)) {
+            New-Item -ItemType Directory -Path $aiballHome -Force | Out-Null
+        }
+        # UTC with a Z, which is what the daemon parses.
+        [System.IO.File]::WriteAllText(
+            $heartbeatFile,
+            [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))
+    } catch { }
+}
+
 # Port: prefer the value baked into the launcher (custom -Port installs),
 # else AIBALL_PORT env, else the 7777 default.
 function Resolve-Port {
@@ -266,6 +291,9 @@ $script:lastStartMs = 0
 $script:iconState = $null
 function Update-State {
     if ($script:quitting) { return }
+    # Before anything else: say we are here. A daemon about to stop for a
+    # restart reads this, and staleness is what tells it to refuse.
+    Write-Heartbeat
     $info = Get-NodeInfo
     if ($info.up) {
         # Recompose the icon only on a transition (proxy on/off, remote up/down).
@@ -307,6 +335,8 @@ try {
     [System.Windows.Forms.Application]::Run()
 } finally {
     $timer.Stop()
+    # Quitting means nothing supervises any more -- stop claiming otherwise.
+    try { Remove-Item -Path $heartbeatFile -ErrorAction SilentlyContinue } catch { }
     if ($singletonMutex) {
         try { $singletonMutex.ReleaseMutex() } catch { }
         $singletonMutex.Dispose()

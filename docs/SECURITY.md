@@ -121,7 +121,9 @@ kept narrow on purpose:
 
 One consequence worth stating plainly: **an approved pairing restarts the node's
 daemon**. Relaying is decided when the daemon builds its HTTP app, so it cannot
-be switched on in place. That restart is bounded on both ends — it happens only
+be switched on in place — through the service manager on Linux, and on Windows
+by stopping so the tray watchdog starts it again, which it only does while that
+watchdog is provably alive. That restart is bounded on both ends — it happens only
 when a request written by an explicit `aiball proxy pair` on that machine is
 approved by a human on the hub, and the node's own record of the request is
 consumed by every outcome, so nothing left on disk can make it reconfigure

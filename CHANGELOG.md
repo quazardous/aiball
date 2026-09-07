@@ -128,6 +128,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Restarting the daemon now works on Windows, where there is no service manager
+  to ask: the tray already watches the daemon and starts it again if it stops,
+  so `aiball restart` — and the restart that completes a node pairing — use it.
+  Without a supervisor proven alive, both refuse and say so rather than stopping
+  a daemon nothing would bring back.
 - Revoking a node marks the row as revoked straight away. The nodes panel was
   the one place that didn't listen for the update it was already being sent, so
   the change only showed after a reload. Opening or shutting the pairing window

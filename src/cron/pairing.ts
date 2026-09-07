@@ -33,10 +33,13 @@ export async function runPairingCollect(): Promise<void> {
             return;
         case "configured":
             console.log(`[pairing] request ${r.code} was approved → relaying to ${r.url}. Restarting to apply.`);
-            if (!restartViaSupervisor()) {
+            // #2089 — we ARE the daemon here, which on Windows means the
+            // restart is this process exiting for the tray to catch.
+            if (!restartViaSupervisor({ selfIsDaemon: true })) {
                 console.warn(
-                    "[pairing] the proxy config is written, but this daemon isn't under a systemd user "
-                    + "service so it could not restart itself. Restart it the way you launched it.",
+                    "[pairing] the proxy config is written, but nothing supervises this daemon "
+                    + "(no systemd user service, no tray) so it could not restart itself. "
+                    + "Restart it the way you launched it.",
                 );
             }
             return;
