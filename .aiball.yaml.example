@@ -206,6 +206,15 @@ claude:
 # private too, without having to say so. Nothing else inherits: the child
 # keeps its own project name, agent and settings. Absent here, with no
 # ancestor declaring one either = `public`.
+#
+# DECLARE IT when the nesting does not describe you. A PUBLIC repo checked
+# out inside a private tree is a real and common shape — a tool developed
+# beside the work that uses it — and inheritance gets that one backwards:
+# it would hand a published repo the `private` kit, whose relaxations
+# (comments in the team's language, internal references) are exactly what
+# must not reach a public remote. Saying `project_type:` here always wins
+# over what the ancestors say, so a repo that knows what it is should say so
+# rather than let the directory it happens to sit in decide.
 
 project_type: public
 

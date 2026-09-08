@@ -32,6 +32,10 @@ dates are YYYY-MM-DD.
   rather than the one that annoys. Only this setting inherits: the nested
   project keeps its own name, agent and every other setting.
 
+  Declaring `project_type` yourself still wins over any ancestor, and a repo
+  that knows what it is should say so — a **public** repo checked out inside a
+  private tree is a common shape, and inheritance gets that one backwards.
+
 - A ticket can now carry a **payload zone**: a small set of key/value pairs
   alongside the thread, for the tickets that hold a thing rather than a
   conversation — a handover, a configuration, a credential. Tickets without one
