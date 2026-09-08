@@ -9,6 +9,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
 
+/**
+ * Run `fn` with the ambient aiball identity cleared.
+ *
+ * `loadConfig` gives `AIBALL_PROJECT` / `AIBALL_AGENT` priority over the yaml —
+ * correctly, that is the documented chain — and every agent session exports
+ * them. A test that asserts what the FILES resolve to must therefore neutralise
+ * the environment itself, or it only passes on the machine that happened to be
+ * clean. This one asserted `project === "child"` and got `"aiball"` the first
+ * time it ran anywhere but my hand-cleared shell.
+ */
+function withoutAmbientIdentity<T>(fn: () => T): T {
+    const saved = {
+        project: process.env.AIBALL_PROJECT,
+        agent: process.env.AIBALL_AGENT,
+        cwd: process.env.AIBALL_CWD,
+    };
+    delete process.env.AIBALL_PROJECT;
+    delete process.env.AIBALL_AGENT;
+    delete process.env.AIBALL_CWD;
+    try {
+        return fn();
+    } finally {
+        if (saved.project !== undefined) process.env.AIBALL_PROJECT = saved.project;
+        if (saved.agent !== undefined) process.env.AIBALL_AGENT = saved.agent;
+        if (saved.cwd !== undefined) process.env.AIBALL_CWD = saved.cwd;
+    }
+}
+
 /** A tree: `<root>/parent/.aiball.yaml` + `<root>/parent/child/.aiball.yaml`. */
 function makeTree(parentYaml: string, childYaml: string) {
     const root = mkdtempSync(join(tmpdir(), "aiball-nested-"));
@@ -23,8 +51,10 @@ function makeTree(parentYaml: string, childYaml: string) {
 test("a nested project inherits its parent's project_type", () => {
     const { root, parent, child } = makeTree("project_type: private\n", "autopoll:\n  enabled: true\n");
     try {
-        assert.equal(loadConfig(parent).project_type, "private");
-        assert.equal(loadConfig(child).project_type, "private", "the child was treated as public");
+        withoutAmbientIdentity(() => {
+            assert.equal(loadConfig(parent).project_type, "private");
+            assert.equal(loadConfig(child).project_type, "private", "the child was treated as public");
+        });
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
@@ -33,7 +63,9 @@ test("a nested project inherits its parent's project_type", () => {
 test("the child's own project_type wins over the parent's", () => {
     const { root, child } = makeTree("project_type: private\n", "project_type: public\n");
     try {
-        assert.equal(loadConfig(child).project_type, "public");
+        withoutAmbientIdentity(() => {
+            assert.equal(loadConfig(child).project_type, "public");
+        });
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
@@ -48,10 +80,12 @@ test("identity does NOT inherit — the child stays its own project", () => {
         "autopoll:\n  enabled: true\n",
     );
     try {
-        const cfg = loadConfig(child);
-        assert.equal(cfg.consumer.project, "child", "the child took its parent's project name");
-        assert.equal(cfg.consumer.agent, "child-claude");
-        assert.equal(cfg.project_type, "private", "…but the type still inherits");
+        withoutAmbientIdentity(() => {
+            const cfg = loadConfig(child);
+            assert.equal(cfg.consumer.project, "child", "the child took its parent's project name");
+            assert.equal(cfg.consumer.agent, "child-claude");
+            assert.equal(cfg.project_type, "private", "…but the type still inherits");
+        });
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
@@ -63,7 +97,9 @@ test("no ancestor config leaves the type unset rather than inventing one", () =>
     mkdirSync(solo, { recursive: true });
     writeFileSync(join(solo, ".aiball.yaml"), "autopoll:\n  enabled: true\n");
     try {
-        assert.equal(loadConfig(solo).project_type, null);
+        withoutAmbientIdentity(() => {
+            assert.equal(loadConfig(solo).project_type, null);
+        });
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
