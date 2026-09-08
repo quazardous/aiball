@@ -1405,6 +1405,35 @@ export interface PlanToExecuteEntry {
     plan_comment_id: number | null;
 }
 
+/**
+ * #2112 — is this ticket closed?
+ *
+ * There is NO `closed` column: closure is a lifecycle EVENT, and a ticket can
+ * be closed and reopened any number of times, so the answer is "the latest of
+ * `ticket_closed` / `ticket_reopened` wins". Reading a `closed` field off a
+ * ticket row silently yields `undefined` — which is how the payload zone
+ * shipped a "closing ends access" guarantee that never fired.
+ *
+ * Approved events only: a close still awaiting moderation has not happened.
+ */
+export function isTicketClosed(ticketId: number): boolean {
+    const lifecycle = getDb()
+        .select({ id: schema.messages.id, kind: schema.messages.kind })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.ticketId, ticketId),
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    let lastClose = 0, lastReopen = 0;
+    for (const l of lifecycle) {
+        if (l.kind === "ticket_closed") lastClose = Math.max(lastClose, l.id);
+        else lastReopen = Math.max(lastReopen, l.id);
+    }
+    return lastClose > lastReopen;
+}
+
 export function listPlansToExecute(consumerId: string): PlanToExecuteEntry[] {
     const db = getDb();
     // plan_accepted decision events (server-emitted, always approved) —
@@ -1462,20 +1491,7 @@ export function listPlansToExecute(consumerId: string): PlanToExecuteEntry[] {
         // I acted since the accept → I'm on it (or done) : not "to execute".
         if (t.lastActor === consumerId) continue;
         // Closed tickets drop out (latest close > latest reopen).
-        const lifecycle = db.select({ id: schema.messages.id, kind: schema.messages.kind })
-            .from(schema.messages)
-            .where(and(
-                eq(schema.messages.ticketId, tid),
-                inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
-                eq(schema.messages.status, "approved"),
-            ))
-            .all();
-        let lastClose = 0, lastReopen = 0;
-        for (const l of lifecycle) {
-            if (l.kind === "ticket_closed") lastClose = Math.max(lastClose, l.id);
-            else lastReopen = Math.max(lastReopen, l.id);
-        }
-        if (lastClose > lastReopen) continue;
+        if (isTicketClosed(tid)) continue;
         out.push({
             ticket_id: tid,
             title: t.title,

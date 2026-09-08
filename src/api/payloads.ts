@@ -17,6 +17,7 @@
 import { Router, type Request, type Response } from "express";
 import { badRequest, consumerOf, notFound } from "./_helpers.js";
 import { getMessage } from "../db.js";
+import { isTicketClosed } from "../db/messages.js";
 import { isHuman } from "../db/consumers.js";
 import {
     readTicketPayload,
@@ -33,7 +34,6 @@ type TicketRow = {
     kind: string;
     by_agent?: string | null;
     assignee?: string | null;
-    closed?: boolean | number | null;
 };
 
 /** Resolve the ticket, or answer for it. */
@@ -72,7 +72,7 @@ payloadsRouter.get("/tickets/:id/payload", (req: Request, res: Response) => {
     if (!t) return;
     const view = readTicketPayload(t.id);
     if (!view) return notFound(res, "this ticket carries no payload");
-    res.json({ ...view, access: payloadAccessState(t, view) });
+    res.json({ ...view, access: payloadAccessState({ closed: isTicketClosed(t.id) }, view) });
 });
 
 /** Deposit or replace. */
@@ -80,7 +80,7 @@ payloadsRouter.put("/tickets/:id/payload", (req: Request, res: Response) => {
     const t = ticketOr404(req, res);
     if (!t) return;
     if (!guardSecretAccess(req, res, t)) return;
-    if (t.closed) {
+    if (isTicketClosed(t.id)) {
         return badRequest(res, "this ticket is closed — reopen it before depositing a payload");
     }
     const body = req.body ?? {};
@@ -112,7 +112,7 @@ payloadsRouter.put("/tickets/:id/payload", (req: Request, res: Response) => {
         (rawSchema as string[] | null | undefined) ?? [],
         consumerOf(req),
     );
-    res.json({ ...view, access: payloadAccessState(t, view) });
+    res.json({ ...view, access: payloadAccessState({ closed: isTicketClosed(t.id) }, view) });
 });
 
 /**
@@ -127,7 +127,7 @@ payloadsRouter.post("/tickets/:id/payload/dump", (req: Request, res: Response) =
     if (!guardSecretAccess(req, res, t)) return;
     const view = readTicketPayload(t.id);
     if (!view) return notFound(res, "this ticket carries no payload");
-    const access = payloadAccessState(t, view);
+    const access = payloadAccessState({ closed: isTicketClosed(t.id) }, view);
     if (access === "revoked") {
         return res.status(410).json({ error: "this payload was revoked — its values are gone", access });
     }
@@ -149,5 +149,5 @@ payloadsRouter.delete("/tickets/:id/payload", (req: Request, res: Response) => {
     if (!guardSecretAccess(req, res, t)) return;
     const view = revokeTicketPayload(t.id, consumerOf(req));
     if (!view) return notFound(res, "this ticket carries no payload");
-    res.json({ ...view, access: payloadAccessState(t, view) });
+    res.json({ ...view, access: payloadAccessState({ closed: isTicketClosed(t.id) }, view) });
 });
