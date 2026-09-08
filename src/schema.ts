@@ -418,11 +418,17 @@ export const tags = sqliteTable("tags", {
     createdAt: text("created_at").notNull(),
     // #554 david `crrdxb` — project-scope. NULL = global tag (the
     // config-defaults catalog lives here too) ; a project name scopes
-    // the tag to that project only. Composite UNIQUE on (name, project).
+    // the tag to that project only.
     project: text("project"),
 }, (t) => [
     index("idx_tags_position").on(t.position),
-    uniqueIndex("idx_tags_name_project").on(t.name, t.project),
+    // #2122 — keyed on IFNULL(project, ''), not on `project` itself. A plain
+    // (name, project) unique index does NOT constrain global tags: their
+    // `project` is NULL, and SQLite treats NULLs as distinct in a unique
+    // index, so the whole shipped catalog could be inserted twice. Folding
+    // NULL into '' makes the constraint apply to exactly the rows it was
+    // always believed to cover. Project-scoped names stay independent.
+    uniqueIndex("idx_tags_name_project").on(t.name, sql`ifnull(${t.project}, '')`),
 ]);
 
 export const ticketTags = sqliteTable("ticket_tags", {
