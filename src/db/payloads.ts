@@ -97,6 +97,23 @@ export function ticketHasPayload(ticketId: number): boolean {
 }
 
 /**
+ * Every ticket carrying a payload, for list rows that want to show a mark.
+ *
+ * Deliberately unscoped — no `WHERE id IN (…)`, unlike the reads #2102 had to
+ * bound. This table holds one row per ticket that has a payload ever, and the
+ * feature is rare by design ("pas utilisé en général mais utile"), so the whole
+ * key set is smaller than the id list we would send to filter it. If that ever
+ * stops being true, this is the line to revisit.
+ */
+export function ticketIdsWithPayload(): Set<number> {
+    const rows = getDb()
+        .select({ id: schema.ticketPayloads.ticketId })
+        .from(schema.ticketPayloads)
+        .all();
+    return new Set(rows.map((r) => r.id));
+}
+
+/**
  * The filtered view — the ONE every surface should call.
  *
  * A revoked payload keeps its row and its key list (the trace that it existed)

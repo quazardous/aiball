@@ -263,6 +263,15 @@ function onRowClick(r: InboxRow) {
                  bookmark à porter la sémantique "hot" via une coloration
                  verte (#657). Orthogonalisation : 🔥 = "activité récente",
                  bookmark = "claim", chacun son icône. -->
+            <!-- #2112 — the ticket carries a payload zone. Absent on nearly
+                 every row by construction, so it costs the list nothing; when
+                 it IS there, the point is that a payload is never invisible
+                 even to someone who cannot read its values. -->
+            <span
+                v-if="r.has_payload"
+                class="list-row__payload"
+                title="This ticket carries a payload zone."
+            ><i class="pi pi-box" /></span>
             <span
                 v-if="r.hot"
                 class="list-row__hot"
@@ -357,6 +366,12 @@ function onRowClick(r: InboxRow) {
 .list-row__hold .pi {
     font-size: var(--fs-sm);
     opacity: 0.75;
+}
+/* #2112 — payload mark. Muted on purpose: it says "there is something here",
+   not "look at this"; the row's own signals (unread, hot, claim) stay louder. */
+.list-row__payload {
+    opacity: 0.45;
+    font-size: 0.75rem;
 }
 /* #829 david `hhg8qz` : 🔥 hot indicator dans le #meta slot — orthogonal
    du claim (= la chip bookmark, voisine). Pré-#829 la coloration verte

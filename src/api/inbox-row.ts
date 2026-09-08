@@ -23,6 +23,7 @@ import {
     ticketUnreadFlags,
 } from "../db.js";
 import { computeHotFocus } from "../db/work-order.js";
+import { ticketIdsWithPayload } from "../db/payloads.js";
 import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
 import { globalConfigPath } from "../autopoll/config.js";
 
@@ -66,6 +67,9 @@ export interface InboxRowContext {
     unreadMap: ReturnType<typeof ticketUnreadFlags>;
     tokenUsageMap: ReturnType<typeof getTicketTokenUsage>;
     crossAgentHotFocus: ReturnType<typeof computeHotFocus>;
+    /** #2112 — the tickets carrying a payload. One tiny query for the whole
+     *  set, so a row can show the mark without asking per ticket. */
+    payloadIds: Set<number>;
     nowStr: string;
 }
 
@@ -82,6 +86,7 @@ export function buildInboxRowContext(
     return {
         byTicket: getInboxAgg(project),
         tagsMap: tagsForMessages(ids),
+        payloadIds: ticketIdsWithPayload(),
         unreadMap: ticketUnreadFlags(consumerId, ids),
         tokenUsageMap: getTicketTokenUsage(ids),
         crossAgentHotFocus: computeHotFocus(
@@ -95,7 +100,7 @@ export function buildInboxRowContext(
 
 /** One inbox row, exactly as the list has always produced it. */
 export function buildInboxRow(t: Message, ctx: InboxRowContext) {
-    const { byTicket, tagsMap, unreadMap, tokenUsageMap, crossAgentHotFocus, nowStr } = ctx;
+    const { byTicket, tagsMap, unreadMap, tokenUsageMap, crossAgentHotFocus, payloadIds, nowStr } = ctx;
     const agg = byTicket.get(t.id) ?? emptyAgg();
     const postponedUntil = t.postponed_until ?? null;
     const postponed =
@@ -184,6 +189,9 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         // Per-consumer unread flag (≥1 unseen ping on the thread for
         // the caller, resolved from the X-Aiball-Consumer header).
         unread: unreadMap.get(t.id) ?? false,
+        // #2112 — the row shows a mark only when the ticket carries a payload.
+        // Absent means absent: a ticket without one is exactly the row it was.
+        has_payload: payloadIds.has(t.id),
         // #405/#532 (sfbsdy + s2sjxz) + #657 david — visibility cross-
         // agent : 🔥 s'allume sur activité récente (< hot_window_sec)
         // OR claim récent (claimed_at < hot_window_sec). Le claim

@@ -57,6 +57,7 @@ import {
     getConsumer,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
+import { ticketHasPayload } from "../db/payloads.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
 import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
@@ -1345,6 +1346,13 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // est plus pédagogique : l'agent lit le ticket → voit le flag →
         // décide d'attendre / d'asker un plain comment.
         decision_proposable: t.status === "approved",
+        // #2112 david: "si pas de payload doit être complètement invisible".
+        // Invisible means the UI must not even ASK — a `GET …/payload` on every
+        // thread open, answered 404 for all but a handful of tickets, is a
+        // round-trip and a log line for nothing. This flag lets the panel stay
+        // unmounted rather than merely render empty. It says a payload EXISTS,
+        // never anything about what is in it.
+        has_payload: ticketHasPayload(t.id),
         // #596 david `sa44wy` : ≥1 unseen ping on this thread for the
         // requesting consumer. Frontend uses it to skip the
         // "marking-as-read" pulse when landing on an already-read ticket.

@@ -327,6 +327,38 @@ export interface NodeEnrollment {
     decided_by: string | null;
 }
 
+/**
+ * #2112 — a payload zone as every surface sees it: keys always, values only
+ * where the schema declared them public.
+ *
+ * A secret value arrives as `{secret: true, preview}` rather than as its own
+ * text — `preview` is a short fixed prefix, or null when the value was too
+ * short for even that to be discreet. The raw values never reach the browser.
+ */
+export interface RedactedValue {
+    secret: true;
+    preview: string | null;
+}
+
+export interface PayloadView {
+    ticket_id: number;
+    /** The key names declared PUBLIC. Empty means every key is secret. */
+    schema: string[];
+    /** Every key, visible even when the values are not — an unreadable payload
+     *  must still be an auditable one. After revocation these come from the
+     *  tombstone, so the row still says WHICH credential was destroyed. */
+    keys: string[];
+    payload: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+    by_agent: string | null;
+    revoked_at: string | null;
+    revoked_by: string | null;
+    /** `open` — readable. `ticket-closed` — out of reach until reopened.
+     *  `revoked` — the values are gone for good. */
+    access?: "open" | "ticket-closed" | "revoked";
+}
+
 export interface TicketSummary {
     id: number;
     project: string;
@@ -401,6 +433,10 @@ export interface TicketSummary {
      *  backlog. */
     decision_proposable?: boolean;
     gated_by_decision?: boolean;
+    /** #2112 — true iff the ticket carries a payload zone. Says only that one
+     *  exists, never anything about its contents. The UI mounts the payload
+     *  panel ONLY on this, so a ticket without one costs no request at all. */
+    has_payload?: boolean;
     /** #1542 — upstream coupling. Set only when the ticket is coupled to an
      *  external issue (manual import/export). All null = a pure aiball ticket. */
     upstream_kind?: string | null;
@@ -513,6 +549,9 @@ export interface InboxRow {
     scope?: "internal" | "default" | "broadcast";
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;
+    /** #2112 — the ticket carries a payload zone. Drives a discreet mark in
+     *  the list; absent on the overwhelming majority of rows, by design. */
+    has_payload?: boolean;
     /** #405: in the requesting consumer's hot-zone (focus) — the ticket they're
      *  actively working. Drives the 🔥 flag in the inbox list. */
     hot?: boolean;
@@ -905,6 +944,15 @@ export const api = {
     // #309: include_deleted=1 surfaces user-deleted comments as tombstones in
     // the moderator UI (agents/MCP never pass it, so they don't see them).
     getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}?full=1&include_deleted=1`),
+    /**
+     * #2112 — the payload zone, FILTERED: keys always, values only where the
+     * schema declares them public, secrets reduced to a short prefix. There is
+     * deliberately no "reveal" call here: the values are reached with
+     * `aiball payload dump`, a command someone runs, never a click.
+     */
+    getTicketPayload: (id: number) => req<PayloadView>("GET", `/api/tickets/${id}/payload`),
+    revokeTicketPayload: (id: number) =>
+        req<PayloadView>("DELETE", `/api/tickets/${id}/payload`),
     search: (params: {
         q: string;
         project?: string;

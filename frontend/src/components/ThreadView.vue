@@ -16,6 +16,7 @@ import ThreadEditPanel from "./ThreadEditPanel.vue";
 import ThreadManagePanel from "./ThreadManagePanel.vue";
 import ThreadCommentsList from "./ThreadCommentsList.vue";
 import ThreadMetaHeader from "./ThreadMetaHeader.vue";
+import TicketPayloadPanel from "./TicketPayloadPanel.vue";
 import ThreadActionsDock from "./ThreadActionsDock.vue";
 import ThreadToolbar from "./ThreadToolbar.vue";
 import { STAGE_LABELS, useThreadItems } from "../lib/threadItems";
@@ -521,6 +522,14 @@ async function copyTicketRef() {
                      the top-down mirror instance below shares the same
                      form. The change-kind / remove popover stays here
                      (one ref, both instances trigger it via @open-menu). -->
+                <!-- #2112 — mounted only when the ticket actually carries a
+                     payload. Not a panel that renders empty: no panel and no
+                     request, so a ticket without one is exactly the thread it
+                     was before the zone existed. -->
+                <TicketPayloadPanel
+                    v-if="data.ticket.has_payload"
+                    :ticket-id="data.ticket.id"
+                />
                 <ThreadRelations
                     :relations="data.ticket.relations ?? []"
                     v-model:form-open="addRelationOpen"
