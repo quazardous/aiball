@@ -10,7 +10,7 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { eq, isNull, or, sql } from "drizzle-orm";
+import { eq, isNull, or } from "drizzle-orm";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
@@ -329,24 +329,48 @@ function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
         .onConflictDoNothing()
         .run();
 
-    // Seed the classic tag catalog on a fresh DB from the shipped dist
-    // config (#223 cj2kp2 — the canonical definition lives in
-    // config/defaults/tags.yaml). The rows exist so these everyday tags
-    // stay applicable to tickets (apply path is FK-by-id); the catalog
-    // surfaces them as config-owned / non-deletable via the merge.
-    const haveTags = db.select({ n: sql<number>`COUNT(*)` }).from(schema.tags).get();
-    if ((haveTags?.n ?? 0) === 0) {
-        const now = nowIso();
-        loadShippedDefaultTags().forEach((t, i) => {
-            db.insert(schema.tags).values({
-                name: t.name,
-                color: t.color ?? null,
-                position: i + 1,
-                note: t.note ?? null,
-                createdAt: now,
-            }).run();
-        });
-    }
+    // Seed the classic tag catalog from the shipped dist config (#223 cj2kp2 —
+    // the canonical definition lives in config/defaults/tags.yaml). The rows
+    // exist so these everyday tags stay applicable to tickets (apply path is
+    // FK-by-id); the catalog surfaces them as config-owned / non-deletable.
+    //
+    // #2122 — this used to run ONLY when the table was empty, which meant a tag
+    // added to the catalog later could never reach an existing database: the
+    // name became config-owned (so `POST /api/tags` refuses it, 409) while no
+    // row was ever created for it, leaving it declared and unusable. Adding a
+    // default tag was therefore impossible anywhere but a fresh install.
+    //
+    // It now reconciles instead: every shipped tag missing a row gets one, at
+    // every boot. Idempotent by the UNIQUE (name, project) constraint, and
+    // consistent with the model the config states — the yaml is canonical, the
+    // rows merely make it applicable. Removing a tag from the catalog still
+    // leaves its row behind on purpose: it stops being config-owned, so it
+    // becomes an ordinary tag the UI can delete once nothing carries it.
+    // Existence is checked by SELECT rather than left to `onConflictDoNothing`.
+    // There IS a UNIQUE index on (name, project), but every global tag has
+    // project NULL, and SQLite treats NULLs as distinct in a unique index — so
+    // it never constrained the global catalog at all, and the conflict clause
+    // silently inserted a second copy on every boot. The API's own POST path
+    // has always guarded this the same way, with a name lookup; this matches it.
+    const now = nowIso();
+    const existingTagNames = new Set(
+        db
+            .select({ name: schema.tags.name })
+            .from(schema.tags)
+            .where(isNull(schema.tags.project))
+            .all()
+            .map((r) => r.name),
+    );
+    loadShippedDefaultTags().forEach((t, i) => {
+        if (existingTagNames.has(t.name)) return;
+        db.insert(schema.tags).values({
+            name: t.name,
+            color: t.color ?? null,
+            position: i + 1,
+            note: t.note ?? null,
+            createdAt: now,
+        }).run();
+    });
 
     // Backfill hashids for any pre-0003 _messages row that doesn't have one.
     // Idempotent: rows that already have a hashid are skipped. Generates

@@ -20,6 +20,13 @@ tags:
   - { name: question, color: "#3b82f6", note: "needs clarification" }
   - { name: docs, color: "#8b5cf6", note: "documentation work" }
   - { name: urgent, color: "#f59e0b", note: "needs attention now" }
-  - { name: discussion, color: "#6b7280", note: "design / architecture talk" }
-  - { name: wontfix, color: "#9ca3af", note: "decided not to act" }
-  - { name: done, color: "#22c55e", note: "completed" }
+  - { name: ui, color: "#06b6d4", note: "user interface work" }
+  - { name: "ui:phone", color: "#0891b2", note: "phone-sized layout" }
+  - { name: infra, color: "#64748b", note: "hosting, deploy, runtime plumbing" }
+#
+# Removed on purpose: `discussion`, `wontfix` and `done` (plus the DB-only
+# `todo` and `smartphone`). Three of them named a ticket's STATE, which the
+# lifecycle already tracks — a `done` tag can only ever disagree with a closed
+# ticket, and `wontfix` is a decision the thread records with an author and a
+# date. `discussion` described every ticket that had a thread. None of the five
+# had ever been applied to anything, which is the measurement that settled it.
