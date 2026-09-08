@@ -592,6 +592,32 @@ function readUpstreamBlock(path: string): AiballConfig["upstream"] {
     }
 }
 
+/**
+ * #2130 — the `project_type` of the nearest ANCESTOR project, if any.
+ *
+ * Starts above `fromDir` (the project's own config was already read) and walks
+ * up, returning the first declared value. Stops at the filesystem root; a tree
+ * with no ancestor config yields null, which leaves the caller's own default
+ * in place.
+ */
+function inheritedProjectType(fromDir: string): string | null {
+    let dir = dirname(resolve(fromDir));
+    for (let i = 0; i < 64; i++) {
+        const candidate = findConfigUpwards(dir);
+        if (!candidate) return null;
+        let declared: unknown;
+        try {
+            declared = ((parseYaml(readFileSync(candidate, "utf8")) ?? {}) as { project_type?: unknown })
+                .project_type;
+        } catch { /* unreadable ancestor config: keep walking */ }
+        if (typeof declared === "string" && declared.trim()) return declared.trim();
+        const next = dirname(dirname(candidate));
+        if (next === dir || next === dirname(candidate)) return null;
+        dir = next;
+    }
+    return null;
+}
+
 export function findConfigUpwards(start: string): string | null {
     let dir = resolve(start);
     const rootPath = parsePath(dir).root;
@@ -919,6 +945,26 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     if (!cfg.consumer.agent) {
         cfg.consumer.agent = `${cfg.consumer.project}-claude`;
         cfg.consumer.agent_source = "default";
+    }
+
+    // #2130 — `project_type` INHERITS from the nearest ancestor that declares
+    // one; nothing else does.
+    //
+    // A nested checkout (…/BookShepherd/jobbox) stops the upward walk at its
+    // own `.aiball.yaml`, which is exactly right for identity: jobbox is its
+    // own project with its own agent, not a part of its parent. But when it
+    // declares no `project_type`, it used to fall to the `public` default —
+    // so a project living inside a PRIVATE one was handed the public welcome
+    // kit, with its rules about secrets and publication. Silently, and in the
+    // direction that leaks rather than the one that annoys.
+    //
+    // Only this one field walks. Inheriting the identity block would undo the
+    // resolution above and put the child's tickets in the parent's project;
+    // inheriting prompts or timings would resurrect the leak #480 fixed. The
+    // safe default is the one you get by saying nothing, so the field that
+    // decides how careful to be is the field that inherits.
+    if (!cfg.project_type && configPath) {
+        cfg.project_type = inheritedProjectType(dirname(configPath));
     }
 
     return cfg;

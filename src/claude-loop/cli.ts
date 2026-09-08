@@ -817,6 +817,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // cwd projet (résolu via `canonicalCwd(ctx.cwd)` au start) ; chaque
         // appel à `loadConfig` côté loop le passe explicitement.
         `export AIBALL_PROJECT_CWD=${shQuote(cwd)}`,
+        // #2130 — and `AIBALL_CWD` with it. The tmux SERVER is shared between
+        // loops, and it keeps the environment of whichever project started it
+        // first, so every other pane inherited that project's `AIBALL_CWD`.
+        // aiball's own entrypoints survive it (the launcher rewrites the var,
+        // and the paths above prefer AIBALL_PROJECT_CWD since #480), but
+        // anything else running in the pane — a hook, a script, a command the
+        // agent types — reads the sibling project's directory. Two variables
+        // naming the same thing, only one of them maintained, is a trap; both
+        // now say the same.
+        `export AIBALL_CWD=${shQuote(cwd)}`,
         // #390: remote-daemon connection for the timer + hooks (they source
         // this file). Empty AIBALL_SOCK forces TCP — see the process.env
         // note above. Mirrors what we exported into process.env for the

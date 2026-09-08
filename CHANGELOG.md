@@ -25,6 +25,13 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A project nested inside another now **inherits its parent's `project_type`**
+  when it declares none of its own. A repo checked out inside a `private` one
+  was being handed the `public` onboarding kit — the rules about secrets and
+  publication of an open repository — silently, and in the direction that leaks
+  rather than the one that annoys. Only this setting inherits: the nested
+  project keeps its own name, agent and every other setting.
+
 - A ticket can now carry a **payload zone**: a small set of key/value pairs
   alongside the thread, for the tickets that hold a thing rather than a
   conversation — a handover, a configuration, a credential. Tickets without one
@@ -46,6 +53,12 @@ dates are YYYY-MM-DD.
   keys were held. See `docs/PAYLOADS.md`.
 
 ### Fixed
+
+- Loops no longer inherit a sibling project's working directory. The tmux
+  server is shared between loops and keeps the environment of whichever project
+  started it first, so every other pane saw that project's `AIBALL_CWD`. aiball
+  itself was immune, but a hook, a script or a command typed in the pane read
+  the wrong project's directory. Loops pick this up on their next start.
 
 - Reading a ticket over MCP marks its events read again. The acknowledgement was
   bounded by the highest id in the response, but the ticket's own id was mixed

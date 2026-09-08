@@ -199,7 +199,13 @@ claude:
 # --- project type -------------------------------------------------------------
 # Picked up by the MCP `welcome` tool to choose the onboarding kit. Out of
 # the box: `public` (strict scrubbing) and `private`. Validated at call
-# time against the install's `welcome/<type>/` folders. Absent here = `public`.
+# time against the install's `welcome/<type>/` folders.
+#
+# NESTED CHECKOUTS: this one setting is INHERITED from the nearest ancestor
+# project that declares it — so a repo living inside a `private` one is
+# private too, without having to say so. Nothing else inherits: the child
+# keeps its own project name, agent and settings. Absent here, with no
+# ancestor declaring one either = `public`.
 
 project_type: public
 
