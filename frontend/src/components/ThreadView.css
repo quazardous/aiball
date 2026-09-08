@@ -40,8 +40,13 @@
 .thread-view--top-down .thread-ticket > .thread-title,
 .thread-view--top-down .thread-ticket > .thread-relations,
 .thread-view--top-down .thread-ticket > .thread-relations-form { display: none; }
+/* #2148 — the tags moved from `.thread-meta-extra` onto `.thread-subline`, so
+   the rule that hides them in top-down mode had to move with them. Without
+   this line they would reappear here, duplicating the context the mirrored
+   header already shows at the top. */
 .thread-view--top-down .thread-ticket > .thread-meta-extra .p-tag,
-.thread-view--top-down .thread-ticket > .thread-meta-extra > .thread-tag { display: none; }
+.thread-view--top-down .thread-ticket > .thread-meta-extra > .thread-tag,
+.thread-view--top-down .thread-ticket > .thread-subline > .thread-subline__tags { display: none; }
 .thread-toolbar {
     display: flex;
     align-items: center;

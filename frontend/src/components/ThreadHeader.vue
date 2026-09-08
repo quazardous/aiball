@@ -135,6 +135,19 @@ function claimerTooltip(t: TicketSummary): string {
         >
             <i class="pi pi-bolt" /> {{ formatTokens(estTokenEffort(ticket.token_usage)) }} tok
         </span>
+        <!-- #2148 david — the tags used to live in their own strip BELOW this
+             one, so a ticket with no claim and no token tally showed an almost
+             empty line with a single chip stranded under it. They belong on the
+             same line as the rest of the ticket's meta; the strip below keeps
+             only the buttons, which is what #382 had been narrowing it to. -->
+        <span v-if="ticket.tags && ticket.tags.length" class="thread-subline__tags">
+            <span
+                v-for="t in ticket.tags"
+                :key="t.id"
+                class="thread-tag"
+                :style="{ background: t.color ?? 'var(--p-surface-200)' }"
+            >{{ t.name }}</span>
+        </span>
         <!-- #1542 — coupled to an external issue: link chip. -->
         <a
             v-if="upstreamUrl"
@@ -192,15 +205,9 @@ function claimerTooltip(t: TicketSummary): string {
          haut). #382 : la priorité est remontée au-dessus du titre ; cette
          bande ne porte plus que les tags (+ les boutons edit/manage). -->
     <div
-        v-if="(ticket.tags && ticket.tags.length) || showEditButton || canExportUpstream"
+        v-if="showEditButton || canExportUpstream"
         class="thread-meta-extra"
     >
-        <span
-            v-for="t in ticket.tags ?? []"
-            :key="t.id"
-            class="thread-tag"
-            :style="{ background: t.color ?? 'var(--p-surface-200)' }"
-        >{{ t.name }}</span>
         <template v-if="showEditButton">
             <span class="spacer" />
             <Button
@@ -259,6 +266,15 @@ function claimerTooltip(t: TicketSummary): string {
     font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     font-variant-numeric: tabular-nums;
+}
+/* #2148 — the chips are ONE item of the subline, not several. The subline's
+   column gap (0.9rem) separates distinct facts; tags are a single fact with
+   several values, so they carry their own tighter spacing inside. */
+.thread-subline__tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
 }
 .thread-subline__item {
     display: inline-flex;
