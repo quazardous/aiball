@@ -27,13 +27,24 @@ import { formatTicketRef } from "./formatting";
 
 /**
  * #2080 — what a notification is ABOUT, so it can be opened instead of only
- * read. `id` is the message's own id: for a new ticket that is the ticket, and
- * for a comment the API resolves it up to its thread and hands back a
- * `focus_message_id`, so the same field lands the reader on the comment itself.
+ * read.
+ *
+ * #2121 — `id` is the TICKET, always. It used to be the message's own id, and
+ * for a comment that meant navigating to a comment id: the thread still
+ * rendered, because the API resolves a non-ticket id up to its parent, but the
+ * app was left holding an id that is not a ticket. The URL was not a ticket
+ * URL, and every button that acts on "the open ticket" was aiming at a comment.
+ *
+ * The message already carries its thread (`ticket_id`), so there is nothing to
+ * resolve: navigate to the ticket, and carry the comment separately as the
+ * thing to scroll to.
  */
 export interface NotificationTarget {
+    /** The ticket to open. Never a comment id. */
     id: number;
     project: string;
+    /** The comment to scroll to within it, when the notice is about one. */
+    focus?: number | null;
 }
 
 /** A toast that knows what it is about. PrimeVue's options type has no field
@@ -151,7 +162,14 @@ export function useNotifications(opts: {
         // #2080 — its own group so the toast can be rendered as something you
         // click. A notice about a ticket that makes you go and find the ticket
         // is the slow path, and the id is right there.
-        const target: NotificationTarget = { id: m.id, project: m.project };
+        // #2121 — a comment's thread is on the message; a ticket IS its own
+        // thread (`ticket_id` is null there), so this reads correctly for both
+        // without asking the server which kind it just received.
+        const target: NotificationTarget = {
+            id: m.ticket_id ?? m.id,
+            project: m.project,
+            focus: m.ticket_id === null ? null : m.id,
+        };
         const opts: TicketToastOptions = {
             group: "ticket",
             severity: m.status === "pending" ? "warn" : "info",

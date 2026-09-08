@@ -29,8 +29,13 @@ import { useAutoMarkRead } from "../lib/autoMarkRead";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
 
-const props = defineProps<{ ticketId: number }>();
-const emit = defineEmits<{ (e: "back"): void }>();
+const props = defineProps<{
+    ticketId: number;
+    /** #2121 — a comment to scroll to, when the reader arrived from a notice
+     *  about one. Distinct from `ticketId`, which is where they ARE. */
+    focusMessageId?: number | null;
+}>();
+const emit = defineEmits<{ (e: "back"): void; (e: "focused"): void }>();
 
 const data = ref<ThreadViewData | null>(null);
 const error = ref<string | null>(null);
@@ -44,10 +49,13 @@ const composerAssignee = ref("");
 
 const { loading, load } = useLoader(async () => {
     data.value = await api.getTicket(props.ticketId);
-    // If the API resolved a non-ticket id up to its parent thread, scroll
-    // to the requested message after Vue has painted the comments.
-    const focus = data.value?.focus_message_id ?? null;
+    // Two ways to arrive pointing at one comment: the API resolved a non-ticket
+    // id up to its parent thread (someone opened a comment URL directly), or a
+    // notification handed us the comment beside the ticket (#2121). The server's
+    // answer wins — it is about the id actually fetched.
+    const focus = data.value?.focus_message_id ?? props.focusMessageId ?? null;
     if (focus !== null) {
+        emit("focused");
         requestAnimationFrame(() => {
             const el = document.getElementById(`comment-${focus}`);
             if (el) {

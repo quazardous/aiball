@@ -332,21 +332,33 @@ const {
 } = useNotifications({ project, onOpen: openNotificationTarget });
 
 /**
- * #2080 — open what a ticket notification is about. The id is the message's
- * own: a new ticket opens itself, and a comment is resolved server-side up to
- * its thread with a `focus_message_id`, so the reader lands on the comment
- * rather than at the top of a long one.
+ * #2080 — open what a ticket notification is about.
+ *
+ * #2121 — the target's id is now always the TICKET, so what lands in the URL is
+ * a ticket URL and every action that reads "the open ticket" gets one. The
+ * comment travels beside it as something to scroll to, not as the thing we
+ * navigate to.
  *
  * The project scope follows, otherwise a toast for another project opens a
  * thread the surrounding list does not contain — the board would disagree with
  * itself about where the reader is.
  */
-function openNotificationTarget(target: { id: number; project: string }): void {
+function openNotificationTarget(target: { id: number; project: string; focus?: number | null }): void {
     if (project.value && project.value !== target.project) project.value = target.project;
     panel.value = null;
+    // Set the focus BEFORE the id: switching the id is what makes ThreadView
+    // load, and it reads this on the way through.
+    pendingFocusId.value = target.focus ?? null;
     openTicketId.value = target.id;
     toast.removeGroup("ticket");
 }
+
+/**
+ * #2121 — the comment a notification pointed at, consumed once by the thread it
+ * belongs to. Held here rather than in the URL because it is not where the
+ * reader IS (that is the ticket), only where they should be looking first.
+ */
+const pendingFocusId = ref<number | null>(null);
 
 // WS handler is now a thin relay: turn WebSocket events into high-level
 // `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
@@ -794,7 +806,9 @@ watch(showSnoozed, (v) => {
                 <ThreadView
                     v-else-if="openTicketId !== null"
                     :ticket-id="openTicketId"
+                    :focus-message-id="pendingFocusId"
                     @back="openTicketId = null"
+                    @focused="pendingFocusId = null"
                 />
 
                 <!-- #471 — unified overview = Detail+Stats+Settings tabs + Danger zone. -->
