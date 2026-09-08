@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import Button from "primevue/button";
 import IdentityPicker from "./IdentityPicker.vue";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
@@ -20,6 +20,31 @@ import StandingPromptButton from "./StandingPromptButton.vue";
 const gotoInput = ref("");
 const gotoBusy = ref(false);
 const gotoError = ref<string | null>(null);
+
+/**
+ * #2123 — a refusal has to be felt, not just be true.
+ *
+ * When the goto refuses, nothing else on screen moves: the page stays where it
+ * was and the input keeps the text that was typed. A red border alone reads as
+ * "still thinking" rather than "no". A brief shake says the widget received the
+ * key and declined, which is exactly the difference the reader needs.
+ *
+ * Re-armed per refusal rather than tied to `gotoError` being non-null, so
+ * typing the same missing id twice shakes twice.
+ */
+const gotoShake = ref(false);
+let shakeTimer: ReturnType<typeof setTimeout> | undefined;
+watch(gotoError, (err) => {
+    if (!err) return;
+    gotoShake.value = false;
+    clearTimeout(shakeTimer);
+    // Next frame, so removing and re-adding the class restarts the animation
+    // instead of the browser coalescing it into no change at all.
+    requestAnimationFrame(() => {
+        gotoShake.value = true;
+        shakeTimer = setTimeout(() => { gotoShake.value = false; }, 400);
+    });
+});
 
 /** Hashids sont en base32-ish 6 chars, alphabet `abcdefghjkmnpqrstuvwxyz23456789`
  *  (cf. `pickFreshHashid` + `HASHID_ALPHABET` côté backend) — pas d'`i`,`l`,`o`,
@@ -57,22 +82,37 @@ function navigateToTicket(id: number, project: string | null): void {
  * path already fetches and gets this for free; the numeric path never asked,
  * which is why it was the one that broke.
  *
- * A failed lookup still navigates. Losing the project switch is the bug we
- * came from — refusing to move at all would be worse than reproducing it.
+ * #2123 — an id that DOESN'T EXIST no longer navigates. It used to, and the
+ * thread then rendered the raw API failure ("GET /api/tickets/9999… → 404")
+ * as the page body, which is a stack trace where a refusal belongs.
+ *
+ * The distinction that keeps the earlier decision intact: a 404 is an answer —
+ * the ticket is not there, so there is nowhere to go and we say so on the
+ * widget. Any OTHER failure (offline, auth, a 500) is NOT an answer about the
+ * ticket, so we still navigate and merely lose the project switch, which is
+ * the behaviour that decision was protecting. Refusing on an inconclusive
+ * lookup would strand the reader on a ticket that exists.
+ *
+ * This also makes the numeric path agree with the hashid one below, which has
+ * always refused an id it could not resolve.
+ *
+ * @returns an error to show on the widget, or null when it navigated.
  */
-async function gotoTicket(id: number): Promise<void> {
+async function gotoTicket(id: number): Promise<string | null> {
     let project: string | null = null;
     try {
         const tok = localStorage.getItem("aiball.token");
         const headers: Record<string, string> = {};
         if (tok) headers["authorization"] = `Bearer ${tok}`;
         const res = await fetch(withBase(`/api/tickets/${id}`), { headers });
+        if (res.status === 404) return `no ticket #${id}`;
         if (res.ok) {
             const data = await res.json();
             if (typeof data?.ticket?.project === "string") project = data.ticket.project;
         }
     } catch { /* fall through — navigate without the switch */ }
     navigateToTicket(id, project);
+    return null;
 }
 
 async function submitGoto() {
@@ -85,7 +125,7 @@ async function submitGoto() {
     if (!Number.isNaN(id) && id > 0 && String(id) === numeric) {
         gotoBusy.value = true;
         try {
-            await gotoTicket(id);
+            gotoError.value = await gotoTicket(id);
         } finally {
             gotoBusy.value = false;
         }
@@ -212,7 +252,11 @@ const emit = defineEmits<{
                 placeholder="#N"
                 :title="gotoError ?? 'Go to ticket — type a ticket number (#540) or a comment hashid (#C.abc123 or abc123) and press Enter'"
                 class="header-goto__input"
-                :class="{ 'header-goto__input--error': !!gotoError, 'header-goto__input--busy': gotoBusy }"
+                :class="{
+                    'header-goto__input--error': !!gotoError,
+                    'header-goto__input--busy': gotoBusy,
+                    'header-goto__input--refused': gotoShake,
+                }"
                 :disabled="gotoBusy"
                 @input="gotoError = null"
             />
@@ -316,6 +360,23 @@ const emit = defineEmits<{
 }
 .header-goto__input--error {
     border-color: var(--p-red-500, #ef4444);
+}
+/* #2123 — the refusal, made visible. Small amplitude on purpose: this sits in
+   the header next to the identity picker, and a wide shake would read as a
+   layout glitch rather than an answer. */
+.header-goto__input--refused {
+    animation: header-goto-shake 0.32s ease-in-out;
+}
+@keyframes header-goto-shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+    /* The border still turns red, so the refusal is not lost — only the motion is. */
+    .header-goto__input--refused { animation: none; }
 }
 .header-goto__input--busy {
     opacity: 0.65;
