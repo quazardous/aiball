@@ -34,6 +34,7 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { eq as eqK } from "drizzle-orm";
 
 const argv = process.argv.slice(2);
 const argOf = (name: string, fallback: string) => {
@@ -66,6 +67,8 @@ process.env.AIBALL_SOCK = "";
 
 const { listMessages, ticketUnreadFlags } = await import("../src/db.js");
 const { computeActionableTicketIds } = await import("../src/db/projects.js");
+const { getDb, nowIso } = await import("../src/db/connection.js");
+const schema = await import("../src/schema.js");
 const { computeHotFocus, compareWorkOrder } = await import("../src/db/work-order.js");
 type WorkOrderCtx = Parameters<typeof compareWorkOrder>[2];
 const { ticketSelfLastActivity } = await import("../src/db/tickets.js");
@@ -157,11 +160,101 @@ function clockHorizon(): void {
     console.log(`  TTL du cache aujourd'hui                          : 5 s`);
 }
 
+/**
+ * #2164 david — « une couche d'invalidation du cache centralisé qui invalide
+ * dès qu'un ticket candidat est update », éprouvée AVANT d'être écrite.
+ *
+ * L'idée : au lieu de vider l'ensemble actionable de tout le monde à chaque
+ * écriture, RÉPARER l'entrée du ticket touché — la porte scopée livrée en #2102
+ * (`computeActionableTicketIds(c, [ids])`) est exactement la primitive qu'il
+ * faut, et elle coûte 4-6 ms pour un ticket contre ~400 ms pour le board.
+ *
+ * Ce que ce test cherche n'est pas la vitesse, c'est la DIVERGENCE : après une
+ * vraie écriture dans l'instantané, l'ensemble réparé est-il encore égal à
+ * l'ensemble recalculé de zéro ? Le cas qui doit faire échouer une réparation
+ * naïve est le bloqueur : fermer T libère ses dépendants, donc réparer T seul
+ * laisse d'autres tickets faussement gatés — et un ticket faussement gaté
+ * disparaît d'une file sans bruit.
+ */
+function cacheInvalidationTrial(samples: number, naive = false): void {
+    const db = getDb();
+    console.log(`\n  couche d'invalidation ${naive ? "NAÏVE (témoin négatif)" : "ciblée"} — ${samples} écritures simulées`);
+    // Échantillon DIRIGÉ vers le cas difficile. Tirer des tickets au hasard
+    // teste surtout des fils isolés, où toute réparation naïve passe : le cas
+    // qui casse est le BLOQUEUR, dont la fermeture libère ses dépendants. On
+    // met donc en tête les tickets portant une relation `depends_on`/`blocks`.
+    const openSet = computeActionableTicketIds(CONSUMER).openIds;
+    const related = new Set<number>();
+    for (const r of db.select({ src: schema.messages.ticketId, tgt: schema.messages.sourceTicketId, meta: schema.messages.meta })
+        .from(schema.messages).where(eqK(schema.messages.kind, "ticket_relation")).all() as { src: number; tgt: number | null; meta: string | null }[]) {
+        if (!r.meta || !/depends_on|"blocks"/.test(r.meta)) continue;
+        if (openSet.has(r.src)) related.add(r.src);
+        if (r.tgt && openSet.has(r.tgt)) related.add(r.tgt);
+    }
+    const rest = [...openSet].filter((id) => !related.has(id));
+    const open = [...related, ...rest].slice(0, samples);
+    console.log(`  dont ${[...related].slice(0, samples).length} portant une relation bloquante`);
+    let ok = 0;
+    const diverged: string[] = [];
+    let seq = naive ? 500_000 : 0;
+
+    /** Les tickets dont la réponse peut bouger quand `id` bouge. */
+    const affectedBy = (id: number): number[] => {
+        const rows = db.select({ src: schema.messages.ticketId, tgt: schema.messages.sourceTicketId })
+            .from(schema.messages)
+            .where(eqK(schema.messages.kind, "ticket_relation"))
+            .all() as { src: number; tgt: number | null }[];
+        const out = new Set<number>([id]);
+        for (const r of rows) {
+            if (r.tgt === id) out.add(r.src);
+            if (r.src === id) { if (r.tgt) out.add(r.tgt); }
+        }
+        return [...out];
+    };
+
+    for (const tid of open) {
+        const before = new Set(computeActionableTicketIds(CONSUMER).actionableIds);
+        // Une VRAIE écriture, dans l'instantané : c'est tout l'intérêt d'en avoir un.
+        db.insert(schema.messages).values({
+            id: 7_000_000 + ++seq, ticketId: tid, kind: "ticket_closed",
+            status: "approved", byAgent: "sim", displaySeq: 900_000 + seq, createdAt: nowIso(),
+        }).run();
+
+        // Réparation ciblée : on recalcule le ticket écrit ET ses dépendants.
+        // Le témoin négatif ne répare QUE le ticket écrit. S'il passe aussi, le
+        // test ne discrimine rien et le 30/30 d'à côté ne vaut rien.
+        const scope = naive ? [tid] : affectedBy(tid);
+        invalidateFlagsCache();
+        const patchSrc = computeActionableTicketIds(CONSUMER, scope).actionableIds;
+        const patched = new Set(before);
+        for (const id of scope) { if (patchSrc.has(id)) patched.add(id); else patched.delete(id); }
+
+        invalidateFlagsCache();
+        const fresh = computeActionableTicketIds(CONSUMER).actionableIds;
+
+        const missing = [...fresh].filter((id) => !patched.has(id));
+        const extra = [...patched].filter((id) => !fresh.has(id));
+        if (missing.length === 0 && extra.length === 0) ok++;
+        else diverged.push(`#${tid}: ${missing.length} manquants, ${extra.length} en trop`);
+    }
+    console.log(`  ${ok}/${open.length} réparations exactes`);
+    for (const d of diverged.slice(0, 5)) console.log(`    divergence ${d}`);
+    if (diverged.length > 5) console.log(`    … et ${diverged.length - 5} autres`);
+}
+
 console.log(`\nsimulateur d'ordre de travail — consommateur ${CONSUMER}, page de ${LIMIT}`);
 console.log(`instantané : ${snapHome}\n`);
 const ref = run("référence (actuel)", reference, null);
 run("fenêtre hot (#2164)", hotWindow, ref);
 clockHorizon();
+// Un essai FERME des tickets dans l'instantané, donc deux essais dans le même
+// processus ne partent pas du même état — le second tirerait un autre
+// échantillon et ne comparerait plus rien. Chaque essai veut son propre
+// instantané : `--cache` pour la couche ciblée, `--cache --naive` pour le
+// témoin négatif.
+if (argv.includes("--cache")) {
+    cacheInvalidationTrial(Number(argOf("samples", "25")), argv.includes("--naive"));
+}
 
 if (!KEEP) rmSync(snapHome, { recursive: true, force: true });
 else console.log(`\ninstantané conservé : ${snapHome}`);
