@@ -178,7 +178,7 @@ function clockHorizon(): void {
  */
 function cacheInvalidationTrial(samples: number, naive = false): void {
     const db = getDb();
-    console.log(`\n  couche d'invalidation ${naive ? "NAÏVE (témoin négatif)" : "ciblée"} — ${samples} écritures simulées`);
+    console.log(`\n  couche d'invalidation ${naive ? "NAÏVE (témoin négatif)" : "ciblée"} — ${samples > 0 ? `${samples} écritures` : "tout le corpus"}`);
     // Échantillon DIRIGÉ vers le cas difficile. Tirer des tickets au hasard
     // teste surtout des fils isolés, où toute réparation naïve passe : le cas
     // qui casse est le BLOQUEUR, dont la fermeture libère ses dépendants. On
@@ -192,8 +192,13 @@ function cacheInvalidationTrial(samples: number, naive = false): void {
         if (r.tgt && openSet.has(r.tgt)) related.add(r.tgt);
     }
     const rest = [...openSet].filter((id) => !related.has(id));
-    const open = [...related, ...rest].slice(0, samples);
-    console.log(`  dont ${[...related].slice(0, samples).length} portant une relation bloquante`);
+    // david : « prend toute la base actuelle comme lot de travail ». `samples`
+    // n'est plus un échantillon mais un plafond optionnel — par défaut on passe
+    // sur TOUS les tickets ouverts. Les porteurs de relation restent en tête
+    // pour que les divergences, s'il y en a, sortent tôt.
+    const ordered = [...related, ...rest];
+    const open = samples > 0 ? ordered.slice(0, samples) : ordered;
+    console.log(`  ${open.length} tickets ouverts, dont ${related.size} portant une relation bloquante`);
     let ok = 0;
     const diverged: string[] = [];
     let seq = naive ? 500_000 : 0;
@@ -212,8 +217,13 @@ function cacheInvalidationTrial(samples: number, naive = false): void {
         return [...out];
     };
 
+    // Un seul calcul complet par tour : le `fresh` d'un tour EST le `before` du
+    // suivant. Sur tout le corpus, en faire deux doublerait une boucle qui se
+    // compte déjà en minutes.
+    let before = new Set(computeActionableTicketIds(CONSUMER).actionableIds);
+    let n = 0;
     for (const tid of open) {
-        const before = new Set(computeActionableTicketIds(CONSUMER).actionableIds);
+        if (++n % 100 === 0) process.stdout.write(`\r  … ${n}/${open.length}`);
         // Une VRAIE écriture, dans l'instantané : c'est tout l'intérêt d'en avoir un.
         db.insert(schema.messages).values({
             id: 7_000_000 + ++seq, ticketId: tid, kind: "ticket_closed",
@@ -236,7 +246,9 @@ function cacheInvalidationTrial(samples: number, naive = false): void {
         const extra = [...patched].filter((id) => !fresh.has(id));
         if (missing.length === 0 && extra.length === 0) ok++;
         else diverged.push(`#${tid}: ${missing.length} manquants, ${extra.length} en trop`);
+        before = new Set(fresh);
     }
+    process.stdout.write("\r");
     console.log(`  ${ok}/${open.length} réparations exactes`);
     for (const d of diverged.slice(0, 5)) console.log(`    divergence ${d}`);
     if (diverged.length > 5) console.log(`    … et ${diverged.length - 5} autres`);
@@ -253,7 +265,7 @@ clockHorizon();
 // instantané : `--cache` pour la couche ciblée, `--cache --naive` pour le
 // témoin négatif.
 if (argv.includes("--cache")) {
-    cacheInvalidationTrial(Number(argOf("samples", "25")), argv.includes("--naive"));
+    cacheInvalidationTrial(Number(argOf("samples", "0")), argv.includes("--naive"));
 }
 
 if (!KEEP) rmSync(snapHome, { recursive: true, force: true });
