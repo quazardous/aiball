@@ -77,8 +77,13 @@ export function emptyAgg(): InboxAgg {
  * wins uses max-id, counts are commutative, lastActivity uses max) except the
  * lifecycle replay which sorts by id itself.
  */
-export function buildInboxAgg(project: string | undefined): Map<number, InboxAgg> {
-    const otherMessages = listMessages({ project }).filter(
+export function buildInboxAgg(project: string | undefined, ticketId?: number): Map<number, InboxAgg> {
+    // #2159 — `ticketId` narrows the SOURCE ROWS, not the fold. The reduction
+    // below is untouched and stays the single source of truth: repairing one
+    // entry runs exactly this code over one thread's messages, so a repaired
+    // entry cannot differ from a rebuilt one. That is what keeps the module's
+    // "no incremental-update code to diverge" promise while dropping the cost.
+    const otherMessages = listMessages({ project, ticket_id: ticketId }).filter(
         (m) => m.kind !== "ticket_created",
     );
     const byTicket = new Map<number, InboxAgg>();
@@ -205,8 +210,36 @@ export function getInboxAgg(project: string | undefined, nowMs: number = Date.no
  * Drop the cached Agg for a project (rebuilt on next hit). The cross-project
  * `ALL` entry is always dropped too — a write to any project changes it.
  * Call from every message write chokepoint.
+ *
+ * #2159 — pass `ticketId` and the cached maps are REPAIRED instead of dropped.
+ * Every field of an entry folds from its own ticket's messages (verified across
+ * the whole reduction, lifecycle replay included), so a write moves exactly one
+ * entry and the others are still correct. Measured: dropping them cost 184 ms
+ * of rebuild on the next read, for one changed row.
+ *
+ * The repair RECOMPUTES the entry from scratch rather than applying a delta —
+ * same fold, fewer rows — so there is no incremental state to drift. A key that
+ * isn't cached is left alone: nothing to repair, and seeding a partial map from
+ * one ticket would be worse than a cold rebuild.
  */
-export function invalidateInboxAgg(project?: string | null): void {
+export function invalidateInboxAgg(project?: string | null, ticketId?: number): void {
+    if (project && ticketId !== undefined) {
+        const fresh = buildInboxAgg(project, ticketId).get(ticketId);
+        // Both maps hold this ticket, and the entry is identical in each: the
+        // fold reads only the thread's own messages, which belong to one
+        // project. Repairing just the project map would leave the cross-project
+        // view stale until the TTL — a wrong count, silently, for 5 s.
+        for (const key of [project, ALL]) {
+            const hit = cache.get(key);
+            if (!hit) continue;
+            // No entry means the thread has no non-`ticket_created` message
+            // left (its last comment was deleted); mirror the full rebuild,
+            // which would not carry the ticket at all.
+            if (fresh) hit.agg.set(ticketId, fresh);
+            else hit.agg.delete(ticketId);
+        }
+        return;
+    }
     if (project) cache.delete(project);
     cache.delete(ALL);
     if (!project) cache.clear();

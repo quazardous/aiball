@@ -235,7 +235,11 @@ export function insertMessage(m: NewMessage): Message {
         return messageRowToMessage(inserted, parent?.project ?? m.project);
     });
     // #1167 — a new message changes the project's inbox aggregation.
-    invalidateInboxAgg(result.project); invalidateFlagsCache();
+    // #2159 — and it changes exactly ONE entry of it: the fold reads only the
+    // thread's own messages. Naming the ticket repairs that entry instead of
+    // dropping a thousand others the write did not touch. This is the hot
+    // path — every comment, close and reopen goes through here.
+    invalidateInboxAgg(result.project, result.ticket_id ?? undefined); invalidateFlagsCache();
     return result;
 }
 
@@ -304,6 +308,10 @@ export function listMessages(filters: {
     kind?: MessageKind;
     by_agent?: string;
     limit?: number;
+    /** #2159 — narrow to a single thread. Added so the inbox aggregate can
+     *  rebuild ONE ticket's entry with the same fold it uses for a whole
+     *  project, instead of re-reading every message to repair one row. */
+    ticket_id?: number;
 } = {}): Message[] {
     const db = getDb();
     const includeTickets = !filters.kind || filters.kind === "ticket_created";
@@ -316,6 +324,7 @@ export function listMessages(filters: {
         if (filters.status) conds.push(eq(schema.tickets.status, filters.status));
         if (filters.project) conds.push(eq(schema.tickets.project, filters.project));
         if (filters.by_agent) conds.push(eq(schema.tickets.byAgent, filters.by_agent));
+        if (filters.ticket_id !== undefined) conds.push(eq(schema.tickets.id, filters.ticket_id));
         let q = db.select().from(schema.tickets).$dynamic();
         if (conds.length) q = q.where(and(...conds));
         // #B.222: sort by urgency hint first (urgent > high > normal > low),
@@ -342,6 +351,7 @@ export function listMessages(filters: {
         if (filters.kind && filters.kind !== "ticket_created")
             conds.push(eq(schema.messages.kind, filters.kind));
         if (filters.by_agent) conds.push(eq(schema.messages.byAgent, filters.by_agent));
+        if (filters.ticket_id !== undefined) conds.push(eq(schema.messages.ticketId, filters.ticket_id));
         // Project filter requires joining with tickets.
         let q = db
             .select({
