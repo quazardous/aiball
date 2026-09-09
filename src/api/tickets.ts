@@ -655,26 +655,52 @@ ticketsRouter.get("/tickets", (req, res) => {
     //   MY own focus higher in MY queue — preserves #532 `bmzpfr`). Empty for
     //   humans (no work order applicable).
     const hotWinMs = hotWindowSec() * 1000;
-    const createdIds = created.map((m) => m.id);
-    const crossAgentHotFocus = computeHotFocus(
-        ticketAgentLastActivity(createdIds),
-        Date.now(),
-        hotWinMs,
-    );
+
+    // #2164 — hot is a TIEBREAK, and was being computed for the whole board.
+    //
+    // The work order sorts on (tier, priority) first and only consults hot to
+    // separate rows that are equal on both. So the rows that hot can possibly
+    // move are those whose coarse key is <= the Nth's — everything strictly
+    // above is in the page regardless, everything strictly below cannot reach
+    // it. Measured on 2164 tickets: a page of 10 has 23 such contenders and a
+    // page of 30 has 297, and the three hot reads drop from 143 ms to 2-9 ms.
+    //
+    // The window includes the strictly-above rows on purpose: two of THEM can
+    // tie with each other, and hot decides their relative order inside a page
+    // they both belong to.
+    const cheapFiltersOnly = !onlyClaimable && !onlyBacklog && !(tagsFilter && tagsFilter.length > 0);
+    const coarseKeyOf = (m: { id: number; priority?: string | null }) =>
+        ((!assumeDrained && unreadMap.get(m.id)) ? 0 : actionableIds.has(m.id) ? 1 : openIds.has(m.id) ? 2 : 3) * 10
+        + (9 - (PRIORITY_WEIGHT[m.priority ?? "normal"] ?? 2));
+    /** The rows a cheap-filter query could still put on the page. */
+    const cheapCandidates = () => {
+        let cand = created;
+        if (onlyOpen) {
+            cand = cand.filter((m) => {
+                const pu = m.postponed_until ?? null;
+                return !closedSet.has(m.id) && (includePostponed || !(!!pu && pu > nowStr));
+            });
+        }
+        if (onlyActionable) cand = cand.filter((m) => actionableIds.has(m.id));
+        if (titleContains) cand = cand.filter((m) => (m.title ?? "").toLowerCase().includes(titleContains));
+        if (sinceIso) cand = cand.filter((m) => m.created_at >= sinceIso);
+        return cand;
+    };
+    let contenders: typeof created | null = null;
+    if (cheapFiltersOnly && limit !== undefined) {
+        const cand = cheapCandidates();
+        if (cand.length > limit) {
+            const coarse = [...cand].sort((a, b) => coarseKeyOf(a) - coarseKeyOf(b) || a.id - b.id);
+            const cut = coarseKeyOf(coarse[limit - 1]);
+            contenders = coarse.filter((m) => coarseKeyOf(m) <= cut);
+        } else {
+            contenders = cand;
+        }
+    }
     const selfHotFocus = isHuman(consumerId)
         ? new Set<number>()
         : computeHotFocus(
-            ticketSelfLastActivity(consumerId, createdIds),
-            Date.now(),
-            hotWinMs,
-        );
-    // #2073 — heat caused by SOMEONE ELSE, which is what a backlog tier should
-    // react to. Undefined for a human: the tier then falls back to the visible
-    // set, exactly as before, and no human orders a backlog anyway.
-    const othersHotFocus = isHuman(consumerId)
-        ? undefined
-        : computeHotFocus(
-            ticketOthersLastActivity(createdIds, consumerId),
+            ticketSelfLastActivity(consumerId, (contenders ?? created).map((m) => m.id)),
             Date.now(),
             hotWinMs,
         );
@@ -705,31 +731,41 @@ ticketsRouter.get("/tickets", (req, res) => {
         isOwnClaim: (id) => ownClaimIds.has(id),
         isAssignedToMe: (id) => assignedToMeIds.has(id),
     };
-    const cheapFiltersOnly = !onlyClaimable && !onlyBacklog && !(tagsFilter && tagsFilter.length > 0);
-    let pageCreated: typeof created | null = null;
-    if (cheapFiltersOnly && limit !== undefined && created.length > limit) {
-        let cand = created;
-        if (onlyOpen) {
-            cand = cand.filter((m) => {
-                const pu = m.postponed_until ?? null;
-                const postponed = !!pu && pu > nowStr;
-                return !closedSet.has(m.id) && (includePostponed || !postponed);
-            });
-        }
-        // `actionable` on a built row IS this set membership (ticket-flags.ts),
-        // so filtering here cannot disagree with filtering there.
-        if (onlyActionable) cand = cand.filter((m) => actionableIds.has(m.id));
-        if (titleContains) cand = cand.filter((m) => (m.title ?? "").toLowerCase().includes(titleContains));
-        if (sinceIso) cand = cand.filter((m) => m.created_at >= sinceIso);
-        pageCreated = [...cand]
+    // The page is chosen from the CONTENDERS, which the hot window above
+    // already narrowed to the rows a tiebreak could still move. Sorting them
+    // with the full comparator and cutting gives the same page as sorting the
+    // whole board would, because everything excluded was strictly below the
+    // Nth on a key hot cannot change.
+    const pageCreated = contenders !== null && limit !== undefined
+        ? [...contenders]
             .sort((a, b) => compareWorkOrder(
                 { id: a.id, priority: a.priority },
                 { id: b.id, priority: b.priority },
                 sortCtx,
             ))
-            .slice(0, limit);
-    }
+            .slice(0, limit)
+        : null;
     const buildFrom = pageCreated ?? created;
+    const buildIds = buildFrom.map((m) => m.id);
+
+    // #2164 — these two feed the BUILT rows only (the visible flame, and the
+    // backlog tier), never the sort, so they follow the page rather than the
+    // board. On the full path `buildFrom` is `created` and nothing changes.
+    const crossAgentHotFocus = computeHotFocus(
+        ticketAgentLastActivity(buildIds),
+        Date.now(),
+        hotWinMs,
+    );
+    // #2073 — heat caused by SOMEONE ELSE, which is what a backlog tier should
+    // react to. Undefined for a human: the tier then falls back to the visible
+    // set, exactly as before, and no human orders a backlog anyway.
+    const othersHotFocus = isHuman(consumerId)
+        ? undefined
+        : computeHotFocus(
+            ticketOthersLastActivity(buildIds, consumerId),
+            Date.now(),
+            hotWinMs,
+        );
 
     // #791 — centralised flag computation. The route used to build
     // 5-6 independent Sets and combine them inline; the route now
@@ -741,7 +777,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         : 0;
     const flagsCtx = buildTicketFlagsContext({
         consumerId,
-        ticketIds: buildFrom.map((m) => m.id),
+        ticketIds: buildIds,
         nowMs: Date.now(),
         cooldownSec,
         closedSet,
