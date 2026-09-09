@@ -14,10 +14,23 @@
  *    change, move). The next hit rebuilds fresh — no incremental-update code to
  *    diverge.
  *  - SAFETY CEILING: even absent an invalidation call, a cached entry older
- *    than `TTL_MS` is rebuilt. So a future write path that forgets to
+ *    than the store's TTL is rebuilt. So a future write path that forgets to
  *    invalidate degrades to ≤ a few seconds of staleness, never a permanent
  *    stale inbox. Bounded, self-healing.
+ *
+ * #2168 — the STORE itself lives in `inbox-agg-cache.ts`, a leaf that imports
+ * nothing, so `projects.ts` can drop this cache on a project delete / rename /
+ * purge without closing the cycle it would go through here. This module keeps
+ * what an entry MEANS: the fold, and the repair.
  */
+import {
+    ALL_PROJECTS,
+    inboxAggKey,
+    getFreshInboxAgg,
+    setInboxAgg,
+    peekInboxAgg,
+    clearInboxAgg,
+} from "./inbox-agg-cache.js";
 import { listMessages } from "./messages.js";
 import type { Message } from "./connection.js";
 import { parseMeta } from "../questions.js";
@@ -185,24 +198,16 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
 }
 
 // ---------------------------------------------------------------------------
-// Cache
+// Cache — the store is in `inbox-agg-cache.ts`; what lives here is the fold.
 // ---------------------------------------------------------------------------
-
-const TTL_MS = 5_000; // safety ceiling for a missed invalidation
-const cache = new Map<string, { agg: Map<number, InboxAgg>; builtAtMs: number }>();
-const ALL = "\0all"; // key for the no-project (cross-project) view
-
-function keyOf(project: string | undefined): string {
-    return project ?? ALL;
-}
 
 /** Cached per-project Agg map. `nowMs` injectable for tests. */
 export function getInboxAgg(project: string | undefined, nowMs: number = Date.now()): Map<number, InboxAgg> {
-    const key = keyOf(project);
-    const hit = cache.get(key);
-    if (hit && nowMs - hit.builtAtMs < TTL_MS) return hit.agg;
+    const key = inboxAggKey(project);
+    const hit = getFreshInboxAgg<Map<number, InboxAgg>>(key, nowMs);
+    if (hit) return hit;
     const agg = buildInboxAgg(project);
-    cache.set(key, { agg, builtAtMs: nowMs });
+    setInboxAgg(key, agg, nowMs);
     return agg;
 }
 
@@ -229,23 +234,21 @@ export function invalidateInboxAgg(project?: string | null, ticketId?: number): 
         // fold reads only the thread's own messages, which belong to one
         // project. Repairing just the project map would leave the cross-project
         // view stale until the TTL — a wrong count, silently, for 5 s.
-        for (const key of [project, ALL]) {
-            const hit = cache.get(key);
-            if (!hit) continue;
+        for (const key of [project, ALL_PROJECTS]) {
+            const agg = peekInboxAgg<Map<number, InboxAgg>>(key);
+            if (!agg) continue;
             // No entry means the thread has no non-`ticket_created` message
             // left (its last comment was deleted); mirror the full rebuild,
             // which would not carry the ticket at all.
-            if (fresh) hit.agg.set(ticketId, fresh);
-            else hit.agg.delete(ticketId);
+            if (fresh) agg.set(ticketId, fresh);
+            else agg.delete(ticketId);
         }
         return;
     }
-    if (project) cache.delete(project);
-    cache.delete(ALL);
-    if (!project) cache.clear();
+    clearInboxAgg(project);
 }
 
 /** Tests — force a cold cache. */
 export function resetInboxAggCacheForTests(): void {
-    cache.clear();
+    clearInboxAgg();
 }

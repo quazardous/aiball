@@ -13,6 +13,7 @@ import {
     clearFlagsCache,
     flagsCacheIsCold,
 } from "./flags-cache.js";
+import { clearInboxAgg } from "./inbox-agg-cache.js";
 import { idScope, shouldScope } from "./scope-ids.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
@@ -831,6 +832,9 @@ export function purgeOldClosedTickets(
     });
     // #2165 — tickets removed wholesale; the ids are gone, not merely changed.
     invalidateFlagsCache();
+    // #2168 — a purge removes whole threads, so the per-ticket repair has no
+    // ticket to repair; the project's map has to go.
+    clearInboxAgg(project);
     return out;
 }
 
@@ -964,6 +968,11 @@ export function renameProject(oldName: string, newName: string): ProjectRenameRe
     });
     // #2165 — every ticket changed project, which per-agent work filters read.
     invalidateFlagsCache();
+    // #2168 — both names, not just the old one: the map is keyed by project,
+    // so the entry left under `oldTrim` is now bogus and anything already
+    // cached under `newTrim` no longer describes the same set of tickets.
+    clearInboxAgg(oldTrim);
+    clearInboxAgg(newTrim);
     return out;
 }
 
@@ -997,6 +1006,9 @@ export function deleteProject(name: string): { deleted_messages: number } {
     });
     // #2165 — a whole project is gone; nothing about the cached sets survives.
     invalidateFlagsCache();
+    // #2168 — and its inbox counters go with it. Dropping the project's map
+    // also drops the cross-project one, which still counts its tickets.
+    clearInboxAgg(name);
     return out;
 }
 
