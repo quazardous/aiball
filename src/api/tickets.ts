@@ -1283,7 +1283,8 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     // push. Same helper + same owned-projects/can-claim gate as the list, so
     // the two views can never disagree.
     const flagConsumer = consumerOf(req);
-    const { actionableIds: hdrActionableIds } = computeActionableTicketIds(flagConsumer);
+    // #2102 — one ticket's header asks about one ticket.
+    const { actionableIds: hdrActionableIds } = computeActionableTicketIds(flagConsumer, [t.id]);
     const hdrOwnedProjects = new Set(
         listSubscriptions(flagConsumer)
             .filter((s) => s.role === "owner")

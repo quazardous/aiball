@@ -7,7 +7,7 @@
  */
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { getCachedDecisionGate, getCachedActionable } from "./flags-cache.js";
-import { idScope } from "./scope-ids.js";
+import { idScope, shouldScope } from "./scope-ids.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
@@ -1445,10 +1445,17 @@ export function lastActorExclusions(consumerId: string, ticketIds?: readonly num
  * `accepted` resolution still gates (short window before close);
  * `accepted` plan is the GO-signal so it un-gates for the agent to execute.
  */
-export function decisionGateByTicket(): Map<number, boolean> {
+export function decisionGateByTicket(ticketIds?: readonly number[]): Map<number, boolean> {
+    // #2102 — when the caller names the tickets it cares about, answer about
+    // those. The cache is deliberately BYPASSED then: it holds the board-wide
+    // map, and seeding it from a partial computation would hand later callers a
+    // map missing every ticket nobody happened to ask about — a ticket silently
+    // absent from a gate reads as "not gated", which is the failure that shows
+    // up as work appearing in a queue it should have left.
+    if (shouldScope(ticketIds)) return decisionGateByTicketUncached(ticketIds);
     return getCachedDecisionGate(() => decisionGateByTicketUncached());
 }
-function decisionGateByTicketUncached(): Map<number, boolean> {
+function decisionGateByTicketUncached(ticketIds?: readonly number[]): Map<number, boolean> {
     const db = getDb();
     // #961 — `ticket_created` is a VIRTUAL kind synthesized from the
     // `tickets` table via `ticketRowToMessage()`. The `_messages` table
@@ -1473,6 +1480,7 @@ function decisionGateByTicketUncached(): Map<number, boolean> {
         createdAt: schema.tickets.createdAt,
     })
         .from(schema.tickets)
+        .where(idScope(schema.tickets.id, ticketIds))
         .all();
     const messageRows = db.select({
         id: schema.messages.id,
@@ -1484,7 +1492,10 @@ function decisionGateByTicketUncached(): Map<number, boolean> {
         createdAt: schema.messages.createdAt,
     })
         .from(schema.messages)
-        .where(inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added"]))
+        .where(and(
+            inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added"]),
+            idScope(schema.messages.ticketId, ticketIds),
+        ))
         .all();
     interface Row {
         createdAt: string;
@@ -1519,12 +1530,61 @@ function decisionGateByTicketUncached(): Map<number, boolean> {
     return computeDecisionGate(merged, (id) => humans.has(id));
 }
 
-export function computeActionableTicketIds(consumerId?: string): ActionableTicketSet {
+export function computeActionableTicketIds(
+    consumerId?: string,
+    ticketIds?: readonly number[],
+): ActionableTicketSet {
+    // #2102 — the cache is bypassed for a scoped call, and the returned sets
+    // are restricted to what was asked for. Seeding the board-wide cache from a
+    // partial answer would make every later reader see a set missing the
+    // tickets nobody asked about — and a ticket absent from `actionableIds`
+    // silently leaves somebody's queue.
+    if (shouldScope(ticketIds)) return computeActionableTicketIdsUncached(consumerId, ticketIds);
     return getCachedActionable(consumerId, () => computeActionableTicketIdsUncached(consumerId));
 }
-function computeActionableTicketIdsUncached(consumerId?: string): ActionableTicketSet {
+function computeActionableTicketIdsUncached(
+    consumerId?: string,
+    ticketIds?: readonly number[],
+): ActionableTicketSet {
     const db = getDb();
     const nowStr = nowIso();
+
+    // #2102 — the SCOPE is wider than the request, and that difference is the
+    // whole difficulty of this ticket.
+    //
+    // Answering "is X actionable?" needs the OPEN state of the tickets X waits
+    // on: a dependent is gated while its blocker is open, so a bucket holding
+    // only X would evaluate the gate against a blocker it never loaded and read
+    // it as closed — freeing a ticket that is still blocked. So the scope is
+    // the requested ids PLUS their relation counterparts, computed first, and
+    // the answer is narrowed back to the requested ids at the end.
+    const relationRows = db.select({
+        sourceTicketId: schema.messages.ticketId,
+        targetTicketId: schema.messages.sourceTicketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+            shouldScope(ticketIds)
+                ? or(
+                    inArray(schema.messages.ticketId, [...ticketIds]),
+                    inArray(schema.messages.sourceTicketId, [...ticketIds]),
+                )
+                : undefined,
+        ))
+        .orderBy(schema.messages.id)
+        .all();
+    let scopeIds: readonly number[] | undefined;
+    if (shouldScope(ticketIds)) {
+        const scope = new Set<number>(ticketIds);
+        for (const r of relationRows) {
+            scope.add(r.sourceTicketId);
+            if (r.targetTicketId) scope.add(r.targetTicketId);
+        }
+        scopeIds = [...scope];
+    }
 
     // Lifecycle replay (mirrors listProjectsDetailed lines 201-249).
     const lifecycle = db.select({
@@ -1534,16 +1594,17 @@ function computeActionableTicketIdsUncached(consumerId?: string): ActionableTick
         id: schema.messages.id,
     })
         .from(schema.messages)
-        .where(
+        .where(and(
             inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked"]),
-        )
+            idScope(schema.messages.ticketId, scopeIds),
+        ))
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
     // #273: latest-decision-wins gate (legacy ticket_resolved/reopened +
     // decision-on-comment, last signal per ticket). Replaces the old
     // monotonic gate that the lifecycle loop + decision block used to set.
-    const gatedByDecisionByTicket = decisionGateByTicket();
+    const gatedByDecisionByTicket = decisionGateByTicket(scopeIds);
     const blockedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
@@ -1570,7 +1631,7 @@ function computeActionableTicketIdsUncached(consumerId?: string): ActionableTick
         assignedAt: schema.tickets.assignedAt,
         claimant: schema.tickets.claimant,
         claimedAt: schema.tickets.claimedAt,
-    }).from(schema.tickets).all();
+    }).from(schema.tickets).where(idScope(schema.tickets.id, scopeIds)).all();
     const openIds = new Set<number>();
     for (const t of tickets) {
         if (t.status !== "approved") continue;
@@ -1599,18 +1660,7 @@ function computeActionableTicketIdsUncached(consumerId?: string): ActionableTick
 
     // Relation gating: depends_on / blocks chains to an open blocker
     // suppress the dependent from the actionable set (#B.123 phase B.4).
-    const latestRelations = db.select({
-        sourceTicketId: schema.messages.ticketId,
-        targetTicketId: schema.messages.sourceTicketId,
-        meta: schema.messages.meta,
-    })
-        .from(schema.messages)
-        .where(and(
-            eq(schema.messages.kind, "ticket_relation"),
-            eq(schema.messages.status, "approved"),
-        ))
-        .orderBy(schema.messages.id)
-        .all();
+    const latestRelations = relationRows;
     const latestPerPair = new Map<string, { source: number; target: number; kind: string }>();
     for (const r of latestRelations) {
         if (!r.meta || !r.targetTicketId) continue;
@@ -1637,7 +1687,7 @@ function computeActionableTicketIdsUncached(consumerId?: string): ActionableTick
     // close hands the ball back — #305; an own untouched task stays mine —
     // #370). Only computed when a consumer is in scope (anonymous / token-
     // less callers keep the global, pre-#265 behaviour — zero regression).
-    const awaitingOtherSet = consumerId ? lastActorExclusions(consumerId) : null;
+    const awaitingOtherSet = consumerId ? lastActorExclusions(consumerId, scopeIds) : null;
 
     const actionableIds = new Set<number>();
     for (const id of openIds) {
@@ -1669,5 +1719,17 @@ function computeActionableTicketIdsUncached(consumerId?: string): ActionableTick
         }
     }
 
+    // Narrow back to what was asked. The extra ids were loaded only so the
+    // relation gate could see the blockers; handing them back would let a
+    // caller count tickets it never asked about.
+    if (shouldScope(ticketIds)) {
+        const wanted = new Set(ticketIds);
+        const keep = <T extends number>(set: Set<T>) => new Set([...set].filter((id) => wanted.has(id)));
+        return {
+            openIds: keep(openIds),
+            actionableIds: keep(actionableIds),
+            gatedByBlockerIds: keep(gatedByBlocker),
+        };
+    }
     return { openIds, actionableIds, gatedByBlockerIds: gatedByBlocker };
 }

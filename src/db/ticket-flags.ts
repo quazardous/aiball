@@ -301,9 +301,13 @@ export function buildTicketFlagsContext(args: {
     for (const id of ticketIds) {
         if (unreadMap.get(id)) unreadIds.add(id);
     }
-    const { openIds, actionableIds, gatedByBlockerIds } = computeActionableTicketIds(consumerId);
+    // #2102 — this context is built for `ticketIds` and probes every set with
+    // exactly those ids, so compute about them. It was the last board-wide
+    // read left on a mutation's path: measured at 483 ms for one ticket, on a
+    // daemon that blocks every other caller while it runs.
+    const { openIds, actionableIds, gatedByBlockerIds } = computeActionableTicketIds(consumerId, ticketIds);
     const lastActorMeIds = lastActorExclusions(consumerId, ticketIds);
-    const decisionGated = decisionGateByTicket();
+    const decisionGated = decisionGateByTicket(ticketIds);
     const cooledIds = cooldownSec > 0
         ? backlogCooldownExclusions(consumerId, cooldownSec)
         : new Set<number>();
