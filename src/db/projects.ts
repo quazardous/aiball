@@ -5,7 +5,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import {
     getCachedDecisionGate,
     getCachedActionable,
@@ -426,6 +426,19 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         .where(and(
             eq(schema.messages.kind, "comment_added"),
             eq(schema.messages.status, "approved"),
+            // #2171 — a PREFILTER, not the decision. Without it this loaded
+            // every approved comment of every project — 12029 rows, each
+            // carrying its whole `meta` blob (which holds `summary_until`, so
+            // kilobytes apiece) — and JSON-parsed all of them to find the 65
+            // that matter. 12029 rows -> 70, and 64 ms -> 29.
+            //
+            // It stays a superset on purpose: a decision of kind "resolution"
+            // with status "pending" cannot fail to contain both words, so the
+            // narrowing cannot hide a match, and the JSON parse below remains
+            // the only thing that DECIDES. Verified on the live corpus: the
+            // retained set is identical, 65 either way.
+            like(schema.messages.meta, '%"resolution"%'),
+            like(schema.messages.meta, '%"pending"%'),
         ))
         .all();
     const pendingResolutionTickets = new Map<string, Set<number>>();
