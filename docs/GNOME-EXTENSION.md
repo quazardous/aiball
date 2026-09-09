@@ -11,8 +11,16 @@ aiball init gnome-extension
 gnome-extensions enable aiball@quazardous.github.io
 ```
 
-The extension is then live on X11 after `Alt+F2`, `r`; on Wayland the shell has
-to be restarted, so log out and back in.
+**On Wayland the second command prints `L'extension … n'existe pas`, and that
+is expected — it still did its job.** A running Wayland shell cannot rescan the
+extensions directory, so it does not yet know about the files the first command
+just wrote; the enable call nevertheless records the choice in
+`org.gnome.shell enabled-extensions`. Log out and back in, and the shell picks
+up both the files and the setting. On X11, `Alt+F2` then `r` is enough and the
+message does not appear.
+
+Check it landed with `gnome-extensions info aiball@quazardous.github.io` after
+logging back in: `État: ACTIVE`.
 
 Refresh it after an aiball upgrade with `aiball init gnome-extension
 --overwrite`. A refresh **replaces** the installed directory rather than
