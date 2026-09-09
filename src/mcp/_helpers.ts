@@ -81,26 +81,17 @@ export async function microStatus(): Promise<{
     project: string | null;
 }> {
     const proj = client.defaultProject;
-    const [pjCount, pgCount, mpCount] = await Promise.all([
-        proj
-            ? client
-                .unreadCount(proj)
-                .then((r) => r.count ?? 0)
-                .catch(() => 0)
-            : Promise.resolve(0),
-        client
-            .pingsCount()
-            .then((r) => r.unread ?? 0)
-            .catch(() => 0),
-        client
-            .myPendingCount()
-            .then((r) => r.count ?? 0)
-            .catch(() => 0),
-    ]);
+    // #2164 — ONE round-trip. This was three, wrapped in a `Promise.all` that
+    // parallelised nothing: the daemon is single-threaded, so it served them in
+    // a row and each took a place in the queue every other caller waits in.
+    // Measured at ~30 ms on every tool response, for four numbers.
+    const counts = await client
+        .microStatusCounts(proj)
+        .catch(() => ({ unread_project: 0, unread_pings: 0, my_pending: 0 }));
     return {
-        unread_project: pjCount,
-        unread_pings: pgCount,
-        my_pending: mpCount,
+        unread_project: counts.unread_project ?? 0,
+        unread_pings: counts.unread_pings ?? 0,
+        my_pending: counts.my_pending ?? 0,
         project: proj,
     };
 }

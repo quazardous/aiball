@@ -19,6 +19,7 @@ import {
     pendingTicketsByAuthor,
     recordBacklogWake,
     unreadCount,
+    unreadPingCount,
 } from "../db.js";
 import { badRequest, consumerOf, withTags } from "./_helpers.js";
 import { isHuman } from "../db.js";
@@ -74,6 +75,32 @@ readTrackingRouter.get("/my-pending/count", (req, res) => {
     const by_agent = req.query.by_agent as string | undefined;
     if (!by_agent) return badRequest(res, "by_agent required");
     res.json({ by_agent, count: pendingTicketsByAuthor(by_agent) });
+});
+
+/**
+ * #2164 — the three counters the MCP layer stamps onto EVERY tool response,
+ * in one round-trip.
+ *
+ * `microStatus()` asked for them separately. Benchmarked, that is ~30 ms added
+ * to every single MCP call: three requests a single-threaded daemon serves one
+ * after another, so the `Promise.all` around them parallelised nothing. The
+ * numbers themselves cost 13 + 13 + 3 ms — the waste was the queueing, not the
+ * work.
+ *
+ * Same values, same names, so the agent-facing `_status` block is unchanged.
+ */
+readTrackingRouter.get("/micro-status", (req, res) => {
+    const consumer_id = req.query.consumer_id as string | undefined;
+    const project = (req.query.project as string | undefined) || null;
+    if (!consumer_id) return badRequest(res, "consumer_id required");
+    const by_agent = (req.query.by_agent as string | undefined) ?? consumer_id;
+    res.json({
+        consumer_id,
+        project,
+        unread_project: project ? unreadCount(consumer_id, project) : 0,
+        unread_pings: unreadPingCount(consumer_id),
+        my_pending: pendingTicketsByAuthor(by_agent),
+    });
 });
 
 readTrackingRouter.post("/mark-read", (req: Request, res: Response) => {

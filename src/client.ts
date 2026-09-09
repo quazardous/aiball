@@ -256,6 +256,21 @@ export class AiballClient {
         return this.http("DELETE", `/api/tickets/${ticketId}/payload`);
     }
 
+    /**
+     * #2164 — the three `_status` counters in ONE round-trip.
+     *
+     * They used to be three calls wrapped in `Promise.all`, which parallelises
+     * nothing against a single-threaded daemon: benchmarked at ~30 ms added to
+     * every MCP tool response, almost all of it queueing.
+     */
+    microStatusCounts(project: string | null) {
+        const proj = project ? `&project=${encodeURIComponent(project)}` : "";
+        return this.http<{ unread_project: number; unread_pings: number; my_pending: number }>(
+            "GET",
+            `/api/micro-status?consumer_id=${encodeURIComponent(this.agentId)}${proj}`,
+        );
+    }
+
     /** Per-project subscriber + content stats (« nobody is listening » hint). */
     projectStats(project: string) {
         return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);
