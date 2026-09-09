@@ -9,7 +9,7 @@
  *
  * Exposed entry point: `registerBootstrapCommands(program)`.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
@@ -464,6 +464,71 @@ export function installSkill(opts: { project: boolean; global: boolean; target?:
     );
 }
 
+
+/**
+ * #2090 — `aiball init gnome-extension`.
+ *
+ * Deliberately NOT the Windows tray. That one supervises the daemon because
+ * Windows has no service manager for a user process; here `systemctl --user`
+ * already does it. So the extension is visibility and shortcuts, and it talks
+ * to the Unix socket rather than the port — which is what keeps any credential
+ * out of a GNOME extension.
+ *
+ * A directory copy, unlike `init skill`'s single file, so a refresh REPLACES
+ * the destination rather than merging into it: a stale `extension.js` left
+ * behind by an older layout would be loaded by the shell alongside the new one.
+ */
+export const GNOME_EXTENSION_UUID = "aiball@quazardous.github.io";
+
+export type GnomeExtensionVerdict =
+    | { kind: "installed"; dest: string; src: string }
+    | { kind: "skipped-exists"; dest: string }
+    | { kind: "missing-source"; src: string };
+
+/**
+ * The copy itself, returning a VERDICT instead of dying — `die()` exits the
+ * process, so the refusal to clobber is only observable from here. Mirrors
+ * `copySkill` / `SkillInstallVerdict` next door.
+ */
+export function copyGnomeExtension(opts: { target?: string; force: boolean }): GnomeExtensionVerdict {
+    const src = join(aiballInstallRoot(), "gnome", GNOME_EXTENSION_UUID);
+    if (!existsSync(join(src, "metadata.json"))) return { kind: "missing-source", src };
+    const destDir = opts.target ?? join(homedir(), ".local", "share", "gnome-shell", "extensions");
+    const dest = join(destDir, GNOME_EXTENSION_UUID);
+    if (existsSync(dest) && !opts.force) return { kind: "skipped-exists", dest };
+    if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
+    mkdirSync(destDir, { recursive: true });
+    cpSync(src, dest, { recursive: true });
+    return { kind: "installed", dest, src };
+}
+
+export function installGnomeExtension(opts: { target?: string; force: boolean }): void {
+    if (process.platform !== "linux" && opts.target === undefined) {
+        die(`init gnome-extension: GNOME Shell extensions are a Linux thing (this is ${process.platform})`);
+    }
+    const v = copyGnomeExtension(opts);
+    if (v.kind === "missing-source") {
+        die(`init gnome-extension: source not found at ${v.src} — is the install root correct?`);
+    }
+    if (v.kind === "skipped-exists") {
+        die(`init gnome-extension: ${v.dest} already exists — pass --overwrite to refresh`);
+    }
+    process.stdout.write(
+        [
+            `Installed the aiball GNOME extension → ${v.dest}`,
+            ``,
+            `Source: ${v.src}`,
+            `Enable it with:  gnome-extensions enable ${GNOME_EXTENSION_UUID}`,
+            `On Wayland the shell has to be restarted before it appears (log out and back in);`,
+            `on X11, Alt+F2 then "r" is enough.`,
+            ``,
+            `It reads the local Unix socket, so it carries no token. Re-run with`,
+            `--overwrite to refresh after an aiball upgrade.`,
+            ``,
+        ].join("\n"),
+    );
+}
+
 /**
  * #651 david `fzsqeg` — called from `bootstrapInit` so `aiball init` and
  * `claude-loop init` automatically deploy the skill to the GLOBAL
@@ -826,6 +891,20 @@ export function registerBootstrapCommands(program: Command): void {
                 target: o.target,
                 force: o.overwrite === true,
             });
+        });
+
+
+    // #2090: `aiball init gnome-extension` — deploy the shipped GJS extension
+    // into ~/.local/share/gnome-shell/extensions/. Mirrors `init skill`: an
+    // artefact that ships in the repo, copied into a user directory, refreshed
+    // with --overwrite.
+    initCmd
+        .command("gnome-extension")
+        .description("Install the aiball GNOME Shell extension into ~/.local/share/gnome-shell/extensions/")
+        .option("--target <path>", "Explicit extensions directory (the extension lands at <path>/" + GNOME_EXTENSION_UUID + ")")
+        .option("--overwrite", "Replace an existing install (a refresh REPLACES the directory, it does not merge)")
+        .action((o: { target?: string; overwrite?: boolean }) => {
+            installGnomeExtension({ target: o.target, force: o.overwrite === true });
         });
 
     // #380: `aiball init tailscale` — configure host-level remote access by

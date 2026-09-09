@@ -35,6 +35,7 @@
     "config",
     "welcome",
     "skills",
+    "gnome",
     "systemd",
     "assets",
     "frontend/dist",

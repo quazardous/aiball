@@ -25,6 +25,15 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **A GNOME Shell indicator**, the Linux counterpart of the Windows tray:
+  daemon state and version in the top bar, with the number of tickets waiting
+  on a human decision beside it, and the rest — actionable, open, running loops
+  — one click away. Install it with `aiball init gnome-extension`. It
+  deliberately does not supervise the daemon the way the Windows tray does,
+  because `systemctl --user` already does that and doing it twice would only
+  create a fight. It reads the local Unix socket rather than the HTTP port, so
+  no credential ever lives inside a desktop extension.
+
 - A project nested inside another now **inherits its parent's `project_type`**
   when it declares none of its own. A repo checked out inside a `private` one
   was being handed the `public` onboarding kit — the rules about secrets and

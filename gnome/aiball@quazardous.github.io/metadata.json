@@ -1,0 +1,8 @@
+{
+    "uuid": "aiball@quazardous.github.io",
+    "name": "aiball",
+    "description": "Daemon state and queue counters for the aiball board, in the top bar. Talks to the local Unix socket, so it holds no token.",
+    "shell-version": ["48", "49", "50"],
+    "url": "https://github.com/quazardous/aiball",
+    "version-name": "0.1.0"
+}

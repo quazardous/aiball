@@ -70,6 +70,7 @@ Root:
 - [`MIGRATIONS.md`](./docs/MIGRATIONS.md) — drizzle/SQLite migration conventions.
 - [`I18N.md`](./docs/I18N.md) — i18n policy (English-only today) + proposed approach.
 - [`PAYLOADS.md`](./docs/PAYLOADS.md) — the payload zone a ticket may carry (#2109): the schema lists the PUBLIC keys, who reads values vs shape, and the deliberate `aiball payload dump`.
+- [`GNOME-EXTENSION.md`](./docs/GNOME-EXTENSION.md) — the GNOME Shell top-bar indicator (#2090): install, what it deliberately does NOT do (no supervision — systemd already does it), why it holds no token, and the version-treadmill it commits to.
 - [`UI-KIT.md`](./docs/UI-KIT.md) — how the Vue frontend is structured: build & entry, routing, component layout, the data layer, styling, and the UI-kit primitives + conventions.
 - [`TICKET_LIFECYCLE.md`](./docs/TICKET_LIFECYCLE.md) — TARGET design: ticket states/events + the per-consumer `actionable` gate (`last_actor` model unifying #265/#273/#358).
 
