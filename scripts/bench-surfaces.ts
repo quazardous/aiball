@@ -192,6 +192,20 @@ async function main(): Promise<void> {
     api.push(await benchApi("projects detailed", "/api/projects?detailed=1"));
     table("API over the Unix socket", api);
 
+    // #2171 — what `poll` is made of. It fires these in a `Promise.all`, which
+    // parallelises nothing against a daemon that serves one caller at a time,
+    // so the tool's cost is very nearly their SUM. Measuring the parts is what
+    // turns "poll is slow" into a decision about which part to attack.
+    const parts: Stat[] = [];
+    parts.push(await benchApi("health", "/api/health"));
+    parts.push(await benchApi("projects detailed", "/api/projects?detailed=1"));
+    parts.push(await benchApi("my pending tickets", `/api/messages?kind=ticket_created&status=pending&by_agent=${enc(CONSUMER)}`));
+    parts.push(await benchApi("my pending comments", `/api/messages?kind=comment_added&status=pending&by_agent=${enc(CONSUMER)}`));
+    parts.push(await benchApi("pings count", `/api/pings/count?consumer_id=${enc(CONSUMER)}`));
+    parts.push(await benchApi("plans to execute", "/api/decisions/plans-to-execute"));
+    table("what `poll` is made of (fired together, served one at a time)", parts);
+    console.log(`  ${"sum of the parts".padEnd(20)}  ${parts.reduce((a, r) => a + r.median, 0).toFixed(1).padStart(6)} ms`);
+
     if (API_ONLY) return;
 
     const mcp = new McpClient();

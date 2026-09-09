@@ -1250,7 +1250,13 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     const id = t.id;
     // Return tickets in any status so the moderator can open pending or
     // rejected ones from the inbox and act on them inline.
-    const all = listMessages({ project: t.project });
+    // #2171 — narrow to THIS thread. Without the ticket id this loaded every
+    // message of the project (6014 on aiball) and filtered in JS down to the
+    // handful below, so the header-only probe — the mode documented as the
+    // CHEAP one — cost exactly what the full thread cost: 144 ms either way.
+    // The filter already existed; #2159 added it so the inbox aggregate could
+    // rebuild one entry, and this route never picked it up. 144 ms -> 11 ms.
+    const all = listMessages({ project: t.project, ticket_id: id });
     // Thread feed = comments + lifecycle events, inline. Lifecycle events
     // (close / reopen / resolved) are rendered as system rows in the UI so
     // the reader can see who flipped the state and when. Order: ASC by id.

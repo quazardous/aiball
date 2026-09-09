@@ -1528,40 +1528,64 @@ export function listPlansToExecute(consumerId: string): PlanToExecuteEntry[] {
         const prev = latestByTicket.get(e.ticketId);
         if (!prev || e.id > prev.id) latestByTicket.set(e.ticketId, e);
     }
+    // #2171 — resolve the proposal authors and the tickets in BULK.
+    //
+    // This loop used to ask the database who wrote each proposal, one ticket at
+    // a time. Measured on the live board: 711 tickets carry a latest
+    // `plan_accepted`, the author lookup cost 91 ms of the route's 124, and it
+    // was thrown away for 531 of them on the very next line. Two queries now
+    // answer for all of them, and the loop below touches the database only for
+    // the handful that survive every filter.
+    const candidates = [...latestByTicket.entries()].filter(([, ev]) => ev.kind === "plan_accepted");
+    const proposalIds = candidates.map(([, ev]) => ev.parentId).filter((v): v is number => v != null);
+    const rootIds = candidates.filter(([, ev]) => ev.parentId == null).map(([tid]) => tid);
+    // `parent_message_id` points at the proposal comment; it is NULL for a plan
+    // attached at ticket CREATION (#803 `ticket_new({then:"plan"})`), where the
+    // proposal IS the ticket and the author is `tickets.by_agent`.
+    const authorByProposal = new Map<number, string | null>(
+        proposalIds.length
+            ? db.select({ id: schema.messages.id, byAgent: schema.messages.byAgent })
+                .from(schema.messages).where(inArray(schema.messages.id, proposalIds)).all()
+                .map((r) => [r.id, r.byAgent])
+            : [],
+    );
+    const authorByRoot = new Map<number, string | null>(
+        rootIds.length
+            ? db.select({ id: schema.tickets.id, byAgent: schema.tickets.byAgent })
+                .from(schema.tickets).where(inArray(schema.tickets.id, rootIds)).all()
+                .map((r) => [r.id, r.byAgent])
+            : [],
+    );
+    const mine = candidates.filter(([tid, ev]) => {
+        const author = ev.parentId != null ? authorByProposal.get(ev.parentId) : authorByRoot.get(tid);
+        return author === consumerId;
+    });
+    const ticketById = new Map(
+        mine.length
+            ? db.select({
+                id: schema.tickets.id,
+                title: schema.tickets.title,
+                project: schema.tickets.project,
+                lastActor: schema.tickets.lastActor,
+                status: schema.tickets.status,
+                assignee: schema.tickets.assignee,
+            }).from(schema.tickets).where(inArray(schema.tickets.id, mine.map(([tid]) => tid))).all()
+                .map((r) => [r.id, r])
+            : [],
+    );
+
     const out: PlanToExecuteEntry[] = [];
-    for (const [tid, ev] of latestByTicket) {
-        if (ev.kind !== "plan_accepted") continue;
-        // The accepted proposal must be MINE. parent_message_id points at the
-        // proposal comment ; it is NULL for a plan attached at ticket
-        // CREATION (#803 ticket_new({then:"plan"})) — the proposal is then
-        // the ticket itself, author = tickets.byAgent.
-        const proposalAuthor = ev.parentId != null
-            ? db.select({ byAgent: schema.messages.byAgent })
-                .from(schema.messages)
-                .where(eq(schema.messages.id, ev.parentId))
-                .get()?.byAgent
-            : db.select({ byAgent: schema.tickets.byAgent })
-                .from(schema.tickets)
-                .where(eq(schema.tickets.id, tid))
-                .get()?.byAgent;
-        if (proposalAuthor !== consumerId) continue;
-        const t = db.select({
-            title: schema.tickets.title,
-            project: schema.tickets.project,
-            lastActor: schema.tickets.lastActor,
-            status: schema.tickets.status,
-            assignee: schema.tickets.assignee,
-        })
-            .from(schema.tickets)
-            .where(eq(schema.tickets.id, tid))
-            .get();
+    for (const [tid, ev] of mine) {
+        const t = ticketById.get(tid);
         if (!t || t.status !== "approved") continue;
         // Assigned to SOMEONE ELSE → their dossier, not my execution queue
         // (caught live : #900, my accepted plan but assignee=aiball-win).
         if (t.assignee && t.assignee !== consumerId) continue;
         // I acted since the accept → I'm on it (or done) : not "to execute".
         if (t.lastActor === consumerId) continue;
-        // Closed tickets drop out (latest close > latest reopen).
+        // Closed tickets drop out (latest close > latest reopen). Last on
+        // purpose: it is the only remaining per-ticket query, so it runs for
+        // the survivors rather than for the board.
         if (isTicketClosed(tid)) continue;
         out.push({
             ticket_id: tid,
