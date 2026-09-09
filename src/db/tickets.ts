@@ -7,7 +7,7 @@
  * Extracted from db.ts (#B.332 Phase A.2).
  */
 import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
-import { invalidateFlagsCache } from "./flags-cache.js";
+import { invalidateFlagsCache } from "./projects.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { listTypedRelationsForTicket } from "./messages.js";
@@ -259,14 +259,13 @@ export function setTicketAssignment(
     assignee: string,
     assigned_by: string,
 ): { released_claim: { ticket_id: number; claimant: string } | null } {
-    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     // #523 david `reztjq` : assignment doit reset le claim courant si claimant
     // existant ET claimant !== nouveau assignee. Self-assign (assignee ==
     // claimant) protégé : le focus reste, promu en responsabilité.
     // Couvre les 2 call-sites (route API + automation runtime) en poussant la
     // logique au niveau DB plutôt qu'API.
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const cur = tx.select({ claimant: schema.tickets.claimant })
             .from(schema.tickets)
             .where(eq(schema.tickets.id, ticket_id))
@@ -292,6 +291,10 @@ export function setTicketAssignment(
                 : null,
         };
     });
+    // #1168 — claim/assign change the actionable held-by-other set.
+    // #2165 — AFTER the write: the repair reads the row it is told about.
+    invalidateFlagsCache([ticket_id]);
+    return out;
 }
 
 /**
@@ -301,11 +304,13 @@ export function setTicketAssignment(
  * tiebreak (#430) + token attribution (#434). Independent of any assignment.
  */
 export function setTicketClaim(ticket_id: number, claimant: string, at: string = nowIso()): void {
-    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     getDb().update(schema.tickets)
         .set({ claimant, claimedAt: at })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
+    // #1168 — claim/assign change the actionable held-by-other set.
+    // #2165 — AFTER the write: the repair reads the row it is told about.
+    invalidateFlagsCache([ticket_id]);
 }
 
 /**
@@ -329,20 +334,24 @@ export function ticketsClaimedBy(consumer_id: string): { id: number; claimed_at:
 
 /** #436: release a ticket's ASSIGNMENT (responsibility) — back to the shared pool. */
 export function releaseTicketAssignment(ticket_id: number): void {
-    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     getDb().update(schema.tickets)
         .set({ assignee: null, assignedBy: null, assignedAt: null })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
+    // #1168 — claim/assign change the actionable held-by-other set.
+    // #2165 — AFTER the write: the repair reads the row it is told about.
+    invalidateFlagsCache([ticket_id]);
 }
 
 /** #436: release a ticket's CLAIM (focus) — drop the lock, keep any assignment. */
 export function releaseTicketClaim(ticket_id: number): void {
-    invalidateFlagsCache(); // #1168 — claim/assign change the actionable held-by-other set
     getDb().update(schema.tickets)
         .set({ claimant: null, claimedAt: null })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
+    // #1168 — claim/assign change the actionable held-by-other set.
+    // #2165 — AFTER the write: the repair reads the row it is told about.
+    invalidateFlagsCache([ticket_id]);
 }
 
 /**
@@ -354,6 +363,8 @@ export function releaseTicketHold(ticket_id: number): void {
         .set({ assignee: null, assignedBy: null, assignedAt: null, claimant: null, claimedAt: null, isClaim: 0 })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
+    // #2165 — same held-by-other set the claim/assign writers repair.
+    invalidateFlagsCache([ticket_id]);
 }
 
 /**
@@ -448,6 +459,10 @@ export function setTicketPostpone(ticketId: number, until: string | null): boole
         .set({ postponedUntil: until })
         .where(eq(schema.tickets.id, ticketId))
         .run();
+    // #2165 — `postponed_until` decides membership of `openIds` outright, and
+    // this path never invalidated anything. It went unnoticed while any other
+    // write emptied the whole cache; a repair heals only what it is told about.
+    invalidateFlagsCache([ticketId]);
     return res.changes > 0;
 }
 

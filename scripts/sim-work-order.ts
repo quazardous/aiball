@@ -73,7 +73,10 @@ const { computeHotFocus, compareWorkOrder } = await import("../src/db/work-order
 type WorkOrderCtx = Parameters<typeof compareWorkOrder>[2];
 const { ticketSelfLastActivity } = await import("../src/db/tickets.js");
 const { hotWindowSec } = await import("../src/api/inbox-row.js");
-const { invalidateFlagsCache } = await import("../src/db/flags-cache.js");
+const { clearFlagsCache } = await import("../src/db/flags-cache.js");
+// #2165 — l'invalidation RÉELLE, celle que le daemon appelle. Le simulateur
+// ne modélise plus la réparation : il la juge.
+const { invalidateFlagsCache } = await import("../src/db/projects.js");
 
 const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
 const hotWinMs = hotWindowSec() * 1000;
@@ -176,13 +179,13 @@ function clockHorizon(): void {
  * laisse d'autres tickets faussement gatés — et un ticket faussement gaté
  * disparaît d'une file sans bruit.
  */
-function cacheInvalidationTrial(samples: number, naive = false): void {
+function cacheInvalidationTrial(samples: number, unwired = false): void {
     const db = getDb();
-    console.log(`\n  couche d'invalidation ${naive ? "NAÏVE (témoin négatif)" : "ciblée"} — ${samples > 0 ? `${samples} écritures` : "tout le corpus"}`);
+    console.log(`\n  invalidation ${unwired ? "DÉBRANCHÉE (témoin négatif)" : "réelle (#2165)"} — ${samples > 0 ? `${samples} écritures` : "tout le corpus"}`);
     // Échantillon DIRIGÉ vers le cas difficile. Tirer des tickets au hasard
-    // teste surtout des fils isolés, où toute réparation naïve passe : le cas
-    // qui casse est le BLOQUEUR, dont la fermeture libère ses dépendants. On
-    // met donc en tête les tickets portant une relation `depends_on`/`blocks`.
+    // teste surtout des fils isolés, où toute réparation passe : le cas qui
+    // casse est le BLOQUEUR, dont la fermeture libère ses dépendants. On met
+    // donc en tête les tickets portant une relation `depends_on`/`blocks`.
     const openSet = computeActionableTicketIds(CONSUMER).openIds;
     const related = new Set<number>();
     for (const r of db.select({ src: schema.messages.ticketId, tgt: schema.messages.sourceTicketId, meta: schema.messages.meta })
@@ -199,59 +202,51 @@ function cacheInvalidationTrial(samples: number, naive = false): void {
     const ordered = [...related, ...rest];
     const open = samples > 0 ? ordered.slice(0, samples) : ordered;
     console.log(`  ${open.length} tickets ouverts, dont ${related.size} portant une relation bloquante`);
+
     let ok = 0;
     const diverged: string[] = [];
-    let seq = naive ? 500_000 : 0;
+    let seq = unwired ? 500_000 : 0;
+    let repairMs = 0;
+    let rebuildMs = 0;
 
-    /** Les tickets dont la réponse peut bouger quand `id` bouge. */
-    const affectedBy = (id: number): number[] => {
-        const rows = db.select({ src: schema.messages.ticketId, tgt: schema.messages.sourceTicketId })
-            .from(schema.messages)
-            .where(eqK(schema.messages.kind, "ticket_relation"))
-            .all() as { src: number; tgt: number | null }[];
-        const out = new Set<number>([id]);
-        for (const r of rows) {
-            if (r.tgt === id) out.add(r.src);
-            if (r.src === id) { if (r.tgt) out.add(r.tgt); }
-        }
-        return [...out];
-    };
+    const asSet = () => new Set(computeActionableTicketIds(CONSUMER).actionableIds);
 
-    // Un seul calcul complet par tour : le `fresh` d'un tour EST le `before` du
-    // suivant. Sur tout le corpus, en faire deux doublerait une boucle qui se
-    // compte déjà en minutes.
-    let before = new Set(computeActionableTicketIds(CONSUMER).actionableIds);
     let n = 0;
     for (const tid of open) {
         if (++n % 100 === 0) process.stdout.write(`\r  … ${n}/${open.length}`);
+        // Le cache est CHAUD au moment de l'écriture, comme sur le daemon.
+        clearFlagsCache();
+        computeActionableTicketIds(CONSUMER);
+
         // Une VRAIE écriture, dans l'instantané : c'est tout l'intérêt d'en avoir un.
         db.insert(schema.messages).values({
             id: 7_000_000 + ++seq, ticketId: tid, kind: "ticket_closed",
             status: "approved", byAgent: "sim", displaySeq: 900_000 + seq, createdAt: nowIso(),
         }).run();
 
-        // Réparation ciblée : on recalcule le ticket écrit ET ses dépendants.
-        // Le témoin négatif ne répare QUE le ticket écrit. S'il passe aussi, le
-        // test ne discrimine rien et le 30/30 d'à côté ne vaut rien.
-        const scope = naive ? [tid] : affectedBy(tid);
-        invalidateFlagsCache();
-        const patchSrc = computeActionableTicketIds(CONSUMER, scope).actionableIds;
-        const patched = new Set(before);
-        for (const id of scope) { if (patchSrc.has(id)) patched.add(id); else patched.delete(id); }
+        // Le témoin n'appelle rien — si le corpus le déclare exact, la
+        // comparaison ne discrimine rien et le score d'à côté ne vaut rien.
+        const t0 = performance.now();
+        if (!unwired) invalidateFlagsCache([tid]);
+        repairMs += performance.now() - t0;
+        const patched = asSet();          // lecture du cache réparé
 
-        invalidateFlagsCache();
-        const fresh = computeActionableTicketIds(CONSUMER).actionableIds;
+        const t1 = performance.now();
+        clearFlagsCache();
+        const fresh = asSet();            // ce qu'un recalcul complet dirait
+        rebuildMs += performance.now() - t1;
 
         const missing = [...fresh].filter((id) => !patched.has(id));
         const extra = [...patched].filter((id) => !fresh.has(id));
         if (missing.length === 0 && extra.length === 0) ok++;
         else diverged.push(`#${tid}: ${missing.length} manquants, ${extra.length} en trop`);
-        before = new Set(fresh);
     }
     process.stdout.write("\r");
-    console.log(`  ${ok}/${open.length} réparations exactes`);
+    console.log(`  ${ok}/${open.length} caches exacts après écriture`);
     for (const d of diverged.slice(0, 5)) console.log(`    divergence ${d}`);
     if (diverged.length > 5) console.log(`    … et ${diverged.length - 5} autres`);
+    console.log(`  coût moyen : réparation ${(repairMs / open.length).toFixed(1)} ms/écriture`
+        + ` contre ${(rebuildMs / open.length).toFixed(1)} ms pour le recalcul qu'elle évite`);
 }
 
 console.log(`\nsimulateur d'ordre de travail — consommateur ${CONSUMER}, page de ${LIMIT}`);
@@ -262,10 +257,10 @@ clockHorizon();
 // Un essai FERME des tickets dans l'instantané, donc deux essais dans le même
 // processus ne partent pas du même état — le second tirerait un autre
 // échantillon et ne comparerait plus rien. Chaque essai veut son propre
-// instantané : `--cache` pour la couche ciblée, `--cache --naive` pour le
-// témoin négatif.
+// instantané : `--cache` pour l'invalidation réelle, `--cache --unwired` pour
+// le témoin négatif.
 if (argv.includes("--cache")) {
-    cacheInvalidationTrial(Number(argOf("samples", "0")), argv.includes("--naive"));
+    cacheInvalidationTrial(Number(argOf("samples", "0")), argv.includes("--unwired"));
 }
 
 if (!KEEP) rmSync(snapHome, { recursive: true, force: true });

@@ -23,6 +23,10 @@ const { getDb } = await import("./connection.js");
 const { submitMessage } = await import("../messages.js");
 const { updateMessageStatus } = await import("./messages.js");
 const { upsertConsumer } = await import("./consumers.js");
+// #2165 — these tests flip `meta` in the tables directly to stand in for the
+// HTTP decide path, so they must also stand in for the invalidation that path
+// does. Without it they read a cache the write went around.
+const { resetFlagsCacheForTests } = await import("./flags-cache.js");
 const { createProject, decisionGateByTicket } = await import("./projects.js");
 const schema = await import("../schema.js");
 const { eq } = await import("drizzle-orm");
@@ -70,6 +74,7 @@ test("ticket_new({then:'plan'}) then meta flipped to accepted → un-gated (go-s
         .set({ meta: JSON.stringify({ decision: { kind: "plan", status: "accepted" } }) })
         .where(eq(schema.tickets.id, id))
         .run();
+    resetFlagsCacheForTests();
     const gate = decisionGateByTicket();
     assert.equal(gate.get(id), false, "accepted plan = go-signal → un-gated");
 });
@@ -92,6 +97,7 @@ test("merge order : ticket_created pending + later comment_added accepted → un
         })
         .where(eq(schema.messages.id, c.id))
         .run();
+    resetFlagsCacheForTests();
     // Sanity : the row IS in the merge pool.
     const persisted = getDb().select()
         .from(schema.messages)

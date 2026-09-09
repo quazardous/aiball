@@ -6,7 +6,13 @@
  * Extracted from db.ts (#B.332 Phase A.2).
  */
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
-import { getCachedDecisionGate, getCachedActionable } from "./flags-cache.js";
+import {
+    getCachedDecisionGate,
+    getCachedActionable,
+    repairEntries,
+    clearFlagsCache,
+    flagsCacheIsCold,
+} from "./flags-cache.js";
 import { idScope, shouldScope } from "./scope-ids.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
@@ -783,7 +789,7 @@ export function purgeOldClosedTickets(
 ): { purged_tickets: number; purged_messages: number } {
     const db = getDb();
     const cutoff = new Date(Date.now() - olderThanDays * 86_400_000).toISOString();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const events = tx.select({
             ticketId: schema.messages.ticketId,
             kind: schema.messages.kind,
@@ -823,6 +829,9 @@ export function purgeOldClosedTickets(
         tx.delete(schema.tickets).where(inArray(schema.tickets.id, purgeIds)).run();
         return { purged_tickets: purgeIds.length, purged_messages: messageIds.length };
     });
+    // #2165 — tickets removed wholesale; the ids are gone, not merely changed.
+    invalidateFlagsCache();
+    return out;
 }
 
 /**
@@ -873,7 +882,7 @@ export function renameProject(oldName: string, newName: string): ProjectRenameRe
         throw new Error(`rename_project: new name "${newTrim}" must not contain whitespace`);
     }
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const oldRow = tx.select({ name: schema.projects.name })
             .from(schema.projects)
             .where(eq(schema.projects.name, oldTrim))
@@ -953,11 +962,14 @@ export function renameProject(oldName: string, newName: string): ProjectRenameRe
             project_token_usage: projectTokenUsage,
         };
     });
+    // #2165 — every ticket changed project, which per-agent work filters read.
+    invalidateFlagsCache();
+    return out;
 }
 
 export function deleteProject(name: string): { deleted_messages: number } {
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const ticketIds = tx.select({ id: schema.tickets.id })
             .from(schema.tickets).where(eq(schema.tickets.project, name)).all()
             .map((r) => r.id);
@@ -983,6 +995,9 @@ export function deleteProject(name: string): { deleted_messages: number } {
         tx.delete(schema.projects).where(eq(schema.projects.name, name)).run();
         return { deleted_messages: ticketIds.length + messageIds.length };
     });
+    // #2165 — a whole project is gone; nothing about the cached sets survives.
+    invalidateFlagsCache();
+    return out;
 }
 
 /**
@@ -1732,4 +1747,98 @@ function computeActionableTicketIdsUncached(
         };
     }
     return { openIds, actionableIds, gatedByBlockerIds: gatedByBlocker };
+}
+
+// =====================================================================
+//  #2165 — the flags cache is REPAIRED by a write, not emptied by it
+// =====================================================================
+
+/**
+ * The tickets a write on `ticketIds` can change the answer for.
+ *
+ * Wider than the write itself, and that width is the whole point. A ticket is
+ * gated out of `actionable` while a blocker it points at is OPEN, so closing X
+ * frees every dependent of X — none of which the writer named. The simulator
+ * measured the difference on the live corpus: the written ticket alone got
+ * 137 of 138 closures right, and the miss was a ticket that DISAPPEARS from a
+ * queue. Adding the relation counterparts made it 138/138.
+ *
+ * One hop is enough: `gatedByBlocker` reads the blocker's own open state, and
+ * the open state of a ticket depends on its lifecycle alone, never on a third
+ * ticket. So the effect of a write stops at the first neighbour.
+ */
+function flagsRepairScope(ticketIds: readonly number[]): number[] {
+    const db = getDb();
+    const scope = new Set<number>(ticketIds);
+    const rows = db.select({
+        sourceTicketId: schema.messages.ticketId,
+        targetTicketId: schema.messages.sourceTicketId,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+            or(
+                inArray(schema.messages.ticketId, [...ticketIds]),
+                inArray(schema.messages.sourceTicketId, [...ticketIds]),
+            ),
+        ))
+        .all();
+    for (const r of rows) {
+        scope.add(r.sourceTicketId);
+        if (r.targetTicketId) scope.add(r.targetTicketId);
+    }
+    return [...scope];
+}
+
+/**
+ * Invalidate the flags cache after a write. **Call it AFTER the mutation** —
+ * the repair reads the database, so running it first recomputes the state the
+ * write was about to replace and hands that back to every reader for the rest
+ * of the TTL. Every call site used to sit on the function's first line, which
+ * was harmless when this only emptied a map.
+ *
+ * With `ticketIds`, the entries are repaired rather than dropped: for each
+ * cached consumer the affected scope is recomputed (4-6 ms per ticket against
+ * ~400 ms for the board) and patched into the sets in place. All three sets
+ * move together — `openIds`, `actionableIds` and `gatedByBlockerIds` are read
+ * side by side by the same callers, and repairing one while leaving another
+ * stale would make them disagree about the same ticket.
+ *
+ * Without ids, it clears. That is the honest answer for a write that cannot
+ * name its blast radius (a project move re-evaluates per-agent work filters
+ * for a whole thread), and it stays correct — just slower.
+ */
+export function invalidateFlagsCache(ticketIds?: readonly number[]): void {
+    if (!ticketIds || ticketIds.length === 0 || flagsCacheIsCold()) {
+        clearFlagsCache();
+        return;
+    }
+    const scope = flagsRepairScope(ticketIds);
+    const freshGate = decisionGateByTicketUncached(scope);
+    repairEntries<ActionableTicketSet, Map<number, boolean>>(
+        (consumerId, val) => {
+            const fresh = computeActionableTicketIdsUncached(consumerId, scope);
+            for (const id of scope) {
+                patchSet(val.openIds, id, fresh.openIds.has(id));
+                patchSet(val.actionableIds, id, fresh.actionableIds.has(id));
+                patchSet(val.gatedByBlockerIds, id, fresh.gatedByBlockerIds.has(id));
+            }
+        },
+        (gate) => {
+            for (const id of scope) {
+                // Absent means "no decision signal", which reads as not gated —
+                // so a ticket whose last decision was removed must be DELETED
+                // from the map, not left behind holding its old `true`.
+                const v = freshGate.get(id);
+                if (v === undefined) gate.delete(id);
+                else gate.set(id, v);
+            }
+        },
+    );
+}
+
+function patchSet(set: Set<number>, id: number, present: boolean): void {
+    if (present) set.add(id);
+    else set.delete(id);
 }

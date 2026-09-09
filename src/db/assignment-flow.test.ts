@@ -18,6 +18,7 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-418-"));
 const { getDb, nowIso } = await import("./connection.js");
 const schema = await import("../schema.js");
 const { computeActionableTicketIds } = await import("./projects.js");
+const { resetFlagsCacheForTests } = await import("./flags-cache.js");
 const { setTicketClaim, setTicketAssignment, releaseTicketClaim } = await import("./tickets.js");
 
 const A = "agent-a";
@@ -68,6 +69,10 @@ test("expiry: a stale claim lapses → ticket returns to the shared pool", () =>
     // …but stamp the CLAIM 5h ago (> the default 4h window) → expired.
     const old = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
     db.update(schema.tickets).set({ claimedAt: old }).where(eq(schema.tickets.id, 3)).run();
+    // #2165 — a claim lapsing is TIME passing, not a write: nothing calls the
+    // invalidation for it, which is exactly why the cache keeps a TTL ceiling.
+    // This line is that ceiling, brought forward so the test needn't wait 5 s.
+    resetFlagsCacheForTests();
     assert.ok(actionable(A).has(3), "expired claim: T3 back for A");
     assert.ok(actionable(B).has(3), "expired claim: T3 back in B's pool");
 });

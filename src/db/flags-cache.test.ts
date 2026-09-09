@@ -3,7 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { getCachedDecisionGate, getCachedActionable, invalidateFlagsCache } = await import("./flags-cache.js");
+const { getCachedDecisionGate, getCachedActionable, clearFlagsCache: invalidateFlagsCache } =
+    await import("./flags-cache.js");
 
 test("#1168: getCachedDecisionGate sert le cache dans le TTL, rebuild après invalidation", () => {
     invalidateFlagsCache();

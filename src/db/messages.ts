@@ -8,7 +8,7 @@
  */
 import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { invalidateInboxAgg } from "./inbox-agg.js";
-import { invalidateFlagsCache } from "./flags-cache.js";
+import { invalidateFlagsCache } from "./projects.js";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "../schema.js";
 import {
@@ -61,6 +61,22 @@ function bumpLastActor(
         .set({ lastActor: actor, lastActorAt: at })
         .where(eq(schema.tickets.id, ticketId))
         .run();
+}
+
+
+/**
+ * #2165 — the ticket a write landed on, in the shape `invalidateFlagsCache`
+ * wants. A ticket ROOT carries `ticket_id: null` and is its own ticket, so
+ * reading only `ticket_id` would silently hand back `undefined` for every
+ * ticket creation and turn the repair into a full clear.
+ *
+ * `undefined` for a null message: the write may have happened even though the
+ * re-read came back empty, and clearing is the safe direction to be wrong in.
+ */
+function touchedTicketIds(m: Message | null | undefined): number[] | undefined {
+    if (!m) return undefined;
+    const id = m.ticket_id ?? (m.kind === "ticket_created" ? m.id : null);
+    return id != null ? [id] : undefined;
 }
 
 /**
@@ -239,7 +255,11 @@ export function insertMessage(m: NewMessage): Message {
     // thread's own messages. Naming the ticket repairs that entry instead of
     // dropping a thousand others the write did not touch. This is the hot
     // path — every comment, close and reopen goes through here.
-    invalidateInboxAgg(result.project, result.ticket_id ?? undefined); invalidateFlagsCache();
+    invalidateInboxAgg(result.project, result.ticket_id ?? undefined);
+    // #2165 — and it moves the flags of that thread alone, plus anything its
+    // relations gate. Naming it repairs those entries instead of emptying the
+    // per-consumer actionable sets on every single comment.
+    invalidateFlagsCache(touchedTicketIds(result));
     return result;
 }
 
@@ -433,6 +453,28 @@ export function listPendingResolvedForTicket(ticketId: number): Message[] {
     return rows.map((r) => messageRowToMessage(r, project));
 }
 
+/** The editable half of a message (#2165 — named so `applyMessageEdit` can
+ *  take the same shape rather than restating it). */
+export interface EditMessageFields {
+    /**
+     * #1565 — `title` is the real NOT NULL column now, so null is no longer
+     * accepted: it used to mean "drop the edited_title override and fall
+     * back to the original", and that override no longer exists. The HTTP
+     * layer rejects a null title up front.
+     */
+    title?: string;
+    body?: string | null;
+    summary?: string | null;
+    intent?: Intent | null;
+    /** #B.222: urgency hint. Tickets only; ignored on comments. NULL
+     *  resets to the schema default 'normal' (= no override). */
+    priority?: Priority | null;
+    /** #553 (david `3r3vjq`) : ticket-level fan-out scope (= default
+     *  scope for new events on this ticket). Tickets only ; ignored
+     *  on comments. NULL resets to schema default 'default'. */
+    scope?: string | null;
+}
+
 /**
  * Update the moderation status of a ticket OR a non-ticket message
  * (comment_added / ticket_closed / ticket_resolved / …).
@@ -460,7 +502,21 @@ export function updateMessageStatus(
     matchedRuleId: number | null = null,
     kind?: MessageKind | "ticket_created" | null,
 ): Message | null {
-    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — status flip may change closed/resolved/pending flags
+    invalidateInboxAgg(); // #1167 — status flip may change closed/resolved/pending flags
+    const out = applyMessageStatus(id, status, decidedBy, matchedRuleId, kind);
+    // #2165 — AFTER the write: the repair reads the database, so running it
+    // first would recompute the state this call is about to replace and hand
+    // it back to every reader for the rest of the TTL.
+    invalidateFlagsCache(touchedTicketIds(out));
+    return out;
+}
+function applyMessageStatus(
+    id: number,
+    status: MessageStatus,
+    decidedBy: "human" | "auto" | "owner",
+    matchedRuleId: number | null,
+    kind?: MessageKind | "ticket_created" | null,
+): Message | null {
     const db = getDb();
     const decidedAt = nowIso();
     if (kind === "ticket_created") {
@@ -503,27 +559,14 @@ export function updateMessageStatus(
 
 export function editMessage(
     id: number,
-    fields: {
-        /**
-         * #1565 — `title` is the real NOT NULL column now, so null is no longer
-         * accepted: it used to mean "drop the edited_title override and fall
-         * back to the original", and that override no longer exists. The HTTP
-         * layer rejects a null title up front.
-         */
-        title?: string;
-        body?: string | null;
-        summary?: string | null;
-        intent?: Intent | null;
-        /** #B.222: urgency hint. Tickets only; ignored on comments. NULL
-         *  resets to the schema default 'normal' (= no override). */
-        priority?: Priority | null;
-        /** #553 (david `3r3vjq`) : ticket-level fan-out scope (= default
-         *  scope for new events on this ticket). Tickets only ; ignored
-         *  on comments. NULL resets to schema default 'default'. */
-        scope?: string | null;
-    },
+    fields: EditMessageFields,
 ): Message | null {
-    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — edit may change lastSpeaker/body-gated flags
+    invalidateInboxAgg(); // #1167 — edit may change lastSpeaker/body-gated flags
+    const out = applyMessageEdit(id, fields);
+    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    return out;
+}
+function applyMessageEdit(id: number, fields: EditMessageFields): Message | null {
     const db = getDb();
     // #B.104: re-inject `<!-- q:xxx -->` markers on any new task-list
     // lines the editor added. Existing markers are preserved.
@@ -605,9 +648,9 @@ export function editMessage(
  * isn't a `comment_added`.
  */
 export function deleteComment(id: number, by: string): Message | null {
-    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — delete changes counts/lastSpeaker
+    invalidateInboxAgg(); // #1167 — delete changes counts/lastSpeaker
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
         if (!m || m.kind !== "comment_added") return null;
         const meta = parseMeta(m.meta ?? null);
@@ -627,6 +670,8 @@ export function deleteComment(id: number, by: string): Message | null {
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
+    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    return out;
 }
 
 /**
@@ -650,9 +695,9 @@ export function moveTicket(
     targetProject: string,
     byAgent: string | null,
 ): { ticket: Message; event: Message | null; from: string } | null {
-    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — move changes which project the thread aggregates into
+    invalidateInboxAgg(); // #1167 — move changes which project the thread aggregates into
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
         if (!t) return null;
         const from = t.project;
@@ -696,6 +741,12 @@ export function moveTicket(
             from,
         };
     });
+    // #2165 — a move stays a full CLEAR, deliberately. Per-agent work filters
+    // (#447) narrow the actionable pool by project AND tag, so changing a
+    // thread's project re-evaluates the filter for every ticket it carries —
+    // a blast radius this function cannot enumerate.
+    invalidateFlagsCache();
+    return out;
 }
 
 /**
@@ -786,7 +837,7 @@ export function insertTypedRelation(opts: {
     axis?: RelationAxis;
 }): Message | null {
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const id = nextMessageId(tx);
         const seq = (tx.select({
             n: sql<number>`COALESCE(MAX(${schema.messages.displaySeq}), 0) + 1`,
@@ -819,6 +870,10 @@ export function insertTypedRelation(opts: {
             .from(schema.tickets).where(eq(schema.tickets.id, opts.source_ticket_id)).get();
         return messageRowToMessage(inserted, parent?.project ?? "");
     });
+    // #2165 — a `depends_on` / `blocks` relation gates its dependent the moment
+    // it lands, on BOTH ends. Another hole the old blanket clear was hiding.
+    invalidateFlagsCache([opts.source_ticket_id, opts.target_ticket_id]);
+    return out;
 }
 
 /**
@@ -1258,9 +1313,9 @@ export function reclassifyMessageDecision(
     messageId: number,
     newKind: import("../decisions.js").DecisionKind,
 ): Message | null {
-    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — decision kind change flips plan/resolution flags
+    invalidateInboxAgg(); // #1167 — decision kind change flips plan/resolution flags
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
         if (!m) return null;
         const meta = parseMeta(m.meta ?? null);
@@ -1281,6 +1336,8 @@ export function reclassifyMessageDecision(
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
+    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    return out;
 }
 
 /**
@@ -1301,9 +1358,9 @@ export function promoteMessageToDecision(
     status: Exclude<DecisionStatus, "pending"> | undefined,
     by: string,
 ): Message | null {
-    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — promotion adds a decision
+    invalidateInboxAgg(); // #1167 — promotion adds a decision
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
         if (!m) return null;
         if (m.kind !== "comment_added") {
@@ -1328,6 +1385,8 @@ export function promoteMessageToDecision(
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
+    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    return out;
 }
 
 /**
@@ -1338,9 +1397,9 @@ export function promoteMessageToDecision(
  * can be cleanly removed.
  */
 export function removeMessageDecision(messageId: number): Message | null {
-    invalidateInboxAgg(); invalidateFlagsCache(); // #1167 — removal clears a decision
+    invalidateInboxAgg(); // #1167 — removal clears a decision
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
         if (!m) return null;
         const meta = parseMeta(m.meta ?? null);
@@ -1365,6 +1424,8 @@ export function removeMessageDecision(messageId: number): Message | null {
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
+    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    return out;
 }
 
 /**
@@ -1639,7 +1700,7 @@ export function applyMessageDecision(
     newKind?: import("../decisions.js").DecisionKind,
 ): Message | null {
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
         if (m) {
             const meta = parseMeta(m.meta ?? null);
@@ -1693,4 +1754,11 @@ export function applyMessageDecision(
         if (!fresh) return null;
         return ticketRowToMessage(fresh);
     });
+    // #2165 — accept/reject is the single most gate-relevant write there is,
+    // and it invalidated NOTHING until now. The staleness was invisible: some
+    // other write usually cleared the cache first, and the TTL closed the gap
+    // within five seconds. Found by the repair layer's own tests.
+    invalidateInboxAgg();
+    invalidateFlagsCache(touchedTicketIds(out));
+    return out;
 }

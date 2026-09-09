@@ -22,7 +22,7 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2102-"));
 const { getDb, nowIso } = await import("./connection.js");
 const schema = await import("../schema.js");
 const { createProject, computeActionableTicketIds } = await import("./projects.js");
-const { invalidateFlagsCache } = await import("./flags-cache.js");
+const { clearFlagsCache: invalidateFlagsCache } = await import("./flags-cache.js");
 
 const PROJECT = "p2102";
 const ME = "claude-aiball-dev";

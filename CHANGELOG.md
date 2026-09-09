@@ -58,6 +58,14 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **Several actions now take effect immediately instead of a moment later.**
+  Accepting or rejecting a decision, snoozing or waking a ticket, adding a
+  blocking relation, and the hold released when a ticket closes all changed the
+  database but left cached queues holding the previous answer — so for a few
+  seconds a ticket could still look gated after its plan was accepted, or still
+  look ready after a resolution was proposed. Nothing signalled it and it
+  cleared itself, which is why it went unnoticed for so long.
+
 - Loops no longer inherit a sibling project's working directory. The tmux
   server is shared between loops and keeps the environment of whichever project
   started it first, so every other pane saw that project's `AIBALL_CWD`. aiball
@@ -89,6 +97,19 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **Listing tickets no longer slows down as the board grows.** Asking for the
+  first ten of your work order used to cost the whole board: every ticket was
+  built and scored before nine hundred of them were thrown away. The order is
+  now settled on what the sort actually reads, the page is cut, and only that
+  page is built — and the freshness signal that breaks ties is computed for the
+  handful of tickets a tie could still move, instead of all of them.
+- **A write now repairs the work-order cache instead of emptying it.** Posting
+  a comment, closing a ticket or taking a claim used to throw away everyone's
+  computed queue, so the next person to look paid a full recomputation. The
+  write now recomputes just the tickets it touched — plus the ones their
+  blocking relations free or gate, which is the part no writer can name — and
+  patches them in. The five-second ceiling that rebuilds everything from
+  scratch stays, as the net under any write path that forgets to speak up.
 - A ticket filed by an agent is tagged with the platform that agent runs on
   (`os:linux`, `os:win`, `os:mac`), so a report can be read against the machine
   it came from. Only the client knows this — behind a proxy node the connection

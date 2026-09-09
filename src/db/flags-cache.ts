@@ -10,9 +10,14 @@
  * invalidation path (and covers the time-dependent bits — claim-window expiry,
  * snooze reveal — that no write signals).
  *
- * Leaf module (no DB imports) so the write chokepoints in db/messages.ts can
- * call `invalidateFlagsCache()` without an import cycle. The builders are
- * passed in as callbacks by the owners in projects.ts.
+ * Leaf module: it imports nothing, and knows nothing of the SHAPE of what it
+ * holds. The builders are passed in as callbacks by the owner (projects.ts),
+ * and so is the repair (#2165) — `repairEntries` hands each live entry back to
+ * that owner rather than interpreting it here.
+ *
+ * The public entry point for a write is `invalidateFlagsCache()` in
+ * projects.ts, NOT `clearFlagsCache()` below: naming the tickets a write
+ * touched lets the owner repair those entries instead of dropping everything.
  */
 const TTL_MS = 5_000;
 
@@ -39,17 +44,48 @@ export function getCachedActionable<T>(consumerId: string | undefined, build: ()
 }
 
 /**
- * Drop all cached flags-context. Called from every message write chokepoint
- * and the claim/assign/release paths. Coarse by design — these sets are small
- * to rebuild and cross-consumer coupling (a decision on one thread shifts
- * everyone's gate) makes per-key invalidation not worth the bookkeeping.
+ * #2165 — hand every LIVE entry to its owner so it can be repaired in place.
+ * Expired entries are dropped instead: repairing one would resurrect a value
+ * whose OTHER, time-dependent parts (an expired claim window, a snooze that
+ * came due) the write says nothing about.
+ *
+ * A repair does NOT refresh `at`, for the same reason — the TTL is a ceiling
+ * on how long a value may live without a full rebuild, and naming one ticket
+ * proves nothing about the rest of the board.
  */
-export function invalidateFlagsCache(): void {
+export function repairEntries<A, D>(
+    repairActionable: (consumerId: string | undefined, val: A) => void,
+    repairDecisionGate: (val: D) => void,
+    nowMs: number = Date.now(),
+): void {
+    if (decisionGate) {
+        if (nowMs - decisionGate.at >= TTL_MS) decisionGate = null;
+        else repairDecisionGate(decisionGate.val as D);
+    }
+    for (const [key, hit] of [...actionable]) {
+        if (nowMs - hit.at >= TTL_MS) {
+            actionable.delete(key);
+            continue;
+        }
+        repairActionable(key === ANON ? undefined : key, hit.val as A);
+    }
+}
+
+/** True when something is cached — lets the owner skip the repair's queries. */
+export function flagsCacheIsCold(): boolean {
+    return decisionGate === null && actionable.size === 0;
+}
+
+/**
+ * Drop all cached flags-context. The fallback for a write that cannot name
+ * what it touched (a project move), and the reset used by tests.
+ */
+export function clearFlagsCache(): void {
     decisionGate = null;
     actionable.clear();
 }
 
 /** Tests — force a cold cache. */
 export function resetFlagsCacheForTests(): void {
-    invalidateFlagsCache();
+    clearFlagsCache();
 }
