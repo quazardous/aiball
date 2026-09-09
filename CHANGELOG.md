@@ -25,6 +25,16 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Two `move` commands in the CLI**, which could not move anything between
+  projects until now — the web UI and the MCP tools both could.
+  `aiball ticket move --id N --to <project>` moves one ticket, leaving the same
+  audit comment on its thread as the other two paths.
+  `aiball project move <source> <target>` folds a whole project into an
+  existing one, which is the case `rename` explicitly refuses: it declines when
+  the destination already holds tickets. The source project is left registered
+  and empty rather than deleted, so the step is reversible, and a fold of more
+  than ten tickets needs `--yes` because there is no undo.
+
 - **A GNOME Shell indicator**, the Linux counterpart of the Windows tray:
   daemon state and version in the top bar, with the number of tickets waiting
   on a human decision beside it, and the rest — actionable, open, running loops

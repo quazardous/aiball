@@ -2,7 +2,7 @@
  * `aiball ticket` command group (carved out of cli.ts in #B.213
  * phase 3.C on 2026-05-19). Behavior-preserving move.
  *
- * Subcommands: new, comment, close, list, get, import, export
+ * Subcommands: new, comment, close, move, list, get, import, export
  *
  * Exposed entry point: `registerTicketCommands(program)`.
  */
@@ -175,6 +175,33 @@ export function registerTicketCommands(program: Command): void {
                 };
                 return `exported ticket #${r.ticket.id} → ${r.provider} issue #${r.external.num}\n  ${r.external.url}`;
             });
+        });
+
+    // #2172 — the CLI could not move a ticket between projects, while the MCP
+    // tool and the web UI both could. Same route as those two
+    // (`POST /tickets/:id/move`), so the audit comment the move leaves on the
+    // thread, the permission check and the ping fan-out are identical here.
+    ticket
+        .command("move")
+        .description("Move a ticket to another project (leaves an audit comment on the thread)")
+        .requiredOption("--id <id>", "Ticket id")
+        .requiredOption("--to <project>", "Destination project")
+        .action(async (opts: { id: string; to: string }, cmd) => {
+            const client = buildClient(gOpts(cmd));
+            const id = Number(opts.id);
+            // Read the source project BEFORE moving: `moveTicketTo` returns the
+            // ticket alone, so the response cannot say where it came from, and
+            // a receipt that only names the destination is half a receipt. It
+            // also fails early and clearly on an id that does not exist.
+            let from: string | undefined;
+            try {
+                from = ((await client.getMessage(id)) as { project?: string })?.project;
+            } catch {
+                /* the move below reports the real error */
+            }
+            const r = await client.moveTicket(id, opts.to) as { project?: string };
+            out({ ...r, from }, gOpts(cmd), (x) =>
+                `ticket #${id} moved${from ? ` from "${from}"` : ""} to "${(x as { project?: string }).project ?? opts.to}"`);
         });
 
     ticket

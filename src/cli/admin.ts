@@ -18,6 +18,46 @@ import {
     userCwd,
 } from "./_helpers.js";
 
+
+/** #2172 — above this many tickets, `project move` demands --yes. Low on
+ *  purpose: the number exists to make an accidental fold impossible, not to
+ *  measure anything. */
+export const MOVE_CONFIRM_THRESHOLD = 10;
+
+/**
+ * #2172 — what `project move` should DO, decided without touching the network.
+ *
+ * Extracted so the refusals are testable: they live in a commander action
+ * otherwise, and `die()` exits the process, so the only way to observe a
+ * refusal would be to fork a shell. The rules are the interesting part —
+ * especially "the target does not exist" pointing at `rename` instead of
+ * silently creating it, which is the difference between the two commands.
+ */
+export type ProjectMoveVerdict =
+    | { kind: "same" }
+    | { kind: "no-source"; name: string }
+    | { kind: "no-target"; name: string }
+    | { kind: "empty" }
+    | { kind: "needs-confirm"; count: number }
+    | { kind: "go"; count: number };
+
+export function planProjectMove(input: {
+    source: string;
+    target: string;
+    known: readonly string[];
+    ticketCount: number;
+    yes: boolean;
+}): ProjectMoveVerdict {
+    if (input.source === input.target) return { kind: "same" };
+    if (!input.known.includes(input.source)) return { kind: "no-source", name: input.source };
+    if (!input.known.includes(input.target)) return { kind: "no-target", name: input.target };
+    if (input.ticketCount === 0) return { kind: "empty" };
+    if (input.ticketCount > MOVE_CONFIRM_THRESHOLD && !input.yes) {
+        return { kind: "needs-confirm", count: input.ticketCount };
+    }
+    return { kind: "go", count: input.ticketCount };
+}
+
 export function registerAdminCommands(program: Command): void {
     // ---- rule -----------------------------------------------------------
     const rule = program.command("rule").description("Moderation rule engine");
@@ -110,6 +150,65 @@ export function registerAdminCommands(program: Command): void {
             const client = buildClient(gOpts(cmd));
             const r = await client.renameProject(oldName, newName);
             out(r, gOpts(cmd), (x) => `project "${x.old_name}" renamed to "${x.new_name}" (tickets:${x.tickets} subs:${x.subscriptions} rules:${x.rules + x.automation_rules} consumers:${x.consumers})`);
+        });
+
+    // #2172 — fold a project INTO another one. `rename` already covers the
+    // case where the destination does not exist, and refuses outright when it
+    // does ("project X already exists") — that refusal is precisely the hole
+    // this fills: merging into a project that already holds tickets.
+    //
+    // A loop over the same `POST /tickets/:id/move` the UI and the MCP tool
+    // use, deliberately: it renumbers `display_seq` in the destination (there
+    // is a UNIQUE (project, display_seq) index, so a bulk move that skipped
+    // renumbering would collide), leaves the audit comment on each thread, and
+    // invalidates what it must. None of that gets reimplemented here.
+    //
+    // The source project is left REGISTERED AND EMPTY rather than deleted:
+    // there is no undo, and `project delete` already exists for whoever wants
+    // the tidier end state.
+    project
+        .command("move <source> <target>")
+        .description("Move every ticket of <source> into the EXISTING project <target> (the source is left empty, not deleted)")
+        .option("--yes", `Required past ${MOVE_CONFIRM_THRESHOLD} tickets — this is a bulk write with no undo`)
+        .action(async (source: string, target: string, opts: { yes?: boolean }, cmd) => {
+            const client = buildClient(gOpts(cmd));
+            // Cheap checks first, so a typo costs no query.
+            const known = source === target ? [] : await client.listProjects() as string[];
+            // `status: any` on purpose: a fold has to carry the pending and the
+            // rejected too, or they are stranded in a project nobody looks at.
+            const rows = known.includes(source) && known.includes(target)
+                ? await client.listTickets({ project: source, status: "any" }) as { id: number }[]
+                : [];
+            const verdict = planProjectMove({
+                source, target, known, ticketCount: rows.length, yes: opts.yes === true,
+            });
+            switch (verdict.kind) {
+                case "same":
+                    return die("project move: source and target are the same project");
+                case "no-source":
+                    return die(`project move: project "${verdict.name}" does not exist`);
+                case "no-target":
+                    return die(`project move: project "${verdict.name}" does not exist — to give "${source}" a new name, use: aiball project rename ${source} ${target}`);
+                case "empty":
+                    out({ moved: 0, source, target }, gOpts(cmd), () => `project "${source}" holds no ticket — nothing to move`);
+                    return;
+                case "needs-confirm":
+                    return die(`project move: "${source}" holds ${verdict.count} tickets and there is no undo — pass --yes to go ahead`);
+            }
+            const moved: number[] = [];
+            for (const r of rows) {
+                try {
+                    await client.moveTicket(r.id, target);
+                    moved.push(r.id);
+                } catch (e) {
+                    // Report what DID move. A half-finished fold is recoverable
+                    // — re-run it — but only if the operator is told where it
+                    // stopped instead of being handed a bare stack trace.
+                    die(`project move: stopped at ticket #${r.id} after moving ${moved.length}/${rows.length} — ${(e as Error).message}`);
+                }
+            }
+            out({ moved: moved.length, source, target, ticket_ids: moved }, gOpts(cmd),
+                (x) => `moved ${(x as { moved: number }).moved} ticket(s) from "${source}" into "${target}" — "${source}" is now empty (delete it with: aiball project delete ${source})`);
         });
 
     // #699 — delete a project + every row that references it. Moved out of
