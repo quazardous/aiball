@@ -678,6 +678,59 @@ ticketsRouter.get("/tickets", (req, res) => {
             Date.now(),
             hotWinMs,
         );
+    // #2164 david (« pagination mal faite ? ») — the page is chosen BEFORE the
+    // expensive half is built.
+    //
+    // `limit` used to be the last line of this handler: the route built a flags
+    // context and a row for every ticket of the project, sorted, then kept ten.
+    // Measured on 1038 tickets, `buildTicketFlagsContext` alone costs 651 ms for
+    // the whole list against 70 ms for a page.
+    //
+    // It works because the ORDER does not need the expensive half.
+    // `compareWorkOrder` reads priority, tier, own-claim, assigned-to-me and
+    // hot — all of them sets computed above, none of them from the flags
+    // context. So the order can be settled on the raw rows, cut to the page,
+    // and only that page paid for.
+    //
+    // It applies ONLY when every active filter is decidable without the built
+    // row. `claimable` and `backlog_tier` are computed flags, and `tags` needs
+    // the tag map, so those queries keep the full path — a fast path that
+    // guessed at them would return a plausible page that is simply the wrong
+    // one, which is the failure mode this whole ticket family is about.
+    const sortCtx: WorkOrderCtx = {
+        tierOf: (id) =>
+            (!assumeDrained && unreadMap.get(id)) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
+        priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
+        isHot: (id) => selfHotFocus.has(id),
+        isOwnClaim: (id) => ownClaimIds.has(id),
+        isAssignedToMe: (id) => assignedToMeIds.has(id),
+    };
+    const cheapFiltersOnly = !onlyClaimable && !onlyBacklog && !(tagsFilter && tagsFilter.length > 0);
+    let pageCreated: typeof created | null = null;
+    if (cheapFiltersOnly && limit !== undefined && created.length > limit) {
+        let cand = created;
+        if (onlyOpen) {
+            cand = cand.filter((m) => {
+                const pu = m.postponed_until ?? null;
+                const postponed = !!pu && pu > nowStr;
+                return !closedSet.has(m.id) && (includePostponed || !postponed);
+            });
+        }
+        // `actionable` on a built row IS this set membership (ticket-flags.ts),
+        // so filtering here cannot disagree with filtering there.
+        if (onlyActionable) cand = cand.filter((m) => actionableIds.has(m.id));
+        if (titleContains) cand = cand.filter((m) => (m.title ?? "").toLowerCase().includes(titleContains));
+        if (sinceIso) cand = cand.filter((m) => m.created_at >= sinceIso);
+        pageCreated = [...cand]
+            .sort((a, b) => compareWorkOrder(
+                { id: a.id, priority: a.priority },
+                { id: b.id, priority: b.priority },
+                sortCtx,
+            ))
+            .slice(0, limit);
+    }
+    const buildFrom = pageCreated ?? created;
+
     // #791 — centralised flag computation. The route used to build
     // 5-6 independent Sets and combine them inline; the route now
     // delegates to `computeTicketFlags(row, ctx)`. Adding a new
@@ -688,7 +741,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         : 0;
     const flagsCtx = buildTicketFlagsContext({
         consumerId,
-        ticketIds: createdIds,
+        ticketIds: buildFrom.map((m) => m.id),
         nowMs: Date.now(),
         cooldownSec,
         closedSet,
@@ -701,7 +754,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         // #1573 — same effective value the claimable lens uses just above.
         canClaim: consumerCanClaim,
     });
-    const tickets = created.map((m) => {
+    const tickets = buildFrom.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
         const flags = computeTicketFlags(
@@ -817,18 +870,10 @@ ticketsRouter.get("/tickets", (req, res) => {
         // cross-agent. Le ranking d'un agent suit son propre focus, pas celui
         // des autres (préserve la sémantique #532 `bmzpfr`). Le `hot` row flag
         // au-dessus utilise crossAgent pour la visibility (séparé exprès).
-        const ctx: WorkOrderCtx = {
-            tierOf: (id) =>
-                // #461 — `assume_drained` flag skips the unread-tier check so
-                // unread tickets fall into actionable-tier alongside the rest
-                // and the head matches what `ticket_claim` returns AFTER the
-                // agent drains its pings.
-                (!assumeDrained && unreadMap.get(id)) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
-            priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
-            isHot: (id) => selfHotFocus.has(id),
-            isOwnClaim: (id) => ownClaimIds.has(id), // #430: own live claim sorts above hot
-            isAssignedToMe: (id) => assignedToMeIds.has(id), // #436(4): handed to me → below claim, above hot
-        };
+        // #2164 — the same comparator the page was chosen with, hoisted above so
+        // the two can never drift apart. Re-sorting an already-ordered page is a
+        // no-op; on the full path this is the original behaviour untouched.
+        const ctx: WorkOrderCtx = sortCtx;
         if (onlyBacklog) {
             // #791 wahxsj (Q2) — when the caller asked for the backlog,
             // sort by `backlog_tier` first: hot (0) > actionable (1) >
