@@ -72,3 +72,21 @@ be checked and the list widened, or it silently stops loading.
 The shipped manifest declares Shell 48, 49 and 50. Only **50.4** has been
 exercised; the two older entries rest on the extension API being stable across
 that range, not on a run.
+
+That obligation is only bearable if checking is one command, so it is:
+
+```bash
+scripts/probe-gnome-extension.sh
+```
+
+It runs a **headless, throwaway** GNOME Shell — no window on your desktop, its
+own dconf and data directory, your live session and its extension list left
+alone — loads the extension there and asks the shell for its state. `ACTIVE`
+means it loaded and `enable()` ran without throwing; anything else prints the
+exception the shell recorded. Exit status follows, so it can gate a release.
+
+The probe is known to discriminate: pointing an import at a missing module
+turns `ACTIVE` into `ERROR`. A check that cannot fail would tell you nothing.
+
+What it does **not** cover is what the thing looks like — headless has no
+screen. Placement, the icon and the label still want a human eye, once.
