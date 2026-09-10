@@ -28,8 +28,8 @@ test("parseQuery: empty / whitespace-only → empty", () => {
     // #2193 — `wordTokens` joined the shape when the whole-word re-rank
     // landed; this deep-equal is what caught the addition, which is the point
     // of pinning a returned object rather than a field at a time.
-    assert.deepEqual(parseQuery(""), { match: null, likeTokens: [], wordTokens: [], empty: true });
-    assert.deepEqual(parseQuery("   "), { match: null, likeTokens: [], wordTokens: [], empty: true });
+    assert.deepEqual(parseQuery(""), { match: null, likeTokens: [], wordTokens: [], expanded: [], empty: true });
+    assert.deepEqual(parseQuery("   "), { match: null, likeTokens: [], wordTokens: [], expanded: [], empty: true });
 });
 
 test("parseQuery: strips FTS5 quoting / prefix chars", () => {
@@ -94,4 +94,21 @@ test("a regex metacharacter in the query does not throw", () => {
     assert.equal(wholeWordScore(["c++"], "we use c++ here", null), 1);
     assert.equal(wholeWordScore(["c++"], "we use cpp here", null), 0);
     assert.doesNotThrow(() => wholeWordScore(["a.b", "[x]", "(y)"], "a.b [x] (y)", null));
+});
+
+test("parseQuery: an expanded token becomes an OR group, groups stay AND-ed", () => {
+    // #2193 — the existing meaning of a multi-word query is "both words".
+    // Expansion must widen INSIDE a token, never turn the query into "either".
+    const r = parseQuery("réveil verrou");
+    assert.match(r.match!, /\(.*"wake".*\)/, "the group is OR-ed inside");
+    assert.match(r.match!, /\).*\(/, "and the two groups sit side by side (AND)");
+    assert.equal(r.expanded.length, 2, "both tokens grew");
+    // The re-rank must still reward what the caller typed, not the synonyms.
+    assert.deepEqual(r.wordTokens, ["réveil", "verrou"]);
+});
+
+test("parseQuery: an unexpanded token keeps its bare quoted form", () => {
+    const r = parseQuery("systemd");
+    assert.equal(r.match, '"systemd"');
+    assert.deepEqual(r.expanded, []);
 });

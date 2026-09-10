@@ -16,6 +16,7 @@
  *     comment) into a single sorted list. That's the public contract.
  */
 
+import { expandToken } from "./search-synonyms.js";
 import type { Intent } from "./db.js";
 import { getRawSqlite } from "./db.js";
 
@@ -44,6 +45,10 @@ export interface SearchHit {
     status: string;
     /** Highlighted snippet around the match (HTML-safe: <mark> tags). */
     snippet: string;
+    /** #2193 — the whole line the match sits on, unmarked, for a grep-shaped
+     *  read. Null when the query matched nothing quotable (short-token LIKE
+     *  fallback, or a match only inside a field this does not scan). */
+    line: string | null;
     /** FTS5 relevance — smaller is more relevant. Two ticket hits and
      *  two comment hits sort by this across kinds. */
     rank: number;
@@ -83,8 +88,14 @@ interface ParsedQuery {
     /** FTS5 MATCH string built from the ≥3-char tokens, or null when the
      *  query has none (→ caller takes the LIKE-only fallback path). */
     match: string | null;
-    /** #2193 — the ≥3-char tokens as written, for the whole-word re-rank. */
+    /** #2193 — the ≥3-char tokens as written, for the whole-word re-rank.
+     *  Deliberately NOT the expanded set: the re-rank must reward the word the
+     *  caller typed, not a synonym the dictionary added — otherwise a hit that
+     *  only matches through expansion sorts as high as an exact one. */
     wordTokens: string[];
+    /** #2193 — the groups that actually grew, for the result header. Empty
+     *  when nothing was expanded, which is the common case. */
+    expanded: string[][];
     /** 1-2 char tokens, applied as LIKE narrowing on base columns. */
     likeTokens: string[];
     /** True when the query has no usable tokens at all (→ empty result). */
@@ -100,14 +111,25 @@ export function parseQuery(raw: string): ParsedQuery {
         .filter((t) => t.length > 0);
     const long = tokens.filter((t) => t.length >= 3);
     const short = tokens.filter((t) => t.length < 3);
+    // #2193 — each token becomes a GROUP: OR inside, AND between. That keeps
+    // the existing meaning of a multi-word query ("both words", never
+    // "either") while letting `réveil` also reach the threads that say `wake`.
+    const groups = long.map((t) => expandToken(t));
+    const expanded = groups.filter((g) => g.length > 1);
     return {
-        match: long.length > 0 ? long.map((t) => `"${t}"`).join(" ") : null,
+        match: long.length > 0
+            ? groups.map((g) => g.length > 1
+                ? `(${g.map((t) => `"${t}"`).join(" OR ")})`
+                : `"${g[0]}"`).join(" ")
+            : null,
+        expanded,
         likeTokens: short,
         /** #2193 — the ≥3-char tokens, kept for the whole-word re-rank. */
         wordTokens: long,
         empty: tokens.length === 0,
     };
 }
+
 
 
 /**
@@ -149,6 +171,66 @@ export function wholeWordScore(tokens: readonly string[], ...parts: (string | nu
         if (new RegExp(`(?<![\\p{L}\\p{N}_])${tok}(?![\\p{L}\\p{N}_])`, "u").test(hay)) score++;
     }
     return score;
+}
+
+
+/**
+ * #2193 — the LINE a match sits on, for a grep-shaped result (david `x925yv`:
+ * "la recherche devrait ressembler à du grep, càd le mot [et] une ligne de
+ * contexte").
+ *
+ * FTS5's `snippet()` gives a 24-token window with `<mark>` tags around the
+ * hit. That is right for the web UI, which highlights, and wrong for an agent,
+ * which reads: it truncates mid-word, carries markup, and can contain newlines
+ * — `"… prend un <mark>verrou</mark> d'écritur…"`. A whole line reads as a
+ * sentence instead.
+ *
+ * "One line of context" is read here as THE line carrying the word, not ±1
+ * around it à la `grep -C1`; that reading is stated on the ticket.
+ *
+ * Returned alongside `snippet`, never instead of it — the UI still wants its
+ * marked-up window.
+ */
+function matchLine(tokens: readonly string[], ...parts: (string | null)[]): string | null {
+    if (tokens.length === 0) return null;
+    const folded = tokens.map(foldForWordTest);
+    for (const part of parts) {
+        if (!part) continue;
+        for (const raw of part.split("\n")) {
+            const line = raw.trim();
+            if (!line) continue;
+            const hay = foldForWordTest(line);
+            if (folded.some((t) => hay.includes(t))) {
+                return line.length > MATCH_LINE_MAX
+                    ? line.slice(0, MATCH_LINE_MAX).replace(/\s+\S*$/, "") + "…"
+                    : line;
+            }
+        }
+    }
+    return null;
+}
+
+/** Wide enough for a sentence, short enough that a wall of results stays a
+ *  list. Cut at a word boundary so it never ends mid-word — the very thing
+ *  that made `snippet()` hard to read. */
+const MATCH_LINE_MAX = 160;
+
+/**
+ * #2193 — the opening line of a body, for the hashid fast-path.
+ *
+ * There, the query IS the identifier: no word of it appears in the text, so
+ * `matchLine` has nothing to find. What a grep-shaped reader wants is still a
+ * line — the first real one, the way `head -1` would answer "what is this".
+ */
+function firstLine(body: string | null): string | null {
+    for (const raw of (body ?? "").split("\n")) {
+        const line = raw.trim();
+        if (!line) continue;
+        return line.length > MATCH_LINE_MAX
+            ? line.slice(0, MATCH_LINE_MAX).replace(/\s+\S*$/, "") + "…"
+            : line;
+    }
+    return null;
 }
 
 /**
@@ -264,6 +346,7 @@ export function searchMessages(
                     status: row.status,
                     snippet: (row.body ?? "").slice(0, 120),
                     rank: 0,
+                    line: firstLine(row.body),
                 }];
             }
         }
@@ -424,6 +507,7 @@ export function searchMessages(
             status: r.status,
             snippet: r.snippet,
             rank: r.rank,
+            line: matchLine(wordTokens, r.title, r.body),
             words: wholeWordScore(wordTokens, r.title, r.body),
         });
     }
@@ -445,6 +529,7 @@ export function searchMessages(
             status: r.status,
             snippet: r.snippet,
             rank: r.rank,
+            line: matchLine(wordTokens, r.body, r.ticket_title),
             words: wholeWordScore(wordTokens, r.ticket_title, r.body),
         });
     }

@@ -96,6 +96,32 @@ export async function microStatus(): Promise<{
     };
 }
 
+/**
+ * #2193 — a grep-shaped response: meta on `#` lines, then one line per result.
+ *
+ * david (`x925yv`): "la recherche devrait ressembler à du grep, càd le mot [et]
+ * une ligne de contexte". `asText` JSON-stringifies everything, which is right
+ * for structured payloads and wrong for a result list an agent skims — a
+ * search hit rendered as JSON buries one sentence under six fields of
+ * ceremony.
+ *
+ * `_status` still rides along, on the first `#` line, because every agent
+ * reads it. Same numbers, same names, no JSON around them.
+ */
+export async function asLines(meta: string[], lines: string[]) {
+    const s = await microStatus();
+    const head = `# unread ${s.unread_project} · pings ${s.unread_pings} `
+        + `· pending ${s.my_pending}${s.project ? ` · ${s.project}` : ""}`;
+    return {
+        content: [
+            {
+                type: "text" as const,
+                text: [head, ...meta.map((m) => `# ${m}`), ...lines].join("\n"),
+            },
+        ],
+    };
+}
+
 export async function asText(v: unknown) {
     const status = await microStatus();
     let payload: unknown;

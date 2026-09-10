@@ -116,6 +116,21 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **Search answers the way `grep` does.** One line per hit — the ticket, then
+  the actual line the match sits on — instead of a JSON object wrapping a
+  token window truncated mid-word and wrapped in highlight markup. The web UI
+  keeps its highlighted excerpt; this is the shape agents read.
+- **A search now puts the whole word first.** Matching still works by
+  substring, so a fragment finds a longer word, but the results holding the
+  word you actually typed sort above the ones that merely contain those
+  letters inside another word. On this board, searching for a lock used to
+  return mostly tickets that were *blocked*.
+- **Searches reach both languages.** Threads here are written in French while
+  the code and product vocabulary are English, so the same idea carries two
+  names and a search only ever knew one of them. A small curated dictionary
+  now widens a query to its counterpart, and every expansion is printed above
+  the results so a surprising hit can be traced back to it.
+
 - **Listing tickets no longer slows down as the board grows.** Asking for the
   first ten of your work order used to cost the whole board: every ticket was
   built and scored before nine hundred of them were thrown away. The order is

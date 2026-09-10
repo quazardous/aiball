@@ -8,7 +8,21 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { asText, client } from "./_helpers.js";
+import { asLines, asText, client } from "./_helpers.js";
+import { expandToken } from "../search-synonyms.js";
+
+
+/** #2193 — how a hit is addressed: the ticket, plus the comment's hashid when
+ *  the match is in a comment. Copy-pasteable into a reply or a `ticket_get`. */
+interface SearchHitLine {
+    ticket_id: number;
+    hashid: string | null;
+    title: string | null;
+    line: string | null;
+}
+function locatorOf(h: SearchHitLine): string {
+    return `#${h.ticket_id}${h.hashid ? `:${h.hashid}` : ""}`;
+}
 
 export function registerTicketReadTools(server: McpServer): void {
     server.registerTool(
@@ -111,7 +125,7 @@ export function registerTicketReadTools(server: McpServer): void {
         "search",
         {
             description:
-                "Full-text search over ticket titles, ticket bodies, and comment / lifecycle bodies. Backed by SQLite FTS5 with a trigram tokenizer: case-insensitive, accent-insensitive, and substring / fragment matching — `broad` finds `broadcast`, and `cast` finds `broadcast` too. Whitespace-separated tokens are AND-ed (so `search('hashid broadcast')` finds rows containing both); each token ≥3 chars is matched as a substring, 1-2 char tokens fall back to a LIKE filter. Returns at most `limit` hits sorted by FTS5 relevance (more relevant first). Each hit carries a `snippet` with `<mark>…</mark>` around the match, plus enough context (project, by_agent, created_at, kind=ticket|comment, hashid for comments) to render without an extra round-trip. Use this instead of scrolling `ticket_list` when you remember a keyword but not a number.",
+                "Full-text search over ticket titles, ticket bodies, and comment / lifecycle bodies. **Answers grep-shaped**: one line per hit, `#<ticket>` or `#<ticket>:<hashid>` followed by THE line the match sits on — a whole sentence, unmarked, not a truncated token window. Meta rides on leading `#` lines.\n\nBacked by SQLite FTS5 with a trigram tokenizer, so matching is case-insensitive, accent-insensitive and by SUBSTRING: `broad` finds `broadcast`, `moderation` finds `modération`. Whitespace-separated tokens are AND-ed. Two things shape the answer beyond that:\n\n**Whole words sort first.** The substring rule decides what comes back; it no longer decides the order. Measured on this corpus, `lock` returned 132 tickets of which 86 matched only through `block`/`blocked` — a ticket STATE here, not a lock. Those are still returned, below the rows holding the actual word.\n\n**Queries are expanded through a bilingual dictionary** (`config/search-synonyms.yaml`), because this board is code-switched: French threads, English identifiers. `réveil` also reaches the threads that say `wake`. Any expansion is printed in the header as `# expanded: réveil → réveil, wake`, so a surprising hit can be traced to a line in that file. The word you typed still ranks above its synonyms.\n\nUse this instead of scrolling `ticket_list` when you remember a keyword but not a number.",
             inputSchema: {
                 query: z.string().describe("Free-form text to look up. Special FTS5 syntax characters are stripped — pass plain words."),
                 project: z.string().optional().describe("Scope to one project (default: all projects the consumer can see)."),
@@ -137,8 +151,25 @@ export function registerTicketReadTools(server: McpServer): void {
                 intent,
                 limit,
                 since,
-            });
-            return asText(hits);
+            }) as SearchHitLine[];
+            // #2193 — grep-shaped: a locator, then THE line the match sits on.
+            // A comment is addressed by its hashid, never by `message_id`
+            // (house convention), so the locator reads the way a reply would.
+            const width = Math.max(0, ...hits.map((h) => locatorOf(h).length));
+            // #2193 — say what the dictionary added. A search that widens in
+            // silence looks like a bug: the surprising hit has no visible
+            // cause, and nobody thinks to suspect a synonym file.
+            const grown = query.trim().split(/\s+/)
+                .map((t) => expandToken(t))
+                .filter((g) => g.length > 1)
+                .map((g) => `${g[0]} → ${g.join(", ")}`);
+            return asLines(
+                [
+                    `${hits.length} hit${hits.length === 1 ? "" : "s"} for « ${query} »`,
+                    ...grown.map((g) => `expanded: ${g}`),
+                ],
+                hits.map((h) => `${locatorOf(h).padEnd(width)}  ${h.line ?? h.title ?? ""}`),
+            );
         },
     );
 

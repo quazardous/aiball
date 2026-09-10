@@ -1,0 +1,39 @@
+# Bilingual search dictionary (#2193).
+#
+# This board is code-switched by construction: the house convention puts
+# product strings, docs and identifiers in English while the threads are
+# written in French. The same concept therefore carries two names, and a
+# substring index knows only one at a time. Measured on the corpus:
+# `modération` and `moderation` return the SAME 145 tickets (the tokenizer
+# folds accents), while `réveil` and `wake` share 7 % of their results,
+# `verrou` and `lock` 6 %, `lenteur` and `performance` 4 %.
+#
+# Each list is a group of equivalent terms, in both directions. A query token
+# found in a group is expanded to the whole group; groups are OR-ed inside and
+# AND-ed between, so `search("réveil verrou")` still means "both", not "either".
+#
+# KEEP THIS SHORT AND SPECIFIC. Every pair widens recall for everyone, and a
+# wrong pair is worse than a missing one: it makes the search quietly answer a
+# question nobody asked. The expansion is printed in the result header exactly
+# so a surprising hit can be traced back to a line in this file.
+#
+# Rejected on measurement, and listed so nobody adds them back on intuition:
+#   file    ↔ queue      `file` appears 1277 times, 237 of them meaning a
+#                        FILE (path, log, .ts) against 36 meaning a queue.
+#   porte   ↔ gate       719 times, overwhelmingly the VERB ("porte sur",
+#                        "qui porte") — only 8 near a decision gate.
+#   modèle  ↔ template   610 times, mostly neither sense; the pairing is not
+#                        supported by usage.
+#   pièce jointe ↔ attachment   `pièce` alone is a common word and the term
+#                        is two words, which this format cannot express.
+groups:
+  - [réveil, reveil, wake]
+  - [verrou, verrous, lock, locks]
+  - [lenteur, lenteurs, performance]
+  - [fil, thread]
+  - [étiquette, tag]
+  - [ticket, issue]
+  - [souscription, abonnement, subscription]
+  - [dépendance, depends_on]
+  - [cap, objectif]
+  - [balayage, sweep]
