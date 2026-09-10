@@ -26,6 +26,7 @@ import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { getConsumer } from "./db/consumers.js";
+import { getConfig } from "./db/config-overrides.js";
 import { listSubscriptions } from "./db/subscriptions.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
@@ -64,6 +65,16 @@ export { isDecisionEventKind };
 
 export interface ValidationError {
     error: string;
+}
+
+/** #2203 — the refusal an agent reads when its summary_until is over budget.
+ *  Written to be enough on its own: it may be the only statement of the rule a
+ *  long-running session ever sees. */
+export function summaryOverBudget(length: number, max: number): string {
+    return `summary_until is ${length} characters; the budget is ${max}. `
+        + "Rewrite it as the ticket's state in one line: where it stands, who plays next, what is still open. "
+        + "Leave out what you just did and the thread's history — a reader who needs the history opens the thread. "
+        + "Nothing was posted: resend with a shorter summary_until.";
 }
 
 export function validateNewMessage(input: unknown): ValidationError | NewMessage {
@@ -146,6 +157,19 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         const provided = typeof o.summary_until === "string" ? o.summary_until.trim() : "";
         if (!provided && !authorIsHuman) {
             return { error: "summary_until is required on comment_added for agent authors (one-line TLDR of the thread state up to this comment). Humans skip the requirement." };
+        }
+        // #2203 — the budget is back, as a REFUSAL. The caps removed above
+        // truncated mid-word; this one never cuts anything: the write is refused
+        // and the agent rewrites. Measured before: summaries had tripled in
+        // length (median 230 → 716) with no gain in the state they carried — a
+        // first comment on a newborn ticket already averaged 600 characters.
+        // The message carries the whole rule, because a session started before
+        // this change still holds the old tool description ("no length cap").
+        if (provided && !authorIsHuman) {
+            const max = Number(getConfig("tickets.summary_until_max", o.project));
+            if (max > 0 && provided.length > max) {
+                return { error: summaryOverBudget(provided.length, max) };
+            }
         }
         if (o.summary_until !== undefined && o.summary_until !== null && typeof o.summary_until !== "string") {
             return { error: "summary_until must be a string" };

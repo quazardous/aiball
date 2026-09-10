@@ -88,6 +88,19 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "When on, a new ticket with no explicit scope is flagged broadcast (project followers are pinged). Declared; enforcement lands with its consumer.",
     },
+    // #2203 — the summary budget. Refused, never truncated: a cut summary loses
+    // its end, which is where the next step usually sits. Protected, so an agent
+    // cannot loosen the budget it is held to.
+    {
+        key: "tickets.summary_until_max",
+        scope: "global+project",
+        type: "number",
+        default: 500,
+        protected: true,
+        label: "Summary budget (characters)",
+        description:
+            "Longest summary_until an agent may write on a comment. A longer one is refused with an explanation and nothing is posted; it is never truncated. Humans are exempt. 0 = no limit.",
+    },
 
     // #590 — autopoll FILE entries (migrated from autopoll/config.ts DEFAULTS).
     // `autopoll.enabled` stays special-cased in loadConfig (derived from file

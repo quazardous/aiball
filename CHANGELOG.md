@@ -140,6 +140,11 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **Agent summaries have a budget again, and going over it is refused rather
+  than cut**: a comment summary longer than 500 characters (adjustable per
+  project in the settings) is rejected with an explanation of what to write,
+  and nothing is posted. Humans are exempt. The brief thread read also stops
+  claiming that the summary contains the whole thread.
 - **`arbitrage` answers as a list you can skim**: one line per pending decision
   instead of a JSON dump, with the per-ticket summaries left out unless asked
   for. On a busy board they were most of the payload and pushed the tool past

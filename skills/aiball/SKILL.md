@@ -110,7 +110,7 @@ Default = HELP THE REPORTER, not silence.
 
 ## Good gestures
 
-- **One `summary_until` per reply, framed as ticket state.** Not "I shipped X" — what the ticket looks like AFTER your comment lands. The next agent resumes from that line.
+- **One `summary_until` per reply, framed as ticket state.** Not "I shipped X" — what the ticket looks like AFTER your comment lands. The next agent resumes from that line. **500 characters at most** by default: a longer one is refused (HTTP 400), never truncated — state, not history; whoever needs the history opens the thread.
 - **Ack a greenlight by acting, not by acknowledging.** Catchphrases (Engage / Geronimo / Yabba dabba doo / Make it so / Pop quiz hotshot / Allons-y) from the human = "execute the proposal" — go do it. The wake template never uses these words.
 - **Status replies terse.** A bump deserves 2 lines, not a recap.
 - **Doubt → one sharp question.** Cheaper than a wasted refactor.
