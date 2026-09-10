@@ -41,6 +41,7 @@ import { HOOKS, buildHookSettings } from "./hooks/registry.js";
 import { buildSpawnSettings } from "./spawn-settings.js";
 import { applyAgentType } from "./agent-type.js";
 import { withInitCwd } from "./init-cwd.js";
+import { readFolderTrust } from "./folder-trust.js";
 import {
     canonicalCwd,
     barColors,
@@ -1359,6 +1360,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // Default behavior: attach. David: "par défaut claude-loop
     // devrait s'attacher (on peut faire un flag inversé)".
     // `--no-attach` opts out → wrapper exits, user re-attaches later.
+    // #2230 — a folder Claude Code was never told to trust opens on its trust
+    // dialog, and with --no-attach nobody would see it. Say so now; the loop
+    // blocks wakes while the dialog is up, and never answers it.
+    if (readFolderTrust(cwd) === false) {
+        process.stdout.write(`claude-loop: Claude Code has not been told to trust ${cwd} — it will ask first, and the loop will not wake it until you answer: ${MUX_CMD} attach -t ${tname}\n`);
+    }
     if (opts.attach === false) {
         process.stdout.write([
             `loop '${name}' started (detached)`,

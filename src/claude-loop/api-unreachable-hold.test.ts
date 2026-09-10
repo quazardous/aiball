@@ -35,6 +35,7 @@ function outage(over: Partial<LoopStateInput> = {}): LoopStateInput {
         paneCompacting: false,
         paneInterrupted: false,
         notLoggedIn: false,
+        trustDialog: false,
         apiUnreachableSinceMs: null,
         apiUnreachableSeenMs: null,
         apiUnreachableTtlMs: TTL,

@@ -66,3 +66,35 @@ export class CompactConfirmWatcher extends BoolWatcher {
         return /Compact this conversation\??/i.test(footer);
     }
 }
+
+/** #2230 — Claude Code's first-run trust dialog for a folder it has never been
+ *  told to trust ("Quick safety check: Is this a project you created or one you
+ *  trust?" · "❯ No, exit" · "Yes, I trust this folder").
+ *
+ *  It matters because the dialog's own selection chevron matches the prompt
+ *  signature (`❯ `), so without this the loop reads the pane as READY and a
+ *  wake would type into the dialog — where Enter picks the highlighted
+ *  "No, exit" and claude quits. The loop never answers it: trusting a folder is
+ *  a persistent choice that belongs to the human.
+ *
+ *  Footer-scoped like CompactConfirmWatcher, so a dialog left in scrollback
+ *  after it was answered does not keep matching; the footer is collapsed to one
+ *  line so a narrow pane that wraps the question still matches. */
+export class TrustDialogWatcher extends BoolWatcher {
+    readonly name = "trustDialog";
+    private footerLines: number;
+    constructor(footerLines = 14) {
+        super();
+        this.footerLines = footerLines;
+    }
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        const footer = paneText
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0)
+            .slice(-this.footerLines)
+            .join(" ")
+            .replace(/\s+/g, " ");
+        return /Quick safety check/i.test(footer) && /Yes, I trust this folder/i.test(footer);
+    }
+}

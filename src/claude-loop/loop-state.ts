@@ -113,6 +113,11 @@ export interface LoopStateInput {
      *  useless until the human runs /login. */
     notLoggedIn: boolean;
 
+    /** #2230 — Claude Code's folder trust dialog is on screen. Blocks ALL wakes
+     *  (even manual): typed into the dialog, a wake's Enter picks "No, exit"
+     *  and claude quits. Only the human answers it. */
+    trustDialog: boolean;
+
     /** #1116 Slice 2 — when the API-unreachable retry banner was detected
      *  (ms epoch), null when clear. Holds ALL wakes (even manual) while
      *  `nowMs − since < apiUnreachableTtlMs`, then FAILS OPEN — a terminal
@@ -341,6 +346,12 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     // runs /login. Blocks even manual wakes (placed before the manual bypass).
     if (input.notLoggedIn) {
         return { allowed: false, reason: "not logged in (run /login)" };
+    }
+
+    // #2230 — never type into Claude Code's trust dialog: Enter picks its
+    // default "No, exit". Blocks even manual wakes, like not-logged-in.
+    if (input.trustDialog) {
+        return { allowed: false, reason: "trust dialog on screen (attach and answer it)" };
     }
 
     // #1116 Slice 2 — claude can't reach the API (it is auto-retrying) : a

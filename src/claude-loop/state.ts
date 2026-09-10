@@ -1228,6 +1228,7 @@ export function readLoopStateInput(
         paneCompacting: ipc.paneCompacting ?? false,
         paneInterrupted: ipc.paneInterrupted ?? false,
         notLoggedIn: ipc.notLoggedIn ?? false,
+        trustDialog: ipc.trustDialog ?? false,
         apiUnreachableSinceMs: ipc.apiUnreachableSinceMs ?? null,
         apiUnreachableSeenMs: ipc.apiUnreachableSeenMs ?? null,
         apiUnreachableTtlMs: API_UNREACHABLE_TTL_MS,

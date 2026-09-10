@@ -200,6 +200,11 @@ export interface IpcState {
      *  the RED link-down overlay) and the wake gate blocks ALL wakes (a wake is
      *  useless until login). Default false. */
     notLoggedIn: boolean;
+    /** #2230 — Claude Code's folder trust dialog is on screen. Set and cleared
+     *  by the TrustDialogWatcher (the dialog gone IS the answer). While true the
+     *  bar paints ORANGE and the wake gate blocks ALL wakes: a wake typed into
+     *  the dialog would pick its default "No, exit". Default false. */
+    trustDialog: boolean;
     /** #1116 — Claude Code can't reach the API (the pane shows a retry banner :
      *  "Unable to connect… · Retrying… · attempt N/10"). Set TRUE by the
      *  ApiUnreachableWatcher, cleared on busy-begin / the first Stop hook (a turn
@@ -274,6 +279,7 @@ const state: IpcState = {
     linkDown: false,
     daemonDown: false,
     notLoggedIn: false,
+    trustDialog: false,
     apiUnreachable: false,
     apiUnreachableSeenMs: null,
     apiUnreachableSinceMs: null,
@@ -463,6 +469,15 @@ export function setIpcDaemonDown(down: boolean): void {
 export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
     if (state.notLoggedIn === notLoggedIn) return;
     state.notLoggedIn = notLoggedIn;
+    notifyIpcChanged();
+}
+
+/** #2230 — flag Claude Code's folder trust dialog as on screen (true) / gone
+ *  (false). notifyIpcChanged → BarRenderer repaints ORANGE and the wake gate
+ *  blocks all wakes while true. */
+export function setIpcTrustDialog(visible: boolean): void {
+    if (state.trustDialog === visible) return;
+    state.trustDialog = visible;
     notifyIpcChanged();
 }
 
@@ -686,6 +701,7 @@ export function resetIpcStateForTests(): void {
     state.linkDown = false;
     state.daemonDown = false;
     state.notLoggedIn = false;
+    state.trustDialog = false;
     state.apiUnreachable = false;
     state.apiUnreachableSinceMs = null;
     state.bootDeadlineMs = null;

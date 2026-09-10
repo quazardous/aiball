@@ -57,6 +57,7 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         paneCompacting: false,
         paneInterrupted: false,
         notLoggedIn: false,
+        trustDialog: false,
         apiUnreachableSinceMs: null,
         apiUnreachableSeenMs: null,
         apiUnreachableTtlMs: 120 * SEC,
@@ -490,6 +491,31 @@ test("#1072 not logged in blocks even a manual wake", () => {
     }));
     assert.equal(v.wakeAllowed, false);
     assert.match(v.wakeSkipReason ?? "", /not logged in/);
+});
+
+test("#2230 trust dialog on screen → wake skipped", () => {
+    const now = T0 + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        idleSinceMs: now,
+        trustDialog: true,
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /trust dialog/);
+});
+
+test("#2230 trust dialog blocks even a manual wake", () => {
+    const now = T0 + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        idleSinceMs: now,
+        trustDialog: true,
+        manualWake: true,
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /trust dialog/);
 });
 
 test("manual wake bypasses user-grace + AFK + defer, but NOT idle-marker", () => {

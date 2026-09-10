@@ -6,7 +6,9 @@ import {
     PickerModeWatcher,
     PickerSessionWatcher,
     ResumingWatcher,
+    TrustDialogWatcher,
 } from "./boot-watchers.js";
+import { TRUST_DIALOG } from "./trust-dialog.fixture.js";
 
 const CTX = { nowMs: 0 };
 
@@ -90,4 +92,38 @@ test("CompactConfirmWatcher: end fires on the visible→hidden transition", () =
     ].join("\n"), CTX);
     w.observe("idle prompt", CTX);
     assert.equal(endCount, 1);
+});
+
+
+test("TrustDialogWatcher: the captured trust dialog → true", () => {
+    assert.equal(new TrustDialogWatcher().observe(TRUST_DIALOG, CTX).visible, true);
+});
+
+test("TrustDialogWatcher: a narrow pane that wraps the question still matches", () => {
+    const narrow = TRUST_DIALOG.replace("Quick safety check: Is this", "Quick safety\ncheck: Is this");
+    assert.equal(new TrustDialogWatcher().observe(narrow, CTX).visible, true);
+});
+
+test("TrustDialogWatcher: an ordinary idle prompt → false (its chevron is not the dialog)", () => {
+    const pane = ["some answer", "─".repeat(60), "❯ ", "─".repeat(60), "  ⏵⏵ auto mode on"].join("\n");
+    assert.equal(new TrustDialogWatcher().observe(pane, CTX).visible, false);
+});
+
+test("TrustDialogWatcher: the resume picker → false", () => {
+    assert.equal(new TrustDialogWatcher().observe("  Resume session\n  Space to preview\n ❯ one", CTX).visible, false);
+});
+
+test("TrustDialogWatcher: the dialog left far up in scrollback after it was answered → false", () => {
+    const pane = [TRUST_DIALOG, ...Array.from({ length: 30 }, (_, i) => `line ${i}`), "─".repeat(60), "❯ ", "─".repeat(60)].join("\n");
+    assert.equal(new TrustDialogWatcher().observe(pane, CTX).visible, false);
+});
+
+test("TrustDialogWatcher: end fires once the dialog is answered", () => {
+    const w = new TrustDialogWatcher();
+    let begin = 0, end = 0;
+    w.on("begin", () => { begin++; });
+    w.on("end", () => { end++; });
+    w.observe(TRUST_DIALOG, CTX);
+    w.observe(["Claude Code v2", "─".repeat(60), "❯ ", "─".repeat(60)].join("\n"), CTX);
+    assert.deepEqual([begin, end], [1, 1]);
 });

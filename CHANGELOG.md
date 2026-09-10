@@ -115,6 +115,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **A loop started in a folder Claude Code has never trusted no longer types into
+  its trust dialog.** The dialog's selection arrow looked like a ready prompt, so
+  the first wake could answer it with the default "No, exit" and close claude.
+  The loop now holds every wake while the dialog is on screen and paints the bar
+  orange with an "attach to answer" hint, and `claude-loop start` warns up front
+  when the folder is not trusted. The question is never answered for you.
 - **Commenting on a ticket that does not exist answers 404 instead of crashing**:
   the API used to fail with a 500 carrying a server stack trace in an HTML page.
   Any unexpected server error is now a plain JSON 500, with the details kept

@@ -105,11 +105,13 @@ import { paneMarkerBarInfo } from "./pane-service.js";
 import { getCompactingDetector } from "./compacting-detector.js";
 import { PaneObserver } from "./pane-watchers/observer.js";
 import { Zone } from "./pane-watchers/zone.js";
+import { composePaneReady } from "./pane-watchers/pane-ready.js";
 import {
     PickerSessionWatcher,
     PickerModeWatcher,
     ResumingWatcher,
     CompactConfirmWatcher,
+    TrustDialogWatcher,
 } from "./pane-watchers/boot-watchers.js";
 import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
@@ -160,7 +162,7 @@ import {
     setIpcSseConnected,
     setIpcLinkDown,
     setIpcDaemonDown,
-    setIpcNotLoggedIn,
+    setIpcNotLoggedIn, setIpcTrustDialog,
     setIpcApiUnreachable,
     refreshIpcApiUnreachableSeen,
     setIpcLastWakeAtMs,
@@ -727,10 +729,13 @@ const errorW = new ErrorWatcher();
 const healthCheckW = new HealthCheckWatcher();
 const promptZoneW = new PromptZoneWatcher();
 const promptInputW = new PromptInputWatcher();
+// #2230 — runtime zone, not boot: the boot zone is left once boot seals, and
+// the watcher must still see the dialog go away.
+const trustDialogW = new TrustDialogWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
+    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -746,13 +751,16 @@ if (getIpcState().bootComplete !== true) {
 // trigger a recompute on its change.
 const refreshPaneReady = (): void => {
     if (!sd) return;
-    const promptVisible = promptW.snapshot().visible;
-    const pickerOrTransient = pickerSessionW.snapshot().visible
-        || pickerModeW.snapshot().visible
-        || resumingW.snapshot().visible
-        || compactConfirmW.snapshot().visible
-        || getCompactingDetector().snapshot().active;
-    setPaneReady(sd, promptVisible && !pickerOrTransient);
+    setPaneReady(sd, composePaneReady({
+        promptVisible: promptW.snapshot().visible,
+        pickerSession: pickerSessionW.snapshot().visible,
+        pickerMode: pickerModeW.snapshot().visible,
+        resuming: resumingW.snapshot().visible,
+        compactConfirm: compactConfirmW.snapshot().visible,
+        compacting: getCompactingDetector().snapshot().active,
+        // #2230 — the dialog's `❯ No, exit` chevron matches the prompt watcher.
+        trustDialog: trustDialogW.snapshot().visible,
+    }));
 };
 
 // Wire watcher events → ipcState side-effects once at module init. The
@@ -809,6 +817,11 @@ if (sd) {
     });
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
     compactConfirmW.on("change", () => refreshPaneReady());
+    // #2230 — Claude Code's folder trust dialog: not ready, every wake blocked,
+    // until the human answers. Cleared by `end`: the dialog gone IS the answer.
+    trustDialogW.on("change", (s) => { setIpcTrustDialog(s.visible); refreshPaneReady(); });
+    trustDialogW.on("begin", () => { log("watcher: trust_dialog begin → wakes blocked until the folder trust question is answered"); });
+    trustDialogW.on("end", () => { log("watcher: trust_dialog end → trust question answered, wakes allowed again"); });
     promptW.on("change", () => refreshPaneReady());
     // #890/#994/#1014 — paneBusy is now owned by the per-tick composite busy
     // decay-stack in refreshPaneMarkers (busy-stack.ts): `esc to interrupt`
