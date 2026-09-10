@@ -130,6 +130,14 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **`arbitrage` answers as a list you can skim**: one line per pending decision
+  instead of a JSON dump, with the per-ticket summaries left out unless asked
+  for. On a busy board they were most of the payload and pushed the tool past
+  what an agent can read. Every decision is still counted, and a cut list says
+  how many it leaves out.
+- **`poll` no longer fetches every pending body only to throw it away**: the
+  daemon drops the bodies and applies the project filter before anything is
+  sent, and the pending lists are capped, flagged when they are cut.
 - **Search answers the way `grep` does.** One line per hit — the ticket, then
   the actual line the match sits on — instead of a JSON object wrapping a
   token window truncated mid-word and wrapped in highlight markup. The web UI

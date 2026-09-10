@@ -39,6 +39,13 @@ export interface SpoolResult {
     file: string;
 }
 
+/** #2198 — what poll() asks the daemon for when it lists my pending posts. */
+export interface PendingListOpts {
+    project?: string | null;
+    summary?: boolean;
+    limit?: number;
+}
+
 export class AiballClient {
     readonly url: string;
     readonly home: string;
@@ -1036,11 +1043,10 @@ export class AiballClient {
             `/api/unread/count?consumer_id=${encodeURIComponent(this.agentId)}${projParam}`,
         );
     }
-    myPendingTickets() {
-        return this.http(
-            "GET",
-            `/api/messages?kind=ticket_created&status=pending&by_agent=${encodeURIComponent(this.agentId)}`,
-        );
+    /** #2198 — `project`, `summary` (no bodies) and `limit` are applied by the
+     *  daemon, so nothing crosses the socket only to be thrown away. */
+    myPendingTickets(opts: PendingListOpts = {}) {
+        return this.http("GET", `/api/messages?${this.pendingQuery("ticket_created", opts)}`);
     }
     /**
      * Pending comments authored by this agent. Symmetric to
@@ -1048,11 +1054,15 @@ export class AiballClient {
      * its own submissions blocked in moderation regardless of kind
      * (per #B.69).
      */
-    myPendingComments() {
-        return this.http(
-            "GET",
-            `/api/messages?kind=comment_added&status=pending&by_agent=${encodeURIComponent(this.agentId)}`,
-        );
+    myPendingComments(opts: PendingListOpts = {}) {
+        return this.http("GET", `/api/messages?${this.pendingQuery("comment_added", opts)}`);
+    }
+    private pendingQuery(kind: "ticket_created" | "comment_added", opts: PendingListOpts): string {
+        const q = new URLSearchParams({ kind, status: "pending", by_agent: this.agentId });
+        if (opts.project) q.set("project", opts.project);
+        if (opts.summary) q.set("summary", "1");
+        if (opts.limit) q.set("limit", String(opts.limit));
+        return q.toString();
     }
     /**
      * First + last non-rejected ticket in scope — used by the slim
@@ -1131,6 +1141,9 @@ export class AiballClient {
                 proposed_by: string | null;
                 created_at: string;
                 summary_until: string | null;
+                actionable?: boolean;
+                superseded?: boolean;
+                superseded_by?: string | null;
             }>;
         }>("GET", `/api/decisions/mine`);
     }

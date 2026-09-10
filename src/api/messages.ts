@@ -129,7 +129,7 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
 });
 
 messagesRouter.get("/messages", (req: Request, res: Response) => {
-    const { status, project, kind, by_agent, limit } = req.query;
+    const { status, project, kind, by_agent, limit, summary } = req.query;
     const list = listMessages({
         status: status as MessageStatus | undefined,
         project: project as string | undefined,
@@ -137,7 +137,19 @@ messagesRouter.get("/messages", (req: Request, res: Response) => {
         by_agent: typeof by_agent === "string" ? by_agent : undefined,
         limit: limit ? Number(limit) : undefined,
     });
-    res.json(withTags(list));
+    // #2198 — `summary=1` drops the bodies HERE, before they cross the socket.
+    // poll() used to fetch every pending ticket with its full body and throw
+    // the bodies away in the MCP process: 92 919 bytes on the wire to deliver
+    // 35 690. A projection belongs where the data is.
+    const rows = summary === "1" || summary === "true"
+        ? list.map((m) => {
+            const r: Record<string, unknown> = { ...m };
+            delete r.body;
+            delete r.original_body;
+            return r;
+        }) as unknown as typeof list
+        : list;
+    res.json(withTags(rows));
 });
 
 messagesRouter.get("/messages/:id", (req, res) => {

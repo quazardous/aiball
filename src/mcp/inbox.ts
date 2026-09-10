@@ -10,7 +10,8 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { asText, client } from "./_helpers.js";
+import { asLines, asText, client } from "./_helpers.js";
+import { ARBITRAGE_DEFAULT_LIMIT, renderArbitrage } from "./arbitrage-lines.js";
 
 export function registerInboxTools(server: McpServer): void {
     server.registerTool(
@@ -77,13 +78,25 @@ export function registerInboxTools(server: McpServer): void {
         "arbitrage",
         {
             description:
-                "#697 F5 — list the pending plan / resolution decisions on tickets THIS agent reports, waiting for accept / reject. The 'ball in MY court' lens : distinct from `my_pending_tickets` (= your drafts waiting on a human moderator) — `arbitrage` is the inverse, work waiting on YOU. Each entry returns `{comment_id, comment_hashid, ticket_id, ticket_title, ticket_project, decision_kind ('plan'|'resolution'), proposed_by, created_at, summary_until}` so the agent can triage without re-fetching every thread. Sorted most-recent-first.",
-            inputSchema: {},
+                "#697 F5 — the pending plan / resolution decisions on tickets THIS agent reports, waiting for your accept / reject. The 'ball in MY court' lens: the inverse of `my_pending_tickets` (your drafts waiting on a moderator). **Answers as lines**, newest first, one decision per line: `#<ticket>:<hashid>`, kind, project, who proposed it, date, ticket title — plus `superseded by <hashid>` on an older amendment (only the latest decision on a ticket needs an answer). An index, not a read: `summary_until` is left out by default, because stacked across dozens of tickets it was most of the payload — pass `full: true` to print it under each line, or open the thread. Every decision is counted in the header; when `limit` cuts the list, the header says how many are not shown.",
+            inputSchema: {
+                full: z
+                    .boolean()
+                    .optional()
+                    .describe("If true, print each decision's summary_until on the line below it. Default false — the index alone."),
+                limit: z
+                    .number()
+                    .int()
+                    .min(1)
+                    .max(500)
+                    .optional()
+                    .describe(`Max decisions to print. Default ${ARBITRAGE_DEFAULT_LIMIT}. When it cuts, the header says how many are not shown.`),
+            },
         },
-        async () => {
+        async ({ full, limit }) => {
             const r = await client.myArbitrage();
-            const decisions = (r as { decisions?: unknown }).decisions ?? [];
-            return asText({ kind: "arbitrage", decisions });
+            const { meta, lines } = renderArbitrage(r.decisions ?? [], { full: full === true, limit });
+            return asLines(meta, lines);
         },
     );
 
@@ -91,7 +104,7 @@ export function registerInboxTools(server: McpServer): void {
         "poll",
         {
             description:
-                "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies.\n\n`unread_pings` and `unread_project` are informational — the wake-injection pipeline owns seen-tracking now (#826 david `74x46c`). Do NOT call `unread({mark_read: true})` to drain : that flag was removed because draining-without-acting was a footgun (agent marked events seen and never acted → events lost). Read `unread({pings: true})` or `unread({...})` if you want to SEE what's queued, but the queue clears via wake-inject (head-FIFO auto-ack) and explicit ticket reads, not via an MCP-side ack call.",
+                "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies. The pending lists are capped (`pending_limit`, default 50); when one is cut, `my_pending_tickets_more` / `my_pending_comments_more` is true, so a cut list never passes for complete.\n\n`unread_pings` and `unread_project` are informational — the wake-injection pipeline owns seen-tracking now (#826 david `74x46c`). Do NOT call `unread({mark_read: true})` to drain : that flag was removed because draining-without-acting was a footgun (agent marked events seen and never acted → events lost). Read `unread({pings: true})` or `unread({...})` if you want to SEE what's queued, but the queue clears via wake-inject (head-FIFO auto-ack) and explicit ticket reads, not via an MCP-side ack call.",
             inputSchema: {
                 include_subscriptions: z
                     .boolean()
@@ -117,6 +130,13 @@ export function registerInboxTools(server: McpServer): void {
                     .describe(
                         "If true, include bodies in my_pending_tickets / my_pending_comments. Default false — summary rows only (id, title, status, intent, …) to save tokens.",
                     ),
+                pending_limit: z
+                    .number()
+                    .int()
+                    .min(1)
+                    .max(500)
+                    .optional()
+                    .describe("Max rows in my_pending_tickets / my_pending_comments. Default 50. A cut list sets my_pending_tickets_more / my_pending_comments_more."),
             },
         },
         async ({
@@ -124,6 +144,7 @@ export function registerInboxTools(server: McpServer): void {
             include_projects,
             all_projects,
             full_pending,
+            pending_limit,
         }) => {
             const wantSubs = include_subscriptions === true;
             const wantProjects = include_projects === true;
@@ -131,6 +152,10 @@ export function registerInboxTools(server: McpServer): void {
             const scopeProject =
                 !allProjects && client.defaultProject ? client.defaultProject : null;
             const summaryPending = full_pending !== true;
+            const pendingLimit = pending_limit ?? 50;
+            // #2198 — project filter, body projection and cap all happen in the
+            // daemon. One row over the limit is asked for, so a cut list can say so.
+            const pendingOpts = { project: scopeProject, summary: summaryPending, limit: pendingLimit + 1 };
             const [
                 daemon,
                 projectSubs,
@@ -150,8 +175,8 @@ export function registerInboxTools(server: McpServer): void {
                     ? client.myTicketSubs().catch(() => ({ subscriptions: [] }))
                     : Promise.resolve(null),
                 client.listProjectsDetailed().catch(() => []),
-                client.myPendingTickets().catch(() => []),
-                client.myPendingComments().catch(() => []),
+                client.myPendingTickets(pendingOpts).catch(() => []),
+                client.myPendingComments(pendingOpts).catch(() => []),
                 client.pingsCount().catch(() => ({ unread: 0 })),
                 client
                     .bookends({ project: scopeProject ?? undefined })
@@ -168,25 +193,17 @@ export function registerInboxTools(server: McpServer): void {
                 openTickets[p.name] = n;
                 openTicketsTotal += n;
             }
-            // Project-scope my_pending_* if AIBALL_PROJECT is set and we're
-            // not in all_projects mode. Default summary projection drops the
-            // body to keep poll() responses small.
-            const projectionPending = (rows: unknown): unknown => {
+            // #2198 — the daemon now filters by project and drops bodies before
+            // anything crosses the socket; it used to ship every body (62% of the
+            // bytes) for this process to throw away. What is left here is the cut.
+            const cutPending = (rows: unknown): { rows: unknown[]; more: boolean } => {
                 const arr = Array.isArray(rows) ? rows : [];
-                const scoped = scopeProject
-                    ? arr.filter(
-                          (m) => (m as { project?: string }).project === scopeProject,
-                      )
-                    : arr;
-                if (!summaryPending) return scoped;
-                return scoped.map((m) => {
-                    const r = m as Record<string, unknown>;
-                    const { body: _b, ...rest } = r;
-                    void _b;
-                    return rest;
-                });
+                return arr.length > pendingLimit
+                    ? { rows: arr.slice(0, pendingLimit), more: true }
+                    : { rows: arr, more: false };
             };
-            const myPendingOut = projectionPending(myPending);
+            const pendingTickets = cutPending(myPending);
+            const myPendingOut = pendingTickets.rows;
             // #1164 S1 — "what should I go execute now" : accepted plans of
             // mine with no action from me since. Scoped like the rest.
             let plansToExecute: unknown[] = [];
@@ -202,7 +219,8 @@ export function registerInboxTools(server: McpServer): void {
             try {
                 presence = await client.presence(scopeProject ?? null);
             } catch { /* degrade silently */ }
-            const myPendingCommentsOut = projectionPending(myPendingComments);
+            const pendingComments = cutPending(myPendingComments);
+            const myPendingCommentsOut = pendingComments.rows;
             // Build the response object — fields are conditionally included
             // based on the opt-in flags. Slim by default per #B.68 user spec.
             const out: Record<string, unknown> = {
@@ -249,11 +267,13 @@ export function registerInboxTools(server: McpServer): void {
                  *  AFK, and in that regime the word reads `loop`. */
                 presence,
                 my_pending_tickets: myPendingOut,
+                ...(pendingTickets.more ? { my_pending_tickets_more: true } : {}),
                 /** Pending comments authored by this agent (#B.69). Needed
                  *  even in `auto-reply` since the strategy can flip to
                  *  `manual` at any moment — comments stuck in moderation
                  *  should always be visible to their author. */
                 my_pending_comments: myPendingCommentsOut,
+                ...(pendingComments.more ? { my_pending_comments_more: true } : {}),
                 unread_pings: (pingCount as { unread?: number }).unread ?? 0,
             };
             if (wantSubs) {
