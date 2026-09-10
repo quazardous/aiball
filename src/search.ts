@@ -83,6 +83,8 @@ interface ParsedQuery {
     /** FTS5 MATCH string built from the ≥3-char tokens, or null when the
      *  query has none (→ caller takes the LIKE-only fallback path). */
     match: string | null;
+    /** #2193 — the ≥3-char tokens as written, for the whole-word re-rank. */
+    wordTokens: string[];
     /** 1-2 char tokens, applied as LIKE narrowing on base columns. */
     likeTokens: string[];
     /** True when the query has no usable tokens at all (→ empty result). */
@@ -101,9 +103,61 @@ export function parseQuery(raw: string): ParsedQuery {
     return {
         match: long.length > 0 ? long.map((t) => `"${t}"`).join(" ") : null,
         likeTokens: short,
+        /** #2193 — the ≥3-char tokens, kept for the whole-word re-rank. */
+        wordTokens: long,
         empty: tokens.length === 0,
     };
 }
+
+
+/**
+ * #2193 — normalise for the whole-word test: lowercase, and strip combining
+ * marks so `modération` and `moderation` compare equal.
+ *
+ * This has to mirror what the trigram tokenizer already does, or the bonus
+ * would DEMOTE a correct hit: searching `moderation` finds `modération`
+ * through FTS5, and a strict word test would then score it zero and push it
+ * behind the substring noise — the opposite of the point.
+ */
+function foldForWordTest(s: string): string {
+    return s.normalize("NFD").replace(/\p{M}+/gu, "").toLowerCase();
+}
+
+/**
+ * #2193 — how many of the query's tokens appear as WHOLE WORDS in this row.
+ *
+ * The trigram tokenizer matches substrings, which is what gives `broad` →
+ * `broadcast` and is worth keeping. What it costs is precision on short
+ * tokens: measured on this corpus, `lock` returns 132 tickets of which 86
+ * (65 %) match only through `block` / `blocked` — and `blocked` is a ticket
+ * STATE here, not a lock.
+ *
+ * So the substring stays the RECALL rule and this becomes the ORDER rule.
+ * Nothing is filtered out; the rows that contain the actual word simply sort
+ * first. A row scoring zero is still returned, just below.
+ *
+ * The boundary is Unicode-aware on purpose: JS `\b` is ASCII-only, so
+ * `\bréveil\b` would not behave — the accented letter reads as a non-word
+ * character and the assertion fires in the middle of the word.
+ */
+export function wholeWordScore(tokens: readonly string[], ...parts: (string | null)[]): number {
+    if (tokens.length === 0) return 0;
+    const hay = foldForWordTest(parts.filter((p): p is string => !!p).join(" "));
+    let score = 0;
+    for (const t of tokens) {
+        const tok = foldForWordTest(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (new RegExp(`(?<![\\p{L}\\p{N}_])${tok}(?![\\p{L}\\p{N}_])`, "u").test(hay)) score++;
+    }
+    return score;
+}
+
+/**
+ * #2193 — the re-rank reads rows the SQL `LIMIT` would have cut, so each
+ * source is asked for more than the caller wants. Without it the fix misses
+ * exactly the case it targets: a row holding the real word, ranked below the
+ * substring noise, never reaches the sort.
+ */
+const OVERFETCH = 4;
 
 /** Build a `LIKE` argument for a token, escaping the LIKE wildcards so a
  *  literal `%`/`_`/`\` in the search term doesn't act as a wildcard. The
@@ -248,7 +302,7 @@ export function searchMessages(
         ticketWhere.push("t.created_at >= ?");
         ticketArgs.push(opts.since);
     }
-    ticketArgs.push(limit);
+    ticketArgs.push(limit * OVERFETCH);
     const ticketRows = sqlite.prepare(`
         SELECT
             t.id              AS id,
@@ -293,7 +347,7 @@ export function searchMessages(
         msgWhere.push("m.created_at >= ?");
         msgArgs.push(opts.since);
     }
-    msgArgs.push(limit);
+    msgArgs.push(limit * OVERFETCH);
     const messageRows = sqlite.prepare(`
         SELECT
             m.id                AS id,
@@ -351,7 +405,10 @@ export function searchMessages(
         `).all(...ids) as { id: number }[];
         for (const r of rows) closedTicketIds.add(r.id);
     }
-    const hits: SearchHit[] = [];
+    // #2193 — `words` rides along only to order the merge; it is stripped
+    // before the result leaves this function, so the public shape is unchanged.
+    const hits: (SearchHit & { words: number })[] = [];
+    const wordTokens = q.wordTokens;
     for (const r of ticketRows) {
         if (opts.open && r.status === "rejected") continue;
         if (opts.open && closedTicketIds.has(r.id)) continue;
@@ -367,6 +424,7 @@ export function searchMessages(
             status: r.status,
             snippet: r.snippet,
             rank: r.rank,
+            words: wholeWordScore(wordTokens, r.title, r.body),
         });
     }
     for (const r of messageRows) {
@@ -387,8 +445,12 @@ export function searchMessages(
             status: r.status,
             snippet: r.snippet,
             rank: r.rank,
+            words: wholeWordScore(wordTokens, r.ticket_title, r.body),
         });
     }
-    hits.sort((a, b) => a.rank - b.rank);
-    return hits.slice(0, limit);
+    // #2193 — whole-word matches first, FTS5 rank inside each band. The
+    // substring rule still decides WHAT comes back; it no longer decides the
+    // order. `words` is internal to the sort and dropped from the result.
+    hits.sort((a, b) => (b.words - a.words) || (a.rank - b.rank));
+    return hits.slice(0, limit).map(({ words: _w, ...hit }) => hit);
 }
