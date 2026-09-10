@@ -589,6 +589,30 @@ export class AiballClient {
     moveTicket(ticket_id: number, project: string) {
         return this.http("POST", `/api/tickets/${ticket_id}/move`, { project });
     }
+    /** #2180 — a ticket's pending `child_of` children, one level, each with who
+     *  attached it and when. A read. */
+    pendingChildren(ticket_id: number) {
+        return this.http<{
+            ticket_id: number;
+            children: Array<{
+                ticket_id: number;
+                project: string;
+                title: string;
+                reporter: string | null;
+                attached_by: string | null;
+                attached_at: string;
+            }>;
+        }>("GET", `/api/tickets/${ticket_id}/pending-children`);
+    }
+    /** #2180 — approve exactly these children (human only). Pass the ids you
+     *  listed: anything that is not, or no longer, a pending child comes back in
+     *  `skipped` and is never approved. */
+    approvePendingChildren(ticket_id: number, ticket_ids: number[]) {
+        return this.http<{
+            approved: number[];
+            skipped: Array<{ ticket_id: number; reason: string }>;
+        }>("POST", `/api/tickets/${ticket_id}/approve-pending-children`, { ticket_ids });
+    }
     /**
      * #418: assign / claim a ticket. Pass `assignee` to PUSH it onto another
      * consumer (human/moderator only); omit it (or pass your own id) to CLAIM it

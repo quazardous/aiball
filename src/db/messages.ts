@@ -1021,6 +1021,60 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
 }
 
 /**
+ * #2180 — the pending children of a ticket, one level down, each with who
+ * attached it and when. Feeds the explicit sweep that approves them.
+ *
+ * Provenance is the point, not decoration: a child the moderator hung under
+ * their own objective needs no second read, while one an agent attached is
+ * exactly what could ride an approval nobody gave it. One level on purpose — a
+ * recursive sweep would approve tickets the moderator never saw listed.
+ *
+ * "Attached" is the latest lineage event for the pair (a direct `parent_of` on
+ * this ticket, or the child's own `child_of` read back as its reciprocal), so
+ * a link removed and re-added reports the re-add.
+ */
+export interface PendingChild {
+    ticket_id: number;
+    project: string;
+    title: string;
+    /** Who filed the child ticket. */
+    reporter: string | null;
+    /** Who created the lineage link — null for a system backfill. */
+    attached_by: string | null;
+    attached_at: string;
+}
+export function listPendingChildren(parentId: number): PendingChild[] {
+    const links = listTypedRelationsForTicket(parentId).filter((r) => r.kind === "parent_of");
+    if (links.length === 0) return [];
+    const rows = getDb().select({
+        id: schema.tickets.id,
+        project: schema.tickets.project,
+        title: schema.tickets.title,
+        byAgent: schema.tickets.byAgent,
+        status: schema.tickets.status,
+    })
+        .from(schema.tickets)
+        .where(inArray(schema.tickets.id, links.map((l) => l.target_ticket_id)))
+        .all();
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const out: PendingChild[] = [];
+    for (const link of links) {
+        const t = byId.get(link.target_ticket_id);
+        if (!t || t.status !== "pending") continue;
+        out.push({
+            ticket_id: t.id,
+            project: t.project,
+            title: t.title,
+            reporter: t.byAgent,
+            attached_by: link.by_agent,
+            attached_at: link.last_event_at,
+        });
+    }
+    // Oldest attachment first: the order things were hung under the ticket.
+    return out.sort((a, b) => a.attached_at.localeCompare(b.attached_at) || a.ticket_id - b.ticket_id);
+}
+
+/**
  * Cycle guard for lineage edges (#275). Returns true if adding the edge
  * "childId child_of parentId" would close a loop — i.e. childId is
  * already an ancestor of parentId (walking `child_of` edges upward from

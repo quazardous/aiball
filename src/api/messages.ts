@@ -54,6 +54,7 @@ import { emitLifecycle } from "../event-bus.js";
 import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
+import { applyModeration } from "./moderation.js";
 
 export const messagesRouter = Router();
 
@@ -177,41 +178,10 @@ function decide(
     if (existing.status !== "pending") {
         return badRequest(res, `message already ${existing.status}`);
     }
-    const updated = updateMessageStatus(id, status, "human", null, existing.kind);
-    if (!updated) return notFound(res);
-    if (status === "approved") {
-        deliverToOutbox(updated);
-        // #B.245 — fanOutPings self-gates on scope=="internal".
-        fanOutPings(updated);
-    } else if (status === "rejected") {
-        // At-insertion fan-out had already delivered pings to subscribers.
-        // The message will never be approved, so wipe those pings so it
-        // stops surfacing as unread on their inboxes.
-        deletePingsForMessage(id);
-    }
-    // Transition ping: notify the message author that a moderator decided
-    // their submission. Routed through the notification service (#260) so
-    // every "decide on someone's post" path notifies the author the same
-    // way — moderation here, decision-on-comment in POST /decide.
-    if (status === "approved" || status === "rejected") {
-        notifyDecision(updated, consumerOf(req));
-    }
-    const decorated = withTagsOne(updated);
-    broadcast({ type: "message_decided", data: decorated });
-    // #321 phase 2 (additive): a moderator approved/rejected a pending message
-    // → emit so the rules engine (#322) can react to the now-live message.
-    emitLifecycle({ op: "decided", message: decorated });
-    // #509 — émet aussi un status_changed dédié pour que l'automation
-    // ticket_status_changed (runtime) fire sans avoir à reconnaître `decided`
-    // comme un transition. old_status = "pending" (la branche est gatée par
-    // existing.status === "pending" plus haut).
-    if (decorated.kind === "ticket_created") {
-        emitLifecycle({
-            op: "status_changed",
-            message: decorated,
-            old_status: "pending",
-        });
-    }
+    // #2180 — the ripple lives in ./moderation.ts so the pending-children
+    // sweep applies exactly the same side-effects per child.
+    const decorated = applyModeration(existing, status, consumerOf(req));
+    if (!decorated) return notFound(res);
     res.json(decorated);
 }
 

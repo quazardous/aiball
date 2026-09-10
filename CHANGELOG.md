@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Approve a ticket's pending sub-tickets in one gesture**, after seeing who
+  attached each one. The thread lists them with who hung each there and when,
+  flags those attached by someone other than the ticket's author, and approves
+  only the ones you tick; `aiball --human ticket approve-children --id N` lists
+  them from the terminal and approves only the ids you pass back. Moderators
+  only, and a sub-ticket attached after you looked is never swept along.
 - **Two `move` commands in the CLI**, which could not move anything between
   projects until now — the web UI and the MCP tools both could.
   `aiball ticket move --id N --to <project>` moves one ticket, leaving the same

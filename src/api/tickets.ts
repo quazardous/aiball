@@ -44,6 +44,7 @@ import {
     isHuman,
     insertTypedRelation,
     listTypedRelationsForTicket,
+    listPendingChildren,
     lineageWouldCycle,
     setTicketOwner,
     setTicketAssignment,
@@ -68,6 +69,7 @@ import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
+import { applyModeration } from "./moderation.js";
 
 /**
  * #2072 — the ticket's state AFTER a mutation, in the exact shape the list
@@ -1039,6 +1041,66 @@ ticketsRouter.post("/tickets/:id/move", (req: Request, res: Response) => {
     // shape here as everywhere else — and a move is precisely when it matters,
     // since changing project can take the row out of the view entirely.
     res.json({ ...updated, ticket: ticketStateAfter(id, consumerOf(req)) });
+});
+
+/**
+ * #2180 — a ticket's pending children, one level, each with who attached it and
+ * when. What the moderator reads before sweeping. A read, open like the other
+ * ticket reads.
+ */
+ticketsRouter.get("/tickets/:id/pending-children", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    res.json({ ticket_id: id, children: listPendingChildren(id) });
+});
+
+/**
+ * #2180 — approve a ticket's pending children in one gesture. Human only: this
+ * is moderation, and an agent able to approve what it hung under an objective
+ * would be approving its own work.
+ *
+ * The body names the ids; there is no "approve all". The moderator approves what
+ * they were shown, each id is re-checked here as still a pending child of this
+ * ticket, and anything else comes back in `skipped` untouched — so a child
+ * attached after the listing, or an unrelated id slipped into the list, is
+ * never approved.
+ */
+ticketsRouter.post("/tickets/:id/approve-pending-children", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const caller = consumerOf(req);
+    if (!isHuman(caller)) {
+        return res.status(403).json({
+            error: "approving pending children is moderation — a registered human moderator only",
+        });
+    }
+    const raw = ((req.body ?? {}) as { ticket_ids?: unknown }).ticket_ids;
+    if (!Array.isArray(raw) || raw.length === 0 || raw.some((n) => !Number.isInteger(n) || (n as number) <= 0)) {
+        return badRequest(res, "ticket_ids (a non-empty array of ticket ids — the ones you were shown) required");
+    }
+    const pending = new Set(listPendingChildren(id).map((c) => c.ticket_id));
+    const children = new Set(
+        listTypedRelationsForTicket(id).filter((r) => r.kind === "parent_of").map((r) => r.target_ticket_id),
+    );
+    const approved: number[] = [];
+    const skipped: Array<{ ticket_id: number; reason: string }> = [];
+    for (const childId of new Set(raw as number[])) {
+        const child = getMessage(childId);
+        if (!pending.has(childId) || !child || child.status !== "pending") {
+            skipped.push({
+                ticket_id: childId,
+                reason: children.has(childId)
+                    ? `not pending (${child?.status ?? "missing"})`
+                    : `not a child of #${id}`,
+            });
+            continue;
+        }
+        if (applyModeration(child, "approved", caller)) approved.push(childId);
+        else skipped.push({ ticket_id: childId, reason: "not found" });
+    }
+    res.json({ ticket_id: id, approved, skipped });
 });
 
 // ---- Typed inter-ticket relations (#B.123 phase B) ------------------------

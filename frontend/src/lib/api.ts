@@ -454,6 +454,16 @@ export interface TokenUsage {
     updated_at: string;
 }
 
+/** #2180 — a pending child of a ticket, with who attached it and when. */
+export interface PendingChild {
+    ticket_id: number;
+    project: string;
+    title: string;
+    reporter: string | null;
+    attached_by: string | null;
+    attached_at: string;
+}
+
 export interface TicketRelation {
     target_ticket_id: number;
     kind: import("./relations").RelationKind;
@@ -983,6 +993,18 @@ export const api = {
      *  human only. Returns the moved ticket header (with its new project). */
     moveTicket: (id: number, project: string) =>
         req<Message>("POST", `/api/tickets/${id}/move`, { project }),
+    /** #2180 — a ticket's pending children, one level, each with who attached it
+     *  and when. */
+    pendingChildren: (id: number) =>
+        req<{ ticket_id: number; children: PendingChild[] }>("GET", `/api/tickets/${id}/pending-children`),
+    /** #2180 — approve exactly these children (human only). Ids that are not,
+     *  or no longer, pending children come back in `skipped`, untouched. */
+    approvePendingChildren: (id: number, ticketIds: number[]) =>
+        req<{ ticket_id: number; approved: number[]; skipped: { ticket_id: number; reason: string }[] }>(
+            "POST",
+            `/api/tickets/${id}/approve-pending-children`,
+            { ticket_ids: ticketIds },
+        ),
     /** #514 — push (or self-claim if assignee = caller) the responsibility for
      *  a ticket. `assignee` empty/omitted = self-claim, else pushes to that
      *  consumer (human/moderator only for cross-assign). Returns the ticket head

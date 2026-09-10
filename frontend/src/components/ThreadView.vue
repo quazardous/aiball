@@ -17,6 +17,7 @@ import ThreadManagePanel from "./ThreadManagePanel.vue";
 import ThreadCommentsList from "./ThreadCommentsList.vue";
 import ThreadMetaHeader from "./ThreadMetaHeader.vue";
 import TicketPayloadPanel from "./TicketPayloadPanel.vue";
+import PendingChildrenSweep from "./PendingChildrenSweep.vue";
 import ThreadActionsDock from "./ThreadActionsDock.vue";
 import ThreadToolbar from "./ThreadToolbar.vue";
 import { STAGE_LABELS, useThreadItems } from "../lib/threadItems";
@@ -529,6 +530,15 @@ async function copyTicketRef() {
                 <TicketPayloadPanel
                     v-if="data.ticket.has_payload"
                     :ticket-id="data.ticket.id"
+                />
+                <!-- #2180 — sweep the ticket's pending children after reading who attached
+                     them. Only mounted when there are child chips at all. -->
+                <PendingChildrenSweep
+                    v-if="(data.ticket.relations ?? []).some((r) => r.kind === 'parent_of')"
+                    :key="`${data.ticket.id}-${(data.ticket.relations ?? []).length}`"
+                    :ticket-id="data.ticket.id"
+                    :reporter="data.ticket.by_agent ?? null"
+                    @done="load"
                 />
                 <ThreadRelations
                     :relations="data.ticket.relations ?? []"

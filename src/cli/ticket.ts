@@ -2,7 +2,7 @@
  * `aiball ticket` command group (carved out of cli.ts in #B.213
  * phase 3.C on 2026-05-19). Behavior-preserving move.
  *
- * Subcommands: new, comment, close, move, list, get, import, export
+ * Subcommands: new, comment, close, move, approve-children, list, get, import, export
  *
  * Exposed entry point: `registerTicketCommands(program)`.
  */
@@ -17,6 +17,41 @@ import {
     out,
     withProject,
 } from "./_helpers.js";
+
+/**
+ * #2180 — what `ticket approve-children` should do, as a pure verdict so a test
+ * can see every branch (`die` exits the process).
+ *
+ * Approving is always a second gesture that names its ids: the listing prints
+ * the exact command to run, and the approval carries only those ids. A child
+ * attached between the listing and the approval is therefore never swept along
+ * — which a bare `--yes` that re-reads "whatever is pending now" would do.
+ */
+export type ChildrenSweepVerdict =
+    | { kind: "none" }
+    | { kind: "preview"; count: number; command: string }
+    | { kind: "go"; ids: number[] }
+    | { kind: "bad-ids"; raw: string };
+export function planChildrenSweep(input: {
+    parentId: number;
+    pendingIds: readonly number[];
+    ids?: string;
+}): ChildrenSweepVerdict {
+    if (input.ids !== undefined) {
+        const parts = input.ids.split(",").map((x) => x.trim().replace(/^#/, "")).filter(Boolean);
+        const ids = parts.map(Number);
+        if (ids.length === 0 || ids.some((n) => !Number.isInteger(n) || n <= 0)) {
+            return { kind: "bad-ids", raw: input.ids };
+        }
+        return { kind: "go", ids: [...new Set(ids)] };
+    }
+    if (input.pendingIds.length === 0) return { kind: "none" };
+    return {
+        kind: "preview",
+        count: input.pendingIds.length,
+        command: `aiball --human ticket approve-children --id ${input.parentId} --ids ${input.pendingIds.join(",")}`,
+    };
+}
 
 export function registerTicketCommands(program: Command): void {
     const ticket = program.command("ticket").description("Create / list / inspect tickets");
@@ -202,6 +237,50 @@ export function registerTicketCommands(program: Command): void {
             const r = await client.moveTicket(id, opts.to) as { project?: string };
             out({ ...r, from }, gOpts(cmd), (x) =>
                 `ticket #${id} moved${from ? ` from "${from}"` : ""} to "${(x as { project?: string }).project ?? opts.to}"`);
+        });
+
+    // #2180 — approve a ticket's pending children in one gesture, after seeing
+    // them. Without --ids it only lists, naming who attached each child; with
+    // --ids it approves those and nothing else (the daemon re-checks each one).
+    ticket
+        .command("approve-children")
+        .description("List a ticket's pending children and who attached them; --ids approves exactly those (human only)")
+        .requiredOption("--id <id>", "Parent ticket id")
+        .option("--ids <list>", "Comma-separated child ids to approve, as printed by the listing")
+        .action(async (opts: { id: string; ids?: string }, cmd) => {
+            const client = buildClient(gOpts(cmd));
+            const id = Number(opts.id);
+            const { children } = await client.pendingChildren(id);
+            const verdict = planChildrenSweep({
+                parentId: id,
+                pendingIds: children.map((c) => c.ticket_id),
+                ids: opts.ids,
+            });
+            switch (verdict.kind) {
+                case "bad-ids":
+                    die(`--ids must be a comma-separated list of ticket ids, got "${verdict.raw}"`);
+                case "none":
+                    out({ ticket_id: id, children }, gOpts(cmd), () => `ticket #${id} has no pending children`);
+                    return;
+                case "preview":
+                    out({ ticket_id: id, children }, gOpts(cmd), () => [
+                        `ticket #${id} has ${verdict.count} pending child(ren):`,
+                        ...children.map((c) =>
+                            `  #${c.ticket_id} [${c.project}] ${c.title}\n      attached by ${c.attached_by ?? "system"} at ${c.attached_at}`),
+                        "",
+                        "to approve exactly these:",
+                        `  ${verdict.command}`,
+                    ].join("\n"));
+                    return;
+                case "go": {
+                    const r = await client.approvePendingChildren(id, verdict.ids);
+                    out(r, gOpts(cmd), (x) => [
+                        `approved ${x.approved.length} child(ren) of #${id}${x.approved.length ? ": " + x.approved.map((n) => `#${n}`).join(", ") : ""}`,
+                        ...x.skipped.map((s) => `  #${s.ticket_id} skipped: ${s.reason}`),
+                    ].join("\n"));
+                    return;
+                }
+            }
         });
 
     ticket
