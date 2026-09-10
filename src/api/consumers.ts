@@ -124,12 +124,16 @@ consumersRouter.post("/consumers", (req: Request, res: Response) => {
     if (kind !== undefined && kind !== "human" && kind !== "agent" && kind !== "sandbox") {
         return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
     }
+    // #2221 — an absent field stays undefined so an existing record keeps it:
+    // defaulting here (null name/note, enabled true) wiped the note and
+    // re-enabled a disabled agent on every partial POST. An explicit null still
+    // clears; a brand-new record gets its defaults from upsertConsumer.
     const c = upsertConsumer({
         consumer_id,
         kind: kind as ConsumerKind | undefined,
-        display_name: typeof display_name === "string" ? display_name : null,
-        enabled: typeof enabled === "boolean" ? enabled : true,
-        note: typeof note === "string" ? note : null,
+        display_name: typeof display_name === "string" || display_name === null ? display_name : undefined,
+        enabled: typeof enabled === "boolean" ? enabled : undefined,
+        note: typeof note === "string" || note === null ? note : undefined,
     });
     broadcast({ type: "consumer_changed", data: c });
     res.json(c);
