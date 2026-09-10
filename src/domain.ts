@@ -84,6 +84,10 @@ export type Intent = typeof INTENTS[number];
  */
 export const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 export type Priority = typeof PRIORITIES[number];
+/** #2216 — a ticket's level: `work` (default) or `steering`. Ordinal: a level
+ *  above would be one more value. */
+export const TICKET_LEVELS = ["work", "steering"] as const;
+export type TicketLevel = typeof TICKET_LEVELS[number];
 
 export const STRATEGIES = ["manual", "auto", "auto-reply"] as const;
 export type Strategy = typeof STRATEGIES[number];

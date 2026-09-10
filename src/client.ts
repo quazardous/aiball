@@ -620,6 +620,11 @@ export class AiballClient {
             skipped: Array<{ ticket_id: number; reason: string }>;
         }>("POST", `/api/tickets/${ticket_id}/approve-pending-children`, { ticket_ids });
     }
+    /** #2216 — set a ticket's level (human only). The response may carry a
+     *  `warning` when a coder agent holds the ticket. */
+    setTicketLevel(ticket_id: number, level: "work" | "steering") {
+        return this.http("POST", `/api/messages/${ticket_id}/edit`, { level });
+    }
     /**
      * #418: assign / claim a ticket. Pass `assignee` to PUSH it onto another
      * consumer (human/moderator only); omit it (or pass your own id) to CLAIM it

@@ -48,6 +48,7 @@ import type {
     RuleDecision,
     Intent,
     Priority,
+    TicketLevel,
     Strategy,
 } from "../domain.js";
 export {
@@ -63,7 +64,7 @@ export {
     isPriority,
     isStrategy,
 };
-export type { MessageKind, MessageStatus, RuleDecision, Intent, Priority, Strategy };
+export type { MessageKind, MessageStatus, RuleDecision, Intent, Priority, TicketLevel, Strategy };
 
 /** Drizzle row types (internal) re-exported for callers that handle the
  *  split shapes natively. The legacy union JSON shape is `Message` below. */
@@ -113,6 +114,8 @@ export interface Message {
      * doesn't apply. Read by listMessages / poll / listPings sorts.
      */
     priority?: Priority;
+    /** #2216 — tickets only: `work` or `steering`. */
+    level?: TicketLevel;
     display_seq: number;
     /**
      * Event scope (#B.245 tristate). One of `internal` / `default` /
@@ -544,6 +547,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         original_body: t.originalBody,
         intent: (t.intent as Intent | null) ?? null,
         priority: (t.priority as Priority | undefined) ?? "normal",
+        level: (t.level as TicketLevel | undefined) ?? "work",
         display_seq: t.displaySeq,
         scope: ((t.scope as "internal" | "default" | "broadcast" | undefined) ?? "default"),
         hashid: null,

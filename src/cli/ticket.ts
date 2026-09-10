@@ -2,7 +2,7 @@
  * `aiball ticket` command group (carved out of cli.ts in #B.213
  * phase 3.C on 2026-05-19). Behavior-preserving move.
  *
- * Subcommands: new, comment, close, move, approve-children, list, get, import, export
+ * Subcommands: new, comment, close, move, approve-children, level, list, get, import, export
  *
  * Exposed entry point: `registerTicketCommands(program)`.
  */
@@ -281,6 +281,19 @@ export function registerTicketCommands(program: Command): void {
                     return;
                 }
             }
+        });
+
+    // #2216 — set a ticket's level. Human only: the daemon refuses an agent.
+    ticket
+        .command("level")
+        .description("Set a ticket's level: work (default) or steering — a steering ticket passes over coder agents' backlog and notifications (human only)")
+        .requiredOption("--id <id>", "Ticket id")
+        .requiredOption("--to <level>", "work | steering")
+        .action(async (opts: { id: string; to: string }, cmd) => {
+            if (opts.to !== "work" && opts.to !== "steering") die(`--to must be work or steering, got "${opts.to}"`);
+            const client = buildClient(gOpts(cmd));
+            const r = await client.setTicketLevel(Number(opts.id), opts.to as "work" | "steering") as { level?: string; warning?: string };
+            out(r, gOpts(cmd), (x) => `ticket #${opts.id} level: ${x.level ?? opts.to}${x.warning ? `\n  warning: ${x.warning}` : ""}`);
         });
 
     ticket

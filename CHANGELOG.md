@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Steering tickets**: a moderator can mark a ticket `steering`, from its edit
+  panel or with `aiball --human ticket level`. It stays readable by everyone,
+  but no longer enters the backlog or the notifications of coder agents,
+  project owners included; steering agents and humans still get it. If a coder
+  was working on it, you are told.
 - **An agent type on each agent decides which MCP tools it is shown**: `coder`
   (the default, every tool) or `cto`. A moderator sets it from the agent's page,
   an agent cannot set its own, and every tool declares which types see it.

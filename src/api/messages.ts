@@ -18,7 +18,8 @@
  * `decide()` helper is local — shared by approve/reject; not exported.
  */
 import { Router, type Request, type Response } from "express";
-import { ERROR_CODES, MESSAGE_SCOPES } from "../domain.js";
+import { ERROR_CODES, MESSAGE_SCOPES, TICKET_LEVELS, type TicketLevel } from "../domain.js";
+import { hidesSteering } from "../db/consumers.js";
 import { clearSeenForMessage, insertPing } from "../db/pings.js";
 import {
     INTENTS,
@@ -287,16 +288,17 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
     if (!existing) return notFound(res);
-    const { title, body, summary, intent, priority, scope } = req.body ?? {};
+    const { title, body, summary, intent, priority, scope, level } = req.body ?? {};
     if (
         title === undefined &&
         body === undefined &&
         summary === undefined &&
         intent === undefined &&
         priority === undefined &&
-        scope === undefined
+        scope === undefined &&
+        level === undefined
     ) {
-        return badRequest(res, "provide title, body, summary, intent, priority, and/or scope");
+        return badRequest(res, "provide title, body, summary, intent, priority, scope, and/or level");
     }
     // #1565 — `title` is the ticket's real column (NOT NULL), no longer an
     // overlay that null could clear. Reject rather than 500 at the DB layer.
@@ -319,7 +321,19 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
             return badRequest(res, `scope must be one of ${MESSAGE_SCOPES.join(", ")}`);
         }
     }
-    const updated = editMessage(id, { title, body, summary, intent, priority, scope });
+    // #2216 — a ticket's level decides whose backlog and notifications it reaches,
+    // so a human sets it: an agent able to mark a ticket `steering` could drop it
+    // out of every coder's queue.
+    if (level !== undefined) {
+        if (typeof level !== "string" || !(TICKET_LEVELS as readonly string[]).includes(level)) {
+            return badRequest(res, `level must be one of ${TICKET_LEVELS.join(", ")}`);
+        }
+        if (existing.kind !== "ticket_created") return badRequest(res, "level applies to tickets only");
+        if (!isHuman(consumerOf(req))) {
+            return res.status(403).json({ error: "a ticket's level is set by a human moderator only" });
+        }
+    }
+    const updated = editMessage(id, { title, body, summary, intent, priority, scope, level: level as TicketLevel | undefined });
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
@@ -337,7 +351,16 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
             old_priority: existing.priority ?? "normal",
         });
     }
-    res.json(decorated);
+    // #2216 — promoting a ticket someone is working on takes it out of their
+    // backlog without a sound. Not blocked (nobody loses the ticket itself), but said.
+    const held = existing as { claimant?: string | null; assignee?: string | null; level?: string };
+    const coderHolders = level === "steering" && held.level !== "steering"
+        ? [...new Set([held.claimant, held.assignee].filter((h): h is string => !!h && hidesSteering(h)))]
+        : [];
+    const warning = coderHolders.length > 0
+        ? `held by ${coderHolders.join(", ")} (coder agent${coderHolders.length > 1 ? "s" : ""}): this ticket now leaves their backlog and notifications`
+        : null;
+    res.json(warning ? { ...decorated, warning } : decorated);
 });
 
 /**

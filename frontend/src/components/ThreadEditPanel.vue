@@ -33,6 +33,8 @@ defineProps<{
     priorityBusy?: boolean;
     /** #553 — scope busy flag (driven by parent). */
     scopeBusy?: boolean;
+    /** #2216 — level busy flag (driven by parent). */
+    levelBusy?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "update:titleDraft", v: string): void;
@@ -43,6 +45,8 @@ const emit = defineEmits<{
     (e: "priority-change", v: Priority | null): void;
     /** #553 — emitted when the user changes the ticket-level scope. */
     (e: "scope-change", v: "internal" | "default" | "broadcast"): void;
+    /** #2216 — emitted when a moderator changes the ticket level. */
+    (e: "level-change", v: "work" | "steering"): void;
     (e: "tags-changed", tags: TagType[]): void;
 }>();
 
@@ -51,6 +55,13 @@ const emit = defineEmits<{
 // the parent started passing them explicitly.
 const defaultPriorityOptions: { label: string; value: Priority | null }[] =
     PRIORITIES.map((p) => ({ label: p, value: p }));
+
+// #2216 — ticket level. `steering` passes over coder agents' backlog and
+// notifications; set by a human only (the daemon refuses an agent).
+const levelOptions: { label: string; value: "work" | "steering" }[] = [
+    { label: "work", value: "work" },
+    { label: "steering", value: "steering" },
+];
 
 // #553 — scope options (#B.245 tristate). Internal = owners + @mentions
 // only ; default = subscribers + project owners + @mentions ; broadcast =
@@ -123,6 +134,21 @@ defineExpose({ bodyTextareaRef });
                     :disabled="priorityBusy"
                     style="min-width: 9rem"
                     @update:model-value="(v: Priority | null) => emit('priority-change', v)"
+                />
+            </div>
+            <!-- #2216 — level: a steering ticket passes over the backlog and the
+                 notifications of coder agents. Human-only, server-side. -->
+            <div class="thread-edit-row">
+                <span class="thread-edit-label">Level</span>
+                <Select
+                    :model-value="ticket.level ?? 'work'"
+                    :options="levelOptions"
+                    option-label="label"
+                    option-value="value"
+                    size="small"
+                    :disabled="levelBusy"
+                    style="min-width: 9rem"
+                    @update:model-value="(v: 'work' | 'steering') => emit('level-change', v)"
                 />
             </div>
             <!-- #553 david `3r3vjq` : scope éditable depuis l'edit panel (à

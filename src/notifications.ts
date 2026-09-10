@@ -27,7 +27,8 @@ import {
     mutedConsumersForTicket,
     type Message,
 } from "./db.js";
-import { effectiveNotifyProjectBroadcasts, getConsumer } from "./db/consumers.js";
+import { effectiveNotifyProjectBroadcasts, getConsumer, hidesSteering } from "./db/consumers.js";
+import { getMessage } from "./db/messages.js";
 // #1573 — moved to a leaf module so the backlog rules can ask the same
 // question ("does this body mention X?") without importing the fan-out.
 import { extractMentions } from "./mentions.js";
@@ -115,6 +116,20 @@ export function fanOutPings(msg: Message): void {
                 if (c && !effectiveNotifyProjectBroadcasts(c)) continue;
                 recipients.add(sub);
             }
+        }
+    }
+
+    // #2216 — a steering ticket passes over the notifications of agents of type
+    // `coder`, project owners included, even when a `cto` agent uses the project
+    // as its product. Humans and `cto` agents still get them. Explicit
+    // @mentions are not filtered here (fanOutMentions): naming someone is a
+    // deliberate call, not a subscription.
+    if (recipients.size > 0) {
+        const level = msg.kind === "ticket_created"
+            ? msg.level
+            : msg.ticket_id !== null ? getMessage(msg.ticket_id)?.level : undefined;
+        if (level === "steering") {
+            for (const r of [...recipients]) if (hidesSteering(r)) recipients.delete(r);
         }
     }
 

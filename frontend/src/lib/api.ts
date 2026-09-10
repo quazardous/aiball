@@ -67,6 +67,8 @@ export interface Message {
      *  "normal" at the SQL layer if absent. Comments and lifecycle
      *  events omit this field on the wire. */
     priority?: Priority;
+    /** #2216 — tickets only. */
+    level?: "work" | "steering";
     /** Public ref for comments / lifecycle events. NULL for tickets. */
     hashid?: string | null;
     /** Set on `ticket_sub_added` / `ticket_referenced` pseudo-comments —
@@ -392,6 +394,8 @@ export interface TicketSummary {
     intent: Intent | null;
     /** Urgency hint (#B.222). Defaults to "normal" server-side. */
     priority?: Priority;
+    /** #2216 — tickets only. */
+    level?: "work" | "steering";
     /** Parent ticket id when this ticket is a sub-ticket. Rendered as
      *  "Sub-ticket of #B.NN" metadata in the thread header. */
     parent_ticket_id?: number | null;
@@ -521,6 +525,8 @@ export interface InboxRow {
     intent: Intent | null;
     /** Urgency hint (#B.222). Defaults to "normal" server-side. */
     priority?: Priority;
+    /** #2216 — tickets only. */
+    level?: "work" | "steering";
     closed: boolean;
     resolved?: boolean;
     /** Agent signalled "I'm stuck, your call" (#B.119). */
@@ -615,6 +621,8 @@ export interface PostMessageInput {
     intent?: Intent | null;
     /** #B.222 urgency hint (ticket_created only; defaults to "normal"). */
     priority?: Priority;
+    /** #2216 — tickets only. */
+    level?: "work" | "steering";
     /** #B.129 — tag a comment as a decision proposal at post-time
      *  (server validates: `"plan" | "resolution"`, comment_added only). */
     decision_kind?: "plan" | "resolution";
@@ -907,6 +915,8 @@ export const api = {
             open?: boolean;
             intent?: string;
             priority?: Priority;
+    /** #2216 — tickets only. */
+    level?: "work" | "steering";
             include_postponed?: boolean;
             unread?: boolean;
             sort?: string;
@@ -1156,7 +1166,7 @@ export const api = {
      *  409 when the decision is already terminal. */
     untagMessage: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/untag`, {}),
-    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null }) =>
+    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null; level?: "work" | "steering" }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),

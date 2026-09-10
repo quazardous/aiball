@@ -20,7 +20,7 @@ import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
 import { isHeldByOther } from "./assignment-gate.js";
 import { assignWindowSec } from "../autopoll/config.js";
-import { listHumans } from "./consumers.js";
+import { hidesSteering, listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
 import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
@@ -1671,6 +1671,7 @@ function computeActionableTicketIdsUncached(
         assignedAt: schema.tickets.assignedAt,
         claimant: schema.tickets.claimant,
         claimedAt: schema.tickets.claimedAt,
+        level: schema.tickets.level,
     }).from(schema.tickets).where(idScope(schema.tickets.id, scopeIds)).all();
     const openIds = new Set<number>();
     for (const t of tickets) {
@@ -1729,8 +1730,17 @@ function computeActionableTicketIdsUncached(
     // less callers keep the global, pre-#265 behaviour — zero regression).
     const awaitingOtherSet = consumerId ? lastActorExclusions(consumerId, scopeIds) : null;
 
+    // #2216 — steering tickets pass over the backlog of agents of type `coder`
+    // (david: "like clouds, they go over our heads"): still open and readable,
+    // never in their actionable pool, owners included. Humans and `cto` agents
+    // keep them, and so does the anonymous pool view.
+    const steeringHidden = consumerId && hidesSteering(consumerId)
+        ? new Set(tickets.filter((t) => t.level === "steering").map((t) => t.id))
+        : null;
+
     const actionableIds = new Set<number>();
     for (const id of openIds) {
+        if (steeringHidden && steeringHidden.has(id)) continue;
         if (gatedByDecisionByTicket.get(id) === true) continue;
         if (blockedByTicket.get(id) === true) continue;
         if (gatedByBlocker.has(id)) continue;

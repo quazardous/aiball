@@ -103,6 +103,12 @@ export const tickets = sqliteTable("tickets", {
      * my_pending_tickets sort.
      */
     priority: text("priority").notNull().default("normal"),
+    /**
+     * #2216 — `work` (default: every ticket before this column) or `steering`.
+     * A steering ticket stays readable by anyone but passes over the backlog and
+     * the notifications of agents of type `coder`. Human-set only. Migration 0067.
+     */
+    level: text("level").notNull().default("work"),
     status: text("status").notNull().default("pending"),
     createdAt: text("created_at").notNull(),
     decidedAt: text("decided_at"),

@@ -25,6 +25,7 @@ import {
     type MessageStatus,
     type NewMessage,
     type Priority,
+    type TicketLevel,
 } from "./connection.js";
 import {
     injectMarkers,
@@ -473,6 +474,8 @@ export interface EditMessageFields {
      *  scope for new events on this ticket). Tickets only ; ignored
      *  on comments. NULL resets to schema default 'default'. */
     scope?: string | null;
+    /** #2216 — tickets only; the HTTP layer validates and gates it (human only). */
+    level?: TicketLevel;
 }
 
 /**
@@ -608,6 +611,7 @@ function applyMessageEdit(id: number, fields: EditMessageFields): Message | null
         // default 'default'. api.ts validates the value upfront.
         ticketPatch.scope = fields.scope ?? "default";
     }
+    if (fields.level !== undefined) ticketPatch.level = fields.level;
     if (Object.keys(ticketPatch).length > 0) {
         const t = db.update(schema.tickets)
             .set(ticketPatch)

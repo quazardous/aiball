@@ -255,6 +255,23 @@ async function changePriority(v: Priority | null) {
         priorityBusy.value = false;
     }
 }
+// #2216 — ticket level. Human-only server-side; the response carries a warning
+// when the ticket is held by a coder agent, who stops getting it.
+const levelBusy = ref(false);
+async function changeLevel(v: "work" | "steering") {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    levelBusy.value = true;
+    try {
+        const r = (await api.edit(tid, { level: v })) as unknown as { warning?: string };
+        if (r.warning) toast.add({ severity: "warn", summary: "Level changed", detail: r.warning, life: 8000 });
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        levelBusy.value = false;
+    }
+}
 // #553 david `3r3vjq` — ticket-level scope edit (à côté de priority dans
 // le edit panel). Pilote le fan-out par défaut des events futurs sur ce
 // ticket (le composer per-comment scope a été retiré par #8864778).
@@ -588,6 +605,8 @@ async function copyTicketRef() {
                     @scope-change="changeScope"
                     @intent-change="changeIntent"
                     @priority-change="changePriority"
+                    :level-busy="levelBusy"
+                    @level-change="changeLevel"
                     @tags-changed="onTagsChanged"
                 />
                 <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" :project="data.ticket.project" />

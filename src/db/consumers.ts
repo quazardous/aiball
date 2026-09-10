@@ -280,6 +280,16 @@ export function listHumans(): string[] {
  * env CSV (default `"human"`). Belt-and-suspenders for environments
  * that boot before the migration runs.
  */
+/**
+ * #2216 — does this consumer keep steering tickets out of its backlog and its
+ * notifications? Agents of type `coder` do — the default, including a consumer
+ * not registered yet. Humans and agents of type `cto` do not.
+ */
+export function hidesSteering(consumer_id: string): boolean {
+    if (isHuman(consumer_id)) return false;
+    return getConsumer(consumer_id)?.agent_type !== "cto";
+}
+
 export function isHuman(consumer_id: string): boolean {
     if (!consumer_id) return false;
     const r = getDb().select({
