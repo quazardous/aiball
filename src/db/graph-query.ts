@@ -29,6 +29,16 @@ const MAX_CLUSTER = 6;
 const MIN_CLUSTER = 3;
 /** A stale-open candidate needs enough dead neighbours to mean something. */
 const MIN_STALE_NEIGHBOURS = 3;
+/**
+ * #2194 — how often two open tickets of the SAME project must name each other
+ * (both directions summed) before the silence between them is worth a line.
+ * Chosen on the measured distribution, not rounded: ≥2 gave 57 intra-project
+ * pairs, ≥3 gave 29, ≥5 gave 16, ≥7 gave 9. At ≥2 the report becomes a list
+ * nobody reads; the head of the list at ≥5 was plainly real (#960 ↔ #1315,
+ * weight 19). The cross-project finding keeps NO threshold: two teams ignoring
+ * each other is worth saying even once.
+ */
+const INTRA_PAIR_MIN_WEIGHT = 5;
 
 const isClosed = (stage: TicketStage | undefined) => stage === "closed" || stage === "closed-resolved";
 
@@ -241,6 +251,8 @@ export type FindingKind =
     | "drained_parent"
     /** Two open tickets in different projects that write about each other, with no typed link. */
     | "cross_project_open_pair"
+    /** The same inside ONE project, above a weight threshold — someone not linking their own threads. */
+    | "intra_project_open_pair"
     /** A small knot of open tickets that are all about one thing. */
     | "root_cause_cluster";
 
@@ -309,8 +321,13 @@ export function graphAudit(
         if (!adj.has(a)) adj.set(a, new Map());
         if (!adj.get(a)!.has(b)) adj.get(a)!.set(b, c);
     };
+    // #2194 — the pair's weight, both directions summed, over the edges that
+    // already count as a link (each direction ≥ LINK_WEIGHT).
+    const pairKey = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`;
+    const pairWeight = new Map<string, number>();
     for (const e of edges) {
         const c: Citation = { message_id: e.messageId, offset: e.offset };
+        pairWeight.set(pairKey(e.src, e.dst), (pairWeight.get(pairKey(e.src, e.dst)) ?? 0) + e.weight);
         link(e.src, e.dst, c);
         link(e.dst, e.src, c);
     }
@@ -463,6 +480,42 @@ export function graphAudit(
             });
         }
     }
+
+    // 3b — the same silence INSIDE one project (#2194). Kept as its own finding
+    // rather than by loosening the one above, for two reasons. It does not mean
+    // the same thing: across projects it is two teams ignoring each other, here
+    // it is someone not linking their own threads, and those call for different
+    // gestures. And it is far more frequent — 107 such pairs against 12 across
+    // projects when measured — so without its own threshold it would bury the
+    // rest of the report. Heaviest first: the strongest silence leads.
+    const intra: Array<{ key: string; weight: number; finding: Finding }> = [];
+    const seenIntra = new Set<string>();
+    for (const t of open) {
+        const nb = adj.get(t.id);
+        if (!nb) continue;
+        const typed = new Set((typedByTicket.get(t.id) ?? []).map((r) => r.target_ticket_id));
+        for (const [other, cite] of nb) {
+            if (!openIds.has(other)) continue;
+            if (projectOf.get(other) !== projectOf.get(t.id)) continue;
+            if (typed.has(other)) continue;
+            const key = pairKey(t.id, other);
+            const weight = pairWeight.get(key) ?? 0;
+            if (weight < INTRA_PAIR_MIN_WEIGHT || seenIntra.has(key)) continue;
+            seenIntra.add(key);
+            intra.push({
+                key,
+                weight,
+                finding: {
+                    kind: "intra_project_open_pair",
+                    ticket_ids: [t.id, other],
+                    detail: `both open in ${projectOf.get(t.id)}, naming each other ${weight} times, with no typed relation`,
+                    citation: cite,
+                },
+            });
+        }
+    }
+    intra.sort((a, b) => b.weight - a.weight || a.key.localeCompare(b.key));
+    for (const x of intra) findings.push(x.finding);
 
     // 4 — small knots of open tickets. Bounded on purpose: on the raw graph the
     // largest component is 153 open tickets across 14 projects, which is a

@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **The graph audit now sees silent pairs inside a project too**: two open
+  tickets of the same project that keep naming each other with no relation
+  between them. They are reported only past a few mentions, because inside a
+  project they are ten times more frequent than across projects and would
+  otherwise bury the rest of the report.
 - **The graph audit reports parents with nothing left moving under them**: an
   open ticket whose sub-tickets, all the way down, are closed. On a real board
   these were mostly umbrellas whose work finished and that nobody closed or
