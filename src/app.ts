@@ -26,6 +26,30 @@ export function frontendDistDir(): string | null {
 }
 
 /**
+ * #2215 — the last middleware on every app: an error nothing else handled ends
+ * as JSON, never as Express's default HTML page, which printed the stack and
+ * absolute paths into the response. An error carrying a 4xx status (a malformed
+ * JSON body, a body over the size limit) keeps that status and its message;
+ * anything else is a 500 whose details go to the daemon journal only.
+ */
+export function jsonErrorHandler(
+    err: unknown,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+): void {
+    if (res.headersSent) return next(err);
+    const e = err as { status?: unknown; statusCode?: unknown; message?: unknown };
+    const raw = typeof e.status === "number" ? e.status : typeof e.statusCode === "number" ? e.statusCode : 500;
+    if (raw >= 400 && raw < 500) {
+        res.status(raw).json({ error: typeof e.message === "string" ? e.message : "bad request" });
+        return;
+    }
+    console.error(`[api] ${req.method} ${req.originalUrl} failed:`, err);
+    res.status(500).json({ error: "internal error" });
+}
+
+/**
  * Build the aiball Express app: JSON body parsing, the `/api` router, static
  * `/uploads` (content-addressed, long cache), and the built frontend with SPA
  * fallback when present. No server bind here — see daemon.ts (HTTP/UDS/WS) and
@@ -55,6 +79,7 @@ export function createApp(): express.Express {
             res.type("html").send(proxyLandingHtml(proxy.url));
         });
         console.log(`aiball PROXY MODE → ${proxy.url}${proxy.strict ? " (strict: node token never injected)" : ""}`);
+        app.use(jsonErrorHandler);
         return app;
     }
 
@@ -85,5 +110,7 @@ export function createApp(): express.Express {
         });
     }
 
+    // #2215 — registered last, so it catches whatever the routes above let through.
+    app.use(jsonErrorHandler);
     return app;
 }

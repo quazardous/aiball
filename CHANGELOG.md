@@ -101,6 +101,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **Commenting on a ticket that does not exist answers 404 instead of crashing**:
+  the API used to fail with a 500 carrying a server stack trace in an HTML page.
+  Any unexpected server error is now a plain JSON 500, with the details kept
+  in the daemon log.
 - **Several actions now take effect immediately instead of a moment later.**
   Accepting or rejecting a decision, snoozing or waking a ticket, adding a
   blocking relation, and the hold released when a ticket closes all changed the

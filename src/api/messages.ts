@@ -124,6 +124,10 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
         if (code === ERROR_CODES.PARENT_PENDING_MODERATION) {
             return res.status(409).json({ error: (err as Error).message });
         }
+        // #2215 — the parent ticket does not exist.
+        if (code === ERROR_CODES.TICKET_NOT_FOUND) {
+            return res.status(404).json({ error: (err as Error).message });
+        }
         throw err;
     }
 });

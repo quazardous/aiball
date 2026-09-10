@@ -100,6 +100,8 @@ export const ERROR_CODES = {
     FORBIDDEN_CLOSE: "FORBIDDEN_CLOSE",
     PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
     PARENT_PENDING_MODERATION: "PARENT_PENDING_MODERATION",
+    /** #2215 — a comment or lifecycle event aimed at a ticket that does not exist. */
+    TICKET_NOT_FOUND: "TICKET_NOT_FOUND",
 } as const;
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 

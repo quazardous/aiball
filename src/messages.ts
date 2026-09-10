@@ -548,6 +548,18 @@ export interface SubmitOpts {
  * API and the spool drainer so behavior is identical regardless of channel.
  */
 export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message {
+    // #2215 — a comment or lifecycle event aimed at a ticket that does not exist
+    // used to reach the insert and die on the foreign key as a raw SqliteError:
+    // a 500 with a stack for an HTTP caller, an unnamed failure for the spool.
+    // Checked first, before anything authorises or writes.
+    if (input.kind !== "ticket_created") {
+        const parent = input.ticket_id != null ? getMessage(input.ticket_id) : null;
+        if (!parent || parent.kind !== "ticket_created") {
+            const err = new Error(`ticket #${input.ticket_id} does not exist`);
+            (err as { code?: string }).code = ERROR_CODES.TICKET_NOT_FOUND;
+            throw err;
+        }
+    }
     assertCloseAuthority(input);
     assertDecisionOnApprovedTicket(input);
     // #561 : reject ticket_created on unknown project so a typo can't
