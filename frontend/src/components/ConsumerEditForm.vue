@@ -37,6 +37,8 @@ const enabled = ref(true);
 // Quand false → consumer "spécialiste" qui ne prend QUE les tickets explicitement
 // assignés (via ticket_assign), pas le pool global.
 const canClaim = ref(true);
+// #2201 — which MCP tools this agent is shown. `coder` = every tool (default).
+const agentType = ref<"coder" | "cto">("coder");
 // #516 (david `r59bkm` plan E) — tri-state opt-in pour les broadcasts projet.
 // "auto" (null) = suit can_claim ; "on" = opt-in explicite ; "off" = opt-out
 // explicite. Stocké en string pour le Select ; converti en boolean | null
@@ -59,6 +61,7 @@ watch(() => props.original, (found) => {
     microPrompt.value = found.micro_prompt ?? "";
     enabled.value = found.enabled;
     canClaim.value = found.can_claim !== false; // default true if undefined (pre-#508 row)
+    agentType.value = found.agent_type === "cto" ? "cto" : "coder";
     notifyBroadcasts.value = found.notify_project_broadcasts === true
         ? "on"
         : found.notify_project_broadcasts === false
@@ -77,6 +80,7 @@ async function save() {
             micro_prompt: microPrompt.value.trim() || null,
             enabled: enabled.value,
             can_claim: canClaim.value,
+            agent_type: agentType.value,
             notify_project_broadcasts: notifyBroadcasts.value === "on"
                 ? true
                 : notifyBroadcasts.value === "off"
@@ -184,6 +188,19 @@ async function sendPrompt() {
                 />
                 can claim (when off, this consumer is <strong>assignment-only</strong>: <code>ticket_engage</code> skips the global pool and returns only tickets explicitly assigned via <code>ticket_assign</code>)
             </label>
+        </FormField>
+
+        <!-- #2201 — which MCP tools this agent is shown. Read by its MCP server
+             at start-up, so a change applies at its next restart. -->
+        <FormField label="agent type" for="ce-agent-type">
+            <select
+                id="ce-agent-type"
+                v-model="agentType"
+                class="consumer-edit__select"
+            >
+                <option value="coder">coder — every MCP tool (default)</option>
+                <option value="cto">cto — only the MCP tools declared for steering</option>
+            </select>
         </FormField>
 
 

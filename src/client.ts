@@ -865,7 +865,7 @@ export class AiballClient {
     /** #397: fetch a single consumer (incl. `micro_prompt`). Used by the wake
      *  builder to inject `{consumer_prompt}` into the relance prompt. */
     getConsumer(id: string) {
-        return this.http<{ consumer_id: string; micro_prompt?: string | null }>(
+        return this.http<{ consumer_id: string; micro_prompt?: string | null; agent_type?: string | null }>(
             "GET",
             `/api/consumers/${encodeURIComponent(id)}`,
         );

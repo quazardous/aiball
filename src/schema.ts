@@ -679,6 +679,13 @@ export const consumers = sqliteTable("consumers", {
      */
     canCreateAgent: integer("can_create_agent").notNull().default(0),
     /**
+     * #2201 — which MCP function tools this agent is shown: `coder` (NULL, the
+     * default: every tool, as before) or `cto`. Read by the MCP server at boot
+     * to decide what to register. Human-set only, like can_claim — a statement
+     * of what the agent is for, not a security boundary. Migration 0066.
+     */
+    agentType: text("agent_type"),
+    /**
      * #1435 slice 5 — multi-agent role (lead / crew), persisted so the UI can
      * show it. Set server-side from the `x-aiball-role` request header (see
      * src/auth.ts), NOT via the human-gated PATCH — it's an agent self-declared

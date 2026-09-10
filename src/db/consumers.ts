@@ -21,6 +21,10 @@ export type ConsumerState = "boot" | "idle" | "busy";
  *  (dedicated jaune word in the black island). */
 export type HumanWord = "stop" | "wait" | "boot" | "loop";
 
+/** #2201 — agent types, as the MCP server reads them. NULL in the database = `coder`. */
+export const AGENT_TYPES = ["coder", "cto"] as const;
+export type AgentType = typeof AGENT_TYPES[number];
+
 export interface Consumer {
     consumer_id: string;
     kind: ConsumerKind;
@@ -71,6 +75,8 @@ export interface Consumer {
      *  agents (via the crew tools); false (default) = cannot. Human-granted
      *  only (gated like can_claim). */
     can_create_agent: boolean;
+    /** #2201 — which MCP tools the agent is shown (`coder` = every tool). */
+    agent_type: AgentType;
     /** #1435 slice 5 — multi-agent role (lead / crew / null), set server-side
      *  from the `x-aiball-role` header. Descriptive (how the agent launched),
      *  surfaced in the consumers UI. NULL = solo/unset. */
@@ -119,6 +125,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         remote: isRemoteConsumer(r.lastSeenVia, r.lastSeenIp),
         can_claim: r.canClaim !== 0,
         can_create_agent: r.canCreateAgent === 1,
+        agent_type: r.agentType === "cto" ? "cto" : "coder",
         role: r.role ?? null,
         notify_project_broadcasts: r.notifyProjectBroadcasts == null
             ? null
@@ -302,6 +309,8 @@ export interface UpdateConsumerPatch {
     /** #1435 slice 7 — lead capability : true = may provision crew agents.
      *  Human-granted only (gated by the #1477 PATCH guard). */
     can_create_agent?: boolean;
+    /** #2201 — human-set only (gated by the PATCH guard). `coder` is stored as NULL. */
+    agent_type?: AgentType;
     /** #1435 slice 5 — multi-agent role (lead / crew / null). Persisted from
      *  the `x-aiball-role` header (not a capability). */
     role?: string | null;
@@ -322,6 +331,7 @@ export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch):
     if (patch.micro_prompt !== undefined) row.microPrompt = patch.micro_prompt;
     if (patch.can_claim !== undefined) row.canClaim = patch.can_claim ? 1 : 0;
     if (patch.can_create_agent !== undefined) row.canCreateAgent = patch.can_create_agent ? 1 : 0;
+    if (patch.agent_type !== undefined) row.agentType = patch.agent_type === "coder" ? null : patch.agent_type;
     if (patch.role !== undefined) row.role = patch.role;
     if (patch.notify_project_broadcasts !== undefined) {
         row.notifyProjectBroadcasts = patch.notify_project_broadcasts === null

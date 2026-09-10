@@ -656,6 +656,8 @@ export interface Consumer {
     /** #1435 slice 7 — lead capability: true = may provision/launch crew
      *  agents. Default false. Human-granted only. */
     can_create_agent?: boolean;
+    /** #2201 — which MCP tools the agent is shown. */
+    agent_type?: "coder" | "cto";
     /** #1435 slice 5 — multi-agent role (lead / crew / null), set from the
      *  agent's launch role. Shown as a badge in the consumers panel. */
     role?: string | null;
@@ -1341,7 +1343,7 @@ export const api = {
     }) => req<Consumer>("POST", "/api/consumers", body),
     updateConsumer: (
         consumer_id: string,
-        patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null; micro_prompt: string | null; can_claim: boolean; can_create_agent: boolean; notify_project_broadcasts: boolean | null }>,
+        patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null; micro_prompt: string | null; can_claim: boolean; can_create_agent: boolean; agent_type: "coder" | "cto"; notify_project_broadcasts: boolean | null }>,
     ) => req<Consumer>("PATCH", `/api/consumers/${encodeURIComponent(consumer_id)}`, patch),
     deleteConsumer: (consumer_id: string) =>
         req<{ consumer_id: string; deleted: boolean }>(

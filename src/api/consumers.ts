@@ -4,6 +4,7 @@
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
 import { Router, type Request, type Response } from "express";
+import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
 import {
     deleteConsumer,
     ensureConsumer,
@@ -143,6 +144,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         micro_prompt?: unknown;
         can_claim?: unknown;
         can_create_agent?: unknown;
+        agent_type?: unknown;
         notify_project_broadcasts?: unknown;
     };
     if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
@@ -156,12 +158,17 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     // on the sibling routes (loop-stop / prompt / nodes). Non-capability
     // fields (display_name, note, micro_prompt, …) stay editable as before.
     // Future capability flags (e.g. can_create_agent) join CAPABILITY_FIELDS.
-    const CAPABILITY_FIELDS = ["can_claim", "can_create_agent"] as const;
+    // #2201 — agent_type joins them: which MCP tools an agent is shown is decided
+    // by a human, never by the agent itself.
+    const CAPABILITY_FIELDS = ["can_claim", "can_create_agent", "agent_type"] as const;
     const touchesCapability = CAPABILITY_FIELDS.some((f) => body[f] !== undefined);
     if (touchesCapability && !isHuman(consumerOf(req))) {
         return res.status(403).json({
-            error: "consumer capability fields (can_claim, can_create_agent) are human-only — set them via the moderator UI, not from an agent",
+            error: "consumer capability fields (can_claim, can_create_agent, agent_type) are human-only — set them via the moderator UI, not from an agent",
         });
+    }
+    if (body.agent_type !== undefined && !(AGENT_TYPES as readonly unknown[]).includes(body.agent_type)) {
+        return badRequest(res, `agent_type must be one of: ${AGENT_TYPES.join(", ")}`);
     }
     const patch: {
         kind?: ConsumerKind;
@@ -171,6 +178,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         micro_prompt?: string | null;
         can_claim?: boolean;
         can_create_agent?: boolean;
+        agent_type?: AgentType;
         notify_project_broadcasts?: boolean | null;
     } = {};
     if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
@@ -196,6 +204,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     if (body.can_create_agent !== undefined && typeof body.can_create_agent === "boolean") {
         patch.can_create_agent = body.can_create_agent;
     }
+    if (body.agent_type !== undefined) patch.agent_type = body.agent_type as AgentType;
     // #516 — tri-state (null | true | false). API accepte les 3 valeurs ;
     // tout autre type est silently ignored (no-op).
     if (body.notify_project_broadcasts === null

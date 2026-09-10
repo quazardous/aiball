@@ -27,6 +27,7 @@ import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
 import { registerUploadTools } from "./mcp/upload.js";
 import { registerWelcomeTools } from "./mcp/welcome.js";
+import { DEFAULT_AGENT_TYPE, gateServer, normalizeAgentType, type AgentType } from "./mcp/tool-audience.js";
 import { AIBALL_VERSION } from "./version.js";
 
 // `aiball-mcp --version` / `-v`: the launcher forwards argv through, so
@@ -41,14 +42,25 @@ const server = new McpServer({
     version: AIBALL_VERSION,
 });
 
+// #2201 — the agent's type decides which tools it is shown. Read from its
+// consumer record before anything registers. Unreadable (daemon down, consumer
+// not created yet) → the default type, which is every tool, exactly as before.
+let agentType: AgentType = DEFAULT_AGENT_TYPE;
+try {
+    agentType = normalizeAgentType((await client.getConsumer(client.agentId)).agent_type);
+} catch {
+    // keep the default type
+}
+const tools = gateServer(server, agentType);
+
 // Tool clusters (#B.213 phase 4 — extracted from this file).
-registerTicketWriteTools(server);
-registerTicketReadTools(server);
-registerTicketRelationTools(server);
-registerSubscriptionTools(server);
-registerInboxTools(server);
-registerUploadTools(server);
-registerWelcomeTools(server);
+registerTicketWriteTools(tools);
+registerTicketReadTools(tools);
+registerTicketRelationTools(tools);
+registerSubscriptionTools(tools);
+registerInboxTools(tools);
+registerUploadTools(tools);
+registerWelcomeTools(tools);
 
 // ---- start ----------------------------------------------------------------
 
@@ -94,7 +106,7 @@ try {
             upstream: cfg.upstream,
             subs: (subs as Array<{ project: string; role: string }>) ?? [],
         });
-        if (surface) registerTicketImportTool(server);
+        if (surface) registerTicketImportTool(tools);
     }
 } catch {
     // fail-closed: leave the upstream tools unregistered

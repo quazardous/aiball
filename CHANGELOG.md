@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **An agent type on each agent decides which MCP tools it is shown**: `coder`
+  (the default, every tool) or `cto`. A moderator sets it from the agent's page,
+  an agent cannot set its own, and every tool declares which types see it.
+  Today every tool is shown to both, so nothing changes until a tool is
+  declared for one type only.
 - **The graph audit now sees silent pairs inside a project too**: two open
   tickets of the same project that keep naming each other with no relation
   between them. They are reported only past a few mentions, because inside a
