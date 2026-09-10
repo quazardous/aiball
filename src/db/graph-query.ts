@@ -237,6 +237,8 @@ export type FindingKind =
     | "stale_open"
     /** Open child under a closed parent. */
     | "orphan_child"
+    /** The mirror: open parent with nothing still moving under it — every child_of descendant closed. */
+    | "drained_parent"
     /** Two open tickets in different projects that write about each other, with no typed link. */
     | "cross_project_open_pair"
     /** A small knot of open tickets that are all about one thing. */
@@ -359,6 +361,75 @@ export function graphAudit(
             ticket_ids: [child, parent],
             detail: `still open under #${parent}, which is closed`,
             citation: null,
+        });
+    }
+
+    // 2b — the mirror of the above: an open parent under which nothing is still
+    // moving. Every child_of descendant, all the way down, is closed or rejected.
+    // Measured on the live board before building (#2199): 6 candidates, 5 of
+    // them not already caught by `stale_open`, and 4 of the 6 umbrellas or
+    // briefings whose work finished while nobody closed or re-aimed them. That
+    // is exactly the "objective with nothing moving under it" a steering audit
+    // asks about — once objectives are marked, restricting this to them IS the
+    // drift finding, with nothing to rewrite.
+    //
+    // Direct children come from the relations already read above for every open
+    // ticket. Only a CLOSED child needs its own replay, to see whether something
+    // open hangs further down, so the extra reads stay bounded by the closed part
+    // of the subtrees under open parents. `seen` makes a lineage cycle terminate.
+    // An unknown stage counts as moving: the finding is only emitted when the
+    // whole subtree is KNOWN to be finished.
+    const relationsOf = (id: number) => {
+        let rels = typedByTicket.get(id);
+        if (!rels) {
+            rels = listTypedRelationsForTicket(id);
+            typedByTicket.set(id, rels);
+        }
+        return rels;
+    };
+    const childrenOf = (id: number) =>
+        relationsOf(id).filter((r) => r.kind === "parent_of").map((r) => r.target_ticket_id);
+    const stageCache = new Map<number, TicketStage | undefined>(allStages);
+    const stageOf = (id: number): TicketStage | undefined => {
+        if (!stageCache.has(id)) stageCache.set(id, getTicketStages([id]).get(id));
+        return stageCache.get(id);
+    };
+    const directChildren = new Map(open.map((t) => [t.id, childrenOf(t.id)] as const));
+    const unstaged = [...new Set([...directChildren.values()].flat())].filter((id) => !stageCache.has(id));
+    if (unstaged.length > 0) {
+        const fetched = getTicketStages(unstaged);
+        for (const id of unstaged) stageCache.set(id, fetched.get(id));
+    }
+    for (const t of open) {
+        const direct = directChildren.get(t.id) ?? [];
+        if (direct.length === 0) continue;
+        const seen = new Set<number>([t.id]);
+        const stack = [...direct];
+        let moving = false;
+        let below = 0;
+        while (stack.length > 0) {
+            const id = stack.pop()!;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            below++;
+            const stage = stageOf(id);
+            if (!isClosed(stage) && stage !== "rejected") {
+                moving = true;
+                break;
+            }
+            stack.push(...childrenOf(id));
+        }
+        if (moving) continue;
+        const held = holderOf(t);
+        findings.push({
+            kind: "drained_parent",
+            ticket_ids: [t.id, ...direct],
+            detail: `open, but all ${below} ticket${below === 1 ? "" : "s"} below it are closed`
+                + (held
+                    ? ` — held by ${held.claimant ?? held.assignee}, so it is parked rather than forgotten`
+                    : " — the work under it finished and nothing re-aimed it"),
+            citation: null,
+            ...(held ? { held_by: held } : {}),
         });
     }
 

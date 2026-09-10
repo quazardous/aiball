@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **The graph audit reports parents with nothing left moving under them**: an
+  open ticket whose sub-tickets, all the way down, are closed. On a real board
+  these were mostly umbrellas whose work finished and that nobody closed or
+  re-aimed. Like the other findings, it is something to look at, not a verdict.
 - **Deny tools to an agent** with `claude.deny_tools` in its `.aiball.yaml`.
   claude-loop writes the list into the permissions of every session it spawns,
   outside the repository, so an agent meant to steer from the board can be kept
