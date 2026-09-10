@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Start a steering agent in one command**: `claude-loop start --type cto`
+  sets the agent's type before its session boots (it used to start as a coder
+  until restarted), and `--init --deny-code` keeps it away from code. For an
+  existing agent, `aiball --human agent set <id> --type cto`.
 - **The graph audit measures drift against objectives**: an objective (a
   `steering` ticket) whose work has all closed is reported as such, and in a
   project that has objectives, open work serving none of them is listed — the

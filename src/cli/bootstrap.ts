@@ -210,6 +210,10 @@ export async function bootstrapInit(opts: {
      *  had to be typed into the yaml by hand, and `--sub-agent` could not
      *  produce the thing it names. See `subAgent`. */
     role?: "lead" | "crew";
+    /** #2180 — seed `claude.deny_tools` with the file and shell tools, for an
+     *  agent that steers from the board and must not read code. Explicit and
+     *  opt-in: not implied by any agent type. */
+    denyCode?: boolean;
     /** #701 (david) : rename the project from this name to the new project
      *  name BEFORE the rest of the init runs. The new name is resolved from
      *  `--project` if passed, else from an existing `.aiball.yaml`'s
@@ -263,6 +267,7 @@ export async function bootstrapInit(opts: {
     const hasIdentity = !!opts.consumer || !!opts.project || opts.noClaim !== undefined
         || opts.role !== undefined;
     const hasProjectType = opts.private === true;
+    const hasDenyCode = opts.denyCode === true;
     if (yamlExists && !force) {
         // #603 (4dzxp2) + #612 : even when the yaml exists, patch in
         // --consumer / --project / --no-claim so subsequent inits actually
@@ -279,7 +284,10 @@ export async function bootstrapInit(opts: {
         if (hasProjectType) {
             patchProjectType(yamlPath, "private");
         }
-        if (!hasIdentity && !hasProjectType) {
+        if (hasDenyCode) {
+            patchDenyTools(yamlPath);
+        }
+        if (!hasIdentity && !hasProjectType && !hasDenyCode) {
             process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
         }
     } else {
@@ -300,6 +308,7 @@ export async function bootstrapInit(opts: {
             "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
             projectTypeLine +
             consumerLines +
+            (hasDenyCode ? denyCodeYamlBlock() : "") +
             "autopoll:\n" +
             "  enabled: true\n";
         writeFileSync(yamlPath, body);
@@ -309,6 +318,7 @@ export async function bootstrapInit(opts: {
         if (opts.project) tags.push(`consumer.project: ${opts.project}`);
         if (opts.noClaim !== undefined) tags.push(`consumer.no_claim: ${opts.noClaim}`);
         if (opts.role !== undefined) tags.push(`consumer.role: ${opts.role}`);
+        if (hasDenyCode) tags.push("claude.deny_tools: file and shell tools");
         process.stdout.write(`${yamlExists && force ? "overwrote" : "created"} ${yamlPath} (${tags.join(", ")})\n`);
     }
     // #651 david `fzsqeg` — drop the aiball Claude Code skill into the
@@ -358,6 +368,34 @@ function patchProjectType(path: string, value: string): void {
     doc.set("project_type", value);
     writeFileSync(path, String(doc));
     process.stdout.write(`${path}: patched project_type='${value}'${prev ? ` (was '${prev}')` : ""}\n`);
+}
+
+/** #2180 — the tools `--deny-code` withholds: every way to read or change the
+ *  disk. What remains is the aiball MCP surface, which never touches code. */
+export const CODE_TOOLS = ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "NotebookEdit"] as const;
+
+/** #2180 — the `claude:` block a fresh `.aiball.yaml` gets with `--deny-code`. */
+export function denyCodeYamlBlock(): string {
+    return `claude:\n  deny_tools: [${CODE_TOOLS.join(", ")}]\n`;
+}
+
+/** #2180 — set `claude.deny_tools` in an existing `.aiball.yaml`, keeping every
+ *  other key and comment (yaml Document API, like patchIdentity). */
+export function patchDenyTools(path: string): void {
+    let doc;
+    try {
+        doc = parseDocument(readFileSync(path, "utf8"));
+    } catch {
+        die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
+    }
+    if (!doc.has("claude")) doc.set("claude", {});
+    const claude = doc.get("claude") as { set: (k: string, v: unknown) => void } | undefined;
+    if (!claude || typeof (claude as { set?: unknown }).set !== "function") {
+        die(`init: ${path} has a non-mapping 'claude' value — fix by hand, then re-run`);
+    }
+    claude.set("deny_tools", doc.createNode([...CODE_TOOLS], { flow: true }));
+    writeFileSync(path, String(doc));
+    process.stdout.write(`${path}: patched claude.deny_tools (${CODE_TOOLS.join(", ")})\n`);
 }
 
 function patchIdentity(

@@ -7,6 +7,7 @@
  * Exposed entry point: `registerConsumerCommands(program)`.
  */
 import type { Command } from "commander";
+import { ensureConsumerRecord } from "../claude-loop/agent-type.js";
 import {
     buildClient,
     die,
@@ -20,7 +21,51 @@ import {
     withProject,
 } from "./_helpers.js";
 
+/**
+ * #2180 — what `aiball agent set` should send, as a pure verdict so a test sees
+ * every refusal (`die` exits). Only the human-set fields of an agent record;
+ * the daemon still decides who may set them.
+ */
+export type AgentSetVerdict =
+    | { kind: "go"; patch: { agent_type?: "coder" | "cto"; can_claim?: boolean } }
+    | { kind: "bad"; message: string };
+export function planAgentSet(opts: { type?: string; canClaim?: string }): AgentSetVerdict {
+    const patch: { agent_type?: "coder" | "cto"; can_claim?: boolean } = {};
+    if (opts.type !== undefined) {
+        if (opts.type !== "coder" && opts.type !== "cto") return { kind: "bad", message: `--type must be coder or cto, got "${opts.type}"` };
+        patch.agent_type = opts.type;
+    }
+    if (opts.canClaim !== undefined) {
+        if (opts.canClaim !== "true" && opts.canClaim !== "false") return { kind: "bad", message: `--can-claim must be true or false, got "${opts.canClaim}"` };
+        patch.can_claim = opts.canClaim === "true";
+    }
+    if (Object.keys(patch).length === 0) return { kind: "bad", message: "nothing to set: pass --type and/or --can-claim" };
+    return { kind: "go", patch };
+}
+
 export function registerConsumerCommands(program: Command): void {
+    // #2180 — the human-set fields of an agent record, from the terminal. Until
+    // now only the UI could touch them. The daemon refuses them from an agent,
+    // so this is run with --human.
+    const agent = program.command("agent").description("Agent records: the fields a human sets (type, can-claim)");
+    agent
+        .command("set <id>")
+        .description("Set an agent's type (coder | cto) and/or can-claim — human only (run with --human)")
+        .option("--type <type>", "coder | cto")
+        .option("--can-claim <bool>", "true | false")
+        .action(async (id: string, opts: { type?: string; canClaim?: string }, cmd) => {
+            const verdict = planAgentSet(opts);
+            if (verdict.kind === "bad") die(verdict.message);
+            const client = buildClient(gOpts(cmd));
+            // Create the record only if there is none, so an agent can be typed
+            // before it ever ran. Never re-post an existing one: POST resets every
+            // field it is not sent (display name, note, and re-enables a disabled
+            // agent).
+            await ensureConsumerRecord(client, id);
+            const r = (await client.patchConsumer(id, verdict.patch)) as { agent_type?: string; can_claim?: boolean };
+            out(r, gOpts(cmd), (x) => `agent ${id}: type ${x.agent_type ?? "?"}, can-claim ${x.can_claim ?? "?"}\n  the MCP server reads the type at start-up: restart the agent's loop for it to apply`);
+        });
+
     program
         .command("whoami")
         .description("Print the consumer_id used here (identity only — for daemon health use `aiball status`, for full config audit use `aiball check`)")

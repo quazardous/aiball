@@ -39,6 +39,7 @@ import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-
 import { acquireStartLock } from "./start-lock.js";
 import { HOOKS, buildHookSettings } from "./hooks/registry.js";
 import { buildSpawnSettings } from "./spawn-settings.js";
+import { applyAgentType } from "./agent-type.js";
 import {
     canonicalCwd,
     barColors,
@@ -236,6 +237,11 @@ interface StartOpts {
      *  (today's default); `crew` = follower + no_claim (assignment-only).
      *  Overrides `.aiball.yaml consumer.role` for this launch. */
     role?: "lead" | "crew";
+    /** #2180 — set the agent's type on its record BEFORE claude boots (the MCP
+     *  server reads it at start-up). */
+    type?: "coder" | "cto";
+    /** #2180 — with --init: seed `claude.deny_tools` (file and shell tools). */
+    denyCode?: boolean;
     /** #393: launch the loop in this directory instead of the invoker's cwd
      *  (e.g. the daemon starting a loop for a known project root from the UI). */
     cwd?: string;
@@ -465,6 +471,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // Note : init doit tourner DANS le cwd cible (--cwd) si fourni, sinon
     // bootstrap écrirait dans le mauvais dossier. Bootstrap utilise
     // `process.cwd()`, donc on bascule temporairement.
+    // #2180 — validate the new flags before anything is written or spawned.
+    if (process.argv.includes("--type") && opts.type === undefined) {
+        die("--type must be coder or cto");
+    }
+    if (opts.denyCode && !opts.init) {
+        die("--deny-code seeds .aiball.yaml, so it needs --init");
+    }
     if (opts.init) {
         const origCwd = process.cwd();
         if (startCwd) process.chdir(startCwd);
@@ -485,6 +498,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 project: opts.project,
                 // #612 — same tri-state for --no-claim on the start --init path.
                 noClaim: process.argv.includes("--no-claim") ? true : undefined,
+                // #2180 — opt-in: withhold the file and shell tools from this agent.
+                denyCode: opts.denyCode === true,
             });
         } finally {
             if (startCwd) process.chdir(origCwd);
@@ -616,6 +631,19 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 process.stdout.write(`aiball: project register skipped — ${m}\n`);
             }
         }
+    }
+
+    // #2180 — set the agent type BEFORE claude (and its MCP server) boots: the
+    // MCP server reads it once, at start-up. Human gesture, local human trust;
+    // a refusal (remote agent-only daemon) warns and the loop starts anyway.
+    if (opts.type && ctx.agent) {
+        const verdict = await applyAgentType({
+            agentId: ctx.agent,
+            type: opts.type,
+            human: new AiballClient({ agentId: process.env.AIBALL_HUMAN ?? "human" }),
+        });
+        if (verdict.ok) process.stdout.write(`aiball: agent '${ctx.agent}' set to type '${opts.type}'\n`);
+        else process.stderr.write(`claude-loop: ${verdict.warning}\n`);
     }
 
     // #B.154: housekeeping before spawn. (1) prune dead state dirs
@@ -2140,6 +2168,8 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // + remote persist si --aiball-url) PUIS start, en un coup. Idempotent
         // (skip si fichiers déjà là, sauf --init-force).
         .option("--init", "#557: run `claude-loop init` first (bootstrap project + persist remote if --aiball-url given), then start.")
+        .option("--type <type>", "#2180: set the agent's type (coder | cto) on its record before claude starts, so the MCP server boots with the right tools. Human-set: uses the local human identity; a remote agent-only daemon refuses it with a warning.")
+        .option("--deny-code", "#2180: with --init, seed claude.deny_tools with the file and shell tools (an agent that steers from the board and must not read code).")
         .option("--init-force", "#557: with --init, pass --force to bootstrap (overwrite existing entries).")
         .option("--init-stop-hook", "#557: with --init, also wire Claude Code's Stop hook into .claude/settings.json.")
         .option("--init-global", "#557: with --init --init-stop-hook, write to ~/.claude/settings.json instead of project-local.")
@@ -2158,6 +2188,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             role?: string;
+            type?: string; denyCode?: boolean;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
             once?: boolean; zen?: boolean;
@@ -2182,6 +2213,8 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 consumer: opts.consumer ?? opts.agent, // #420: --agent is an alias for --consumer
                 project: opts.project,
                 role: opts.role === "lead" || opts.role === "crew" ? opts.role : undefined,
+                type: opts.type === "coder" || opts.type === "cto" ? opts.type : undefined,
+                denyCode: opts.denyCode === true,
                 cwd: opts.cwd,
                 init: opts.init === true,
                 initForce: opts.initForce === true,

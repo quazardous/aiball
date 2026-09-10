@@ -81,6 +81,26 @@ The list is read when the session is spawned, so a change applies to the next
 spawn. Leave it absent (the default) and the settings file carries no permission
 block at all — the session starts exactly as before.
 
+`claude-loop start --init --deny-code` writes that list for you (every file and
+shell tool) into the tree's `.aiball.yaml`, keeping whatever is already there.
+
+### Starting a steering agent
+
+An agent's type — `coder` (default) or `cto` — decides which aiball MCP tools it
+is shown and whether steering tickets reach it. The MCP server reads it once, at
+start-up, so it has to be set before the session boots:
+
+```sh
+claude-loop start --init --agent cto-product --project product --type cto --deny-code
+```
+
+`--type` creates the agent's record if needed and sets the type before claude
+starts. Setting a type is a human gesture: it runs with the local human
+identity, and a remote daemon reached with an agent-only token refuses it — the
+loop still starts, with a warning naming the command to run instead. For an
+existing agent, `aiball --human agent set <id> --type cto` does the same from
+any terminal; restart the agent's loop for it to apply.
+
 ## Core cycle
 
 ```

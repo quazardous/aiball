@@ -1246,6 +1246,11 @@ export class AiballClient {
     }) {
         return this.http("POST", "/api/consumers", input);
     }
+    /** #2180 — patch a consumer record. The capability fields (`agent_type`,
+     *  `can_claim`) are refused unless the caller is a human (`--human`). */
+    patchConsumer(id: string, patch: { agent_type?: "coder" | "cto"; can_claim?: boolean }) {
+        return this.http("PATCH", `/api/consumers/${encodeURIComponent(id)}`, patch);
+    }
 
     health() {
         return this.http<{ ok: boolean; ts: string; version?: string }>("GET", "/api/health");
