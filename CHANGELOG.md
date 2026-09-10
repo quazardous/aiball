@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **The graph audit measures drift against objectives**: an objective (a
+  `steering` ticket) whose work has all closed is reported as such, and in a
+  project that has objectives, open work serving none of them is listed — the
+  oldest ten per project, with the total. Nothing is asked in projects without
+  objectives, where the answer would just describe the board.
 - **Steering tickets**: a moderator can mark a ticket `steering`, from its edit
   panel or with `aiball --human ticket level`. It stays readable by everyone,
   but no longer enters the backlog or the notifications of coder agents,

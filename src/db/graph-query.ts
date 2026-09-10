@@ -39,6 +39,12 @@ const MIN_STALE_NEIGHBOURS = 3;
  * each other is worth saying even once.
  */
 const INTRA_PAIR_MIN_WEIGHT = 5;
+/**
+ * #2208 — how many unanchored work tickets a project reports, oldest first. The
+ * detail line still gives the project's total, so a cut list does not pass for
+ * the whole of it. To be tuned once real steering tickets exist.
+ */
+const UNANCHORED_PER_PROJECT = 10;
 
 const isClosed = (stage: TicketStage | undefined) => stage === "closed" || stage === "closed-resolved";
 
@@ -249,6 +255,10 @@ export type FindingKind =
     | "orphan_child"
     /** The mirror: open parent with nothing still moving under it — every child_of descendant closed. */
     | "drained_parent"
+    /** #2208 — the same when the parent is a `steering` ticket: an objective with nothing moving under it. */
+    | "steering_drained"
+    /** #2208 — open `work` in a project that has open objectives, serving none of them. */
+    | "unanchored_work"
     /** Two open tickets in different projects that write about each other, with no typed link. */
     | "cross_project_open_pair"
     /** The same inside ONE project, above a weight threshold — someone not linking their own threads. */
@@ -299,6 +309,7 @@ export function graphAudit(
         title: schema.tickets.title,
         claimant: schema.tickets.claimant,
         assignee: schema.tickets.assignee,
+        level: schema.tickets.level,
     }).from(schema.tickets)
         .where(opts.project
             ? and(eq(schema.tickets.status, "approved"), eq(schema.tickets.project, opts.project))
@@ -439,15 +450,71 @@ export function graphAudit(
         if (moving) continue;
         const held = holderOf(t);
         findings.push({
-            kind: "drained_parent",
+            kind: t.level === "steering" ? "steering_drained" : "drained_parent",
             ticket_ids: [t.id, ...direct],
-            detail: `open, but all ${below} ticket${below === 1 ? "" : "s"} below it are closed`
+            detail: (t.level === "steering" ? "an objective with nothing moving under it: " : "open, but ")
+                + `all ${below} ticket${below === 1 ? "" : "s"} below it are closed`
                 + (held
                     ? ` — held by ${held.claimant ?? held.assignee}, so it is parked rather than forgotten`
                     : " — the work under it finished and nothing re-aimed it"),
             citation: null,
             ...(held ? { held_by: held } : {}),
         });
+    }
+
+    // 2c — #2208: work that serves no objective, asked ONLY where objectives
+    // exist. Measured before building: 63% of open tickets have no ancestor at
+    // all, so asked board-wide this would describe the board, not a drift. Inside
+    // a project with at least one open steering ticket it is a real question —
+    // "this silo has objectives, and this ticket serves none of them". A ticket is
+    // anchored when any child_of ancestor, through closed intermediates too, is
+    // an open steering ticket.
+    const levelById = new Map<number, string>(openRows.map((r) => [r.id, r.level] as const));
+    const levelOf = (id: number): string => {
+        if (!levelById.has(id)) {
+            const row = db.select({ level: schema.tickets.level }).from(schema.tickets).where(eq(schema.tickets.id, id)).get();
+            levelById.set(id, row?.level ?? "work");
+        }
+        return levelById.get(id)!;
+    };
+    const parentsOf = (id: number) =>
+        relationsOf(id).filter((r) => r.kind === "child_of").map((r) => r.target_ticket_id);
+    const silos = new Set(open.filter((t) => t.level === "steering").map((t) => t.project));
+    const anchored = (id: number): boolean => {
+        const seen = new Set<number>([id]);
+        const stack = parentsOf(id);
+        while (stack.length > 0) {
+            const a = stack.pop()!;
+            if (seen.has(a)) continue;
+            seen.add(a);
+            const stage = stageOf(a);
+            if (levelOf(a) === "steering" && !isClosed(stage) && stage !== "rejected") return true;
+            stack.push(...parentsOf(a));
+        }
+        return false;
+    };
+    const unanchoredByProject = new Map<string, typeof open>();
+    for (const t of open) {
+        if (t.level === "steering" || !silos.has(t.project)) continue;
+        if (anchored(t.id)) continue;
+        const list = unanchoredByProject.get(t.project) ?? [];
+        list.push(t);
+        unanchoredByProject.set(t.project, list);
+    }
+    for (const [project, list] of unanchoredByProject) {
+        list.sort((a, b) => a.id - b.id);
+        const total = `${list.length} such ticket${list.length === 1 ? "" : "s"} in ${project}`
+            + (list.length > UNANCHORED_PER_PROJECT ? `, oldest ${UNANCHORED_PER_PROJECT} shown` : "");
+        for (const t of list.slice(0, UNANCHORED_PER_PROJECT)) {
+            const held = holderOf(t);
+            findings.push({
+                kind: "unanchored_work",
+                ticket_ids: [t.id],
+                detail: `open work in ${project}, which has objectives, serving none of them (${total})`,
+                citation: null,
+                ...(held ? { held_by: held } : {}),
+            });
+        }
     }
 
     // 3 — two OPEN tickets in different projects writing about each other, with
