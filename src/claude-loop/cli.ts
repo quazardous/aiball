@@ -38,6 +38,7 @@ import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
 import { HOOKS, buildHookSettings } from "./hooks/registry.js";
+import { buildSpawnSettings } from "./spawn-settings.js";
 import {
     canonicalCwd,
     barColors,
@@ -913,7 +914,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // (out of the pure registry). Per-hook rationale lives in registry.ts.
     const buildHookCommand = (scriptRel: string) =>
         `${tsxBin} ${hookPath(join(root, scriptRel))}`;
-    const settings = { hooks: buildHookSettings(HOOKS, buildHookCommand) };
+    // #2201 — plus the agent's tool denials when its tree declares any
+    // (`claude.deny_tools`), as `permissions.deny`. Composed in a pure helper so
+    // the yaml → settings chain is testable without spawning.
+    const settings = buildSpawnSettings(buildHookSettings(HOOKS, buildHookCommand), ctx.claude.deny_tools);
     const settingsJson = JSON.stringify(settings);
 
     // claude passthrough args. Shell-escape per-arg so the inline

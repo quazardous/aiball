@@ -196,6 +196,13 @@ claude:
   # Session id used only when session_mode is `fixed` (must be a valid UUID).
   # session_id: "00000000-0000-4000-8000-000000000000"
 
+  # Tools this agent's claude session may NOT use. Written into the permission
+  # deny list of the settings claude-loop generates at every spawn, so it holds
+  # for the whole session and the session itself cannot edit it. Typical use: an
+  # agent that steers work from the board and must not read code — deny its file
+  # and shell tools and it has no way to the disk. Absent or empty = no restriction.
+  # deny_tools: [Read, Edit, Write, Bash, Glob, Grep, NotebookEdit]
+
 # --- project type -------------------------------------------------------------
 # Picked up by the MCP `welcome` tool to choose the onboarding kit. Out of
 # the box: `public` (strict scrubbing) and `private`. Validated at call

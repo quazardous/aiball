@@ -59,6 +59,28 @@ config.)
 
 ---
 
+### Denying tools to an agent
+
+Some agents should not have certain tools at all — typically one that steers
+work from the board and must not read code. Declare the tools in the tree's
+`.aiball.yaml`:
+
+```yaml
+claude:
+  deny_tools: [Read, Edit, Write, Bash, Glob, Grep, NotebookEdit]
+```
+
+claude-loop writes the list into the `permissions.deny` of the settings file it
+generates at every spawn. That file lives in the loop's state directory, not in
+the repository, and is rewritten on each launch, so the session cannot relax its
+own restriction. Deny rules win over allow rules, your own Claude settings
+included. Without file and shell tools the agent has no path to the disk: this
+is a guard, not a hint.
+
+The list is read when the session is spawned, so a change applies to the next
+spawn. Leave it absent (the default) and the settings file carries no permission
+block at all — the session starts exactly as before.
+
 ## Core cycle
 
 ```

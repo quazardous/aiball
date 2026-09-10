@@ -348,6 +348,12 @@ export interface AiballConfig {
         /** #1549 — session id explicite pour `session_mode: fixed`. Ignoré
          *  hors mode fixed. Doit être un UUID valide. */
         session_id: string;
+        /** #2201 — tool names this agent's claude session is denied, poured into
+         *  the `permissions.deny` of the settings claude-loop writes at spawn.
+         *  Empty (default) = no restriction. The use it exists for: an agent that
+         *  steers from the board and must not read code. A guard, not a hint —
+         *  without file and shell tools there is no path to the disk. */
+        deny_tools: string[];
     };
     /**
      * #160 Phase 1 (david `f9agk3` + `#552 b4y2yx`) — upstream provider
@@ -505,6 +511,8 @@ const DEFAULTS: AiballConfig = {
         // (or `fixed` + `session_id`). Crew agents are forced to `managed`.
         session_mode: "auto",
         session_id: "",
+        // #2201 — no tool is denied unless a tree says so.
+        deny_tools: [],
     },
     // #160 Phase 1: no upstream bindings by default — opt-in per-project via
     // `.aiball.yaml upstream: { <project>: [...] }`. Without a binding,
@@ -699,6 +707,12 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         claude_loop: { ...DEFAULTS.claude_loop },
         upstream: { ...DEFAULTS.upstream },
         colors: { ...DEFAULTS.colors },
+        // #2201 — `claude` was the one nested block NOT copied, so every
+        // `cfg.claude.x = …` below wrote into the process-wide DEFAULTS and the
+        // next load in the same process inherited it. Harmless while a loop
+        // loaded config once; not for a deny list, which must never reach
+        // another tree's session.
+        claude: { ...DEFAULTS.claude },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         project_type: DEFAULTS.project_type,
         configPath,
@@ -851,6 +865,17 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cb.session_id === "string" && cb.session_id.trim()) {
                 cfg.claude.session_id = cb.session_id.trim();
+            }
+            // #2201 — per-agent tool denials. Strings only, trimmed and
+            // de-duplicated; anything else in the list is dropped rather than
+            // guessed at.
+            if (Array.isArray(cb.deny_tools)) {
+                cfg.claude.deny_tools = [...new Set(
+                    cb.deny_tools
+                        .filter((t): t is string => typeof t === "string")
+                        .map((t) => t.trim())
+                        .filter(Boolean),
+                )];
             }
             // #565 david : per-project `project_type:` — picked up by the
             // MCP `welcome` tool. Free-string ; absent = null (welcome

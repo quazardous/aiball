@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Deny tools to an agent** with `claude.deny_tools` in its `.aiball.yaml`.
+  claude-loop writes the list into the permissions of every session it spawns,
+  outside the repository, so an agent meant to steer from the board can be kept
+  from reading code at all rather than asked not to.
 - **Approve a ticket's pending sub-tickets in one gesture**, after seeing who
   attached each one. The thread lists them with who hung each there and when,
   flags those attached by someone other than the ticket's author, and approves

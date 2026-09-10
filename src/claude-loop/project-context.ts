@@ -76,6 +76,8 @@ export interface ProjectContext {
         session_mode: string;
         /** #1549 — explicit session id for `fixed` mode. */
         session_id: string;
+        /** #2201 — tool names denied to this agent's claude session (see config). */
+        deny_tools: string[];
     };
     /** #385: tmux bar colour profile (layered defaults → global → project). */
     colors: {
