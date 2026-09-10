@@ -60,3 +60,32 @@ test("a moderator moves the budget per project, and 0 lifts it", () => {
         deleteConfigOverride("p2", KEY);
     }
 });
+
+// #2214 — a refusal posts nothing, so the trace line is the ONLY record that it
+// happened. Without it the refusal rate a week later is unmeasurable.
+function captureErrors(fn: () => void): string[] {
+    const lines: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
+    try {
+        fn();
+    } finally {
+        console.error = original;
+    }
+    return lines.filter((l) => l.startsWith("[summary-budget]"));
+}
+
+test("a refusal leaves exactly one trace line, with the numbers and nothing of the summary", () => {
+    const summary = "secret-".repeat(80);
+    const traces = captureErrors(() => { reply("worker", summary); });
+    assert.deepEqual(traces, [`[summary-budget] refused agent=worker project=p1 length=${summary.length} budget=500`]);
+    assert.equal(traces[0].includes("secret"), false, "the summary text never reaches the journal");
+});
+
+test("an accepted summary, or a human's, leaves no trace", () => {
+    const traces = captureErrors(() => {
+        reply("worker", "a".repeat(500));
+        reply("boss", "h".repeat(2000));
+    });
+    assert.deepEqual(traces, []);
+});

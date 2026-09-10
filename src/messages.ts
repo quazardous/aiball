@@ -168,6 +168,12 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         if (provided && !authorIsHuman) {
             const max = Number(getConfig("tickets.summary_until_max", o.project));
             if (max > 0 && provided.length > max) {
+                // #2214 — a refusal is the one outcome that leaves nothing in the
+                // database (nothing is posted), so it is traced here or the
+                // refusal rate could never be measured. Numbers only — never the
+                // summary text. Lands in the daemon journal, like the other
+                // `[tag]` lines.
+                console.error(`[summary-budget] refused agent=${byAgent ?? "?"} project=${o.project} length=${provided.length} budget=${max}`);
                 return { error: summaryOverBudget(provided.length, max) };
             }
         }
