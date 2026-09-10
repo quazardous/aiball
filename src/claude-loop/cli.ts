@@ -40,6 +40,7 @@ import { acquireStartLock } from "./start-lock.js";
 import { HOOKS, buildHookSettings } from "./hooks/registry.js";
 import { buildSpawnSettings } from "./spawn-settings.js";
 import { applyAgentType } from "./agent-type.js";
+import { withInitCwd } from "./init-cwd.js";
 import {
     canonicalCwd,
     barColors,
@@ -479,9 +480,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         die("--deny-code seeds .aiball.yaml, so it needs --init");
     }
     if (opts.init) {
-        const origCwd = process.cwd();
-        if (startCwd) process.chdir(startCwd);
-        try {
+        // #2180 — chdir AND AIBALL_CWD: a loop shell exports AIBALL_CWD, which
+        // bootstrap reads first, so a chdir alone wrote into the loop's repo.
+        await withInitCwd(startCwd, async () => {
             cmdInitRemote({
                 aiballUrl: opts.aiballUrl,
                 aiballToken: opts.aiballToken,
@@ -501,9 +502,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 // #2180 — opt-in: withhold the file and shell tools from this agent.
                 denyCode: opts.denyCode === true,
             });
-        } finally {
-            if (startCwd) process.chdir(origCwd);
-        }
+        });
     }
     // #394 volet A: a persisted remote config (`claude-loop init`) makes a plain
     // `claude-loop start` reconnect to the same REMOTE aiball without re-passing

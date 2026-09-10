@@ -60,3 +60,19 @@ test("--deny-code on an existing .aiball.yaml adds the list and keeps every othe
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test("--deny-code on an existing .aiball.yaml WITHOUT a claude block creates it (the common case)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aiball-denycode-"));
+    const path = join(dir, ".aiball.yaml");
+    try {
+        writeFileSync(path, "# no claude block here\nconsumer:\n  agent: cto\n  project: p\nautopoll:\n  enabled: true\n");
+        quietly(() => patchDenyTools(path));
+        const y = parse(readFileSync(path, "utf8")) as { consumer: { agent: string }; autopoll: { enabled: boolean }; claude: { deny_tools: string[] } };
+        assert.deepEqual(y.claude.deny_tools, [...CODE_TOOLS]);
+        assert.equal(y.consumer.agent, "cto");
+        assert.equal(y.autopoll.enabled, true);
+        assert.match(readFileSync(path, "utf8"), /# no claude block here/);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});

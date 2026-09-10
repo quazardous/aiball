@@ -388,7 +388,9 @@ export function patchDenyTools(path: string): void {
     } catch {
         die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
     }
-    if (!doc.has("claude")) doc.set("claude", {});
+    // #2180 — createNode: a plain `{}` is stored as a raw value with no `.set`, so
+    // a file WITHOUT a claude block (the common case) died here.
+    if (!doc.has("claude")) doc.set("claude", doc.createNode({}));
     const claude = doc.get("claude") as { set: (k: string, v: unknown) => void } | undefined;
     if (!claude || typeof (claude as { set?: unknown }).set !== "function") {
         die(`init: ${path} has a non-mapping 'claude' value — fix by hand, then re-run`);
@@ -398,7 +400,7 @@ export function patchDenyTools(path: string): void {
     process.stdout.write(`${path}: patched claude.deny_tools (${CODE_TOOLS.join(", ")})\n`);
 }
 
-function patchIdentity(
+export function patchIdentity(
     path: string,
     agent: string | undefined,
     project: string | undefined,
@@ -411,7 +413,8 @@ function patchIdentity(
     } catch {
         die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
     }
-    if (!doc.has("consumer")) doc.set("consumer", {});
+    // #2180 — same trap as patchDenyTools: a plain `{}` has no `.set`.
+    if (!doc.has("consumer")) doc.set("consumer", doc.createNode({}));
     const consumer = doc.get("consumer") as { set: (k: string, v: unknown) => void } | undefined;
     if (!consumer || typeof (consumer as { set?: unknown }).set !== "function") {
         die(`init: ${path} has a non-mapping 'consumer' value — fix by hand, then re-run`);
