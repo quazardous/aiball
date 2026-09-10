@@ -6,11 +6,20 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-1542x-"));
+// #2219 — pin the upstream transport. It is read from the HOST's global config
+// (`$XDG_CONFIG_HOME/aiball/config.yaml`), which AIBALL_HOME does not isolate: on
+// a machine where that key is unset (`auto`) and `gh` is installed, `auto`
+// picks the real `gh`, the stubbed fetch below is never called, and the test
+// reaches GitHub. A private config forcing `http` makes the stub the only path.
+const xdg = mkdtempSync(join(tmpdir(), "aiball-1542x-xdg-"));
+mkdirSync(join(xdg, "aiball"), { recursive: true });
+writeFileSync(join(xdg, "aiball", "config.yaml"), "upstream_transport: http\n");
+process.env.XDG_CONFIG_HOME = xdg;
 
 const { getDb } = await import("./db/connection.js");
 const { eq } = await import("drizzle-orm");
