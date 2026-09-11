@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **The GNOME indicator can start and stop the daemon**: start, stop and
+  restart entries, each greyed out when it cannot apply, and a *Start at login*
+  switch backed by `systemctl --user enable` / `disable`.
 - **Start a CTO agent in one command**: `claude-loop start --type cto`
   sets the agent's type before its session boots (it used to start as a coder
   until restarted), and `--init --deny-code` keeps it away from code. For an

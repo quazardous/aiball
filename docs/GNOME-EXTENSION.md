@@ -33,7 +33,9 @@ by the shell alongside the new ones, and nothing would say so.
 and restarts what it finds dead, because a Windows user session has no service
 manager. On Linux `systemctl --user` already does that job, has done it longer,
 and does it better. A second watcher would duplicate it and could fight it —
-so this extension is visibility and shortcuts, and nothing else.
+so this extension is visibility and shortcuts, and nothing else. Its start and
+stop entries are buttons you press — they go through `systemctl --user`, and
+nothing in the extension acts on its own.
 
 ## What it shows
 
@@ -45,7 +47,12 @@ nobody reads. Everything else is one click away in the menu:
 - tickets to moderate, actionable tickets, open tickets — summed across every
   project,
 - how many loops are running,
-- shortcuts to open the board, restart the daemon, and reload the config.
+- shortcuts to open the board, and to start, stop, restart the daemon or reload
+  its config — each greyed out while it cannot apply (start while the daemon
+  is up, the others while it is down). Stopping disconnects every loop, and
+  the entry says so;
+- a **Start at login** switch that mirrors `systemctl --user is-enabled aiball`
+  and flips it with `enable` / `disable`.
 
 ## No token lives in it
 

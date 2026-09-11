@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 // `copyGnomeExtension` rather than `installGnomeExtension`: the latter reports
 // through `die()`, which exits the process, so a refusal is only observable as
@@ -38,7 +39,7 @@ test("it lands the whole extension, not just a manifest", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["metadata.json", "extension.js", "aiballClient.js"]) {
+    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js"]) {
         assert.ok(existsSync(join(dir, f)), `${f} is missing — the shell needs all of them`);
     }
 });
@@ -82,11 +83,55 @@ test("the extension holds no token, and asks for none", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["extension.js", "aiballClient.js"]) {
+    for (const f of ["extension.js", "aiballClient.js", "daemonActions.js"]) {
         const src = stripComments(readFileSync(join(dir, f), "utf8"));
         assert.doesNotMatch(src, /Authorization|Bearer|aiball_token|AIBALL_TOKEN/i, `${f}`);
     }
     assert.match(readFileSync(join(dir, "aiballClient.js"), "utf8"), /UnixSocketAddress/);
+});
+
+// #2251 — the menu's daemon actions. They live in an import-free module so the
+// commands are pinned here, without a GNOME Shell; the probe script covers the
+// shell loading it.
+const ACTIONS_FILE = join(import.meta.dirname, "..", "..", "gnome", GNOME_EXTENSION_UUID, "daemonActions.js");
+type Action = { id: string; argv: string[]; when: "up" | "down" };
+const actions = await import(pathToFileURL(ACTIONS_FILE).href) as {
+    ACTIONS: Action[];
+    AUTOSTART: { query: string[]; enable: string[]; disable: string[] };
+    isActionSensitive: (a: Action, up: boolean | null) => boolean;
+    autostartFromIsEnabled: (stdout: string) => boolean;
+};
+
+test("the actions module stays loadable outside the shell (no gi:// or resource:// import)", () => {
+    assert.doesNotMatch(stripComments(readFileSync(ACTIONS_FILE, "utf8")), /gi:\/\/|resource:\/\//);
+});
+
+test("each action runs the command it names — start and stop through systemd, not a second path", () => {
+    const argv = Object.fromEntries(actions.ACTIONS.map((a) => [a.id, a.argv.join(" ")]));
+    assert.deepEqual(argv, {
+        start: "systemctl --user start aiball",
+        stop: "systemctl --user stop aiball",
+        restart: "aiball restart",
+        reload: "aiball reload",
+    });
+    assert.equal(actions.AUTOSTART.query.join(" "), "systemctl --user is-enabled aiball");
+    assert.equal(actions.AUTOSTART.enable.join(" "), "systemctl --user enable aiball");
+    assert.equal(actions.AUTOSTART.disable.join(" "), "systemctl --user disable aiball");
+});
+
+test("an action is clickable only when it applies: start while down, the others while up", () => {
+    const clickable = (up: boolean | null) =>
+        actions.ACTIONS.filter((a) => actions.isActionSensitive(a, up)).map((a) => a.id).sort();
+    assert.deepEqual(clickable(true), ["reload", "restart", "stop"]);
+    assert.deepEqual(clickable(false), ["start"]);
+    assert.deepEqual(clickable(null), ["reload", "restart", "start", "stop"], "unknown state guesses nothing");
+});
+
+test("the Start at login switch is on only for \`enabled\`", () => {
+    assert.equal(actions.autostartFromIsEnabled("enabled\n"), true);
+    for (const other of ["disabled\n", "static", "masked", "", "enabled-runtime"]) {
+        assert.equal(actions.autostartFromIsEnabled(other), false, other);
+    }
 });
 
 after(() => {

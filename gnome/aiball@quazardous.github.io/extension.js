@@ -22,6 +22,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {defaultSocketPath, getJson} from './aiballClient.js';
+import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './daemonActions.js';
 
 /*
  * Two cadences, because the two reads do not cost the same thing.
@@ -75,8 +76,19 @@ class AiballIndicator extends PanelMenu.Button {
         this._addAction('Open the board', () => {
             Gio.AppInfo.launch_default_for_uri(BOARD_URL, null);
         });
-        this._addAction('Restart the daemon', () => this._run(['aiball', 'restart']));
-        this._addAction('Reload the config', () => this._run(['aiball', 'reload']));
+        // #2251 — start / stop / restart / reload, each greyed out when it cannot
+        // apply. Buttons, not supervision: nothing here acts on its own.
+        this._actionItems = ACTIONS.map((action) => ({
+            action,
+            item: this._addAction(action.label, () => this._runThen(action.argv, () => this._refreshHealth())),
+        }));
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._autostartItem = new PopupMenu.PopupSwitchMenuItem(AUTOSTART.label, false);
+        this._autostartItem.connect('toggled', (_item, on) => {
+            this._runThen(on ? AUTOSTART.enable : AUTOSTART.disable, () => this._refreshAutostart());
+        });
+        this.menu.addMenuItem(this._autostartItem);
 
         // The one refresh that is always worth paying for: the menu is open,
         // so somebody is actually reading the numbers.
@@ -84,11 +96,13 @@ class AiballIndicator extends PanelMenu.Button {
             if (open) {
                 this._refreshHealth();
                 this._refreshCounters();
+                this._refreshAutostart();
             }
         });
 
         this._refreshHealth();
         this._refreshCounters();
+        this._refreshAutostart();
         this._healthSource = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, HEALTH_INTERVAL_S, () => {
                 this._refreshHealth();
@@ -105,13 +119,35 @@ class AiballIndicator extends PanelMenu.Button {
         const item = new PopupMenu.PopupMenuItem(label);
         item.connect('activate', () => fn());
         this.menu.addMenuItem(item);
+        return item;
     }
 
-    _run(argv) {
+    /** Run `argv`, then `then()` once it exits — to re-read the state it changed. */
+    _runThen(argv, then) {
         try {
-            GLib.spawn_async(null, argv, null, GLib.SpawnFlags.SEARCH_PATH, null);
+            const proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDERR_SILENCE);
+            proc.wait_async(this._cancellable, () => {
+                if (!this._cancellable.is_cancelled()) then();
+            });
         } catch (e) {
             Main.notify('aiball', `could not run ${argv.join(' ')}: ${e.message}`);
+        }
+    }
+
+    _refreshAutostart() {
+        try {
+            const proc = Gio.Subprocess.new(AUTOSTART.query,
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+            proc.communicate_utf8_async(null, this._cancellable, (p, res) => {
+                try {
+                    const [, stdout] = p.communicate_utf8_finish(res);
+                    this._autostartItem.setToggleState(autostartFromIsEnabled(stdout));
+                } catch {
+                    // Cancelled on destroy, or systemctl missing: leave the switch as is.
+                }
+            });
+        } catch {
+            // No systemctl on this machine: the switch stays off and inert.
         }
     }
 
@@ -145,6 +181,8 @@ class AiballIndicator extends PanelMenu.Button {
 
     _setUp(up, version) {
         this._up = up;
+        for (const {action, item} of this._actionItems)
+            item.setSensitive(isActionSensitive(action, up));
         this._stateItem.label.text = up
             ? `daemon up${version ? ` — ${version}` : ''}`
             : 'daemon down';
