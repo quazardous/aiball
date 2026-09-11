@@ -8,7 +8,7 @@
 // counterpart exists (someone other than C also acted). When C is the sole
 // participant (their own un-answered task), it stays actionable.
 
-import { movesLastActor } from "../ticket-transitions.js";
+import { keepsAuthorInPool, movesLastActor } from "../ticket-transitions.js";
 
 /**
  * Event kinds that count as an "action" on a ticket (move whose-court).
@@ -63,13 +63,16 @@ export function eventHasForeignActor(ev: ActorEvent, consumerId: string): boolea
  * §4.1 exclusion predicate: C is gated out of its actionable pool iff C is the
  * ticket's last actor AND a counterpart exists. `lastActor === consumerId` with
  * no foreign actor = sole participant (own backlog) → kept (returns false).
+ * #2326 — nor when that last action is C's own step (`then: continue`): a step
+ * says "not done, I carry on", so it never leaves C waiting on someone.
  */
 export function isExcludedForConsumer(
     lastActor: string | null,
     hasForeignActor: boolean,
     consumerId: string,
+    lastActionKeepsAuthorInPool = false,
 ): boolean {
-    return lastActor === consumerId && hasForeignActor;
+    return lastActor === consumerId && hasForeignActor && !lastActionKeepsAuthorInPool;
 }
 
 /** One stored event, as the last-actor replay reads it. */
@@ -85,20 +88,23 @@ export interface LastActorEvent {
  * `insertMessage` and `applyMessageDecision` write the same rule one event at a
  * time; the boot backfill replays it over a whole thread, and the tests drive it
  * without a database. An event counts when it is an action by a real author, or
- * carries a decision someone settled. A step (`then: continue`) is not an
- * action: it leaves the ticket with whoever held the court.
+ * carries a decision someone settled. A step (`then: continue`) is an action
+ * too; the replay also says whether the last action keeps its author in the
+ * pool (#2326), which is what `isExcludedForConsumer` needs.
  */
 export function replayLastActor(
     start: { actor: string | null; at: string },
     events: readonly LastActorEvent[],
-): { actor: string | null; at: string } {
+): { actor: string | null; at: string; keepsAuthorInPool: boolean } {
     let { actor, at } = start;
+    let inPool = false;
     for (const ev of events) {
         // The event's own author action (ISO timestamps compare chronologically).
         if (LAST_ACTOR_ACTION_KINDS.has(ev.kind) && movesLastActor(ev.kind, ev.meta)
             && ev.byAgent && ev.byAgent !== "auto" && ev.createdAt >= at) {
             actor = ev.byAgent;
             at = ev.createdAt;
+            inPool = keepsAuthorInPool(ev.kind, ev.meta);
         }
         // A decision accept/reject recorded in this comment's meta.
         if (ev.meta) {
@@ -109,9 +115,10 @@ export function replayLastActor(
                     && d.decided_at && d.decided_at >= at) {
                     actor = d.decided_by;
                     at = d.decided_at;
+                    inPool = false;
                 }
             } catch { /* malformed meta — skip */ }
         }
     }
-    return { actor, at };
+    return { actor, at, keepsAuthorInPool: inPool };
 }

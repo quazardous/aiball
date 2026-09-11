@@ -80,8 +80,8 @@ meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status
 - A reply can also carry **no decision** (the second table below).
   `comment_only: true` concludes nothing and hands the ticket back like any
   comment, so it is kept for a question or a ticket still in moderation;
-  `then: continue` marks a step done on a ticket the author holds and leaves
-  the ticket where it was (§4.2).
+  `then: continue` marks a step done on a ticket the author holds and keeps
+  the ticket in the author's pool (§4.1).
 
 ### 3.1 The decision matrix
 
@@ -100,10 +100,10 @@ the table disagree.
 
 Replies that carry no decision, so nobody accepts or rejects them:
 
-| reply | stored as | meaning | makes the author the last actor | only the agent holding the ticket | flagged when nothing follows |
-|---|---|---|---|---|---|
-| `comment_only: true` | — | concludes nothing: a question, a ticket still in moderation; strongly discouraged for anything else | yes | no | no |
-| `then: continue` | `meta.step` | a step is done and the work goes on, nothing to validate | no | yes | yes |
+| reply | stored as | meaning | makes the author the last actor | keeps the ticket in the author's pool | only the agent holding the ticket | flagged when nothing follows |
+|---|---|---|---|---|---|---|
+| `comment_only: true` | — | concludes nothing: a question, a ticket still in moderation; strongly discouraged for anything else | yes | no | no | no |
+| `then: continue` | `meta.step` | a step is done and the work goes on, nothing to validate | yes | yes | yes | yes |
 <!-- decision-matrix:end -->
 
 ---
@@ -132,6 +132,8 @@ actionable-for-C (whose-court) =
   tickets vanish from its queue.)*
 - **last_actor = C and a counterpart exists** → C acted last toward someone else
   → gated (awaiting them). *(e.g. agent posted a plan/reply, awaiting david.)*
+- **…unless C's last action is a step** (`then: continue`) → C is carrying on,
+  not waiting → stays actionable, even right after C's own question.
 
 ### 4.2 What counts as an "action" (what sets `last_actor`)
 
@@ -141,9 +143,9 @@ actionable-for-C (whose-court) =
 | accept / reject a decision | the **decider** | *(mutates meta — no event, see §7)* |
 | resolve / close / reopen / block | the human who did it | `ticket_*` lifecycle |
 
-**Not** an action: a **step** (`then: continue`). It records work done without
-handing the ticket to anyone, so the ticket stays where it was: in the author's
-pool if it was there, out of it if the author was already waiting on someone.
+A **step** (`then: continue`) is an action like any comment, with one
+difference (§4.1): while it is the ticket's last action, its author is never
+"waiting on them", so the ticket stays in the author's pool.
 
 **Not** an action: **auto-moderation** (`decided_by = "auto"`). An auto-approved
 agent comment's actor is its **author**, not "auto".

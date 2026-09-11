@@ -241,8 +241,9 @@ export function insertMessage(m: NewMessage): Message {
         // blocked) reaching this branch is an ACTION → the author is now the
         // ticket's last actor. (Relation/sub/referenced/move events take other
         // insert paths and are structural, not actions — see TICKET_LIFECYCLE.)
-        // #2308 — except a step (`then: continue`): it records work done without
-        // handing the ticket to anyone, so the court stays where it was.
+        // #2308 — the transition table says which comments move it; a step does
+        // since #2326. What keeps a step's author in the pool is read at gate
+        // time (`lastActorExclusions`), not stored here.
         if (movesLastActor(m.kind, metaInit)) {
             bumpLastActor(tx, m.ticket_id, m.by_agent ?? null, createdAt);
         }

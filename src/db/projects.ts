@@ -27,6 +27,7 @@ import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 import { presenceRunning } from "../live-presence.js";
 import { tagsForMessages } from "./tags.js";
 import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
+import { isStepMeta } from "../ticket-transitions.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -1450,12 +1451,49 @@ export function lastActorExclusions(consumerId: string, ticketIds?: readonly num
     const rows = db.select({
         id: schema.tickets.id,
         lastActor: schema.tickets.lastActor,
+        lastActorAt: schema.tickets.lastActorAt,
     }).from(schema.tickets).where(idScope(schema.tickets.id, ticketIds)).all();
     const hasForeign = foreignActorTickets(consumerId, ticketIds);
+    // #2326 — a step (`then: continue`) as the last action keeps its author in the pool.
+    const ownStepLast = ticketsWhereLastActionIsOwnStep(consumerId, rows.filter((r) => r.lastActor === consumerId));
     const out = new Set<number>();
     for (const r of rows) {
-        if (isExcludedForConsumer(r.lastActor, hasForeign.has(r.id), consumerId)) out.add(r.id);
+        if (isExcludedForConsumer(r.lastActor, hasForeign.has(r.id), consumerId, ownStepLast.has(r.id))) out.add(r.id);
     }
+    return out;
+}
+
+/**
+ * #2326 — among tickets whose last actor is `consumerId`, those where that last
+ * action is the consumer's own step (`then: continue`). The step is the comment
+ * that set `last_actor`: same author, and `created_at` equal to `last_actor_at`,
+ * which the insert stamps from the same instant. When two of the consumer's
+ * comments share that instant, the later one (highest id) decides. Only the
+ * consumer's own comments on those tickets are read.
+ */
+function ticketsWhereLastActionIsOwnStep(
+    consumerId: string,
+    rows: ReadonlyArray<{ id: number; lastActorAt: string | null }>,
+): Set<number> {
+    const out = new Set<number>();
+    if (rows.length === 0) return out;
+    const lastAt = new Map(rows.map((r) => [r.id, r.lastActorAt]));
+    const latest = new Map<number, { id: number; step: boolean }>();
+    for (const m of getDb().select({
+        id: schema.messages.id,
+        ticketId: schema.messages.ticketId,
+        createdAt: schema.messages.createdAt,
+        meta: schema.messages.meta,
+    }).from(schema.messages).where(and(
+        eq(schema.messages.kind, "comment_added"),
+        eq(schema.messages.byAgent, consumerId),
+        idScope(schema.messages.ticketId, rows.map((r) => r.id)),
+    )).all()) {
+        if (m.ticketId == null || lastAt.get(m.ticketId) !== m.createdAt) continue;
+        const cur = latest.get(m.ticketId);
+        if (!cur || m.id > cur.id) latest.set(m.ticketId, { id: m.id, step: isStepMeta(m.meta) });
+    }
+    for (const [ticketId, last] of latest) if (last.step) out.add(ticketId);
     return out;
 }
 

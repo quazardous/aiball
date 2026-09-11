@@ -159,7 +159,8 @@ export function verbsAllowedOn(host: DecisionHost): string[] {
 /**
  * A reply nobody accepts or rejects. `comment_only` concludes nothing and hands
  * the ticket back like any comment. `continue` marks a step done on a ticket the
- * author holds: the work goes on, and the ticket stays where it was.
+ * author holds: the work goes on, and the ticket stays in the author's pool, even
+ * right after the author's own question (#2326).
  */
 export interface ReplyGesture {
     /** How the author asks for it. */
@@ -169,6 +170,8 @@ export interface ReplyGesture {
     readonly meaning: string;
     /** Does posting it make the author the ticket's last actor? */
     readonly movesLastActor: boolean;
+    /** While it is the ticket's last action, is its author still in the pool — never "waiting on them"? */
+    readonly keepsAuthorInPool: boolean;
     /** Only the agent holding the ticket (its live claim or its assignment) may post it. */
     readonly holderOnly: boolean;
     /** Flagged in the inbox once nothing has followed it for `tickets.step_stale_hours`. */
@@ -181,6 +184,7 @@ export const REPLY_GESTURES = {
         stored: null,
         meaning: "concludes nothing: a question, a ticket still in moderation; strongly discouraged for anything else",
         movesLastActor: true,
+        keepsAuthorInPool: false,
         holderOnly: false,
         flaggedWhenNothingFollows: false,
     },
@@ -188,7 +192,8 @@ export const REPLY_GESTURES = {
         asked: "then: continue",
         stored: "meta.step",
         meaning: "a step is done and the work goes on, nothing to validate",
-        movesLastActor: false,
+        movesLastActor: true,
+        keepsAuthorInPool: true,
         holderOnly: true,
         flaggedWhenNothingFollows: true,
     },
@@ -209,10 +214,19 @@ export function isStepMeta(meta: string | null | undefined): boolean {
     }
 }
 
-/** Does this event make its author the ticket's last actor? Only a step is exempt. */
+/** Does this event make its author the ticket's last actor? Read from the table; a step does since #2326. */
 export function movesLastActor(kind: string, meta: string | null | undefined): boolean {
     if (kind === "comment_added" && isStepMeta(meta)) return REPLY_GESTURES.continue.movesLastActor;
     return true;
+}
+
+/**
+ * #2326 — as the ticket's last action, does this event keep its author in the
+ * pool? A step does: "not done, I carry on" must not leave the ticket waiting on
+ * someone, even right after the author's own question. Nothing else does.
+ */
+export function keepsAuthorInPool(kind: string, meta: string | null | undefined): boolean {
+    return kind === "comment_added" && isStepMeta(meta) && REPLY_GESTURES.continue.keepsAuthorInPool;
 }
 
 /** What `stepRefusal` needs to know about the ticket. */
@@ -301,13 +315,13 @@ export function renderReplyGestureMatrix(): string {
     const lines = [
         "Replies that carry no decision, so nobody accepts or rejects them:",
         "",
-        "| reply | stored as | meaning | makes the author the last actor | only the agent holding the ticket | flagged when nothing follows |",
-        "|---|---|---|---|---|---|",
+        "| reply | stored as | meaning | makes the author the last actor | keeps the ticket in the author's pool | only the agent holding the ticket | flagged when nothing follows |",
+        "|---|---|---|---|---|---|---|",
     ];
     for (const g of Object.values(REPLY_GESTURES) as ReplyGesture[]) {
         lines.push(
             `| \`${g.asked}\` | ${g.stored ? `\`${g.stored}\`` : "—"} | ${g.meaning}`
-            + ` | ${yesNo(g.movesLastActor)} | ${yesNo(g.holderOnly)} | ${yesNo(g.flaggedWhenNothingFollows)} |`,
+            + ` | ${yesNo(g.movesLastActor)} | ${yesNo(g.keepsAuthorInPool)} | ${yesNo(g.holderOnly)} | ${yesNo(g.flaggedWhenNothingFollows)} |`,
         );
     }
     return lines.join("\n");

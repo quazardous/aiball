@@ -248,9 +248,10 @@ test("then: continue is a reply gesture, not a decision, and a step is read tole
         assert.equal(t.isStepMeta(m), false, String(m));
     }
     const stepMeta = JSON.stringify({ step: true });
-    assert.equal(t.movesLastActor("comment_added", stepMeta), false);
-    assert.equal(t.movesLastActor("comment_added", null), true);
-    assert.equal(t.movesLastActor("ticket_closed", stepMeta), true, "only a comment can be a step");
+    assert.equal(t.movesLastActor("comment_added", stepMeta), true, "a step is an action like any comment");
+    assert.equal(t.keepsAuthorInPool("comment_added", stepMeta), true);
+    assert.equal(t.keepsAuthorInPool("comment_added", null), false);
+    assert.equal(t.keepsAuthorInPool("ticket_closed", stepMeta), false, "only a comment can be a step");
 });
 
 test("whose turn it is after a step, replayed without a database", async () => {
@@ -265,13 +266,15 @@ test("whose turn it is after a step, replayed without a database", async () => {
         ["the agent comments", [ev(1, "agent")], true],
         ["the agent posts a step", [ev(1, "agent", step)], false],
         ["david accepts the plan, the agent posts two steps", [ev(1, "agent", planAcceptedByDavid), ev(3, "agent", step), ev(4, "agent", step)], false],
-        ["the agent asked a question, then posts a step", [ev(1, "agent"), ev(2, "agent", step)], true],
+        // #2326 — the #2210 case: a step right after the agent's own question.
+        ["the agent asked a question, then posts a step", [ev(1, "agent"), ev(2, "agent", step)], false],
+        ["david speaks, the agent comments, then posts a step", [ev(1, "david"), ev(2, "agent"), ev(3, "agent", step)], false],
         ["the agent posts a step, david answers", [ev(1, "agent", step), ev(2, "david")], false],
         ["the agent posts a step, then a comment", [ev(1, "agent", step), ev(2, "agent")], true],
     ];
     for (const [name, events, out] of EXPECTED_OUT) {
-        const { actor } = replayLastActor({ actor: "david", at: at(0) }, events);
-        assert.equal(isExcludedForConsumer(actor, true, "agent"), out, name);
+        const { actor, keepsAuthorInPool } = replayLastActor({ actor: "david", at: at(0) }, events);
+        assert.equal(isExcludedForConsumer(actor, true, "agent", keepsAuthorInPool), out, name);
     }
 });
 
