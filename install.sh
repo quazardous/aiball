@@ -11,6 +11,10 @@
 #                  [--proxy-token TOK]  # relaying to a remote aiball (writes the
 #                                      # proxy: block; mint TOK on the remote with
 #                                      # `aiball auth issue --node`)
+#   ./install.sh --gnome-extension     # on Linux, install + enable the GNOME top-bar
+#                                      # extension without asking
+#   ./install.sh --no-gnome-extension  # never offer it (by default, on GNOME: ask in a
+#                                      # terminal, print a hint otherwise)
 #   ./install.sh --uninstall           # remove everything we installed (data kept)
 #   ./install.sh --uninstall --purge   # ALSO delete the data dir (accounts, tickets)
 #
@@ -32,6 +36,7 @@ PORT=""
 HOST=""
 PROXY_URL=""
 PROXY_TOKEN=""
+GNOME_EXT=""   # "" = offer on GNOME, "yes" = install without asking, "no" = never
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -39,6 +44,8 @@ while [[ $# -gt 0 ]]; do
         --uninstall)  UNINSTALL=true; shift ;;
         --purge)      PURGE=true; shift ;;
         --symlink)    SYMLINK=true; shift ;;
+        --gnome-extension)    GNOME_EXT=yes; shift ;;
+        --no-gnome-extension) GNOME_EXT=no; shift ;;
         # #394: proxy-node mode — relay this daemon to a remote aiball.
         --proxy-url)    PROXY_URL="${2:-}"; shift 2 ;;
         --proxy-url=*)  PROXY_URL="${1#--proxy-url=}"; shift ;;
@@ -78,6 +85,14 @@ uninstall() {
     rm -f "$DEV_DROPIN" "$BIND_DROPIN"
     rmdir "$DROPIN_DIR" 2>/dev/null || true
     rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp" "$PREFIX_BIN/claude-loop" "$PREFIX_BIN/aiball-tailscale"
+    local ext_dir="$HOME/.local/share/gnome-shell/extensions/aiball@quazardous.github.io"
+    if [[ -d "$ext_dir" ]]; then
+        if command -v gnome-extensions >/dev/null 2>&1; then
+            gnome-extensions disable aiball@quazardous.github.io 2>/dev/null || true
+        fi
+        rm -rf "$ext_dir"
+        log "Removed the GNOME extension (it leaves the top bar at your next GNOME login)"
+    fi
     if [[ -L "$PREFIX_LIB" ]]; then
         # Symlinked install — drop the link, never touch the source it points to
         rm -f "$PREFIX_LIB"
@@ -293,6 +308,17 @@ elif command -v aiball >/dev/null 2>&1; then
     else
         # Already initialized — surface a hint.
         log "auth already initialized (use 'aiball auth reinit' to mint a fresh setup token)"
+    fi
+fi
+
+# --- GNOME top-bar extension ------------------------------------------------
+# Offered, never installed behind your back: on GNOME, the CLI asks in a terminal
+# and prints a hint otherwise; an install that is already there is refreshed.
+if [[ "$GNOME_EXT" != "no" ]] && command -v aiball >/dev/null 2>&1; then
+    if [[ "$GNOME_EXT" == "yes" ]]; then
+        aiball init gnome-extension --overwrite --enable || warn "GNOME extension install failed"
+    else
+        aiball init gnome-extension --offer || warn "GNOME extension offer failed"
     fi
 fi
 

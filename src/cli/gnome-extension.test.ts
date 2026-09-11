@@ -17,7 +17,7 @@ import { pathToFileURL } from "node:url";
 // `copyGnomeExtension` rather than `installGnomeExtension`: the latter reports
 // through `die()`, which exits the process, so a refusal is only observable as
 // a verdict. Testing the exit would test the CLI wrapper, not the decision.
-const { copyGnomeExtension, GNOME_EXTENSION_UUID } = await import("./bootstrap.js");
+const { copyGnomeExtension, GNOME_EXTENSION_UUID, gnomeExtensionOffer, enabledExtensionsWith } = await import("./bootstrap.js");
 
 /**
  * Comments are stripped before the credential check below. Without this the
@@ -39,7 +39,7 @@ test("it lands the whole extension, not just a manifest", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "stylesheet.css", "icons/aiball-symbolic.svg"]) {
+    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "stylesheet.css", "icons/aiball-symbolic.svg"]) {
         assert.ok(existsSync(join(dir, f)), `${f} is missing — the shell needs all of them`);
     }
 });
@@ -83,7 +83,7 @@ test("the extension holds no token, and asks for none", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["extension.js", "aiballClient.js", "daemonActions.js"]) {
+    for (const f of ["extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js"]) {
         const src = stripComments(readFileSync(join(dir, f), "utf8"));
         assert.doesNotMatch(src, /Authorization|Bearer|aiball_token|AIBALL_TOKEN/i, `${f}`);
     }
@@ -140,6 +140,79 @@ test("the top-bar icon is the logo file, named -symbolic so the shell recolours 
     assert.doesNotMatch(ext, /view-list-symbolic|action-unavailable-symbolic/, "the generic theme icons are gone");
     const svg = readFileSync(join(ACTIONS_FILE, "..", "icons", "aiball-symbolic.svg"), "utf8");
     assert.match(svg, /<svg[^>]*viewBox="0 0 16 16"/, "drawn on the 16 px grid of a panel icon");
+});
+
+// #2251 — the tailnet section, pinned against the shapes tailscale really prints.
+const TAILNET_FILE = join(import.meta.dirname, "..", "..", "gnome", GNOME_EXTENSION_UUID, "tailscaleState.js");
+type TailnetState = { visible: boolean; line: string; url: string | null; canExpose: boolean };
+const tailnet = await import(pathToFileURL(TAILNET_FILE).href) as {
+    TAILNET: Record<string, string[]>;
+    tailscaleProvider: (stdout: string | null) => { enabled?: boolean; path?: string } | null;
+    tailscaleConnection: (stdout: string | null) => { connected: boolean; host: string | null };
+    aiballTailnetUrl: (stdout: string | null, port: number, path?: string) => string | null;
+    tailnetMenu: (s: { provider: unknown; connection?: { connected: boolean }; url?: string | null }) => TailnetState;
+};
+const SERVE = JSON.stringify({
+    TCP: { "8443": { HTTPS: true } },
+    Web: { "papy.tail.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:7777" }, "/aiball": { Proxy: "http://127.0.0.1:7777" } } } },
+});
+
+test("the tailnet module stays loadable outside the shell (no gi:// or resource:// import)", () => {
+    assert.doesNotMatch(stripComments(readFileSync(TAILNET_FILE, "utf8")), /gi:\/\/|resource:\/\//);
+});
+
+test("the tailnet URL is the handler proxying to the board, on the configured path", () => {
+    assert.equal(tailnet.aiballTailnetUrl(SERVE, 7777, "/aiball"), "https://papy.tail.ts.net:8443/aiball");
+    assert.equal(tailnet.aiballTailnetUrl(SERVE, 7777, undefined), "https://papy.tail.ts.net:8443/");
+    assert.equal(tailnet.aiballTailnetUrl(SERVE, 7878, "/aiball"), null, "a handler to another port is not the board");
+    const on443 = JSON.stringify({ TCP: { "443": { HTTPS: true } }, Web: { "papy.tail.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:7777" } } } } });
+    assert.equal(tailnet.aiballTailnetUrl(on443, 7777, "/"), "https://papy.tail.ts.net/", "the default port is left out");
+    for (const junk of ["", "not json", "{}", null]) assert.equal(tailnet.aiballTailnetUrl(junk, 7777, "/"), null);
+});
+
+test("tailscale counts as connected only when it is Running", () => {
+    assert.deepEqual(
+        tailnet.tailscaleConnection(JSON.stringify({ BackendState: "Running", Self: { DNSName: "papy.tail.ts.net." } })),
+        { connected: true, host: "papy.tail.ts.net" },
+    );
+    for (const s of [JSON.stringify({ BackendState: "Stopped" }), JSON.stringify({ BackendState: "NeedsLogin" }), "", null]) {
+        assert.equal(tailnet.tailscaleConnection(s).connected, false, String(s));
+    }
+});
+
+test("the section: hidden without a provider, Expose only when it can change something, no command that takes it down", () => {
+    const provider = { enabled: true };
+    assert.equal(tailnet.tailscaleProvider(JSON.stringify({ config: {}, tailscale: null })), null);
+    assert.deepEqual(tailnet.tailscaleProvider(JSON.stringify({ config: { tailscale: provider } })), provider);
+    assert.equal(tailnet.tailnetMenu({ provider: null }).visible, false);
+    const served = tailnet.tailnetMenu({ provider, connection: { connected: true }, url: "https://x/aiball" });
+    assert.equal(served.url, "https://x/aiball");
+    assert.equal(served.canExpose, false);
+    assert.equal(tailnet.tailnetMenu({ provider, connection: { connected: true }, url: null }).canExpose, true);
+    assert.equal(tailnet.tailnetMenu({ provider, connection: { connected: false }, url: null }).canExpose, false);
+    assert.equal(tailnet.tailnetMenu({ provider: { enabled: false }, connection: { connected: true }, url: null }).canExpose, false);
+    const argv = Object.values(tailnet.TAILNET).flat();
+    assert.ok(!argv.some((a) => a === "down" || a === "reset"), "one stray click must not wipe the machine's serve config");
+    assert.deepEqual(tailnet.TAILNET.expose, ["aiball", "providers", "up", "--all"]);
+});
+
+test("the installers offer the extension on GNOME only, ask in a terminal, and refresh an existing install", () => {
+    const base = { desktop: "GNOME", hasCli: true, installed: false, interactive: true };
+    assert.equal(gnomeExtensionOffer(base), "ask");
+    assert.equal(gnomeExtensionOffer({ ...base, interactive: false }), "hint");
+    assert.equal(gnomeExtensionOffer({ ...base, desktop: "ubuntu:GNOME" }), "ask");
+    assert.equal(gnomeExtensionOffer({ ...base, desktop: "KDE" }), "not-gnome");
+    assert.equal(gnomeExtensionOffer({ ...base, desktop: undefined }), "not-gnome");
+    assert.equal(gnomeExtensionOffer({ ...base, hasCli: false }), "not-gnome");
+    assert.equal(gnomeExtensionOffer({ ...base, installed: true }), "refresh");
+    assert.equal(gnomeExtensionOffer({ ...base, choice: false }), "declined");
+    assert.equal(gnomeExtensionOffer({ ...base, desktop: "KDE", choice: true }), "install", "an explicit yes wins");
+});
+
+test("enabling appends the uuid to enabled-extensions once", () => {
+    assert.equal(enabledExtensionsWith("@as []\n", "a@b"), "['a@b']");
+    assert.equal(enabledExtensionsWith("['x@y', 'z@w']\n", "a@b"), "['x@y', 'z@w', 'a@b']");
+    assert.equal(enabledExtensionsWith("['x@y', 'a@b']", "a@b"), null);
 });
 
 after(() => {

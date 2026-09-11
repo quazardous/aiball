@@ -40,6 +40,15 @@ dates are YYYY-MM-DD.
   switch backed by `systemctl --user enable` / `disable`.
 - The GNOME indicator shows the aiball logo in the panel's colour, red while
   the daemon is down.
+- **The GNOME indicator shows the tailnet**: whether Tailscale is connected,
+  the URL it serves the board on, and entries to open it, copy it, or expose the
+  board when it is not served. There is no entry to take it down.
+- **The installers offer the GNOME extension**: on GNOME, `install.sh` and
+  `aiball install --service` ask in a terminal (a hint otherwise), with
+  `--gnome-extension` / `--no-gnome-extension` to decide up front;
+  `aiball init gnome-extension --enable` installs and enables it in one go.
+- `aiball providers status --json` prints the configured providers and the
+  live serve status as JSON.
 - **Start a CTO agent in one command**: `claude-loop start --type cto`
   sets the agent's type before its session boots (it used to start as a coder
   until restarted), and `--init --deny-code` keeps it away from code. For an

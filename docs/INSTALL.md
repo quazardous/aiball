@@ -198,6 +198,8 @@ install, run `./install.sh --uninstall` first.
 | `--no-systemd` | skip the user unit (macOS, headless boxes — start the daemon manually, see below) |
 | `--proxy-url URL` | proxy-node mode — run this daemon as a transparent relay to a remote aiball (see [`REMOTE.md`](./REMOTE.md)) |
 | `--proxy-token TOK` | with `--proxy-url`, the node token minted on the remote (`aiball auth issue --node`) |
+| `--gnome-extension` | install and enable the GNOME top-bar extension without asking (by default it is offered on GNOME: a question in a terminal, a hint otherwise) |
+| `--no-gnome-extension` | never offer the GNOME extension |
 | `--uninstall` | remove the install (code, bins, systemd unit); data dir preserved |
 
 Re-running with new `--port` / `--host` overwrites only the bind drop-in.

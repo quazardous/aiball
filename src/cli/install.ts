@@ -28,6 +28,7 @@ import { homedir } from "node:os";
 import { dirname, join, posix as pathPosix, resolve, win32 as pathWin32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
+import { offerGnomeExtension } from "./bootstrap.js";
 
 const SERVICE_NAME = "aiball.service";
 /** Scheduled-task name — must match install.ps1's `$TaskName`. */
@@ -306,14 +307,18 @@ export function registerInstallCommands(program: Command): void {
             "--no-tray",
             "Windows only: register the daemon directly instead of letting the tray own it",
         )
+        // #2251 — the Linux counterpart of the tray: offered on GNOME, not imposed.
+        .option("--gnome-extension", "Linux: install and enable the GNOME top-bar extension without asking")
+        .option("--no-gnome-extension", "Linux: do not offer the GNOME top-bar extension")
         .action(
-            (opts: {
+            async (opts: {
                 service?: boolean;
                 remove?: boolean;
                 host?: string;
                 port?: string;
                 dryRun?: boolean;
                 tray?: boolean;
+                gnomeExtension?: boolean;
             }) => {
                 if (!opts.service) {
                     process.stderr.write(
@@ -398,6 +403,7 @@ export function registerInstallCommands(program: Command): void {
                         `  systemctl --user status ${SERVICE_NAME}\n` +
                         `  aiball install --service --remove   # to give it back\n`,
                 );
+                await offerGnomeExtension({ choice: opts.gnomeExtension });
             },
         );
 }

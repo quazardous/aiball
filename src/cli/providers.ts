@@ -7,6 +7,7 @@
  * Exposed entry point: `registerProviderCommands(program)`.
  */
 import type { Command } from "commander";
+import { gOpts, out } from "./_helpers.js";
 
 export function registerProviderCommands(program: Command): void {
     const providers = program
@@ -18,17 +19,24 @@ export function registerProviderCommands(program: Command): void {
     providers
         .command("status")
         .description("Show configured providers + live tailscale serve status")
-        .action(async () => {
+        // #2251 — the GNOME extension reads this to know whether a tailscale
+        // provider is configured, without parsing the YAML itself.
+        .option("--json", "Machine-readable JSON output")
+        .action(async (opts: { json?: boolean }, cmd: Command) => {
             const { providersStatus } = await import("../providers.js");
             const s = providersStatus();
-            if (!s.config.tailscale) {
-                console.log("No provider configured. Add a `providers:` block to ~/.config/aiball/config.yaml (see docs/CONFIGS.md).");
-                return;
-            }
-            console.log("Configured providers:");
-            console.log(JSON.stringify(s.config, null, 2));
-            console.log("\n[tailscale serve status]");
-            console.log(s.tailscale ?? "(tailscale not reachable / not logged in)");
+            out(s, { ...gOpts(cmd), json: opts.json === true || gOpts(cmd).json === true }, (v) => {
+                if (!v.config.tailscale) {
+                    return "No provider configured. Add a `providers:` block to ~/.config/aiball/config.yaml (see docs/CONFIGS.md).";
+                }
+                return [
+                    "Configured providers:",
+                    JSON.stringify(v.config, null, 2),
+                    "",
+                    "[tailscale serve status]",
+                    v.tailscale ?? "(tailscale not reachable / not logged in)",
+                ].join("\n");
+            });
         });
 
     providers

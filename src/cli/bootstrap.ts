@@ -10,6 +10,8 @@
  * Exposed entry point: `registerBootstrapCommands(program)`.
  */
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createInterface } from "node:readline/promises";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
@@ -543,7 +545,7 @@ export function copyGnomeExtension(opts: { target?: string; force: boolean }): G
     return { kind: "installed", dest, src };
 }
 
-export function installGnomeExtension(opts: { target?: string; force: boolean }): void {
+export function installGnomeExtension(opts: { target?: string; force: boolean; enable?: boolean }): void {
     if (process.platform !== "linux" && opts.target === undefined) {
         die(`init gnome-extension: GNOME Shell extensions are a Linux thing (this is ${process.platform})`);
     }
@@ -559,12 +561,18 @@ export function installGnomeExtension(opts: { target?: string; force: boolean })
             `Installed the aiball GNOME extension → ${v.dest}`,
             ``,
             `Source: ${v.src}`,
-            `Enable it with:  gnome-extensions enable ${GNOME_EXTENSION_UUID}`,
-            ``,
-            `On WAYLAND that command prints "n'existe pas" / "does not exist" — expected,`,
-            `and it still records the choice. A running Wayland shell cannot rescan the`,
-            `extensions directory, so it only sees these files after you log out and back`,
-            `in. On X11, Alt+F2 then "r" is enough and no such message appears.`,
+            ...(opts.enable
+                ? [
+                    `Enabled — it shows in the top bar after your next GNOME login. A running`,
+                    `Wayland shell does not load new extension code; on X11, Alt+F2 then "r" is enough.`,
+                ]
+                : [
+                    `Enable it with:  aiball init gnome-extension --overwrite --enable`,
+                    `(or gnome-extensions enable ${GNOME_EXTENSION_UUID})`,
+                    ``,
+                    `A running Wayland shell cannot rescan the extensions directory, so it only`,
+                    `sees these files after you log out and back in. On X11, Alt+F2 then "r" is enough.`,
+                ]),
             ``,
             `Then check:      gnome-extensions info ${GNOME_EXTENSION_UUID}   (expect State: ACTIVE)`,
             ``,
@@ -572,6 +580,93 @@ export function installGnomeExtension(opts: { target?: string; force: boolean })
             `--overwrite to refresh after an aiball upgrade.`,
             ``,
         ].join("\n"),
+    );
+    if (opts.enable) enableGnomeExtension();
+}
+
+/**
+ * #2251 — what an installer does about the extension. Offered, never installed
+ * behind your back: an explicit choice wins; otherwise only on GNOME, asking in
+ * a terminal and printing a hint when nobody can answer. An install that is
+ * already there is refreshed, since someone chose it before.
+ */
+export type GnomeExtensionOffer = "declined" | "not-gnome" | "install" | "refresh" | "ask" | "hint";
+
+export function gnomeExtensionOffer(o: {
+    desktop?: string;
+    hasCli: boolean;
+    installed: boolean;
+    choice?: boolean;
+    interactive: boolean;
+}): GnomeExtensionOffer {
+    if (o.choice === false) return "declined";
+    if (o.choice === true) return "install";
+    const gnome = (o.desktop ?? "").split(":").some((d) => /gnome/i.test(d));
+    if (!gnome || !o.hasCli) return "not-gnome";
+    if (o.installed) return "refresh";
+    return o.interactive ? "ask" : "hint";
+}
+
+/**
+ * `gsettings get org.gnome.shell enabled-extensions` prints a GVariant string
+ * array (`['a', 'b']`, or `@as []` when empty). Returns the value with `uuid`
+ * appended, or null when it is already there.
+ */
+export function enabledExtensionsWith(current: string, uuid: string): string | null {
+    const items = [...current.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]);
+    if (items.includes(uuid)) return null;
+    return `[${[...items, uuid].map((i) => `'${i}'`).join(", ")}]`;
+}
+
+/**
+ * Enable the extension for the next login. `gnome-extensions enable` goes
+ * through the running shell, which refuses an extension it has not loaded yet
+ * — and a Wayland shell loads new ones only at login. The setting is what that
+ * login reads, so make sure the uuid is in it either way.
+ */
+function enableGnomeExtension(): void {
+    spawnSync("gnome-extensions", ["enable", GNOME_EXTENSION_UUID], { stdio: "ignore" });
+    const get = spawnSync("gsettings", ["get", "org.gnome.shell", "enabled-extensions"], { encoding: "utf8" });
+    if (get.status !== 0 || typeof get.stdout !== "string") return;
+    const next = enabledExtensionsWith(get.stdout, GNOME_EXTENSION_UUID);
+    if (next) spawnSync("gsettings", ["set", "org.gnome.shell", "enabled-extensions", next], { stdio: "ignore" });
+}
+
+/** The installers' gesture: `install.sh` and `aiball install --service` both end here. */
+export async function offerGnomeExtension(o: { choice?: boolean } = {}): Promise<void> {
+    if (process.platform !== "linux") return;
+    const dest = join(homedir(), ".local", "share", "gnome-shell", "extensions", GNOME_EXTENSION_UUID);
+    const verdict = gnomeExtensionOffer({
+        desktop: process.env.XDG_CURRENT_DESKTOP,
+        hasCli: spawnSync("gnome-extensions", ["version"], { stdio: "ignore" }).status === 0,
+        installed: existsSync(dest),
+        choice: o.choice,
+        interactive: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    });
+    if (verdict === "declined" || verdict === "not-gnome") return;
+    if (verdict === "hint") {
+        process.stdout.write("GNOME detected — add aiball's top-bar indicator with: aiball init gnome-extension --enable\n");
+        return;
+    }
+    if (verdict === "ask") {
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        const answer = (await rl.question("Install the aiball GNOME top-bar extension? [Y/n] ")).trim().toLowerCase();
+        rl.close();
+        if (answer !== "" && !answer.startsWith("y")) {
+            process.stdout.write("Skipped — add it later with: aiball init gnome-extension --enable\n");
+            return;
+        }
+    }
+    const v = copyGnomeExtension({ force: true });
+    if (v.kind !== "installed") {
+        process.stderr.write(`GNOME extension not installed: ${v.kind === "missing-source" ? `source not found at ${v.src}` : v.kind}\n`);
+        return;
+    }
+    // A refresh leaves the enable state alone: someone may have switched it off.
+    if (verdict !== "refresh") enableGnomeExtension();
+    process.stdout.write(
+        `${verdict === "refresh" ? "Refreshed" : "Installed and enabled"} the aiball GNOME extension → ${v.dest}\n` +
+            "It shows the change after your next GNOME login — a running Wayland shell does not load new extension code.\n",
     );
 }
 
@@ -949,8 +1044,11 @@ export function registerBootstrapCommands(program: Command): void {
         .description("Install the aiball GNOME Shell extension into ~/.local/share/gnome-shell/extensions/")
         .option("--target <path>", "Explicit extensions directory (the extension lands at <path>/" + GNOME_EXTENSION_UUID + ")")
         .option("--overwrite", "Replace an existing install (a refresh REPLACES the directory, it does not merge)")
-        .action((o: { target?: string; overwrite?: boolean }) => {
-            installGnomeExtension({ target: o.target, force: o.overwrite === true });
+        .option("--enable", "Also enable it — recorded for your next GNOME login")
+        .option("--offer", "What the installers run: only on GNOME, ask first (a hint when not in a terminal); refresh an existing install")
+        .action(async (o: { target?: string; overwrite?: boolean; enable?: boolean; offer?: boolean }) => {
+            if (o.offer) return offerGnomeExtension();
+            installGnomeExtension({ target: o.target, force: o.overwrite === true, enable: o.enable === true });
         });
 
     // #380: `aiball init tailscale` — configure host-level remote access by

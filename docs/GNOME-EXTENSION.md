@@ -19,6 +19,15 @@ just wrote; the enable call nevertheless records the choice in
 up both the files and the setting. On X11, `Alt+F2` then `r` is enough and the
 message does not appear.
 
+`aiball init gnome-extension --enable` does both steps, and also writes the
+setting directly, so the choice holds even when the running shell refuses it.
+
+**The installers offer it.** On GNOME, `./install.sh` and `aiball install
+--service` ask whether to install the extension when run in a terminal, and
+print a one-line hint otherwise; an extension that is already installed is
+refreshed. `--gnome-extension` installs it without asking,
+`--no-gnome-extension` never offers it. `./install.sh --uninstall` removes it.
+
 Check it landed with `gnome-extensions info aiball@quazardous.github.io` after
 logging back in: `État: ACTIVE`.
 
@@ -56,7 +65,17 @@ nobody reads. Everything else is one click away in the menu:
   is up, the others while it is down). Stopping disconnects every loop, and
   the entry says so;
 - a **Start at login** switch that mirrors `systemctl --user is-enabled aiball`
-  and flips it with `enable` / `disable`.
+  and flips it with `enable` / `disable`;
+- when a tailscale provider is configured, the **tailnet**: whether Tailscale is
+  connected and the URL it serves the board on, with *Open on the tailnet*,
+  *Copy the tailnet URL*, and *Expose on the tailnet* (`aiball providers up
+  --all`, clickable only when Tailscale is connected and the board is not
+  served). It reads `aiball providers status --json`, `tailscale status
+  --json` and `tailscale serve status --json` when the menu opens — no token.
+
+There is deliberately no entry to take the tailnet down: `aiball providers
+down` runs `tailscale serve reset`, which wipes the machine's whole serve
+configuration, not only aiball's. That stays a command-line gesture.
 
 ## No token lives in it
 

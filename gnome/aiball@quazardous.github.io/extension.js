@@ -23,6 +23,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {defaultSocketPath, getJson} from './aiballClient.js';
 import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './daemonActions.js';
+import {TAILNET, aiballTailnetUrl, tailnetMenu, tailscaleConnection, tailscaleProvider} from './tailscaleState.js';
 
 /*
  * Two cadences, because the two reads do not cost the same thing.
@@ -38,7 +39,8 @@ import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './d
  */
 const HEALTH_INTERVAL_S = 5;
 const COUNTERS_INTERVAL_S = 30;
-const BOARD_URL = 'http://127.0.0.1:7777/';
+const BOARD_PORT = 7777;
+const BOARD_URL = `http://127.0.0.1:${BOARD_PORT}/`;
 
 const AiballIndicator = GObject.registerClass(
 class AiballIndicator extends PanelMenu.Button {
@@ -92,6 +94,24 @@ class AiballIndicator extends PanelMenu.Button {
         });
         this.menu.addMenuItem(this._autostartItem);
 
+        // #2251 — the tailnet, shown only when a tailscale provider is
+        // configured, and read when the menu opens. No "take it down" entry:
+        // see tailscaleState.js.
+        this._tailnetSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this.menu.addMenuItem(this._tailnetSeparator);
+        this._tailnetItem = new PopupMenu.PopupMenuItem('', {reactive: false});
+        this.menu.addMenuItem(this._tailnetItem);
+        this._tailnetUrl = null;
+        this._tailnetOpen = this._addAction('Open on the tailnet', () => {
+            if (this._tailnetUrl) Gio.AppInfo.launch_default_for_uri(this._tailnetUrl, null);
+        });
+        this._tailnetCopy = this._addAction('Copy the tailnet URL', () => {
+            if (this._tailnetUrl) St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, this._tailnetUrl);
+        });
+        this._tailnetExpose = this._addAction('Expose on the tailnet',
+            () => this._runThen(TAILNET.expose, () => this._refreshTailnet()));
+        this._showTailnet(tailnetMenu({provider: null}));
+
         // The one refresh that is always worth paying for: the menu is open,
         // so somebody is actually reading the numbers.
         this.menu.connect('open-state-changed', (_menu, open) => {
@@ -99,6 +119,7 @@ class AiballIndicator extends PanelMenu.Button {
                 this._refreshHealth();
                 this._refreshCounters();
                 this._refreshAutostart();
+                this._refreshTailnet();
             }
         });
 
@@ -151,6 +172,57 @@ class AiballIndicator extends PanelMenu.Button {
         } catch {
             // No systemctl on this machine: the switch stays off and inert.
         }
+    }
+
+    /** Run `argv` and resolve with its stdout, or null when it cannot run or fails to answer. */
+    _capture(argv) {
+        return new Promise((resolve) => {
+            try {
+                const proc = Gio.Subprocess.new(argv,
+                    Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+                proc.communicate_utf8_async(null, this._cancellable, (p, res) => {
+                    try {
+                        resolve(p.communicate_utf8_finish(res)[1]);
+                    } catch {
+                        resolve(null);
+                    }
+                });
+            } catch {
+                // The command is not installed on this machine.
+                resolve(null);
+            }
+        });
+    }
+
+    async _refreshTailnet() {
+        const provider = tailscaleProvider(await this._capture(TAILNET.providers));
+        if (this._cancellable.is_cancelled()) return;
+        if (!provider) {
+            this._showTailnet(tailnetMenu({provider: null}));
+            return;
+        }
+        const [status, serve] = await Promise.all([
+            this._capture(TAILNET.status),
+            this._capture(TAILNET.serve),
+        ]);
+        if (this._cancellable.is_cancelled()) return;
+        this._showTailnet(tailnetMenu({
+            provider,
+            connection: tailscaleConnection(status),
+            url: aiballTailnetUrl(serve, BOARD_PORT, provider.path),
+        }));
+    }
+
+    _showTailnet(state) {
+        for (const item of [this._tailnetSeparator, this._tailnetItem, this._tailnetOpen,
+            this._tailnetCopy, this._tailnetExpose])
+            item.visible = state.visible;
+        this._tailnetUrl = state.url;
+        if (!state.visible) return;
+        this._tailnetItem.label.text = state.line;
+        this._tailnetOpen.setSensitive(!!state.url);
+        this._tailnetCopy.setSensitive(!!state.url);
+        this._tailnetExpose.setSensitive(state.canExpose);
     }
 
     async _refreshHealth() {
