@@ -97,7 +97,6 @@ the table disagree.
 | `resolved` | `resolution` | `comment_added` | the work is done, close the ticket | out of the proposer's pool until someone else acts | the ticket closes, resolved; out of the pool, settled | back in the pool | — | yes | yes | `pending_resolution` |
 | `wontfix` | `wontfix` | `comment_added` | close without doing it: junk, out of scope, not reproducible | out of the proposer's pool until someone else acts | the ticket closes, not resolved; out of the pool, settled | back in the pool | — | no | no | `pending_wontfix` |
 | `escalate` | `escalation` | `comment_added` | a blocker only a human can lift | out of the proposer's pool until someone else acts | unblocked, the ticket stays open; back in the pool | back in the pool | priority up one notch, broadcast to followers | no | no | `pending_escalation` |
-| `wait` | `wait` | `comment_added` | waiting on another ticket (`wait_for`): blocked until it closes, which accepts the wait; a human lifts it by rejecting it | back in the pool | unblocked, the ticket stays open; back in the pool | back in the pool | — | no | no | `pending_wait` |
 
 Every decision above hands the ticket back (its author waits). The replies below carry no decision, so nobody accepts or rejects them; a comment with no `then` must say which one it is:
 

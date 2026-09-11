@@ -1219,14 +1219,24 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     const callerIsProjectOwner =
         listProjectSubscribers(t.project, { roles: ["owner"] }).includes(caller)
         || listProjectSubscribers(targetTicket.project, { roles: ["owner"] }).includes(caller);
+    // #2368 — the agent either ticket is assigned to may set or cut the
+    // dependency gate between them: a relation is how the holder says its ticket
+    // waits on another. (A claimant needs no rule of its own: only an owner of
+    // the project can claim, and owners already pass.) Only that axis — lineage
+    // and cross-references stay with the reporters and owners.
+    const GATE_KINDS = ["depends_on", "blocks"];
+    const touchesGateOnly = GATE_KINDS.includes(kindStr)
+        || (kindStr === "ignored" && typeof body.axis_kind === "string" && GATE_KINDS.includes(body.axis_kind));
+    const callerIsAssignee = t.assignee === caller || targetTicket.assignee === caller;
     if (
         !isHuman(caller) &&
         t.by_agent !== caller &&
         targetTicket.by_agent !== caller &&
-        !callerIsProjectOwner
+        !callerIsProjectOwner &&
+        !(touchesGateOnly && callerIsAssignee)
     ) {
         return res.status(403).json({
-            error: `only a registered human moderator, the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}), or a project-owner of either project can relate them`,
+            error: `only a registered human moderator, the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}), a project-owner of either project, or (for depends_on / blocks) the agent either ticket is assigned to can relate them`,
         });
     }
     // Anti-cycle (#275): lineage (child_of/parent_of) must stay a DAG.

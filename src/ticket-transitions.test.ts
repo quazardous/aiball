@@ -53,11 +53,6 @@ const EXPECTED: Record<Kind, Record<Scenario, boolean>> = {
         "pending": true, "pending, then someone else comments": false, "pending, then the proposer comments": true,
         "accepted": false, "accepted, then someone else comments": false, "rejected": false,
     },
-    // #2297 — the decision holds nothing: its target blocks the ticket (db/wait-gate.ts).
-    wait: {
-        "pending": false, "pending, then someone else comments": false, "pending, then the proposer comments": false,
-        "accepted": false, "accepted, then someone else comments": false, "rejected": false,
-    },
 };
 
 const decided = (kind: string, status: string) => ({
@@ -114,7 +109,7 @@ test("each then verb posts its kind, and only escalation acts when posted", () =
     assert.equal(t.kindForVerb("escalate"), "escalation");
     assert.equal(t.kindForVerb("close"), null);
     assert.deepEqual(t.verbsAllowedOn("ticket_created"), ["plan"]);
-    assert.deepEqual(t.verbsAllowedOn("comment_added"), ["plan", "resolved", "wontfix", "escalate", "wait"]);
+    assert.deepEqual(t.verbsAllowedOn("comment_added"), ["plan", "resolved", "wontfix", "escalate"]);
     for (const kind of t.DECISION_KINDS) {
         const { bumpPriority, broadcast } = t.DECISION_GESTURES[kind].onPost;
         assert.equal(bumpPriority, kind === "escalation", `${kind} priority bump`);
@@ -133,10 +128,7 @@ test("close-time acceptance, the agent's pending list, rejection badges and atte
     assert.deepEqual(pick("autoAcceptedOnClose"), ["resolution"]);
     assert.deepEqual(pick("listedAsMyPending"), ["plan", "resolution"]);
     assert.deepEqual(pick("surfacesRejection"), ["plan", "resolution"]);
-    assert.deepEqual(t.kindsByAttention(), ["escalation", "plan", "resolution", "wontfix", "wait"]);
-    // #2297 — only a wait names a ticket, and only a wait keeps the hand.
-    assert.deepEqual(t.DECISION_KINDS.filter((k) => t.DECISION_GESTURES[k].waitsForTicket), ["wait"]);
-    assert.deepEqual(t.DECISION_KINDS.filter((k) => t.DECISION_GESTURES[k].keepsTheHand), ["wait"]);
+    assert.deepEqual(t.kindsByAttention(), ["escalation", "plan", "resolution", "wontfix"]);
     for (const k of t.DECISION_KINDS) assert.equal(t.DECISION_GESTURES[k].inboxFlag, `pending_${k}`);
     assert.equal(t.resolvesTicket("resolution", "accepted"), true);
     for (const [k, st] of [["resolution", "pending"], ["wontfix", "accepted"], ["plan", "accepted"]] as const) {
@@ -362,8 +354,7 @@ test("the fold tracks the latest step and the row flags it once nothing followed
 // --- #2331: handback ---------------------------------------------------------
 
 test("#2331 every then implies a handback, and a comment with none must say it", () => {
-    for (const k of t.DECISION_KINDS) assert.equal(t.implicitHandback(k, false), !t.DECISION_GESTURES[k].keepsTheHand, k);
-    assert.equal(t.implicitHandback("wait", false), false, "a wait keeps the hand");
+    for (const k of t.DECISION_KINDS) assert.equal(t.implicitHandback(k, false), true, k);
     assert.equal(t.implicitHandback(null, true), false, "a step keeps the hand");
     assert.equal(t.implicitHandback(null, false), null);
     const base = { decisionKind: null, step: false, handback: undefined, required: true };

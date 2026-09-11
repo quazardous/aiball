@@ -29,7 +29,6 @@ import { tagsForMessages } from "./tags.js";
 import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
 import { isStepMeta, keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
 import { getConfig } from "./config-overrides.js";
-import { pendingWaitTargets } from "./wait-gate.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -1708,8 +1707,6 @@ function computeActionableTicketIdsUncached(
             scope.add(r.sourceTicketId);
             if (r.targetTicketId) scope.add(r.targetTicketId);
         }
-        // #2297 — a pending wait's target decides the gate too, so it is loaded.
-        for (const target of pendingWaitTargets(ticketIds).values()) scope.add(target);
         scopeIds = [...scope];
     }
 
@@ -1808,10 +1805,6 @@ function computeActionableTicketIdsUncached(
     for (const r of latestPerPair.values()) {
         if (r.kind === "depends_on" && openIds.has(r.target)) gatedByBlocker.add(r.source);
         else if (r.kind === "blocks" && openIds.has(r.source)) gatedByBlocker.add(r.target);
-    }
-    // #2297 — a pending `then: wait` gates like a soft depends_on on the ticket it names.
-    for (const [source, target] of pendingWaitTargets(scopeIds)) {
-        if (openIds.has(target)) gatedByBlocker.add(source);
     }
 
     // #265/#374: per-consumer "I acted last → awaiting someone else" gate,

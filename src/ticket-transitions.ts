@@ -13,7 +13,7 @@
  * the `@shared` alias) all load this file.
  */
 
-export const DECISION_KINDS = ["plan", "resolution", "wontfix", "escalation", "wait"] as const;
+export const DECISION_KINDS = ["plan", "resolution", "wontfix", "escalation"] as const;
 export type DecisionKind = typeof DECISION_KINDS[number];
 
 /** Where a decision may be attached. */
@@ -56,12 +56,6 @@ export interface DecisionGesture {
     readonly autoAcceptedOnClose: boolean;
     /** Whether it is listed among the proposals an agent waits on (arbitrage). */
     readonly listedAsMyPending: boolean;
-    /** #2297 — whether it names another ticket it waits on (`wait_for`), which
-     *  blocks the ticket while that one is open and accepts it when that one closes. */
-    readonly waitsForTicket: boolean;
-    /** #2297 — whether posting it keeps the author's hand (it holds the ticket and
-     *  carries on) instead of handing the ticket back like the other decisions. */
-    readonly keepsTheHand: boolean;
 }
 
 export const DECISION_GESTURES = {
@@ -74,7 +68,7 @@ export const DECISION_GESTURES = {
         onPost: { bumpPriority: false, broadcast: false },
         meaning: "how the work will go, for the reporter to validate",
         inboxFlag: "pending_plan", attentionRank: 1, pendingLabel: "pending plan", pendingSeverity: "warn",
-        surfacesRejection: true, autoAcceptedOnClose: false, listedAsMyPending: true, waitsForTicket: false, keepsTheHand: false,
+        surfacesRejection: true, autoAcceptedOnClose: false, listedAsMyPending: true,
     },
     resolution: {
         verb: "resolved",
@@ -85,7 +79,7 @@ export const DECISION_GESTURES = {
         onPost: { bumpPriority: false, broadcast: false },
         meaning: "the work is done, close the ticket",
         inboxFlag: "pending_resolution", attentionRank: 2, pendingLabel: "pending resolution", pendingSeverity: "warn",
-        surfacesRejection: true, autoAcceptedOnClose: true, listedAsMyPending: true, waitsForTicket: false, keepsTheHand: false,
+        surfacesRejection: true, autoAcceptedOnClose: true, listedAsMyPending: true,
     },
     wontfix: {
         verb: "wontfix",
@@ -96,7 +90,7 @@ export const DECISION_GESTURES = {
         onPost: { bumpPriority: false, broadcast: false },
         meaning: "close without doing it: junk, out of scope, not reproducible",
         inboxFlag: "pending_wontfix", attentionRank: 3, pendingLabel: "pending wontfix", pendingSeverity: "warn",
-        surfacesRejection: false, autoAcceptedOnClose: false, listedAsMyPending: false, waitsForTicket: false, keepsTheHand: false,
+        surfacesRejection: false, autoAcceptedOnClose: false, listedAsMyPending: false,
     },
     escalation: {
         verb: "escalate",
@@ -107,20 +101,7 @@ export const DECISION_GESTURES = {
         onPost: { bumpPriority: true, broadcast: true },
         meaning: "a blocker only a human can lift",
         inboxFlag: "pending_escalation", attentionRank: 0, pendingLabel: "ESCALATED", pendingSeverity: "danger",
-        surfacesRejection: false, autoAcceptedOnClose: false, listedAsMyPending: false, waitsForTicket: false, keepsTheHand: false,
-    },
-    wait: {
-        verb: "wait",
-        family: "waiting",
-        allowedOn: ["comment_added"],
-        // The decision itself holds nothing: while pending, its target blocks the
-        // ticket like a soft depends_on (db/wait-gate.ts).
-        gate: { pending: "open", accepted: "open", rejected: "open" },
-        onAccept: "unblock",
-        onPost: { bumpPriority: false, broadcast: false },
-        meaning: "waiting on another ticket (`wait_for`): blocked until it closes, which accepts the wait; a human lifts it by rejecting it",
-        inboxFlag: "pending_wait", attentionRank: 4, pendingLabel: "waiting", pendingSeverity: "warn",
-        surfacesRejection: false, autoAcceptedOnClose: false, listedAsMyPending: false, waitsForTicket: true, keepsTheHand: true,
+        surfacesRejection: false, autoAcceptedOnClose: false, listedAsMyPending: false,
     },
 } as const satisfies Record<DecisionKind, DecisionGesture>;
 
@@ -254,26 +235,13 @@ export function readHandback(meta: string | null | undefined): boolean | null {
     }
 }
 
-/** #2297 — the kind of the decision a comment carries, or null. */
-export function readDecisionKind(meta: string | null | undefined): string | null {
-    if (!meta) return null;
-    try {
-        const k = (JSON.parse(meta) as { decision?: { kind?: unknown } }).decision?.kind;
-        return typeof k === "string" ? k : null;
-    } catch {
-        return null;
-    }
-}
-
 /**
  * #2331 — the handback a comment's `then` implies: every decision waits on
  * someone (true), a step keeps the hand (false). null when the comment has no
  * `then`: an agent must then say it explicitly.
  */
 export function implicitHandback(decisionKind: string | null | undefined, step: boolean): boolean | null {
-    const row = decisionGesture(decisionKind);
-    // #2297 — every decision waits on someone, except one that keeps the hand (a wait).
-    if (row) return !row.keepsTheHand;
+    if (decisionGesture(decisionKind)) return true;
     if (step) return false;
     return null;
 }
@@ -338,8 +306,6 @@ export function movesLastActor(kind: string, meta: string | null | undefined): b
 export function keepsAuthorInPool(kind: string, meta: string | null | undefined): boolean {
     if (kind !== "comment_added") return false;
     if (isStepMeta(meta)) return REPLY_GESTURES.continue.keepsAuthorInPool;
-    // #2297 — so does a decision that keeps the hand (a wait).
-    if (decisionGesture(readDecisionKind(meta))?.keepsTheHand) return true;
     return readHandback(meta) === false && REPLY_GESTURES.keep.keepsAuthorInPool;
 }
 
@@ -354,7 +320,7 @@ export interface StepHold {
 }
 
 /** Why `author` may not post a step on this ticket, or null when it may. */
-export function stepRefusal(h: StepHold, gesture: string = "then: continue"): string | null {
+export function stepRefusal(h: StepHold, gesture: "then: continue" | "handback: false" = "then: continue"): string | null {
     if (h.ticketStatus !== "approved") {
         return `${gesture} needs an approved ticket; this one is "${h.ticketStatus}". Nothing was posted.`;
     }

@@ -193,8 +193,6 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
             like a resolution does, so without this the row looked idle
             while it was in fact waiting on the reporter. */
         pending_wontfix: pendingFlag("wontfix"),
-        /** #2297 — pending WAIT: the ticket waits on another one (`wait_for`). */
-        pending_wait: pendingFlag("wait"),
         /** #656 david `2c9qm4`: true iff a pending decision exists
             AND the decision-bearing comment IS the latest comment
             on the thread (no newer activity past the proposal).

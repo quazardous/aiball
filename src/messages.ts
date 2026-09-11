@@ -8,7 +8,6 @@ import {
     insertRelationEvent,
     insertTypedRelation,
     listTypedRelationsForTicket,
-    applyMessageDecision,
     updateMessageStatus,
     upsertTicketSubscription,
     releaseTicketClaim,
@@ -25,9 +24,8 @@ import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, typ
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
 import { isTicketClosed } from "./db/messages.js";
-import { ticketsWaitingOn } from "./db/wait-gate.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
-import { decisionGesture, isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
+import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
 import { isHeldByOther, isAssignmentLive } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { getConsumer } from "./db/consumers.js";
@@ -185,21 +183,6 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         }
         decisionKind = o.decision_kind;
     }
-    // #2297 — a `then: wait` names the open ticket it waits on; nothing else carries one.
-    let waitFor: number | null = null;
-    if (decisionKind && decisionGesture(decisionKind)?.waitsForTicket) {
-        const target = typeof o.wait_for === "number" ? o.wait_for : Number.NaN;
-        if (!Number.isInteger(target) || target <= 0) {
-            return { error: "then: wait needs wait_for: the id of the ticket it waits on" };
-        }
-        if (target === o.ticket_id) return { error: "a ticket cannot wait on itself" };
-        const waited = getMessage(target);
-        if (!waited || waited.kind !== "ticket_created") return { error: `wait_for #${target}: no such ticket` };
-        if (isTicketClosed(target)) return { error: `wait_for #${target} is already closed: there is nothing to wait for` };
-        waitFor = target;
-    } else if (o.wait_for !== undefined && o.wait_for !== null) {
-        return { error: "wait_for goes with then: wait only" };
-    }
     // #B.130: `summary_until` on comments — author's one-line TLDR of
     // the thread state *up to this comment*. Powers brief-mode reads
     // and densifies the thread context. Mandatory on comment_added
@@ -321,7 +304,6 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         intent: kind === "ticket_created" ? intent : null,
         priority: kind === "ticket_created" ? priority : null,
         decision_kind: decisionKind,
-        ...(waitFor !== null ? { wait_for: waitFor } : {}),
         summary_until: summaryUntil,
         ...(step ? { step: true } : {}),
         ...(handback !== undefined ? { handback } : {}),
@@ -494,9 +476,7 @@ function assertDecisionOnApprovedTicket(input: NewMessage): void {
 function assertStepByHolder(input: NewMessage): void {
     // #2331 — keeping the hand without a step (handback: false, no then) is the holder's too.
     const keeping = input.handback === false && !input.decision_kind && !input.step;
-    // #2297 — so is a decision that keeps the hand (then: wait).
-    const keepingDecision = decisionGesture(input.decision_kind)?.keepsTheHand ? decisionGesture(input.decision_kind)!.verb : null;
-    if (input.kind !== "comment_added" || !(input.step || keeping || keepingDecision) || !input.ticket_id) return;
+    if (input.kind !== "comment_added" || !(input.step || keeping) || !input.ticket_id) return;
     const author = input.by_agent ?? "";
     if (author && isHuman(author)) return;
     const t = getMessage(input.ticket_id);
@@ -507,7 +487,7 @@ function assertStepByHolder(input: NewMessage): void {
         assignee: t.assignee ?? null,
         claimant: t.claimant ?? null,
         claimLive: isAssignmentLive(t.claimed_at, Date.now(), assignWindowSec() * 1000),
-    }, keepingDecision ? `then: ${keepingDecision}` : keeping ? "handback: false" : "then: continue");
+    }, keeping ? "handback: false" : "then: continue");
     if (!refusal) return;
     const err = new Error(refusal);
     (err as Error & { code?: string }).code = ERROR_CODES.STEP_NOT_HOLDER;
@@ -561,11 +541,6 @@ function postDependencyClosedEvents(closedTicketId: number, closer: string | nul
     const dependents = new Set(listTypedRelationsForTicket(closedTicketId)
         .filter((r) => r.kind === "blocks")
         .map((r) => r.target_ticket_id));
-    // …and the tickets whose pending `then: wait` named it: the wait is over.
-    for (const w of ticketsWaitingOn(closedTicketId)) {
-        applyMessageDecision(w.messageId, "accepted", "auto");
-        dependents.add(w.ticketId);
-    }
     for (const id of dependents) {
         if (isTicketClosed(id)) continue;
         const pseudo = insertRelationEvent({
