@@ -1,0 +1,19 @@
+name: a ticket waiting on another is blocked, and hears it the moment the blocker closes
+steps:
+  - alpha-lead: ticket_new
+    args: { title: The blocker, body: Must land first. }
+    save: { blocker: id }
+  - alpha-lead: ticket_new
+    args: { title: Waits on the blocker, body: Cannot start before the blocker lands. }
+    save: { waiting: id }
+  - moderator: approve $blocker
+  - moderator: approve $waiting
+  - alpha-lead: ticket_relate
+    args: { ticket_id: $waiting, target_id: $blocker, kind: depends_on }
+  # While the blocker is open, the waiting ticket is blocked, and nothing is queued on it.
+  - expect:
+      alpha-lead: { ticket: $waiting, backlog: blocked, act: false, events: [] }
+  - moderator: close $blocker
+  - expect:
+      alpha-lead: { ticket: $waiting, act: true, events: [dependency_closed], wake: event }
+  - view: [alpha-lead]

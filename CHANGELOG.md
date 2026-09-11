@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **A waiting ticket hears when its blocker closes**: closing a ticket posts a
+  `dependency_closed` event on every open ticket that depends on it
+  (`depends_on`, or `blocks` from the other side), so its owner is woken
+  instead of finding out at the next backlog pass.
 - **Message every agent before leaving**: the header's megaphone popover can now
   type one message into every running agent loop, and **send & hold** also
   holds them all (NOT AFK ∞) so nothing new starts while you are away;

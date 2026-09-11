@@ -26,6 +26,11 @@ const BASE_MESSAGE_KINDS = [
     "ticket_blocked",
     "ticket_sub_added",
     "ticket_referenced",
+    // #2297 — posted by the daemon on each open ticket that was waiting on a
+    // ticket (depends_on / blocks) when that ticket closes, so its watchers hear
+    // the wait is over. Structural, like the two above: not user-postable, and it
+    // does not move whose turn it is.
+    "dependency_closed",
     // #B.123 phase B: typed inter-ticket relation events
     // (relates_to / depends_on / blocks / duplicates / ignored stored
     // in meta.relation.kind). Lifecycle replay treats these as N-N graph

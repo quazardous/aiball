@@ -2191,6 +2191,8 @@ export async function buildContextPhrase(
             // reads like a leak; these follow the convention of the two above.
             ticket_sub_added: "sub-ticket added",
             ticket_referenced: "referenced",
+            // #2297 — carries its own line of text; the label is the fallback.
+            dependency_closed: "dependency closed",
         };
         // #1351 + #1363 — render ONE event as a compact line, SAME content as
         // its standalone wake : a comment shows its markdown-stripped body

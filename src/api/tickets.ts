@@ -1348,6 +1348,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
                     m.kind === "ticket_blocked" ||
                     m.kind === "ticket_sub_added" ||
                     m.kind === "ticket_referenced" ||
+                    m.kind === "dependency_closed" ||
                     m.kind === "ticket_relation") &&
                 // rejected rows are hidden — EXCEPT user-deletions (#309): a
                 // comment with meta.deleted is re-surfaced as a tombstone, but
@@ -1757,7 +1758,7 @@ function enrichRelationStages<T extends { id: number; kind: string; source_ticke
     const sourceIds = new Set<number>();
     for (const c of comments) {
         if (
-            (c.kind === "ticket_referenced" || c.kind === "ticket_sub_added") &&
+            (c.kind === "ticket_referenced" || c.kind === "ticket_sub_added" || c.kind === "dependency_closed") &&
             typeof c.source_ticket_id === "number"
         ) {
             sourceIds.add(c.source_ticket_id);
@@ -1767,7 +1768,7 @@ function enrichRelationStages<T extends { id: number; kind: string; source_ticke
     const stages = getTicketStages([...sourceIds]);
     return comments.map((c) => {
         if (
-            (c.kind === "ticket_referenced" || c.kind === "ticket_sub_added") &&
+            (c.kind === "ticket_referenced" || c.kind === "ticket_sub_added" || c.kind === "dependency_closed") &&
             typeof c.source_ticket_id === "number"
         ) {
             return { ...c, source_ticket_stage: stages.get(c.source_ticket_id) ?? "open" };

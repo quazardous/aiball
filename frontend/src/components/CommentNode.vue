@@ -231,6 +231,8 @@ const LIFECYCLE_LABELS: Record<string, LifecycleLabel> = {
     ticket_blocked: { icon: "pi pi-ban", verb: "flagged this ticket TBD (handing back to a human)", severity: "warn" },
     ticket_sub_added: { icon: "pi pi-sitemap", verb: "added sub-ticket", severity: "info", showSource: true },
     ticket_referenced: { icon: "pi pi-link", verb: "referenced this ticket from", severity: "secondary", showSource: true },
+    // #2297 — the ticket this one was waiting on (depends_on / blocks) was closed.
+    dependency_closed: { icon: "pi pi-flag", verb: "closed a ticket this one was waiting on:", severity: "success", showSource: true },
     // #830 — decision events render as lifecycle-style chips (no body).
     // Verb names the action ("accepted X's plan") so the thread audit
     // reads naturally without re-fetching the original proposal.

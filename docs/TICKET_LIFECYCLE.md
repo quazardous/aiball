@@ -58,7 +58,7 @@ Only `approved` tickets are ever open/actionable.
 **Event kinds** (the append-only log):
 `ticket_created`, `comment_added`, `ticket_resolved`, `ticket_closed`,
 `ticket_reopened`, `ticket_blocked`, `ticket_relation`, `ticket_sub_added`,
-`ticket_referenced`.
+`ticket_referenced`, `dependency_closed`.
 
 ---
 
@@ -260,7 +260,9 @@ tier it qualifies for** (`backlog_tier`, computed per consumer in
 - **Tier 3 — waiting on them.** I was the last actor, no decision pending: the
   ball is with the reporter. Soft reminder set, below the tiers above.
 - **Tier 4 — blocked.** Gated by an open `depends_on` blocker. Surfaced last so
-  the agent can check the chain — the blocker may be snoozed or forgotten.
+  the agent can check the chain — the blocker may be snoozed or forgotten. When
+  the blocker closes, each open ticket waiting on it gets a `dependency_closed`
+  event, so whoever watches it is woken instead of finding out at the next pass.
 
 A triage comment (§ in `skills/aiball/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
 moves the ticket **from tier 1 to tier 3** within the same backlog — the agent

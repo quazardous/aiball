@@ -57,6 +57,7 @@ const KIND_LABEL: Record<string, string> = {
     ticket_reopened: "reopened",
     ticket_resolved: "resolved",
     ticket_referenced: "ref",
+    dependency_closed: "dep closed",
     ticket_sub_added: "sub",
     ticket_relation: "rel",
     plan_accepted: "+plan",

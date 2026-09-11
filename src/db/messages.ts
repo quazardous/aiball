@@ -793,8 +793,10 @@ export function moveTicket(
 export function insertRelationEvent(opts: {
     target_ticket_id: number;
     source_ticket_id: number;
-    kind: "ticket_sub_added" | "ticket_referenced";
+    kind: "ticket_sub_added" | "ticket_referenced" | "dependency_closed";
     by_agent: string | null;
+    /** #2297 — a line of text; the relation pseudo-comments carry none. */
+    body?: string;
 }): Message | null {
     const db = getDb();
     return db.transaction((tx) => {
@@ -826,7 +828,7 @@ export function insertRelationEvent(opts: {
             ticketId: opts.target_ticket_id,
             displaySeq: seq,
             kind: opts.kind,
-            body: "",
+            body: opts.body ?? "",
             byAgent: opts.by_agent ?? null,
             status: "approved",
             decidedAt: createdAt,

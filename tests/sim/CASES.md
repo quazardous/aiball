@@ -27,6 +27,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 10 — "No plan" in a plain human comment makes the ticket the agent's; its steps keep it there | `decision-no-plan-comment` |
 | 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
 | 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
+| 24 — A ticket waiting on another (`depends_on`) is blocked, and gets a `dependency_closed` event the moment the blocker closes | `dependency-closed` |
 
 To add to `handback-refusals`: `then: continue` on a ticket the agent does not
 hold (409, the text points to claiming), and a `summary_until` over the budget
@@ -64,7 +65,6 @@ What the board does today; each needs a human answer before it becomes an expect
 
 ### Dependencies, relations and time
 
-24. **Open dependency.** A `depends_on` B. → A is blocked ("Blocked by an open dependency"); B closed → A actionable.
 25. **Blocked wake with nothing changed.** B waits on the human (the agent's own pending resolution). → Pin down: whether the blocked wake keeps coming back on A.
 26. **Plan accepted while the dependency is still open.** → Pin down: actionable (the human said go) or blocked.
 27. **Dependency written only in a plan's prose.** → Invisible to the backlog: A is actionable while B is open.

@@ -7,6 +7,7 @@ import {
     moveTicket,
     insertRelationEvent,
     insertTypedRelation,
+    listTypedRelationsForTicket,
     updateMessageStatus,
     upsertTicketSubscription,
     releaseTicketClaim,
@@ -22,6 +23,7 @@ import {
 import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
+import { isTicketClosed } from "./db/messages.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
 import { isHeldByOther, isAssignmentLive } from "./db/assignment-gate.js";
@@ -35,8 +37,8 @@ import { broadcast } from "./ws.js";
 import { emitLifecycle, pushEvent } from "./event-bus.js";
 import { fanOutPings, fanOutMentions } from "./notifications.js";
 
-// User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added`
-// and `ticket_referenced` (daemon-emitted on relations) AND
+// User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added`,
+// `ticket_referenced` and `dependency_closed` (daemon-emitted on relations) AND
 // `ticket_blocked` since the agent→human blocked direction was
 // retired by david (#B.129 wording pass): the primitive induced
 // misuse (agents temporizing with blocked when they were just
@@ -527,6 +529,36 @@ function extractTicketRefs(
 }
 
 /**
+ * #2297 — a ticket just closed: post `dependency_closed` on every open ticket
+ * that was waiting on it, so whoever watches that ticket hears the wait is over.
+ * Before, a `depends_on` gate lifted in silence and the dependent only came back
+ * at the next backlog pass, if at all. Relations are read as the closed ticket
+ * sees them, where `A depends_on T` and `T blocks A` both show as `blocks`,
+ * and a removed relation is already gone.
+ */
+function postDependencyClosedEvents(closedTicketId: number, closer: string | null, scope: Message["scope"]): void {
+    const closed = getMessage(closedTicketId);
+    const dependents = new Set(listTypedRelationsForTicket(closedTicketId)
+        .filter((r) => r.kind === "blocks")
+        .map((r) => r.target_ticket_id));
+    for (const id of dependents) {
+        if (isTicketClosed(id)) continue;
+        const pseudo = insertRelationEvent({
+            target_ticket_id: id,
+            source_ticket_id: closedTicketId,
+            kind: "dependency_closed",
+            by_agent: closer,
+            body: `#${closedTicketId} closed${closed?.title ? `: ${closed.title}` : ""} — this ticket was waiting on it.`,
+        });
+        if (!pseudo) continue;
+        // The same fan-out as the other relation events, in the close's own scope.
+        pseudo.scope = scope;
+        pushEvent(pseudo);
+        broadcast({ type: "message_created", data: pseudo });
+    }
+}
+
+/**
  * Auto-emit cross-reference pseudo-comments triggered by a freshly
  * inserted message:
  *   - `ticket_sub_added` on parent thread when the message is a
@@ -757,6 +789,8 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
                 // (transient focus), pas l'assignment (responsabilité audit
                 // qui reste pertinente sur un reopen ultérieur).
                 releaseTicketClaim(closedTicketId);
+                // #2297 — the tickets that were waiting on this one hear it closed.
+                postDependencyClosedEvents(closedTicketId, input.by_agent ?? null, msg.scope);
             }
         }
     }
