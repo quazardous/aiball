@@ -20,7 +20,9 @@ prompt. `claude-loop` adds that behavior externally:
   `~/.claude/settings.json`):
   - `SessionStart` — fires after claude has booted.
   - `Stop` — fires at the end of every claude turn.
-- **A detached timer process** ticks every `CL_INTERVAL` seconds.
+- **A detached kernel process** (long called "the timer") holds the loop's
+  state in memory, runs its state machines, and keeps a heartbeat every
+  `CL_INTERVAL` seconds.
 
 Each surface asks the same question — _is there work?_ — by running
 the loop's `--check-cmd`. Exit 0 → wake claude with a random
@@ -105,54 +107,48 @@ any terminal; restart the agent's loop for it to apply.
 ## Core cycle
 
 ```
-                           ┌─────────────────────────────┐
-       boot ──► SessionStart hook ──► check-cmd ?        │
-                              │       ├─ exit 0 → send-keys phrase
-                              │       └─ non-0  → stamp idle-since (ipc)
+       boot ──► SessionStart hook ──► kernel: no turn yet, idle since now
+                              │
                               ▼
-                    ┌────────────────────────┐
-                    │  claude waits at prompt │ ◄─────┐
-                    └──────────┬──────────────┘       │
-                               │ user types OR        │ send-keys
-                               │ send-keys arrives    │
-                               ▼                      │
-                    ┌────────────────────────┐        │
-                    │  claude runs a turn     │        │
-                    └──────────┬──────────────┘        │
-                               │                       │
-                               ▼                       │
-                       Stop hook ──► check-cmd ?       │
-                              │     ├─ exit 0 → send-keys phrase ──┘
-                              │     └─ non-0  → write idle-since
-                              ▼
-                      (back to "waits at prompt")
-
-         in parallel, every CL_INTERVAL seconds:
-         ┌────────────────────────────────────────────────┐
-         │ timer process: idle-since present?             │
-         │   ├─ no  → skip tick (claude is busy)          │
-         │   └─ yes → human present? (user-grace /        │
-         │            human-typing / busy-defer)          │
-         │            ├─ yes → skip tick (yield to human) │
-         │            └─ no  → wake-requested / check-cmd?│
-         │                     ├─ yes → wake phrase       │
-         │                     └─ no  → skip (stay idle)  │
-         └────────────────────────────────────────────────┘
+                    ┌─────────────────────────┐
+                    │  claude waits at prompt │ ◄───────────────────┐
+                    └──────────┬──────────────┘                     │
+                               │ you type, or a wake is typed       │
+                               ▼                                    │
+                    ┌─────────────────────────┐                     │
+                    │  claude runs a turn     │                     │
+                    └──────────┬──────────────┘                     │
+                               ▼                                    │
+                       Stop hook ──► kernel: turn ended             │
+                              │     work waiting? ─ yes ─► types a wake phrase
+                              ▼                                     │
+                      (back to "waits at prompt")                   │
+                                                                    │
+         in the kernel, 10 s after the turn ended, then every 10 s: │
+         ┌─────────────────────────────────────────────────────┐    │
+         │ turn:settled ──► tryWake: the checks of diagram 4   │    │
+         │   ├─ a check says no → skip, stay idle              │    │
+         │   └─ work waiting    → type a wake phrase ──────────┼────┘
+         └─────────────────────────────────────────────────────┘
 ```
 
-The "human present?" branch is the keystroke-detection gate — see
-[Human presence & keystroke detection](#human-presence--keystroke-detection).
+None of this state is on disk: idle-since, busy-defer, the presence hold and
+the last keystroke live in the kernel's memory, and the hooks report to it
+over `loop.sock`. See [the state diagrams](#state-diagrams) for each machine,
+and [Human presence & keystroke detection](#human-presence--keystroke-detection)
+for the checks that keep a wake off a human at the keyboard.
 
-**Three wake sources**, all gated through the same `checkHasWork()`
-function (except `wake` which is unconditional):
+**Wake sources.** All but the Stop hook go through `tryWake` and the checks of
+[diagram 4](#4-what-stops-a-wake); the Stop hook runs the work check itself.
 
-| Surface         | When                              | Latency from event arrival |
-|-----------------|-----------------------------------|----------------------------|
-| Stop hook       | Just after claude finishes a turn | ~immediate                 |
-| SessionStart    | After claude boots                | ~immediate (once)          |
-| Timer tick      | Every `CL_INTERVAL` seconds       | up to `CL_INTERVAL` sec    |
-| `claude-loop wake` | Manual external trigger        | up to `CL_INTERVAL` sec    |
-
+| Source | When | Latency |
+|---|---|---|
+| Stop hook | just after a turn, when work is waiting | immediate |
+| `turn:settled` | 10 s after a turn ended, then every 10 s while idle | up to 10 s |
+| Live notification | a panic ping or signal pushed to the loop | immediate |
+| Presence hold released | F9, or the hold's timeout | immediate |
+| `claude-loop wake` | manual trigger; skips the work check | next heartbeat |
+| Heartbeat | every `CL_INTERVAL` s, only when no `turn:settled` is scheduled (anti-stuck) | up to `CL_INTERVAL` s |
 The Stop hook is the tightest drain: as soon as claude returns to
 the prompt with new work waiting, it re-fires without waiting for
 the timer.
@@ -227,9 +223,8 @@ stateDiagram-v2
 - **Typing** is detected by the PTY proxy. It arms or restarts a 600 s hold,
   except in **∞**, which only F9 releases. A red `⌨` joins the bar while a key
   was typed in the last 5 s.
-- The words `loop` / `wait` / `stop` used in
-  [the tmux bar section](#3-the-tmux-bar-word--stop--boot--wait--loop) are the
-  internal names of `▶` / `⏸` / `⌨`.
+- [The tmux bar section](#3-the-tmux-bar-glyphs) lists every glyph, with the
+  internal names (`loop` / `wait` / `stop`) the code and the logs use.
 - When a hold clears, the loop tries a wake — deferred while typing is still hot.
 
 ### 3. The wake machine
@@ -271,8 +266,10 @@ flowchart TD
 ```
 
 - Every skip is logged in `loop.log` as `skip wake (<reason>) — <why>`.
-- A manual `claude-loop wake` does not go through the loop-view check. A panic
-  wake only ignores busy-defer, `esc to interrupt` and `/compact`.
+- A manual `claude-loop wake` skips the work check and what a human asks to
+  override (boot, presence hold, typing, busy-defer), but still stops at not
+  logged in, the trust dialog and an unreachable API. A panic wake only ignores
+  busy-defer, `esc to interrupt` and `/compact`.
 - A consumer with `no_claim` and no personal pings is skipped before the work
   check.
 - **busy-defer** is armed for 10 s after each delivered wake, by the Stop hook,
@@ -396,38 +393,33 @@ best-to-worst :
   and can't separate your keystrokes from the loop's own injection as
   cleanly — exactly the blind spot the proxy was built to close.
 
-### 3. The tmux bar word — `stop` / `boot` / `wait` / `loop`
+### 3. The tmux bar glyphs
 
-The human-presence word on the bar reads **AFK state ONLY** —
-user-grace gates auto-wakes silently behind the scenes but doesn't
-paint a colour here. F9 is the single visible control.
+The bar shows presence as glyphs. The names `loop` / `wait` / `stop` / `boot`
+are what the code and the logs call them.
 
-| Word   | Colour | Meaning                                                       |
-|--------|--------|--------------------------------------------------------------|
-| `stop` | red    | a human is typing **now** (`ipc.humanTypingAtMs` < 5s)       |
-| `boot` | yellow | the launch-grace window — claude is still loading            |
-| `wait` | yellow | F9-armed hold (10-min auto-release or indefinite)             |
-| `loop` | green  | autonomous, gate open (managed mode / `--no-wait`)           |
+| Glyph | Colour | Name | Meaning |
+|---|---|---|---|
+| `▶` | green | `loop` | autonomous: no presence hold, wakes allowed |
+| `⏸` | orange | `wait` | a presence hold is on (F9, typing, `--wait`) |
+| `⌨` | red | `stop` | a key was typed in the last 5 s; shown next to `▶` / `⏸`, not instead |
+| *(none)* | yellow bar | `boot` | the boot phase: the 🚀 boot marker stands in for the presence glyph |
 
-The timer's `BarRenderer` is the single writer of every tmux bar
-option (`@cl_human`, `@cl_state`, `status-bg`, `@cl_afk_state`, etc.).
-It subscribes to `ipcState` changes and repaints diff-guardedly, so the
-bar is always coherent with the in-memory truth — no race between proxy
-and timer like the older two-writer setup had.
+The `웃` glyph at the end of the claude zone carries the hold itself:
 
-The status-right segment shows the AFK chunk in matching colours :
+| State | `웃` |
+|---|---|
+| autonomous | dim, no suffix |
+| hold for a window | orange, with the seconds left (`웃542s`) |
+| hold, indefinite | red, `웃∞` |
 
-| State                  | Status-right chunk     | Bar word colour |
-|------------------------|------------------------|-----------------|
-| autonomous (AFK on)    | `AFK:F9` (dim)         | green `loop`    |
-| F9-armed 10 min        | `9m NOT AFK:F9` (yellow) | yellow `wait` |
-| F9-armed ∞             | `∞ NOT AFK:F9` (red)    | yellow `wait` |
+The status-right segment is a static `AFK:F9` reminder.
 
-The label flip `AFK:` ↔ `NOT AFK:` matches the literal "Away From
-Keyboard" reading — when the bar is `loop` the human is presumed
-away (claude runs), when `wait` the human is present and holding
-the loop.
-
+The kernel's `BarRenderer` is the single writer of every tmux bar option
+(`@cl_human`, `@cl_typing`, `@cl_afk_glyph`, `@cl_state`, `status-bg`, …). It
+subscribes to the in-memory state, repaints only what changed, and re-checks
+every second for what only time changes (a typing glyph expiring, the hold
+countdown), so the bar always matches the loop's state.
 ### The take-over workflow — what happens when you type
 
 Typing in the pane **arms the 10-minute presence hold** (the same

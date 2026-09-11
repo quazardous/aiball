@@ -46,7 +46,7 @@ export interface ReplayPaneFrame {
 export interface BootReplayResult {
     sealed: boolean;
     sealedAtRelMs: number | null;
-    sealReason: "deadline" | "hook" | null;
+    sealReason: "deadline" | null;
     /** Modules still within their remanence window when the replay stopped
      *  (the smoking gun on a stuck boot — e.g. ["resume_mode"]). */
     finalActiveModules: string[];
@@ -117,7 +117,7 @@ export function replayBootFrames(frames: ReplayPaneFrame[], opts: BootReplayOpti
 
     const moduleEdges: BootReplayResult["moduleEdges"] = [];
     let sealedAtMs: number | null = null;
-    let sealReason: "deadline" | "hook" | null = null;
+    let sealReason: "deadline" | null = null;
     let vnow = loopStartMs;
 
     const sealed = () => actor.getSnapshot().matches("sealed");

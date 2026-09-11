@@ -75,15 +75,10 @@ test("DEADLINE_REACHED : booting → sealed", () => {
     assert.equal(actor.getSnapshot().status, "active");
 });
 
-test("HOOK_SEAL : booting → sealed", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
-    actor.send({ type: "HOOK_SEAL" });
-    assert.equal(actor.getSnapshot().matches("sealed"), true);
-});
 
 test("sealed terminal : MODULE_SEEN suivants no-op", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
-    actor.send({ type: "HOOK_SEAL" });
+    actor.send({ type: "DEADLINE_REACHED" });
     const before = Object.keys(actor.getSnapshot().context.moduleSeen).length;
     actor.send({ type: "MODULE_SEEN", name: "compacting", nowMs: 1_999_000 });
     assert.equal(Object.keys(actor.getSnapshot().context.moduleSeen).length, before);
@@ -98,13 +93,6 @@ test("emit boot:sealed (reason=deadline) sur DEADLINE_REACHED", () => {
     assert.equal(events[0].reason, "deadline");
 });
 
-test("emit boot:sealed (reason=hook) sur HOOK_SEAL", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
-    const events: { reason: string }[] = [];
-    actor.on("boot:sealed", (ev) => events.push(ev));
-    actor.send({ type: "HOOK_SEAL" });
-    assert.equal(events[0].reason, "hook");
-});
 
 // Scenarios — the decay model.
 
@@ -130,7 +118,7 @@ test("snapshot observable : subscribe fires sur transitions", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     let sawSealed = false;
     actor.subscribe((snap) => { if (snap.matches("sealed")) sawSealed = true; });
-    actor.send({ type: "HOOK_SEAL" });
+    actor.send({ type: "DEADLINE_REACHED" });
     assert.ok(sawSealed);
 });
 
@@ -147,7 +135,7 @@ test("emit loop:start 10s après boot:sealed", async () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     const events: { loopStartMs: number }[] = [];
     actor.on("loop:start", (ev) => events.push(ev));
-    actor.send({ type: "HOOK_SEAL" });
+    actor.send({ type: "DEADLINE_REACHED" });
     assert.deepEqual(actor.getSnapshot().value, { sealed: "fresh" });
     assert.equal(events.length, 0);
     await new Promise((r) => setTimeout(r, SETTLE_DELAY + 200));

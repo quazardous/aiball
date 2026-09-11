@@ -141,12 +141,14 @@ test("emit wake:cleared (reason=completed) on WAKE_COMPLETED", () => {
     assert.equal(events[0].reason, "completed");
 });
 
-test("emit wake:cleared (reason=ttl) on IN_FLIGHT_TTL_EXPIRED", () => {
+test("emit wake:cleared (reason=ttl) when inFlight outlives its TTL", async () => {
+    // #2311 — the only way out by TTL is the machine's own after(inFlightTtl):
+    // the IN_FLIGHT_TTL_EXPIRED event had no sender and is gone.
     const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     const events: { reason: string }[] = [];
     actor.on("wake:cleared", (ev) => events.push(ev));
-    actor.send({ type: "IN_FLIGHT_TTL_EXPIRED" });
+    await delay(IN_FLIGHT_TTL_MS + SLACK);
     assert.equal(events.length, 1);
     assert.equal(events[0].reason, "ttl");
 });

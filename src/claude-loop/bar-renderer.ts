@@ -1,25 +1,20 @@
 /**
- * #862 (`s8u6pt`) Slice 1 — observer-only BarRenderer.
+ * #862 (`s8u6pt`) — BarRenderer: the single writer of the tmux bar.
  *
- * Le BarRenderer est un PUR OBSERVER de `ipcState`. Il souscrit à
- * `onIpcChanged`, debounce 50ms (= même cadence que `schedulePush`
- * existant), puis compute la "bar desired state" canonique à partir
- * de `getIpcState()` + `computeLoopView` + diff vs le dernier snapshot
- * peint en interne. Si rien n'a changé → no-op.
+ * It watches `ipcState`: subscribes to `onIpcChanged`, debounces 50 ms,
+ * computes the bar's desired state from `getIpcState()` + `computeLoopView`,
+ * diffs it against the last snapshot it painted, and writes only the tmux
+ * options that changed. A 1 s safety tick catches what only time changes (a
+ * typing glyph expiring, the hold countdown).
  *
- * **API publique = ZÉRO méthode externe** : `start()` / `stop()`. Les
- * autres modules NE SAVENT PAS qu'il existe ; ils mutent uniquement
- * `setIpc*`, et la barre se met à jour automatiquement.
+ * **Public API = `start()` / `stop()`.** Other modules do not know it exists:
+ * they mutate state through `setIpc*`, and the bar follows.
  *
- * **Slice 1** : OBSERVE + LOG seulement. Pas d'écriture tmux. Le but
- * = valider que le snapshot computed match les paints actuels, en
- * faisant tourner les deux en parallèle. Les divergences atterrissent
- * dans `bar-paint.log` avec writer=`observer:<field>` pour comparaison.
- *
- * Slice 3 fera le flip writer-effectif (= la classe écrit, les paints
- * legacy deviennent no-op). Slice 4 retire `_paint_word` côté proxy.
- */
-import { spawnSync } from "node:child_process";
+ * History: slice 1 only observed, logging its snapshot next to the legacy
+ * paints; slice 3 made it the writer and neutralised those paints
+ * (`setTmuxStatus` / `setTmuxCounters` / `setTmuxAfkState`). #2311 — this
+ * header still described slice 1.
+ */import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { getIpcState, onIpcChanged } from "./ipc-state.js";
 import {

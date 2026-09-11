@@ -30,7 +30,7 @@
  *
  * Model :
  *   booting ──MODULE_SEEN──▶ booting (upsert module, recompute deadline)
- *   booting ──HOOK_SEAL────▶ sealed (respawn handoff, immédiat)
+
  *   booting ──DEADLINE_REACHED▶ sealed (tous tombés, fired par le pump)
  *   sealed = final (fresh → settled après 10s → emit loop:start)
  *
@@ -39,7 +39,8 @@
  *     `MODULE_SEEN{name, nowMs, remanenceMs}`.
  *   - Deadline pump : setInterval(1000) qui envoie `DEADLINE_REACHED` quand
  *     `Date.now() >= deadlineMs`.
- *   - `HOOK_SEAL` au respawn handoff.
+ *   - Respawn : the kernel restores the persisted snapshot, already sealed
+ *     (#2311 — the hook seal that used to hand it over is gone).
  */
 import { setup, assign, emit } from "xstate";
 
@@ -56,7 +57,7 @@ export interface BootMachineInput {
 
 /** Locus events emitted by the actor. */
 export type BootEmittedEvent =
-    | { type: "boot:sealed"; loopStartMs: number; reason: "deadline" | "hook" }
+    | { type: "boot:sealed"; loopStartMs: number; reason: "deadline" }
     | { type: "loop:start"; loopStartMs: number };
 
 interface ModuleSeen {
@@ -100,7 +101,7 @@ export const bootMachine = setup({
         },
         events: {} as
             | { type: "MODULE_SEEN"; name: string; nowMs: number; remanenceMs?: number }
-            | { type: "HOOK_SEAL" }
+
             | { type: "DEADLINE_REACHED" },
         emitted: {} as BootEmittedEvent,
         input: {} as BootMachineInput,
@@ -124,11 +125,7 @@ export const bootMachine = setup({
             loopStartMs: context.loopStartMs,
             reason: "deadline" as const,
         })),
-        emitBootSealedHook: emit(({ context }) => ({
-            type: "boot:sealed" as const,
-            loopStartMs: context.loopStartMs,
-            reason: "hook" as const,
-        })),
+
         emitLoopStart: emit(({ context }) => ({
             type: "loop:start" as const,
             loopStartMs: context.loopStartMs,
@@ -153,7 +150,7 @@ export const bootMachine = setup({
         booting: {
             on: {
                 MODULE_SEEN: { actions: "onModuleSeen" },
-                HOOK_SEAL: { target: "sealed", actions: "emitBootSealedHook" },
+
                 DEADLINE_REACHED: { target: "sealed", actions: "emitBootSealedDeadline" },
             },
         },

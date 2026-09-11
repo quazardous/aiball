@@ -486,6 +486,28 @@ export function shouldArmAfk10mOnSettleBoot(input: Pick<LoopStateInput, "noWait"
     return !input.noWait;
 }
 
+/** The skip reasons a panic wake may pass: the pane is working, not refusing. */
+export const PANIC_BYPASSABLE_REASONS = /busy-defer|esc to interrupt|\/compact/;
+
+/**
+ * #2311 — what `tryWake` does with the loop view, for EVERY wake. A manual wake
+ * (`claude-loop wake`) used to skip the view entirely, so it typed Enter into
+ * the trust dialog (which picks "No, exit") and woke a logged-out or offline
+ * claude, although the gate says those three stop even a manual wake. The gate
+ * already knows what a manual wake may skip (`input.manualWake`); the caller
+ * only has to ask it. A panic wake passes the busy reasons, nothing else.
+ */
+export function wakeViewVerdict(
+    input: LoopStateInput,
+    panicMode: boolean,
+): { proceed: boolean; reason: string | null; panicBypass: boolean } {
+    const view = computeLoopView(input);
+    if (view.wakeAllowed) return { proceed: true, reason: null, panicBypass: false };
+    const reason = view.wakeSkipReason ?? "";
+    if (panicMode && PANIC_BYPASSABLE_REASONS.test(reason)) return { proceed: true, reason, panicBypass: true };
+    return { proceed: false, reason, panicBypass: false };
+}
+
 /** Alias for the view's `wakeAllowed` — reads more naturally at call sites. */
 export function canFireWake(view: LoopStateView): boolean {
     return view.wakeAllowed;

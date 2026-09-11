@@ -151,6 +151,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `claude-loop wake` no longer types into Claude Code's folder trust dialog, where
+  Enter picks "No, exit", and no longer wakes a session that is logged out or
+  cannot reach the API.
 - A loop no longer re-injects the same updates wake after wake: when a live
   notification about one ticket took over the wake, the pending updates of
   another ticket were glued onto the phrase without being marked seen.

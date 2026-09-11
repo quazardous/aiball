@@ -27,7 +27,7 @@
  */
 export interface KernelEventMap {
     // in-process — XState actor emits (wired in S2)
-    "boot:sealed": { loopStartMs: number; reason: "deadline" | "hook" };
+    "boot:sealed": { loopStartMs: number; reason: "deadline" };
     "loop:start": { loopStartMs: number };
     "turn:started": { atMs: number };
     "turn:ended": { atMs: number };

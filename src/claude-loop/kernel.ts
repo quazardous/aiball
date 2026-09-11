@@ -174,7 +174,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, type AfkMode } from "./loop-state.js";
+import { isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -1307,9 +1307,11 @@ function client(): AiballClient {
  * actually fires send-keys when claude is at the prompt with work to
  * do. Returns true iff a wake was sent — useful for logging.
  *
- * `manualWake = true` (file-marker bypass) skips the user-grace AND
- * the check-cmd; only the idle-since gate stays because pinging over
- * a busy claude is always wrong.
+ * `manualWake = true` (file-marker bypass) skips the check-cmd and the
+ * gates a human asks to override (boot, presence hold, typing,
+ * busy-defer). The idle-since gate stays, because pinging over a busy
+ * claude is always wrong, and so do the screens that stop every wake:
+ * not logged in, the trust dialog, an unreachable API (#2311).
  */
 // #B.205 — in-flight mutex: bursts of SSE pings used to queue at
 // `await checkHasWork` then all fire send-keys at once, pasting N
@@ -1482,10 +1484,10 @@ async function tryWake(reason: string, manualWake = false, hint?: WakeHint, pani
     }
 }
 // A panic wake bypasses ONLY the busy gates (busy-defer, pane shows
-// "esc to interrupt", pane shows /compact). AFK / zen / idle-marker
-// still apply — if the loop is told to shut up, panic respects that;
-// if claude was never seen idle the wake would be lost anyway.
-const PANIC_BYPASSABLE_REASONS = /busy-defer|esc to interrupt|\/compact/;
+// "esc to interrupt", pane shows /compact) — `PANIC_BYPASSABLE_REASONS` in
+// loop-state.ts. AFK / zen / idle-marker still apply — if the loop is told to
+// shut up, panic respects that; if claude was never seen idle the wake would
+// be lost anyway.
 async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint, panicMode = false): Promise<boolean> {
     // #749 david — `--zen` kill switch. Presence of `zen` marker mutes ALL
     // wake injections (including manualWake, including afk-cleared-drain).
@@ -1513,22 +1515,18 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // service. Every external signal is a marker — including pane state
     // (busy/ready/compacting/interrupted), written by the heartbeat
     // pane probe below. tryWake just reads the verdict.
-    if (!manualWake) {
-        // Refresh pane markers before computing the view so the gate
-        // sees the just-observed state (the heartbeat probe at line
-        // ~937 also writes them, but tryWake can fire from SSE
-        // out-of-band).
-        refreshPaneMarkers();
-        const view = computeLoopView(readLoopStateInput(sd!));
-        if (!view.wakeAllowed) {
-            const skipReason = view.wakeSkipReason ?? "";
-            if (panicMode && PANIC_BYPASSABLE_REASONS.test(skipReason)) {
-                log(`panic (${reason}) — bypassing busy gate (${skipReason})`);
-            } else {
-                log(`skip wake (${reason}) — ${skipReason}`);
-                return false;
-            }
-        }
+    // #2311 — for EVERY wake, a manual one included: the gate is what knows that
+    // not-logged-in, the trust dialog and an unreachable API stop even a manual
+    // wake, and what a manual wake may skip. Pane markers are refreshed first so
+    // the gate sees the just-observed state (tryWake can fire from SSE
+    // out-of-band).
+    refreshPaneMarkers();
+    const verdict = wakeViewVerdict(readLoopStateInput(sd!, { manualWake }), panicMode);
+    if (verdict.panicBypass) {
+        log(`panic (${reason}) — bypassing busy gate (${verdict.reason})`);
+    } else if (!verdict.proceed) {
+        log(`skip wake (${reason}) — ${verdict.reason}`);
+        return false;
     }
     let gateHash: string | undefined;
     if (!manualWake) {
@@ -2197,9 +2195,9 @@ async function mainSse(): Promise<void> {
     //   à la transition `booting → sealed` : disarm fast-probe, leave pane
     //   "boot" zone, et (si fresh seal, pas respawn) écrit `bootComplete`
     //   + side-effects via `onFreshBootSeal`. Le gate `wasComplete` (lu
-    //   à l'init) discrimine respawn de fresh ; le `reason` ("deadline" |
-    //   "hook") sur le payload du locus event aussi mais le gate ipc
-    //   reste plus simple.
+    //   à l'init) discrimine respawn de fresh.
+    //   #2311 — a seal only comes from the deadline now: the hook seal is
+    //   gone, and a respawn restores an already-sealed snapshot.
     {
         const input0 = readLoopStateInput(sd!);
         // #884 — restore depuis snapshot persisté si respawn.

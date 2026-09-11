@@ -14,7 +14,7 @@ claude-loop paints a tmux bar word to show human presence — `loop`
 window) / `stop` (red, a human is typing in the pane, so the loop
 yields). To paint `stop` it must answer one question continuously:
 **is a human typing right now?** (Full word mapping in
-[`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md#3-the-tmux-bar-word--stop--wait--loop).)
+[`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md#3-the-tmux-bar-glyphs).)
 
 The first implementation (`kernel.ts::detectHumanTyping`) answered it by
 **pane-diffing** — capturing the bottom of the tmux pane every ~1.5 s

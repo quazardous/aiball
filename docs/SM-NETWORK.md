@@ -66,15 +66,24 @@ The third case is the one to watch for : if you find yourself tempted to call `s
 
 ```mermaid
 graph LR
-  Watchers[Pane Watchers] -- "WATCHER_TICK" --> Boot[BootMachine]
-  Hooks[Session-start hook] -- "HOOK_SEAL" --> Boot
+  Watchers[Pane scan] -- "MODULE_SEEN" --> Boot[BootMachine]
   Pump[bootDeadlineTimer] -- "DEADLINE_REACHED" --> Boot
-  Boot -- "subscribe → bridge" --> Ipc[(ipcState)]
+  Boot -- "emit: boot:sealed / loop:start" --> Consumers[Consumers in kernel.ts]
+  Hooks[Hooks: SessionStart / Stop / UserPromptSubmit] -- "SESSION_START / TURN_STARTED / TURN_ENDED" --> Turn[TurnController]
+  Turn -- "emit: turn:settled" --> Consumers
+  Consumers -- "BOOT_READY / REQUEST_WAKE / WAKE_*" --> Wake[WakeController]
+  Proxy[PTY proxy keystrokes] -- "KEYSTROKE" --> Typing[TypingController]
   F9[F9 toggle / typing] -- "ARM_* / HARD_*" --> Afk[AfkController]
   AfkPump[afkExpiryTimer] -- "EXPIRY_REACHED" --> Afk
-  Afk -- "subscribe → bridge" --> Ipc
   Afk -- "emit: afk:armed_10m / armed_inf / cleared" --> Consumers
-  Boot -- "emit: boot:sealed" --> Consumers[Consumers in kernel.ts]
+  Busy[Pane busy watcher] -- "BUSY_LATCHED / BUSY_CLEARED / TICKET_ACTIVITY" --> Sanity[SanityController]
+  Sanity -- "emit: sanity:clear_paneBusy" --> Consumers
+  Prompt[Pane scan] -- "PROMPT_DETECTED / PROMPT_CLEARED" --> Health[HealthCheckController]
+  Boot -- "subscribe → bridge" --> Ipc[(ipcState)]
+  Afk -- "subscribe → bridge" --> Ipc
+  Wake -- "subscribe → bridge" --> Ipc
+  Typing -- "subscribe → bridge" --> Ipc
+  Turn -- "subscribe → bridge" --> Ipc
   Ipc --> BarRenderer
   Ipc --> WakeGate[Wake gate / isAfkActive]
 ```
@@ -88,13 +97,16 @@ graph LR
 | **Source** | [`src/claude-loop/boot-machine.ts`](../src/claude-loop/boot-machine.ts) |
 | **Role** | Owns the boot phase lifecycle. Single authority for sealing. |
 | **Slice owned** | `ipcState.bootDeadlineMs`, `ipcState.bootComplete` |
-| **Events in** | `WATCHER_TICK` (pane probes), `DEADLINE_REACHED` (deadline pump), `HOOK_SEAL` (respawn handoff) |
-| **Events emitted** | `boot:sealed` { loopStartMs, reason: `"deadline"` \| `"hook"` } |
-| **States** | `booting` (initial) → `sealed` (terminal) |
+| **Events in** | `MODULE_SEEN` { name, nowMs, remanenceMs } (pane scan, while a boot screen is visible), `DEADLINE_REACHED` (deadline pump) |
+| **Events emitted** | `boot:sealed` { loopStartMs, reason: `"deadline"` } / `loop:start` { loopStartMs } |
+| **States** | `booting` (initial) → `sealed.fresh` → `sealed.settled` (after 10 s, emits `loop:start`) |
 | **Pump** | `bootDeadlineTimer` setInterval (1s) in `kernel.ts` |
 | **Tests** | `boot-machine.test.ts` |
 
-See the source file header for the state diagram and event semantics.
+Each boot screen (the floor module, the resume picker, `/compact`…) stays live
+for its remanence after it was last seen; the machine seals once every one has
+gone. A respawn restores the persisted snapshot, already sealed. See the source
+file header for the model.
 
 ### AfkController — shipped
 
@@ -121,13 +133,17 @@ state name to `ipcState.dispAfkMode/dispAfkExpiryMs` (display).
 | **Source** | [`src/claude-loop/wake-machine.ts`](../src/claude-loop/wake-machine.ts) |
 | **Role** | Owns the wake lifecycle : in-flight mutex (replaces `tryWakeInFlight` Promise) + post-fire cooldown (= coalesce window). External gates (zen, idle-since, wakeAllowed, checkHasWork, drained-state, hasContent) stay in `tryWake` consumer. |
 | **Slice owned** | `ipcState.wakeInFlightAtMs`, `lastWakeAtMs` |
-| **Events in** | `REQUEST_WAKE` { source, atMs }, `WAKE_DELIVERED` { phrase, headMessageId, deliveredAtMs }, `WAKE_COMPLETED`, `IN_FLIGHT_TTL_EXPIRED` |
-| **Events emitted** | `wake:requested` { source, atMs } / `wake:in_flight_started` { atMs } / `wake:delivered` { phrase, headMessageId } / `wake:cleared` { reason: `"completed"` \| `"ttl"` } / `wake:cooldown_expired` |
-| **States** | `idle` → `inFlight` → `cooldown` → `idle` (cycle) |
-| **Pump** | None — XState `after(inFlightTtl)` + `after(coalesceWindow)` handle the lifecycle. |
+| **Events in** | `BOOT_READY`, `REQUEST_WAKE` { source, atMs }, `WAKE_DELIVERED` { phrase, headMessageId, deliveredAtMs }, `WAKE_COMPLETED`, `WAKE_SKIPPED` |
+| **Events emitted** | `wake:requested` { source, atMs } / `wake:in_flight_started` { atMs } / `wake:delivered` { phrase, headMessageId } / `wake:cleared` { reason: `"completed"` \| `"ttl"` \| `"skipped"` \| `"boot_gated"` } / `wake:cooldown_expired` |
+| **States** | `gated` (initial) → `idle` → `inFlight` → `cooldown` → `idle`; `inFlight` → `idle` on `WAKE_SKIPPED` |
+| **Pump** | None — XState `after(inFlightTtl)` (30 s) + `after(coalesceWindow)` (10 s) handle the lifecycle. |
 | **Tests** | `wake-machine.test.ts` |
 
-The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consumers gate with `wakeSvc.isIdle()` before sending. The `wake:delivered` consumer (in `kernel.ts:mainSse`) calls `markMessageSeen` on the FIFO-head ack.
+The machine starts `gated` and opens on `BOOT_READY` (sent on `loop:start`); a
+`REQUEST_WAKE` before that is dropped with `wake:cleared(boot_gated)`. A
+`REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consumers
+gate with `wakeSvc.isIdle()` before sending. The `wake:delivered` consumer (in
+`kernel.ts:mainSse`) calls `markMessageSeen` on the FIFO-head ack.
 
 ### TypingController — shipped
 
@@ -147,20 +163,43 @@ The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consu
 | Field | Value |
 |---|---|
 | **Source** | [`src/claude-loop/turn-machine.ts`](../src/claude-loop/turn-machine.ts) |
-| **Role** | Tracks claude's turn lifecycle — 3-state SM (`unknown`/`no_turn`/`in_turn`) consuming the three Hook events (SessionStart / Stop / UserPromptSubmit). |
+| **Role** | Tracks claude's turn lifecycle from the three hook events (SessionStart / Stop / UserPromptSubmit), and paces the wakes: `turn:settled` asks for one 10 s after a turn ended. |
 | **Slice owned** | `ipcState.idleSinceMs` |
 | **Events in** | `SESSION_START` { atMs }, `TURN_STARTED` { atMs }, `TURN_ENDED` { atMs } |
-| **Events emitted** | `turn:no_turn_since` { atMs, reason: `"session_start"` \| `"turn_ended"` } / `turn:started` { atMs } / `turn:ended` { atMs } |
-| **States** | `unknown` → `no_turn` ⇄ `in_turn` |
-| **Pump** | None — pure event-driven from HookService. |
+| **Events emitted** | `turn:no_turn_since` { atMs, reason: `"session_start"` \| `"turn_ended"` } / `turn:started` { atMs } / `turn:ended` { atMs } / `turn:settled` { idleSinceMs } |
+| **States** | `unknown` → `no_turn` (`fresh` → `settled` after 10 s, emitting `turn:settled`) ⇄ `in_turn` |
+| **Pump** | None — event-driven from the hooks, plus `after(10 s)` into `settled`. |
 | **Tests** | `turn-machine.test.ts` |
+
+### SanityController — shipped
+
+| Field | Value |
+|---|---|
+| **Source** | [`src/claude-loop/sanity-machine.ts`](../src/claude-loop/sanity-machine.ts) |
+| **Role** | Safety net for a stale `paneBusy` latch: busy stays set with no sign of activity (a lost Stop hook, a crash mid-turn). The normal path clears busy on `turn:ended`; this covers the abnormal one. |
+| **Slice owned** | None — its consumer calls `setPaneBusy(false)`. |
+| **Events in** | `BUSY_LATCHED` { atMs }, `BUSY_CLEARED` { atMs }, `TICKET_ACTIVITY` { atMs } (a wake delivered, a prompt submitted) |
+| **Events emitted** | `sanity:clear_paneBusy` { reason: `"stale_timeout"`, atMs } |
+| **States** | `unknown` → `watching` ⇄ `idle`; in `watching`, `after(STALE_BUSY_MS)` (5 min) emits the clear |
+| **Pump** | None — XState `after`. |
+
+### HealthCheckController — shipped
+
+| Field | Value |
+|---|---|
+| **Source** | [`src/claude-loop/health-check-machine.ts`](../src/claude-loop/health-check-machine.ts) |
+| **Role** | Tracks Claude Code's native session-health feedback prompt on screen. Logged only; nothing acts on it yet. |
+| **Slice owned** | None. |
+| **Events in** | `PROMPT_DETECTED` { atMs }, `PROMPT_CLEARED` { atMs } |
+| **Events emitted** | `health:prompt_detected` { atMs } / `health:prompt_cleared` { atMs } |
+| **States** | `idle` ⇄ `prompted` |
+| **Pump** | None. |
 
 ### Future controllers (queued)
 
 - **PaneStateController** — pane{Busy,Ready,Compacting,Resuming,Interrupted,Pickers} consolidation.
 
 Each will follow the same pattern : pure machine, external pump (if needed), subscriber → ipcState bridge, `<controller>:<event_name>` emits.
-
 ## Patterns
 
 ### Composition root
@@ -195,18 +234,20 @@ Each controller declares its **locus events** (= pivotal transitions the rest of
 
 | Controller | Locus events |
 |---|---|
-| `boot:` | `boot:sealed` |
+| `boot:` | `boot:sealed`, `loop:start` |
 | `afk:` | `afk:armed_10m`, `afk:armed_inf`, `afk:cleared` |
 | `wake:` | `wake:requested`, `wake:in_flight_started`, `wake:delivered`, `wake:cleared`, `wake:cooldown_expired` |
 | `typing:` | `typing:started`, `typing:ended` |
-| `turn:` | `turn:no_turn_since`, `turn:started`, `turn:ended` |
+| `turn:` | `turn:no_turn_since`, `turn:started`, `turn:ended`, `turn:settled` |
+| `sanity:` | `sanity:clear_paneBusy` |
+| `health:` | `health:prompt_detected`, `health:prompt_cleared` |
 | `pane:` (planned) | `pane:busy_started`, `pane:idle`, `pane:compacting_started`, `pane:compacting_ended` |
 
 **Payload guidelines** — what to put on the event vs what to leave for `subscribe(snap)` or `getSnapshot()` :
 
 - ✅ **Timestamps** (`expiryMs`, `sinceMs`, `elapsedMs`, `loopStartMs`) — useful for decisions and metrics.
 - ✅ **Previous state** (`prevMode`) — useful to discriminate transitions sharing the same target (e.g. `wait_10m → off` vs `wait_inf → off`).
-- ✅ **Reason discriminator** (`reason: "user" | "expiry"`, `reason: "deadline" | "hook"`) — useful for logs and conditional consumer actions.
+- ✅ **Reason discriminator** (`reason: "user" | "expiry"`, `reason: "completed" | "ttl" | "skipped"`) — useful for logs and conditional consumer actions.
 - ❌ **Full context snapshot** — defeats the purpose vs `subscribe(snap)`.
 - ❌ **ipcState reads** — the consumer can read them itself if needed.
 
@@ -249,7 +290,7 @@ The inverse of `emit` (controller → outside) is `actor.send({...})` (outside �
 
 | Direction | Channel | Declared in | Convention | Example |
 |---|---|---|---|---|
-| Outside → SM (drive) | `actor.send({type, ...})` | `setup.types.events` | `SCREAMING_SNAKE_CASE` | `REQUEST_WAKE`, `KEYSTROKE`, `SESSION_START`, `WATCHER_TICK` |
+| Outside → SM (drive) | `actor.send({type, ...})` | `setup.types.events` | `SCREAMING_SNAKE_CASE` | `REQUEST_WAKE`, `KEYSTROKE`, `SESSION_START`, `MODULE_SEEN` |
 | SM → Outside (notify) | `emit({type, ...})` ↦ `actor.on(type, cb)` | `setup.types.emitted` | `<controller>:lower_snake` | `wake:requested`, `boot:sealed`, `afk:armed_10m` |
 
 The two casings make the direction obvious : a `SCREAMING_CASE` event name in a call means "outside is telling the machine something happened" ; a `controller:lower_case` name means "the machine is telling outside something happened".
@@ -285,13 +326,12 @@ wall-clock dependency) while the wrapper integrates with the real runtime.
 
 ### Respawn handoff
 
-When the timer re-execs in place (source SHA changed, see `selfReloadIfStale`),
+When the kernel re-execs in place (source SHA changed, see `selfReloadIfStale`),
 some ipcState is preserved across the spawn (e.g. `bootComplete=true`,
-`afkMode/Expiry`). The new actor starts in its initial state but is
-immediately synchronised to the live ipcState via an external event
-(`HOOK_SEAL` for BootMachine, `ARM_*` for AfkController). The subscriber
-detects "already committed" via the ipcState gate and skips fresh-seal
-side-effects.
+`afkMode/Expiry`). The BootMachine restores its persisted snapshot, already
+sealed; the AfkController is synchronised to the live ipcState via its `ARM_*`
+events. The subscriber detects "already committed" via the ipcState gate and
+skips fresh-seal side-effects.
 
 ## Adding a new controller
 

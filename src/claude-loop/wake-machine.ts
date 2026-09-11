@@ -72,7 +72,7 @@ export const wakeMachine = setup({
             | { type: "WAKE_DELIVERED"; phrase: string; headMessageId: number | null; deliveredAtMs: number }
             | { type: "WAKE_COMPLETED" }
             | { type: "WAKE_SKIPPED" }
-            | { type: "IN_FLIGHT_TTL_EXPIRED" }
+
             | { type: "BOOT_READY" },
         emitted: {} as WakeEmittedEvent,
         input: {} as WakeMachineInput,
@@ -182,10 +182,7 @@ export const wakeMachine = setup({
                     target: "idle",
                     actions: ["emitClearedSkipped", "clearInFlight"],
                 },
-                IN_FLIGHT_TTL_EXPIRED: {
-                    target: "cooldown",
-                    actions: ["emitClearedTtl", "clearInFlight"],
-                },
+
             },
         },
         cooldown: {
