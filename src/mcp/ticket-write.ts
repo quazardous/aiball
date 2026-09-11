@@ -119,6 +119,9 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // pipeline (validator extends to allow it on ticket_created ;
                 // db/messages stamps meta.decision={kind,status:"pending"}).
                 decision_kind: then === "plan" ? "plan" : undefined,
+                // #2306 — a ticket with no `then` needs the flag on the wire:
+                // declared in the schema and destructured is not enough.
+                comment_only: then === "plan" ? undefined : comment_only,
             })) as { id?: number };
             markActiveTicket(res?.id); // #404: focus = the new ticket (token attribution)
             if (tags && tags.length > 0 && typeof res?.id === "number") {
