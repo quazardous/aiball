@@ -128,3 +128,31 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
   covered separately (david).
 - **attribution (#322)** + **per-agent workflow (#323)** — await the multi-agent /
   sandbox layer.
+
+## Board simulator — `npm run sim`
+
+The rules that decide what an agent sees (last actor, pending decisions, claims,
+handback and steps, dependencies, backlog tiers) are tested one by one; the
+simulator shows them **together**, on a board you can watch and moderate.
+
+- **The board:** the real daemon and web UI, in this stack's `daemon` container
+  under its own compose project (`aiball-sim`) and port (`AIBALL_SIM_PORT`,
+  default **17780**), on a throwaway database. It never meets the live board nor
+  `npm run test:e2e`.
+- **The cohort** (`tests/sim/cohort.yaml`): a human moderator who logs into the
+  web UI, projects with their lead agent, and extra agents following a project.
+- **Simulated agents** call the **real MCP tool handlers** with their own token,
+  so a gesture is refused or accepted exactly as it would be for a real agent.
+
+| Command | What |
+|---|---|
+| `npm run sim -- up [cohort.yaml]` | build and start the board, provision the cohort, print the logins |
+| `npm run sim -- mcp <agent> <tool> '<json>'` | call an MCP tool as that agent |
+| `npm run sim -- view [agent...]` | each agent's seat: every open ticket's backlog tier, whether it can act or claim, what gates it, the last actor, and what its **next wake** would say |
+| `npm run sim -- pending` / `approve <id>` / `reject <id>` | moderate from the terminal (or use the web UI) |
+| `npm run sim -- down` | stop the board and drop its database |
+
+The next wake is worked out like the loop does it: unread pings first, then the
+head of the agent's backlog (the first ticket not in cooldown), ended with the
+loop's own wording for that tier. `src/sim/view.test.ts` fails if that wording
+drifts from `src/claude-loop/state.ts`.

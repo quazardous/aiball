@@ -40,3 +40,5 @@ assets/aiball-preview.png
 # compiled cl-pty-proxy.exe is a platform-specific artifact built locally
 # (or by install.ps1); never committed.
 windows/cl-pty-proxy/target/
+# The board simulator's local state: the tokens of its throwaway cohort.
+tests/sim/.state/

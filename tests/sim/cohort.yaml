@@ -1,0 +1,21 @@
+# The simulated board: who exists and who leads what.
+# `npm run sim -- up` provisions it in a fresh, throwaway container.
+#
+# - moderator: the human who logs into the web UI and moderates.
+# - projects: each lead is an agent subscribed as the project's owner.
+# - agents: extra agents, following a project (a crew member, an outsider…).
+
+moderator:
+  id: david
+  password: simulator
+
+projects:
+  alpha:
+    lead: alpha-lead
+  beta:
+    lead: beta-lead
+
+agents:
+  - id: alpha-helper
+    project: alpha
+    role: follower
