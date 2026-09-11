@@ -385,15 +385,6 @@ async function doDelete() {
             >
                 ·
             </span>
-            <!-- #2308 — a step (then: continue): work done and going on, nothing to decide.
-                 #2324 david: it reads before the author's name. -->
-            <Tag
-                v-if="isStep"
-                :value="STEP_LABEL"
-                severity="info"
-                title="a step: the agent marked this part done and carries on — nothing to accept or reject"
-                style="font-size: var(--fs-2xs); margin-right: 0.4rem"
-            />
             <span v-if="msg.by_agent">by {{ msg.by_agent }}</span>
             <!-- #1561 david `bf6cju`: "rien n'indique qu'un commentaire est
                  invisible". The Message type carried `scope` and claimed to
@@ -414,6 +405,15 @@ async function doDelete() {
                 :title="questionStats.open === 0
                     ? 'All questions in this comment have been answered.'
                     : `${questionStats.open} question${questionStats.open === 1 ? '' : 's'} still open — click a checkbox to quote it in your reply.`"
+                style="font-size: var(--fs-2xs); margin-left: 0.4rem"
+            />
+            <!-- #2308 — a step (then: continue): work done and going on, nothing to decide.
+                 #2326 david: after the author's name, with the other markers. -->
+            <Tag
+                v-if="isStep"
+                :value="STEP_LABEL"
+                severity="info"
+                title="a step: the agent marked this part done and carries on — nothing to accept or reject"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;
