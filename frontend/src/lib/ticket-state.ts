@@ -73,6 +73,7 @@ export type LifecycleStage =
     | "blocked"
     | "snoozed"
     | "stalled-step"
+    | "step"
     | "open";
 
 export function lifecycleStage(r: InboxRow): LifecycleStage {
@@ -111,6 +112,8 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     // #2308 — an indicator only: the agent marked a step done and nothing
     // followed. Last, so any state that asks something of the reader wins.
     if (r.stalled_step) return "stalled-step";
+    // #2327 — the last word is a step: a discreet blue check, nothing to decide.
+    if (r.latest_is_step) return "step";
     return "open";
 }
 

@@ -212,6 +212,9 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         })(),
         /** #2308 — a step (`then: continue`) nothing has followed for
             `tickets.step_stale_hours`: the work it announced went quiet. */
+        /** #2327 — the ticket’s last word is a step (`then: continue`); the
+            list shows a discreet blue check. */
+        latest_is_step: live && agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,
         stalled_step: live && isStepStalled(
             agg.lastStepAt || null,
             agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,

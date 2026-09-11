@@ -550,6 +550,8 @@ export interface InboxRow {
     /** #2308 — a step (then: continue) nothing has followed for
      *  tickets.step_stale_hours: the work it announced went quiet. */
     stalled_step?: boolean;
+    /** #2327 — the last word on the ticket is a step (then: continue). */
+    latest_is_step?: boolean;
     /** #656 david `2c9qm4`: true iff a pending decision exists AND
      *  the decision-bearing comment IS the latest comment on the
      *  thread (no newer activity past it). UI uses this to keep

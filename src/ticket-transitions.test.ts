@@ -346,4 +346,7 @@ test("the fold tracks the latest step and the row flags it once nothing followed
     assert.equal(row(quiet, 24).stalled_step, true);
     assert.equal(row(answered, 24).stalled_step, false, "david answered after the step");
     assert.equal(row(quiet, 0).stalled_step, false, "0 turns the flag off");
+    // #2327 — the list marker: the last word is a step, until someone answers.
+    assert.equal(row(quiet, 0).latest_is_step, true, "the last word is a step");
+    assert.equal(row(answered, 24).latest_is_step, false, "david answered after the step");
 });
