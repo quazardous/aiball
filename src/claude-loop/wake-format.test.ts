@@ -493,6 +493,37 @@ test("#999 event wake with FIFO already carrying the comment → still comment-c
     assert.doesNotMatch(res.phrase, /Triage the ticket/);
 });
 
+// #2310 — a hint on ANOTHER ticket anchors the wake (Rule A, #1569) while the
+// FIFO head is a same-ticket bundle. The bundle is left unread for the next wake
+// (not acked), so it must not be rendered either: it came back glued to every
+// wake, "…(#2297 / #56gqhd)#2290: … — 3 updates: …". Replays the real case.
+test("#2310 hint on another ticket while the FIFO head is a bundle → the bundle is neither rendered nor acked", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 3 }),
+            unread: async () => ({
+                messages: [
+                    { id: 1019196, kind: "resolution_accepted", ticket_id: 2290, hashid: "rcjg96", by_agent: "david" },
+                    { id: 1019198, kind: "ticket_reopened", ticket_id: 2290, hashid: "hyh8fg", by_agent: "david" },
+                    { id: 1019199, kind: "ticket_closed", ticket_id: 2290, hashid: "myy8e5", by_agent: "david" },
+                ],
+            }),
+            getTicket: async (id: number) => ({
+                ticket: { title: id === 2297 ? "analyse ajout d'un then:wait" : "extension gnome et mode proxy", claimable: true },
+            }),
+        }),
+        null,
+        PINGS_YAML,
+        { ticketId: 2297, commentId: 1019205, commentHashid: "56gqhd", commentBody: "fait un ticket pour un then:continue aussi" },
+    );
+    assert.match(res.phrase, /then:continue aussi/);
+    assert.match(res.phrase, /#2297/);
+    assert.doesNotMatch(res.phrase, /updates:/, "the other ticket's bundle is not rendered");
+    assert.doesNotMatch(res.phrase, /#2290|rcjg96|hyh8fg|myy8e5/, "nothing of the other ticket leaks into the phrase");
+    assert.deepEqual(res.extraSeenIds ?? [], [], "nothing of it is acked either: it comes back whole on the next wake");
+    assert.equal(res.headMessageId, 1019205, "the acked head is the hint's own comment, not one of the bundle's");
+});
+
 // #1169 — un decision-event (body vide) arrivé par HINT alors que le FIFO ne
 // l'a pas comme head ne doit PAS se rendre en refs nues « (#N / #hashid) ».
 // Le hint porte maintenant `commentKind` ; la branche comment-centrique est

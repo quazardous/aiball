@@ -2356,6 +2356,11 @@ export async function buildContextPhrase(
             if (!head?.id || head.id !== eventHint.ticketId) {
                 hintAnchored = true;
                 head = { id: eventHint.ticketId, title: undefined, kind: "comment" };
+                // #2310 — the FIFO head's same-ticket bundle was built above for
+                // the ticket we just left. Rule A leaves it UNREAD for the next
+                // wake (its ids are not acked below), so it must not be RENDERED
+                // either: rendered-but-not-acked came back glued to every wake.
+                headBundle = "";
                 // The hint doesn't carry the parent ticket title — best-effort.
                 try {
                     const t = await client.getTicket(eventHint.ticketId, { summary: true }) as {

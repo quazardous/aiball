@@ -145,6 +145,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop no longer re-injects the same updates wake after wake: when a live
+  notification about one ticket took over the wake, the pending updates of
+  another ticket were glued onto the phrase without being marked seen.
 - **A loop started in a folder Claude Code has never trusted no longer types into
   its trust dialog.** The dialog's selection arrow looked like a ready prompt, so
   the first wake could answer it with the default "No, exit" and close claude.
