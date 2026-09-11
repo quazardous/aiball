@@ -18,15 +18,11 @@ import { emptyAgg } from "./inbox-agg.js";
 import { DECISION_KINDS } from "../decisions.js";
 import { ticketDecision } from "../api/tickets.js";
 
-test("every decision kind the model defines has a pending flag on the aggregate", () => {
-    // buildInboxAgg reads the DB, so the shape is what can be pinned purely —
-    // and the shape is exactly what was missing: no pendingWontfix field meant
-    // no dispatch could ever set one.
-    const agg = emptyAgg() as unknown as Record<string, unknown>;
-    for (const kind of DECISION_KINDS) {
-        const flag = `pending${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
-        assert.ok(flag in agg, `decision kind "${kind}" has no "${flag}" on the inbox aggregate`);
-    }
+test("every decision kind the model defines is tracked on the aggregate", () => {
+    // #2308 — one track per kind, built from the transition table. A kind with
+    // no track is exactly what hid pending wontfix before.
+    const agg = emptyAgg();
+    assert.deepEqual(Object.keys(agg.decisions).sort(), [...DECISION_KINDS].sort());
 });
 
 test("a decision carried by the TICKET is seen, not just one on a comment", () => {

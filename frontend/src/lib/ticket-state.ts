@@ -7,6 +7,7 @@
  *
  * Extracted from App.vue + InboxList.vue (#B.332 Phase D, per `#C.mf5h72`).
  */
+import { DECISION_GESTURES, DECISION_KINDS } from "@shared/ticket-transitions";
 import { type InboxRow } from "./api";
 
 export function isPending(r: InboxRow): boolean {
@@ -119,22 +120,9 @@ export type Attention = "moderation" | "resolution" | "comments" | null;
 
 export function attentionOf(r: InboxRow): Attention {
     if (isPending(r)) return "moderation";
-    if (r.pending_resolution) return "resolution";
-    // #656 david: same "resolution" tint for pending plans — both are
-    // "decision pending on the reporter". Distinct icons / labels
-    // surface the kind ; the row accent groups them as "your call".
-    if (r.pending_plan) return "resolution";
-    // #897 david dt3fj7 : pending escalation = action humaine attendue
-    // (= "your call" aussi, même tint vert que plan/resolution). La rouge
-    // ESCALATED reste via lifecycleStage="pending-escalation" → badge
-    // urgence ; le liseré dit en plus "il faut que tu agisses sur cette
-    // ligne dans ton inbox".
-    if (r.pending_escalation) return "resolution";
-    // #1835 — wontfix is the fourth decision kind and awaits the reporter
-    // exactly like the three above. It was the only one lighting nothing,
-    // while still gating the ticket out of the agent's pool: the row looked
-    // idle precisely when it had become the human's call.
-    if (r.pending_wontfix) return "resolution";
+    // #2308 — any pending decision is "your call" (#656, #897, #1835): one flag
+    // per kind, named by the transition table's `inboxFlag` column.
+    if (DECISION_KINDS.some((k) => (r as unknown as Record<string, unknown>)[DECISION_GESTURES[k].inboxFlag])) return "resolution";
     if (r.pending_comment_count > 0) return "comments";
     return null;
 }

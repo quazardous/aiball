@@ -15,6 +15,7 @@
  * The composable returns 20 things — the parent destructures and
  * passes them down to ThreadActionsDock / ThreadToolbar.
  */
+import { DECISION_GESTURES, type DecisionKind } from "@shared/ticket-transitions";
 import { computed, ref, type ComputedRef, type Ref } from "vue";
 import { api, type Message, type ThreadView as ThreadViewData } from "./api";
 import { findActiveDecision, type CommentDecision } from "./decisions";
@@ -259,7 +260,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
     // but it's really just a plan, accept it as a plan". When `asKind`
     // is passed AND differs from the original kind, the close side-
     // effect of resolution-accept is suppressed (we want plan ergonomics).
-    async function acceptActiveDecision(asKind?: "plan" | "resolution" | "wontfix" | "escalation") {
+    async function acceptActiveDecision(asKind?: DecisionKind) {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;
@@ -282,11 +283,10 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
             // separate ticket_closed for resolution → 2nd fan-out = double
             // ping. For plan/escalation no close follows, so the note lands as
             // a plain comment. One source of truth per accept.
-            const closeNote =
-                (effectiveKind === "resolution" || effectiveKind === "wontfix")
-                    ? composerBody.value.trim() || undefined
-                    : undefined;
-            if (composerBody.value.trim() && effectiveKind !== "resolution" && effectiveKind !== "wontfix") {
+            // #2308 — whether this acceptance closes the ticket is the table's `onAccept`.
+            const closes = DECISION_GESTURES[effectiveKind].onAccept.startsWith("close_");
+            const closeNote = closes ? composerBody.value.trim() || undefined : undefined;
+            if (composerBody.value.trim() && !closes) {
                 await postBodyAs("comment_added");
             }
             await api.decide(active.message.id, "accepted", asKind, closeNote);
@@ -302,7 +302,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
         }
     }
 
-    async function reclassifyActiveDecision(newKind: "plan" | "resolution" | "wontfix" | "escalation") {
+    async function reclassifyActiveDecision(newKind: DecisionKind) {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;

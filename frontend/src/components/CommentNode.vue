@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DECISION_GESTURES } from "@shared/ticket-transitions";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import Button from "primevue/button";
 import SplitButton from "primevue/splitbutton";
@@ -110,7 +111,8 @@ const decisionChipLabel = computed(() => {
         // we're waiting on the kind to be decided ; it's a flag that
         // human action is required. Plan/resolution/wontfix keep the
         // "pending $kind" framing (= proposal awaiting reporter accept).
-        return d.kind === "escalation" ? "ESCALATED" : `pending ${d.kind}`;
+        // #2308 — the pending label is the transition table's `pendingLabel`.
+        return DECISION_GESTURES[d.kind]?.pendingLabel ?? `pending ${d.kind}`;
     }
     const prefix = d.status === "accepted" ? "✓ accepted" : "✗ rejected";
     const by = d.decided_by ? ` by ${d.decided_by}` : "";
@@ -125,8 +127,8 @@ const decisionChipSeverity = computed(() => {
     // NOW") rather than the neutral warn yellow used for plan/resolution/
     // wontfix. The kind tells the human what's pending ; the color tells
     // them the urgency.
-    if (d.kind === "escalation") return "danger";
-    return "warn"; // pending plan/resolution/wontfix
+    // #2308 — how loud a pending decision is: the table's `pendingSeverity`.
+    return DECISION_GESTURES[d.kind]?.pendingSeverity ?? "warn";
 });
 
 // #B.256: post-hoc "classify" affordance — transform a plain comment

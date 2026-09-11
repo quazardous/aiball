@@ -34,6 +34,14 @@ import {
 import { listMessages } from "./messages.js";
 import type { Message } from "./connection.js";
 import { parseMeta } from "../questions.js";
+import { DECISION_KINDS, decisionGesture, resolvesTicket, type DecisionKind } from "../ticket-transitions.js";
+
+/** The latest decision of one kind on a thread. */
+export interface DecisionTrack {
+    latestId: number;
+    pending: boolean;
+    rejected: boolean;
+}
 
 export interface InboxAgg {
     commentCount: number;
@@ -42,21 +50,11 @@ export interface InboxAgg {
     closed: boolean;
     resolved: boolean;
     blocked: boolean;
-    pendingResolution: boolean;
-    latestResolutionId: number;
-    latestResolutionRejected: boolean;
-    latestPlanId: number;
-    latestPlanRejected: boolean;
-    pendingPlan: boolean;
-    latestEscalationId: number;
-    pendingEscalation: boolean;
-    /** #1835 — the FOURTH decision kind. `wontfix` awaits the reporter's
-     *  accept/reject exactly like a resolution, and gates `actionable` the
-     *  same way (it shares resolution's gate semantics). It was the only
-     *  kind this aggregate never looked at, so a ticket left the agent's
-     *  pool while the inbox row showed nothing to do. */
-    latestWontfixId: number;
-    pendingWontfix: boolean;
+    /** #2308 — one track per decision kind, built from the transition table,
+     *  so a kind added there is tracked here without a new field. A kind this
+     *  aggregate did not look at is how a pending wontfix once lit nothing
+     *  (#1835). */
+    decisions: Record<DecisionKind, DecisionTrack>;
     lastSpeaker: string | null;
     lastSpeakerId: number;
 }
@@ -69,16 +67,9 @@ export function emptyAgg(): InboxAgg {
         closed: false,
         resolved: false,
         blocked: false,
-        pendingResolution: false,
-        latestResolutionId: 0,
-        latestResolutionRejected: false,
-        latestPlanId: 0,
-        latestPlanRejected: false,
-        pendingPlan: false,
-        latestEscalationId: 0,
-        pendingEscalation: false,
-        latestWontfixId: 0,
-        pendingWontfix: false,
+        decisions: Object.fromEntries(
+            DECISION_KINDS.map((k) => [k, { latestId: 0, pending: false, rejected: false }]),
+        ) as Record<DecisionKind, DecisionTrack>,
         lastSpeaker: null,
         lastSpeakerId: 0,
     };
@@ -123,41 +114,21 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
             cur.lastSpeakerId = m.id;
         }
         if (m.kind === "ticket_resolved" && m.status === "pending") {
-            cur.pendingResolution = true;
+            cur.decisions.resolution.pending = true;
         }
         let syntheticResolved: Message | null = null;
         if (m.kind === "comment_added" && m.status === "approved") {
             const d = parseMeta(m.meta ?? null).decision;
-            if (d?.kind === "resolution") {
-                if (cur.latestResolutionId === 0 || m.id > cur.latestResolutionId) {
-                    cur.latestResolutionId = m.id;
-                    cur.pendingResolution = d.status === "pending";
-                    cur.latestResolutionRejected = d.status === "rejected";
+            // #2308 — one fold for every kind: the latest decision of a kind wins.
+            if (d?.kind && decisionGesture(d.kind)) {
+                const track = cur.decisions[d.kind as DecisionKind];
+                if (track.latestId === 0 || m.id > track.latestId) {
+                    track.latestId = m.id;
+                    track.pending = d.status === "pending";
+                    track.rejected = d.status === "rejected";
                 }
-                if (d.status === "accepted") {
+                if (resolvesTicket(d.kind, d.status)) {
                     syntheticResolved = { ...m, kind: "ticket_resolved" };
-                }
-            }
-            if (d?.kind === "plan") {
-                if (cur.latestPlanId === 0 || m.id > cur.latestPlanId) {
-                    cur.latestPlanId = m.id;
-                    cur.latestPlanRejected = d.status === "rejected";
-                    cur.pendingPlan = d.status === "pending";
-                }
-            }
-            if (d?.kind === "escalation") {
-                if (cur.latestEscalationId === 0 || m.id > cur.latestEscalationId) {
-                    cur.latestEscalationId = m.id;
-                    cur.pendingEscalation = d.status === "pending";
-                }
-            }
-            // #1835 — wontfix. Missing here meant a pending "close without
-            // resolution" gated the ticket out of the agent's pool and lit
-            // nothing for the human, so nobody was looking at it.
-            if (d?.kind === "wontfix") {
-                if (cur.latestWontfixId === 0 || m.id > cur.latestWontfixId) {
-                    cur.latestWontfixId = m.id;
-                    cur.pendingWontfix = d.status === "pending";
                 }
             }
         }

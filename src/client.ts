@@ -10,6 +10,7 @@
  * token is needed. Token + URL remain the only path for remote clients
  * if the architecture ever grows beyond local.
  */
+import type { DecisionKind } from "./ticket-transitions.js";
 import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -1154,7 +1155,7 @@ export class AiballClient {
                 ticket_id: number;
                 ticket_title: string;
                 ticket_project: string;
-                decision_kind: "plan" | "resolution";
+                decision_kind: DecisionKind;
                 proposed_by: string | null;
                 created_at: string;
                 summary_until: string | null;

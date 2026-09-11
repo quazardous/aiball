@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { decisionGesture } from "../ticket-transitions.js";
+import { decisionGesture, type DecisionKind } from "../ticket-transitions.js";
 import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { invalidateInboxAgg } from "./inbox-agg.js";
 import { invalidateFlagsCache } from "./projects.js";
@@ -1507,7 +1507,7 @@ export interface PendingDecisionEntry {
     ticket_id: number;
     ticket_title: string;
     ticket_project: string;
-    decision_kind: "plan" | "resolution";
+    decision_kind: DecisionKind;
     proposed_by: string | null;
     created_at: string;
     summary_until: string | null;
@@ -1694,7 +1694,8 @@ export function listPendingDecisionsForReporter(
                 summary_until?: string;
             };
             const kind = m.decision?.kind;
-            if ((kind === "plan" || kind === "resolution")
+            // #2308 — which kinds count as "waiting on the reporter" here is the table's `listedAsMyPending`.
+            if (decisionGesture(kind)?.listedAsMyPending
                 && m.decision?.status === "pending") {
                 const t = ticketIndex.get(r.ticketId)!;
                 out.push({
@@ -1703,7 +1704,7 @@ export function listPendingDecisionsForReporter(
                     ticket_id: r.ticketId,
                     ticket_title: t.title,
                     ticket_project: t.project,
-                    decision_kind: kind,
+                    decision_kind: kind as DecisionKind,
                     proposed_by: r.byAgent ?? null,
                     created_at: r.createdAt,
                     summary_until: m.summary_until ?? null,
@@ -1763,7 +1764,8 @@ export function listPendingResolutionDecisionsForTicket(
         if (!r.meta) continue;
         try {
             const m = JSON.parse(r.meta) as { decision?: { kind?: string; status?: string } };
-            if (m.decision?.kind === "resolution" && m.decision.status === "pending") {
+            // #2308 — which pending decisions a close accepts is the table's `autoAcceptedOnClose`.
+            if (decisionGesture(m.decision?.kind)?.autoAcceptedOnClose && m.decision?.status === "pending") {
                 const parent = db.select({ project: schema.tickets.project })
                     .from(schema.tickets).where(eq(schema.tickets.id, r.ticketId)).get();
                 out.push(messageRowToMessage(r, parent?.project ?? ""));

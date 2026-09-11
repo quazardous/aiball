@@ -21,6 +21,8 @@ const t = await import("./ticket-transitions.js");
 const { computeDecisionGate } = await import("./db/decision-gate.js");
 const { CLOSING_DECISION_KINDS, WAITING_DECISION_KINDS } = await import("./decisions.js");
 const { validateNewMessage } = await import("./messages.js");
+const { buildInboxRow } = await import("./api/inbox-row.js");
+const { emptyAgg } = await import("./db/inbox-agg.js");
 
 type Kind = typeof t.DECISION_KINDS[number];
 type Scenario =
@@ -118,4 +120,120 @@ test("each then verb posts its kind, and only escalation acts when posted", () =
 test("the lifecycle doc's decision matrix is exactly what the table renders", () => {
     const doc = readFileSync(join(import.meta.dirname, "..", "docs", "TICKET_LIFECYCLE.md"), "utf8");
     assert.equal(t.withDecisionMatrix(doc), doc, "out of date — run: npx tsx scripts/gen-transition-matrix.ts");
+});
+
+test("close-time acceptance, the agent's pending list, rejection badges and attention order are as written here", () => {
+    type BoolCol = "autoAcceptedOnClose" | "listedAsMyPending" | "surfacesRejection";
+    const pick = (col: BoolCol) => t.DECISION_KINDS.filter((k) => t.DECISION_GESTURES[k][col]);
+    assert.deepEqual(pick("autoAcceptedOnClose"), ["resolution"]);
+    assert.deepEqual(pick("listedAsMyPending"), ["plan", "resolution"]);
+    assert.deepEqual(pick("surfacesRejection"), ["plan", "resolution"]);
+    assert.deepEqual(t.kindsByAttention(), ["escalation", "plan", "resolution", "wontfix"]);
+    for (const k of t.DECISION_KINDS) assert.equal(t.DECISION_GESTURES[k].inboxFlag, `pending_${k}`);
+    assert.equal(t.resolvesTicket("resolution", "accepted"), true);
+    for (const [k, st] of [["resolution", "pending"], ["wontfix", "accepted"], ["plan", "accepted"]] as const) {
+        assert.equal(t.resolvesTicket(k, st), false, `${k} ${st}`);
+    }
+});
+
+type Agg = ReturnType<typeof emptyAgg>;
+function rowWith(mutate: (agg: Agg) => void): Record<string, unknown> {
+    const agg = emptyAgg();
+    mutate(agg);
+    const ctx = {
+        byTicket: new Map([[7, agg]]), tagsMap: new Map(), unreadMap: new Map(), tokenUsageMap: new Map(),
+        crossAgentHotFocus: new Set(), payloadIds: new Set(), nowStr: new Date().toISOString(),
+    };
+    const ticket = { id: 7, project: "p", kind: "ticket_created", status: "approved", title: "t", body: "", meta: null, created_at: "2026-01-01T00:00:00Z" };
+    return buildInboxRow(ticket as never, ctx as never) as unknown as Record<string, unknown>;
+}
+
+test("the inbox row raises each kind's flag and points at the most urgent pending decision", () => {
+    for (const kind of t.DECISION_KINDS) {
+        const row = rowWith((agg) => { agg.decisions[kind].pending = true; agg.decisions[kind].latestId = 11; agg.lastSpeakerId = 11; });
+        for (const other of t.DECISION_KINDS) {
+            const flag = t.DECISION_GESTURES[other].inboxFlag;
+            assert.equal(row[flag], other === kind, `${kind} pending → ${flag}`);
+        }
+        assert.equal(row.pending_decision_is_latest, true, kind);
+    }
+    const both = rowWith((agg) => {
+        agg.decisions.plan.pending = true; agg.decisions.plan.latestId = 20;
+        agg.decisions.escalation.pending = true; agg.decisions.escalation.latestId = 10;
+        agg.lastSpeakerId = 10;
+    });
+    assert.equal(both.pending_decision_is_latest, true, "with a plan and an escalation pending, the row points at the escalation");
+    const rejected = rowWith((agg) => { for (const k of t.DECISION_KINDS) agg.decisions[k].rejected = true; });
+    assert.equal(rejected.latest_plan_rejected, true);
+    assert.equal(rejected.latest_resolution_rejected, true);
+    assert.equal("latest_wontfix_rejected" in rejected, false);
+});
+
+test("a decision filed with the ticket itself raises its flag too, and a closed ticket raises none", () => {
+    const withTicketPlan = (closed: boolean) => {
+        const agg = emptyAgg();
+        agg.closed = closed;
+        const ctx = {
+            byTicket: new Map([[8, agg]]), tagsMap: new Map(), unreadMap: new Map(), tokenUsageMap: new Map(),
+            crossAgentHotFocus: new Set(), payloadIds: new Set(), nowStr: new Date().toISOString(),
+        };
+        const ticket = {
+            id: 8, project: "p", kind: "ticket_created", status: "approved", title: "t", body: "",
+            meta: JSON.stringify({ decision: { kind: "plan", status: "pending" } }), created_at: "2026-01-01T00:00:00Z",
+        };
+        return buildInboxRow(ticket as never, ctx as never) as unknown as Record<string, unknown>;
+    };
+    assert.equal(withTicketPlan(false).pending_plan, true);
+    assert.equal(withTicketPlan(false).pending_decision_is_latest, true);
+    assert.equal(withTicketPlan(true).pending_plan, false);
+});
+
+// The row tests above set the aggregate by hand; this one goes through the real
+// fold over stored comments, so a track the fold stops updating is caught.
+test("the inbox fold tracks each kind's latest decision from the stored comments", async () => {
+    const { getDb, nowIso } = await import("./db/connection.js");
+    const schema = await import("./schema.js");
+    const { createProject } = await import("./db/projects.js");
+    const { buildInboxAgg } = await import("./db/inbox-agg.js");
+    const db = getDb();
+    createProject({ name: "p2308" });
+    let id = 90000;
+    const ticket = () => {
+        const tid = ++id;
+        db.insert(schema.tickets).values({
+            id: tid, project: "p2308", displaySeq: tid, title: `T${tid}`, status: "approved",
+            byAgent: "david", lastActor: "david", lastActorAt: nowIso(), createdAt: nowIso(),
+        }).run();
+        return tid;
+    };
+    const decision = (ticketId: number, kind: string, status: string) => {
+        const mid = ++id;
+        db.insert(schema.messages).values({
+            id: mid, ticketId, kind: "comment_added", status: "approved", body: "b",
+            meta: JSON.stringify({ decision: { kind, status } }), byAgent: "agent", displaySeq: mid, createdAt: nowIso(),
+        }).run();
+        return mid;
+    };
+    const cases = t.DECISION_KINDS.map((kind) => {
+        const rejectedLast = ticket();
+        decision(rejectedLast, kind, "accepted");
+        const rejectedId = decision(rejectedLast, kind, "rejected");
+        const pendingLast = ticket();
+        decision(pendingLast, kind, "rejected");
+        const pendingId = decision(pendingLast, kind, "pending");
+        const accepted = ticket();
+        decision(accepted, kind, "accepted");
+        return { kind, rejectedLast, rejectedId, pendingLast, pendingId, accepted };
+    });
+    const agg = buildInboxAgg("p2308");
+    for (const c of cases) {
+        assert.deepEqual(agg.get(c.rejectedLast)!.decisions[c.kind],
+            { latestId: c.rejectedId, pending: false, rejected: true }, `${c.kind}: rejected last`);
+        assert.deepEqual(agg.get(c.pendingLast)!.decisions[c.kind],
+            { latestId: c.pendingId, pending: true, rejected: false }, `${c.kind}: a newer proposal replaces the rejection`);
+        assert.equal(agg.get(c.accepted)!.resolved, c.kind === "resolution", `${c.kind}: accepted resolves the ticket?`);
+        for (const other of t.DECISION_KINDS.filter((k) => k !== c.kind)) {
+            assert.equal(agg.get(c.rejectedLast)!.decisions[other].latestId, 0, `${c.kind} leaves ${other} untouched`);
+        }
+    }
 });

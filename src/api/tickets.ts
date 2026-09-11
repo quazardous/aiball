@@ -18,6 +18,7 @@
  * Local helper `enrichRelationStages` is kept private — only the GET
  * /tickets/:id thread builder uses it.
  */
+import { resolvesTicket } from "../ticket-transitions.js";
 import { Router, type Request, type Response } from "express";
 import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
 import { ERROR_CODES } from "../domain.js";
@@ -1374,7 +1375,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         if (m.status !== "approved") continue;
         if (m.kind === "comment_added") {
             const d = parseMeta(m.meta ?? null).decision;
-            if (d?.kind === "resolution" && d.status === "accepted") {
+            if (d && resolvesTicket(d.kind, d.status)) {
                 lifecycle.push({
                     ...m,
                     kind: "ticket_resolved",

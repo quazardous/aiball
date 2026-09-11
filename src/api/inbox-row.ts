@@ -25,6 +25,7 @@ import {
 import { computeHotFocus } from "../db/work-order.js";
 import { ticketIdsWithPayload } from "../db/payloads.js";
 import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
+import { DECISION_GESTURES, kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
 import { globalConfigPath } from "../autopoll/config.js";
 
 /**
@@ -105,6 +106,12 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
     const postponedUntil = t.postponed_until ?? null;
     const postponed =
         !!postponedUntil && postponedUntil > nowStr;
+    // #2308 — the decision flags follow the transition table: one rule for
+    // every kind rather than a hand-kept line per kind.
+    const live = !(agg.closed || t.status === "rejected");
+    const pendingFlag = (kind: DecisionKind): boolean => (agg.decisions[kind].pending || ticketDecision(t, kind)) && live;
+    const rejectedFlag = (kind: DecisionKind): boolean =>
+        DECISION_GESTURES[kind].surfacesRejection && agg.decisions[kind].rejected && live;
     return {
         id: t.id,
         project: t.project,
@@ -138,33 +145,33 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         // that the reporter still has to accept-and-close or reject.
         // Stays false once the ticket is closed (the close auto-promotes
         // any dangling pending resolved, see submitMessage).
-        pending_resolution: (agg.pendingResolution || ticketDecision(t, "resolution")) && !(agg.closed || t.status === "rejected"),
+        pending_resolution: pendingFlag("resolution"),
         /** #B.168 follow-up: latest resolution was rejected →
             flag for a `× rejected` badge on the inbox row. Same
             suppression as pending_resolution (cleared once
             ticket is closed/rejected). */
-        latest_resolution_rejected: agg.latestResolutionRejected && !(agg.closed || t.status === "rejected"),
+        latest_resolution_rejected: rejectedFlag("resolution"),
         /** #B.173: same flag for plan decisions. David: reject
             plan wasn't surfaced in the list view the way reject
             resolution is. Symmetric to latest_resolution_rejected
             — cleared once the ticket is closed/rejected so the
             badge represents "live unresolved rejection". */
-        latest_plan_rejected: agg.latestPlanRejected && !(agg.closed || t.status === "rejected"),
+        latest_plan_rejected: rejectedFlag("plan"),
         /** #656 david: pending PLAN flag. Symmetric to
             pending_resolution — surfaced so the inbox row can
             show "you have a plan to accept/reject" the same way
             it shows pending resolutions. Cleared once the ticket
             is closed/rejected. */
-        pending_plan: (agg.pendingPlan || ticketDecision(t, "plan")) && !(agg.closed || t.status === "rejected"),
+        pending_plan: pendingFlag("plan"),
         /** #737 — pending ESCALATION flag. Symmetric to pending_plan.
             Drives the red ESCALATED badge on the inbox row. Cleared
             once the ticket is closed/rejected. */
-        pending_escalation: (agg.pendingEscalation || ticketDecision(t, "escalation")) && !(agg.closed || t.status === "rejected"),
+        pending_escalation: pendingFlag("escalation"),
         /** #1835 — pending WONTFIX. The fourth decision kind, and the one
             nothing surfaced: it gates the ticket out of the agent's pool
             like a resolution does, so without this the row looked idle
             while it was in fact waiting on the reporter. */
-        pending_wontfix: (agg.pendingWontfix || ticketDecision(t, "wontfix")) && !(agg.closed || t.status === "rejected"),
+        pending_wontfix: pendingFlag("wontfix"),
         /** #656 david `2c9qm4`: true iff a pending decision exists
             AND the decision-bearing comment IS the latest comment
             on the thread (no newer activity past the proposal).
@@ -173,12 +180,9 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
             = dashed band. Null/false on rows with no pending
             decision. */
         pending_decision_is_latest: ((): boolean => {
-            if (agg.closed || t.status === "rejected") return false;
-            const pendingId = agg.pendingEscalation ? agg.latestEscalationId
-                : agg.pendingPlan ? agg.latestPlanId
-                : agg.pendingResolution ? agg.latestResolutionId
-                : agg.pendingWontfix ? agg.latestWontfixId
-                : 0;
+            if (!live) return false;
+            const first = kindsByAttention().find((k) => agg.decisions[k].pending);
+            const pendingId = first ? agg.decisions[first].latestId : 0;
             if (pendingId > 0) return pendingId === agg.lastSpeakerId;
             // #1835 — a decision filed WITH the ticket (`ticket_new({then})`)
             // has no comment to compare ids against. It is the freshest

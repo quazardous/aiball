@@ -1,3 +1,4 @@
+import type { DecisionKind } from "@shared/ticket-transitions";
 import { withBase } from "./base";
 
 export interface Tag {
@@ -623,9 +624,9 @@ export interface PostMessageInput {
     priority?: Priority;
     /** #2216 — tickets only. */
     level?: "task" | "milestone" | "roadmap";
-    /** #B.129 — tag a comment as a decision proposal at post-time
-     *  (server validates: `"plan" | "resolution"`, comment_added only). */
-    decision_kind?: "plan" | "resolution";
+    /** #B.129 — tag a message as a decision proposal at post-time. The
+     *  server checks the kind against where it may sit (the transition table). */
+    decision_kind?: DecisionKind;
 }
 
 /** Consumer registry entry (#B.79). */
@@ -1137,7 +1138,7 @@ export const api = {
     decide: (
         id: number,
         status: "accepted" | "rejected",
-        new_kind?: "plan" | "resolution" | "wontfix" | "escalation",
+        new_kind?: DecisionKind,
         // #980 — closing note carried on the server-side auto-close event
         // for resolution/wontfix accepts (one call does decide + close).
         closeBody?: string,
@@ -1150,7 +1151,7 @@ export const api = {
     /** Reclassify a pending decision's kind without changing its
      *  status (#B.129 follow-up). 409 when the decision is missing
      *  or already terminal. */
-    reclassify: (id: number, new_kind: "plan" | "resolution" | "wontfix" | "escalation") =>
+    reclassify: (id: number, new_kind: DecisionKind) =>
         req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
     /** Promote an undecorated comment to a decision (#B.256).
      *  `status` omitted → tag as pending. `status` set → tag +

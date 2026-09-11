@@ -86,12 +86,12 @@ place a decision's behaviour is defined. Edit the table, then run
 the table disagree.
 
 <!-- decision-matrix:start -->
-| `then:` | stored as | allowed on | meaning | while pending | accepted | rejected | when posted |
-|---|---|---|---|---|---|---|---|
-| `plan` | `plan` | `comment_added`, `ticket_created` | how the work will go, for the reporter to validate | out of the proposer's pool until someone else acts | go: the proposer executes; back in the pool | back in the pool | — |
-| `resolved` | `resolution` | `comment_added` | the work is done, close the ticket | out of the proposer's pool until someone else acts | the ticket closes, resolved; out of the pool, settled | back in the pool | — |
-| `wontfix` | `wontfix` | `comment_added` | close without doing it: junk, out of scope, not reproducible | out of the proposer's pool until someone else acts | the ticket closes, not resolved; out of the pool, settled | back in the pool | — |
-| `escalate` | `escalation` | `comment_added` | a blocker only a human can lift | out of the proposer's pool until someone else acts | unblocked, the ticket stays open; back in the pool | back in the pool | priority up one notch, broadcast to followers |
+| `then:` | stored as | allowed on | meaning | while pending | accepted | rejected | when posted | accepted when the ticket closes | in the agent's pending list | inbox flag |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `plan` | `plan` | `comment_added`, `ticket_created` | how the work will go, for the reporter to validate | out of the proposer's pool until someone else acts | go: the proposer executes; back in the pool | back in the pool | — | no | yes | `pending_plan` |
+| `resolved` | `resolution` | `comment_added` | the work is done, close the ticket | out of the proposer's pool until someone else acts | the ticket closes, resolved; out of the pool, settled | back in the pool | — | yes | yes | `pending_resolution` |
+| `wontfix` | `wontfix` | `comment_added` | close without doing it: junk, out of scope, not reproducible | out of the proposer's pool until someone else acts | the ticket closes, not resolved; out of the pool, settled | back in the pool | — | no | no | `pending_wontfix` |
+| `escalate` | `escalation` | `comment_added` | a blocker only a human can lift | out of the proposer's pool until someone else acts | unblocked, the ticket stays open; back in the pool | back in the pool | priority up one notch, broadcast to followers | no | no | `pending_escalation` |
 <!-- decision-matrix:end -->
 
 ---

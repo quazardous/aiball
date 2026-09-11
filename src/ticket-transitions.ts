@@ -43,6 +43,19 @@ export interface DecisionGesture {
     readonly onPost: { readonly bumpPriority: boolean; readonly broadcast: boolean };
     /** One line for the lifecycle doc. */
     readonly meaning: string;
+    /** The inbox row flag raised while it is pending. */
+    readonly inboxFlag: string;
+    /** Among several pending decisions, the one a row points at first (lower wins). */
+    readonly attentionRank: number;
+    /** How the thread labels it while pending, and how loud. */
+    readonly pendingLabel: string;
+    readonly pendingSeverity: "warn" | "danger";
+    /** Whether the inbox row keeps a "latest rejected" badge for this kind. */
+    readonly surfacesRejection: boolean;
+    /** Whether closing the ticket accepts it while it is still pending. */
+    readonly autoAcceptedOnClose: boolean;
+    /** Whether it is listed among the proposals an agent waits on (arbitrage). */
+    readonly listedAsMyPending: boolean;
 }
 
 export const DECISION_GESTURES = {
@@ -54,6 +67,8 @@ export const DECISION_GESTURES = {
         onAccept: "go",
         onPost: { bumpPriority: false, broadcast: false },
         meaning: "how the work will go, for the reporter to validate",
+        inboxFlag: "pending_plan", attentionRank: 1, pendingLabel: "pending plan", pendingSeverity: "warn",
+        surfacesRejection: true, autoAcceptedOnClose: false, listedAsMyPending: true,
     },
     resolution: {
         verb: "resolved",
@@ -63,6 +78,8 @@ export const DECISION_GESTURES = {
         onAccept: "close_resolved",
         onPost: { bumpPriority: false, broadcast: false },
         meaning: "the work is done, close the ticket",
+        inboxFlag: "pending_resolution", attentionRank: 2, pendingLabel: "pending resolution", pendingSeverity: "warn",
+        surfacesRejection: true, autoAcceptedOnClose: true, listedAsMyPending: true,
     },
     wontfix: {
         verb: "wontfix",
@@ -72,6 +89,8 @@ export const DECISION_GESTURES = {
         onAccept: "close_unresolved",
         onPost: { bumpPriority: false, broadcast: false },
         meaning: "close without doing it: junk, out of scope, not reproducible",
+        inboxFlag: "pending_wontfix", attentionRank: 3, pendingLabel: "pending wontfix", pendingSeverity: "warn",
+        surfacesRejection: false, autoAcceptedOnClose: false, listedAsMyPending: false,
     },
     escalation: {
         verb: "escalate",
@@ -81,6 +100,8 @@ export const DECISION_GESTURES = {
         onAccept: "unblock",
         onPost: { bumpPriority: true, broadcast: true },
         meaning: "a blocker only a human can lift",
+        inboxFlag: "pending_escalation", attentionRank: 0, pendingLabel: "ESCALATED", pendingSeverity: "danger",
+        surfacesRejection: false, autoAcceptedOnClose: false, listedAsMyPending: false,
     },
 } as const satisfies Record<DecisionKind, DecisionGesture>;
 
@@ -118,6 +139,16 @@ export function kindForVerb(verb: string | null | undefined): DecisionKind | nul
     return DECISION_KINDS.find((k) => DECISION_GESTURES[k].verb === verb) ?? null;
 }
 
+/** Whether a decision at this status makes the ticket resolved. */
+export function resolvesTicket(kind: string | null | undefined, status: string | null | undefined): boolean {
+    return status === "accepted" && decisionGesture(kind)?.onAccept === "close_resolved";
+}
+
+/** The kinds in the order an inbox row points at them when several are pending. */
+export function kindsByAttention(): DecisionKind[] {
+    return [...DECISION_KINDS].sort((a, b) => DECISION_GESTURES[a].attentionRank - DECISION_GESTURES[b].attentionRank);
+}
+
 /** The `then` verbs that post a decision on `host`, in table order. */
 export function verbsAllowedOn(host: DecisionHost): string[] {
     return kindsAllowedOn(host).map((k) => DECISION_GESTURES[k].verb);
@@ -143,8 +174,8 @@ export const DECISION_MATRIX_END = "<!-- decision-matrix:end -->";
 
 export function renderDecisionMatrix(): string {
     const lines = [
-        "| `then:` | stored as | allowed on | meaning | while pending | accepted | rejected | when posted |",
-        "|---|---|---|---|---|---|---|---|",
+        "| `then:` | stored as | allowed on | meaning | while pending | accepted | rejected | when posted | accepted when the ticket closes | in the agent's pending list | inbox flag |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ];
     for (const kind of DECISION_KINDS) {
         const g = DECISION_GESTURES[kind];
@@ -155,7 +186,8 @@ export function renderDecisionMatrix(): string {
         lines.push(
             `| \`${g.verb}\` | \`${kind}\` | ${g.allowedOn.map((h) => `\`${h}\``).join(", ")} | ${g.meaning}`
             + ` | ${GATE_TEXT[g.gate.pending]} | ${ACCEPT_TEXT[g.onAccept]}; ${GATE_TEXT[g.gate.accepted]}`
-            + ` | ${GATE_TEXT[g.gate.rejected]} | ${posted} |`,
+            + ` | ${GATE_TEXT[g.gate.rejected]} | ${posted} | ${g.autoAcceptedOnClose ? "yes" : "no"}`
+            + ` | ${g.listedAsMyPending ? "yes" : "no"} | \`${g.inboxFlag}\` |`,
         );
     }
     return lines.join("\n");

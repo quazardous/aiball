@@ -6,6 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
+import { resolvesTicket } from "../ticket-transitions.js";
 import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
 import { invalidateFlagsCache } from "./projects.js";
 import * as schema from "../schema.js";
@@ -101,7 +102,7 @@ export function getTicketStages(ids: number[]): Map<number, TicketStage> {
         if (!c.meta) continue;
         try {
             const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
-            if (m.decision?.kind === "resolution" && m.decision.status === "accepted") {
+            if (resolvesTicket(m.decision?.kind, m.decision?.status)) {
                 resolvedById.set(c.ticket_id, true);
             }
         } catch { /* malformed meta, skip */ }
