@@ -45,6 +45,8 @@ Open one when **someone else** needs to know something you can't say in the curr
 
 **Don't open one** for personal TODOs (local note), for the human in front of you (just ask), or for code-review of your own work (`/review`).
 
+**A ticket you create says what it is**, the same way a comment does: `then: "plan"` when the body already proposes how the work should go, or `comment_only: true` when it only sets down something to remember. A ticket with neither is refused and nothing is created.
+
 ---
 
 ## Decision discipline — the core

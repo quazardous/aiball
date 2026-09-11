@@ -63,6 +63,8 @@ export function registerTicketCommands(program: Command): void {
         .option("--project <project>", "Project (default $AIBALL_PROJECT)")
         .option("--body <body>", "Ticket body")
         .option("--by <agent>", "Author override (default: resolved consumer id)")
+        .option("--plan", "The body proposes how the work should go: the ticket carries a pending plan")
+        .option("--comment-only", "The ticket only sets down something to remember — required for an agent, whose tickets otherwise need --plan")
         .action(async (opts, cmd) => {
             const globalOpts = gOpts(cmd);
             const client = buildClient(globalOpts);
@@ -73,6 +75,8 @@ export function registerTicketCommands(program: Command): void {
                 title: opts.title,
                 ...(opts.body ? { body: opts.body } : {}),
                 by_agent: opts.by ?? client.agentId,
+                ...(opts.plan ? { decision_kind: "plan" } : {}),
+                ...(opts.commentOnly ? { comment_only: true } : {}),
             });
             out(res, globalOpts, (v) => fmtPostReceipt(v, "ticket"));
         });

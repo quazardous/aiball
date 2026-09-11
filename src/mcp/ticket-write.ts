@@ -91,11 +91,17 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .enum(["plan"])
                     .optional()
                     .describe(
-                        "#803 — attach a pending decision DIRECTLY on the ticket_created so the reporter validates the approach in one step (instead of `ticket_new` then `ticket_reply({then:'plan'})`). Today only `plan` is supported : the ticket carries `meta.decision={kind:'plan',status:'pending'}` and is gated out of the actionable backlog until the reporter accepts (go-signal to execute) or rejects (re-plan). Use when you already have a HOW in mind at creation time — typical for feature requests an agent files with a proposed approach.",
+                        "#803 — attach a pending decision DIRECTLY on the ticket_created so the reporter validates the approach in one step (instead of `ticket_new` then `ticket_reply({then:'plan'})`). Today only `plan` is supported : the ticket carries `meta.decision={kind:'plan',status:'pending'}` and is gated out of the actionable backlog until the reporter accepts (go-signal to execute) or rejects (re-plan). Use when you already have a HOW in mind at creation time — typical for feature requests an agent files with a proposed approach. A ticket with no `then` must set `comment_only: true` (#2275).",
+                    ),
+                comment_only: z
+                    .boolean()
+                    .optional()
+                    .describe(
+                        "#2275 — REQUIRED (true) for a ticket created with no `then`. A ticket that neither carries `then: \"plan\"` nor sets comment_only: true is refused (HTTP 400) and nothing is created. Set it when the ticket only sets down something to remember; if you already know how the work should go, attach `then: \"plan\"` instead.",
                     ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project, then }) => {
+        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project, then, comment_only }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,

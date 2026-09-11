@@ -84,22 +84,31 @@ export function summaryOverBudget(length: number, max: number): string {
  * last, so the ticket left its backlog, and nothing was proposed, so the human had
  * nothing to decide.
  *
+ * The same holds for a ticket an agent creates (david, #2275): it carries a plan
+ * (`then: plan`, the only decision a new ticket can hold), or it says it is only
+ * something set down to remember (`comment_only: true`).
+ *
  * Judged on the AUTHENTICATED caller, never on the body's `by_agent`: the UI
  * posts without one, and a body can name anyone. Humans are exempt. Server-side
  * writes (the upstream watcher…) call `submitMessage` directly and never come
- * here. Returns the refusal, or null when the comment may go through.
+ * here. Returns the refusal, or null when the message may go through.
  */
-export function commentWithoutDecisionRefusal(
+export function withoutDecisionRefusal(
     msg: NewMessage,
     rawBody: unknown,
     caller: string,
 ): string | null {
-    if (msg.kind !== "comment_added" || msg.decision_kind) return null;
+    const isComment = msg.kind === "comment_added";
+    if ((!isComment && msg.kind !== "ticket_created") || msg.decision_kind) return null;
     if ((rawBody as { comment_only?: unknown } | null)?.comment_only === true) return null;
     if (isHuman(caller)) return null;
     if (getConfig("tickets.require_then", msg.project) === false) return null;
     // Traced like the summary budget: a refusal leaves nothing in the database.
-    console.error(`[comment-only] refused agent=${caller} project=${msg.project}`);
+    console.error(`[comment-only] refused ${isComment ? "comment" : "ticket"} agent=${caller} project=${msg.project}`);
+    if (!isComment) {
+        return "a ticket without then: plan needs comment_only: true. If you already know how the work should go, "
+            + "attach then: plan; if the ticket only sets down something to remember, set comment_only: true. Nothing was created.";
+    }
     return "a comment without then: needs comment_only: true. If it concludes something, attach the matching then: "
         + "(plan / resolved / wontfix / escalate); if it only asks or informs, set comment_only: true. Nothing was posted.";
 }
