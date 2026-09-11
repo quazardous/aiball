@@ -2,3 +2,8 @@
     font-feature-settings: "tnum";
     padding-left: 4px;
 }
+
+/* Daemon down: the logo stays, in red. */
+.aiball-down {
+    color: #e01b24;
+}

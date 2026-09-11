@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- The aiball logo (the tray's pixel-art sphere), redrawn in one colour for the
+       GNOME top bar: a disc cut by its equator band, with the dish as a hole. A
+       ring for the dish blurs into a smudge at 16 px, hence the plain hole.
+       `-symbolic` in the file name tells the shell to recolour it with the theme. -->
+  <path fill="#bebebe" fill-rule="evenodd"
+        d="M1.072 7 A7 7 0 0 1 14.928 7 Z
+           M9 4.5 a1.5 1.5 0 1 0 3 0 a1.5 1.5 0 1 0 -3 0 Z
+           M1.072 9 A7 7 0 0 0 14.928 9 Z"/>
+</svg>

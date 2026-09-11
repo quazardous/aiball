@@ -39,7 +39,7 @@ test("it lands the whole extension, not just a manifest", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js"]) {
+    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "stylesheet.css", "icons/aiball-symbolic.svg"]) {
         assert.ok(existsSync(join(dir, f)), `${f} is missing — the shell needs all of them`);
     }
 });
@@ -132,6 +132,14 @@ test("the Start at login switch is on only for \`enabled\`", () => {
     for (const other of ["disabled\n", "static", "masked", "", "enabled-runtime"]) {
         assert.equal(actions.autostartFromIsEnabled(other), false, other);
     }
+});
+
+test("the top-bar icon is the logo file, named -symbolic so the shell recolours it", () => {
+    const ext = stripComments(readFileSync(join(ACTIONS_FILE, "..", "extension.js"), "utf8"));
+    assert.match(ext, /icons\/aiball-symbolic\.svg/);
+    assert.doesNotMatch(ext, /view-list-symbolic|action-unavailable-symbolic/, "the generic theme icons are gone");
+    const svg = readFileSync(join(ACTIONS_FILE, "..", "icons", "aiball-symbolic.svg"), "utf8");
+    assert.match(svg, /<svg[^>]*viewBox="0 0 16 16"/, "drawn on the 16 px grid of a panel icon");
 });
 
 after(() => {

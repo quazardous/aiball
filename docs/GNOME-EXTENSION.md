@@ -39,6 +39,10 @@ nothing in the extension acts on its own.
 
 ## What it shows
 
+The icon is the aiball logo — the Windows tray's sphere, redrawn in one colour
+so it takes the panel theme's colour like any system icon. It turns red while
+the daemon is down.
+
 The top bar carries **one** number: tickets waiting on a human decision. That
 is the count that should make you look up; a bar full of numbers is a bar
 nobody reads. Everything else is one click away in the menu:

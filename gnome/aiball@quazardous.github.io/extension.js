@@ -52,8 +52,10 @@ class AiballIndicator extends PanelMenu.Button {
         this._up = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
+        // The tray's logo, redrawn in one colour. The `-symbolic` file name
+        // makes the shell recolour it with the panel theme, like any system icon.
         this._icon = new St.Icon({
-            icon_name: 'view-list-symbolic',
+            gicon: Gio.icon_new_for_string(`${extension.path}/icons/aiball-symbolic.svg`),
             style_class: 'system-status-icon',
         });
         this._label = new St.Label({
@@ -186,7 +188,12 @@ class AiballIndicator extends PanelMenu.Button {
         this._stateItem.label.text = up
             ? `daemon up${version ? ` — ${version}` : ''}`
             : 'daemon down';
-        this._icon.icon_name = up ? 'view-list-symbolic' : 'action-unavailable-symbolic';
+        // Same logo either way; down turns it red, so the brand stays and the
+        // state still reads at a glance.
+        if (up)
+            this._icon.remove_style_class_name('aiball-down');
+        else
+            this._icon.add_style_class_name('aiball-down');
         if (!up) {
             this._label.visible = false;
             this._countsItem.visible = false;
