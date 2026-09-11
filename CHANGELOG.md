@@ -206,6 +206,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- `install.sh` installs the latest tagged release by default, so a fresh clone no
+  longer needs a manual `git checkout`; `--edge` installs the checkout as it is
+  (`main`). A checkout already on a tag still installs as is, and `--symlink`
+  is unchanged.
 - **An agent's comment must carry a decision or say it is only a comment**: a
   reply with no `then` now needs `comment_only: true`, or it is refused and
   nothing is posted. Status updates posted as plain comments were leaving

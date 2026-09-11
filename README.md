@@ -1,5 +1,10 @@
 # aiball — pilot your Claude Code agents like a GitHub board
 
+**In three lines:** `claude-loop` runs Claude Code inside tmux, one persistent
+session per project. The board runs on your machine. You file a ticket; the
+agent wakes up, works it, and proposes a plan or a resolution you accept or
+reject.
+
 A local-first board that turns Claude Code sessions into persistent,
 remotely-pilotable agents — one per project. Queue work, watch them drain
 it, accept or reject what they propose — or grab the keyboard and drive
@@ -24,11 +29,10 @@ moment coding starts.
 ```bash
 # 1. Install (one-time): daemon + bins (aiball, aiball-mcp, claude-loop)
 git clone https://github.com/quazardous/aiball.git && cd aiball
-git checkout "$(git describe --tags --abbrev=0)"   # latest stable release (omit to ride main / bleeding edge)
-./install.sh               # mints a one-shot install token + prints a setup URL
+./install.sh               # installs the latest release (--edge rides main), prints a setup URL
 # Open the printed *tokenized* URL to choose your first login + password:
 #   http://127.0.0.1:7777/setup?t=<token>   (one-shot, expires in 24h)
-# Lost it? re-mint with: aiball auth init
+# Expired or lost? `aiball auth reinit` mints a new one
 
 # 2. Wire a project (per repo): writes .mcp.json + .aiball.yaml (idempotent)
 cd <your-project> && claude-loop init
@@ -37,9 +41,12 @@ cd <your-project> && claude-loop init
 claude-loop
 ```
 
-tmux opens with claude inside; the status bar tracks real state
-(`boot` → `idle` → `busy`, plus a `stop` / `wait` / `loop` human-presence
-word). Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
+On Windows, install with `install.ps1` instead — see
+[`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md).
+
+tmux opens with claude inside; the status bar tracks real state (boot, idle,
+busy) and who holds the wheel (`▶` autonomous, `⏸` held, `⌨` you're typing).
+Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
 Press **F9** to take or release the wheel by hand: it cycles autonomous →
 held 10 min → held until you press again, so you can pilot live without the
 loop pinging over you (full presence model in
@@ -48,6 +55,15 @@ Run `aiball check` to verify wiring. Full install guide (modes, flags,
 env vars, troubleshooting) in [`docs/INSTALL.md`](./docs/INSTALL.md); other
 setups (bare MCP, autopoll Stop hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md);
 the loop internals in [`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
+
+What gets installed:
+
+| Binary | Role |
+|---|---|
+| `aiball` | the CLI: status and checks, auth, project and agent setup, tickets from the shell |
+| `aiball-daemon` | the board server (HTTP + local socket, SQLite); the service starts it, not you |
+| `aiball-mcp` | the MCP server Claude Code starts from `.mcp.json`: the agent's ticket tools |
+| `claude-loop` | runs Claude Code in tmux and wakes it when work arrives |
 
 **Your first ticket** — with a session looping, open the board (the URL from
 setup, e.g. `http://127.0.0.1:7777`), pick your project, and file a ticket
@@ -106,11 +122,11 @@ Guide: [`docs/REMOTE.md`](./docs/REMOTE.md).
 No magic. `claude-loop` runs claude inside **tmux** and installs two
 session-scoped Claude Code **hooks** (`SessionStart` + `Stop`): at every
 turn-end the Stop hook checks your backlog and, if there's work, wakes
-claude with the next ping (a detached timer heartbeats too). To interleave
+claude with the next ping (the loop's kernel keeps a heartbeat too). To interleave
 those pings without typing over you, a small **PTY proxy** sits between
 tmux and claude and watches the input stream — it tells *your* keystrokes
-apart from claude's output, holds pings back while you're typing (a grace
-window), and injects wakes straight into claude's PTY. Details:
+apart from claude's output, holds pings back while you're typing (a presence
+hold), and injects wakes straight into claude's PTY. Details:
 [`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md) +
 [`docs/PTY-PROXY.md`](./docs/PTY-PROXY.md).
 
@@ -120,8 +136,6 @@ window), and injects wakes straight into claude's PTY. Details:
 
 The short version (full list in [`ROADMAP.md`](./ROADMAP.md)):
 
-- **Windows** — install ships; `claude-loop` runs via psmux / WSL2
-  (experimental, hardening — [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md)).
 - **Sandboxed autonomous agent** — `aiball sandbox` runs an agent against
   a fixed plate of tickets (experimental, development on pause — one
   looped agent per project proved the better grain;

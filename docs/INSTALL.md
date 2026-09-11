@@ -105,9 +105,12 @@ cd aiball
 What it does:
 
 1. Verifies prereqs (`node ≥ 20`, `npm`, `rsync`).
-2. Builds the frontend bundle if missing (`frontend/dist/index.html`),
-   then `rsync`s the source tree to `~/.local/lib/aiball/` (excluding
-   `node_modules`, `.git`, `*.log`, `.env`, `var/`).
+2. Picks what to install: the **latest release tag** of the clone, exported
+   with `git archive` (a checkout sitting exactly on a tag installs as is;
+   `--edge` installs this checkout, `main` included). Builds the frontend
+   bundle if missing (`frontend/dist/index.html`), then `rsync`s that tree to
+   `~/.local/lib/aiball/` (excluding `node_modules`, `.git`, `*.log`, `.env`,
+   `var/`).
 3. Runs `npm install` in the install dir (tsx is in devDependencies
    but needed at runtime, so we install everything).
 4. Symlinks the CLIs into `~/.local/bin/`:
@@ -126,16 +129,15 @@ aiball --version
 systemctl --user status aiball
 ```
 
-#### Install a specific stable release
+#### Which version gets installed
 
-`git clone` above tracks `main` (the latest development state). To install a
-tagged **stable release** instead, pin the checkout to the release tag before
-running `install.sh` — everything else is identical:
+`./install.sh` installs the **latest release** tag of your clone, so a plain
+`git clone` + `./install.sh` gets a stable version. To install something else:
 
 ```bash
-git clone https://github.com/quazardous/aiball.git
-cd aiball
-git checkout v0.37.0     # a tag from the releases page
+./install.sh --edge      # this checkout as it is: main, or your local edits
+
+git checkout v0.37.0     # an older release: a checkout exactly on a tag installs as is
 ./install.sh
 ```
 
@@ -148,11 +150,11 @@ cd aiball-0.37.0
 ```
 
 Releases (tags + notes) are on the [releases page](https://github.com/quazardous/aiball/releases);
-`aiball --version` then reports the installed tag. Releases ship **source only**
+`aiball --version` then reports the installed version. Releases ship **source only**
 (no pre-built binaries — the Rust PTY proxy is built at install time via `cargo`,
-best-effort). To move an existing install to a newer release, re-checkout the new
-tag (or re-extract) and re-run `./install.sh`.
-
+best-effort). To move an existing install to a newer release, `git pull` on
+`main` (or extract the new tarball) and re-run `./install.sh`. A dev install
+(`--symlink`) always runs this checkout, whatever the tags.
 ### Path 3: Dev install (`--symlink`)
 
 ```bash
@@ -193,6 +195,7 @@ install, run `./install.sh --uninstall` first.
 | Flag | What |
 |---|---|
 | `--symlink` | dev install — symlink the install dir to this checkout + tsx-watch drop-in |
+| `--edge` | hard install of this checkout as it is (`main`, local edits) instead of the latest release tag |
 | `--port 7878` | override the listen port (writes a systemd drop-in; default `7777`) |
 | `--host 0.0.0.0` | override the listen host (default `127.0.0.1`; use with care) |
 | `--no-systemd` | skip the user unit (macOS, headless boxes — start the daemon manually, see below) |

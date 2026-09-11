@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install aiball into ~/.local (code + binaries + systemd user service).
 #
-#   ./install.sh                       # full install (rsync source → ~/.local/lib/aiball)
+#   ./install.sh                       # full install: the latest tagged release → ~/.local/lib/aiball
+#   ./install.sh --edge                # full install of this checkout as it is (main, local edits)
 #   ./install.sh --symlink             # dev install: symlink ~/.local/lib/aiball → this checkout
 #                                      # (edits in this repo are picked up immediately)
 #   ./install.sh --port 7878           # override listen port (writes a systemd drop-in)
@@ -32,6 +33,7 @@ NO_SYSTEMD=false
 UNINSTALL=false
 PURGE=false
 SYMLINK=false
+EDGE=false
 PORT=""
 HOST=""
 PROXY_URL=""
@@ -44,6 +46,7 @@ while [[ $# -gt 0 ]]; do
         --uninstall)  UNINSTALL=true; shift ;;
         --purge)      PURGE=true; shift ;;
         --symlink)    SYMLINK=true; shift ;;
+        --edge)       EDGE=true; shift ;;
         --gnome-extension)    GNOME_EXT=yes; shift ;;
         --no-gnome-extension) GNOME_EXT=no; shift ;;
         # #394: proxy-node mode — relay this daemon to a remote aiball.
@@ -149,12 +152,40 @@ if [[ -L "$PREFIX_LIB" ]] && ! $SYMLINK; then
     log "Existing install at $PREFIX_LIB is a symlink — keeping dev layout (run --uninstall first to switch to a prod copy)"
 fi
 
+# --- what to install ---------------------------------------------------------
+# A hard install ships the latest tagged release of this clone by default, so a
+# fresh `git clone` + `./install.sh` gets a stable version without a manual
+# checkout. --edge ships this checkout as it is (main, local edits). A checkout
+# sitting exactly on a tag is already a pin and ships as is. No git or no tag
+# (a release tarball, a fork): this directory. A dev install (--symlink) always
+# points at this checkout.
+INSTALL_SRC="$SRC_DIR"
+INSTALL_WHAT="this checkout"
+if ! $SYMLINK && ! $EDGE && command -v git >/dev/null 2>&1 \
+    && git -C "$SRC_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    if exact_tag="$(git -C "$SRC_DIR" describe --exact-match --tags HEAD 2>/dev/null)"; then
+        INSTALL_WHAT="$exact_tag (this checkout)"
+    elif latest_tag="$(git -C "$SRC_DIR" describe --tags --abbrev=0 2>/dev/null)"; then
+        EXPORT_DIR="$(mktemp -d)"
+        trap 'rm -rf "$EXPORT_DIR"' EXIT
+        git -C "$SRC_DIR" archive "$latest_tag" | tar -x -C "$EXPORT_DIR"
+        INSTALL_SRC="$EXPORT_DIR"
+        INSTALL_WHAT="$latest_tag (latest release; ./install.sh --edge installs this checkout instead)"
+    else
+        warn "no release tag in this clone — installing this checkout as it is"
+    fi
+fi
+if $SYMLINK && $EDGE; then
+    warn "--edge has no effect on a dev install: it always points at this checkout"
+fi
+$SYMLINK || log "Installing: $INSTALL_WHAT"
+
 # Live human-typing detection uses the Rust PTY proxy (cl-pty-proxy) — the
 # default on Unix since the cutover. Build the release binary best-effort : if
 # cargo is absent or the build fails, the loop transparently falls back to the
 # Python proxy (pty-proxy.py). Built in the source tree so symlink mode shares
 # it and rsync mode ships it.
-PROXY_DIR="$SRC_DIR/windows/cl-pty-proxy"
+PROXY_DIR="$INSTALL_SRC/windows/cl-pty-proxy"
 if [[ -f "$PROXY_DIR/Cargo.toml" && ! -x "$PROXY_DIR/target/release/cl-pty-proxy" ]]; then
     if command -v cargo >/dev/null 2>&1; then
         log "Building the Rust PTY proxy in $PROXY_DIR (one-time, ~30s)"
@@ -185,9 +216,9 @@ else
     # share the source dir's dist (which the dev rebuilds on save); in
     # rsync mode we have to ship the built bundle ourselves. Build it
     # in the source tree if missing so rsync picks it up.
-    if [[ -f "$SRC_DIR/frontend/package.json" && ! -f "$SRC_DIR/frontend/dist/index.html" ]]; then
-        log "Building frontend bundle in $SRC_DIR/frontend (one-time, ~30s)"
-        ( cd "$SRC_DIR/frontend" && npm install --silent && npm run build --silent )
+    if [[ -f "$INSTALL_SRC/frontend/package.json" && ! -f "$INSTALL_SRC/frontend/dist/index.html" ]]; then
+        log "Building frontend bundle in $INSTALL_SRC/frontend (one-time, ~30s)"
+        ( cd "$INSTALL_SRC/frontend" && npm install --silent && npm run build --silent )
     fi
     mkdir -p "$PREFIX_LIB"
     rsync -a --delete \
@@ -195,7 +226,7 @@ else
         --exclude='*.log' --exclude='.env' --exclude='var' \
         --exclude='frontend/node_modules' \
         --exclude='windows/cl-pty-proxy/target/debug' \
-        "$SRC_DIR/" "$PREFIX_LIB/"
+        "$INSTALL_SRC/" "$PREFIX_LIB/"
 fi
 
 # --- install deps ----------------------------------------------------------
@@ -348,6 +379,7 @@ cat <<EOF
 
 Data dir:    ~/.local/share/aiball
 Code dir:    $PREFIX_LIB$($SYMLINK && printf "  (→ %s)" "$SRC_DIR")
+Installed:   $($SYMLINK && echo "this checkout (dev install)" || echo "$INSTALL_WHAT")
 Service:     systemctl --user status $SERVICE_NAME
 Uninstall:   $SRC_DIR/install.sh --uninstall   (add --purge to also wipe data)
 ────────────────────────────────────────────────────────────────────
