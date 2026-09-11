@@ -88,7 +88,10 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             // direct keystroke (this path) — both reach the SM the same
             // way. No debounce on typing : david "frappe direct doit
             // directement passer en NOT AFK 10m (autre logique)".
-            armAfkViaService(sd, 600);
+            // #2311 — the hold lasts `claude_loop.presence_hold_seconds`, like F9 and
+            // `--wait`: the helper reads the knob. It was 600 s hard-coded here, so a
+            // typed hold ignored the setting.
+            armAfkViaService(sd);
             return { kind: "typing-armed" };
         }
         if (kind === "keystroke" && eventKind === "afk_key") {

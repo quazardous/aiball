@@ -220,7 +220,7 @@ stateDiagram-v2
   held key does not spin through the cycle. The window comes from
   `claude_loop.presence_hold_seconds` (600 s by default), for F9 and for
   `claude-loop start --wait`.
-- **Typing** is detected by the PTY proxy. It arms or restarts a 600 s hold,
+- **Typing** is detected by the PTY proxy. It arms or restarts that same hold,
   except in **∞**, which only F9 releases. A red `⌨` joins the bar while a key
   was typed in the last 5 s.
 - [The tmux bar section](#3-the-tmux-bar-glyphs) lists every glyph, with the
@@ -392,6 +392,20 @@ best-to-worst :
   `ipc.humanTypingAtMs` when the prompt area changes at idle. Idle-only,
   and can't separate your keystrokes from the loop's own injection as
   cleanly — exactly the blind spot the proxy was built to close.
+
+#### Three "recent typing" windows
+
+A keystroke counts as recent for three different lengths of time, each for its
+own purpose. They are separate on purpose:
+
+| Window | Setting | What it drives |
+|---|---|---|
+| 5 s | `HUMAN_TYPING_TTL_SEC` (code constant) | a wake is skipped as "human typing right now", and the bar shows `⌨` |
+| 3 s | `claude_loop.input_hot_ttl_ms` | the pane probe runs at its fast rate; when a presence hold clears while a key is this recent, the drain wake is deferred |
+| 30 s | typing machine TTL (code default) | `typing:ended` fires 30 s after the last key; the deferred drain above waits for it |
+
+The presence hold itself (`claude_loop.presence_hold_seconds`, 600 s by
+default) is a fourth, much longer window: typing arms it, F9 cycles it.
 
 ### 3. The tmux bar glyphs
 

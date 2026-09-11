@@ -411,3 +411,25 @@ test("#633F formatVerdictLogLine covers every verdict variant", () => {
     assert.equal(formatVerdictLogLine({ kind: "unknown", raw: "keystroke:foo" }), "proxy-event: unknown 'keystroke:foo'");
     assert.equal(formatVerdictLogLine({ kind: "error", message: "boom" }), "proxy-event handler error: boom");
 });
+
+test("#2311 a typed hold lasts claude_loop.presence_hold_seconds, like F9 and --wait", async () => {
+    const { _resetLoopConfigCacheForTests } = await import("./loop-config.js");
+    const sd = tmp();
+    const project = mkdtempSync(join(tmpdir(), "proxy-event-hold-"));
+    const prevCwd = process.env.AIBALL_PROJECT_CWD;
+    try {
+        writeFileSync(join(project, ".aiball.yaml"), "claude_loop:\n  presence_hold_seconds: 120\n");
+        process.env.AIBALL_PROJECT_CWD = project;
+        _resetLoopConfigCacheForTests();
+        seedPostBoot(sd);
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "typing-armed" });
+        const delta = (getIpcState().afkExpiryMs ?? 0) - Date.now();
+        assert.ok(delta > 115_000 && delta < 125_000, `expiry delta ${delta}ms, expected the configured 120 s`);
+    } finally {
+        if (prevCwd === undefined) delete process.env.AIBALL_PROJECT_CWD; else process.env.AIBALL_PROJECT_CWD = prevCwd;
+        _resetLoopConfigCacheForTests();
+        rmSync(sd, { recursive: true, force: true });
+        rmSync(project, { recursive: true, force: true });
+    }
+});
