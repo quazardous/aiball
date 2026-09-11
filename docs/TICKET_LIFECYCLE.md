@@ -290,6 +290,10 @@ at the human's expense); with it, a waiting thread re-surfaces about once per
 window instead of every heartbeat. A gated thread is therefore never silent
 *forever* — its silence is bounded by the cooldown.
 
+A ticket whose last action is a step (`then: continue`) is cooled only briefly,
+5 minutes by default (`tickets.sink_then_continue_minutes`, 0 = not at all): a
+step says there is work to do now, so the pause only turns the queue over.
+
 **Why keep the waiting tiers, not drop them:** a ball-in-their-court ticket
 isn't done — it's waiting on a human/reporter who may go silent. Surfacing it
 in the wake (below tier 1) keeps it visible to the agent: a periodic "look #N —

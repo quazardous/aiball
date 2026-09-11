@@ -27,7 +27,8 @@ import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 import { presenceRunning } from "../live-presence.js";
 import { tagsForMessages } from "./tags.js";
 import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
-import { keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
+import { isStepMeta, keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
+import { getConfig } from "./config-overrides.js";
 import { pendingWaitTargets } from "./wait-gate.js";
 
 /**
@@ -1055,9 +1056,9 @@ export function recordBacklogWake(consumerId: string, ticketId: number): void {
 export function backlogCooldownExclusions(
     consumerId: string,
     cooldownSec: number,
-): Set<number> {
+): Map<number, number> {
     const db = getDb();
-    if (cooldownSec <= 0) return new Set();
+    if (cooldownSec <= 0) return new Map();
     const cutoffIso = new Date(Date.now() - cooldownSec * 1000).toISOString();
     const rows = db.select({
         ticketId: schema.backlogWakeLog.ticketId,
@@ -1068,23 +1069,59 @@ export function backlogCooldownExclusions(
             gt(schema.backlogWakeLog.wakeAt, cutoffIso),
         ))
         .all();
-    if (rows.length === 0) return new Set();
+    if (rows.length === 0) return new Map();
     const ticketIds = rows.map((r) => r.ticketId);
     const tickets = db.select({
         id: schema.tickets.id,
         lastActorAt: schema.tickets.lastActorAt,
+        project: schema.tickets.project,
     }).from(schema.tickets)
         .where(inArray(schema.tickets.id, ticketIds))
         .all();
-    const lastActorByTicket = new Map(tickets.map((t) => [t.id, t.lastActorAt]));
-    const out = new Set<number>();
+    const byTicket = new Map(tickets.map((t) => [t.id, t]));
+    const wakeAtByTicket = new Map(rows.map((r) => [r.ticketId, r.wakeAt]));
+    // Ticket → the cooldown window (seconds) that sinks it right now.
+    const out = new Map<number, number>();
     for (const r of rows) {
-        const lastActorAt = lastActorByTicket.get(r.ticketId);
+        const lastActorAt = byTicket.get(r.ticketId)?.lastActorAt;
         // Exclude when the thread hasn't moved since the wake. A null
         // last_actor_at (= no activity yet) also counts as "not moved".
         if (lastActorAt === undefined || lastActorAt === null || lastActorAt <= r.wakeAt) {
-            out.add(r.ticketId);
+            out.set(r.ticketId, cooldownSec);
         }
+    }
+    // #2365 — a ticket whose last action is a step (then: continue) is sunk only
+    // briefly: a step says there is work to do now, and the wake that follows it
+    // used to hide that work for the whole cooldown. The short window
+    // (`tickets.sink_then_continue_minutes`, 0 = none) only turns the queue over.
+    const candidates = [...out.keys()].map((id) => byTicket.get(id)).filter((t): t is NonNullable<typeof t> => !!t);
+    const nowMs = Date.now();
+    for (const id of ticketsWhereLastActionIsStep(candidates)) {
+        const minutes = Number(getConfig("tickets.sink_then_continue_minutes", byTicket.get(id)?.project) ?? 5);
+        const windowSec = Math.min(cooldownSec, Math.max(0, Number.isFinite(minutes) ? minutes : 5) * 60);
+        const wakeAtMs = Date.parse(wakeAtByTicket.get(id) ?? "");
+        if (windowSec <= 0 || !Number.isFinite(wakeAtMs) || wakeAtMs + windowSec * 1000 <= nowMs) out.delete(id);
+        else out.set(id, windowSec);
+    }
+    return out;
+}
+
+/** #2365 — the tickets whose last action (the comment at `last_actor_at`) is a step. */
+function ticketsWhereLastActionIsStep(rows: ReadonlyArray<{ id: number; lastActorAt: string | null }>): Set<number> {
+    const out = new Set<number>();
+    const withAt = rows.filter((r) => r.lastActorAt);
+    if (withAt.length === 0) return out;
+    const lastAt = new Map(withAt.map((r) => [r.id, r.lastActorAt]));
+    for (const m of getDb().select({
+        ticketId: schema.messages.ticketId,
+        createdAt: schema.messages.createdAt,
+        meta: schema.messages.meta,
+    }).from(schema.messages).where(and(
+        eq(schema.messages.kind, "comment_added"),
+        eq(schema.messages.status, "approved"),
+        inArray(schema.messages.ticketId, withAt.map((r) => r.id)),
+    )).all()) {
+        if (m.ticketId != null && lastAt.get(m.ticketId) === m.createdAt && isStepMeta(m.meta)) out.add(m.ticketId);
     }
     return out;
 }

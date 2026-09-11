@@ -111,6 +111,9 @@ export interface TicketFlagsContext {
      *  recent wake fired. The flag function turns wake_at + cooldown_sec
      *  into `backlog_cooled_until` (only when still in the future). */
     cooledWakeAt: Map<number, string>;
+    /** #2365 — the cooldown window each cooled ticket is held for (seconds):
+     *  the whole cooldown, or the short one after a step. */
+    cooledWindowSec?: Map<number, number>;
     /** Live claims held by this consumer (claimant=me, within window). */
     ownClaimIds: Set<number>;
     /** Tickets explicitly assigned to me (a human handed them over). */
@@ -231,7 +234,7 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         if (wakeAt) {
             const wakeAtMs = Date.parse(wakeAt);
             if (Number.isFinite(wakeAtMs)) {
-                const untilMs = wakeAtMs + ctx.cooldownSec * 1000;
+                const untilMs = wakeAtMs + (ctx.cooledWindowSec?.get(t.id) ?? ctx.cooldownSec) * 1000;
                 if (untilMs > ctx.nowMs) {
                     backlog_cooled_until = new Date(untilMs).toISOString();
                 }
@@ -310,7 +313,7 @@ export function buildTicketFlagsContext(args: {
     const decisionGated = decisionGateByTicket(ticketIds);
     const cooledIds = cooldownSec > 0
         ? backlogCooldownExclusions(consumerId, cooldownSec)
-        : new Set<number>();
+        : new Map<number, number>();
     // `backlogCooldownExclusions` already cross-checks against
     // `last_actor_at`; we just need the underlying wake_at to derive
     // the "until" timestamp for the row. Read the log once.
@@ -363,6 +366,7 @@ export function buildTicketFlagsContext(args: {
         lastActorMeIds,
         decisionGated,
         cooledWakeAt,
+        cooledWindowSec: cooledIds,
         ownClaimIds,
         assignedToMeIds,
         crossAgentHot,

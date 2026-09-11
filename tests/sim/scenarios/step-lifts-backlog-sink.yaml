@@ -1,8 +1,9 @@
-name: a backlog wake sinks its ticket, and the agent's own step lifts the sink
+name: a backlog wake sinks its ticket, the agent's own step lifts the sink, and the wake after a step sinks it only briefly
 # The loop names a ticket in a backlog wake: that ticket sinks (it is not named
 # again for the cooldown) while the thread does not move. Any gesture on the
 # thread moves it, including the agent's own `then: continue`: the ticket can
-# be named again at the very next wake.
+# be named again at the very next wake. That next wake sinks it again, but only
+# for `tickets.sink_then_continue_minutes` (5 by default), not the whole hour.
 steps:
   - alpha-lead: ticket_new
     args:
@@ -23,3 +24,8 @@ steps:
       then: continue
   - expect:
       alpha-lead: { ticket: $ticket, act: true, wake: triage }
+  # The wake that follows the step: a short sink (minutes, not the hour).
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: none }
+  - view: [alpha-lead]

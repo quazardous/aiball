@@ -225,6 +225,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **A step sinks its ticket for 5 minutes, not an hour**: the backlog wake that
+  follows a `then: continue` used to put the ticket in the cooldown for the whole
+  hour, hiding the work the step announced. The short pause only turns the queue
+  over; set it per project with `tickets.sink_then_continue_minutes` (0 = none).
 - `install.sh` installs the latest tagged release by default, so a fresh clone no
   longer needs a manual `git checkout`; `--edge` installs the checkout as it is
   (`main`). A checkout already on a tag still installs as is, and `--symlink`

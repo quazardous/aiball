@@ -126,6 +126,17 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "A step (then: continue) with nothing after it for this long is flagged in the inbox: the work it announced went quiet. 0 = never flag.",
     },
+    // #2365 — a step says there is work to do now: the backlog wake that follows
+    // it sinks the ticket only briefly, long enough to turn the queue over.
+    {
+        key: "tickets.sink_then_continue_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 5,
+        label: "Backlog cooldown after a step (minutes)",
+        description:
+            "How long a backlog wake keeps a ticket out of the wake pool when its last action is a step (then: continue), instead of the whole cooldown. Short on purpose: the step says there is work to do now, and the pause only lets the queue turn over. 0 = never sink it.",
+    },
 
     // #590 — autopoll FILE entries (migrated from autopoll/config.ts DEFAULTS).
     // `autopoll.enabled` stays special-cased in loadConfig (derived from file
