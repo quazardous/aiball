@@ -1,0 +1,32 @@
+name: an accepted plan deliberately queued behind another ticket
+# Case 8. The lead's plan on A is accepted, but A comes after B. The gesture is
+# a `depends_on` relation from A to B, with a comment that keeps the hand: A is
+# blocked instead of coming back as "Triage the ticket", and B's close brings it
+# back to the lead with a `dependency_closed` event.
+cooldown: 60s
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Ticket A, body: Its plan comes after B. }
+    save: { a: id }
+  - alpha-lead: ticket_new
+    args: { title: Ticket B, body: To finish first. }
+    save: { b: id }
+  - moderator: approve $a
+  - moderator: approve $b
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $a }
+  - alpha-lead: ticket_reply
+    args: { target_id: $a, body: The plan for A., summary_until: Plan waiting., then: plan }
+    save: { plan: id }
+  - moderator: accept $plan
+  - wake: alpha-lead
+  - alpha-lead: ticket_relate
+    args: { ticket_id: $a, target_id: $b, kind: depends_on }
+  - alpha-lead: ticket_reply
+    args: { target_id: $a, body: Step 2 once B is closed., summary_until: A queued behind B; the lead carries on with B., handback: false }
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $a, backlog: blocked, act: false, wake: none }
+  - moderator: close $b
+  - expect:
+      alpha-lead: { ticket: $a, act: true, events: [dependency_closed], wake: event }

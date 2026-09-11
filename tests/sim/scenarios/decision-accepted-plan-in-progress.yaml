@@ -1,0 +1,28 @@
+name: an accepted plan being worked, with nothing to post for a while
+# Case 7 (pin down). The lead's plan is accepted and it works for minutes
+# without posting. What do its idle cycles say: the accept as an event, then
+# "Triage the ticket" every time the cooldown ends?
+cooldown: 60s
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Long plan, body: Work that takes a while. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting., then: plan }
+    save: { plan: id }
+  - moderator: accept $plan
+  - expect:
+      alpha-lead: { ticket: $ticket, events: [plan_accepted], wake: event }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: triage }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: none }
+  - sleep: 70
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: triage }
+  - view: [alpha-lead]

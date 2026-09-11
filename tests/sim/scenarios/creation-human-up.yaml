@@ -1,0 +1,15 @@
+name: a human "up" on an agent's ticket with no decision puts it back in the agent's court
+# Case 22. alpha-lead filed a ticket and said nothing since. The moderator
+# comments "up": the ticket is actionable for the lead, unread, and the human is
+# its last actor (a human never makes a ticket hot).
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Forgotten ticket, body: Filed and left without a decision. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - wake: alpha-lead
+  - moderator: comment $ticket
+    body: up
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, act: true, last_actor: david, events: [comment_added], wake: event }

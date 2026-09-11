@@ -49,6 +49,13 @@ steps:
     assert.equal(scenarioCohort("name: x\nsteps: []"), null, "no cohort: the default one");
 });
 
+test("a scenario may play the loop with a shorter backlog cooldown; without one it is the loop's hour", () => {
+    assert.equal(parseScenario("name: x\ncooldown: 90s\nsteps:\n  - view: alpha-lead", AGENTS).cooldownSec, 90);
+    assert.equal(parseScenario("name: x\nsteps:\n  - view: alpha-lead", AGENTS).cooldownSec, 3600);
+    assert.throws(() => parseScenario("name: x\ncooldown: soon\nsteps:\n  - view: alpha-lead", AGENTS), /cooldown takes a duration/);
+    assert.throws(() => parseScenario("name: x\ncooldown: 0\nsteps:\n  - view: alpha-lead", AGENTS), /cooldown takes a duration/);
+});
+
 test("a scenario naming someone outside the cohort, or an unknown gesture, is refused before anything runs", () => {
     assert.throws(() => parseScenario("name: x\nsteps:\n  - stranger: poll", AGENTS), /unknown agent stranger/);
     assert.throws(() => parseScenario("name: x\nsteps:\n  - moderator: merge 1", AGENTS), /moderator action/);

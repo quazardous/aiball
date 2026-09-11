@@ -1,0 +1,22 @@
+name: every open ticket in the lead's court ends with a pending decision
+# Case 33. Before disconnecting, the lead leaves a plan on one ticket and a
+# resolution on the other. Its backlog is empty and no wake comes.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Planned, body: x }
+    save: { p: id }
+  - alpha-lead: ticket_new
+    args: { title: Delivered, body: x }
+    save: { d: id }
+  - moderator: approve $p
+  - moderator: approve $d
+  - alpha-lead: ticket_reply
+    args: { target_id: $p, body: The plan., summary_until: Plan waiting., then: plan }
+  - alpha-lead: ticket_reply
+    args: { target_id: $d, body: Done., summary_until: Delivered; waiting for the accept., then: resolved }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $p, backlog: none, gated: true, wake: none }
+  - expect:
+      alpha-lead: { ticket: $d, backlog: none, gated: true, wake: none }
+  - view: [alpha-lead]

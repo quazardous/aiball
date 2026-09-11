@@ -1,0 +1,40 @@
+name: a burst of accepted resolutions
+# Case 32 (pin down). The moderator accepts three resolutions in a row. Each
+# closed ticket is its own event wake, none of them needing an action. Should
+# they be grouped?
+steps:
+  - alpha-lead: ticket_new
+    args: { title: One, body: x }
+    save: { t1: id }
+  - alpha-lead: ticket_new
+    args: { title: Two, body: x }
+    save: { t2: id }
+  - alpha-lead: ticket_new
+    args: { title: Three, body: x }
+    save: { t3: id }
+  - moderator: approve $t1
+  - moderator: approve $t2
+  - moderator: approve $t3
+  - alpha-lead: ticket_reply
+    args: { target_id: $t1, body: Done., summary_until: Delivered., then: resolved }
+    save: { r1: id }
+  - alpha-lead: ticket_reply
+    args: { target_id: $t2, body: Done., summary_until: Delivered., then: resolved }
+    save: { r2: id }
+  - alpha-lead: ticket_reply
+    args: { target_id: $t3, body: Done., summary_until: Delivered., then: resolved }
+    save: { r3: id }
+  - moderator: accept $r1
+  - moderator: accept $r2
+  - moderator: accept $r3
+  - expect:
+      alpha-lead: { ticket: $t1, events: [resolution_accepted], wake: event }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $t2, events: [resolution_accepted], wake: event }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $t3, events: [resolution_accepted], wake: event }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $t3, events: [], wake: none }

@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { formatView, nextWake, type ViewRow } from "../../src/sim/view.js";
 import { sanitizeCopy } from "../../src/sim/sanitize.js";
-import { matchSeat, parseDuration, parseScenario, pick, scenarioCohort, substitute, type Seat, type Step, type UnreadEvent } from "../../src/sim/scenario.js";
+import { DEFAULT_COOLDOWN_SEC, matchSeat, parseDuration, parseScenario, pick, scenarioCohort, substitute, type Seat, type Step, type UnreadEvent } from "../../src/sim/scenario.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
@@ -215,7 +215,7 @@ function mcpGesture(agent: string, tool: string, args: Record<string, unknown>):
 }
 
 /** What the agent sees: its project's open tickets, its unread pings, and the head its loop would pick. */
-async function fetchSeat(state: SimState, agent: string): Promise<Seat> {
+async function fetchSeat(state: SimState, agent: string, cooldownSec = DEFAULT_COOLDOWN_SEC): Promise<Seat> {
     const seat = state.agents[agent];
     if (!seat) throw new Error(`no agent ${agent} in the cohort`);
     const project = encodeURIComponent(seat.project);
@@ -227,7 +227,7 @@ async function fetchSeat(state: SimState, agent: string): Promise<Seat> {
     // first row neither in cooldown nor actionable-but-not-claimable — a head the
     // agent could not claim never gets a "Triage" wake.
     const backlog = await api<(ViewRow & { backlog_cooled_until?: string | null })[]>(
-        seat.token, "GET", `/api/tickets?project=${project}&backlog=1&limit=500&cooldown_sec=3600`);
+        seat.token, "GET", `/api/tickets?project=${project}&backlog=1&limit=500&cooldown_sec=${cooldownSec}`);
     const head = backlog.find((r) => !r.backlog_cooled_until && !(r.actionable === true && r.claimable === false)) ?? null;
     // The queue an event wake is picked from, oldest first.
     const queued = await api<{ messages?: UnreadEvent[] } | UnreadEvent[]>(seat.token, "GET", `/api/unread?consumer_id=${encodeURIComponent(agent)}&limit=500`);
@@ -309,8 +309,8 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
  * (the oldest event with the others on its ticket, marked seen); otherwise it
  * names its backlog head and records the wake, which starts that ticket's cooldown.
  */
-async function wakeAgent(state: SimState, agent: string): Promise<string> {
-    const seat = await fetchSeat(state, agent);
+async function wakeAgent(state: SimState, agent: string, cooldownSec = DEFAULT_COOLDOWN_SEC): Promise<string> {
+    const seat = await fetchSeat(state, agent, cooldownSec);
     const token = state.agents[agent]!.token;
     if (seat.unreadPings > 0 && seat.unread.length > 0) {
         const key = seat.unread[0]!.ticket_id ?? seat.unread[0]!.id;
@@ -379,13 +379,13 @@ async function play(file: string): Promise<number> {
             } else if (step.kind === "view") {
                 console.log(`${n} view`);
                 for (const agent of step.agents) {
-                    const seat = await fetchSeat(state, agent);
+                    const seat = await fetchSeat(state, agent, scenario.cooldownSec);
                     console.log(formatView(agent, seat.rows, seat.unreadPings, seat.head).replace(/^/gm, "      "));
                 }
             } else if (step.kind === "expect") {
                 for (const [agent, expectation] of Object.entries(step.seats)) {
                     const e = substitute(expectation, vars);
-                    const misses = matchSeat(e, await fetchSeat(state, agent));
+                    const misses = matchSeat(e, await fetchSeat(state, agent, scenario.cooldownSec));
                     if (misses.length === 0) {
                         console.log(`${n} ✓ ${agent} on #${String(e.ticket)}`);
                     } else {
@@ -394,7 +394,7 @@ async function play(file: string): Promise<number> {
                     }
                 }
             } else if (step.kind === "wake") {
-                console.log(`${n} ✓ ${step.agent} woken${await wakeAgent(state, step.agent)}`);
+                console.log(`${n} ✓ ${step.agent} woken${await wakeAgent(state, step.agent, scenario.cooldownSec)}`);
             } else if (step.kind === "sleep") {
                 console.log(`${n} … sleeping ${step.seconds}s`);
                 await new Promise((r) => setTimeout(r, step.seconds * 1000));

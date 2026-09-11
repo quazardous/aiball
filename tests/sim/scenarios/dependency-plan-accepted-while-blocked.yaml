@@ -1,0 +1,23 @@
+name: a plan accepted while its ticket's dependency is still open
+# Case 26 (pin down). A depends on B, B is open. The lead plans A and the
+# moderator accepts: the human said go, the dependency says wait. Which wins?
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Ticket A, body: Depends on B. }
+    save: { a: id }
+  - alpha-lead: ticket_new
+    args: { title: Ticket B, body: Still open. }
+    save: { b: id }
+  - moderator: approve $a
+  - moderator: approve $b
+  - alpha-lead: ticket_relate
+    args: { ticket_id: $a, target_id: $b, kind: depends_on }
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $a }
+  - alpha-lead: ticket_reply
+    args: { target_id: $a, body: The plan for A., summary_until: Plan waiting., then: plan }
+    save: { plan: id }
+  - moderator: accept $plan
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $a, backlog: blocked, act: false }

@@ -1,0 +1,32 @@
+name: a ticket filed by another project's agent, planned and resolved by the lead
+# Case 18 (observed, waiting for a decision). beta-lead files in alpha. alpha-lead
+# plans, then resolves; the moderator accepts both. No MCP tool lets an agent
+# accept a plan (`ticket_decide` moderates pending posts), so the reporter agent
+# cannot. beta-lead is woken three times: the plan (a comment), the plan's
+# accept with the resolution, and the resolution's accept. After that, nothing.
+steps:
+  - beta-lead: ticket_new
+    args: { project: alpha, title: Asked by beta, body: beta needs this from alpha. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Plan for beta's ask., summary_until: Plan waiting., then: plan }
+    save: { plan: id }
+  - expect:
+      beta-lead: { ticket: $ticket, events: [comment_added], wake: event }
+  - wake: beta-lead
+  - moderator: accept $plan
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Done for beta., summary_until: Delivered; waiting for the accept., then: resolved }
+    save: { resolution: id }
+  - expect:
+      beta-lead: { ticket: $ticket, events: [plan_accepted, comment_added], wake: event }
+  - wake: beta-lead
+  - moderator: accept $resolution
+  - expect:
+      beta-lead: { ticket: $ticket, events: [resolution_accepted], wake: event }
+  - wake: beta-lead
+  - expect:
+      beta-lead: { ticket: $ticket, events: [], wake: none }

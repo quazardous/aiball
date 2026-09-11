@@ -1,0 +1,33 @@
+name: work carried on a recap ticket while the older ticket with the accepted plan gets nothing
+# Case 28 (pin down). The lead's plan on O is accepted, but the work goes to a
+# recap ticket R, linked to O only by text. O gets no step. Does O come back as
+# "Triage the ticket", and does a `relates_to` relation change that?
+cooldown: 60s
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Older ticket O, body: The plan was accepted here. }
+    save: { o: id }
+  - moderator: approve $o
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $o }
+  - alpha-lead: ticket_reply
+    args: { target_id: $o, body: The plan for O., summary_until: Plan waiting., then: plan }
+    save: { plan: id }
+  - moderator: accept $plan
+  - wake: alpha-lead
+  - alpha-lead: ticket_new
+    args: { title: Recap ticket R, body: Carries the work planned on O. }
+    save: { r: id }
+  - moderator: approve $r
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $r }
+  - alpha-lead: ticket_reply
+    args: { target_id: $r, body: First step of O's plan, done here., summary_until: R carries O's plan; step one done., then: continue }
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $o, backlog: actionable, act: true }
+  - alpha-lead: ticket_relate
+    args: { ticket_id: $o, target_id: $r, kind: relates_to }
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $o, backlog: actionable, act: true }

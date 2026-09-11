@@ -1,0 +1,23 @@
+name: a long external wait after a step
+# Case 30 (pin down). The lead posts a step ("waiting for the test suite, about
+# 16 minutes") and nothing else. The step lifts the sink; the wake that follows
+# sinks the ticket for 5 minutes only (`tickets.sink_then_continue_minutes`), so
+# the ticket is named again every 5 minutes while the suite runs. Waiting on a
+# machine has no gesture of its own: a dated wait was not kept.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Waiting for CI, body: Work whose next step waits for the test suite. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: "Pushed; waiting for the test suite, about 16 minutes.", summary_until: Waiting for the test suite before the next step., then: continue }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: triage }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: none }
+  - sleep: 310
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: triage }

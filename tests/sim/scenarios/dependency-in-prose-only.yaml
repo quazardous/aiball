@@ -1,0 +1,20 @@
+name: a dependency written only in a plan's prose is invisible to the backlog
+# Case 27. The plan for A says "after B", but no relation says so. A is
+# actionable while B is still open.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Ticket A, body: Comes after B, says the plan. }
+    save: { a: id }
+  - alpha-lead: ticket_new
+    args: { title: Ticket B, body: Still open. }
+    save: { b: id }
+  - moderator: approve $a
+  - moderator: approve $b
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $a }
+  - alpha-lead: ticket_reply
+    args: { target_id: $a, body: "I will do A once B is closed.", summary_until: Plan waiting., then: plan }
+    save: { plan: id }
+  - moderator: accept $plan
+  - expect:
+      alpha-lead: { ticket: $a, backlog: actionable, act: true, gated: false }

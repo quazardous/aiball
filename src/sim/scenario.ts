@@ -8,6 +8,7 @@
  *
  *     name: a sole participant keeps its ticket after a handback
  *     cohort: tests/sim/cohorts/two-owners.yaml   # optional; default tests/sim/cohort.yaml
+ *     cooldown: 60s                               # optional; the loop's backlog cooldown, default 1h
  *     steps:
  *       - alpha-lead: ticket_new             # an agent calls an MCP tool
  *         args: { title: "…" }
@@ -60,8 +61,17 @@ export interface Scenario {
     name: string;
     /** Cohort file for this scenario, relative to the repository root; null = the default one. */
     cohort: string | null;
+    /**
+     * The backlog cooldown the loop is played with, in seconds (`cooldown: 60s`;
+     * default an hour, the loop's own). Short, a scenario can watch a sunk
+     * ticket come back without waiting an hour.
+     */
+    cooldownSec: number;
     steps: Step[];
 }
+
+/** The loop's backlog cooldown when a scenario names none. */
+export const DEFAULT_COOLDOWN_SEC = 3600;
 
 const MODERATOR_ACTIONS: readonly ModeratorAction[] = ["approve", "reject", "accept", "refuse", "comment", "close", "reopen", "snooze", "assign"];
 const BACKLOGS: readonly Backlog[] = ["hot", "actionable", "follow-up", "waiting", "blocked", "none"];
@@ -141,7 +151,14 @@ export function parseScenario(text: string, agents: readonly string[]): Scenario
             refused: typeof s.refused === "string" ? s.refused : null,
         };
     });
-    return { name, cohort: scenarioCohort(text), steps };
+    const cooldownRaw = (raw as { cooldown?: unknown }).cooldown;
+    let cooldownSec = DEFAULT_COOLDOWN_SEC;
+    if (cooldownRaw !== undefined) {
+        const seconds = parseDuration(String(cooldownRaw));
+        if (seconds === null || seconds <= 0) fail(null, "cooldown takes a duration: 60, 60s, 5m");
+        cooldownSec = seconds!;
+    }
+    return { name, cohort: scenarioCohort(text), cooldownSec, steps };
 }
 
 /** Replace every `$name` string, however deep, by its saved value. */

@@ -1,0 +1,25 @@
+name: a human-only blocker filed at creation can only be a plan
+# Case 23 (pin down). `ticket_new` takes only `then: plan`, so a blocker that
+# needs a human gesture is filed as a plan. It sits next to a real plan waiting
+# for the same moderator: how do the two rank, for the lead and for the other
+# owner?
+cohort: tests/sim/cohorts/two-owners.yaml
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Needs a human, body: Only a human can rotate the key; nothing to plan., then: plan }
+    save: { blocker: id }
+  - moderator: approve $blocker
+  - alpha-lead: ticket_new
+    args: { title: Real work, body: A ticket the lead plans after reading it. }
+    save: { work: id }
+  - moderator: approve $work
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $work }
+  - alpha-lead: ticket_reply
+    args: { target_id: $work, body: Here is how I will do it., summary_until: Plan waiting for the moderator., then: plan }
+  - view: [alpha-lead, alpha-second]
+  - expect:
+      alpha-lead: { ticket: $blocker, gated: true, act: false }
+      alpha-second: { ticket: $blocker, gated: true }
+  - expect:
+      alpha-lead: { ticket: $work, gated: true, act: false }

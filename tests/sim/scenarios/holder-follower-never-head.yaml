@@ -1,0 +1,20 @@
+name: a follower sees a ticket it cannot claim, and is never woken to triage it
+# Case 16. alpha-helper only follows alpha. A broadcast ticket reaches it as an
+# event, but the work belongs to alpha's owners: once the event is delivered,
+# no backlog wake names the ticket to the follower.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Broadcast to followers, body: Work for alpha's owners that followers hear about., scope: broadcast }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - view: [alpha-helper]
+  - wake: alpha-helper
+  - expect:
+      alpha-helper: { ticket: $ticket, claim: false, wake: none }
+  # A human comment moves the thread; the follower still has nothing to triage.
+  - moderator: comment $ticket
+    body: Any news on this one?
+  - wake: alpha-helper
+  - view: [alpha-helper]
+  - expect:
+      alpha-helper: { ticket: $ticket, claim: false, wake: none }

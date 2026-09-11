@@ -1,0 +1,12 @@
+name: a ticket filed on another project without a then hands itself to that project's lead
+# Case 20. beta-lead files in alpha with no `then`: the handback is deduced. The
+# ticket leaves beta-lead's queue and lands actionable with alpha's lead.
+steps:
+  - beta-lead: ticket_new
+    args: { project: alpha, title: Filed from beta, body: beta needs this from alpha. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - view: [alpha-lead, beta-lead]
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, act: true, claim: true, last_actor: beta-lead }
+      beta-lead: { ticket: $ticket, wake: none }

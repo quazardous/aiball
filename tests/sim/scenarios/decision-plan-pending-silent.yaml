@@ -1,0 +1,22 @@
+name: a plan pending while the moderator stays silent
+# Case 12 (pin down). Weeks cannot be simulated; several cooldowns can. The
+# lead's plan waits and nobody answers: the lead's backlog does not show the
+# ticket (it spoke last, and the plan gates it), and nothing reminds the lead
+# as cooldowns pass. Whether anything should remind either side is the question.
+cooldown: 60s
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Forgotten plan, body: A plan nobody answers. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan }
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: none, act: false, gated: true, wake: none }
+  - sleep: 130
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: none, act: false, gated: true, wake: none }
+  - view: [alpha-lead]

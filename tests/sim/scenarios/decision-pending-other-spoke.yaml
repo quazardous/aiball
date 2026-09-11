@@ -1,0 +1,42 @@
+name: my decision is pending and the other side spoke
+# Case 11 (observed, waiting for a decision). The lead's plan waits and the
+# moderator comments without deciding. The comment lifts the pending plan's
+# gate at once, as in case 3: the ticket is actionable, "Triage the ticket"
+# after the comment's event, sunk after that wake, back once the cooldown ends.
+# The same with another agent commenting is played after it, to compare.
+cooldown: 60s
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Plan under discussion, body: A plan the moderator comments on. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting., then: plan }
+  - moderator: comment $ticket
+    body: What about the migration?
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, act: true, events: [comment_added], wake: event }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, wake: triage }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, wake: none }
+  - sleep: 70
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, wake: triage }
+
+  # Another agent asks a question on a second pending plan.
+  - alpha-lead: ticket_new
+    args: { title: Plan an agent questions, body: A plan another agent comments on. }
+    save: { second: id }
+  - moderator: approve $second
+  - alpha-lead: ticket_reply
+    args: { target_id: $second, body: The plan., summary_until: Plan waiting., then: plan }
+  - alpha-helper: ticket_reply
+    args: { target_id: $second, body: Does the plan cover the rollback?, summary_until: Plan waiting; a question on the rollback., handback: true }
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $second, backlog: hot, act: true }

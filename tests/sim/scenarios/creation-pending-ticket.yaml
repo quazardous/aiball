@@ -1,0 +1,19 @@
+name: an agent's ticket waiting for moderation is in no backlog, and a decision on it is refused at once
+# Case 21. alpha-lead files a ticket: it waits for the moderator. It is in no
+# agent's backlog, and a plan on it is refused with a 409 that says why (not a
+# timeout). Closed while it waits, it stays out. That it also leaves `poll`'s
+# pending list and count is held by the route test of the pending-tickets poll.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Waiting for moderation, body: Filed by an agent. }
+    save: { ticket: id }
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: none, act: false, rank: 0 }
+      alpha-helper: { ticket: $ticket, backlog: none, act: false }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: A plan before the ticket is approved., summary_until: s, then: plan }
+    refused: cannot propose plan on a ticket in status
+  - moderator: close $ticket
+    may_fail: true
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: none, act: false, rank: 0 }

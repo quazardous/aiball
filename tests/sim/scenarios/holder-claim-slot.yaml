@@ -1,0 +1,43 @@
+name: two accepted plans in flight, and another owner claims the one the lead still holds
+# Case 14 (observed, waiting for a decision). alpha-lead holds A (plan accepted,
+# a step posted), then claims B to execute B's accepted plan. Claiming B does
+# not release A: the lead holds both, and A stays out of the other owner's
+# backlog. But the other owner can still claim A by id: the claim goes through
+# with no refusal and no warning, and A leaves the lead's pool.
+cohort: tests/sim/cohorts/two-owners.yaml
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Ticket A, body: First accepted plan. }
+    save: { a: id }
+  - alpha-lead: ticket_new
+    args: { title: Ticket B, body: Second accepted plan. }
+    save: { b: id }
+  - moderator: approve $a
+  - moderator: approve $b
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $a }
+  - alpha-lead: ticket_reply
+    args: { target_id: $a, body: Plan for A., summary_until: Plan for A waiting., then: plan }
+    save: { plan_a: id }
+  - moderator: accept $plan_a
+  - alpha-lead: ticket_reply
+    args: { target_id: $a, body: A's first step done., summary_until: A in progress with the lead., then: continue }
+  - alpha-lead: ticket_reply
+    args: { target_id: $b, body: Plan for B., summary_until: Plan for B waiting., then: plan }
+    save: { plan_b: id }
+  - moderator: accept $plan_b
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $b }
+  # Both claims hold: A is still the lead's, and not the other owner's.
+  - expect:
+      alpha-lead: { ticket: $a, act: true, claim: true }
+      alpha-second: { ticket: $a, backlog: none, act: false, claim: false }
+  - expect:
+      alpha-lead: { ticket: $b, act: true, claim: true }
+  # The other owner takes A anyway.
+  - alpha-second: ticket_claim
+    args: { ticket_id: $a }
+  - view: [alpha-lead, alpha-second]
+  - expect:
+      alpha-lead: { ticket: $a, backlog: none, act: false }
+      alpha-second: { ticket: $a, backlog: hot, act: true, claim: true }

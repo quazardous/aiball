@@ -1,0 +1,29 @@
+name: a blocked ticket whose blocker waits on the human, with nothing changing
+# Case 25 (pin down). A depends on B; B waits on the moderator (the lead's own
+# pending resolution). Nothing moves. Does the blocked wake on A come back at
+# every cooldown?
+cooldown: 60s
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Ticket A, body: Waits on B. }
+    save: { a: id }
+  - alpha-lead: ticket_new
+    args: { title: Ticket B, body: Done, waiting for the moderator. }
+    save: { b: id }
+  - moderator: approve $a
+  - moderator: approve $b
+  - alpha-lead: ticket_relate
+    args: { ticket_id: $a, target_id: $b, kind: depends_on }
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $b }
+  - alpha-lead: ticket_reply
+    args: { target_id: $b, body: B is done., summary_until: B delivered; waiting for the accept., then: resolved }
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $a, backlog: blocked, wake: blocked }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $a, backlog: blocked, wake: none }
+  - sleep: 70
+  - expect:
+      alpha-lead: { ticket: $a, backlog: blocked, wake: blocked }

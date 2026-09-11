@@ -1,0 +1,25 @@
+name: a ticket with a hard deadline but normal priority
+# Case 31 (pin down). Two older normal tickets, then one due soon, still normal.
+# There is no due date: the work order puts it last among equals. Raising its
+# priority to high is the gesture that puts it first.
+cohort: tests/sim/cohorts/two-owners.yaml
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Older one, body: Normal. }
+    save: { old1: id }
+  - alpha-lead: ticket_new
+    args: { title: Older two, body: Normal. }
+    save: { old2: id }
+  - alpha-lead: ticket_new
+    args: { title: Due Friday, body: A hard deadline, filed as normal. }
+    save: { due: id }
+  - moderator: approve $old1
+  - moderator: approve $old2
+  - moderator: approve $due
+  - expect:
+      alpha-second: { ticket: $due, rank: 3 }
+  - alpha-lead: ticket_update
+    args: { ticket_id: $due, priority: high }
+  - expect:
+      alpha-second: { ticket: $due, rank: 1 }
+  - view: [alpha-second]

@@ -1,0 +1,16 @@
+name: the latest event is the holder's own comment on a ticket it is working
+# Case 19 (pin down). alpha-lead holds a ticket in progress and posts a note that
+# keeps the hand (`handback: false`). Nothing waits on anyone else: does the
+# next backlog wake still say "Triage the ticket"?
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Work in progress, body: A ticket the lead is working. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: A note while working; nothing to hand back., summary_until: In progress with the lead., handback: false }
+  - view: [alpha-lead]
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, last_actor: alpha-lead, wake: triage }

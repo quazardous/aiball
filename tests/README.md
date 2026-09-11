@@ -223,6 +223,10 @@ More steps and fields:
 - `cohort: tests/sim/cohorts/<file>.yaml` at the top of a scenario: `run` starts
   its board with that cohort (two owners of one project, a `can_claim: false`
   specialist…).
+- `cooldown: 60s` at the top of a scenario: the backlog cooldown its views,
+  expectations and wakes are played with (default an hour, the loop's own), so
+  a scenario can watch a sunk ticket come back without waiting an hour. It only
+  changes what the simulator asks the daemon, not the daemon.
 - Moderator gestures also include `close`, `reopen`, `snooze $ticket 2m` and
   `assign $ticket <agent>`. `may_fail: true` on a moderator step reports a
   refusal and goes on: for a case whose rule is still to pin down, the refusal
