@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DECISION_GESTURES } from "@shared/ticket-transitions";
+import { DECISION_GESTURES, STEP_LABEL, isStepMeta } from "@shared/ticket-transitions";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import Button from "primevue/button";
 import SplitButton from "primevue/splitbutton";
@@ -102,6 +102,8 @@ const questionStats = computed(() =>
 // accept/reject pair lives under the composer, per david's layout
 // constraint ("on change pas le layout actuel").
 const decision = computed(() => readDecision(props.msg));
+// #2308 — a step (`then: continue`): work done and going on, nothing to decide.
+const isStep = computed(() => isStepMeta(props.msg.meta));
 const decisionChipLabel = computed(() => {
     const d = decision.value;
     if (!d) return "";
@@ -404,6 +406,13 @@ async function doDelete() {
                     ? 'All questions in this comment have been answered.'
                     : `${questionStats.open} question${questionStats.open === 1 ? '' : 's'} still open — click a checkbox to quote it in your reply.`"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
+            />
+            <!-- #2308 — a step (then: continue): work done and going on, nothing to decide. -->
+            <Tag
+                v-if="isStep"
+                :value="STEP_LABEL"
+                severity="info"
+                title="a step: the agent marked this part done and carries on — nothing to accept or reject"
             />
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;
                  accept/reject lives under the composer). -->

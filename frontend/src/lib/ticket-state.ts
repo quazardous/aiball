@@ -72,6 +72,7 @@ export type LifecycleStage =
     | "rejected-plan"
     | "blocked"
     | "snoozed"
+    | "stalled-step"
     | "open";
 
 export function lifecycleStage(r: InboxRow): LifecycleStage {
@@ -107,6 +108,9 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     // just rubber-stamp; they need to look at it (#B.119).
     if (isBlocked(r)) return "blocked";
     if (isSnoozed(r)) return "snoozed";
+    // #2308 — an indicator only: the agent marked a step done and nothing
+    // followed. Last, so any state that asks something of the reader wins.
+    if (r.stalled_step) return "stalled-step";
     return "open";
 }
 

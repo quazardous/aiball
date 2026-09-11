@@ -114,6 +114,8 @@ export const ERROR_CODES = {
     PARENT_PENDING_MODERATION: "PARENT_PENDING_MODERATION",
     /** #2215 — a comment or lifecycle event aimed at a ticket that does not exist. */
     TICKET_NOT_FOUND: "TICKET_NOT_FOUND",
+    /** #2308 — `then: continue` from an agent that does not hold the ticket. */
+    STEP_NOT_HOLDER: "STEP_NOT_HOLDER",
 } as const;
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 

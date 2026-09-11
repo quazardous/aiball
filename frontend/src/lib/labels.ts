@@ -123,6 +123,13 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         // fallback for rows without a known wake-up date.
         title: "snoozed",
     },
+    "stalled-step": {
+        // #2308 — the agent marked a step done (then: continue) and nothing
+        // has followed: the work it announced went quiet.
+        icon: "pi pi-hourglass",
+        color: "--p-amber-500",
+        title: "stalled step — the agent marked a step done and nothing has followed since",
+    },
     open: {
         icon: "pi pi-ticket",
         color: "--p-text-muted-color",

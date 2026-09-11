@@ -237,3 +237,110 @@ test("the inbox fold tracks each kind's latest decision from the stored comments
         }
     }
 });
+
+// --- then: continue (a step): the pure rules first, then the fold ---------------
+
+test("then: continue is a reply gesture, not a decision, and a step is read tolerantly", () => {
+    assert.equal(t.kindForVerb(t.STEP_VERB), null);
+    assert.deepEqual(Object.keys(t.REPLY_GESTURES), ["comment_only", "continue"]);
+    assert.equal(t.isStepMeta(JSON.stringify({ step: true, summary_until: "s" })), true);
+    for (const m of [null, undefined, "", "not json", "null", "{}", JSON.stringify({ step: "yes" })]) {
+        assert.equal(t.isStepMeta(m), false, String(m));
+    }
+    const stepMeta = JSON.stringify({ step: true });
+    assert.equal(t.movesLastActor("comment_added", stepMeta), false);
+    assert.equal(t.movesLastActor("comment_added", null), true);
+    assert.equal(t.movesLastActor("ticket_closed", stepMeta), true, "only a comment can be a step");
+});
+
+test("whose turn it is after a step, replayed without a database", async () => {
+    const { replayLastActor, isExcludedForConsumer } = await import("./db/last-actor-gate.js");
+    const at = (n: number) => `2026-01-01T00:00:${String(n).padStart(2, "0")}.000Z`;
+    const ev = (n: number, by: string, meta: object | null = null) =>
+        ({ kind: "comment_added", byAgent: by, createdAt: at(n), meta: meta ? JSON.stringify(meta) : null });
+    const step = { step: true };
+    const planAcceptedByDavid = { decision: { kind: "plan", status: "accepted", decided_by: "david", decided_at: at(2) } };
+    // Is the ticket out of the agent's pool at the end? Written by hand.
+    const EXPECTED_OUT: [string, ReturnType<typeof ev>[], boolean][] = [
+        ["the agent comments", [ev(1, "agent")], true],
+        ["the agent posts a step", [ev(1, "agent", step)], false],
+        ["david accepts the plan, the agent posts two steps", [ev(1, "agent", planAcceptedByDavid), ev(3, "agent", step), ev(4, "agent", step)], false],
+        ["the agent asked a question, then posts a step", [ev(1, "agent"), ev(2, "agent", step)], true],
+        ["the agent posts a step, david answers", [ev(1, "agent", step), ev(2, "david")], false],
+        ["the agent posts a step, then a comment", [ev(1, "agent", step), ev(2, "agent")], true],
+    ];
+    for (const [name, events, out] of EXPECTED_OUT) {
+        const { actor } = replayLastActor({ actor: "david", at: at(0) }, events);
+        assert.equal(isExcludedForConsumer(actor, true, "agent"), out, name);
+    }
+});
+
+test("a step by the proposer leaves the proposal pending", () => {
+    const events = [decided("plan", "pending"), { ...plain("agent"), meta: JSON.stringify({ step: true }) }];
+    assert.equal(computeDecisionGate(events, () => false).get(1), true);
+});
+
+test("only the agent holding the ticket may post a step", () => {
+    const base = { author: "agent", ticketStatus: "approved", assignee: null, claimant: "agent", claimLive: true };
+    assert.equal(t.stepRefusal(base), null, "its live claim");
+    assert.equal(t.stepRefusal({ ...base, claimant: null, claimLive: false, assignee: "agent" }), null, "its assignment");
+    assert.match(t.stepRefusal({ ...base, claimLive: false }) ?? "", /claim it first/, "its claim expired");
+    assert.match(t.stepRefusal({ ...base, claimant: null, claimLive: false }) ?? "", /claim it first/, "nobody holds it");
+    assert.match(t.stepRefusal({ ...base, claimant: "other" }) ?? "", /held by other/, "another agent's claim");
+    assert.match(t.stepRefusal({ ...base, claimant: null, claimLive: false, assignee: "other" }) ?? "", /held by other/, "assigned to another");
+    assert.match(t.stepRefusal({ ...base, ticketStatus: "pending" }) ?? "", /approved ticket/, "still in moderation");
+});
+
+test("a step is flagged stalled only while it is the latest word and old enough", () => {
+    const now = Date.parse("2026-01-02T12:00:00Z");
+    assert.equal(t.isStepStalled("2026-01-01T11:00:00Z", true, now, 24), true);
+    assert.equal(t.isStepStalled("2026-01-02T11:00:00Z", true, now, 24), false, "too recent");
+    assert.equal(t.isStepStalled("2026-01-01T11:00:00Z", false, now, 24), false, "something followed");
+    assert.equal(t.isStepStalled("2026-01-01T11:00:00Z", true, now, 0), false, "0 turns it off");
+    assert.equal(t.isStepStalled(null, true, now, 24), false, "no step");
+});
+
+test("the fold tracks the latest step and the row flags it once nothing followed", async () => {
+    const { getDb, nowIso } = await import("./db/connection.js");
+    const schema = await import("./schema.js");
+    const { createProject } = await import("./db/projects.js");
+    const { buildInboxAgg } = await import("./db/inbox-agg.js");
+    const db = getDb();
+    createProject({ name: "p2308-step" });
+    const old = "2026-01-01T00:00:00.000Z";
+    let id = 95000;
+    const mkTicket = () => {
+        const tid = ++id;
+        db.insert(schema.tickets).values({
+            id: tid, project: "p2308-step", displaySeq: tid, title: `S${tid}`, status: "approved",
+            byAgent: "david", lastActor: "david", lastActorAt: nowIso(), createdAt: old,
+        }).run();
+        return tid;
+    };
+    const say = (ticketId: number, by: string, meta: object | null) => {
+        const mid = ++id;
+        db.insert(schema.messages).values({
+            id: mid, ticketId, kind: "comment_added", status: "approved", body: "b",
+            meta: meta ? JSON.stringify(meta) : null, byAgent: by, displaySeq: mid, createdAt: old,
+        }).run();
+        return mid;
+    };
+    const quiet = mkTicket();
+    const stepId = say(quiet, "agent", { step: true });
+    const answered = mkTicket();
+    say(answered, "agent", { step: true });
+    say(answered, "david", null);
+    const agg = buildInboxAgg("p2308-step");
+    assert.equal(agg.get(quiet)!.lastStepId, stepId);
+    assert.equal(agg.get(quiet)!.lastStepAt, old);
+    const row = (tid: number, hours: number) => buildInboxRow(
+        { id: tid, project: "p2308-step", kind: "ticket_created", status: "approved", title: "t", body: "", meta: null, created_at: old } as never,
+        {
+            byTicket: agg, tagsMap: new Map(), unreadMap: new Map(), tokenUsageMap: new Map(),
+            crossAgentHotFocus: new Set(), payloadIds: new Set(), nowStr: new Date().toISOString(), stepStaleHours: () => hours,
+        } as never,
+    ) as unknown as Record<string, unknown>;
+    assert.equal(row(quiet, 24).stalled_step, true);
+    assert.equal(row(answered, 24).stalled_step, false, "david answered after the step");
+    assert.equal(row(quiet, 0).stalled_step, false, "0 turns the flag off");
+});

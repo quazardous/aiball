@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import * as schema from "../schema.js";
-import { LAST_ACTOR_ACTION_KINDS } from "./last-actor-gate.js";
+import { replayLastActor } from "./last-actor-gate.js";
 import { DB_PATH, ensureDirs } from "../paths.js";
 import { loadShippedDefaultTags } from "../config-tags.js";
 
@@ -251,6 +251,8 @@ export interface NewMessage {
     /** #B.130 phase 1: author-supplied one-line TLDR. comment_added
      *  only — used by brief-mode reads to skip the full body. */
     summary_until?: string | null;
+    /** #2308 — `then: continue`: a step on a ticket the author holds. comment_added only. */
+    step?: boolean;
     /** #B.245 tristate scope. `internal` = owners only + @mentions;
      *  `default` = subs + owners + @mentions; `broadcast` = +
      *  followers. Applies to every kind (ticket_created uses it the
@@ -413,34 +415,14 @@ function backfillLastActor(db: BetterSQLite3Database<typeof schema>): void {
         createdAt: schema.tickets.createdAt,
     }).from(schema.tickets).where(isNull(schema.tickets.lastActor)).all();
     for (const t of pending) {
-        let actor: string | null = t.byAgent ?? null;
-        let at: string = t.createdAt;
         const msgs = db.select({
             byAgent: schema.messages.byAgent,
             createdAt: schema.messages.createdAt,
             kind: schema.messages.kind,
             meta: schema.messages.meta,
         }).from(schema.messages).where(eq(schema.messages.ticketId, t.id)).all();
-        for (const msg of msgs) {
-            // The event's own author action (ISO timestamps compare chronologically).
-            if (LAST_ACTOR_ACTION_KINDS.has(msg.kind)
-                && msg.byAgent && msg.byAgent !== "auto" && msg.createdAt >= at) {
-                actor = msg.byAgent;
-                at = msg.createdAt;
-            }
-            // A decision accept/reject recorded in this comment's meta.
-            if (msg.meta) {
-                try {
-                    const d = (JSON.parse(msg.meta) as { decision?: { status?: string; decided_by?: string; decided_at?: string } }).decision;
-                    if (d && (d.status === "accepted" || d.status === "rejected")
-                        && d.decided_by && d.decided_by !== "auto"
-                        && d.decided_at && d.decided_at >= at) {
-                        actor = d.decided_by;
-                        at = d.decided_at;
-                    }
-                } catch { /* malformed meta — skip */ }
-            }
-        }
+        // #2308 — the same pure replay the tests drive without a database.
+        const { actor, at } = replayLastActor({ actor: t.byAgent ?? null, at: t.createdAt }, msgs);
         db.update(schema.tickets)
             .set({ lastActor: actor, lastActorAt: at })
             .where(eq(schema.tickets.id, t.id))

@@ -1,11 +1,14 @@
 // #374 — pure logic of the per-consumer "whose court" gate (last_actor +
 // sole-participant), extracted from projects.ts so it unit-tests without a DB
-// (façon decision-gate.ts). ZERO imports on purpose — the test file stays pure.
+// (façon decision-gate.ts). No DB import on purpose — the test file stays pure;
+// the one import is the transition table, itself import-free.
 //
 // See docs/TICKET_LIFECYCLE.md §4. The model: a ticket is excluded from
 // consumer C's actionable pool iff C took the LAST action on it AND a
 // counterpart exists (someone other than C also acted). When C is the sole
 // participant (their own un-answered task), it stays actionable.
+
+import { movesLastActor } from "../ticket-transitions.js";
 
 /**
  * Event kinds that count as an "action" on a ticket (move whose-court).
@@ -67,4 +70,48 @@ export function isExcludedForConsumer(
     consumerId: string,
 ): boolean {
     return lastActor === consumerId && hasForeignActor;
+}
+
+/** One stored event, as the last-actor replay reads it. */
+export interface LastActorEvent {
+    kind: string;
+    byAgent: string | null;
+    createdAt: string;
+    meta: string | null;
+}
+
+/**
+ * #2308 — the ticket's last actor after `events`, from `start` (its creator).
+ * `insertMessage` and `applyMessageDecision` write the same rule one event at a
+ * time; the boot backfill replays it over a whole thread, and the tests drive it
+ * without a database. An event counts when it is an action by a real author, or
+ * carries a decision someone settled. A step (`then: continue`) is not an
+ * action: it leaves the ticket with whoever held the court.
+ */
+export function replayLastActor(
+    start: { actor: string | null; at: string },
+    events: readonly LastActorEvent[],
+): { actor: string | null; at: string } {
+    let { actor, at } = start;
+    for (const ev of events) {
+        // The event's own author action (ISO timestamps compare chronologically).
+        if (LAST_ACTOR_ACTION_KINDS.has(ev.kind) && movesLastActor(ev.kind, ev.meta)
+            && ev.byAgent && ev.byAgent !== "auto" && ev.createdAt >= at) {
+            actor = ev.byAgent;
+            at = ev.createdAt;
+        }
+        // A decision accept/reject recorded in this comment's meta.
+        if (ev.meta) {
+            try {
+                const d = (JSON.parse(ev.meta) as { decision?: { status?: string; decided_by?: string; decided_at?: string } }).decision;
+                if (d && (d.status === "accepted" || d.status === "rejected")
+                    && d.decided_by && d.decided_by !== "auto"
+                    && d.decided_at && d.decided_at >= at) {
+                    actor = d.decided_by;
+                    at = d.decided_at;
+                }
+            } catch { /* malformed meta — skip */ }
+        }
+    }
+    return { actor, at };
 }

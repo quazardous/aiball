@@ -55,6 +55,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 
 - **`then: "resolved"`** — propose to close. Use when work shipped (commit landed, fix live) and scope is satisfied. Do this **immediately** — don't write "awaiting test" and wait.
 - **`then: "plan"`** — propose **how** you'll tackle. Reporter's accept = greenlight to execute.
+- **`then: "continue"`** — a step is done and you carry on, nothing to validate. Only on a ticket you hold (claim it first). The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
 - **Plain comment** — status updates with no deliverable, refinements to a still-valid plan, clarification answers, acks. **Posting one needs `comment_only: true`**: a reply with neither a `then:` nor `comment_only: true` is refused and nothing is posted. Setting the flag is saying out loud that this comment concludes nothing — if it does conclude something, attach the `then:` instead.
 
 ### The default is decision-bearing
@@ -66,6 +67,7 @@ For these three cases, use `then:`, NOT a plain comment :
 | "Shipped commit XYZ, awaiting test" | `then: "resolved"` |
 | "Tu préfères A ou B ?" | `then: "plan"` with A vs B |
 | "Claim = je code ?" | `then: "plan"` with the next concrete step |
+| "J'ai fini l'étape 2, je passe à la 3" | `then: "continue"` |
 
 Skipping `then:` pushes cleanup overhead onto the human.
 

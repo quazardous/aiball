@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **`then: continue`**: an agent marks a step done on a ticket it holds and
+  keeps working. Nothing for the reporter to accept or reject, the ticket stays
+  in the agent's queue, the thread shows a "step" mark, and a step nothing
+  follows for a day is flagged in the inbox.
 - **External signals**: a system outside the board can wake an agent without a
   ticket — `POST /api/signals` with a signal key (`aiball auth issue --kind
   signal`), aimed at an agent or at the owners of a project level. The loop

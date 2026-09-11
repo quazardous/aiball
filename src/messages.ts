@@ -23,8 +23,8 @@ import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, typ
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
-import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost } from "./ticket-transitions.js";
-import { isHeldByOther } from "./db/assignment-gate.js";
+import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal } from "./ticket-transitions.js";
+import { isHeldByOther, isAssignmentLive } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { getConsumer } from "./db/consumers.js";
 import { getConfig } from "./db/config-overrides.js";
@@ -100,7 +100,8 @@ export function withoutDecisionRefusal(
     caller: string,
 ): string | null {
     const isComment = msg.kind === "comment_added";
-    if ((!isComment && msg.kind !== "ticket_created") || msg.decision_kind) return null;
+    // #2308 — a step (`then: continue`) says what it does too.
+    if ((!isComment && msg.kind !== "ticket_created") || msg.decision_kind || msg.step) return null;
     if ((rawBody as { comment_only?: unknown } | null)?.comment_only === true) return null;
     if (isHuman(caller)) return null;
     if (getConfig("tickets.require_then", msg.project) === false) return null;
@@ -111,7 +112,7 @@ export function withoutDecisionRefusal(
             + "attach then: plan; if the ticket only sets down something to remember, set comment_only: true. Nothing was created.";
     }
     return "a comment without then: needs comment_only: true. If it concludes something, attach the matching then: "
-        + "(plan / resolved / wontfix / escalate); if it only asks or informs, set comment_only: true. Nothing was posted.";
+        + "(plan / resolved / wontfix / escalate / continue); if it only asks or informs, set comment_only: true. Nothing was posted.";
 }
 
 export function validateNewMessage(input: unknown): ValidationError | NewMessage {
@@ -223,6 +224,15 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     } else if (o.summary_until !== undefined && o.summary_until !== null && o.summary_until !== "") {
         return { error: `summary_until only allowed on comment_added (got kind=${kind})` };
     }
+    // #2308 — `then: continue` arrives as `step: true`: a step on a ticket the
+    // author holds. A comment only, and never together with a decision.
+    let step = false;
+    if (o.step !== undefined && o.step !== null && o.step !== false) {
+        if (o.step !== true) return { error: "step must be true when present" };
+        if (kind !== "comment_added") return { error: `step only allowed on comment_added (got kind=${kind})` };
+        if (decisionKind) return { error: "step and decision_kind are exclusive: then: continue proposes nothing" };
+        step = true;
+    }
     // #B.245 tristate: composer-side `scope`. One of
     // `internal | default | broadcast`. Applies to every kind
     // (ticket_created and comment_added alike — each event decides
@@ -275,6 +285,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         priority: kind === "ticket_created" ? priority : null,
         decision_kind: decisionKind,
         summary_until: summaryUntil,
+        ...(step ? { step: true } : {}),
         scope,
         from_project: fromProject,
     };
@@ -432,6 +443,31 @@ function assertDecisionOnApprovedTicket(input: NewMessage): void {
         `cannot propose ${input.decision_kind} on a ticket in status "${parent.status}" — the reporter must moderate (approve) the ticket first ; post a plain comment_added (without "then:") until then`,
     );
     (err as Error & { code?: string }).code = ERROR_CODES.PARENT_PENDING_MODERATION;
+    throw err;
+}
+
+/**
+ * #2308 — a step (`then: continue`) keeps a ticket in its author's pool, so only
+ * the agent holding the ticket may post one. The rule is `stepRefusal` in the
+ * transition table; this reads the ticket it needs. Humans are exempt, as they
+ * are for decisions. Throws with a marker the HTTP layer maps to 409.
+ */
+function assertStepByHolder(input: NewMessage): void {
+    if (input.kind !== "comment_added" || !input.step || !input.ticket_id) return;
+    const author = input.by_agent ?? "";
+    if (author && isHuman(author)) return;
+    const t = getMessage(input.ticket_id);
+    if (!t || t.kind !== "ticket_created") return;
+    const refusal = stepRefusal({
+        author,
+        ticketStatus: t.status,
+        assignee: t.assignee ?? null,
+        claimant: t.claimant ?? null,
+        claimLive: isAssignmentLive(t.claimed_at, Date.now(), assignWindowSec() * 1000),
+    });
+    if (!refusal) return;
+    const err = new Error(refusal);
+    (err as Error & { code?: string }).code = ERROR_CODES.STEP_NOT_HOLDER;
     throw err;
 }
 
@@ -601,6 +637,7 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     }
     assertCloseAuthority(input);
     assertDecisionOnApprovedTicket(input);
+    assertStepByHolder(input);
     // #561 : reject ticket_created on unknown project so a typo can't
     // silently birth a phantom project. Only ticket_created needs the
     // guard; comments/lifecycle inherit the parent ticket's project.
@@ -726,7 +763,8 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
         // handoffs stop confiscating; plans and deliveries still claim, so
         // the anti-collision stays structural — an agent that really works a
         // ticket always ends up posting a decision.
-        && carriesDecision(msg.meta)) {
+        // #2308 — a step (`then: continue`) is a position on the ticket too.
+        && (carriesDecision(msg.meta) || isStepMeta(msg.meta))) {
         const author = msg.by_agent;
         if (author && author !== "auto" && !isHuman(author)) {
             const t = getMessage(msg.ticket_id);

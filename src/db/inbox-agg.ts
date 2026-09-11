@@ -34,7 +34,7 @@ import {
 import { listMessages } from "./messages.js";
 import type { Message } from "./connection.js";
 import { parseMeta } from "../questions.js";
-import { DECISION_KINDS, decisionGesture, resolvesTicket, type DecisionKind } from "../ticket-transitions.js";
+import { DECISION_KINDS, decisionGesture, isStepMeta, resolvesTicket, type DecisionKind } from "../ticket-transitions.js";
 
 /** The latest decision of one kind on a thread. */
 export interface DecisionTrack {
@@ -57,6 +57,9 @@ export interface InboxAgg {
     decisions: Record<DecisionKind, DecisionTrack>;
     lastSpeaker: string | null;
     lastSpeakerId: number;
+    /** #2308 — the latest step (`then: continue`) on the thread; 0 and "" when none. */
+    lastStepId: number;
+    lastStepAt: string;
 }
 
 export function emptyAgg(): InboxAgg {
@@ -72,6 +75,8 @@ export function emptyAgg(): InboxAgg {
         ) as Record<DecisionKind, DecisionTrack>,
         lastSpeaker: null,
         lastSpeakerId: 0,
+        lastStepId: 0,
+        lastStepAt: "",
     };
 }
 
@@ -115,6 +120,11 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
         }
         if (m.kind === "ticket_resolved" && m.status === "pending") {
             cur.decisions.resolution.pending = true;
+        }
+        // #2308 — the latest step; the row flags it once nothing has followed.
+        if (m.kind === "comment_added" && m.status === "approved" && m.id > cur.lastStepId && isStepMeta(m.meta ?? null)) {
+            cur.lastStepId = m.id;
+            cur.lastStepAt = m.created_at;
         }
         let syntheticResolved: Message | null = null;
         if (m.kind === "comment_added" && m.status === "approved") {

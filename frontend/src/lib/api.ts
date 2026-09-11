@@ -547,6 +547,9 @@ export interface InboxRow {
     /** #1835 — pending wontfix (close without resolution), awaiting the
      *  reporter. Same green attention band as plan / resolution. */
     pending_wontfix?: boolean;
+    /** #2308 — a step (then: continue) nothing has followed for
+     *  tickets.step_stale_hours: the work it announced went quiet. */
+    stalled_step?: boolean;
     /** #656 david `2c9qm4`: true iff a pending decision exists AND
      *  the decision-bearing comment IS the latest comment on the
      *  thread (no newer activity past it). UI uses this to keep

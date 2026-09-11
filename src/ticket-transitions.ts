@@ -154,6 +154,100 @@ export function verbsAllowedOn(host: DecisionHost): string[] {
     return kindsAllowedOn(host).map((k) => DECISION_GESTURES[k].verb);
 }
 
+// --- Replies that carry no decision ---------------------------------------------
+
+/**
+ * A reply nobody accepts or rejects. `comment_only` concludes nothing and hands
+ * the ticket back like any comment. `continue` marks a step done on a ticket the
+ * author holds: the work goes on, and the ticket stays where it was.
+ */
+export interface ReplyGesture {
+    /** How the author asks for it. */
+    readonly asked: string;
+    /** What the comment carries; null when nothing. */
+    readonly stored: string | null;
+    readonly meaning: string;
+    /** Does posting it make the author the ticket's last actor? */
+    readonly movesLastActor: boolean;
+    /** Only the agent holding the ticket (its live claim or its assignment) may post it. */
+    readonly holderOnly: boolean;
+    /** Flagged in the inbox once nothing has followed it for `tickets.step_stale_hours`. */
+    readonly flaggedWhenNothingFollows: boolean;
+}
+
+export const REPLY_GESTURES = {
+    comment_only: {
+        asked: "comment_only: true",
+        stored: null,
+        meaning: "concludes nothing: a question, a note, a ticket still in moderation",
+        movesLastActor: true,
+        holderOnly: false,
+        flaggedWhenNothingFollows: false,
+    },
+    continue: {
+        asked: "then: continue",
+        stored: "meta.step",
+        meaning: "a step is done and the work goes on, nothing to validate",
+        movesLastActor: false,
+        holderOnly: true,
+        flaggedWhenNothingFollows: true,
+    },
+} as const satisfies Record<string, ReplyGesture>;
+
+/** The `then` verb that posts a step. */
+export const STEP_VERB = "continue";
+/** How the thread marks a step. */
+export const STEP_LABEL = "step";
+
+/** Does this comment meta mark a step? Anything unparseable is not one. */
+export function isStepMeta(meta: string | null | undefined): boolean {
+    if (!meta) return false;
+    try {
+        return (JSON.parse(meta) as { step?: unknown } | null)?.step === true;
+    } catch {
+        return false;
+    }
+}
+
+/** Does this event make its author the ticket's last actor? Only a step is exempt. */
+export function movesLastActor(kind: string, meta: string | null | undefined): boolean {
+    if (kind === "comment_added" && isStepMeta(meta)) return REPLY_GESTURES.continue.movesLastActor;
+    return true;
+}
+
+/** What `stepRefusal` needs to know about the ticket. */
+export interface StepHold {
+    author: string;
+    ticketStatus: string;
+    assignee: string | null;
+    claimant: string | null;
+    /** Is the claim still inside the assign window? */
+    claimLive: boolean;
+}
+
+/** Why `author` may not post a step on this ticket, or null when it may. */
+export function stepRefusal(h: StepHold): string | null {
+    if (h.ticketStatus !== "approved") {
+        return `then: continue needs an approved ticket; this one is "${h.ticketStatus}". Nothing was posted.`;
+    }
+    if (h.assignee === h.author || (h.claimLive && h.claimant === h.author)) return null;
+    const holder = h.assignee ?? (h.claimLive ? h.claimant : null);
+    if (holder) {
+        return `then: continue is for the agent holding the ticket, and it is held by ${holder}. Post a comment instead. Nothing was posted.`;
+    }
+    return "then: continue is for the agent holding the ticket: claim it first (ticket_claim), then post the step. Nothing was posted.";
+}
+
+/**
+ * A step nothing has followed for `staleHours`: the work it announced went quiet.
+ * `stepIsLatest` says nobody has spoken on the thread since. 0 hours = never.
+ */
+export function isStepStalled(stepAt: string | null, stepIsLatest: boolean, nowMs: number, staleHours: number): boolean {
+    if (!stepAt || !stepIsLatest || !(staleHours > 0)) return false;
+    const t = Date.parse(stepAt);
+    return !Number.isNaN(t) && nowMs - t >= staleHours * 3_600_000;
+}
+
 // --- The lifecycle doc's matrix, generated from the rows above -----------------
 
 const GATE_TEXT: Record<GateEffect, string> = {
@@ -198,5 +292,23 @@ export function withDecisionMatrix(doc: string): string {
     const start = doc.indexOf(DECISION_MATRIX_START);
     const end = doc.indexOf(DECISION_MATRIX_END);
     if (start < 0 || end < start) throw new Error("decision matrix markers not found");
-    return `${doc.slice(0, start + DECISION_MATRIX_START.length)}\n${renderDecisionMatrix()}\n${doc.slice(end)}`;
+    return `${doc.slice(0, start + DECISION_MATRIX_START.length)}\n${renderDecisionMatrix()}\n\n${renderReplyGestureMatrix()}\n${doc.slice(end)}`;
+}
+
+/** The replies that carry no decision, as a table for the lifecycle doc. */
+export function renderReplyGestureMatrix(): string {
+    const yesNo = (b: boolean) => (b ? "yes" : "no");
+    const lines = [
+        "Replies that carry no decision, so nobody accepts or rejects them:",
+        "",
+        "| reply | stored as | meaning | makes the author the last actor | only the agent holding the ticket | flagged when nothing follows |",
+        "|---|---|---|---|---|---|",
+    ];
+    for (const g of Object.values(REPLY_GESTURES) as ReplyGesture[]) {
+        lines.push(
+            `| \`${g.asked}\` | ${g.stored ? `\`${g.stored}\`` : "—"} | ${g.meaning}`
+            + ` | ${yesNo(g.movesLastActor)} | ${yesNo(g.holderOnly)} | ${yesNo(g.flaggedWhenNothingFollows)} |`,
+        );
+    }
+    return lines.join("\n");
 }

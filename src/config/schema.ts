@@ -115,6 +115,17 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "When on, an agent's comment with no then: must set comment_only: true, or it is refused with an explanation and nothing is posted. Humans are exempt.",
     },
+    // #2308 — a step (`then: continue`) keeps a ticket in its author's pool; one
+    // that nothing follows is flagged in the inbox after this many hours.
+    {
+        key: "tickets.step_stale_hours",
+        scope: "global+project",
+        type: "number",
+        default: 24,
+        label: "Stalled step after (hours)",
+        description:
+            "A step (then: continue) with nothing after it for this long is flagged in the inbox: the work it announced went quiet. 0 = never flag.",
+    },
 
     // #590 — autopoll FILE entries (migrated from autopoll/config.ts DEFAULTS).
     // `autopoll.enabled` stays special-cased in loadConfig (derived from file

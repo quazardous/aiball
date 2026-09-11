@@ -77,6 +77,10 @@ meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status
 - **wontfix** — close without doing it. **escalation** — a blocker only a human
   can lift. Both are in the matrix below.
 - accept/reject goes through `POST /messages/:id/decide`.
+- A reply can also carry **no decision** (the second table below).
+  `comment_only: true` concludes nothing and hands the ticket back like any
+  comment; `then: continue` marks a step done on a ticket the author holds and
+  leaves the ticket where it was (§4.2).
 
 ### 3.1 The decision matrix
 
@@ -92,6 +96,13 @@ the table disagree.
 | `resolved` | `resolution` | `comment_added` | the work is done, close the ticket | out of the proposer's pool until someone else acts | the ticket closes, resolved; out of the pool, settled | back in the pool | — | yes | yes | `pending_resolution` |
 | `wontfix` | `wontfix` | `comment_added` | close without doing it: junk, out of scope, not reproducible | out of the proposer's pool until someone else acts | the ticket closes, not resolved; out of the pool, settled | back in the pool | — | no | no | `pending_wontfix` |
 | `escalate` | `escalation` | `comment_added` | a blocker only a human can lift | out of the proposer's pool until someone else acts | unblocked, the ticket stays open; back in the pool | back in the pool | priority up one notch, broadcast to followers | no | no | `pending_escalation` |
+
+Replies that carry no decision, so nobody accepts or rejects them:
+
+| reply | stored as | meaning | makes the author the last actor | only the agent holding the ticket | flagged when nothing follows |
+|---|---|---|---|---|---|
+| `comment_only: true` | — | concludes nothing: a question, a note, a ticket still in moderation | yes | no | no |
+| `then: continue` | `meta.step` | a step is done and the work goes on, nothing to validate | no | yes | yes |
 <!-- decision-matrix:end -->
 
 ---
@@ -128,6 +139,10 @@ actionable-for-C (whose-court) =
 | post a comment | the author | `comment_added` |
 | accept / reject a decision | the **decider** | *(mutates meta — no event, see §7)* |
 | resolve / close / reopen / block | the human who did it | `ticket_*` lifecycle |
+
+**Not** an action: a **step** (`then: continue`). It records work done without
+handing the ticket to anyone, so the ticket stays where it was: in the author's
+pool if it was there, out of it if the author was already waiting on someone.
 
 **Not** an action: **auto-moderation** (`decided_by = "auto"`). An auto-approved
 agent comment's actor is its **author**, not "auto".

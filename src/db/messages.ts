@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { decisionGesture, type DecisionKind } from "../ticket-transitions.js";
+import { decisionGesture, type DecisionKind, movesLastActor } from "../ticket-transitions.js";
 import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { invalidateInboxAgg } from "./inbox-agg.js";
 import { invalidateFlagsCache } from "./projects.js";
@@ -206,10 +206,14 @@ export function insertMessage(m: NewMessage): Message {
         // Both gated on kind===comment_added by the validator (ticket_created
         // path stamps its own meta in the tickets-insert branch above).
         let metaInit: string | null = null;
-        if (m.kind === "comment_added" && (m.decision_kind || m.summary_until)) {
+        if (m.kind === "comment_added" && (m.decision_kind || m.summary_until || m.step)) {
             const meta: Record<string, unknown> = {};
             if (m.decision_kind) {
                 meta.decision = { kind: m.decision_kind, status: "pending" };
+            }
+            // #2308 — `then: continue`: a step, which proposes nothing.
+            if (m.step) {
+                meta.step = true;
             }
             if (m.summary_until) {
                 meta.summary_until = m.summary_until;
@@ -237,7 +241,11 @@ export function insertMessage(m: NewMessage): Message {
         // blocked) reaching this branch is an ACTION → the author is now the
         // ticket's last actor. (Relation/sub/referenced/move events take other
         // insert paths and are structural, not actions — see TICKET_LIFECYCLE.)
-        bumpLastActor(tx, m.ticket_id, m.by_agent ?? null, createdAt);
+        // #2308 — except a step (`then: continue`): it records work done without
+        // handing the ticket to anyone, so the court stays where it was.
+        if (movesLastActor(m.kind, metaInit)) {
+            bumpLastActor(tx, m.ticket_id, m.by_agent ?? null, createdAt);
+        }
         // #737 — escalation comment bumps the parent ticket's priority one
         // notch (low/normal→high, high→urgent, urgent stays) so the human
         // sees it at the top of their inbox. Idempotent if already urgent.

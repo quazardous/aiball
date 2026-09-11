@@ -25,7 +25,8 @@ import {
 import { computeHotFocus } from "../db/work-order.js";
 import { ticketIdsWithPayload } from "../db/payloads.js";
 import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
-import { DECISION_GESTURES, kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
+import { DECISION_GESTURES, isStepStalled, kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
+import { getConfig } from "../db/config-overrides.js";
 import { globalConfigPath } from "../autopoll/config.js";
 
 /**
@@ -72,6 +73,24 @@ export interface InboxRowContext {
      *  set, so a row can show the mark without asking per ticket. */
     payloadIds: Set<number>;
     nowStr: string;
+    /** #2308 — hours after which a step nothing followed is flagged; 0 = never.
+     *  Optional so a context built by hand in a test still works: absent, no
+     *  row is flagged. */
+    stepStaleHours?: (project: string) => number;
+}
+
+/** #2308 — `tickets.step_stale_hours`, read once per project for a whole page of rows. */
+function stepStaleHoursByProject(): (project: string) => number {
+    const byProject = new Map<string, number>();
+    return (project) => {
+        let hours = byProject.get(project);
+        if (hours === undefined) {
+            hours = Number(getConfig("tickets.step_stale_hours", project));
+            if (!Number.isFinite(hours)) hours = 0;
+            byProject.set(project, hours);
+        }
+        return hours;
+    };
 }
 
 /**
@@ -90,6 +109,8 @@ export function buildInboxRowContext(
         payloadIds: ticketIdsWithPayload(),
         unreadMap: ticketUnreadFlags(consumerId, ids),
         tokenUsageMap: getTicketTokenUsage(ids),
+        // #2308 — read once per project, not once per row.
+        stepStaleHours: stepStaleHoursByProject(),
         crossAgentHotFocus: computeHotFocus(
             ticketAgentLastActivity(ids),
             Date.now(),
@@ -189,6 +210,14 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
             // signal exactly while nobody has spoken since.
             return ticketDecision(t, null) && agg.commentCount === 0;
         })(),
+        /** #2308 — a step (`then: continue`) nothing has followed for
+            `tickets.step_stale_hours`: the work it announced went quiet. */
+        stalled_step: live && isStepStalled(
+            agg.lastStepAt || null,
+            agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,
+            Date.parse(nowStr),
+            ctx.stepStaleHours?.(t.project) ?? 0,
+        ),
         scope: t.scope,
         // Per-consumer unread flag (≥1 unseen ping on the thread for
         // the caller, resolved from the X-Aiball-Consumer header).
