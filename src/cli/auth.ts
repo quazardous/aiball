@@ -16,6 +16,7 @@
  */
 import { hostname } from "node:os";
 import type { Command } from "commander";
+import { issueSignalKey } from "../db/signal-keys.js";
 import {
     anyHumanCredentials,
     deleteToken,
@@ -99,7 +100,8 @@ export function registerAuthCommands(program: Command): void {
             "--node",
             "Mint a NODE token instead — a trusted-proxy SERVICE token (#394), NOT bound to a consumer. It lets a proxy node assert relayed identities via x-aiball-consumer. Put it in the node's `proxy.token`.",
         )
-        .action((opts: { consumer?: string; label?: string; kind: string; node?: boolean }) => {
+        .option("--note <note>", "Who the key is given to and why — required with --kind signal")
+        .action((opts: { consumer?: string; label?: string; kind: string; node?: boolean; note?: string }) => {
             // #394 volet C: a node token is a service credential for the proxy
             // node — no consumer, kind 'node'. The daemon then trusts the
             // forwarded x-aiball-consumer (X-Forwarded-For style).
@@ -139,11 +141,16 @@ export function registerAuthCommands(program: Command): void {
             }
             // #2255 — a signal key: bound to no consumer, its label is the source
             // of the signals it posts, and it opens POST /api/signals only.
+            // #2276 — minted through the same rules as the Signals tab: a note
+            // saying who holds it, and a label no other key already uses.
             if (opts.kind === "signal") {
                 if (!opts.label) die("auth issue --kind signal: --label <source> is required — it names the system posting signals");
-                const t = issueToken({ consumer_id: null, kind: "signal", label: opts.label });
+                if (!opts.note) die("auth issue --kind signal: --note \"<who it is given to, and why>\" is required");
+                const minted = issueSignalKey(opts.label, opts.note);
+                if ("error" in minted) die(`auth issue --kind signal: ${minted.error}`);
+                const t = { token: minted.token };
                 process.stdout.write([
-                    `Signal key issued for source '${opts.label}':`,
+                    `Signal key issued for source '${opts.label}' (${minted.key.note}):`,
                     ``,
                     `  ${t.token}`,
                     ``,
@@ -197,8 +204,9 @@ export function registerAuthCommands(program: Command): void {
                 const exp = t.expires_at ? ` expires=${t.expires_at}` : "";
                 const last = t.last_used_at ? ` last=${t.last_used_at}` : " never used";
                 const lbl = t.label ? ` "${t.label}"` : "";
+                const note = t.note ? ` note="${t.note}"` : "";
                 process.stdout.write(
-                    `${t.kind.padEnd(7)}  ${t.consumer_id ?? "(no consumer)"}  ${t.token}${lbl}${last}${exp}\n`,
+                    `${t.kind.padEnd(7)}  ${t.consumer_id ?? "(no consumer)"}  ${t.token}${lbl}${note}${last}${exp}\n`,
                 );
             }
         });

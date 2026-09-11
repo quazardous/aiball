@@ -30,6 +30,11 @@ dates are YYYY-MM-DD.
   signal`), aimed at an agent or at the owners of a project level. The loop
   delivers signals before ticket events, through the usual wake gates, framed
   as untrusted text. See docs/SIGNALS.md.
+- **A Signals tab on each project**: the signals it received with their
+  delivery state, and the signal keys — who holds each one and why, when it was
+  last used, how many signals it sent here — with note editing, revocation and
+  minting from the page. A signal key now requires a note, and no two keys may
+  share a label.
 - **The GNOME indicator can start and stop the daemon**: start, stop and
   restart entries, each greyed out when it cannot apply, and a *Start at login*
   switch backed by `systemctl --user enable` / `disable`.

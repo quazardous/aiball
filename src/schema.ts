@@ -728,6 +728,9 @@ export const tokens = sqliteTable("tokens", {
     createdAt: text("created_at").notNull(),
     lastUsedAt: text("last_used_at"),
     expiresAt: text("expires_at"),
+    /** #2276: free text on the token — for a signal key, who it was given to
+     *  and why (required when minting one). NULL on other kinds. */
+    note: text("note"),
     /** #424: peer IP stamped when a `node` token relays — the proxy node's
      *  address. Lets the Nodes panel show it + group the consumers it relays
      *  (consumers.last_seen_via='node' with matching last_seen_ip). NULL for

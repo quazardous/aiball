@@ -1414,7 +1414,51 @@ export const api = {
     /** #424: revoke a node by its non-secret handle (deletes the node token). */
     revokeNode: (node_id: string) =>
         req<{ node_id: string; revoked: boolean }>("DELETE", `/api/nodes/${encodeURIComponent(node_id)}`),
+    /** #2276 — signal keys (moderator-only). With a project, each key also
+     *  counts the signals that reached it. Never carries a token. */
+    listSignalKeys: (project?: string) =>
+        req<SignalKeyView[]>("GET", `/api/signal-keys${project ? `?project=${encodeURIComponent(project)}` : ""}`),
+    /** #2276 — the ONLY answer that carries the token: show it once. */
+    createSignalKey: (label: string, note: string) =>
+        req<{ key: SignalKeyView; token: string }>("POST", "/api/signal-keys", { label, note }),
+    updateSignalKeyNote: (key_id: string, note: string) =>
+        req<SignalKeyView>("PATCH", `/api/signal-keys/${encodeURIComponent(key_id)}`, { note }),
+    revokeSignalKey: (key_id: string) =>
+        req<{ key_id: string; revoked: boolean }>("DELETE", `/api/signal-keys/${encodeURIComponent(key_id)}`),
+    /** #2276 — signals aimed at the project or at one of its owners, newest first. */
+    listProjectSignals: (project: string) =>
+        req<{ project: string; signals: ProjectSignal[] }>("GET", `/api/projects/${encodeURIComponent(project)}/signals`),
 };
+
+/** #2276 — a signal key as the Signals tab shows it: addressed by `key_id`, never by its token. */
+export interface SignalKeyView {
+    key_id: string;
+    /** The source every signal posted with this key carries. */
+    label: string;
+    /** Who the key was given to and why. NULL on a key minted before notes existed. */
+    note: string | null;
+    created_at: string;
+    last_used_at: string | null;
+    signals_sent: number;
+    signals_to_project?: number;
+}
+
+/** #2276 — a signal a project received, with each recipient's delivery state. */
+export interface ProjectSignal {
+    id: number;
+    source: string;
+    target_consumer: string | null;
+    target_project: string | null;
+    target_level: string | null;
+    title: string;
+    body: string | null;
+    severity: "normal" | "panic";
+    repeat_count: number;
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    deliveries: { recipient: string; state: "delivered" | "pending" | "expired"; acked_at: string | null }[];
+}
 
 /** #424: a proxy node for the Nodes panel — never carries the token value. */
 export interface NodeView {

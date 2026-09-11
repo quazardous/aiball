@@ -5,9 +5,9 @@
 // last_seen_ip). The token VALUE is never exposed: a node is addressed by a
 // stable, non-secret `node_id` = sha256(token) prefix.
 import { eq } from "drizzle-orm";
-import { createHash } from "node:crypto";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
+import { tokenHandle } from "./tokens.js";
 
 export interface RelayedConsumer {
     consumer_id: string;
@@ -50,7 +50,7 @@ export const REVOKED_RETENTION_MS = 60 * 60 * 1000;
 
 /** Non-secret handle for a node token (never expose the token value). */
 export function nodeId(token: string): string {
-    return createHash("sha256").update(token).digest("hex").slice(0, 16);
+    return tokenHandle(token);
 }
 
 /**

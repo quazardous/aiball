@@ -30,13 +30,14 @@ import DetailHeader from "./ui/DetailHeader.vue";
 import ProjectDetailPage from "./ProjectDetailPage.vue";
 import ProjectStatsPage from "./ProjectStatsPage.vue";
 import ProjectSettingsPage from "./ProjectSettingsPage.vue";
+import ProjectSignalsPage from "./ProjectSignalsPage.vue";
 
 const props = defineProps<{ project: string }>();
 const emit = defineEmits<{
     (e: "close"): void;
 }>();
 
-const activeTab = ref<"detail" | "stats" | "settings">("detail");
+const activeTab = ref<"detail" | "stats" | "signals" | "settings">("detail");
 const toast = useToast();
 const confirmDialog = useConfirm();
 const purging = ref(false);
@@ -105,6 +106,7 @@ async function doPurge() {
             <TabList>
                 <Tab value="detail">Detail</Tab>
                 <Tab value="stats">Stats</Tab>
+                <Tab value="signals">Signals</Tab>
                 <Tab value="settings">Settings</Tab>
             </TabList>
             <TabPanels>
@@ -123,6 +125,10 @@ async function doPurge() {
                         :embedded="true"
                         @back="emit('close')"
                     />
+                </TabPanel>
+                <!-- #2276 — what external systems sent this project, and who holds a key. -->
+                <TabPanel value="signals">
+                    <ProjectSignalsPage v-if="activeTab === 'signals'" :project="project" />
                 </TabPanel>
                 <TabPanel value="settings">
                     <ProjectSettingsPage

@@ -17,7 +17,7 @@
  * are rejected for /api/* — they grant access to /setup only.
  */
 import { and, asc, eq, isNotNull, lt } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
@@ -28,6 +28,8 @@ export interface Token {
     consumer_id: string | null;
     kind: TokenKind;
     label: string | null;
+    /** #2276 — who a signal key was given to and why. */
+    note: string | null;
     created_at: string;
     last_used_at: string | null;
     expires_at: string | null;
@@ -39,6 +41,7 @@ function rowToToken(r: schema.Token): Token {
         consumer_id: r.consumerId,
         kind: (r.kind as TokenKind) ?? "agent",
         label: r.label,
+        note: r.note ?? null,
         created_at: r.createdAt,
         last_used_at: r.lastUsedAt,
         expires_at: r.expiresAt,
@@ -53,10 +56,19 @@ export function generateTokenString(): string {
     return `aiball-${randomBytes(24).toString("hex")}`;
 }
 
+/**
+ * A stable, non-secret handle for a token — what the UI and the API address a
+ * proxy node or a signal key by, so the token value itself is never sent back.
+ */
+export function tokenHandle(token: string): string {
+    return createHash("sha256").update(token).digest("hex").slice(0, 16);
+}
+
 export interface IssueTokenInput {
     consumer_id?: string | null;
     kind: TokenKind;
     label?: string | null;
+    note?: string | null;
     /** ISO8601 timestamp. NULL = no expiry. */
     expires_at?: string | null;
 }
@@ -69,6 +81,7 @@ export function issueToken(input: IssueTokenInput): Token {
         consumerId: input.consumer_id ?? null,
         kind: input.kind,
         label: input.label ?? null,
+        note: input.note ?? null,
         createdAt: now,
         expiresAt: input.expires_at ?? null,
     }).run();
@@ -77,6 +90,7 @@ export function issueToken(input: IssueTokenInput): Token {
         consumer_id: input.consumer_id ?? null,
         kind: input.kind,
         label: input.label ?? null,
+        note: input.note ?? null,
         created_at: now,
         last_used_at: null,
         expires_at: input.expires_at ?? null,
