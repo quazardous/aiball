@@ -255,10 +255,10 @@ async function changePriority(v: Priority | null) {
         priorityBusy.value = false;
     }
 }
-// #2216 — ticket level. Human-only server-side; the response carries a warning
-// when the ticket is held by a coder agent, who stops getting it.
+// #2216/#2241 — ticket level. Human-only server-side; the response carries a
+// warning when the ticket's holder does not work on the new level.
 const levelBusy = ref(false);
-async function changeLevel(v: "work" | "steering") {
+async function changeLevel(v: "task" | "milestone" | "roadmap") {
     if (!data.value) return;
     const tid = data.value.ticket.id;
     levelBusy.value = true;

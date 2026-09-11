@@ -114,7 +114,7 @@ export interface Message {
      * doesn't apply. Read by listMessages / poll / listPings sorts.
      */
     priority?: Priority;
-    /** #2216 — tickets only: `work` or `steering`. */
+    /** #2241 — tickets only: `task`, `milestone` or `roadmap`. */
     level?: TicketLevel;
     display_seq: number;
     /**
@@ -547,7 +547,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         original_body: t.originalBody,
         intent: (t.intent as Intent | null) ?? null,
         priority: (t.priority as Priority | undefined) ?? "normal",
-        level: (t.level as TicketLevel | undefined) ?? "work",
+        level: (t.level as TicketLevel | undefined) ?? "task",
         display_seq: t.displaySeq,
         scope: ((t.scope as "internal" | "default" | "broadcast" | undefined) ?? "default"),
         hashid: null,

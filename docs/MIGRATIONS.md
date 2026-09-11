@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_foo_bar ON foo(bar);
 SQLite doesn't have a real ENUM type; aiball's enum-shaped columns (`kind`, `status`, `intent`, …) are plain `TEXT`. To add a new value:
 
 - For columns used only as discriminators (e.g. `_messages.kind`): no schema change, just update the TypeScript union (`src/db/connection.ts:MessageKind`) and any `VALID_KINDS` array. The migration file might be empty or just a comment.
-- For columns with a CHECK constraint (none in aiball today, but possible): you'd need to rebuild the table because SQLite can't `ALTER TABLE … ALTER COLUMN`. See the "Temp-table swap" section.
+- For columns with a CHECK constraint: SQLite can't `ALTER TABLE … ALTER COLUMN`. Change the column in place (see "Changing a CHECK constraint") — rebuild the table only if nothing references it (see "Temp-table swap").
 
 ## Renumbering / re-keying with FK columns
 
@@ -57,7 +57,22 @@ When two columns of the same primary-key sequence need to swap or be renumbered 
 
 `drizzle/migrations/0007_split_pings_renumber_tickets.sql` is the canonical example in this repo.
 
+## Changing a CHECK constraint
+
+Don't rebuild the table: rename the column, add the new one with the new CHECK, copy the values across, drop the old column. No table is ever dropped, so no foreign-key action can fire, and it runs inside the migrator's transaction:
+
+```sql
+ALTER TABLE foo RENAME COLUMN kind TO kind_old;--> statement-breakpoint
+ALTER TABLE foo ADD COLUMN kind TEXT NOT NULL DEFAULT 'a' CHECK (kind IN ('a', 'b', 'c'));--> statement-breakpoint
+UPDATE foo SET kind = CASE kind_old WHEN 'x' THEN 'b' ELSE 'a' END;--> statement-breakpoint
+ALTER TABLE foo DROP COLUMN kind_old;
+```
+
+The column moves to the end of the table, which nothing in aiball depends on. `DROP COLUMN` refuses a column used by an index, a trigger, a view or a foreign key — check `sqlite_master` first.
+
 ## Temp-table swap (for changes SQLite can't do in-place)
+
+> **Never on a table other tables reference.** The migrator runs every pending migration inside one transaction with `foreign_keys = ON`, and `PRAGMA foreign_keys = OFF` is a no-op inside a transaction. `DROP TABLE foo` then performs an implicit `DELETE FROM foo`, and every `ON DELETE CASCADE` child row goes with it — `defer_foreign_keys` defers the *checks*, not the *actions*. Renaming the old table under `legacy_alter_table` does not help either: with foreign keys on, SQLite rewrites the children's `REFERENCES` to follow the rename. Measured on a copy of the live database, a swap of `tickets` emptied `_messages` and every other child table while `integrity_check` and `foreign_key_check` both reported nothing wrong. Before a swap, list the references: `SELECT m.name, f.* FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE f."table" = 'foo'`.
 
 SQLite cannot drop or alter most column types/constraints. The general recipe is:
 

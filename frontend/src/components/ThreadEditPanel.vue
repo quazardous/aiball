@@ -46,7 +46,7 @@ const emit = defineEmits<{
     /** #553 — emitted when the user changes the ticket-level scope. */
     (e: "scope-change", v: "internal" | "default" | "broadcast"): void;
     /** #2216 — emitted when a moderator changes the ticket level. */
-    (e: "level-change", v: "work" | "steering"): void;
+    (e: "level-change", v: "task" | "milestone" | "roadmap"): void;
     (e: "tags-changed", tags: TagType[]): void;
 }>();
 
@@ -56,11 +56,13 @@ const emit = defineEmits<{
 const defaultPriorityOptions: { label: string; value: Priority | null }[] =
     PRIORITIES.map((p) => ({ label: p, value: p }));
 
-// #2216 — ticket level. `steering` passes over coder agents' backlog and
-// notifications; set by a human only (the daemon refuses an agent).
-const levelOptions: { label: string; value: "work" | "steering" }[] = [
-    { label: "work", value: "work" },
-    { label: "steering", value: "steering" },
+// #2241 — ticket level. Coder agents work on tasks, cto agents on milestones and
+// roadmap: backlog, notifications and claim follow. Set by a human only (the
+// daemon refuses an agent).
+const levelOptions: { label: string; value: "task" | "milestone" | "roadmap" }[] = [
+    { label: "task", value: "task" },
+    { label: "milestone", value: "milestone" },
+    { label: "roadmap", value: "roadmap" },
 ];
 
 // #553 — scope options (#B.245 tristate). Internal = owners + @mentions
@@ -136,19 +138,19 @@ defineExpose({ bodyTextareaRef });
                     @update:model-value="(v: Priority | null) => emit('priority-change', v)"
                 />
             </div>
-            <!-- #2216 — level: a steering ticket passes over the backlog and the
-                 notifications of coder agents. Human-only, server-side. -->
+            <!-- #2241 — level: task / milestone / roadmap decides which agents work on
+                 the ticket. Human-only, server-side. -->
             <div class="thread-edit-row">
                 <span class="thread-edit-label">Level</span>
                 <Select
-                    :model-value="ticket.level ?? 'work'"
+                    :model-value="ticket.level ?? 'task'"
                     :options="levelOptions"
                     option-label="label"
                     option-value="value"
                     size="small"
                     :disabled="levelBusy"
                     style="min-width: 9rem"
-                    @update:model-value="(v: 'work' | 'steering') => emit('level-change', v)"
+                    @update:model-value="(v: 'task' | 'milestone' | 'roadmap') => emit('level-change', v)"
                 />
             </div>
             <!-- #553 david `3r3vjq` : scope éditable depuis l'edit panel (à

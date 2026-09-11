@@ -25,20 +25,22 @@ dates are YYYY-MM-DD.
 
 ### Added
 
-- **Start a steering agent in one command**: `claude-loop start --type cto`
+- **Start a CTO agent in one command**: `claude-loop start --type cto`
   sets the agent's type before its session boots (it used to start as a coder
   until restarted), and `--init --deny-code` keeps it away from code. For an
   existing agent, `aiball --human agent set <id> --type cto`.
 - **The graph audit measures drift against objectives**: an objective (a
-  `steering` ticket) whose work has all closed is reported as such, and in a
+  `roadmap` ticket) whose work has all closed is reported as such, and in a
   project that has objectives, open work serving none of them is listed — the
   oldest ten per project, with the total. Nothing is asked in projects without
   objectives, where the answer would just describe the board.
-- **Steering tickets**: a moderator can mark a ticket `steering`, from its edit
-  panel or with `aiball --human ticket level`. It stays readable by everyone,
-  but no longer enters the backlog or the notifications of coder agents,
-  project owners included; steering agents and humans still get it. If a coder
-  was working on it, you are told.
+- **Ticket levels, and a scope per agent type**: a ticket is a `task` (the
+  default), a `milestone` (a deliverable) or a `roadmap` item (a fuzzy, moving
+  objective), set by a moderator from its edit panel or with `aiball --human
+  ticket level`. Coder agents work on tasks, CTO agents on milestones and
+  roadmap: only their levels enter their backlog, notify them and can be claimed
+  by them, project owners included. Every ticket stays readable by everyone, and
+  moving a ticket out of its holder's scope says so.
 - **An agent type on each agent decides which MCP tools it is shown**: `coder`
   (the default, every tool) or `cto`. A moderator sets it from the agent's page,
   an agent cannot set its own, and every tool declares which types see it.

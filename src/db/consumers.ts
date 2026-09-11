@@ -7,6 +7,7 @@
  * truth for "should this consumer get moderator privileges".
  */
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { LEVELS_BY_AGENT_TYPE, type TicketLevel } from "../domain.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isRemoteConsumer, type SeenVia } from "./remote-detect.js";
@@ -281,13 +282,22 @@ export function listHumans(): string[] {
  * that boot before the migration runs.
  */
 /**
- * #2216 — does this consumer keep steering tickets out of its backlog and its
- * notifications? Agents of type `coder` do — the default, including a consumer
- * not registered yet. Humans and agents of type `cto` do not.
+ * #2241 — the ticket levels this consumer works on: its backlog, its
+ * notifications, what it may claim. `null` for a human, who works on every
+ * level. An agent of type `cto` works on `roadmap` and `milestone`; any other
+ * agent — `coder`, the default, including a consumer not registered yet — on
+ * `task`.
  */
-export function hidesSteering(consumer_id: string): boolean {
-    if (isHuman(consumer_id)) return false;
-    return getConsumer(consumer_id)?.agent_type !== "cto";
+export function levelsVisibleTo(consumer_id: string): readonly TicketLevel[] | null {
+    if (isHuman(consumer_id)) return null;
+    return getConsumer(consumer_id)?.agent_type === "cto" ? LEVELS_BY_AGENT_TYPE.cto : LEVELS_BY_AGENT_TYPE.coder;
+}
+
+/** #2241 — does this consumer work on tickets of this level? A missing level
+ *  reads as `task`, the default. */
+export function seesLevel(consumer_id: string, level: string | null | undefined): boolean {
+    const levels = levelsVisibleTo(consumer_id);
+    return levels === null || (levels as readonly string[]).includes(level ?? "task");
 }
 
 export function isHuman(consumer_id: string): boolean {

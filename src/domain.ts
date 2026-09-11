@@ -84,10 +84,18 @@ export type Intent = typeof INTENTS[number];
  */
 export const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 export type Priority = typeof PRIORITIES[number];
-/** #2216 — a ticket's level: `work` (default) or `steering`. Ordinal: a level
- *  above would be one more value. */
-export const TICKET_LEVELS = ["work", "steering"] as const;
+/** #2241 — a ticket's level: `task` (default: an ordinary ticket), `milestone`
+ *  (a deliverable) or `roadmap` (a fuzzy, moving objective). Ordinal, bottom to
+ *  top. Which levels an agent works on follows its type: LEVELS_BY_AGENT_TYPE. */
+export const TICKET_LEVELS = ["task", "milestone", "roadmap"] as const;
 export type TicketLevel = typeof TICKET_LEVELS[number];
+/** #2241 — the levels each agent type works on: what enters its backlog, what
+ *  notifies it, what it may claim. Same mechanism for every type, only the scope
+ *  differs. Humans work on every level. */
+export const LEVELS_BY_AGENT_TYPE = {
+    coder: ["task"],
+    cto: ["roadmap", "milestone"],
+} as const satisfies Record<string, readonly TicketLevel[]>;
 
 export const STRATEGIES = ["manual", "auto", "auto-reply"] as const;
 export type Strategy = typeof STRATEGIES[number];

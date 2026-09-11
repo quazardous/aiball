@@ -11,7 +11,7 @@
  * tool" is decided, and a test fails for any registered tool missing from it —
  * adding a tool without deciding its audience cannot pass by accident. On the
  * day this landed every tool is shown to both types: the analysis in #2195 found
- * a steering agent needs 21 of the 25, and no steering-only tool existed yet.
+ * a cto agent needs 21 of the 25, and no cto-only tool existed yet.
  *
  * Import-free (no daemon, no database): loaded by the MCP process.
  */

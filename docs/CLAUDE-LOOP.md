@@ -84,10 +84,11 @@ block at all — the session starts exactly as before.
 `claude-loop start --init --deny-code` writes that list for you (every file and
 shell tool) into the tree's `.aiball.yaml`, keeping whatever is already there.
 
-### Starting a steering agent
+### Starting a CTO agent
 
 An agent's type — `coder` (default) or `cto` — decides which aiball MCP tools it
-is shown and whether steering tickets reach it. The MCP server reads it once, at
+is shown and which ticket levels it works on: a coder works on tasks, a cto on
+milestones and roadmap. The MCP server reads it once, at
 start-up, so it has to be set before the session boots:
 
 ```sh

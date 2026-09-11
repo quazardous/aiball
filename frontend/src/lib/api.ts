@@ -68,7 +68,7 @@ export interface Message {
      *  events omit this field on the wire. */
     priority?: Priority;
     /** #2216 — tickets only. */
-    level?: "work" | "steering";
+    level?: "task" | "milestone" | "roadmap";
     /** Public ref for comments / lifecycle events. NULL for tickets. */
     hashid?: string | null;
     /** Set on `ticket_sub_added` / `ticket_referenced` pseudo-comments —
@@ -395,7 +395,7 @@ export interface TicketSummary {
     /** Urgency hint (#B.222). Defaults to "normal" server-side. */
     priority?: Priority;
     /** #2216 — tickets only. */
-    level?: "work" | "steering";
+    level?: "task" | "milestone" | "roadmap";
     /** Parent ticket id when this ticket is a sub-ticket. Rendered as
      *  "Sub-ticket of #B.NN" metadata in the thread header. */
     parent_ticket_id?: number | null;
@@ -526,7 +526,7 @@ export interface InboxRow {
     /** Urgency hint (#B.222). Defaults to "normal" server-side. */
     priority?: Priority;
     /** #2216 — tickets only. */
-    level?: "work" | "steering";
+    level?: "task" | "milestone" | "roadmap";
     closed: boolean;
     resolved?: boolean;
     /** Agent signalled "I'm stuck, your call" (#B.119). */
@@ -622,7 +622,7 @@ export interface PostMessageInput {
     /** #B.222 urgency hint (ticket_created only; defaults to "normal"). */
     priority?: Priority;
     /** #2216 — tickets only. */
-    level?: "work" | "steering";
+    level?: "task" | "milestone" | "roadmap";
     /** #B.129 — tag a comment as a decision proposal at post-time
      *  (server validates: `"plan" | "resolution"`, comment_added only). */
     decision_kind?: "plan" | "resolution";
@@ -916,7 +916,7 @@ export const api = {
             intent?: string;
             priority?: Priority;
     /** #2216 — tickets only. */
-    level?: "work" | "steering";
+    level?: "task" | "milestone" | "roadmap";
             include_postponed?: boolean;
             unread?: boolean;
             sort?: string;
@@ -1166,7 +1166,7 @@ export const api = {
      *  409 when the decision is already terminal. */
     untagMessage: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/untag`, {}),
-    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null; level?: "work" | "steering" }) =>
+    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null; level?: "task" | "milestone" | "roadmap" }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),

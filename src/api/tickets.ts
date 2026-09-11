@@ -19,6 +19,7 @@
  * /tickets/:id thread builder uses it.
  */
 import { Router, type Request, type Response } from "express";
+import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
 import { ERROR_CODES } from "../domain.js";
 import {
     listMessages,
@@ -181,6 +182,16 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
         return res.status(409).json({
             error: `cannot claim a ticket in status "${t.status}" — the reporter must moderate (approve) the ticket first`,
             code: ERROR_CODES.PARENT_PENDING_MODERATION,
+        });
+    }
+    // #2241 — an agent claims only within its scope: a cto agent `roadmap` and
+    // `milestone` tickets, a coder agent tasks. Same claim, different scope. A
+    // human is not restricted, and neither is a moderator's push-assignment.
+    // Covers MCP `ticket_claim({ticket_id})`, which reaches here directly; the
+    // zero-arg form already picks from the scoped actionable pool.
+    if (isClaim && !isHuman(caller) && !seesLevel(caller, t.level)) {
+        return res.status(403).json({
+            error: `#${t.id} is a ${t.level ?? "task"} ticket, and this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets only`,
         });
     }
     // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,

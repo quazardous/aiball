@@ -104,11 +104,11 @@ export const tickets = sqliteTable("tickets", {
      */
     priority: text("priority").notNull().default("normal"),
     /**
-     * #2216 — `work` (default: every ticket before this column) or `steering`.
-     * A steering ticket stays readable by anyone but passes over the backlog and
-     * the notifications of agents of type `coder`. Human-set only. Migration 0067.
+     * #2241 — `task` (default: an ordinary ticket), `milestone` (a deliverable)
+     * or `roadmap` (a fuzzy, moving objective). Coder agents work on tasks, cto
+     * agents on milestones and roadmap: backlog, notifications and claim follow.
      */
-    level: text("level").notNull().default("work"),
+    level: text("level").notNull().default("task"),
     status: text("status").notNull().default("pending"),
     createdAt: text("created_at").notNull(),
     decidedAt: text("decided_at"),

@@ -198,8 +198,8 @@ async function sendPrompt() {
                 v-model="agentType"
                 class="consumer-edit__select"
             >
-                <option value="coder">coder — every MCP tool (default)</option>
-                <option value="cto">cto — only the MCP tools declared for steering</option>
+                <option value="coder">coder — works on tasks (default)</option>
+                <option value="cto">cto — works on milestones and roadmap</option>
             </select>
         </FormField>
 

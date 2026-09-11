@@ -40,9 +40,9 @@ const MIN_STALE_NEIGHBOURS = 3;
  */
 const INTRA_PAIR_MIN_WEIGHT = 5;
 /**
- * #2208 — how many unanchored work tickets a project reports, oldest first. The
+ * #2208 — how many unanchored tasks a project reports, oldest first. The
  * detail line still gives the project's total, so a cut list does not pass for
- * the whole of it. To be tuned once real steering tickets exist.
+ * the whole of it. To be tuned once real roadmap tickets exist.
  */
 const UNANCHORED_PER_PROJECT = 10;
 
@@ -255,10 +255,10 @@ export type FindingKind =
     | "orphan_child"
     /** The mirror: open parent with nothing still moving under it — every child_of descendant closed. */
     | "drained_parent"
-    /** #2208 — the same when the parent is a `steering` ticket: an objective with nothing moving under it. */
-    | "steering_drained"
-    /** #2208 — open `work` in a project that has open objectives, serving none of them. */
-    | "unanchored_work"
+    /** #2208/#2241 — the same when the parent is a `roadmap` ticket: an objective with nothing moving under it. */
+    | "roadmap_drained"
+    /** #2208/#2241 — an open `task` in a project that has open roadmap objectives, serving none of them. */
+    | "unanchored_task"
     /** Two open tickets in different projects that write about each other, with no typed link. */
     | "cross_project_open_pair"
     /** The same inside ONE project, above a weight threshold — someone not linking their own threads. */
@@ -397,7 +397,7 @@ export function graphAudit(
     // Measured on the live board before building (#2199): 6 candidates, 5 of
     // them not already caught by `stale_open`, and 4 of the 6 umbrellas or
     // briefings whose work finished while nobody closed or re-aimed them. That
-    // is exactly the "objective with nothing moving under it" a steering audit
+    // is exactly the "objective with nothing moving under it" a roadmap audit
     // asks about — once objectives are marked, restricting this to them IS the
     // drift finding, with nothing to rewrite.
     //
@@ -450,9 +450,9 @@ export function graphAudit(
         if (moving) continue;
         const held = holderOf(t);
         findings.push({
-            kind: t.level === "steering" ? "steering_drained" : "drained_parent",
+            kind: t.level === "roadmap" ? "roadmap_drained" : "drained_parent",
             ticket_ids: [t.id, ...direct],
-            detail: (t.level === "steering" ? "an objective with nothing moving under it: " : "open, but ")
+            detail: (t.level === "roadmap" ? "an objective with nothing moving under it: " : "open, but ")
                 + `all ${below} ticket${below === 1 ? "" : "s"} below it are closed`
                 + (held
                     ? ` — held by ${held.claimant ?? held.assignee}, so it is parked rather than forgotten`
@@ -465,21 +465,21 @@ export function graphAudit(
     // 2c — #2208: work that serves no objective, asked ONLY where objectives
     // exist. Measured before building: 63% of open tickets have no ancestor at
     // all, so asked board-wide this would describe the board, not a drift. Inside
-    // a project with at least one open steering ticket it is a real question —
+    // a project with at least one open roadmap ticket it is a real question —
     // "this silo has objectives, and this ticket serves none of them". A ticket is
     // anchored when any child_of ancestor, through closed intermediates too, is
-    // an open steering ticket.
+    // an open roadmap ticket.
     const levelById = new Map<number, string>(openRows.map((r) => [r.id, r.level] as const));
     const levelOf = (id: number): string => {
         if (!levelById.has(id)) {
             const row = db.select({ level: schema.tickets.level }).from(schema.tickets).where(eq(schema.tickets.id, id)).get();
-            levelById.set(id, row?.level ?? "work");
+            levelById.set(id, row?.level ?? "task");
         }
         return levelById.get(id)!;
     };
     const parentsOf = (id: number) =>
         relationsOf(id).filter((r) => r.kind === "child_of").map((r) => r.target_ticket_id);
-    const silos = new Set(open.filter((t) => t.level === "steering").map((t) => t.project));
+    const silos = new Set(open.filter((t) => t.level === "roadmap").map((t) => t.project));
     const anchored = (id: number): boolean => {
         const seen = new Set<number>([id]);
         const stack = parentsOf(id);
@@ -488,14 +488,14 @@ export function graphAudit(
             if (seen.has(a)) continue;
             seen.add(a);
             const stage = stageOf(a);
-            if (levelOf(a) === "steering" && !isClosed(stage) && stage !== "rejected") return true;
+            if (levelOf(a) === "roadmap" && !isClosed(stage) && stage !== "rejected") return true;
             stack.push(...parentsOf(a));
         }
         return false;
     };
     const unanchoredByProject = new Map<string, typeof open>();
     for (const t of open) {
-        if (t.level === "steering" || !silos.has(t.project)) continue;
+        if ((t.level ?? "task") !== "task" || !silos.has(t.project)) continue;
         if (anchored(t.id)) continue;
         const list = unanchoredByProject.get(t.project) ?? [];
         list.push(t);
@@ -508,9 +508,9 @@ export function graphAudit(
         for (const t of list.slice(0, UNANCHORED_PER_PROJECT)) {
             const held = holderOf(t);
             findings.push({
-                kind: "unanchored_work",
+                kind: "unanchored_task",
                 ticket_ids: [t.id],
-                detail: `open work in ${project}, which has objectives, serving none of them (${total})`,
+                detail: `open task in ${project}, which has roadmap objectives, serving none of them (${total})`,
                 citation: null,
                 ...(held ? { held_by: held } : {}),
             });

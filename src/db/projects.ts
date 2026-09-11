@@ -20,7 +20,7 @@ import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
 import { isHeldByOther } from "./assignment-gate.js";
 import { assignWindowSec } from "../autopoll/config.js";
-import { hidesSteering, listHumans } from "./consumers.js";
+import { levelsVisibleTo, listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
 import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
@@ -1730,17 +1730,18 @@ function computeActionableTicketIdsUncached(
     // less callers keep the global, pre-#265 behaviour — zero regression).
     const awaitingOtherSet = consumerId ? lastActorExclusions(consumerId, scopeIds) : null;
 
-    // #2216 — steering tickets pass over the backlog of agents of type `coder`
-    // (david: "like clouds, they go over our heads"): still open and readable,
-    // never in their actionable pool, owners included. Humans and `cto` agents
-    // keep them, and so does the anonymous pool view.
-    const steeringHidden = consumerId && hidesSteering(consumerId)
-        ? new Set(tickets.filter((t) => t.level === "steering").map((t) => t.id))
+    // #2241 — an agent's actionable pool holds only the levels it works on:
+    // `task` for a coder, `roadmap` + `milestone` for a cto. The rest stays open
+    // and readable, never in this pool, owners included (david: "like clouds,
+    // they go over our heads"). Humans and the anonymous pool view keep every level.
+    const levels = consumerId ? levelsVisibleTo(consumerId) : null;
+    const outOfScope = levels
+        ? new Set(tickets.filter((t) => !(levels as readonly string[]).includes(t.level ?? "task")).map((t) => t.id))
         : null;
 
     const actionableIds = new Set<number>();
     for (const id of openIds) {
-        if (steeringHidden && steeringHidden.has(id)) continue;
+        if (outOfScope && outOfScope.has(id)) continue;
         if (gatedByDecisionByTicket.get(id) === true) continue;
         if (blockedByTicket.get(id) === true) continue;
         if (gatedByBlocker.has(id)) continue;

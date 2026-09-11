@@ -19,7 +19,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { ERROR_CODES, MESSAGE_SCOPES, TICKET_LEVELS, type TicketLevel } from "../domain.js";
-import { hidesSteering } from "../db/consumers.js";
+import { seesLevel } from "../db/consumers.js";
 import { clearSeenForMessage, insertPing } from "../db/pings.js";
 import {
     INTENTS,
@@ -321,9 +321,9 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
             return badRequest(res, `scope must be one of ${MESSAGE_SCOPES.join(", ")}`);
         }
     }
-    // #2216 — a ticket's level decides whose backlog and notifications it reaches,
-    // so a human sets it: an agent able to mark a ticket `steering` could drop it
-    // out of every coder's queue.
+    // #2216/#2241 — a ticket's level decides whose backlog and notifications it
+    // reaches, so a human sets it: an agent able to move a ticket to another level
+    // could drop it out of every coder's queue.
     if (level !== undefined) {
         if (typeof level !== "string" || !(TICKET_LEVELS as readonly string[]).includes(level)) {
             return badRequest(res, `level must be one of ${TICKET_LEVELS.join(", ")}`);
@@ -351,14 +351,15 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
             old_priority: existing.priority ?? "normal",
         });
     }
-    // #2216 — promoting a ticket someone is working on takes it out of their
-    // backlog without a sound. Not blocked (nobody loses the ticket itself), but said.
+    // #2241 — moving a ticket to a level its holder does not work on takes it out
+    // of their backlog without a sound. Not blocked (nobody loses the ticket
+    // itself), but said.
     const held = existing as { claimant?: string | null; assignee?: string | null; level?: string };
-    const coderHolders = level === "steering" && held.level !== "steering"
-        ? [...new Set([held.claimant, held.assignee].filter((h): h is string => !!h && hidesSteering(h)))]
+    const leftBehind = level !== undefined && level !== held.level
+        ? [...new Set([held.claimant, held.assignee].filter((h): h is string => !!h && !seesLevel(h, level)))]
         : [];
-    const warning = coderHolders.length > 0
-        ? `held by ${coderHolders.join(", ")} (coder agent${coderHolders.length > 1 ? "s" : ""}): this ticket now leaves their backlog and notifications`
+    const warning = leftBehind.length > 0
+        ? `held by ${leftBehind.join(", ")}, who ${leftBehind.length > 1 ? "do" : "does"} not work on ${level} tickets: this ticket now leaves their backlog and notifications`
         : null;
     res.json(warning ? { ...decorated, warning } : decorated);
 });
