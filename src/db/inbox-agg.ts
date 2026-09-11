@@ -212,17 +212,28 @@ export function isLiveDecision(agg: InboxAgg, kind: DecisionKind): boolean {
     return agg.decisions[kind].latestId > 0 && agg.decisions[kind].latestId === agg.latestDecisionId;
 }
 
+/** Each ticket's state as the project stats count it. */
+export interface ProjectTicketStates {
+    /** #2372 — the live decision is a pending resolution (the list's badge). */
+    awaitingResolution: Set<number>;
+    closed: Set<number>;
+    /** #2373 — resolved, whether by a legacy row or a resolution accepted on a comment. */
+    resolved: Set<number>;
+}
+
 /**
- * #2372 — the project's tickets whose live decision is a pending resolution,
- * the ones the list badges "resolution proposed". The project stats count the
- * open, awake ones among them (a close accepts a pending resolution anyway).
+ * #2372 / #2373 — the project's tickets by state, from this aggregate, where a
+ * resolution accepted on a comment resolves the ticket and a replaced decision
+ * is not live. The project stats count from these.
  */
-export function ticketsAwaitingResolution(project: string): Set<number> {
-    const out = new Set<number>();
+export function projectTicketStates(project: string): ProjectTicketStates {
+    const states: ProjectTicketStates = { awaitingResolution: new Set(), closed: new Set(), resolved: new Set() };
     for (const [id, agg] of getInboxAgg(project)) {
-        if (agg.decisions.resolution.pending && isLiveDecision(agg, "resolution")) out.add(id);
+        if (agg.decisions.resolution.pending && isLiveDecision(agg, "resolution")) states.awaitingResolution.add(id);
+        if (agg.closed) states.closed.add(id);
+        if (agg.resolved) states.resolved.add(id);
     }
-    return out;
+    return states;
 }
 
 /**

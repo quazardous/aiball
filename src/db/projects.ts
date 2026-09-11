@@ -1165,12 +1165,21 @@ export interface ProjectStatsRich {
     top_token_tickets: { id: number; title: string; token_usage: TokenTally }[];
 }
 
+/** Each ticket's state, as `projectTicketStates` reads it from the inbox aggregate. */
+export interface ProjectTicketStatesView {
+    awaitingResolution: ReadonlySet<number>;
+    closed: ReadonlySet<number>;
+    resolved: ReadonlySet<number>;
+}
+
 /**
- * `awaitingResolution` — the project's open tickets whose live decision is a
- * pending resolution (#2372: `ticketsAwaitingResolution`, read from the inbox
- * aggregate, which this module cannot import without closing an import cycle).
+ * `states` — each ticket's closed / resolved / awaiting-resolution state, read
+ * from the inbox aggregate (#2372, #2373: `projectTicketStates`), which this
+ * module cannot import without closing an import cycle. The aggregate is where a
+ * resolution accepted on a comment resolves the ticket; a replay of the
+ * lifecycle rows alone missed every one of them.
  */
-export function getProjectStatsRich(project: string, awaitingResolution: ReadonlySet<number>): ProjectStatsRich {
+export function getProjectStatsRich(project: string, states: ProjectTicketStatesView): ProjectStatsRich {
     const db = getDb();
     const nowStr = nowIso();
     const nowMs = Date.now();
@@ -1190,33 +1199,7 @@ export function getProjectStatsRich(project: string, awaitingResolution: Readonl
     const ticketCount = tickets.filter((t) => t.status === "approved").length;
     const pendingMod = tickets.filter((t) => t.status === "pending").length;
 
-    // Lifecycle replay for closed/resolved flags on each ticket.
     const ticketIds = tickets.map((t) => t.id);
-    const lifecycle = ticketIds.length ? db.select({
-        ticket_id: schema.messages.ticketId,
-        kind: schema.messages.kind,
-        id: schema.messages.id,
-        status: schema.messages.status,
-    })
-        .from(schema.messages)
-        .where(and(
-            inArray(schema.messages.ticketId, ticketIds),
-            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved"]),
-        ))
-        .orderBy(asc(schema.messages.id))
-        .all() : [];
-
-    const closedById = new Map<number, boolean>();
-    const resolvedById = new Map<number, boolean>();
-    for (const ev of lifecycle) {
-        if (ev.status === "pending" && ev.kind === "ticket_resolved") continue;
-        if (ev.status !== "approved") continue;
-        if (ev.kind === "ticket_closed") closedById.set(ev.ticket_id, true);
-        else if (ev.kind === "ticket_reopened") {
-            closedById.set(ev.ticket_id, false);
-            resolvedById.set(ev.ticket_id, false);
-        } else if (ev.kind === "ticket_resolved") resolvedById.set(ev.ticket_id, true);
-    }
 
     let closedCount = 0;
     let resolvedCount = 0;
@@ -1226,8 +1209,8 @@ export function getProjectStatsRich(project: string, awaitingResolution: Readonl
     let oldestOpen: typeof tickets[number] | null = null;
     for (const t of tickets) {
         if (t.status !== "approved") continue;
-        const closed = closedById.get(t.id) === true;
-        const resolved = resolvedById.get(t.id) === true;
+        const closed = states.closed.has(t.id);
+        const resolved = states.resolved.has(t.id);
         const snoozed = !!t.postponedUntil && t.postponedUntil > nowStr;
         if (closed) {
             closedCount++;
@@ -1236,7 +1219,7 @@ export function getProjectStatsRich(project: string, awaitingResolution: Readonl
         }
         if (snoozed) continue;
         openCount++;
-        if (awaitingResolution.has(t.id)) pendingResolutionCount++;
+        if (states.awaitingResolution.has(t.id)) pendingResolutionCount++;
         const ageMs = nowMs - new Date(t.createdAt).getTime();
         ageSumMs += ageMs;
         if (!oldestOpen || t.createdAt < oldestOpen.createdAt) oldestOpen = t;

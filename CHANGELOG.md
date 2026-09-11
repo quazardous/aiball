@@ -171,6 +171,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **The project stats count tickets resolved by an accepted resolution**: the
+  resolved count (and the resolved percentage) only saw the old resolution
+  format and missed nearly every resolved ticket. It now agrees with the list.
 - **Closing a ticket accepts only its latest proposed resolution**: a close
   used to accept every resolution still pending in the thread, even one replaced
   since by newer plans, and could mark the ticket resolved on it. A replaced
