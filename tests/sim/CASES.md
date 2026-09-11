@@ -19,6 +19,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | A sole participant keeps its ticket after a handback; only another agent's activity makes a ticket hot, never a human's | `sole-participant-handback` |
 | A step keeps the ticket, a pending plan gates it even for its claimant, an accepted plan hands it back | `step-then-plan` |
 | A backlog wake sinks its ticket; the agent's own step lifts the sink; the wake after a step sinks it for 5 minutes only | `step-lifts-backlog-sink` |
+| An agent carried on but handed the ticket back; the moderator tags its reply as a step: the ticket is the agent's again, its last actor unchanged, and the agent is not notified | `moderator-step-tag` |
 | 1 — A rejected plan hands the ticket back, with a `plan_rejected` event | `decision-plan-rejected` |
 | 2 — An accepted resolution closes the ticket, a reopen brings it back, a rejected resolution hands it back | `decision-resolution` |
 | 5 — A human comment refining an accepted plan reaches the claimant; no new plan is needed | `decision-scope-refined` |

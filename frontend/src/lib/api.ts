@@ -1172,6 +1172,11 @@ export const api = {
      *  409 when the decision is already terminal. */
     untagMessage: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/untag`, {}),
+    /** #2369 — tag an agent's comment as a step after the fact, or remove that tag. */
+    stepMessage: (id: number) =>
+        req<Message>("POST", `/api/messages/${id}/step`, {}),
+    unstepMessage: (id: number) =>
+        req<Message>("POST", `/api/messages/${id}/unstep`, {}),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null; level?: "task" | "milestone" | "roadmap" }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>

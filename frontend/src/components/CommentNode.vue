@@ -165,6 +165,27 @@ async function untag() {
         classifyBusy.value = false;
     }
 }
+// #2369 — an agent carried on but did not post `then: continue`: the moderator
+// tags its comment as a step. Agents' comments always carry a summary_until
+// (humans are exempt), which is how the menu tells them apart; the daemon
+// refuses a human's comment anyway.
+const stepMeta = computed((): { summary: boolean; tagged: { by: string } | null } => {
+    try {
+        const m = JSON.parse(props.msg.meta ?? "null") as { summary_until?: unknown; step_tagged?: { by: string } } | null;
+        return { summary: typeof m?.summary_until === "string", tagged: m?.step_tagged ?? null };
+    } catch {
+        return { summary: false, tagged: null };
+    }
+});
+async function stepTag(tag: boolean) {
+    classifyBusy.value = true;
+    try {
+        await (tag ? api.stepMessage(props.msg.id) : api.unstepMessage(props.msg.id));
+        broadcastRefresh();
+    } finally {
+        classifyBusy.value = false;
+    }
+}
 // #B.256 / #266 yzfvud: the classify SplitButton adapts to the current
 // decision. `classifyActions[0]` is the primary (button), the rest is the
 // chevron menu. We DROP "tag as pending <kind>" for the kind this comment
@@ -186,6 +207,13 @@ const classifyActions = computed(() => {
     // terminal ones are not un-taggable (backend 409s).
     if (d && d.status === "pending") {
         items.push({ label: "remove tag", icon: "pi pi-trash", command: () => { void untag(); } });
+    }
+    // #2369 — an agent's plain comment can be tagged as the step it did not post.
+    if (!d && !isStep.value && stepMeta.value.summary) {
+        items.push({ label: "tag as step", icon: "pi pi-forward", command: () => { void stepTag(true); } });
+    }
+    if (stepMeta.value.tagged) {
+        items.push({ label: "remove step tag", icon: "pi pi-trash", command: () => { void stepTag(false); } });
     }
     return items;
 });
@@ -415,7 +443,9 @@ async function doDelete() {
                 v-if="isStep"
                 :value="STEP_LABEL"
                 severity="info"
-                title="a step: the agent marked this part done and carries on — nothing to accept or reject"
+                :title="stepMeta.tagged
+                    ? `a step, tagged by ${stepMeta.tagged.by}: the agent carries on — nothing to accept or reject`
+                    : 'a step: the agent marked this part done and carries on — nothing to accept or reject'"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;

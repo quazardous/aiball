@@ -47,6 +47,7 @@ import {
     type Priority,
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
+import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
 import { decisionGesture } from "../ticket-transitions.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
@@ -789,6 +790,37 @@ messagesRouter.post("/messages/:id/untag", (req: Request, res: Response) => {
         return res.status(409).json({ error: (e as Error).message });
     }
 });
+
+/**
+ * #2369 — tag an agent's comment as a step (`then: continue`) the agent did not
+ * post, or remove that tag. Human moderators only. Silent: no ping — the agent
+ * finds the ticket back in its pool at its next wake.
+ */
+messagesRouter.post("/messages/:id/step", (req, res) => stepTagRoute(req, res, true));
+messagesRouter.post("/messages/:id/unstep", (req, res) => stepTagRoute(req, res, false));
+
+function stepTagRoute(req: Request, res: Response, tag: boolean) {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    const caller = consumerOf(req);
+    if (!isHuman(caller)) {
+        return res.status(403).json({ error: "only a registered human moderator can tag a comment as a step" });
+    }
+    const existing = getMessage(id);
+    if (!existing) return notFound(res);
+    if (tag && (!existing.by_agent || isHuman(existing.by_agent))) {
+        return res.status(409).json({ error: "only an agent's comment can be tagged as a step" });
+    }
+    try {
+        const updated = tag ? tagMessageAsStep(id, caller) : untagMessageStep(id);
+        if (!updated) return notFound(res);
+        const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
+        return res.status(409).json({ error: (e as Error).message });
+    }
+}
 
 messagesRouter.post("/messages/:id/note", (req, res) => {
     const id = Number(req.params.id);

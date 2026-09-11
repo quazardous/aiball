@@ -227,8 +227,9 @@ More steps and fields:
   expectations and wakes are played with (default an hour, the loop's own), so
   a scenario can watch a sunk ticket come back without waiting an hour. It only
   changes what the simulator asks the daemon, not the daemon.
-- Moderator gestures also include `close`, `reopen`, `snooze $ticket 2m` and
-  `assign $ticket <agent>`. `may_fail: true` on a moderator step reports a
+- Moderator gestures also include `close`, `reopen`, `snooze $ticket 2m`,
+  `assign $ticket <agent>` and `step $comment` (tag an agent's comment as a
+  step). `may_fail: true` on a moderator step reports a
   refusal and goes on: for a case whose rule is still to pin down, the refusal
   is the answer.
 - `sleep: <seconds>` (or `30s`, `2m`) waits, for snoozes and cooldowns.

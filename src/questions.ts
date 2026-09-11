@@ -78,6 +78,14 @@ export interface MessageMeta {
      *  v1 ; si plus tard on veut stats agrégées, on extrait vers
      *  `comment_votes`. La key est le consumer_id votant. */
     votes?: Record<string, 1 | -1>;
+    /** #2331 — does this comment hand the ticket back? */
+    handback?: boolean;
+    /** #2308 — a step (`then: continue`). */
+    step?: boolean;
+    /** #2369 — set when a human tagged this comment as a step after the fact:
+     *  who, when, and the handback the comment carried, restored if the tag
+     *  is removed. Absent on a step its author posted. */
+    step_tagged?: { by: string; at: string; handback: boolean | null };
 }
 
 // `- [ ]` or `- [x]` line, optionally preceded by indent, optionally

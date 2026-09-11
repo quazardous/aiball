@@ -30,7 +30,7 @@
 import { parse } from "yaml";
 import { TIER_LABEL, type ViewRow } from "./view.js";
 
-export type ModeratorAction = "approve" | "reject" | "accept" | "refuse" | "comment" | "close" | "reopen" | "snooze" | "assign";
+export type ModeratorAction = "approve" | "reject" | "accept" | "refuse" | "comment" | "close" | "reopen" | "snooze" | "assign" | "step";
 export type Backlog = "hot" | "actionable" | "follow-up" | "waiting" | "blocked" | "none";
 export type Wake = "triage" | "followup" | "waiting" | "blocked" | "event" | "none";
 
@@ -73,7 +73,7 @@ export interface Scenario {
 /** The loop's backlog cooldown when a scenario names none. */
 export const DEFAULT_COOLDOWN_SEC = 3600;
 
-const MODERATOR_ACTIONS: readonly ModeratorAction[] = ["approve", "reject", "accept", "refuse", "comment", "close", "reopen", "snooze", "assign"];
+const MODERATOR_ACTIONS: readonly ModeratorAction[] = ["approve", "reject", "accept", "refuse", "comment", "close", "reopen", "snooze", "assign", "step"];
 const BACKLOGS: readonly Backlog[] = ["hot", "actionable", "follow-up", "waiting", "blocked", "none"];
 const WAKES: readonly Wake[] = ["triage", "followup", "waiting", "blocked", "event", "none"];
 

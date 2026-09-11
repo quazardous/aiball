@@ -46,6 +46,7 @@ steps:
     assert.deepEqual(s.steps[8], { kind: "moderator", action: "snooze", target: "$ticket", arg: "90s", body: null, mayFail: false });
     assert.deepEqual(s.steps[9], { kind: "moderator", action: "assign", target: "$ticket", arg: "alpha-helper", body: null, mayFail: false });
     assert.equal((s.steps[10] as { mayFail: boolean }).mayFail, true);
+    assert.deepEqual(parseScenario("name: x\nsteps:\n  - moderator: step $reply", AGENTS).steps[0], { kind: "moderator", action: "step", target: "$reply", arg: null, body: null, mayFail: false });
     assert.equal(scenarioCohort("name: x\nsteps: []"), null, "no cohort: the default one");
 });
 

@@ -124,7 +124,9 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
         // #2308 — the latest step; the row flags it once nothing has followed.
         if (m.kind === "comment_added" && m.status === "approved" && m.id > cur.lastStepId && isStepMeta(m.meta ?? null)) {
             cur.lastStepId = m.id;
-            cur.lastStepAt = m.created_at;
+            // #2369 — a step a human tagged later dates from the tag: tagging an old
+            // comment must not flag it as a step nothing has followed.
+            cur.lastStepAt = parseMeta(m.meta ?? null).step_tagged?.at ?? m.created_at;
         }
         let syntheticResolved: Message | null = null;
         if (m.kind === "comment_added" && m.status === "approved") {

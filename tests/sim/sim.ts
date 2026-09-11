@@ -295,6 +295,10 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
             await api(token, "POST", `/api/tickets/${id}/postpone`, { until });
             return `#${id} snoozed until ${until}`;
         }
+        case "step": {
+            await api(token, "POST", `/api/messages/${id}/step`);
+            return `comment ${id} tagged as a step`;
+        }
         case "assign": {
             await api(token, "POST", `/api/tickets/${id}/assign`, { assignee: arg });
             return `#${id} assigned to ${String(arg)}`;

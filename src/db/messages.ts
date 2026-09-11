@@ -1513,6 +1513,67 @@ export function removeMessageDecision(messageId: number): Message | null {
 }
 
 /**
+ * #2369 — a human tags an agent's plain comment as a step after the fact: the
+ * agent carried on but did not post `then: continue`. The comment then counts
+ * as a step everywhere (while it is the ticket's last action its author stays
+ * in the pool), and `step_tagged` keeps who tagged it, when, and the handback
+ * it carried, so the tag can be removed. A comment carrying a decision cannot
+ * be a step. Idempotent on a comment that already is one.
+ */
+export function tagMessageAsStep(messageId: number, by: string): Message | null {
+    return rewriteStepMeta(messageId, (meta) => {
+        if (meta.decision) throw new Error("a comment carrying a decision cannot be a step");
+        if (meta.step === true) return false;
+        meta.step_tagged = { by, at: new Date().toISOString(), handback: typeof meta.handback === "boolean" ? meta.handback : null };
+        meta.step = true;
+        meta.handback = false;
+        return true;
+    });
+}
+
+/**
+ * #2369 — remove a step a human tagged, giving the comment back the handback
+ * it carried. A step its author posted is the author's gesture and stays.
+ */
+export function untagMessageStep(messageId: number): Message | null {
+    return rewriteStepMeta(messageId, (meta) => {
+        if (meta.step !== true) return false;
+        if (!meta.step_tagged) throw new Error("this step was posted by its author; only a step a human tagged can be removed");
+        const handback = meta.step_tagged.handback;
+        delete meta.step;
+        delete meta.step_tagged;
+        if (handback === null) delete meta.handback;
+        else meta.handback = handback;
+        return true;
+    });
+}
+
+/** Rewrite a comment's meta in one transaction; `change` returns false when there is nothing to write. */
+function rewriteStepMeta(messageId: number, change: (meta: ReturnType<typeof parseMeta>) => boolean): Message | null {
+    invalidateInboxAgg();
+    const db = getDb();
+    const out = db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        if (m.kind !== "comment_added") throw new Error("only a comment can be tagged as a step");
+        const meta = parseMeta(m.meta ?? null);
+        if (change(meta)) {
+            tx.update(schema.messages)
+                .set({ meta: serializeMeta(meta) })
+                .where(eq(schema.messages.id, messageId))
+                .run();
+        }
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+    invalidateFlagsCache(touchedTicketIds(out)); // after the write, like the decision tags
+    return out;
+}
+
+/**
  * #697 F5 (pisynth-claude #692) — "ball in MY court" lens. Lists every
  * pending decision (plan or resolution) waiting on the given consumer
  * for accept / reject. Defined as : approved `comment_added` rows on

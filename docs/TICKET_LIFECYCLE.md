@@ -149,7 +149,10 @@ actionable-for-C (whose-court) =
 
 A **step** (`then: continue`), or a comment with `handback: false`, is an action like any comment, with one
 difference (§4.1): while it is the ticket's last action, its author is never
-"waiting on them", so the ticket stays in the author's pool.
+"waiting on them", so the ticket stays in the author's pool. When an agent
+carried on without saying so, a human can tag its plain comment as a step
+afterwards (the comment's classify menu, no notification): it then counts as
+a step, and the tag can be removed.
 
 **Not** an action: **auto-moderation** (`decided_by = "auto"`). An auto-approved
 agent comment's actor is its **author**, not "auto".

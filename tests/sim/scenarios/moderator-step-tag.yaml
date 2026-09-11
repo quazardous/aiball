@@ -1,0 +1,24 @@
+name: a moderator tags an agent's reply as the step it did not post
+# The lead answers the moderator and keeps working, but its reply hands the
+# ticket back (`handback: true`): the ticket leaves the lead's backlog. The
+# moderator tags that reply as a step. The ticket is the lead's again, the lead
+# is still its last actor, and nothing notifies the lead: its next backlog wake
+# names the ticket.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Carried on without saying so, body: A ticket the moderator asks the lead to work. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - moderator: comment $ticket
+    body: Please look into it.
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: "On it; the first part is done.", summary_until: The lead is on it; first part done., handback: true }
+    save: { reply: id }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: false, last_actor: alpha-lead }
+  - moderator: step $reply
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, last_actor: alpha-lead, events: [], wake: triage }
+  - view: [alpha-lead]

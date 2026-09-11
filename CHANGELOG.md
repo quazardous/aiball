@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Tag an agent's comment as a step**: when an agent carried on but did not
+  post `then: continue`, a moderator can tag its comment as a step from the
+  comment's classify menu. The ticket stays in the agent's pool as if it had
+  posted the step, without notifying it; the tag can be removed.
+
 - **A waiting ticket hears when its blocker closes**: closing a ticket posts a
   `dependency_closed` event on every open ticket that depends on it
   (`depends_on`, or `blocks` from the other side), so its owner is woken
