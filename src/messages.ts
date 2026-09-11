@@ -23,6 +23,7 @@ import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, typ
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
+import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost } from "./ticket-transitions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { getConsumer } from "./db/consumers.js";
@@ -170,8 +171,10 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         if (kind !== "comment_added" && kind !== "ticket_created") {
             return { error: `decision_kind only allowed on comment_added or ticket_created (got kind=${kind})` };
         }
-        if (kind === "ticket_created" && o.decision_kind !== "plan") {
-            return { error: `decision_kind on ticket_created must be "plan" (got "${o.decision_kind}")` };
+        // #2308 — which kinds may sit on which host is the table's `allowedOn`.
+        if (!isDecisionAllowedOn(o.decision_kind, kind)) {
+            const allowed = kindsAllowedOn(kind as DecisionHost).map((k) => `"${k}"`).join(" or ");
+            return { error: `decision_kind on ${kind} must be ${allowed} (got "${o.decision_kind}")` };
         }
         decisionKind = o.decision_kind;
     }

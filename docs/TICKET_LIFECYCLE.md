@@ -67,14 +67,32 @@ Only `approved` tickets are ever open/actionable.
 A `comment_added` can carry a decision sidecar in its meta:
 
 ```jsonc
-meta.decision = { kind: "plan" | "resolution", status: "pending" | "accepted" | "rejected" }
+meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status: "pending" | "accepted" | "rejected" }
 ```
 
 - **resolution** — "done, I propose to close." Accepted → ticket closes.
 - **plan** — "here's HOW I'll tackle it, validate the approach." Accepted = a
   **go-signal**: the ticket re-enters actionable so the agent executes.
 - A **pending** decision means *the reporter owes the next move* (accept/reject).
+- **wontfix** — close without doing it. **escalation** — a blocker only a human
+  can lift. Both are in the matrix below.
 - accept/reject goes through `POST /messages/:id/decide`.
+
+### 3.1 The decision matrix
+
+Generated from the transition table in `src/ticket-transitions.ts`, the one
+place a decision's behaviour is defined. Edit the table, then run
+`npx tsx scripts/gen-transition-matrix.ts`; a test fails while this block and
+the table disagree.
+
+<!-- decision-matrix:start -->
+| `then:` | stored as | allowed on | meaning | while pending | accepted | rejected | when posted |
+|---|---|---|---|---|---|---|---|
+| `plan` | `plan` | `comment_added`, `ticket_created` | how the work will go, for the reporter to validate | out of the proposer's pool until someone else acts | go: the proposer executes; back in the pool | back in the pool | — |
+| `resolved` | `resolution` | `comment_added` | the work is done, close the ticket | out of the proposer's pool until someone else acts | the ticket closes, resolved; out of the pool, settled | back in the pool | — |
+| `wontfix` | `wontfix` | `comment_added` | close without doing it: junk, out of scope, not reproducible | out of the proposer's pool until someone else acts | the ticket closes, not resolved; out of the pool, settled | back in the pool | — |
+| `escalate` | `escalation` | `comment_added` | a blocker only a human can lift | out of the proposer's pool until someone else acts | unblocked, the ticket stays open; back in the pool | back in the pool | priority up one notch, broadcast to followers |
+<!-- decision-matrix:end -->
 
 ---
 

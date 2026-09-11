@@ -19,6 +19,8 @@
  *              separate lifecycle event (it's a signal, not a vote).
  */
 
+import { DECISION_KINDS, kindsInFamily, type DecisionKind } from "./ticket-transitions.js";
+
 // #802 — `wontfix` joined the set : an agent triaging a junk / out-of-scope /
 // non-reproducible ticket can propose closure WITHOUT resolution via
 // `ticket_reply({then:"wontfix"})`. Symmetric to `resolution` (pending = gated,
@@ -38,29 +40,24 @@
 // (low→high, normal→high, high→urgent, urgent stays) so the human sees
 // it at the top of their inbox. The bump lives in db/messages.ts insert
 // path, NOT in this pure module.
-export const DECISION_KINDS = ["plan", "resolution", "wontfix", "escalation"] as const;
-export type DecisionKind = typeof DECISION_KINDS[number];
+// #2308 — the kinds come from the transition table (src/ticket-transitions.ts),
+// the one place a decision's behaviour is defined. Re-exported for every
+// existing importer.
+export { DECISION_KINDS, type DecisionKind };
 
 export const DECISION_STATUSES = ["pending", "accepted", "rejected"] as const;
 export type DecisionStatus = typeof DECISION_STATUSES[number];
 
-// The decision kinds split into two gate families (consumed by
-// db/decision-gate.ts). Named here so the taxonomy lives with the kinds:
+// The two gate families, read from the table's `family` column (consumed by
+// db/decision-gate.ts and the pending-decision surfaces):
 //  - CLOSING : a proposal to END the ticket. pending OR accepted → gated
 //    (close is imminent) ; rejected → ungated.
 //  - WAITING : a "waiting on someone" signal. pending → gated ; accepted
 //    (go / human acted) or rejected → ungated.
-// Together they must cover DECISION_KINDS — a kind in neither would be inert
-// to the gate. The compile-time guard below fails typecheck if a new kind is
-// added without classifying it (turns a silent gate-fallthrough into an error).
-export const CLOSING_DECISION_KINDS = ["resolution", "wontfix"] as const satisfies readonly DecisionKind[];
-export const WAITING_DECISION_KINDS = ["plan", "escalation"] as const satisfies readonly DecisionKind[];
-type _ClassifiedDecisionKind =
-    | typeof CLOSING_DECISION_KINDS[number]
-    | typeof WAITING_DECISION_KINDS[number];
-// If this line errors, a DecisionKind is missing from both families above.
-const _allKindsClassified: DecisionKind extends _ClassifiedDecisionKind ? true : never = true;
-void _allKindsClassified;
+// The table is typed `satisfies Record<DecisionKind, DecisionGesture>`, so a
+// kind without a row — or a row without a family — no longer typechecks.
+export const CLOSING_DECISION_KINDS: readonly DecisionKind[] = kindsInFamily("closing");
+export const WAITING_DECISION_KINDS: readonly DecisionKind[] = kindsInFamily("waiting");
 
 export interface CommentDecision {
     kind: DecisionKind;

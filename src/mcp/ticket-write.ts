@@ -11,19 +11,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MESSAGE_SCOPES } from "../domain.js";
 import { type DecisionKind } from "../decisions.js";
+import { DECISION_GESTURES, kindForVerb, verbsAllowedOn } from "../ticket-transitions.js";
 import { asText, client, effectiveBy, markActiveTicket } from "./_helpers.js";
 
-// Single source for the `then` verb → decision kind mapping. The MCP verb
-// vocabulary (`resolved` / `escalate`) is agent-facing sugar; the stored
-// `decision_kind` is the canonical DECISION_KINDS value. `satisfies` keeps
-// the values honest against the domain enum.
-const DECISION_VERB_TO_KIND = {
-    resolved: "resolution",
-    plan: "plan",
-    wontfix: "wontfix",
-    escalate: "escalation",
-} as const satisfies Record<string, DecisionKind>;
-type DecisionVerb = keyof typeof DECISION_VERB_TO_KIND;
+// #2308 — each decision's `then` verb, where it may be posted and what posting
+// it does come from the transition table (src/ticket-transitions.ts). Only the
+// lifecycle verbs (close, reopen) are named here.
+const THEN_ON_TICKET = verbsAllowedOn("ticket_created") as [string, ...string[]];
+const THEN_ON_REPLY: [string, ...string[]] = ["close", "reopen", ...verbsAllowedOn("comment_added")];
 
 export function registerTicketWriteTools(server: McpServer): void {
     server.registerTool(
@@ -88,7 +83,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                         "#697 F4 — origin project for cross-project tickets. Set when this agent (living in `from_project`) files a ticket in `project` on behalf of `project`'s agents (e.g. `kodi_sauvagge-claude` opening a ticket in `pisynth` to ask how pisynth handles deploy/probe). Surfaced on `ticket_get` and renderable as a 'from X' badge so the recipient distinguishes a cross-project ask from an in-project ticket. Omit for intra-project tickets — the common case.",
                     ),
                 then: z
-                    .enum(["plan"])
+                    .enum(THEN_ON_TICKET)
                     .optional()
                     .describe(
                         "#803 — attach a pending decision DIRECTLY on the ticket_created so the reporter validates the approach in one step (instead of `ticket_new` then `ticket_reply({then:'plan'})`). Today only `plan` is supported : the ticket carries `meta.decision={kind:'plan',status:'pending'}` and is gated out of the actionable backlog until the reporter accepts (go-signal to execute) or rejects (re-plan). Use when you already have a HOW in mind at creation time — typical for feature requests an agent files with a proposed approach. A ticket with no `then` must set `comment_only: true` (#2275).",
@@ -118,10 +113,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // #803 — `then:"plan"` rides on the existing `decision_kind`
                 // pipeline (validator extends to allow it on ticket_created ;
                 // db/messages stamps meta.decision={kind,status:"pending"}).
-                decision_kind: then === "plan" ? "plan" : undefined,
+                decision_kind: kindForVerb(then) ?? undefined,
                 // #2306 — a ticket with no `then` needs the flag on the wire:
                 // declared in the schema and destructured is not enough.
-                comment_only: then === "plan" ? undefined : comment_only,
+                comment_only: then ? undefined : comment_only,
             })) as { id?: number };
             markActiveTicket(res?.id); // #404: focus = the new ticket (token attribution)
             if (tags && tags.length > 0 && typeof res?.id === "number") {
@@ -208,7 +203,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                         ].join("\n"),
                     ),
                 then: z
-                    .enum(["resolved", "plan", "wontfix", "escalate", "close", "reopen"])
+                    .enum(THEN_ON_REPLY)
                     .optional()
                     .describe(
                         "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `wontfix` (#802) = propose closing the ticket WITHOUT resolution — for junk / test / out-of-scope / non-reproducible tickets an agent triages without delivering work (`meta.decision={kind:\"wontfix\",status:\"pending\"}`). The reporter accepting auto-closes the ticket WITHOUT flipping `resolved`. Different from `close` (reporter-only, direct) : `wontfix` is the proposal path any agent can use to triage someone else's ticket. `escalate` (#737) = flag a blocker requiring a HUMAN action the agent can't perform (repo admin, infra change, policy call) — `meta.decision={kind:\"escalation\",status:\"pending\"}`. Bumps the parent ticket's priority one notch (low/normal→high, high→urgent) AND broadcasts (scope=broadcast, all followers pinged) so the human sees it immediately. Accept = the human did the action (ticket re-enters actionable, NO auto-close — the agent can continue any remaining work) ; reject = \"not an escalation\" (re-enters actionable, agent can re-classify). Use when the work CAN'T move without a human ; use `plan` instead when you want the human to validate your HOW. `close` = close the ticket (reporter-only, direct). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved`/`plan`/`wontfix`/`escalate` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
@@ -265,16 +260,13 @@ export function registerTicketWriteTools(server: McpServer): void {
             // question — the conversational thread covers it naturally.
             // close / reopen are lifecycle rows ; every other verb (and the
             // no-`then` case) is a comment_added. The decision verbs map to
-            // their canonical kind via DECISION_VERB_TO_KIND — no per-verb
+            // their canonical kind via the transition table — no per-verb
             // enumeration here.
             const kind: string =
                 then === "close" ? "ticket_closed"
                 : then === "reopen" ? "ticket_reopened"
                 : "comment_added";
-            const decision_kind: DecisionKind | undefined =
-                then && then !== "close" && then !== "reopen"
-                    ? DECISION_VERB_TO_KIND[then as DecisionVerb]
-                    : undefined;
+            const decision_kind: DecisionKind | undefined = kindForVerb(then) ?? undefined;
             const proj = project ?? target.project;
             const res = await client.postMessage({
                 project: proj,
@@ -298,7 +290,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // asking for human attention, the comment must reach
                 // every follower (not just subscribers/owners) regardless
                 // of the agent's default scope preference.
-                scope: then === "escalate" ? "broadcast" : (scope ?? "default"),
+                scope: decision_kind && DECISION_GESTURES[decision_kind].onPost.broadcast ? "broadcast" : (scope ?? "default"),
             });
             markActiveTicket(ticketId); // #404: focus = this ticket (token attribution)
             // #928 david `2uxj45` (Slice 2) : surface la décision posée en

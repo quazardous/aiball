@@ -23,7 +23,7 @@
 // pas de proposeur → un commentaire tardif ne les lève pas (flux d'auto-close
 // préservé). = « point 4 » (lastAuthor GO-override) différé de #273.
 
-import { CLOSING_DECISION_KINDS, WAITING_DECISION_KINDS } from "../decisions.js";
+import { gateEffect } from "../ticket-transitions.js";
 
 /** Un event pertinent pour le gate, fourni dans l'ordre d'insertion (id asc). */
 export interface DecisionGateEvent {
@@ -114,35 +114,23 @@ function applyDecisionSignal(
     decision: { kind?: string; status?: string },
     byAgent: string | null,
 ): void {
-    const kind = decision.kind ?? "";
-    if ((CLOSING_DECISION_KINDS as readonly string[]).includes(kind)) {
-        // #802 — wontfix shares resolution's gate semantics : pending OR
-        // accepted = ticket gated. Difference is in the side-effect
-        // (acceptance auto-closes the ticket, see api/messages.ts decide
-        // handler) ; the gate replay treats them identically.
-        // #1113 — proposer tracké seulement sur PENDING (levable par un
-        // commentaire foreign) ; sur `accepted` le gate est settled (close
-        // imminente) → proposer null, pas de levée sur commentaire tardif.
-        if (decision.status === "pending") {
+    // #2308 — what each kind does at each status is the transition table's
+    // `gate` column. #1113 — the proposer is tracked only while the hold can
+    // be lifted by someone else speaking; a settled hold (an accepted
+    // resolution / wontfix, close imminent) keeps proposer null so a late
+    // comment does not lift it. An unknown kind or status stays inert.
+    switch (gateEffect(decision.kind, decision.status)) {
+        case "held_until_counterpart":
             state.set(ticketId, { gated: true, proposer: byAgent });
-        } else if (decision.status === "accepted") {
+            return;
+        case "held":
             state.set(ticketId, { gated: true, proposer: null });
-        } else if (decision.status === "rejected") {
+            return;
+        case "open":
             state.set(ticketId, { gated: false, proposer: null });
-        }
-    } else if ((WAITING_DECISION_KINDS as readonly string[]).includes(kind)) {
-        // Plan accepté = go-signal → dé-gaté (le ticket re-rentre dans
-        // l'actionable pour être exécuté). Plan rejeté = dé-gaté aussi.
-        // #737 — escalation partage les mêmes sémantiques de gate :
-        // pending = gated (l'agent attend l'action humaine), accept = the
-        // human did the action → dé-gaté (l'agent re-rentre dans l'actionable
-        // pour suite éventuelle, PAS d'auto-close), reject = "not an
-        // escalation" → dé-gaté aussi (l'agent peut re-classifier).
-        if (decision.status === "pending") {
-            state.set(ticketId, { gated: true, proposer: byAgent });
-        } else if (decision.status === "accepted" || decision.status === "rejected") {
-            state.set(ticketId, { gated: false, proposer: null });
-        }
+            return;
+        case null:
+            return;
     }
 }
 

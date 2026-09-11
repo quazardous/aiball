@@ -48,6 +48,7 @@ import {
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
 import { isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
+import { decisionGesture } from "../ticket-transitions.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
@@ -562,14 +563,16 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
             try {
                 const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
                 const k = m.decision?.kind;
-                if (k === "wontfix" || k === "resolution") {
+                // #2308 — which acceptances close the ticket is the table's `onAccept`.
+                const effect = decisionGesture(k)?.onAccept;
+                if (effect === "close_resolved" || effect === "close_unresolved") {
                     // Optional closing note rides on the close event ; wontfix
                     // keeps its synthesized default when no note is supplied.
                     const closeBody =
                         typeof body.body === "string" && body.body.trim()
                             ? body.body
-                            : k === "wontfix"
-                                ? `(auto-close from accepted wontfix #${updated.hashid ?? id})`
+                            : effect === "close_unresolved"
+                                ? `(auto-close from accepted ${k} #${updated.hashid ?? id})`
                                 : undefined;
                     // #921 — skip ping fan-out : `<kind>_accepted` a déjà
                     // pingé ; le ticket_closed est redondant côté ping.

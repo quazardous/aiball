@@ -6,6 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
+import { decisionGesture } from "../ticket-transitions.js";
 import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { invalidateInboxAgg } from "./inbox-agg.js";
 import { invalidateFlagsCache } from "./projects.js";
@@ -243,7 +244,8 @@ export function insertMessage(m: NewMessage): Message {
         // Fires even on still-pending messages : moderation may take time,
         // but the priority of the underlying ticket should reflect that
         // a human action was demanded as soon as the demand was posted.
-        if (m.decision_kind === "escalation") {
+        // #2308 — which decisions raise the priority when posted is the table's `onPost`.
+        if (decisionGesture(m.decision_kind)?.onPost.bumpPriority) {
             bumpPriorityForEscalation(tx, m.ticket_id);
         }
         // Resolve project via parent ticket for the legacy shape.
