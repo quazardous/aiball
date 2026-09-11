@@ -53,6 +53,7 @@ Root:
 - [`.aiball.yaml.example`](./.aiball.yaml.example) — canonical annotated per-project config template.
 
 `docs/`:
+- [`USAGE.md`](./docs/USAGE.md) — how aiball is used day to day: a pilot's board, not an agent farm (persistent agents per project, the plan → resolution loop, between projects).
 - [`INSTALL.md`](./docs/INSTALL.md) — Linux/macOS install modes (hard / `--symlink`), flags, env vars, layout, sanity-checks, troubleshooting.
 - [`CONFIGS.md`](./docs/CONFIGS.md) — the layered ("russian-doll") config model: files, layers, precedence per concern.
 - [`CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md) — the `claude-loop` wrapper: hooks, timer, keystroke detection, state files.

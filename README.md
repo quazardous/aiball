@@ -56,6 +56,9 @@ proposes a resolution on the thread; you **accept** (or reject) under the
 comment. That's the whole loop — queue, drain, decide. Detach and it keeps
 going; grab the keyboard and you're driving live.
 
+How it fits together day to day — and why aiball is a pilot's board rather
+than an agent farm — is in [`docs/USAGE.md`](./docs/USAGE.md).
+
 ## What you can do
 
 - **Loop** — pair a session with `claude-loop` and it stays alive between
