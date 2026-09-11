@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-    canArmAfk10mOnTyping,
+
     canFireWake,
     canFlipBgFromBoot,
     canPaintStopOnTyping,
@@ -645,38 +645,6 @@ test("busy-defer with deadline in the past → no longer gates", () => {
 //  Semantic helpers — canX / isX (david `vnhdku`)
 // ---------------------------------------------------------------------------
 
-test("canArmAfk10mOnTyping : false in boot-grace", () => {
-    const input = baseInput({ nowMs: T0 + 10 * SEC });
-    assert.equal(canArmAfk10mOnTyping(input), false);
-});
-
-test("canArmAfk10mOnTyping : false in NOT AFK ∞ (only F9 releases)", () => {
-    const input = baseInput({
-        nowMs: T0 + 5 * MIN,
-        loopStartMs: T0,
-        afkMode: "wait_inf",
-    });
-    assert.equal(canArmAfk10mOnTyping(input), false);
-});
-
-test("canArmAfk10mOnTyping : true post-boot in AFK off (arms fresh 10m)", () => {
-    const input = baseInput({
-        nowMs: T0 + 5 * MIN,
-        loopStartMs: T0,
-    });
-    assert.equal(canArmAfk10mOnTyping(input), true);
-});
-
-test("canArmAfk10mOnTyping : true post-boot in NOT AFK 10m (refreshes)", () => {
-    const now = T0 + 5 * MIN;
-    const input = baseInput({
-        nowMs: now,
-        loopStartMs: T0,
-        afkMode: "wait_10m",
-        afkExpiryMs: now + 5 * MIN,
-    });
-    assert.equal(canArmAfk10mOnTyping(input), true);
-});
 
 test("canPaintStopOnTyping : false in boot-grace, true after", () => {
     assert.equal(canPaintStopOnTyping(baseInput({ nowMs: T0 + 5 * SEC })), false);

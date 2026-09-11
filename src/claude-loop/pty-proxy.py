@@ -917,23 +917,21 @@ class _Decider:
         #     buffering de la « 1re combo » (la séquence à 2 touches a disparu) →
         #     l'ESC d'interruption atteint claude SANS le délai de 400ms qu'imposait
         #     l'ancien buffer.
-        # #924 Slice C : `_in_boot_phase()` filter retiré. Le filtrage
-        # boot est fait UNIQUEMENT par `apply_decision` TS-side via
-        # `barWord=boot` (#629). Le proxy émet les markers
-        # systématiquement ; XState applique selon le boot state.
-        # Side-effect : `arm_afk_10m` est émis pendant les ~30s de boot
-        # grace mais reste no-op (TS gate). Pas de drift visible.
+        # #924 Slice C : `_in_boot_phase()` filter retiré. Le proxy émet les
+        # markers systématiquement, boot compris.
+        # #2311 : il n'y a PAS de filtre boot côté TS non plus. Depuis #951
+        # (c68ce67), une frappe pendant le boot arme bien le maintien : sans
+        # lui, l'injection d'après-boot tapait par-dessus la frappe humaine.
         if is_typing_keystroke(data):
             d["typing"] = True
-            # #622 david `jzcgmh` : typing arms NOT AFK 10m. TS gate filtre
-            # pendant boot grace (#629 picker-typing window).
+            # #622 david `jzcgmh` : typing arms NOT AFK 10m, boot compris (#951).
             # #745 phase B — `touch_user_grace` dropped.
             d["markers"] += ["arm_afk_10m", "touch_marker"]
             self.last_keystroke = now
         elif self.esc_takeover and _is_lone_esc(data):
             d["lone_esc"] = True
             # #622 david `jzcgmh` : ESC behaves like typing — arms NOT AFK
-            # 10m, no-op in ∞ côté TS. Boot gate appliqué côté TS.
+            # 10m, no-op in ∞ côté TS, boot compris (#951).
             d["markers"] += ["arm_afk_10m"]
             # David `<chat>` : le swallow systématique du #858 cassait
             # l'interruption mid-turn. ESC est re-forwardé à claude
@@ -1248,9 +1246,8 @@ def _boot_grace_remaining():
 
 # #924 Slice C : `_in_boot_phase()` retiré. Le filtrage boot vivait
 # dans `_Decider.on_stdin` pour gater l'émission de markers AFK
-# pendant la fenêtre boot ; XState côté TS le fait maintenant via le
-# gate `barWord=boot` dans `apply_decision`. Le proxy émet
-# systématiquement, TS applique selon le boot state.
+# pendant la fenêtre boot. Il n'a pas été repris côté TS : depuis #951
+# (c68ce67), une frappe pendant le boot arme le maintien (#2311).
 
 
 # #862 Slice 4 — `_rest_word`, `_paint_word`, `_format_afk_state`,

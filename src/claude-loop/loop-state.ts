@@ -458,14 +458,6 @@ export function computeLoopView(input: LoopStateInput): LoopStateView {
 //  branch) or the computed view (for the consumers painting/gating).
 // ---------------------------------------------------------------------------
 
-/** True iff a typing keystroke should arm/refresh the NOT AFK 10m hold.
- *  Skipped during boot-grace (resume-picker typing) and in NOT AFK ∞
- *  (only F9 releases the indefinite hold). */
-export function canArmAfk10mOnTyping(input: LoopStateInput): boolean {
-    if (isInBootGrace(input)) return false;
-    if (effectiveAfkMode(input) === "wait_inf") return false;
-    return true;
-}
 
 /** True iff a typing keystroke should paint the bar word `stop` (red).
  *  Skipped during boot-grace (the `boot` word stays put). */
