@@ -1,0 +1,20 @@
+name: a rejected plan hands the ticket back to its author
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Plan rejected, body: The lead proposes a plan the moderator refuses. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Here is how I would do it., summary_until: Plan waiting for the moderator., then: plan }
+    save: { plan: id }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: false, gated: true }
+  - moderator: refuse $plan
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, gated: false, events: [plan_rejected], wake: event }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, events: [], wake: triage }

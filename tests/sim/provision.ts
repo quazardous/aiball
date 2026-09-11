@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { parseCohort } from "../../src/sim/cohort.js";
 import { hashPassword } from "../../src/auth.js";
 import { issueToken } from "../../src/db/tokens.js";
-import { setPasswordHash, upsertConsumer } from "../../src/db.js";
+import { setPasswordHash, updateConsumer, upsertConsumer } from "../../src/db.js";
 import { createProject } from "../../src/db/projects.js";
 import { upsertSubscription } from "../../src/db/subscriptions.js";
 import { seedCounters } from "../lib.js";
@@ -44,6 +44,7 @@ const moderatorToken = issueToken({ consumer_id: cohort.moderator.id, kind: "aut
 const agents: Record<string, { project: string; role: string; token: string }> = {};
 for (const a of cohort.agents) {
     upsertConsumer({ consumer_id: a.id, kind: "agent", enabled: true });
+    if (!a.canClaim) updateConsumer(a.id, { can_claim: false });
     upsertSubscription(a.id, a.project, a.role);
     agents[a.id] = {
         project: a.project,

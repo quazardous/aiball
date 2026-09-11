@@ -1,0 +1,13 @@
+name: a specialist agent sees only what is pushed to it
+cohort: tests/sim/cohorts/specialist.yaml
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Not for the crew, body: A ticket nobody pushes to the specialist. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - expect:
+      alpha-crew: { ticket: $ticket, backlog: none, claim: false, wake: none }
+  - moderator: assign $ticket alpha-crew
+  - expect:
+      alpha-crew: { ticket: $ticket, act: true }
+  - view: [alpha-crew]

@@ -11,6 +11,8 @@ export interface CohortAgent {
     id: string;
     project: string;
     role: SubscriptionRole;
+    /** false = a specialist: it consumes only what is pushed to it (a mention, an assignment). */
+    canClaim: boolean;
 }
 
 export interface Cohort {
@@ -25,7 +27,7 @@ export function parseCohort(text: string): Cohort {
     const raw = (parse(text) ?? {}) as {
         moderator?: { id?: unknown; password?: unknown };
         projects?: Record<string, { lead?: unknown } | null>;
-        agents?: { id?: unknown; project?: unknown; role?: unknown }[];
+        agents?: { id?: unknown; project?: unknown; role?: unknown; can_claim?: unknown }[];
     };
     const fail = (why: string): never => { throw new Error(`cohort: ${why}`); };
     const id = (v: unknown, what: string): string =>
@@ -44,14 +46,15 @@ export function parseCohort(text: string): Cohort {
     const agents: CohortAgent[] = [];
     for (const p of projects) {
         const lead = raw.projects![p]?.lead;
-        if (lead !== undefined) agents.push({ id: id(lead, `projects.${p}.lead`), project: p, role: "owner" });
+        if (lead !== undefined) agents.push({ id: id(lead, `projects.${p}.lead`), project: p, role: "owner", canClaim: true });
     }
     for (const a of raw.agents ?? []) {
         const project = id(a.project, "agents[].project");
         if (!projects.includes(project)) fail(`agent ${String(a.id)} follows unknown project ${project}`);
         const role = a.role ?? "follower";
         if (role !== "owner" && role !== "follower") fail(`agents[].role must be owner or follower`);
-        agents.push({ id: id(a.id, "agents[].id"), project, role: role as SubscriptionRole });
+        if (a.can_claim !== undefined && typeof a.can_claim !== "boolean") fail(`agents[].can_claim must be true or false`);
+        agents.push({ id: id(a.id, "agents[].id"), project, role: role as SubscriptionRole, canClaim: a.can_claim !== false });
     }
     const seen = new Set<string>([moderator.id]);
     for (const a of agents) {

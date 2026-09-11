@@ -1,0 +1,32 @@
+name: an accepted resolution closes the ticket, a reopen brings it back, a rejected resolution hands it back
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Resolution accepted, body: Work the moderator accepts. }
+    save: { done: id }
+  - moderator: approve $done
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $done }
+  - alpha-lead: ticket_reply
+    args: { target_id: $done, body: Done and verified., summary_until: Delivered; waiting for the moderator's accept., then: resolved }
+    save: { resolution: id }
+  - expect:
+      alpha-lead: { ticket: $done, act: false, gated: true }
+  - moderator: accept $resolution
+  - expect:
+      alpha-lead: { ticket: $done, act: false, backlog: none, rank: 0 }
+  - moderator: reopen $done
+  - expect:
+      alpha-lead: { ticket: $done, act: true }
+
+  - alpha-lead: ticket_new
+    args: { title: Resolution rejected, body: Work the moderator sends back. }
+    save: { redo: id }
+  - moderator: approve $redo
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $redo }
+  - alpha-lead: ticket_reply
+    args: { target_id: $redo, body: Done., summary_until: Delivered; waiting for the moderator's accept., then: resolved }
+    save: { resolution2: id }
+  - moderator: refuse $resolution2
+  - expect:
+      alpha-lead: { ticket: $redo, act: true, gated: false }

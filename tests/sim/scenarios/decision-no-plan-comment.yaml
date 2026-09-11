@@ -1,0 +1,25 @@
+name: '"no plan" in a plain human comment makes the ticket the agent''s to act on, and its steps keep it there'
+steps:
+  - alpha-lead: ticket_new
+    args: { title: No plan needed, body: A small fix. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Do you want a plan first?, summary_until: Asking the moderator whether a plan is needed., handback: true }
+  - moderator: comment $ticket
+    body: No plan, just do it.
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, last_actor: david, wake: event }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: triage }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: First part done., summary_until: Fix in progress., then: continue }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Fixed., summary_until: Fixed; waiting for the moderator's accept., then: resolved }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: false, gated: true }

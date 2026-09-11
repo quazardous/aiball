@@ -1,0 +1,28 @@
+name: "pin down: a human pushes back on a pending plan, then the agent replaces it"
+# Settled: the replacement supersedes the first plan (no reject needed) and its
+# accept hands the ticket back. Pin down: which wakes the agent gets between the
+# pushback and the replacement — the views below are the answer to report.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Pushback then replacement, body: The moderator finds the first plan too complicated. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: A complicated plan., summary_until: First plan waiting for the moderator., then: plan }
+    save: { first: id }
+  - wake: alpha-lead
+  - moderator: comment $ticket
+    body: This plan seems complicated.
+  - view: [alpha-lead]
+  - wake: alpha-lead
+  - view: [alpha-lead]
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: A simpler plan; it replaces the previous one., summary_until: Simpler plan waiting for the moderator., then: plan }
+    save: { second: id }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: false, gated: true }
+  - moderator: accept $second
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, gated: false }

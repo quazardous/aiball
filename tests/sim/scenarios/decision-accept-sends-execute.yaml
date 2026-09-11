@@ -1,0 +1,18 @@
+name: accepting a plan sends its author an execute event
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Accept sends execute, body: The lead waits for the go. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan }
+    save: { plan: id }
+  # Clear whatever was queued before the decision, so the event below is the accept's.
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, events: [] }
+  - moderator: accept $plan
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, gated: false, events: [plan_accepted], wake: event }

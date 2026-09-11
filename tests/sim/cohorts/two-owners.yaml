@@ -1,0 +1,16 @@
+# Two agents own the same project: a claim by one takes the ticket out of the
+# other's backlog, and an assignment picks one of them.
+moderator:
+  id: david
+  password: simulator
+
+projects:
+  alpha:
+    lead: alpha-lead
+  beta:
+    lead: beta-lead
+
+agents:
+  - id: alpha-second
+    project: alpha
+    role: owner

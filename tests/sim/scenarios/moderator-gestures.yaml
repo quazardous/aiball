@@ -1,0 +1,45 @@
+name: moderator gestures and the work order, with two owners on one project
+cohort: tests/sim/cohorts/two-owners.yaml
+steps:
+  - alpha-lead: ticket_new
+    args: { title: A normal one, body: Normal priority. }
+    save: { normal: id }
+  - alpha-lead: ticket_new
+    args: { title: A high one, body: High priority., priority: high }
+    save: { high: id }
+  - moderator: approve $normal
+  - moderator: approve $high
+  # Work order: the high-priority ticket comes first for the other owner.
+  - expect:
+      alpha-second: { ticket: $high, rank: 1 }
+  - expect:
+      alpha-second: { ticket: $normal, rank: 2 }
+  # A claim by one owner takes the ticket out of the other's backlog; a release brings it back.
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $normal }
+  - expect:
+      alpha-second: { ticket: $normal, backlog: none }
+  - alpha-lead: ticket_release
+    args: { ticket_id: $normal }
+  - expect:
+      alpha-second: { ticket: $normal, act: true }
+  # An assignment puts it with the assignee, and out of the other owner's backlog.
+  - moderator: assign $normal alpha-second
+  - expect:
+      alpha-second: { ticket: $normal, act: true }
+      alpha-lead: { ticket: $normal, backlog: none }
+  # Closed, it leaves every list; reopened, it is back.
+  - moderator: close $normal
+  - expect:
+      alpha-second: { ticket: $normal, backlog: none, rank: 0 }
+  - moderator: reopen $normal
+  - expect:
+      alpha-second: { ticket: $normal, act: true }
+  # Snoozed, it leaves the list until the snooze ends.
+  - moderator: snooze $high 1m
+  - expect:
+      alpha-second: { ticket: $high, rank: 0 }
+  - sleep: 70
+  - view: [alpha-second]
+  - expect:
+      alpha-second: { ticket: $high, act: true }

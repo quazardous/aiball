@@ -1,0 +1,23 @@
+name: a second plan on a held ticket gates it until accepted, then sends execute again
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Chained plans, body: Measure first, then build. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Step 1 is to measure., summary_until: Measuring plan waiting for the moderator., then: plan }
+    save: { measure: id }
+  - moderator: accept $measure
+  - wake: alpha-lead
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Measured., summary_until: Measures taken; build plan next., then: continue }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: The results, and the plan to build., summary_until: Build plan waiting for the moderator., then: plan }
+    save: { build: id }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: false, gated: true }
+  - moderator: accept $build
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, gated: false, events: [plan_accepted], wake: event }

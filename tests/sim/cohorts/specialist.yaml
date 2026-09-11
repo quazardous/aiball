@@ -1,0 +1,15 @@
+# A specialist agent (`can_claim: false`) owns alpha next to its lead: it
+# consumes only what is pushed to it, a mention or an assignment.
+moderator:
+  id: david
+  password: simulator
+
+projects:
+  alpha:
+    lead: alpha-lead
+
+agents:
+  - id: alpha-crew
+    project: alpha
+    role: owner
+    can_claim: false

@@ -4,10 +4,12 @@ Cases gathered from real sessions (the aiball, qdadm, quarkernel and
 BookShepherd agents) and from tickets still waiting for a human decision. Each
 is written as setup → gestures → expected. **"Pin down"** marks a case where the
 rule is not settled or not known: the scenario's job is to show what the board
-does, so a human can decide whether that is right.
+does, so a human can decide whether that is right. Numbers are stable: a case
+keeps its number when it moves to "Covered".
 
 Cohort of reference: `alpha-lead` (owner of alpha), `alpha-helper` (follower of
-alpha), `beta-lead` (owner of beta), `david` (moderator).
+alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
+`tests/sim/cohorts/`.
 
 ## Covered by a scenario
 
@@ -16,36 +18,40 @@ alpha), `beta-lead` (owner of beta), `david` (moderator).
 | A reply with neither `then` nor `handback`, `handback: false` without a claim, or a handback that contradicts `then: plan`, is refused | `handback-refusals` |
 | A sole participant keeps its ticket after a handback; only another agent's activity makes a ticket hot, never a human's | `sole-participant-handback` |
 | A step keeps the ticket, a pending plan gates it even for its claimant, an accepted plan hands it back | `step-then-plan` |
-| A backlog wake sinks its ticket; the agent's own step lifts the sink | `step-lifts-backlog-sink` |
+| A backlog wake sinks its ticket; the agent's own step lifts the sink (no cooldown after a step, by design) | `step-lifts-backlog-sink` |
+| 1 — A rejected plan hands the ticket back, with a `plan_rejected` event | `decision-plan-rejected` |
+| 2 — An accepted resolution closes the ticket, a reopen brings it back, a rejected resolution hands it back | `decision-resolution` |
+| 5 — A human comment refining an accepted plan reaches the claimant; no new plan is needed | `decision-scope-refined` |
+| 6 — Accepting a plan sends its author a `plan_accepted` event | `decision-accept-sends-execute` |
+| 9 — A second plan on a held ticket gates it until accepted, then sends `plan_accepted` again | `decision-chained-plans` |
+| 10 — "No plan" in a plain human comment makes the ticket the agent's; its steps keep it there | `decision-no-plan-comment` |
+| 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
+| 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
 
 To add to `handback-refusals`: `then: continue` on a ticket the agent does not
 hold (409, the text points to claiming), and a `summary_until` over the budget
 (400). Both must leave nothing posted.
 
+## Observed, waiting for a decision
+
+What the board does today; each needs a human answer before it becomes an expectation.
+
+3. **Human pushback on a pending plan, then a replacement plan** (`decision-pushback-replacement`). The human's comment lifts the pending plan's gate at once: the agent gets the comment as an event, then "Triage the ticket" (not "Your pending decision is what gates this"). The replacement plan gates the ticket again, and its accept hands it back.
+4. **Accepting a plan the agent has already replaced** (`decision-accept-superseded`). The accept goes through. The agent gets a `plan_accepted` event for the replaced plan, but the ticket stays gated by the newer pending plan: follow-up tier, then "Your pending decision is what gates this". Only the newer plan's accept opens it. Should an accept on a superseded plan be refused?
+
 ## To write
 
 ### Decisions
 
-1. **Plan rejected.** The lead posts `then: plan`; the moderator rejects it. → Actionable again for the lead; its next wake is about this ticket.
-2. **Resolution accepted / rejected.** Accepted → the ticket is closed and in nobody's backlog. Rejected → actionable again for its author.
-3. **Human pushback on a pending plan, then a replacement plan.** The moderator comments on a pending plan; the agent posts a new `then: plan` without rejecting the old one. → The old plan is superseded, no reject needed. Pin down: between the comment and the replacement, whether the agent's wake is "Triage the ticket" or "Your pending decision is what gates this".
-4. **Accepting a superseded plan.** Plan v1, then v2 by the same agent. → Only v2 gates; accepting v2 sends one "execute". Pin down: what an accept of v1 does, and which wakes it sends.
-5. **Accepted plan, then the human refines the scope in a comment.** → The comment makes the ticket unread and actionable for the claimant; no new plan is required.
-6. **Plan accepted.** → An "execute" event wake reaches the agent. A real session once got none and learned it from a backlog wake: check the event exists.
 7. **Accepted plan in progress.** The agent works for minutes with nothing to post. → Pin down: repeated "execute" and "Triage" wakes on the same ticket while nothing moves.
-8. **Accepted plan deliberately queued** ("step 2 after the other ticket"). → Pin down: whether it resurfaces at every idle cycle, and which gesture keeps it in the agent's pool quietly (`continue` and `handback: false` both need the claim).
-9. **Chained plans on one held ticket.** Plan 1 accepted, steps, then plan 2 posted with the results. → Plan 2 gates the ticket although the agent holds the claim; its accept sends "execute" and makes it actionable.
-10. **"No plan" written as a plain human comment.** → Actionable for the agent ("Triage the ticket"); its `continue` steps keep it there until `then: resolved`.
+8. **Accepted plan deliberately queued** ("step 2 after the other ticket"). → Pin down: whether it resurfaces at every idle cycle, and which gesture keeps it in the agent's pool quietly (`continue` and `handback: false` both need the claim; the waiting gesture is the `then: wait` proposal).
 11. **My decision pending, the other side spoke.** → Follow-up tier; sinks for the cooldown after a wake, then comes back.
 12. **Plan pending for weeks, reporter silent.** → The agent's backlog no longer shows it (last actor, gated). Pin down: whether anything reminds either side.
 
 ### Who holds the ticket
 
-13. **Claim by another owner** (cohort variant: two owners of alpha). → Out of the other's backlog; `ticket_release` → back.
 14. **Two accepted plans in flight, one claim slot.** The agent holds ticket A (a step posted) and claims B to execute its plan: A's claim is released silently. → Pin down where A sits for the agent (actionable, tier, next wake), whether another agent can now claim A, and whether the claim should warn.
-15. **Assigned by the moderator.** → In the assignee's backlog without a claim; another agent's claim is released.
 16. **Follower.** An actionable ticket the agent cannot claim. → Never a wake head: no "Triage the ticket".
-17. **Specialist agent** (`can_claim: false`). → Sees only what is pushed to it: a mention or an assignment.
 18. **Reporter is another project's agent.** `beta-lead` files in alpha; `alpha-lead` posts a plan, later a resolution the moderator accepts. → Pin down: whether `beta-lead` can accept the plan, what wakes it and with which marker; after the accepted resolution, no gesture is required from `beta-lead` and it is not woken again.
 19. **The latest event is the holder's own comment** on a claimed ticket in progress. → Pin down: a "Triage the ticket" wake on it.
 
@@ -63,8 +69,7 @@ hold (409, the text points to claiming), and a `summary_until` over the budget
 26. **Plan accepted while the dependency is still open.** → Pin down: actionable (the human said go) or blocked.
 27. **Dependency written only in a plan's prose.** → Invisible to the backlog: A is actionable while B is open.
 28. **Work carried on another ticket, linked only by text.** A recap ticket gets the steps; the older ticket with the accepted plan gets none. → Pin down: whether the older ticket resurfaces as "Triage", and whether a `relates_to` relation changes that.
-29. **Snooze.** The moderator snoozes A for 2 minutes. → Out of the backlog, back after the reveal job (every 60 s).
-30. **A long external wait after a step.** `continue` ("waiting for the test suite, ~16 min"), then nothing. → Pin down: how often the backlog names the ticket again during the wait (the step lifted its sink).
+30. **A long external wait after a step.** `continue` ("waiting for the test suite, ~16 min"), then nothing. → The step lifts the sink, so the backlog names the ticket again at the next idle cycle. Seen live; the gesture that should replace `continue` here is the `then: wait` proposal.
 
 ### Work order
 
@@ -75,13 +80,8 @@ hold (409, the text points to claiming), and a `summary_until` over the budget
 32. **A burst of "resolution accepted, ticket closed".** → One event wake each, none needing action. Pin down whether they should be grouped.
 33. **Every open ticket in the agent's court ends with a pending decision** ("stabilise before I disconnect"). → Empty backlog, no wake.
 
-## What the simulator still needs
-
-- **Moderator gestures:** snooze, close, reopen, assign (cases 2, 15, 29).
-- **Time:** a `sleep <seconds>` step (cases 11, 29, 30).
-- **Cohort variants:** two owners of one project, a `can_claim: false` agent, a cross-project reporter (cases 13, 17, 18).
-- **Accepting a superseded decision** (case 4).
-- **The work order** as `ticket_list` returns it, to expect a rank (case 31).
+Every case above can be written with the simulator's current steps (moderator
+gestures, `sleep`, cohort variants, `rank`, `events`, `may_fail`).
 
 ## Not simulator cases
 

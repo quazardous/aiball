@@ -7,24 +7,29 @@
  * (tests/sim/sim.ts) only performs the gestures and fetches the seats.
  *
  *     name: a sole participant keeps its ticket after a handback
+ *     cohort: tests/sim/cohorts/two-owners.yaml   # optional; default tests/sim/cohort.yaml
  *     steps:
  *       - alpha-lead: ticket_new             # an agent calls an MCP tool
  *         args: { title: "…" }
  *         save: { ticket: id }               # $ticket = the result's `id`
  *       - moderator: approve $ticket          # approve | reject | accept | refuse | comment
+ *                                             # | close | reopen | snooze $t 2m | assign $t <agent>
  *       - alpha-lead: ticket_reply
  *         args: { target_id: $ticket, body: "…", summary_until: "…", handback: false }
  *         refused: claim it first             # the call must fail, with this in the error
+ *       - moderator: accept $old_plan
+ *         may_fail: true                     # a pin-down: a refusal is reported, the scenario goes on
  *       - view: [alpha-lead]
  *       - wake: alpha-lead                   # the loop wakes the agent now; its backlog head sinks
+ *       - sleep: 75                          # seconds
  *       - expect:
- *           alpha-lead: { ticket: $ticket, backlog: actionable, act: true, wake: triage }
+ *           alpha-lead: { ticket: $ticket, backlog: actionable, act: true, wake: triage, rank: 1, events: [plan_accepted] }
  *       - pause: look at the web UI
  */
 import { parse } from "yaml";
 import { TIER_LABEL, type ViewRow } from "./view.js";
 
-export type ModeratorAction = "approve" | "reject" | "accept" | "refuse" | "comment";
+export type ModeratorAction = "approve" | "reject" | "accept" | "refuse" | "comment" | "close" | "reopen" | "snooze" | "assign";
 export type Backlog = "hot" | "actionable" | "follow-up" | "waiting" | "blocked" | "none";
 export type Wake = "triage" | "followup" | "waiting" | "blocked" | "event" | "none";
 
@@ -36,24 +41,44 @@ export interface SeatExpectation {
     gated?: boolean;
     last_actor?: string;
     wake?: Wake;
+    /** 1-based position among the agent's open tickets, in `ticket_list`'s work order; 0 = not listed. */
+    rank?: number;
+    /** Kinds of the agent's unread events on this ticket, oldest first. */
+    events?: string[];
 }
 
 export type Step =
     | { kind: "mcp"; agent: string; tool: string; args: Record<string, unknown>; save: Record<string, string>; refused: string | null }
-    | { kind: "moderator"; action: ModeratorAction; target: unknown; body: string | null }
+    | { kind: "moderator"; action: ModeratorAction; target: unknown; arg: string | null; body: string | null; mayFail: boolean }
     | { kind: "view"; agents: string[] }
     | { kind: "expect"; seats: Record<string, SeatExpectation> }
     | { kind: "wake"; agent: string }
+    | { kind: "sleep"; seconds: number }
     | { kind: "pause"; message: string };
 
 export interface Scenario {
     name: string;
+    /** Cohort file for this scenario, relative to the repository root; null = the default one. */
+    cohort: string | null;
     steps: Step[];
 }
 
-const MODERATOR_ACTIONS: readonly ModeratorAction[] = ["approve", "reject", "accept", "refuse", "comment"];
+const MODERATOR_ACTIONS: readonly ModeratorAction[] = ["approve", "reject", "accept", "refuse", "comment", "close", "reopen", "snooze", "assign"];
 const BACKLOGS: readonly Backlog[] = ["hot", "actionable", "follow-up", "waiting", "blocked", "none"];
 const WAKES: readonly Wake[] = ["triage", "followup", "waiting", "blocked", "event", "none"];
+
+/** `90`, `90s`, `2m`, `1h` → seconds; null when unreadable. */
+export function parseDuration(text: string): number | null {
+    const m = /^(\d+)\s*([smh]?)$/.exec(text.trim());
+    if (!m) return null;
+    return Number(m[1]) * ({ "": 1, s: 1, m: 60, h: 3600 } as Record<string, number>)[m[2]!]!;
+}
+
+/** The cohort a scenario asks for, readable before the board (and its agents) exist. */
+export function scenarioCohort(text: string): string | null {
+    const raw = (parse(text) ?? {}) as { cohort?: unknown };
+    return typeof raw.cohort === "string" && raw.cohort ? raw.cohort : null;
+}
 
 export function parseScenario(text: string, agents: readonly string[]): Scenario {
     const raw = (parse(text) ?? {}) as { name?: unknown; steps?: unknown };
@@ -71,6 +96,10 @@ export function parseScenario(text: string, agents: readonly string[]): Scenario
         if (!s || typeof s !== "object") return fail(i, "a step is a mapping");
         if ("pause" in s) return { kind: "pause", message: String(s.pause ?? "") };
         if ("wake" in s) return { kind: "wake", agent: knownAgent(i, String(s.wake)) };
+        if ("sleep" in s) {
+            const seconds = parseDuration(String(s.sleep));
+            return seconds === null || seconds <= 0 ? fail(i, "sleep takes a duration: 30, 30s, 2m") : { kind: "sleep", seconds };
+        }
         if ("view" in s) {
             const list = Array.isArray(s.view) ? s.view : [s.view];
             return { kind: "view", agents: list.map((a) => knownAgent(i, String(a))) };
@@ -82,15 +111,23 @@ export function parseScenario(text: string, agents: readonly string[]): Scenario
                 if (!e || e.ticket === undefined) fail(i, `expect.${agent} needs a ticket`);
                 if (e.backlog !== undefined && !BACKLOGS.includes(e.backlog as Backlog)) fail(i, `backlog must be one of ${BACKLOGS.join(", ")}`);
                 if (e.wake !== undefined && !WAKES.includes(e.wake as Wake)) fail(i, `wake must be one of ${WAKES.join(", ")}`);
+                if (e.rank !== undefined && !(Number.isInteger(e.rank) && (e.rank as number) >= 0)) fail(i, "rank is a position from 1, or 0 for not listed");
+                if (e.events !== undefined && !Array.isArray(e.events)) fail(i, "events is a list of event kinds");
             }
             return { kind: "expect", seats: seats as unknown as Record<string, SeatExpectation> };
         }
         if ("moderator" in s) {
-            const [action, target] = String(s.moderator).trim().split(/\s+/, 2);
+            const [action, target, ...rest] = String(s.moderator).trim().split(/\s+/);
             if (!MODERATOR_ACTIONS.includes(action as ModeratorAction)) fail(i, `moderator action must be one of ${MODERATOR_ACTIONS.join(", ")}`);
             if (target === undefined) fail(i, `moderator: ${action} needs a target (a ticket or comment id, or $name)`);
+            const arg = rest.length > 0 ? rest.join(" ") : null;
             if (action === "comment" && typeof s.body !== "string") fail(i, "moderator: comment needs a body");
-            return { kind: "moderator", action: action as ModeratorAction, target, body: typeof s.body === "string" ? s.body : null };
+            if (action === "snooze" && (arg === null || parseDuration(arg) === null)) fail(i, "moderator: snooze $ticket <duration>, e.g. 2m");
+            if (action === "assign") {
+                if (arg === null) fail(i, "moderator: assign $ticket <agent>");
+                knownAgent(i, arg!);
+            }
+            return { kind: "moderator", action: action as ModeratorAction, target, arg, body: typeof s.body === "string" ? s.body : null, mayFail: s.may_fail === true };
         }
         const keys = Object.keys(s).filter((k) => !["args", "save", "refused"].includes(k));
         if (keys.length !== 1) fail(i, "an agent step names one agent: `<agent>: <tool>`");
@@ -104,7 +141,7 @@ export function parseScenario(text: string, agents: readonly string[]): Scenario
             refused: typeof s.refused === "string" ? s.refused : null,
         };
     });
-    return { name, steps };
+    return { name, cohort: scenarioCohort(text), steps };
 }
 
 /** Replace every `$name` string, however deep, by its saved value. */
@@ -126,11 +163,19 @@ export function pick(result: unknown, path: string): unknown {
     return path.split(".").reduce<unknown>((v, k) => (v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined), result);
 }
 
-/** An agent's seat, as the runner fetches it. */
+/** An unread event, as the agent's queue holds it. A ticket's creation is its own ticket. */
+export interface UnreadEvent {
+    id: number;
+    kind: string;
+    ticket_id: number | null;
+}
+
+/** An agent's seat, as the runner fetches it. `rows` come in `ticket_list`'s work order. */
 export interface Seat {
     rows: ViewRow[];
     unreadPings: number;
     head: ViewRow | null;
+    unread: UnreadEvent[];
 }
 
 function wakeOf(seat: Seat, ticketId: number): Wake | `about #${number}` {
@@ -154,6 +199,11 @@ export function matchSeat(expect: SeatExpectation, seat: Seat): string[] {
     check("claim", expect.claim, row?.claimable ?? false);
     check("gated", expect.gated, row?.gated_by_decision ?? false);
     check("last_actor", expect.last_actor, row?.last_actor ?? null);
+    check("rank", expect.rank, seat.rows.findIndex((r) => r.id === id) + 1);
+    if (expect.events !== undefined) {
+        const got = seat.unread.filter((e) => (e.ticket_id ?? e.id) === id).map((e) => e.kind);
+        if (got.join(",") !== expect.events.join(",")) misses.push(`events: expected [${expect.events.join(", ")}], got [${got.join(", ")}]`);
+    }
     if (expect.wake !== undefined) {
         const got = wakeOf(seat, id);
         // A wake about another ticket is still "no wake about this one".

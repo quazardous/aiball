@@ -61,9 +61,11 @@ agents:
   - { id: helper, project: alpha }
 `);
     assert.deepEqual(c.agents, [
-        { id: "alpha-lead", project: "alpha", role: "owner" },
-        { id: "helper", project: "alpha", role: "follower" },
+        { id: "alpha-lead", project: "alpha", role: "owner", canClaim: true },
+        { id: "helper", project: "alpha", role: "follower", canClaim: true },
     ]);
+    assert.equal(parseCohort("moderator: { id: d, password: simulator }\nprojects: { a: {} }\nagents: [{ id: crew, project: a, can_claim: false }]").agents[0]!.canClaim, false);
+    assert.throws(() => parseCohort("moderator: { id: d, password: simulator }\nprojects: { a: {} }\nagents: [{ id: crew, project: a, can_claim: nope }]"), /can_claim must be/);
     assert.throws(() => parseCohort("moderator: { id: d, password: x }\nprojects: { a: {} }"), /password/);
     assert.throws(() => parseCohort("moderator: { id: d, password: simulator }\nprojects: { a: { lead: d } }"), /declared twice/);
     assert.throws(() => parseCohort("moderator: { id: d, password: simulator }\nprojects: { a: {} }\nagents: [{ id: x, project: b }]"), /unknown project/);

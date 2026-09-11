@@ -1,0 +1,26 @@
+name: a human comment refining an accepted plan reaches the claimant, and needs no new plan
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Scope refined after accept, body: The moderator adds a requirement while the lead executes. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan }
+    save: { plan: id }
+  - moderator: accept $plan
+  - wake: alpha-lead
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: First part done., summary_until: First part done; the rest is in progress., then: continue }
+  - moderator: comment $ticket
+    body: Also cover the empty case.
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, last_actor: david, wake: event }
+  - wake: alpha-lead
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Empty case covered, as asked., summary_until: Both parts done, empty case included., then: continue }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Delivered, empty case included., summary_until: Delivered; waiting for the moderator's accept., then: resolved }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: false, gated: true }

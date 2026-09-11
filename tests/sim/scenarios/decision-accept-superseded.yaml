@@ -1,0 +1,27 @@
+name: "pin down: the moderator accepts a plan the agent has already replaced"
+# Pin down: whether accepting the superseded plan is refused, opens the ticket,
+# or sends an execute — the outcome and the views below are the answer to report.
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Accepting a superseded plan, body: Two plans in a row; the moderator accepts the first. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Plan one., summary_until: Plan one waiting for the moderator., then: plan }
+    save: { first: id }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Plan two; it replaces plan one., summary_until: Plan two waiting for the moderator., then: plan }
+    save: { second: id }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: false, gated: true }
+  - moderator: accept $first
+    may_fail: true
+  - view: [alpha-lead]
+  - wake: alpha-lead
+  - view: [alpha-lead]
+  - moderator: accept $second
+    may_fail: true
+  - view: [alpha-lead]

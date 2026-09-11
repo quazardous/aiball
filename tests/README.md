@@ -189,5 +189,20 @@ Cases waiting for a scenario, and what the simulator still needs to play them,
 are listed in `tests/sim/CASES.md`.
 
 `wake` does what the loop does when the agent goes idle: with unread pings it is
-an event wake; otherwise it names the backlog head and records that wake, which
-sinks the ticket for the cooldown until the thread moves again.
+an event wake (the events on the oldest one's ticket are marked seen, as the loop
+delivers them in one bundle); otherwise it names the backlog head and records
+that wake, which sinks the ticket for the cooldown until the thread moves again.
+
+More steps and fields:
+
+- `cohort: tests/sim/cohorts/<file>.yaml` at the top of a scenario: `run` starts
+  its board with that cohort (two owners of one project, a `can_claim: false`
+  specialist…).
+- Moderator gestures also include `close`, `reopen`, `snooze $ticket 2m` and
+  `assign $ticket <agent>`. `may_fail: true` on a moderator step reports a
+  refusal and goes on: for a case whose rule is still to pin down, the refusal
+  is the answer.
+- `sleep: <seconds>` (or `30s`, `2m`) waits, for snoozes and cooldowns.
+- `expect` also takes `rank` (the ticket's position in the agent's `ticket_list`
+  work order, 0 when not listed) and `events` (the kinds of the agent's unread
+  events on that ticket, oldest first).
