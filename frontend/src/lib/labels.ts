@@ -131,9 +131,10 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         title: "stalled step — the agent marked a step done and nothing has followed since",
     },
     step: {
-        // #2327 david: a blue check, not green (green is a proposed resolution).
-        icon: "pi pi-check",
-        color: "--p-blue-500",
+        // #2327 david: the proposed resolution's circled check, in the step
+        // tag's blue (`--p-tag-info-color`) instead of green.
+        icon: "pi pi-check-circle",
+        color: "--p-tag-info-color",
         title: "step — the agent marked a part done and carries on; nothing to decide",
     },
     open: {
