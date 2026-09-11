@@ -24,7 +24,7 @@ import {
 } from "../db.js";
 import { computeHotFocus } from "../db/work-order.js";
 import { ticketIdsWithPayload } from "../db/payloads.js";
-import { getInboxAgg, emptyAgg } from "../db/inbox-agg.js";
+import { getInboxAgg, emptyAgg, isLiveDecision as liveDecision } from "../db/inbox-agg.js";
 import { DECISION_GESTURES, isStepStalled, kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
 import { getConfig } from "../db/config-overrides.js";
 import { globalConfigPath } from "../autopoll/config.js";
@@ -134,8 +134,7 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
     // newer decision of any kind replaced it: the actionable gate's last-wins
     // rule, so the badge cannot disagree with the gate. A decision the ticket
     // was filed with is replaced by the first decision in its thread.
-    const isLiveDecision = (kind: DecisionKind): boolean =>
-        agg.decisions[kind].latestId > 0 && agg.decisions[kind].latestId === agg.latestDecisionId;
+    const isLiveDecision = (kind: DecisionKind): boolean => liveDecision(agg, kind);
     const pendingFlag = (kind: DecisionKind): boolean =>
         ((agg.decisions[kind].pending && isLiveDecision(kind)) || (ticketDecision(t, kind) && agg.latestDecisionId === 0)) && live;
     const rejectedFlag = (kind: DecisionKind): boolean =>

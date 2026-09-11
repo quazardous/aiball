@@ -1143,7 +1143,7 @@ export interface ProjectStatsRich {
     closed_count: number;             // closed tickets (regardless of resolved)
     resolved_count: number;           // closed-and-resolved tickets
     pending_mod: number;              // tickets in moderation queue
-    pending_resolution: number;       // open tickets with a pending ticket_resolved proposal
+    pending_resolution: number;       // open, unsnoozed tickets whose live decision is a pending resolution
     resolved_pct: number;             // resolved / (closed) — 0..100, rounded to 1 decimal
 
     // Live tickets
@@ -1165,7 +1165,12 @@ export interface ProjectStatsRich {
     top_token_tickets: { id: number; title: string; token_usage: TokenTally }[];
 }
 
-export function getProjectStatsRich(project: string): ProjectStatsRich {
+/**
+ * `awaitingResolution` — the project's open tickets whose live decision is a
+ * pending resolution (#2372: `ticketsAwaitingResolution`, read from the inbox
+ * aggregate, which this module cannot import without closing an import cycle).
+ */
+export function getProjectStatsRich(project: string, awaitingResolution: ReadonlySet<number>): ProjectStatsRich {
     const db = getDb();
     const nowStr = nowIso();
     const nowMs = Date.now();
@@ -1203,12 +1208,8 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
 
     const closedById = new Map<number, boolean>();
     const resolvedById = new Map<number, boolean>();
-    const pendingResolvedById = new Set<number>();
     for (const ev of lifecycle) {
-        if (ev.status === "pending" && ev.kind === "ticket_resolved") {
-            pendingResolvedById.add(ev.ticket_id);
-            continue;
-        }
+        if (ev.status === "pending" && ev.kind === "ticket_resolved") continue;
         if (ev.status !== "approved") continue;
         if (ev.kind === "ticket_closed") closedById.set(ev.ticket_id, true);
         else if (ev.kind === "ticket_reopened") {
@@ -1235,7 +1236,7 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         }
         if (snoozed) continue;
         openCount++;
-        if (pendingResolvedById.has(t.id)) pendingResolutionCount++;
+        if (awaitingResolution.has(t.id)) pendingResolutionCount++;
         const ageMs = nowMs - new Date(t.createdAt).getTime();
         ageSumMs += ageMs;
         if (!oldestOpen || t.createdAt < oldestOpen.createdAt) oldestOpen = t;

@@ -205,6 +205,27 @@ export function getInboxAgg(project: string | undefined, nowMs: number = Date.no
 }
 
 /**
+ * #2370 — is this kind's latest decision the ticket's live one? Only while no
+ * newer decision of any kind replaced it: the actionable gate's last-wins rule.
+ */
+export function isLiveDecision(agg: InboxAgg, kind: DecisionKind): boolean {
+    return agg.decisions[kind].latestId > 0 && agg.decisions[kind].latestId === agg.latestDecisionId;
+}
+
+/**
+ * #2372 — the project's tickets whose live decision is a pending resolution,
+ * the ones the list badges "resolution proposed". The project stats count the
+ * open, awake ones among them (a close accepts a pending resolution anyway).
+ */
+export function ticketsAwaitingResolution(project: string): Set<number> {
+    const out = new Set<number>();
+    for (const [id, agg] of getInboxAgg(project)) {
+        if (agg.decisions.resolution.pending && isLiveDecision(agg, "resolution")) out.add(id);
+    }
+    return out;
+}
+
+/**
  * Drop the cached Agg for a project (rebuilt on next hit). The cross-project
  * `ALL` entry is always dropped too — a write to any project changes it.
  * Call from every message write chokepoint.

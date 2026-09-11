@@ -171,6 +171,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **The project stats count the resolutions agents propose today**: the
+  "pending resolution" counter only saw the old resolution format and stayed
+  low. It now counts the open tickets whose latest decision is a proposed
+  resolution, the ones the list badges.
 - **A replaced decision no longer lights the list's badge**: a proposed resolution
   nobody decided, replaced since by newer plans, kept "resolution proposed" on
   the ticket's row. The row's decision badges (pending and rejected) now follow

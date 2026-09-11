@@ -48,7 +48,7 @@ addTicketTokenUsage(2, { in: 50_000, out: 5_000, cacheW: 2_000, cacheR: 1_000_00
 addTicketTokenUsage(3, { in: 50_000, out: 0, cacheW: 3_000, cacheR: 80_000_000 });
 
 test("#466 top_token_tickets sorted by effort (matches UI), not by cost-equiv", () => {
-    const stats = getProjectStatsRich(PROJECT);
+    const stats = getProjectStatsRich(PROJECT, new Set());
     const top = stats.top_token_tickets;
     assert.equal(top.length, 3, "all 3 surfaced as top");
     // The HIGH-effort ticket must come FIRST — david's screenshot pathology.

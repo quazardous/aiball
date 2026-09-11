@@ -1,3 +1,4 @@
+import { ticketsAwaitingResolution } from "./db/inbox-agg.js";
 import { Router, type Request, type Response } from "express";
 import {
     getMessage,
@@ -321,7 +322,7 @@ api.get("/projects/:name/stats", (req, res) => {
  * for a dashboard view.
  */
 api.get("/projects/:name/stats-rich", (req, res) => {
-    res.json(getProjectStatsRich(req.params.name));
+    res.json(getProjectStatsRich(req.params.name, ticketsAwaitingResolution(req.params.name)));
 });
 
 /**
