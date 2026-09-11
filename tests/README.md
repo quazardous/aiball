@@ -147,11 +147,35 @@ simulator shows them **together**, on a board you can watch and moderate.
 | Command | What |
 |---|---|
 | `npm run sim -- up [cohort.yaml]` | build and start the board, provision the cohort, print the logins |
+| `npm run sim -- up --from-live --as <agent>[,<agent>] [--moderator <human>]` | start the board on a sanitized copy of the live board, playing those real agents (see below) |
 | `npm run sim -- mcp <agent> <tool> '<json>'` | call an MCP tool as that agent |
+| `npm run sim -- wake <agent>` | what the loop does when that agent goes idle, now (as the scenario step) |
 | `npm run sim -- view [agent...]` | each agent's seat: every open ticket's backlog tier, whether it can act or claim, what gates it, the last actor, and what its **next wake** would say |
 | `npm run sim -- run [--keep] [scenario.yaml...]` | play scenarios (default: every `tests/sim/scenarios/*.yaml`), each on a fresh board unless `--keep`; exits 1 if a gesture fails or an expectation does not hold |
 | `npm run sim -- pending` / `approve <id>` / `reject <id>` | moderate from the terminal (or use the web UI) |
 | `npm run sim -- down` | stop the board and drop its database |
+
+The board listens on `127.0.0.1` only: its moderator password is known.
+
+### On a copy of the live board
+
+`up --from-live --as <agents>` answers "what would this agent's loop do on the
+real board, and what if…" without touching the real board:
+
+1. the live database (`$AIBALL_LIVE_HOME`, default `~/.local/share/aiball`) is
+   copied with SQLite's own backup, which is consistent while the daemon writes;
+2. the copy is wiped **on this host, before it reaches the container**: every
+   token (agents, sessions, nodes, signal keys, install), every password, the
+   node wiring and pairing requests, and every ticket payload
+   (`src/sim/sanitize.ts`; its test fails on any new column that looks secret
+   until it is wiped or classified there);
+3. the board starts on that copy, with a token for each agent named by `--as`
+   (seated in the project it owns) and the moderator's password set to
+   `simulator` (`--moderator`, default `david`).
+
+`view <agent>` then shows the seat that agent's loop has live, and every gesture
+(`mcp`, `wake`, moderation, a scenario with `run --keep`) plays on the copy
+only. `down` drops it.
 
 The next wake is worked out like the loop does it: unread pings first, then the
 head of the agent's backlog (the first ticket not in cooldown), ended with the
@@ -191,7 +215,8 @@ are listed in `tests/sim/CASES.md`.
 `wake` does what the loop does when the agent goes idle: with unread pings it is
 an event wake (the events on the oldest one's ticket are marked seen, as the loop
 delivers them in one bundle); otherwise it names the backlog head and records
-that wake, which sinks the ticket for the cooldown until the thread moves again.
+that wake, which sinks the ticket for the cooldown until the thread moves again
+(only 5 minutes when the ticket's last action is a step).
 
 More steps and fields:
 

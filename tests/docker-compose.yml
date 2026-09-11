@@ -24,7 +24,9 @@ services:
     ports:
       # #982 — host port configurable to dodge collisions with other projects
       # (e.g. skybot-runic also publishes 17777). Override: AIBALL_TEST_PORT=… .
-      - "${AIBALL_TEST_PORT:-17777}:7777"
+      # Loopback only: the test daemon carries throwaway logins (and the board
+      # simulator can load a copy of real threads), never a thing for the LAN.
+      - "127.0.0.1:${AIBALL_TEST_PORT:-17777}:7777"
     healthcheck:
       # /api/health is a PUBLIC path (no auth) — good liveness probe.
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7777/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

@@ -4,6 +4,8 @@
  * moderator on the web UI.
  *
  *     npm run sim -- up [cohort.yaml]            start the container, provision the cohort
+ *     npm run sim -- up --from-live --as a,b     start it on a sanitized copy of the live board, playing real agents
+ *     npm run sim -- wake <agent>                what the loop does when the agent goes idle, now
  *     npm run sim -- mcp <agent> <tool> [json]   call an MCP tool as that agent
  *     npm run sim -- view [agent...]             each agent's seat: backlog, gates, next wake
  *     npm run sim -- run [--keep] [scenario...]  play scenarios (default: tests/sim/scenarios/*.yaml),
@@ -17,11 +19,14 @@
  * meets the live board nor `npm run test:e2e`.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
 import { formatView, nextWake, type ViewRow } from "../../src/sim/view.js";
+import { sanitizeCopy } from "../../src/sim/sanitize.js";
 import { matchSeat, parseDuration, parseScenario, pick, scenarioCohort, substitute, type Seat, type Step, type UnreadEvent } from "../../src/sim/scenario.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -69,17 +74,17 @@ async function api<T>(token: string, method: string, path: string, body?: unknow
     return JSON.parse(text) as T;
 }
 
-async function up(cohortArg: string | undefined): Promise<void> {
-    const cohort = relative(ROOT, resolve(cohortArg ?? join(HERE, "cohort.yaml")));
-    if (cohort.startsWith("..")) throw new Error("the cohort file must live inside the repository (the container mounts it)");
-    docker(["up", "-d", "--build", "daemon"]);
-    let healthy = false;
-    for (let i = 0; i < 60 && !healthy; i++) {
-        healthy = await fetch(`${BASE}/api/health`).then((r) => r.ok, () => false);
-        if (!healthy) await new Promise((r) => setTimeout(r, 1000));
+async function waitHealthy(): Promise<void> {
+    for (let i = 0; i < 60; i++) {
+        if (await fetch(`${BASE}/api/health`).then((r) => r.ok, () => false)) return;
+        await new Promise((r) => setTimeout(r, 1000));
     }
-    if (!healthy) throw new Error(`the sim daemon did not answer on ${BASE}`);
-    const out = docker(["exec", "-T", "daemon", "npx", "tsx", "tests/sim/provision.ts", cohort], true);
+    throw new Error(`the sim daemon did not answer on ${BASE}`);
+}
+
+/** Run provisioning in the container and keep the cohort it prints (tokens included). */
+function provision(args: string[]): void {
+    const out = docker(["exec", "-T", "daemon", "npx", "tsx", "tests/sim/provision.ts", ...args], true);
     const line = out.split("\n").find((l) => l.startsWith("SIM-COHORT:"));
     if (!line) throw new Error(`provisioning printed no cohort:\n${out}`);
     mkdirSync(dirname(STATE_FILE), { recursive: true });
@@ -88,6 +93,50 @@ async function up(cohortArg: string | undefined): Promise<void> {
     console.log(`simulated board up: ${BASE}`);
     console.log(`  moderator (web UI login): ${state.moderator.id} / ${state.moderator.password}`);
     for (const [id, a] of Object.entries(state.agents)) console.log(`  agent ${id}: ${a.role} of ${a.project}`);
+}
+
+async function up(cohortArg: string | undefined): Promise<void> {
+    const cohort = relative(ROOT, resolve(cohortArg ?? join(HERE, "cohort.yaml")));
+    if (cohort.startsWith("..")) throw new Error("the cohort file must live inside the repository (the container mounts it)");
+    docker(["up", "-d", "--build", "daemon"]);
+    await waitHealthy();
+    provision([cohort]);
+}
+
+/**
+ * #2345 — the simulated board on a copy of the live one. The live database is
+ * only read (SQLite's own backup, consistent under a daemon writing), the copy
+ * is wiped of every credential on this host BEFORE it reaches the container,
+ * and only the agents named by `--as` get a token. The live board is never
+ * touched: the copy lives in the simulator's own volume, served on loopback.
+ */
+async function upFromLive(agents: string[]): Promise<void> {
+    if (agents.length === 0) throw new Error("usage: sim up --from-live --as <agent>[,<agent>]");
+    const liveHome = process.env.AIBALL_LIVE_HOME ?? join(homedir(), ".local/share/aiball");
+    const liveDb = join(liveHome, "aiball.db");
+    if (!existsSync(liveDb)) throw new Error(`no live database at ${liveDb} (set AIBALL_LIVE_HOME)`);
+    const dir = mkdtempSync(join(tmpdir(), "aiball-sim-live-"));
+    const copy = join(dir, "aiball.db");
+    try {
+        const live = new Database(liveDb, { readonly: true });
+        await live.backup(copy);
+        live.close();
+        const db = new Database(copy);
+        const wiped = sanitizeCopy(db);
+        db.pragma("journal_mode = DELETE");
+        db.close();
+        console.log(`live copy wiped of its credentials: ${Object.entries(wiped).map(([t, n]) => `${t} ${n}`).join(", ")}`);
+        // A fresh volume, then the copy in it before the daemon first opens it.
+        if (existsSync(STATE_FILE)) down();
+        else docker(["down", "-v"]);
+        docker(["create", "--build", "daemon"]);
+        docker(["cp", copy, "daemon:/data/aiball.db"]);
+        docker(["up", "-d", "daemon"]);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+    await waitHealthy();
+    provision(["--from-live", "--as", agents.join(",")]);
 }
 
 function down(): void {
@@ -255,6 +304,24 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
     }
 }
 
+/**
+ * What the loop does when the agent goes idle: unread pings make an event wake
+ * (the oldest event with the others on its ticket, marked seen); otherwise it
+ * names its backlog head and records the wake, which starts that ticket's cooldown.
+ */
+async function wakeAgent(state: SimState, agent: string): Promise<string> {
+    const seat = await fetchSeat(state, agent);
+    const token = state.agents[agent]!.token;
+    if (seat.unreadPings > 0 && seat.unread.length > 0) {
+        const key = seat.unread[0]!.ticket_id ?? seat.unread[0]!.id;
+        const delivered = seat.unread.filter((e) => (e.ticket_id ?? e.id) === key);
+        for (const e of delivered) await api(token, "POST", "/api/mark-read", { consumer_id: agent, message_id: e.id });
+        return ` by events on #${key}: ${delivered.map((e) => e.kind).join(", ")}`;
+    }
+    if (seat.head) await api(token, "POST", "/api/backlog-wake", { consumer_id: agent, ticket_id: seat.head.id });
+    return `: ${nextWake(0, seat.head)}`;
+}
+
 function describe(step: Step): string {
     switch (step.kind) {
         case "mcp": return `${step.agent} → ${step.tool} ${JSON.stringify(step.args)}${step.refused ? ` (must be refused: ${step.refused})` : ""}`;
@@ -327,22 +394,7 @@ async function play(file: string): Promise<number> {
                     }
                 }
             } else if (step.kind === "wake") {
-                // What the loop does when the agent goes idle: unread pings make an
-                // event wake; otherwise it names its backlog head and records the
-                // wake, which starts that ticket's cooldown.
-                const seat = await fetchSeat(state, step.agent);
-                const token = state.agents[step.agent]!.token;
-                if (seat.unreadPings > 0 && seat.unread.length > 0) {
-                    // An event wake: the loop delivers the oldest event with the others on
-                    // its ticket (one bundle) and marks them seen.
-                    const key = seat.unread[0]!.ticket_id ?? seat.unread[0]!.id;
-                    const delivered = seat.unread.filter((e) => (e.ticket_id ?? e.id) === key);
-                    for (const e of delivered) await api(token, "POST", "/api/mark-read", { consumer_id: step.agent, message_id: e.id });
-                    console.log(`${n} ✓ ${step.agent} woken by events on #${key}: ${delivered.map((e) => e.kind).join(", ")}`);
-                } else {
-                    if (seat.head) await api(token, "POST", "/api/backlog-wake", { consumer_id: step.agent, ticket_id: seat.head.id });
-                    console.log(`${n} ✓ ${step.agent} woken: ${nextWake(0, seat.head)}`);
-                }
+                console.log(`${n} ✓ ${step.agent} woken${await wakeAgent(state, step.agent)}`);
             } else if (step.kind === "sleep") {
                 console.log(`${n} … sleeping ${step.seconds}s`);
                 await new Promise((r) => setTimeout(r, step.seconds * 1000));
@@ -389,7 +441,17 @@ async function run(args: string[]): Promise<void> {
 const [command, ...rest] = process.argv.slice(2);
 try {
     switch (command) {
-        case "up": await up(rest[0]); break;
+        case "up": {
+            const asIndex = rest.indexOf("--as");
+            if (rest.includes("--from-live")) await upFromLive(asIndex >= 0 ? (rest[asIndex + 1] ?? "").split(",").map((a) => a.trim()).filter(Boolean) : []);
+            else await up(rest[0]);
+            break;
+        }
+        case "wake": {
+            if (!rest[0]) die("usage: sim wake <agent>", 2);
+            console.log(`${rest[0]} woken${await wakeAgent(loadState(), rest[0])}`);
+            break;
+        }
         case "down": down(); break;
         case "mcp": await mcp(rest[0], rest[1], rest[2]); break;
         case "view": await view(rest); break;
@@ -402,7 +464,7 @@ try {
             break;
         }
         default:
-            die("usage: sim up [cohort.yaml] | mcp <agent> <tool> [json] | view [agent...] | run [--keep] [scenario...] | pending | approve <id> | reject <id> | down", 2);
+            die("usage: sim up [cohort.yaml] | up --from-live --as <agent>[,<agent>] | wake <agent> | mcp <agent> <tool> [json] | view [agent...] | run [--keep] [scenario...] | pending | approve <id> | reject <id> | down", 2);
     }
 } catch (e) {
     die((e as Error).message);
