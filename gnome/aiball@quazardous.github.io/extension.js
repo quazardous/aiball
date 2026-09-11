@@ -24,6 +24,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {defaultSocketPath, getJson} from './aiballClient.js';
 import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './daemonActions.js';
 import {TAILNET, aiballTailnetUrl, tailnetMenu, tailscaleConnection, tailscaleProvider} from './tailscaleState.js';
+import {HEALTH_PATH, ICON_LOCAL, NODE_PATH, actionLabel, daemonView, presentation} from './nodeState.js';
 
 /*
  * Two cadences, because the two reads do not cost the same thing.
@@ -41,6 +42,10 @@ const HEALTH_INTERVAL_S = 5;
 const COUNTERS_INTERVAL_S = 30;
 const BOARD_PORT = 7777;
 const BOARD_URL = `http://127.0.0.1:${BOARD_PORT}/`;
+// A proxy node relays reads to a remote that may hang rather than refuse: without
+// a deadline, every tick would leave one more request waiting inside the shell.
+const READ_TIMEOUT_MS = 2000;
+const COUNTERS_TIMEOUT_MS = 5000;
 
 const AiballIndicator = GObject.registerClass(
 class AiballIndicator extends PanelMenu.Button {
@@ -52,14 +57,17 @@ class AiballIndicator extends PanelMenu.Button {
         this._healthSource = 0;
         this._countersSource = 0;
         this._up = null;
+        this._boardUrl = BOARD_URL;
+        this._presentation = null;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
         // The tray's logo, redrawn in one colour. The `-symbolic` file name
         // makes the shell recolour it with the panel theme, like any system icon.
         this._icon = new St.Icon({
-            gicon: Gio.icon_new_for_string(`${extension.path}/icons/aiball-symbolic.svg`),
+            gicon: Gio.icon_new_for_string(`${extension.path}/icons/${ICON_LOCAL}`),
             style_class: 'system-status-icon',
         });
+        this._iconFile = ICON_LOCAL;
         this._label = new St.Label({
             text: '',
             y_align: 2 /* Clutter.ActorAlign.CENTER */,
@@ -78,7 +86,8 @@ class AiballIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._addAction('Open the board', () => {
-            Gio.AppInfo.launch_default_for_uri(BOARD_URL, null);
+            // On a proxy node this is the REMOTE board: the relay serves a landing page.
+            Gio.AppInfo.launch_default_for_uri(this._boardUrl, null);
         });
         // #2251 — start / stop / restart / reload, each greyed out when it cannot
         // apply. Buttons, not supervision: nothing here acts on its own.
@@ -225,62 +234,89 @@ class AiballIndicator extends PanelMenu.Button {
         this._tailnetExpose.setSensitive(state.canExpose);
     }
 
-    async _refreshHealth() {
+    /** GET `path` on the socket, or null when it fails or outlasts `timeoutMs`. */
+    async _getJson(path, timeoutMs = READ_TIMEOUT_MS) {
+        const cancellable = new Gio.Cancellable();
+        const link = this._cancellable.connect(() => cancellable.cancel());
+        let fired = false;
+        const timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
+            fired = true;
+            cancellable.cancel();
+            return GLib.SOURCE_REMOVE;
+        });
         try {
-            const health = await getJson(this._socketPath, '/api/health', this._cancellable);
-            this._setUp(true, health.version);
+            return await getJson(this._socketPath, path, cancellable);
         } catch {
-            // A daemon that is down is the normal case, not an error: it is
-            // exactly what this indicator exists to show.
-            this._setUp(false, null);
+            return null;
+        } finally {
+            if (!fired) GLib.source_remove(timer);
+            this._cancellable.disconnect(link);
         }
+    }
+
+    async _refreshHealth() {
+        // Local first: /api/node is never relayed, while /api/health on a proxy
+        // node answers for the remote. A daemon that is down is the normal case,
+        // not an error: it is exactly what this indicator exists to show.
+        const node = await this._getJson(NODE_PATH);
+        const health = await this._getJson(HEALTH_PATH);
+        if (this._cancellable.is_cancelled()) return;
+        this._applyView(daemonView(node, health));
     }
 
     async _refreshCounters() {
-        try {
-            const projects = await getJson(
-                this._socketPath, '/api/projects?detailed=1', this._cancellable);
-            let pending = 0, actionable = 0, open = 0, loops = 0;
-            for (const p of projects) {
-                pending += p.pending_count ?? 0;
-                actionable += p.actionable_count ?? 0;
-                open += p.open_count ?? 0;
-                if (p.running) loops += 1;
-            }
-            this._setCounts({pending, actionable, open, loops});
-        } catch {
+        const projects = await this._getJson('/api/projects?detailed=1', COUNTERS_TIMEOUT_MS);
+        if (this._cancellable.is_cancelled()) return;
+        if (!Array.isArray(projects)) {
             this._setCounts(null);
+            return;
         }
+        let pending = 0, actionable = 0, open = 0, loops = 0;
+        for (const p of projects) {
+            pending += p.pending_count ?? 0;
+            actionable += p.actionable_count ?? 0;
+            open += p.open_count ?? 0;
+            if (p.running) loops += 1;
+        }
+        this._setCounts({pending, actionable, open, loops});
     }
 
-    _setUp(up, version) {
-        this._up = up;
-        for (const {action, item} of this._actionItems)
-            item.setSensitive(isActionSensitive(action, up));
-        this._stateItem.label.text = up
-            ? `daemon up${version ? ` — ${version}` : ''}`
-            : 'daemon down';
-        // Same logo either way; down turns it red, so the brand stays and the
-        // state still reads at a glance.
-        if (up)
-            this._icon.remove_style_class_name('aiball-down');
-        else
-            this._icon.add_style_class_name('aiball-down');
-        if (!up) {
+    _applyView(view) {
+        const p = presentation(view, BOARD_URL);
+        const proxy = view.state.startsWith('proxy');
+        this._presentation = p;
+        this._up = p.localUp;
+        this._boardUrl = p.boardUrl;
+        for (const {action, item} of this._actionItems) {
+            item.label.text = actionLabel(action.label, proxy);
+            item.setSensitive(isActionSensitive(action, p.localUp));
+        }
+        this._stateItem.label.text = p.stateLine;
+        // The logo either way — with the uplink arrow on a proxy node — and a
+        // colour for trouble: red when the local daemon is down, orange when
+        // only a proxy node's remote is.
+        if (this._iconFile !== p.icon) {
+            this._iconFile = p.icon;
+            this._icon.gicon = Gio.icon_new_for_string(`${this._extension.path}/icons/${p.icon}`);
+        }
+        for (const cls of ['aiball-down', 'aiball-upstream-down'])
+            this._icon.remove_style_class_name(cls);
+        if (p.styleClass) this._icon.add_style_class_name(p.styleClass);
+        if (!p.showCounts) {
             this._label.visible = false;
             this._countsItem.visible = false;
         }
     }
 
     _setCounts(counts) {
-        if (!counts) {
+        if (!counts || this._presentation?.showCounts === false) {
             this._countsItem.visible = false;
             this._label.visible = false;
             return;
         }
         this._countsItem.visible = true;
         this._countsItem.label.text =
-            `${counts.pending} to moderate · ${counts.actionable} actionable · ${counts.open} open`
+            `${this._presentation?.countsPrefix ?? ''}${counts.pending} to moderate · ${counts.actionable} actionable · ${counts.open} open`
             + (counts.loops > 0 ? ` · ${counts.loops} loop${counts.loops > 1 ? 's' : ''}` : '');
         // The bar carries ONE number, and it is the one that wants YOU: tickets
         // waiting on a human decision. Everything else is in the menu, a click

@@ -39,7 +39,7 @@ test("it lands the whole extension, not just a manifest", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "stylesheet.css", "icons/aiball-symbolic.svg"]) {
+    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "nodeState.js", "stylesheet.css", "icons/aiball-symbolic.svg", "icons/aiball-proxy-symbolic.svg"]) {
         assert.ok(existsSync(join(dir, f)), `${f} is missing — the shell needs all of them`);
     }
 });
@@ -83,7 +83,7 @@ test("the extension holds no token, and asks for none", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js"]) {
+    for (const f of ["extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "nodeState.js"]) {
         const src = stripComments(readFileSync(join(dir, f), "utf8"));
         assert.doesNotMatch(src, /Authorization|Bearer|aiball_token|AIBALL_TOKEN/i, `${f}`);
     }
@@ -100,6 +100,18 @@ const actions = await import(pathToFileURL(ACTIONS_FILE).href) as {
     AUTOSTART: { query: string[]; enable: string[]; disable: string[] };
     isActionSensitive: (a: Action, up: boolean | null) => boolean;
     autostartFromIsEnabled: (stdout: string) => boolean;
+};
+
+// #2290 — what the indicator says about the daemon, proxy nodes included.
+const NODE_FILE = join(import.meta.dirname, "..", "..", "gnome", GNOME_EXTENSION_UUID, "nodeState.js");
+type View = { state: string; upstream?: string | null; version?: string | null };
+type Look = { icon: string; styleClass: string | null; localUp: boolean; showCounts: boolean; countsPrefix: string; stateLine: string; boardUrl: string };
+const node = await import(pathToFileURL(NODE_FILE).href) as {
+    ICON_LOCAL: string;
+    ICON_PROXY: string;
+    daemonView: (node: unknown, health: unknown) => View;
+    presentation: (view: View, localBoardUrl: string) => Look;
+    actionLabel: (label: string, proxy: boolean) => string;
 };
 
 test("the actions module stays loadable outside the shell (no gi:// or resource:// import)", () => {
@@ -134,12 +146,17 @@ test("the Start at login switch is on only for \`enabled\`", () => {
     }
 });
 
-test("the top-bar icon is the logo file, named -symbolic so the shell recolours it", () => {
+test("the top-bar icons are logo files, named -symbolic so the shell recolours them", () => {
     const ext = stripComments(readFileSync(join(ACTIONS_FILE, "..", "extension.js"), "utf8"));
-    assert.match(ext, /icons\/aiball-symbolic\.svg/);
+    assert.match(ext, /\/icons\/\$\{/, "loaded from the extension's own icons directory");
     assert.doesNotMatch(ext, /view-list-symbolic|action-unavailable-symbolic/, "the generic theme icons are gone");
-    const svg = readFileSync(join(ACTIONS_FILE, "..", "icons", "aiball-symbolic.svg"), "utf8");
-    assert.match(svg, /<svg[^>]*viewBox="0 0 16 16"/, "drawn on the 16 px grid of a panel icon");
+    assert.equal(node.ICON_LOCAL, "aiball-symbolic.svg");
+    for (const file of [node.ICON_LOCAL, node.ICON_PROXY]) {
+        assert.match(file, /-symbolic\.svg$/);
+        const svg = readFileSync(join(ACTIONS_FILE, "..", "icons", file), "utf8");
+        assert.match(svg, /<svg[^>]*viewBox="0 0 16 16"/, `${file} is drawn on the 16 px grid of a panel icon`);
+        assert.doesNotMatch(stripComments(svg.replace(/<!--[\s\S]*?-->/g, "")), /<mask|<image/, `${file}: the shell recolours every fill, a mask would render as a solid block`);
+    }
 });
 
 // #2251 — the tailnet section, pinned against the shapes tailscale really prints.
@@ -213,6 +230,53 @@ test("enabling appends the uuid to enabled-extensions once", () => {
     assert.equal(enabledExtensionsWith("@as []\n", "a@b"), "['a@b']");
     assert.equal(enabledExtensionsWith("['x@y', 'z@w']\n", "a@b"), "['x@y', 'z@w', 'a@b']");
     assert.equal(enabledExtensionsWith("['x@y', 'a@b']", "a@b"), null);
+});
+
+test("the node module stays loadable outside the shell (no gi:// or resource:// import)", () => {
+    assert.doesNotMatch(stripComments(readFileSync(NODE_FILE, "utf8")), /gi:\/\/|resource:\/\//);
+});
+
+test("the daemon view reads /api/node first: on a proxy node, relayed health is the remote's", () => {
+    assert.deepEqual(node.daemonView(null, null), { state: "down", upstream: null, version: null });
+    assert.equal(node.daemonView(null, { ok: true, version: "0.38.0" }).state, "up", "a daemon without /api/node falls back to health");
+    assert.deepEqual(
+        node.daemonView({ ok: true, proxy: false, upstream: null }, { ok: true, version: "0.39.0" }),
+        { state: "up", upstream: null, version: "0.39.0" },
+    );
+    assert.deepEqual(
+        node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777" }, { ok: true, version: "0.39.0" }),
+        { state: "proxy-up", upstream: "https://a:7777", version: "0.39.0" },
+    );
+    assert.equal(
+        node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777" }, null).state,
+        "proxy-remote-down",
+        "the relay is up even when the remote does not answer",
+    );
+});
+
+test("each state has its icon, colour, board link and counters", () => {
+    const local = "http://127.0.0.1:7777/";
+    const pick = (l: Look) => [l.icon, l.styleClass, l.localUp, l.showCounts, l.boardUrl];
+    assert.deepEqual(pick(node.presentation({ state: "down" }, local)), [node.ICON_LOCAL, "aiball-down", false, false, local]);
+    assert.deepEqual(pick(node.presentation({ state: "up", version: "0.39.0" }, local)), [node.ICON_LOCAL, null, true, true, local]);
+    const proxyUp = node.presentation({ state: "proxy-up", upstream: "https://a:7777", version: "0.39.0" }, local);
+    assert.deepEqual(pick(proxyUp), [node.ICON_PROXY, null, true, true, "https://a:7777/"]);
+    assert.match(proxyUp.countsPrefix, /remote/, "the counters are the remote board's, and say so");
+    assert.match(proxyUp.stateLine, /https:\/\/a:7777/);
+    const remoteDown = node.presentation({ state: "proxy-remote-down", upstream: "https://a:7777" }, local);
+    assert.deepEqual(pick(remoteDown), [node.ICON_PROXY, "aiball-upstream-down", true, false, "https://a:7777/"]);
+    assert.match(remoteDown.stateLine, /unreachable/);
+});
+
+test("on a proxy node the actions say they act on the relay", () => {
+    assert.equal(node.actionLabel("Stop the daemon — disconnects every loop", true), "Stop the relay — disconnects every loop");
+    assert.equal(node.actionLabel("Restart the daemon", false), "Restart the daemon");
+});
+
+test("the stylesheet colours both trouble states", () => {
+    const css = readFileSync(join(ACTIONS_FILE, "..", "stylesheet.css"), "utf8");
+    assert.match(css, /\.aiball-down\s*\{[^}]*color/);
+    assert.match(css, /\.aiball-upstream-down\s*\{[^}]*color/);
 });
 
 after(() => {

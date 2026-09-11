@@ -77,6 +77,24 @@ There is deliberately no entry to take the tailnet down: `aiball providers
 down` runs `tailscale serve reset`, which wipes the machine's whole serve
 configuration, not only aiball's. That stays a command-line gesture.
 
+## On a proxy node
+
+On a machine where aiball runs as a proxy node — a local relay to a remote
+aiball — `/api/health` answers for the remote. So the extension reads
+`/api/node` first, which the local daemon always answers itself, the way the
+Windows tray does:
+
+- **the relay is down** → the logo in red, as on any machine;
+- **the relay is up and the remote answers** → the logo with an upward arrow,
+  in the panel's colour; the counters are the remote board's, and say so;
+- **the relay is up but the remote does not answer** → the same icon in orange,
+  and no counters.
+
+The menu names the upstream, *Open the board* opens the remote board (the relay
+only serves a landing page), and start / stop / restart say they act on the
+relay. Every read has a deadline of a few seconds, so a remote that hangs
+cannot pile requests up inside the shell.
+
 ## No token lives in it
 
 The extension talks to the **Unix socket**, never the HTTP port. That is a

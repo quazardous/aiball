@@ -49,6 +49,10 @@ dates are YYYY-MM-DD.
   `aiball init gnome-extension --enable` installs and enables it in one go.
 - `aiball providers status --json` prints the configured providers and the
   live serve status as JSON.
+- **The GNOME indicator understands proxy nodes**: it tells the local relay
+  from the remote board it relays to — an arrow on the logo, orange when the
+  remote does not answer instead of a false "daemon down" — labels the counters
+  as the remote's, and opens the remote board.
 - **Start a CTO agent in one command**: `claude-loop start --type cto`
   sets the agent's type before its session boots (it used to start as a coder
   until restarted), and `--init --deny-code` keeps it away from code. For an

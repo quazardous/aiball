@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- The aiball logo on a proxy node: the same sphere and equator band, with an
+       upward "uplink" arrow cut where the dish sits — the Windows tray marks a
+       proxy node with an upward arrow too. Holes only (even-odd), never a mask:
+       the shell recolours every fill of a symbolic icon, a mask included. -->
+  <path fill="#bebebe" fill-rule="evenodd"
+        d="M1.072 7 A7 7 0 0 1 14.928 7 Z
+           M8 2.6 L10.8 5.4 L8.9 5.4 L8.9 7 L7.1 7 L7.1 5.4 L5.2 5.4 Z
+           M1.072 9 A7 7 0 0 0 14.928 9 Z"/>
+</svg>

@@ -7,3 +7,8 @@
 .aiball-down {
     color: #e01b24;
 }
+
+/* Proxy node whose remote does not answer: the relay itself is up, so orange, not red. */
+.aiball-upstream-down {
+    color: #ff7800;
+}
