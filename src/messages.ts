@@ -77,6 +77,33 @@ export function summaryOverBudget(length: number, max: number): string {
         + "Nothing was posted: resend with a shorter summary_until.";
 }
 
+/**
+ * #2275 — an agent's comment must say what it does to the ticket: carry a
+ * decision (`then`), or state that it concludes nothing (`comment_only: true`).
+ * A plain status update used to leave tickets that nobody held: the agent spoke
+ * last, so the ticket left its backlog, and nothing was proposed, so the human had
+ * nothing to decide.
+ *
+ * Judged on the AUTHENTICATED caller, never on the body's `by_agent`: the UI
+ * posts without one, and a body can name anyone. Humans are exempt. Server-side
+ * writes (the upstream watcher…) call `submitMessage` directly and never come
+ * here. Returns the refusal, or null when the comment may go through.
+ */
+export function commentWithoutDecisionRefusal(
+    msg: NewMessage,
+    rawBody: unknown,
+    caller: string,
+): string | null {
+    if (msg.kind !== "comment_added" || msg.decision_kind) return null;
+    if ((rawBody as { comment_only?: unknown } | null)?.comment_only === true) return null;
+    if (isHuman(caller)) return null;
+    if (getConfig("tickets.require_then", msg.project) === false) return null;
+    // Traced like the summary budget: a refusal leaves nothing in the database.
+    console.error(`[comment-only] refused agent=${caller} project=${msg.project}`);
+    return "a comment without then: needs comment_only: true. If it concludes something, attach the matching then: "
+        + "(plan / resolved / wontfix / escalate); if it only asks or informs, set comment_only: true. Nothing was posted.";
+}
+
 export function validateNewMessage(input: unknown): ValidationError | NewMessage {
     if (!input || typeof input !== "object") return { error: "body must be object" };
     const o = input as Record<string, unknown>;

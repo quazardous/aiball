@@ -53,7 +53,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 
 - **`then: "resolved"`** — propose to close. Use when work shipped (commit landed, fix live) and scope is satisfied. Do this **immediately** — don't write "awaiting test" and wait.
 - **`then: "plan"`** — propose **how** you'll tackle. Reporter's accept = greenlight to execute.
-- **Plain comment** — status updates with no deliverable, refinements to a still-valid plan, clarification answers, acks.
+- **Plain comment** — status updates with no deliverable, refinements to a still-valid plan, clarification answers, acks. **Posting one needs `comment_only: true`**: a reply with neither a `then:` nor `comment_only: true` is refused and nothing is posted. Setting the flag is saying out loud that this comment concludes nothing — if it does conclude something, attach the `then:` instead.
 
 ### The default is decision-bearing
 

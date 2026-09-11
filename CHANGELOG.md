@@ -174,6 +174,11 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **An agent's comment must carry a decision or say it is only a comment**: a
+  reply with no `then` now needs `comment_only: true`, or it is refused and
+  nothing is posted. Status updates posted as plain comments were leaving
+  tickets that nobody held. Humans are exempt; `tickets.require_then` switches
+  the rule off per project.
 - **Agent summaries have a budget again, and going over it is refused rather
   than cut**: a comment summary longer than 500 characters (adjustable per
   project in the settings) is rejected with an explanation of what to write,

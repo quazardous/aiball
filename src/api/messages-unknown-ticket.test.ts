@@ -41,7 +41,7 @@ const post = (body: string) => fetch(`${BASE}/api/messages`, {
     body,
 });
 const comment = (ticket_id: number) => JSON.stringify({
-    project: "p-2215", kind: "comment_added", ticket_id, body: "x", by_agent: "worker", summary_until: "state",
+    project: "p-2215", kind: "comment_added", ticket_id, body: "x", by_agent: "worker", summary_until: "state", comment_only: true,
 });
 const messageCount = () => db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM _messages`)[0].n;
 

@@ -101,6 +101,20 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "Longest summary_until an agent may write on a comment. A longer one is refused with an explanation and nothing is posted; it is never truncated. Humans are exempt. 0 = no limit.",
     },
+    // #2275 — a comment from an agent must carry a decision (`then`) or say it
+    // concludes nothing (`comment_only: true`). Protected, so an agent cannot
+    // switch off the rule it is held to; a moderator can, per project, for a
+    // loop that cannot be reloaded to learn the new flag.
+    {
+        key: "tickets.require_then",
+        scope: "global+project",
+        type: "boolean",
+        default: true,
+        protected: true,
+        label: "Agent comments need then: or comment_only",
+        description:
+            "When on, an agent's comment with no then: must set comment_only: true, or it is refused with an explanation and nothing is posted. Humans are exempt.",
+    },
 
     // #590 — autopoll FILE entries (migrated from autopoll/config.ts DEFAULTS).
     // `autopoll.enabled` stays special-cased in loadConfig (derived from file

@@ -85,6 +85,7 @@ export function registerTicketCommands(program: Command): void {
         .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
         .option("--parent <id>", "Parent message id (default: ticket id)")
         .option("--by <agent>", "Author override")
+        .option("--comment-only", "Say this comment concludes nothing — required for an agent, whose comments otherwise need a decision")
         .action(async (opts, cmd) => {
             const client = buildClient(gOpts(cmd));
             const ticketId = Number(opts.id);
@@ -111,6 +112,7 @@ export function registerTicketCommands(program: Command): void {
                 by_agent: opts.by ?? client.agentId,
                 ticket_id: ticketId,
                 parent_id: parent,
+                ...(opts.commentOnly ? { comment_only: true } : {}),
             });
             out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "comment"));
         });

@@ -47,7 +47,7 @@ import {
     type Priority,
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
-import { isDecisionEventKind, submitMessage, validateNewMessage } from "../messages.js";
+import { isDecisionEventKind, submitMessage, commentWithoutDecisionRefusal, validateNewMessage } from "../messages.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
@@ -106,6 +106,9 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     // every close on a ticket the moderator didn't open returned 403. Same
     // pattern as api/tickets.ts:assign which has always done `consumerOf(req)`.
     if (!v.by_agent) v.by_agent = consumerOf(req);
+    // #2275 — an agent's comment carries a decision or says it is only a comment.
+    const noDecision = commentWithoutDecisionRefusal(v, req.body, consumerOf(req));
+    if (noDecision) return badRequest(res, noDecision);
     try {
         const msg = submitMessage(v);
         applyPlatformTag(msg, req);
