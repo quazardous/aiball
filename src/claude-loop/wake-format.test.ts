@@ -692,3 +692,27 @@ test("#1991 a loop with no single project in scope gets no marker", async () => 
     const res = await buildContextPhrase(foreignProjectHead("comment_added"), null, PINGS_YAML);
     assert.doesNotMatch(res.phrase, /\[aiball\]/);
 });
+
+// #2344 — a bundle whose oldest event is the ticket's creation printed the
+// "new ticket" branch AND the bundle: `new ticket #N: TITLE#N: TITLE — 2 updates:`.
+// The five head branches are exclusive; the bundle already carries the creation
+// as its first line.
+test("#2344 a bundle that opens on the ticket's creation renders once, not glued to a new-ticket header", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 920, kind: "ticket_created", ticket_id: null, title: "shared ticket", by_agent: "david" },
+                    { id: 701, kind: "comment_added", ticket_id: 920, hashid: "ddd444", body: "a first comment", by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "shared ticket", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /#920: shared ticket — 2 updates:/);
+    assert.doesNotMatch(res.phrase, /new ticket #920/, res.phrase);
+    assert.equal((res.phrase.match(/#920: shared ticket/g) ?? []).length, 1, res.phrase);
+});

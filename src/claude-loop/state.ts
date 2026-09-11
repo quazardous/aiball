@@ -2566,8 +2566,9 @@ export async function buildContextPhrase(
             head_title: head?.title ?? "",
             // head_kind fires only for the ticket_created case so the
             // ticket-led template branch doesn't double-fire when the head
-            // is a comment or a lifecycle event.
-            head_kind: head?.kind === "new ticket" && !headCommentHashid && !headLifecycleVerb ? head.kind : "",
+            // is a comment or a lifecycle event — or, #2344, when the head
+            // opens a same-ticket bundle, whose first line already says it.
+            head_kind: head?.kind === "new ticket" && !headCommentHashid && !headLifecycleVerb && !headBundle ? head.kind : "",
             // head_lifecycle = the verb (closed / resolved / reopened)
             // when the FIFO head is a lifecycle event; "" otherwise.
             head_lifecycle: headLifecycleVerb,
