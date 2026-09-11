@@ -149,6 +149,7 @@ simulator shows them **together**, on a board you can watch and moderate.
 | `npm run sim -- up [cohort.yaml]` | build and start the board, provision the cohort, print the logins |
 | `npm run sim -- mcp <agent> <tool> '<json>'` | call an MCP tool as that agent |
 | `npm run sim -- view [agent...]` | each agent's seat: every open ticket's backlog tier, whether it can act or claim, what gates it, the last actor, and what its **next wake** would say |
+| `npm run sim -- run [--keep] [scenario.yaml...]` | play scenarios (default: every `tests/sim/scenarios/*.yaml`), each on a fresh board unless `--keep`; exits 1 if a gesture fails or an expectation does not hold |
 | `npm run sim -- pending` / `approve <id>` / `reject <id>` | moderate from the terminal (or use the web UI) |
 | `npm run sim -- down` | stop the board and drop its database |
 
@@ -156,3 +157,34 @@ The next wake is worked out like the loop does it: unread pings first, then the
 head of the agent's backlog (the first ticket not in cooldown), ended with the
 loop's own wording for that tier. `src/sim/view.test.ts` fails if that wording
 drifts from `src/claude-loop/state.ts`.
+
+### Scenarios
+
+A scenario (`tests/sim/scenarios/*.yaml`) is a list of steps:
+
+```yaml
+name: a sole participant keeps its ticket after a handback
+steps:
+  - alpha-lead: ticket_new                 # an agent calls an MCP tool
+    args: { title: "…" }
+    save: { ticket: id }                   # $ticket = the result's `id`
+  - moderator: approve $ticket              # approve | reject | accept | refuse | comment
+  - alpha-helper: ticket_reply
+    args: { target_id: $ticket, body: "…", summary_until: "…", handback: false }
+    refused: claim it first                 # the call must fail with this in its error
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, act: true, wake: triage }
+  - view: [alpha-lead]
+  - wake: alpha-lead                        # the loop wakes the agent now
+  - pause: look at the web UI               # waits for Enter in a terminal
+```
+
+`expect` checks any of `backlog` (hot, actionable, follow-up, waiting, blocked,
+none), `act`, `claim`, `gated`, `last_actor` and `wake` (triage, followup,
+waiting, blocked, event for unread pings first, none) for one ticket. A gesture
+that fails stops the scenario; an expectation that does not hold is reported and
+the scenario goes on.
+
+`wake` does what the loop does when the agent goes idle: with unread pings it is
+an event wake; otherwise it names the backlog head and records that wake, which
+sinks the ticket for the cooldown until the thread moves again.

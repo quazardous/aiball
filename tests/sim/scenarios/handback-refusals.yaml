@@ -1,0 +1,21 @@
+name: a reply must say whether it hands the ticket back, and cannot keep what it does not hold
+# Every refusal happens before anything is posted: the thread still ends on the
+# lead's ticket, untouched.
+steps:
+  - alpha-lead: ticket_new
+    args:
+      title: Handback refusals
+      body: A ticket another agent tries to answer the wrong ways.
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-helper: ticket_reply
+    args: { target_id: $ticket, body: A reply with no then and no handback., summary_until: s }
+    refused: needs one, or handback
+  - alpha-helper: ticket_reply
+    args: { target_id: $ticket, body: Keeping a ticket it does not hold., summary_until: s, handback: false }
+    refused: claim it first
+  - alpha-helper: ticket_reply
+    args: { target_id: $ticket, body: A plan that claims to keep the hand., summary_until: s, then: plan, handback: false }
+    refused: "contradicts then: plan"
+  - expect:
+      alpha-lead: { ticket: $ticket, last_actor: alpha-lead }

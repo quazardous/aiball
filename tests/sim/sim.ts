@@ -6,6 +6,7 @@
  *     npm run sim -- up [cohort.yaml]            start the container, provision the cohort
  *     npm run sim -- mcp <agent> <tool> [json]   call an MCP tool as that agent
  *     npm run sim -- view [agent...]             each agent's seat: backlog, gates, next wake
+ *     npm run sim -- run [--keep] [scenario...]  play scenarios (default: tests/sim/scenarios/*.yaml)
  *     npm run sim -- pending                     what waits for the moderator
  *     npm run sim -- approve|reject <id>         moderate a pending ticket or comment
  *     npm run sim -- down                        stop the container and drop its database
@@ -15,16 +16,19 @@
  * meets the live board nor `npm run test:e2e`.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { formatView, type ViewRow } from "../../src/sim/view.js";
+import { formatView, nextWake, type ViewRow } from "../../src/sim/view.js";
+import { matchSeat, parseScenario, pick, substitute, type Seat, type Step } from "../../src/sim/scenario.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
 const PORT = process.env.AIBALL_SIM_PORT ?? "17780";
 const BASE = `http://127.0.0.1:${PORT}`;
 const STATE_FILE = join(HERE, ".state", "cohort.json");
+const SCENARIOS = join(HERE, "scenarios");
 const COMPOSE = ["compose", "-p", "aiball-sim", "-f", join(ROOT, "tests/docker-compose.yml")];
 
 interface SimState {
@@ -44,12 +48,12 @@ function docker(args: string[], capture = false): string {
         return execFileSync("docker", [...COMPOSE, ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
     }
     const r = spawnSync("docker", [...COMPOSE, ...args], { env, stdio: "inherit" });
-    if (r.status !== 0) die(`docker compose ${args[0]} failed`);
+    if (r.status !== 0) throw new Error(`docker compose ${args[0]} failed`);
     return "";
 }
 
 function loadState(): SimState {
-    if (!existsSync(STATE_FILE)) die("the simulator is not up: run `npm run sim -- up` first");
+    if (!existsSync(STATE_FILE)) throw new Error("the simulator is not up: run `npm run sim -- up` first");
     return JSON.parse(readFileSync(STATE_FILE, "utf8")) as SimState;
 }
 
@@ -60,23 +64,23 @@ async function api<T>(token: string, method: string, path: string, body?: unknow
         body: body ? JSON.stringify(body) : undefined,
     });
     const text = await r.text();
-    if (!r.ok) die(`${method} ${path} → ${r.status}: ${text}`);
+    if (!r.ok) throw new Error(`${method} ${path} → ${r.status}: ${text}`);
     return JSON.parse(text) as T;
 }
 
 async function up(cohortArg: string | undefined): Promise<void> {
     const cohort = relative(ROOT, resolve(cohortArg ?? join(HERE, "cohort.yaml")));
-    if (cohort.startsWith("..")) die("the cohort file must live inside the repository (the container mounts it)");
+    if (cohort.startsWith("..")) throw new Error("the cohort file must live inside the repository (the container mounts it)");
     docker(["up", "-d", "--build", "daemon"]);
     let healthy = false;
     for (let i = 0; i < 60 && !healthy; i++) {
         healthy = await fetch(`${BASE}/api/health`).then((r) => r.ok, () => false);
         if (!healthy) await new Promise((r) => setTimeout(r, 1000));
     }
-    if (!healthy) die(`the sim daemon did not answer on ${BASE}`);
+    if (!healthy) throw new Error(`the sim daemon did not answer on ${BASE}`);
     const out = docker(["exec", "-T", "daemon", "npx", "tsx", "tests/sim/provision.ts", cohort], true);
     const line = out.split("\n").find((l) => l.startsWith("SIM-COHORT:"));
-    if (!line) die(`provisioning printed no cohort:\n${out}`);
+    if (!line) throw new Error(`provisioning printed no cohort:\n${out}`);
     mkdirSync(dirname(STATE_FILE), { recursive: true });
     writeFileSync(STATE_FILE, line.slice("SIM-COHORT:".length), { mode: 0o600 });
     const state = loadState();
@@ -142,27 +146,54 @@ async function mcp(agent: string | undefined, tool: string | undefined, json: st
     if (result.isError) process.exit(1);
 }
 
+/**
+ * One agent's gesture in its own process: the MCP client is bound to one
+ * identity when it is imported, so a scenario with several agents cannot share one.
+ */
+function mcpGesture(agent: string, tool: string, args: Record<string, unknown>): { ok: true; result: unknown } | { ok: false; error: string } {
+    const r = spawnSync(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url), "mcp", agent, tool, JSON.stringify(args)], {
+        encoding: "utf8",
+        env: process.env,
+    });
+    if (r.status !== 0) return { ok: false, error: (r.stderr || r.stdout || `exit ${r.status}`).trim() };
+    const out = r.stdout.trim();
+    try {
+        return { ok: true, result: JSON.parse(out) };
+    } catch {
+        return { ok: true, result: out };
+    }
+}
+
+/** What the agent sees: its project's open tickets, its unread pings, and the head its loop would pick. */
+async function fetchSeat(state: SimState, agent: string): Promise<Seat> {
+    const seat = state.agents[agent];
+    if (!seat) throw new Error(`no agent ${agent} in the cohort`);
+    const project = encodeURIComponent(seat.project);
+    // Scoped to the agent's project, as its MCP tools and its loop are: unscoped,
+    // another project's ticket reads as actionable to an agent that never sees it.
+    const rows = await api<ViewRow[]>(seat.token, "GET", `/api/tickets?project=${project}&open=1&limit=500`);
+    const pings = await api<{ unread: number }>(seat.token, "GET", `/api/pings/count?consumer_id=${encodeURIComponent(agent)}`);
+    // The loop's own pick (src/claude-loop/state.ts): its project's backlog, the
+    // first row neither in cooldown nor actionable-but-not-claimable — a head the
+    // agent could not claim never gets a "Triage" wake.
+    const backlog = await api<(ViewRow & { backlog_cooled_until?: string | null })[]>(
+        seat.token, "GET", `/api/tickets?project=${project}&backlog=1&limit=500&cooldown_sec=3600`);
+    const head = backlog.find((r) => !r.backlog_cooled_until && !(r.actionable === true && r.claimable === false)) ?? null;
+    return { rows, unreadPings: pings.unread, head };
+}
+
 async function view(agents: string[]): Promise<void> {
     const state = loadState();
-    const ids = agents.length > 0 ? agents : Object.keys(state.agents);
-    for (const id of ids) {
-        const seat = state.agents[id] ?? die(`no agent ${id} in the cohort`);
-        // Scoped to the agent's project, as its MCP tools and its loop are: unscoped,
-        // another project's ticket reads as actionable to an agent that never sees it.
-        const open = await api<ViewRow[]>(seat.token, "GET", `/api/tickets?project=${encodeURIComponent(seat.project)}&open=1&limit=500`);
-        const pings = await api<{ unread: number }>(seat.token, "GET", `/api/pings/count?consumer_id=${encodeURIComponent(id)}`);
-        // The loop's own pick: its project's backlog, the first row not in cooldown.
-        const backlog = await api<(ViewRow & { backlog_cooled_until?: string | null })[]>(
-            seat.token, "GET", `/api/tickets?project=${encodeURIComponent(seat.project)}&backlog=1&limit=500&cooldown_sec=3600`);
-        const head = backlog.find((r) => !r.backlog_cooled_until) ?? null;
-        console.log(formatView(id, open, pings.unread, head));
+    for (const id of agents.length > 0 ? agents : Object.keys(state.agents)) {
+        const seat = await fetchSeat(state, id);
+        console.log(formatView(id, seat.rows, seat.unreadPings, seat.head));
         console.log("");
     }
 }
 
 async function pending(): Promise<void> {
     const state = loadState();
-    const rows = await api<{ id: number; kind: string; ticket_id: number | null; by_agent: string; title: string | null; body: string | null }[]>(
+    const rows = await api<{ id: number; kind: string; ticket_id: number | null; by_agent: string; title: string | null }[]>(
         state.moderator.token, "GET", "/api/messages?status=pending&summary=1");
     if (rows.length === 0) return void console.log("nothing waits for the moderator");
     for (const m of rows) {
@@ -171,21 +202,166 @@ async function pending(): Promise<void> {
     }
 }
 
-async function moderate(decision: "approve" | "reject", id: string | undefined): Promise<void> {
-    if (!id || !/^\d+$/.test(id)) die(`usage: sim ${decision} <id>`, 2);
+/** The moderator's gestures, through the same routes as the web UI. */
+async function moderatorGesture(state: SimState, action: string, target: unknown, body: string | null): Promise<string> {
+    const id = Number(target);
+    if (!Number.isInteger(id) || id <= 0) throw new Error(`moderator: ${action} needs a numeric id, got ${String(target)}`);
+    const token = state.moderator.token;
+    switch (action) {
+        case "approve":
+        case "reject": {
+            const m = await api<{ status: string }>(token, "POST", `/api/messages/${id}/${action}`);
+            return `${id} is ${m.status}`;
+        }
+        case "accept":
+        case "refuse": {
+            await api(token, "POST", `/api/messages/${id}/decide`, { status: action === "accept" ? "accepted" : "rejected" });
+            return `decision on ${id} ${action === "accept" ? "accepted" : "rejected"}`;
+        }
+        case "comment": {
+            const ticket = await api<{ project: string }>(token, "GET", `/api/messages/${id}`);
+            const m = await api<{ id: number }>(token, "POST", "/api/messages", {
+                // `by_agent` is what the route reads to exempt a human from summary_until.
+                project: ticket.project, kind: "comment_added", ticket_id: id, body, by_agent: state.moderator.id,
+            });
+            return `comment ${m.id} on #${id}`;
+        }
+        default:
+            throw new Error(`unknown moderator action ${action}`);
+    }
+}
+
+function describe(step: Step): string {
+    switch (step.kind) {
+        case "mcp": return `${step.agent} → ${step.tool} ${JSON.stringify(step.args)}${step.refused ? ` (must be refused: ${step.refused})` : ""}`;
+        case "moderator": return `moderator → ${step.action} ${String(step.target)}`;
+        case "view": return `view ${step.agents.join(", ")}`;
+        case "expect": return `expect ${Object.keys(step.seats).join(", ")}`;
+        case "wake": return `wake ${step.agent}`;
+        case "pause": return `pause: ${step.message}`;
+    }
+}
+
+/** Play one scenario on the current board. Returns how many checks failed. */
+async function play(file: string): Promise<number> {
     const state = loadState();
-    const m = await api<{ id: number; status: string }>(state.moderator.token, "POST", `/api/messages/${id}/${decision}`);
-    console.log(`${m.id} is ${m.status}`);
+    let scenario: ReturnType<typeof parseScenario>;
+    try {
+        scenario = parseScenario(readFileSync(file, "utf8"), Object.keys(state.agents));
+    } catch (e) {
+        // One unreadable file must not hide how the others play.
+        console.log(`\n▶ ${relative(ROOT, file)}\n  ✗ ${(e as Error).message}`);
+        return 1;
+    }
+    console.log(`\n▶ ${scenario.name}  (${relative(ROOT, file)})`);
+    const vars: Record<string, unknown> = {};
+    let failed = 0;
+    for (const [i, step] of scenario.steps.entries()) {
+        const n = `  ${String(i + 1).padStart(2)}.`;
+        try {
+            if (step.kind === "mcp") {
+                const args = substitute(step.args, vars);
+                const r = mcpGesture(step.agent, step.tool, args);
+                if (step.refused !== null) {
+                    if (r.ok) throw new Error(`${describe(step)}: accepted, but it had to be refused`);
+                    if (!r.error.includes(step.refused)) throw new Error(`${describe(step)}: refused, but not with "${step.refused}":\n${r.error}`);
+                    console.log(`${n} ✓ ${step.agent} → ${step.tool}: refused (${step.refused})`);
+                    continue;
+                }
+                if (!r.ok) throw new Error(`${describe(step)}: ${r.error}`);
+                for (const [name, path] of Object.entries(step.save)) {
+                    const value = pick(r.result, path);
+                    if (value === undefined) throw new Error(`${describe(step)}: the result has no ${path} to save as $${name}`);
+                    vars[name] = value;
+                }
+                const saved = Object.keys(step.save).map((k) => `$${k}=${String(vars[k])}`).join(" ");
+                console.log(`${n} ✓ ${step.agent} → ${step.tool}${saved ? `  ${saved}` : ""}`);
+            } else if (step.kind === "moderator") {
+                console.log(`${n} ✓ moderator: ${await moderatorGesture(state, step.action, substitute(step.target, vars), step.body)}`);
+            } else if (step.kind === "view") {
+                console.log(`${n} view`);
+                for (const agent of step.agents) {
+                    const seat = await fetchSeat(state, agent);
+                    console.log(formatView(agent, seat.rows, seat.unreadPings, seat.head).replace(/^/gm, "      "));
+                }
+            } else if (step.kind === "expect") {
+                for (const [agent, expectation] of Object.entries(step.seats)) {
+                    const e = substitute(expectation, vars);
+                    const misses = matchSeat(e, await fetchSeat(state, agent));
+                    if (misses.length === 0) {
+                        console.log(`${n} ✓ ${agent} on #${String(e.ticket)}`);
+                    } else {
+                        failed++;
+                        console.log(`${n} ✗ ${agent} on #${String(e.ticket)}: ${misses.join("; ")}`);
+                    }
+                }
+            } else if (step.kind === "wake") {
+                // What the loop does when the agent goes idle: unread pings make an
+                // event wake; otherwise it names its backlog head and records the
+                // wake, which starts that ticket's cooldown.
+                const seat = await fetchSeat(state, step.agent);
+                if (seat.unreadPings === 0 && seat.head) {
+                    await api(state.agents[step.agent]!.token, "POST", "/api/backlog-wake", { consumer_id: step.agent, ticket_id: seat.head.id });
+                }
+                console.log(`${n} ✓ ${step.agent} woken: ${nextWake(seat.unreadPings, seat.head)}`);
+            } else {
+                if (process.stdin.isTTY) {
+                    const rl = createInterface({ input: process.stdin, output: process.stdout });
+                    await rl.question(`${n} ⏸ ${step.message} — press Enter to go on `);
+                    rl.close();
+                } else {
+                    console.log(`${n} ⏸ ${step.message} (not a terminal: going on)`);
+                }
+            }
+        } catch (e) {
+            // A gesture that fails leaves the later steps nothing sound to stand on.
+            console.log(`${n} ✗ ${(e as Error).message}`);
+            console.log("      scenario stopped");
+            return failed + 1;
+        }
+    }
+    console.log(failed === 0 ? "  passed" : `  ${failed} check(s) failed`);
+    return failed;
+}
+
+async function run(args: string[]): Promise<void> {
+    const keep = args.includes("--keep");
+    const named = args.filter((a) => a !== "--keep");
+    const files = named.length > 0
+        ? named.map((f) => resolve(f))
+        : readdirSync(SCENARIOS).filter((f) => f.endsWith(".yaml")).sort().map((f) => join(SCENARIOS, f));
+    if (files.length === 0) throw new Error("no scenario to play");
+    let failed = 0;
+    for (const file of files) {
+        if (!keep) {
+            // Every scenario starts from an empty board, so none reads another's leftovers.
+            if (existsSync(STATE_FILE)) down();
+            await up(undefined);
+        }
+        failed += await play(file);
+    }
+    console.log(`\n${files.length} scenario(s), ${failed === 0 ? "all passed" : `${failed} failure(s)`} — the last board stays up on ${BASE}`);
+    if (failed > 0) process.exit(1);
 }
 
 const [command, ...rest] = process.argv.slice(2);
-switch (command) {
-    case "up": await up(rest[0]); break;
-    case "down": down(); break;
-    case "mcp": await mcp(rest[0], rest[1], rest[2]); break;
-    case "view": await view(rest); break;
-    case "pending": await pending(); break;
-    case "approve": await moderate("approve", rest[0]); break;
-    case "reject": await moderate("reject", rest[0]); break;
-    default: die("usage: sim up [cohort.yaml] | mcp <agent> <tool> [json] | view [agent...] | pending | approve <id> | reject <id> | down", 2);
+try {
+    switch (command) {
+        case "up": await up(rest[0]); break;
+        case "down": down(); break;
+        case "mcp": await mcp(rest[0], rest[1], rest[2]); break;
+        case "view": await view(rest); break;
+        case "run": await run(rest); break;
+        case "pending": await pending(); break;
+        case "approve":
+        case "reject": {
+            if (!rest[0]) die(`usage: sim ${command} <id>`, 2);
+            console.log(await moderatorGesture(loadState(), command, rest[0], null));
+            break;
+        }
+        default:
+            die("usage: sim up [cohort.yaml] | mcp <agent> <tool> [json] | view [agent...] | run [--keep] [scenario...] | pending | approve <id> | reject <id> | down", 2);
+    }
+} catch (e) {
+    die((e as Error).message);
 }

@@ -1,0 +1,39 @@
+name: a sole participant keeps its ticket after a handback
+# A lead files a ticket on its own project, holds it, and asks the moderator a
+# question with `handback: true`. As long as nobody else has spoken on the
+# thread, the ticket stays in the lead's backlog: a sole participant keeps it.
+steps:
+  - alpha-lead: ticket_new
+    args:
+      title: Sole participant then handback
+      body: The lead files a ticket and asks the moderator a question.
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args:
+      target_id: $ticket
+      body: Question for the moderator.
+      summary_until: Waiting for the moderator to answer.
+      handback: true
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, act: true, last_actor: alpha-lead, wake: triage }
+      alpha-helper: { ticket: $ticket, backlog: none, act: false, wake: none }
+  # The moderator answers. A human's activity never makes a ticket hot: the lead
+  # still has it as actionable, and the answer reaches it as an event wake.
+  - moderator: comment $ticket
+    body: Here is the answer.
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: actionable, act: true, last_actor: david, wake: event }
+  # Another agent chimes in: recent activity by someone else, not a human, is
+  # what makes the ticket hot in the lead's backlog.
+  - alpha-helper: ticket_reply
+    args:
+      target_id: $ticket
+      body: I saw something related on my side.
+      summary_until: The lead holds it; the helper added a pointer.
+      handback: true
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: hot, act: true, last_actor: alpha-helper }
+  - view: [alpha-lead, alpha-helper]

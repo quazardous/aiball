@@ -1,0 +1,25 @@
+name: a backlog wake sinks its ticket, and the agent's own step lifts the sink
+# The loop names a ticket in a backlog wake: that ticket sinks (it is not named
+# again for the cooldown) while the thread does not move. Any gesture on the
+# thread moves it, including the agent's own `then: continue`: the ticket can
+# be named again at the very next wake.
+steps:
+  - alpha-lead: ticket_new
+    args:
+      title: Sink then step
+      body: The lead's only ticket, named by a backlog wake.
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: none }
+  - alpha-lead: ticket_reply
+    args:
+      target_id: $ticket
+      body: A step done, more to come.
+      summary_until: One step done; the lead carries on.
+      then: continue
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: triage }

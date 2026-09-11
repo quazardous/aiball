@@ -1,0 +1,38 @@
+name: a step keeps the ticket, a plan waits for the moderator, an accepted plan hands it back
+# The moderator asks the lead to look into a ticket. The lead holds it and posts
+# a step (`then: continue`): the ticket stays with the lead. Then it proposes a
+# plan: the ticket is gated until the moderator decides. Accepting the plan is
+# the go signal: the ticket is the lead's to act on again.
+steps:
+  - alpha-lead: ticket_new
+    args:
+      title: Step then plan
+      body: A ticket the moderator asks the lead to work.
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - moderator: comment $ticket
+    body: Please look into it.
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args:
+      target_id: $ticket
+      body: First step done.
+      summary_until: First step done; the next one is in progress.
+      then: continue
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, gated: false, last_actor: alpha-lead }
+      alpha-helper: { ticket: $ticket, act: false }
+  - alpha-lead: ticket_reply
+    args:
+      target_id: $ticket
+      body: Here is how I will do the rest.
+      summary_until: Plan waiting for the moderator.
+      then: plan
+    save: { plan: id }
+  - expect:
+      alpha-lead: { ticket: $ticket, backlog: none, act: false, gated: true, wake: none }
+  - moderator: accept $plan
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, gated: false }
+  - view: [alpha-lead]
