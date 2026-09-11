@@ -1395,6 +1395,13 @@ export const api = {
             `/api/consumers/${encodeURIComponent(consumer_id)}/prompt`,
             { text },
         ),
+    /** #2333 — type a message into every live agent loop; with `hold`, then
+     *  hold each one indefinitely (NOT AFK ∞). One result per loop. */
+    messageAllLoops: (message: string, hold: boolean) =>
+        req<{ action: string; results: LoopHoldResult[] }>("POST", "/api/loops/message-all", { message, hold }),
+    /** #2333 — lift the hold on every live agent loop. */
+    releaseAllLoops: () =>
+        req<{ action: string; results: LoopHoldResult[] }>("POST", "/api/loops/release-all", {}),
     /** #398: operator-approved command launchers (declared in the global
      *  config `launchers:` list; the API only ever takes an id). */
     listLaunchers: () => req<Launcher[]>("GET", "/api/launchers"),
@@ -1498,4 +1505,14 @@ export interface NodeView {
      *  for an hour, then forgotten. Absent/null on a live node. */
     revoked_at?: string | null;
     revoked_by?: string | null;
+}
+
+/** #2333 — one loop's outcome in a message-all / release-all. */
+export interface LoopHoldResult {
+    consumer_id: string;
+    /** Set on a message: typed into the live session now, or queued until the loop reconnects. */
+    prompt?: "delivered" | "spooled";
+    /** Set when a hold was asked (armed) or released, or could not be. */
+    hold?: "armed" | "released" | "failed";
+    hold_error?: string;
 }

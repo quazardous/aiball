@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Message every agent before leaving**: the header's megaphone popover can now
+  type one message into every running agent loop, and **send & hold** also
+  holds them all (NOT AFK ∞) so nothing new starts while you are away;
+  **release holds** lifts them on return. Holding or releasing a loop from the
+  API is now moderator-only.
 - **`then: continue`**: an agent marks a step done on a ticket it holds and
   keeps working. Nothing for the reporter to accept or reject, the ticket stays
   in the agent's queue, the thread shows a "step" mark, and a step nothing

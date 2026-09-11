@@ -41,6 +41,8 @@ import { emitControl } from "../event-bus.js";
 import { isPresent, presenceRunning } from "../live-presence.js";
 import { canControlLoop } from "../loop-control.js";
 import { spoolPrompt, drainPrompts } from "../loop-prompts.js";
+import { pickHoldTargets, type LoopHoldResult } from "../loop-hold.js";
+import { sendAfkToLoop } from "./agents.js";
 import { badRequest, consumerOf, notFound, tokenKindOf } from "./_helpers.js";
 
 export const consumersRouter = Router();
@@ -101,13 +103,68 @@ consumersRouter.post("/consumers/:consumer_id/prompt", (req: Request, res: Respo
     if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
     if (!text) return badRequest(res, "text required");
+    const present = deliverLoopPrompt(target, text);
+    res.json({ consumer_id: target, action: "prompt", spooled: true, delivered: present });
+});
+
+/** #451 — spool a prompt for a loop, then flush the whole queue when the loop is
+ *  live. Returns whether it was delivered now (else it waits for the reconnect). */
+function deliverLoopPrompt(target: string, text: string): boolean {
     spoolPrompt(target, text);
     const present = isPresent(target);
     if (present) {
         // Live → flush the whole queue (this prompt + anything spooled earlier).
         for (const t of drainPrompts(target)) emitControl(target, { action: "prompt", text: t });
     }
-    res.json({ consumer_id: target, action: "prompt", spooled: true, delivered: present });
+    return present;
+}
+
+/** #2333 — the agent loops an all-loops control reaches: the live ones, or the ones named. */
+function holdTargets(requested: unknown): string[] {
+    const named = Array.isArray(requested) ? requested.filter((x): x is string => typeof x === "string") : null;
+    return pickHoldTargets(
+        listConsumers().map((c) => ({ consumer_id: c.consumer_id, kind: c.kind, present: presenceRunning(c.consumer_id) })),
+        named,
+    );
+}
+
+// #2333 — a message to every agent loop running on this aiball. It is typed into
+// each session right away (a control prompt does not go through the wake gates),
+// and with `hold: true` each loop is then held indefinitely (NOT AFK ∞), so no
+// auto-wake starts new work while the operator is away. Same privilege gate as
+// loop-stop and prompt. One line per loop in the daemon log and in the reply.
+consumersRouter.post("/loops/message-all", (req: Request, res: Response) => {
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    if (!message) return badRequest(res, "message required");
+    const hold = req.body?.hold === true;
+    const results: LoopHoldResult[] = holdTargets(req.body?.consumers).map((consumer_id) => {
+        const delivered = deliverLoopPrompt(consumer_id, message);
+        const result: LoopHoldResult = { consumer_id, prompt: delivered ? "delivered" : "spooled" };
+        if (hold) {
+            const held = sendAfkToLoop(consumer_id, "arm_inf");
+            result.hold = held.ok ? "armed" : "failed";
+            if (!held.ok) result.hold_error = held.error;
+        }
+        console.error(`[loops-message-all] ${consumer_id} prompt=${result.prompt}${hold ? ` hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}` : ""}`);
+        return result;
+    });
+    res.json({ action: hold ? "message-and-hold" : "message", results });
+});
+
+// #2333 — on return: lift the hold on every agent loop (or the ones named).
+consumersRouter.post("/loops/release-all", (req: Request, res: Response) => {
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    const results: LoopHoldResult[] = holdTargets(req.body?.consumers).map((consumer_id) => {
+        const released = sendAfkToLoop(consumer_id, "off");
+        const result: LoopHoldResult = { consumer_id, hold: released.ok ? "released" : "failed" };
+        if (!released.ok) result.hold_error = released.error;
+        console.error(`[loops-release-all] ${consumer_id} hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}`);
+        return result;
+    });
+    res.json({ action: "release", results });
 });
 
 consumersRouter.post("/consumers", (req: Request, res: Response) => {

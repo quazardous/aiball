@@ -32,7 +32,9 @@ import { homedir } from "node:os";
 import { MUX_CMD, tmuxName, loopSockPath } from "../claude-loop/state.js";
 import { sendEventOnce } from "../claude-loop/ipc-events.js";
 import { captureCursor, captureGeometry } from "../pane.js";
-import { getConsumer } from "../db.js";
+import { getConsumer, isHuman } from "../db.js";
+import { canControlLoop } from "../loop-control.js";
+import { consumerOf, tokenKindOf } from "./_helpers.js";
 import {
     getNodeSocketForConsumerIp,
     listConnectedNodeIds,
@@ -459,7 +461,56 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
 // Local-process only : the daemon emits on the local UDS ; no
 // node-relayed pathway for now.
 // ---------------------------------------------------------------------------
+export type LoopAfkAction = "toggle" | "off" | "arm_10m" | "arm_inf";
+
+/**
+ * #2333 — queue an AFK change on a consumer's LOCAL loop, through its socket.
+ * Shared by the per-agent route below and the all-loops message / release
+ * routes. Node-relayed loops are refused (not implemented). Returns the loop
+ * name, or the HTTP status and reason it could not be reached.
+ */
+export function sendAfkToLoop(
+    consumerId: string,
+    action: LoopAfkAction,
+    durationSec = 600,
+): { ok: true; loop: string } | { ok: false; status: number; error: string } {
+    const consumer = getConsumer(consumerId);
+    if (!consumer || !consumer.cwd) {
+        return { ok: false, status: 404, error: `consumer not found / no cwd : ${consumerId}` };
+    }
+    if (consumer.last_seen_via === "node") {
+        return { ok: false, status: 501, error: "AFK toggle over node-relayed pane is not implemented yet" };
+    }
+    const loopName = resolveLoopName(consumer.cwd);
+    if (!loopName) {
+        return { ok: false, status: 404, error: `no claude-loop dir matches cwd ${consumer.cwd}` };
+    }
+    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
+        ?? join(homedir(), ".claude-loop");
+    const sd = join(stateRoot, loopName);
+    if (!existsSync(sd)) {
+        return { ok: false, status: 404, error: `loop state dir missing : ${sd}` };
+    }
+    const nowMs = Date.now();
+    let payload: Record<string, unknown>;
+    if (action === "toggle") {
+        payload = { event: "keystroke", kind: "afk_key", now_ms: nowMs };
+    } else if (action === "off") {
+        payload = { event: "marker", name: "clear_afk", now_ms: nowMs };
+    } else if (action === "arm_10m") {
+        payload = { event: "marker", name: "set_afk_10m", expiry_ms: nowMs + durationSec * 1000, now_ms: nowMs };
+    } else {
+        payload = { event: "marker", name: "set_afk_inf", now_ms: nowMs };
+    }
+    void sendEventOnce(loopSockPath(sd), { kind: "proxyEvent", data: payload }, { timeoutMs: 500 });
+    return { ok: true, loop: loopName };
+}
+
 agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
+    // #2333 — holding or releasing someone's loop is a loop control like kill and
+    // prompt: moderator only, proxy nodes denied. It checked nothing before.
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
     const rawName = req.params.name;
     const consumerId = typeof rawName === "string" ? rawName : "";
     if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
@@ -475,41 +526,11 @@ agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
     const durationSec = typeof body.durationSec === "number" && Number.isFinite(body.durationSec)
         ? Math.max(1, Math.floor(body.durationSec))
         : 600;
-    const consumer = getConsumer(consumerId);
-    if (!consumer || !consumer.cwd) {
-        return res.status(404).json({ error: `consumer not found / no cwd : ${consumerId}` });
-    }
-    if (consumer.last_seen_via === "node") {
-        return res.status(501).json({
-            error: "AFK toggle over node-relayed pane is not implemented yet",
-        });
-    }
-    const loopName = resolveLoopName(consumer.cwd);
-    if (!loopName) {
-        return res.status(404).json({ error: `no claude-loop dir matches cwd ${consumer.cwd}` });
-    }
-    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
-        ?? join(homedir(), ".claude-loop");
-    const sd = join(stateRoot, loopName);
-    if (!existsSync(sd)) {
-        return res.status(404).json({ error: `loop state dir missing : ${sd}` });
-    }
-    const nowMs = Date.now();
-    const sock = loopSockPath(sd);
-    let payload: Record<string, unknown>;
-    if (action === "toggle") {
-        payload = { event: "keystroke", kind: "afk_key", now_ms: nowMs };
-    } else if (action === "off") {
-        payload = { event: "marker", name: "clear_afk", now_ms: nowMs };
-    } else if (action === "arm_10m") {
-        payload = { event: "marker", name: "set_afk_10m", expiry_ms: nowMs + durationSec * 1000, now_ms: nowMs };
-    } else {
-        payload = { event: "marker", name: "set_afk_inf", now_ms: nowMs };
-    }
-    void sendEventOnce(sock, { kind: "proxyEvent", data: payload }, { timeoutMs: 500 });
+    const sent = sendAfkToLoop(consumerId, action, durationSec);
+    if (!sent.ok) return res.status(sent.status).json({ error: sent.error });
     res.status(202).json({
         consumer_id: consumerId,
-        loop: loopName,
+        loop: sent.loop,
         action,
         queued: true,
     });

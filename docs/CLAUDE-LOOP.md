@@ -365,6 +365,12 @@ single window is the collapse of the historical two-window model
 marker file and its `userIsTakingOver()` check are gone ; presence is
 in-memory IPC only.
 
+Before stepping away from the board, the megaphone popover in the header can
+message every agent loop at once: **send** types the message into each running
+session, **send & hold** also holds every loop indefinitely (`∞`), and
+**release holds** lifts them on return. A message typed that way is not held
+back by the hold: it does not go through the wake gates.
+
 The catch: the loop's *own* wake also triggers `UserPromptSubmit`,
 which must not read as human presence. Fix: every wake path stamps
 `ipc.wakeInFlightAtMs` right before injecting ; the hook sees the
