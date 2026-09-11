@@ -185,6 +185,9 @@ waiting, blocked, event for unread pings first, none) for one ticket. A gesture
 that fails stops the scenario; an expectation that does not hold is reported and
 the scenario goes on.
 
+Cases waiting for a scenario, and what the simulator still needs to play them,
+are listed in `tests/sim/CASES.md`.
+
 `wake` does what the loop does when the agent goes idle: with unread pings it is
 an event wake; otherwise it names the backlog head and records that wake, which
 sinks the ticket for the cooldown until the thread moves again.
