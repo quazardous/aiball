@@ -92,7 +92,7 @@ export function registerAuthCommands(program: Command): void {
         .option("--label <label>", "Human-readable label (e.g. 'laptop cli', 'sandbox-1', 'B proxy node')")
         .option(
             "--kind <kind>",
-            "Token kind: 'agent' (default) or 'auth' (web-style, normally minted by /login)",
+            "Token kind: 'agent' (default), 'auth' (web-style, normally minted by /login), or 'signal' (an API key for an external system: POST /api/signals only, --label is its source)",
             "agent",
         )
         .option(
@@ -133,6 +133,25 @@ export function registerAuthCommands(program: Command): void {
                     `  private network (tailnet/LAN) only, never expose it publicly, never`,
                     `  commit it. For per-consumer proof instead, use direct mode (#390 — a`,
                     `  per-consumer agent token). See docs/REMOTE.md § Trust model.`,
+                    ``,
+                ].join("\n"));
+                return;
+            }
+            // #2255 — a signal key: bound to no consumer, its label is the source
+            // of the signals it posts, and it opens POST /api/signals only.
+            if (opts.kind === "signal") {
+                if (!opts.label) die("auth issue --kind signal: --label <source> is required — it names the system posting signals");
+                const t = issueToken({ consumer_id: null, kind: "signal", label: opts.label });
+                process.stdout.write([
+                    `Signal key issued for source '${opts.label}':`,
+                    ``,
+                    `  ${t.token}`,
+                    ``,
+                    `It can only POST /api/signals, on the socket or over HTTP:`,
+                    `  curl --unix-socket ~/.local/share/aiball/sock -H 'Authorization: Bearer ${t.token}' \\`,
+                    `       -H 'content-type: application/json' http://x/api/signals \\`,
+                    `       -d '{"target":{"consumer":"<agent>"},"title":"something needs attention"}'`,
+                    `Revoke it with: aiball auth revoke ${t.token.slice(0, 16)}`,
                     ``,
                 ].join("\n"));
                 return;

@@ -8,6 +8,9 @@
  *                 x-aiball-consumer (X-Forwarded-For style); the daemon honors
  *                 that header (+ auto-creates the consumer) instead of the usual
  *                 token-wins rule. Minted with `aiball auth issue --node`.
+ *   - `signal`  — #2255: an API key for external systems, bound to no consumer.
+ *                 It opens POST /api/signals and nothing else; its label is the
+ *                 signal's source. Minted with `aiball auth issue --kind signal`.
  *
  * The bearer-token middleware (src/auth.ts) does one lookup per
  * request to resolve `token → {consumer_id, kind}`. Install tokens
@@ -18,7 +21,7 @@ import { randomBytes } from "node:crypto";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
-export type TokenKind = "install" | "auth" | "agent" | "node";
+export type TokenKind = "install" | "auth" | "agent" | "node" | "signal";
 
 export interface Token {
     token: string;

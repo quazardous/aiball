@@ -9,12 +9,13 @@
  *   POST /pings/mark-read    — ack pings (up-to-id or all)
  */
 import { Router, type Request, type Response } from "express";
+import { listPendingSignals } from "../db/signals.js";
 import {
     listPings,
     markPingsRead,
     unreadPingCount,
 } from "../db.js";
-import { onPing, onControl } from "../event-bus.js";
+import { onPing, onControl, onSignal } from "../event-bus.js";
 import { drainPrompts } from "../loop-prompts.js";
 import { presenceConnect, presenceDisconnect } from "../live-presence.js";
 import { badRequest } from "./_helpers.js";
@@ -85,6 +86,14 @@ pingsRouter.get("/events", (req, res) => {
     const offControl = onControl(consumer, (payload) => {
         res.write(`event: control\ndata: ${JSON.stringify(payload)}\n\n`);
     });
+    // #2255 — external signals ride the same stream. On (re)connect, replay the
+    // ones still waiting for this consumer, so a loop that was down misses none.
+    const offSignal = onSignal(consumer, (payload) => {
+        res.write(`event: signal\ndata: ${JSON.stringify(payload)}\n\n`);
+    });
+    for (const pending of listPendingSignals(consumer)) {
+        res.write(`event: signal\ndata: ${JSON.stringify(pending)}\n\n`);
+    }
     // #451: flush any prompts spooled while this loop was offline — its control
     // SSE is live now, so write them straight onto the stream (drained == sent).
     for (const text of drainPrompts(consumer)) {
@@ -107,6 +116,7 @@ pingsRouter.get("/events", (req, res) => {
         clearInterval(ka);
         off();
         offControl();
+        offSignal();
         presenceDisconnect(consumer);
         try { res.end(); } catch { /* already closed */ }
     };

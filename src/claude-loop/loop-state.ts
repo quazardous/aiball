@@ -290,8 +290,10 @@ export function wakeCountdownArmable(opts: {
     events: number;
     actionableOpen: number;
     backlog: number;
+    /** #2255 — external signals waiting: they are delivered on the next drain. */
+    signals?: number;
 }): boolean {
-    return opts.events > 0 || (opts.actionableOpen > 0 && opts.backlog > 0);
+    return (opts.signals ?? 0) > 0 || opts.events > 0 || (opts.actionableOpen > 0 && opts.backlog > 0);
 }
 
 /**

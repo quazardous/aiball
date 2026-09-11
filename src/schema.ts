@@ -866,6 +866,36 @@ export type Consumer = typeof consumers.$inferSelect;
 export type NewConsumerRow = typeof consumers.$inferInsert;
 
 export type Token = typeof tokens.$inferSelect;
+
+/**
+ * #2255 — an external signal: a synthetic wake posted by a system outside the
+ * board with a signal key. Never a ticket, never in a backlog. It targets one
+ * agent (`targetConsumer`) or the owners of a project who work on a level.
+ */
+export const signals = sqliteTable("signals", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    targetConsumer: text("target_consumer"),
+    targetProject: text("target_project"),
+    targetLevel: text("target_level"),
+    title: text("title").notNull(),
+    body: text("body"),
+    severity: text("severity").notNull().default("normal"),
+    dedupKey: text("dedup_key"),
+    repeatCount: integer("repeat_count").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+});
+export type Signal = typeof signals.$inferSelect;
+
+/** #2255 — one row per recipient of a signal; `ackedAt` set once its loop injected it. */
+export const signalDeliveries = sqliteTable("signal_deliveries", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    signalId: integer("signal_id").notNull().references(() => signals.id, { onDelete: "cascade" }),
+    recipient: text("recipient").notNull(),
+    ackedAt: text("acked_at"),
+});
 export type NewTokenRow = typeof tokens.$inferInsert;
 
 /**

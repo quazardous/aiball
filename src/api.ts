@@ -49,6 +49,7 @@ import { configRouter } from "./api/config.js";
 import { messagesRouter } from "./api/messages.js";
 import { payloadsRouter } from "./api/payloads.js";
 import { pingsRouter } from "./api/pings.js";
+import { signalsRouter } from "./api/signals.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
 import { rulesRouter } from "./api/rules.js";
 import { automationRouter } from "./api/automation.js";
@@ -649,4 +650,5 @@ api.use(tagsRouter);
 // Ping list/count/SSE/mark-read → ./api/pings.ts; per-ticket subscription
 // CRUD → ./api/ticket-subscriptions.ts. (#B.213 phase 1.E)
 api.use(pingsRouter);
+api.use(signalsRouter);
 api.use(ticketSubscriptionsRouter);

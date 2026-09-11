@@ -826,6 +826,14 @@ export class AiballClient {
             ticket_id,
         });
     }
+    /** #2255 — external signals still waiting for this agent. */
+    listSignals() {
+        return this.http("GET", "/api/signals");
+    }
+    /** #2255 — the loop injected this signal: stop delivering it. */
+    ackSignal(signal_id: number) {
+        return this.http("POST", `/api/signals/${signal_id}/ack`, {});
+    }
 
     // ---- ticket subscriptions + pings ------------------------------------
 
@@ -973,6 +981,8 @@ export class AiballClient {
         // #442/#451: out-of-band control events (remote kill / raw-prompt
         // injection) on the same stream.
         onControl?: (payload: ControlEvent) => void;
+        // #2255: external signals, replayed by the daemon on every (re)connect.
+        onSignal?: (payload: { id: number; source: string; title: string; body: string | null; severity: "normal" | "panic"; repeat_count: number; expires_at: string }) => void;
         onError?: (err: Error) => void;
     }): () => void {
         const path = `/api/events?consumer_id=${encodeURIComponent(this.agentId)}`;
@@ -1028,6 +1038,8 @@ export class AiballClient {
                         handlers.onHello(payload as { consumer_id: string; unread: number });
                     } else if (evName === "control" && handlers.onControl) {
                         handlers.onControl(payload as ControlEvent);
+                    } else if (evName === "signal" && handlers.onSignal) {
+                        handlers.onSignal(payload as { id: number; source: string; title: string; body: string | null; severity: "normal" | "panic"; repeat_count: number; expires_at: string });
                     }
                 }
             });

@@ -11,6 +11,7 @@ interface CapturedHandlers {
     onHello?: (h: { consumer_id: string; unread: number }) => void;
     onControl?: (c: { action: string; [k: string]: unknown }) => void;
     onError?: (e: Error) => void;
+    onSignal?: (s: unknown) => void;
 }
 
 /** Mock that captures the handler set passed to `subscribeEvents` so the
@@ -28,6 +29,7 @@ function mockClient(): {
             handlers.onHello = h.onHello;
             handlers.onControl = h.onControl;
             handlers.onError = h.onError;
+            handlers.onSignal = h.onSignal;
             return () => { unsubscribed.count++; };
         },
     } as unknown as import("../client.js").AiballClient;
@@ -136,4 +138,15 @@ test("#628 WakeBus: close() unsubscribes from upstream + clears listeners", () =
     // the bus won't forward them anymore.
     handlers.onPing!({ ticket_id: 1 });
     assert.equal(seen.length, 0);
+});
+
+test("#2255 WakeBus: signal event fires registered listeners", () => {
+    const { client, handlers } = mockClient();
+    const bus = new WakeBus(client);
+    bus.connect();
+    const seen: Array<{ id: number }> = [];
+    bus.on("signal", (sgn) => seen.push(sgn));
+    handlers.onSignal!({ id: 9, source: "ci", title: "t", body: null, severity: "normal", repeat_count: 1, expires_at: "2999-01-01T00:00:00.000Z" });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].id, 9);
 });

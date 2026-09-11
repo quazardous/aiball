@@ -106,6 +106,7 @@ import { getCompactingDetector } from "./compacting-detector.js";
 import { PaneObserver } from "./pane-watchers/observer.js";
 import { Zone } from "./pane-watchers/zone.js";
 import { composePaneReady } from "./pane-watchers/pane-ready.js";
+import { SignalQueue, renderSignalPhrase } from "./signal-queue.js";
 import {
     PickerSessionWatcher,
     PickerModeWatcher,
@@ -634,7 +635,14 @@ function respawnKernel(reason: string): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null; extraSeenIds?: number[]; wakeTicketId?: number | null; bundleTicketCount?: number }> {
+async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null; extraSeenIds?: number[]; wakeTicketId?: number | null; bundleTicketCount?: number; signalId?: number }> {
+    // #2255 — a pending external signal comes first (david: "la file signal est
+    // prioritaire"). It is not a ticket: no head message to mark seen, no backlog
+    // bookkeeping — the inject site acks the signal instead.
+    const signal = pendingSignals.next();
+    if (signal) {
+        return { phrase: renderSignalPhrase(signal), headMessageId: null, hasContent: true, backlogTicketId: null, signalId: signal.id };
+    }
     // #749 — every wake path (SSE direct, AFK-clear-drain, stop-hook
     // post-turn, heartbeat) routes through `buildContextPhrase` so the
     // content is uniform: pop the oldest unread FIFO event, fall back
@@ -1096,7 +1104,7 @@ let lastSendAt = 0;
 let lastWakeDeliveryMs = 0;
 let wakeSeq = 0;
 const WAKE_SERIES_RESET_MS = 60_000;
-async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[], wakeTicketId?: number | null, bundleTicketCount?: number, hintTicketId?: number | null): Promise<void> {
+async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null, extraSeenIds?: number[], wakeTicketId?: number | null, bundleTicketCount?: number, hintTicketId?: number | null, signalId?: number): Promise<void> {
     // Touch wake-in-flight BEFORE the actual send-keys so the
     // UserPromptSubmit hook can flag from_auto_wake=true (the marker
     // only flags the auto-wake, it's NOT a gate anymore — the post-wake
@@ -1132,7 +1140,7 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         const sinceMs = lastWakeDeliveryMs ? nowMs - lastWakeDeliveryMs : -1;
         wakeSeq = (lastWakeDeliveryMs && sinceMs <= WAKE_SERIES_RESET_MS) ? wakeSeq + 1 : 1;
         lastWakeDeliveryMs = nowMs;
-        const wkind = headMessageId != null ? "event" : (backlogTicketId != null ? "backlog-sink" : "other");
+        const wkind = signalId != null ? "signal" : headMessageId != null ? "event" : (backlogTicketId != null ? "backlog-sink" : "other");
         const wticket = wakeTicketId != null ? `#${wakeTicketId}` : (backlogTicketId != null ? `#${backlogTicketId}` : "-");
         const bundled = 1 + (extraSeenIds?.length ?? 0);
         // #1554 — distinctTickets is the direct detector for "multiple tickets in
@@ -1168,6 +1176,12 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         // fire-and-forget like the head).
         for (const id of extraSeenIds ?? []) {
             void client().markMessageSeen(id).catch(() => {});
+        }
+        // #2255 — delivered: take the signal out of the queue and tell the daemon,
+        // or it would be replayed on the next reconnect.
+        if (signalId != null) {
+            pendingSignals.remove(signalId);
+            void client().ackSignal(signalId).catch(() => {});
         }
     });
     // #974 — fail loud quand le proxy était censé recevoir l'inject mais a
@@ -1352,6 +1366,9 @@ async function refreshCounters(): Promise<void> {
 // path. Cleared on consumption and on `turn:started` (a new turn supersedes a
 // stale pending event).
 let pendingWakeHint: WakeHint | undefined;
+// #2255 — external signals waiting for delivery. Priority over the ticket FIFO,
+// same gates as any wake; removed and acked once injected.
+const pendingSignals = new SignalQueue();
 // #1039 — graceful window before the bar goes RED on a lost link. A link that
 // drops but recovers within this window must NOT flash red. Generic over the
 // TWO links: proxy↔timer (loop.sock) and loop↔daemon (SSE). `arm()` on a
@@ -1407,6 +1424,7 @@ function recomputeNextWake(): void {
         events: c?.events ?? 0,
         actionableOpen,
         backlog: c?.backlog ?? 0,
+        signals: pendingSignals.size(),
     });
     const tempoMs = wakeTempoSec * 1000;
     // A NOT-AFK hold (human present) gates `tryWake` out at every tempo
@@ -1529,11 +1547,12 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         // exclusivement pour les no_claim — les autres consumers gardent
         // le comportement antérieur (actionable + pings).
         const isNoClaim = process.env.AIBALL_NO_CLAIM === "1";
-        if (isNoClaim && gate.pingsCount === 0) {
+        if (isNoClaim && gate.pingsCount === 0 && pendingSignals.size() === 0) {
             log(`skip wake (${reason}) — no_claim + no pings (actionable=${gate.openCount} but not for this consumer)`);
             return false;
         }
-        if (!gate.has) {
+        // #2255 — a waiting signal is work even when the ticket queues are empty.
+        if (!gate.has && pendingSignals.size() === 0) {
             // #379 drained-reminder branch. The timer is the SOLE writer of the
             // drained-state marker (heartbeat-owned) → no cross-process race with
             // the hooks. Fires only when a GATED backlog remains (actionable=0,
@@ -1566,7 +1585,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount } = await pickPhrase(hint);
+    const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount, signalId } = await pickPhrase(hint);
     // If there's nothing actionable to surface (no FIFO head, no backlog,
     // no triggered gate), don't fire — david: "si y a rien on dit rien".
     // Manual wakes and panic still go through; their content is the
@@ -1609,7 +1628,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // #881 — TurnController acteur : TURN_STARTED transitionne no_turn→in_turn
     // et clear idleSinceMs (bridge subscriber écrit setIpcIdleSince(null)).
     getTurnService().turnStarted(Date.now());
-    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount, hint?.ticket_id ?? null);
+    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount, hint?.ticket_id ?? null, signalId);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup). The legacy count watermark fallback was
     // dropped in #814 — its only writer wrote a file no one read.
@@ -1747,6 +1766,18 @@ async function mainSse(): Promise<void> {
                 log(`SSE ping recorded as pending hint — countdown armed nextWakeAtMs=${nw} (~${inSec ?? "?"}s), drains on next turn:settled (≤${wakeTempoSec}s tempo)`);
             })();
         }
+    });
+    // #2255 — an external signal. Queued (keyed by id: the daemon replays pending
+    // signals on every reconnect), then delivered by the next tempo drain. A
+    // `panic` signal tries right away — but through the same gates, and without
+    // the self-interrupt a panic PING gets: its text comes from outside the board.
+    wakeBus.on("signal", (s) => {
+        setIpcLastSseEventAtMs(Date.now());
+        setIpcSseConnected(true);
+        pendingSignals.upsert(s);
+        log(`SSE signal received: #${s.id} from ${s.source} severity=${s.severity} repeat=${s.repeat_count} → ${s.severity === "panic" ? "tryWake now (gates apply)" : "queued for the next drain"}`);
+        if (s.severity === "panic") void tryWake("sse:signal:panic", false).then(() => recomputeNextWake());
+        else recomputeNextWake();
     });
     wakeBus.on("error", (e) => {
         setIpcSseConnected(false);

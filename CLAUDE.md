@@ -63,6 +63,7 @@ Root:
 - [`SANDBOX.md`](./docs/SANDBOX.md) — `aiball sandbox` (experimental autonomous agent).
 - [`TAILSCALE.md`](./docs/TAILSCALE.md) — remote access over a tailnet.
 - [`UPSTREAM.md`](./docs/UPSTREAM.md) — couple aiball tickets to external issues (GitHub/GitLab): config, manual import, roadmap.
+- [`SIGNALS.md`](./docs/SIGNALS.md) — external signals: how a system outside the board wakes an agent with a signal key, without a ticket.
 - [`REMOTE.md`](./docs/REMOTE.md) — run a local `claude-loop` against a remote daemon: the two types (direct / agent-token vs proxy / node-token).
 - [`SECURITY.md`](./docs/SECURITY.md) — trust model & limits (local UDS / direct / proxy-node), with diagrams; the proxy node token is the weak point.
 - [`WIN-INSTALL.md`](./docs/WIN-INSTALL.md) — Windows install.

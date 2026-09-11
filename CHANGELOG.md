@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **External signals**: a system outside the board can wake an agent without a
+  ticket — `POST /api/signals` with a signal key (`aiball auth issue --kind
+  signal`), aimed at an agent or at the owners of a project level. The loop
+  delivers signals before ticket events, through the usual wake gates, framed
+  as untrusted text. See docs/SIGNALS.md.
 - **The GNOME indicator can start and stop the daemon**: start, stop and
   restart entries, each greyed out when it cannot apply, and a *Start at login*
   switch backed by `systemctl --user enable` / `disable`.

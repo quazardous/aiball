@@ -67,6 +67,27 @@ export type ControlEvent =
     | { action: "kill" }
     | { action: "prompt"; text: string };
 
+/** #2255 — an external signal pushed to a recipient's live SSE stream. */
+export interface SignalEvent {
+    id: number;
+    source: string;
+    title: string;
+    body: string | null;
+    severity: "normal" | "panic";
+    repeat_count: number;
+    expires_at: string;
+}
+
+export function emitSignal(recipient: string, payload: SignalEvent): void {
+    bus.emit(`signal:${recipient}`, payload);
+}
+
+export function onSignal(recipient: string, handler: (payload: SignalEvent) => void): () => void {
+    const key = `signal:${recipient}`;
+    bus.on(key, handler);
+    return () => bus.off(key, handler);
+}
+
 export function emitControl(recipient: string, payload: ControlEvent): void {
     bus.emit(`control:${recipient}`, payload);
 }

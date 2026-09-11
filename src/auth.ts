@@ -107,6 +107,9 @@ export interface AuthenticatedRequest extends Request {
      *  `x-aiball-no-claim: 1` for this consumer (declared no-claim by the
      *  relaying proxy). Effective in addition to `consumers.can_claim=false`. */
     no_claim_hint?: boolean;
+    /** #2255 — set for a `signal` key: the label it was minted with, which IS
+     *  the source of the signals it posts. */
+    signal_source?: string;
 }
 
 // Paths are relative to the router mount (`api = Router()` mounted at
@@ -137,7 +140,7 @@ function isPublicPath(path: string): boolean {
     return path.startsWith("/nodes/enroll/");
 }
 
-function readBearerToken(req: Request): string | null {
+export function readBearerToken(req: Request): string | null {
     const auth = req.header("authorization");
     if (auth && /^bearer\s+/i.test(auth)) {
         return auth.replace(/^bearer\s+/i, "").trim();
@@ -207,6 +210,19 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         res.status(403).json({
             error: "install tokens cannot access /api/* — use POST /api/auth/setup first",
         });
+        return;
+    }
+    // #2255 — a signal key opens exactly one door. It is bound to no consumer
+    // and its label is the source of what it posts.
+    if (row.kind === "signal") {
+        if (req.method !== "POST" || req.path !== "/signals") {
+            res.status(403).json({ error: "a signal key can only POST /api/signals" });
+            return;
+        }
+        const ar = req as AuthenticatedRequest;
+        ar.token_kind = "signal";
+        ar.signal_source = row.label ?? "unnamed";
+        next();
         return;
     }
     // #394 volet C: a "node" token authenticates a trusted proxy NODE, not a

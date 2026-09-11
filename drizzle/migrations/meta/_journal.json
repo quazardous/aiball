@@ -484,6 +484,13 @@
       "when": 1782700000017,
       "tag": "0068_ticket_levels",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1782700000018,
+      "tag": "0069_signals",
+      "breakpoints": true
     }
   ]
 }

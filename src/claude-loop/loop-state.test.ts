@@ -1187,3 +1187,8 @@ test("#1377 wakeCountdownArmable: a real FIFO event still arms even with everyth
 // #1014 — the #994 nextPaneBusy arm/dearm latch is retired ; paneBusy is now
 // the output of the composite busy decay-stack. See busy-stack.test.ts for the
 // arm (seenProof)/dearm (releaseAll)/hysteresis (remanence) coverage.
+
+test("#2255 a waiting signal arms the wake countdown even with empty ticket queues", () => {
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0, backlog: 0, signals: 1 }), true);
+    assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0, backlog: 0, signals: 0 }), false);
+});
