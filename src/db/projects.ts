@@ -27,7 +27,7 @@ import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 import { presenceRunning } from "../live-presence.js";
 import { tagsForMessages } from "./tags.js";
 import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
-import { isStepMeta } from "../ticket-transitions.js";
+import { keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -1452,33 +1452,42 @@ export function lastActorExclusions(consumerId: string, ticketIds?: readonly num
         id: schema.tickets.id,
         lastActor: schema.tickets.lastActor,
         lastActorAt: schema.tickets.lastActorAt,
+        byAgent: schema.tickets.byAgent,
+        createdAt: schema.tickets.createdAt,
+        meta: schema.tickets.meta,
     }).from(schema.tickets).where(idScope(schema.tickets.id, ticketIds)).all();
     const hasForeign = foreignActorTickets(consumerId, ticketIds);
-    // #2326 — a step (`then: continue`) as the last action keeps its author in the pool.
-    const ownStepLast = ticketsWhereLastActionIsOwnStep(consumerId, rows.filter((r) => r.lastActor === consumerId));
+    // #2326 / #2331 — a step, or a `handback: false` comment, as the last action keeps its author in the pool.
+    const keptLast = ticketsWhereLastActionKeepsAuthor(consumerId, rows.filter((r) => r.lastActor === consumerId));
     const out = new Set<number>();
     for (const r of rows) {
-        if (isExcludedForConsumer(r.lastActor, hasForeign.has(r.id), consumerId, ownStepLast.has(r.id))) out.add(r.id);
+        // #2331 — the last action is still the creation, and it was filed handing the ticket back.
+        const handingBackCreation = r.lastActor === consumerId && r.byAgent === consumerId
+            && r.lastActorAt === r.createdAt && readHandback(r.meta) === true;
+        if (isExcludedForConsumer(r.lastActor, hasForeign.has(r.id), consumerId, keptLast.has(r.id), handingBackCreation)) {
+            out.add(r.id);
+        }
     }
     return out;
 }
 
 /**
- * #2326 — among tickets whose last actor is `consumerId`, those where that last
- * action is the consumer's own step (`then: continue`). The step is the comment
+ * #2326 / #2331 — among tickets whose last actor is `consumerId`, those where
+ * that last action keeps the consumer in the pool: its own step (`then:
+ * continue`) or its comment with `handback: false`. That action is the comment
  * that set `last_actor`: same author, and `created_at` equal to `last_actor_at`,
  * which the insert stamps from the same instant. When two of the consumer's
  * comments share that instant, the later one (highest id) decides. Only the
  * consumer's own comments on those tickets are read.
  */
-function ticketsWhereLastActionIsOwnStep(
+function ticketsWhereLastActionKeepsAuthor(
     consumerId: string,
     rows: ReadonlyArray<{ id: number; lastActorAt: string | null }>,
 ): Set<number> {
     const out = new Set<number>();
     if (rows.length === 0) return out;
     const lastAt = new Map(rows.map((r) => [r.id, r.lastActorAt]));
-    const latest = new Map<number, { id: number; step: boolean }>();
+    const latest = new Map<number, { id: number; keeps: boolean }>();
     for (const m of getDb().select({
         id: schema.messages.id,
         ticketId: schema.messages.ticketId,
@@ -1491,9 +1500,9 @@ function ticketsWhereLastActionIsOwnStep(
     )).all()) {
         if (m.ticketId == null || lastAt.get(m.ticketId) !== m.createdAt) continue;
         const cur = latest.get(m.ticketId);
-        if (!cur || m.id > cur.id) latest.set(m.ticketId, { id: m.id, step: isStepMeta(m.meta) });
+        if (!cur || m.id > cur.id) latest.set(m.ticketId, { id: m.id, keeps: keepsAuthorInPool("comment_added", m.meta) });
     }
-    for (const [ticketId, last] of latest) if (last.step) out.add(ticketId);
+    for (const [ticketId, last] of latest) if (last.keeps) out.add(ticketId);
     return out;
 }
 

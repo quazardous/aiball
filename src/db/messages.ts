@@ -135,9 +135,11 @@ export function insertMessage(m: NewMessage): Message {
             // decision in the meta of the ticket_created itself. Only `plan`
             // is allowed (validator enforces). decisionGateByTicket replays
             // it like a comment_added with a pending plan.
-            const ticketMeta = m.decision_kind
-                ? JSON.stringify({ decision: { kind: m.decision_kind, status: "pending" } })
-                : null;
+            // #2331 — and the handback deduced from who filed it.
+            const ticketMetaFields: Record<string, unknown> = {};
+            if (m.decision_kind) ticketMetaFields.decision = { kind: m.decision_kind, status: "pending" };
+            if (typeof m.handback === "boolean") ticketMetaFields.handback = m.handback;
+            const ticketMeta = Object.keys(ticketMetaFields).length > 0 ? JSON.stringify(ticketMetaFields) : null;
             const inserted = tx.insert(schema.tickets).values({
                 id,
                 project: m.project,
@@ -206,7 +208,7 @@ export function insertMessage(m: NewMessage): Message {
         // Both gated on kind===comment_added by the validator (ticket_created
         // path stamps its own meta in the tickets-insert branch above).
         let metaInit: string | null = null;
-        if (m.kind === "comment_added" && (m.decision_kind || m.summary_until || m.step)) {
+        if (m.kind === "comment_added" && (m.decision_kind || m.summary_until || m.step || typeof m.handback === "boolean")) {
             const meta: Record<string, unknown> = {};
             if (m.decision_kind) {
                 meta.decision = { kind: m.decision_kind, status: "pending" };
@@ -214,6 +216,10 @@ export function insertMessage(m: NewMessage): Message {
             // #2308 — `then: continue`: a step, which proposes nothing.
             if (m.step) {
                 meta.step = true;
+            }
+            // #2331 — an explicit handback (a comment with no `then`).
+            if (typeof m.handback === "boolean") {
+                meta.handback = m.handback;
             }
             if (m.summary_until) {
                 meta.summary_until = m.summary_until;

@@ -64,7 +64,7 @@ export function registerTicketCommands(program: Command): void {
         .option("--body <body>", "Ticket body")
         .option("--by <agent>", "Author override (default: resolved consumer id)")
         .option("--plan", "The body proposes how the work should go: the ticket carries a pending plan")
-        .option("--comment-only", "The ticket only sets down something to remember — required for an agent, whose tickets otherwise need --plan")
+
         .action(async (opts, cmd) => {
             const globalOpts = gOpts(cmd);
             const client = buildClient(globalOpts);
@@ -76,7 +76,6 @@ export function registerTicketCommands(program: Command): void {
                 ...(opts.body ? { body: opts.body } : {}),
                 by_agent: opts.by ?? client.agentId,
                 ...(opts.plan ? { decision_kind: "plan" } : {}),
-                ...(opts.commentOnly ? { comment_only: true } : {}),
             });
             out(res, globalOpts, (v) => fmtPostReceipt(v, "ticket"));
         });
@@ -89,7 +88,8 @@ export function registerTicketCommands(program: Command): void {
         .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
         .option("--parent <id>", "Parent message id (default: ticket id)")
         .option("--by <agent>", "Author override")
-        .option("--comment-only", "Say this comment concludes nothing — required for an agent, whose comments otherwise need a decision")
+        .option("--handback", "Hand the ticket back: a question, you wait for an answer (an agent's comment needs --handback or --keep)")
+        .option("--keep", "Keep the ticket and carry on (only on a ticket you hold)")
         .action(async (opts, cmd) => {
             const client = buildClient(gOpts(cmd));
             const ticketId = Number(opts.id);
@@ -116,7 +116,7 @@ export function registerTicketCommands(program: Command): void {
                 by_agent: opts.by ?? client.agentId,
                 ticket_id: ticketId,
                 parent_id: parent,
-                ...(opts.commentOnly ? { comment_only: true } : {}),
+                ...(opts.keep ? { handback: false } : opts.handback ? { handback: true } : {}),
             });
             out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "comment"));
         });

@@ -23,7 +23,7 @@ import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, typ
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
-import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal } from "./ticket-transitions.js";
+import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
 import { isHeldByOther, isAssignmentLive } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { getConsumer } from "./db/consumers.js";
@@ -79,45 +79,44 @@ export function summaryOverBudget(length: number, max: number): string {
 }
 
 /**
- * #2275 — an agent's comment must say what it does to the ticket: carry a
- * decision (`then`), or state that it concludes nothing (`comment_only: true`).
- * A plain status update used to leave tickets that nobody held: the agent spoke
- * last, so the ticket left its backlog, and nothing was proposed, so the human had
- * nothing to decide.
- *
- * The same holds for a ticket an agent creates (david, #2275): it carries a plan
- * (`then: plan`, the only decision a new ticket can hold), or it says it is only
- * something set down to remember (`comment_only: true`).
+ * #2275 / #2331 — an agent's comment must say what it does to the ticket: carry
+ * a decision or a step (`then`), which implies the handback, or say explicitly
+ * whether it hands the ticket back (`handback`). A `handback` that contradicts
+ * the `then` is refused for anyone. The rule itself is `handbackRefusal` in the
+ * transition table.
  *
  * Judged on the AUTHENTICATED caller, never on the body's `by_agent`: the UI
- * posts without one, and a body can name anyone. Humans are exempt. Server-side
- * writes (the upstream watcher…) call `submitMessage` directly and never come
- * here. Returns the refusal, or null when the message may go through.
+ * posts without one, and a body can name anyone. Humans are exempt from the
+ * requirement. Server-side writes (the upstream watcher…) call `submitMessage`
+ * directly and never come here. Returns the refusal, or null when the message
+ * may go through.
  */
-export function withoutDecisionRefusal(
-    msg: NewMessage,
-    rawBody: unknown,
-    caller: string,
-): string | null {
-    const isComment = msg.kind === "comment_added";
-    // #2308 — a step (`then: continue`) says what it does too.
-    if ((!isComment && msg.kind !== "ticket_created") || msg.decision_kind || msg.step) return null;
-    if ((rawBody as { comment_only?: unknown } | null)?.comment_only === true) return null;
-    if (isHuman(caller)) return null;
-    if (getConfig("tickets.require_then", msg.project) === false) return null;
+export function withoutDecisionRefusal(msg: NewMessage, caller: string): string | null {
+    if (msg.kind !== "comment_added") return null;
+    const required = !isHuman(caller) && getConfig("tickets.require_then", msg.project) !== false;
+    const refusal = handbackRefusal({
+        decisionKind: msg.decision_kind,
+        step: msg.step === true,
+        handback: msg.handback,
+        required,
+    });
     // Traced like the summary budget: a refusal leaves nothing in the database.
-    console.error(`[comment-only] refused ${isComment ? "comment" : "ticket"} agent=${caller} project=${msg.project}`);
-    if (!isComment) {
-        return "a ticket without then: plan needs comment_only: true. If you already know how the work should go, "
-            + "attach then: plan; if the ticket only sets down something to remember, set comment_only: true. Nothing was created.";
-    }
-    // #2308 — comment_only is the exception: the refusal points at the gestures first.
-    return "a comment without then: needs one. A step you finished on a ticket you hold: then: continue. A step to have validated: then: plan. "
-        + "Work done, or a ticket to drop or unblock: then: resolved / wontfix / escalate. "
-        + "comment_only: true is for a comment that concludes nothing (a question, a ticket still in moderation) and is strongly discouraged otherwise: "
-        + "the ticket leaves your queue and nobody holds it. Nothing was posted.";
+    if (refusal) console.error(`[handback] refused comment agent=${caller} project=${msg.project}`);
+    return refusal;
 }
 
+/**
+ * #2331 — the handback a new ticket carries, deduced from who files it (never
+ * sent by the caller), and the reminder a project's lead gets when it files one
+ * without a plan. Read-only: the route asks it for the warning, `submitMessage`
+ * for the stored value.
+ */
+export function creationHandbackFor(msg: NewMessage): { handback: boolean; warning: string | null } {
+    const author = msg.by_agent ?? "";
+    const human = !author || isHuman(author);
+    const leads = !human && listSubscriptions(author).some((s) => s.project === msg.project && s.role === "owner");
+    return creationHandback({ creatorIsHuman: human, creatorLeadsProject: leads, hasPlan: msg.decision_kind === "plan" });
+}
 export function validateNewMessage(input: unknown): ValidationError | NewMessage {
     if (!input || typeof input !== "object") return { error: "body must be object" };
     const o = input as Record<string, unknown>;
@@ -227,6 +226,22 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     } else if (o.summary_until !== undefined && o.summary_until !== null && o.summary_until !== "") {
         return { error: `summary_until only allowed on comment_added (got kind=${kind})` };
     }
+    // #2331 — `comment_only` is gone: say so instead of ignoring it.
+    if (o.comment_only !== undefined) {
+        return {
+            error: "comment_only no longer exists: set handback: true (you hand the ticket back and wait for an answer) "
+                + "or handback: false (you keep working on it), or attach a then. Nothing was posted.",
+        };
+    }
+    // #2331 — `handback` is explicit on a comment only; a new ticket's is deduced.
+    let handback: boolean | undefined;
+    if (o.handback !== undefined && o.handback !== null) {
+        if (typeof o.handback !== "boolean") return { error: "handback must be true or false" };
+        if (kind !== "comment_added") {
+            return { error: `handback is only set on a comment (got kind=${kind}); a new ticket's handback is deduced from who files it` };
+        }
+        handback = o.handback;
+    }
     // #2308 — `then: continue` arrives as `step: true`: a step on a ticket the
     // author holds. A comment only, and never together with a decision.
     let step = false;
@@ -289,6 +304,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         decision_kind: decisionKind,
         summary_until: summaryUntil,
         ...(step ? { step: true } : {}),
+        ...(handback !== undefined ? { handback } : {}),
         scope,
         from_project: fromProject,
     };
@@ -456,7 +472,9 @@ function assertDecisionOnApprovedTicket(input: NewMessage): void {
  * are for decisions. Throws with a marker the HTTP layer maps to 409.
  */
 function assertStepByHolder(input: NewMessage): void {
-    if (input.kind !== "comment_added" || !input.step || !input.ticket_id) return;
+    // #2331 — keeping the hand without a step (handback: false, no then) is the holder's too.
+    const keeping = input.handback === false && !input.decision_kind && !input.step;
+    if (input.kind !== "comment_added" || !(input.step || keeping) || !input.ticket_id) return;
     const author = input.by_agent ?? "";
     if (author && isHuman(author)) return;
     const t = getMessage(input.ticket_id);
@@ -467,7 +485,7 @@ function assertStepByHolder(input: NewMessage): void {
         assignee: t.assignee ?? null,
         claimant: t.claimant ?? null,
         claimLive: isAssignmentLive(t.claimed_at, Date.now(), assignWindowSec() * 1000),
-    });
+    }, keeping ? "handback: false" : "then: continue");
     if (!refusal) return;
     const err = new Error(refusal);
     (err as Error & { code?: string }).code = ERROR_CODES.STEP_NOT_HOLDER;
@@ -641,6 +659,8 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     assertCloseAuthority(input);
     assertDecisionOnApprovedTicket(input);
     assertStepByHolder(input);
+    // #2331 — a new ticket's handback is deduced from who files it.
+    if (input.kind === "ticket_created") input = { ...input, handback: creationHandbackFor(input).handback };
     // #561 : reject ticket_created on unknown project so a typo can't
     // silently birth a phantom project. Only ticket_created needs the
     // guard; comments/lifecycle inherit the parent ticket's project.
@@ -767,7 +787,7 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
         // the anti-collision stays structural — an agent that really works a
         // ticket always ends up posting a decision.
         // #2308 — a step (`then: continue`) is a position on the ticket too.
-        && (carriesDecision(msg.meta) || isStepMeta(msg.meta))) {
+        && (carriesDecision(msg.meta) || isStepMeta(msg.meta) || readHandback(msg.meta) === false)) {
         const author = msg.by_agent;
         if (author && author !== "auto" && !isHuman(author)) {
             const t = getMessage(msg.ticket_id);

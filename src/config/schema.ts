@@ -101,8 +101,8 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "Longest summary_until an agent may write on a comment. A longer one is refused with an explanation and nothing is posted; it is never truncated. Humans are exempt. 0 = no limit.",
     },
-    // #2275 — a comment from an agent must carry a decision (`then`) or say it
-    // concludes nothing (`comment_only: true`). Protected, so an agent cannot
+    // #2275 / #2331 — a comment from an agent must carry a `then` or say whether
+    // it hands the ticket back (`handback`). Protected, so an agent cannot
     // switch off the rule it is held to; a moderator can, per project, for a
     // loop that cannot be reloaded to learn the new flag.
     {
@@ -111,9 +111,9 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         type: "boolean",
         default: true,
         protected: true,
-        label: "Agent comments need then: or comment_only",
+        label: "Agent comments need then: or handback",
         description:
-            "When on, an agent's comment with no then: must set comment_only: true, or it is refused with an explanation and nothing is posted. Humans are exempt.",
+            "When on, an agent's comment with no then: must set handback (true: it hands the ticket back, false: it keeps it), or it is refused with an explanation and nothing is posted. Humans are exempt.",
     },
     // #2308 — a step (`then: continue`) keeps a ticket in its author's pool; one
     // that nothing follows is flagged in the inbox after this many hours.

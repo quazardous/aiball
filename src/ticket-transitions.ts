@@ -157,10 +157,11 @@ export function verbsAllowedOn(host: DecisionHost): string[] {
 // --- Replies that carry no decision ---------------------------------------------
 
 /**
- * A reply nobody accepts or rejects. `comment_only` concludes nothing and hands
- * the ticket back like any comment. `continue` marks a step done on a ticket the
- * author holds: the work goes on, and the ticket stays in the author's pool, even
- * right after the author's own question (#2326).
+ * A reply nobody accepts or rejects. #2331 — every message says whether it hands
+ * the ticket back: a decision does (its author waits), `then: continue` does not
+ * (the author carries on, and the step is marked), and a comment with no `then`
+ * says it with `handback: true` (a question, an answer awaited) or
+ * `handback: false` (keeping the hand without marking a step).
  */
 export interface ReplyGesture {
     /** How the author asks for it. */
@@ -179,13 +180,22 @@ export interface ReplyGesture {
 }
 
 export const REPLY_GESTURES = {
-    comment_only: {
-        asked: "comment_only: true",
-        stored: null,
-        meaning: "concludes nothing: a question, a ticket still in moderation; strongly discouraged for anything else",
+    handback: {
+        asked: "handback: true",
+        stored: "meta.handback",
+        meaning: "hands the ticket back: a question, an answer awaited",
         movesLastActor: true,
         keepsAuthorInPool: false,
         holderOnly: false,
+        flaggedWhenNothingFollows: false,
+    },
+    keep: {
+        asked: "handback: false",
+        stored: "meta.handback",
+        meaning: "keeps the hand and carries on, without marking a step",
+        movesLastActor: true,
+        keepsAuthorInPool: true,
+        holderOnly: true,
         flaggedWhenNothingFollows: false,
     },
     continue: {
@@ -214,6 +224,73 @@ export function isStepMeta(meta: string | null | undefined): boolean {
     }
 }
 
+/** #2331 — the `handback` a message's meta carries, or null when it carries none. */
+export function readHandback(meta: string | null | undefined): boolean | null {
+    if (!meta) return null;
+    try {
+        const v = (JSON.parse(meta) as { handback?: unknown } | null)?.handback;
+        return typeof v === "boolean" ? v : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * #2331 — the handback a comment's `then` implies: every decision waits on
+ * someone (true), a step keeps the hand (false). null when the comment has no
+ * `then`: an agent must then say it explicitly.
+ */
+export function implicitHandback(decisionKind: string | null | undefined, step: boolean): boolean | null {
+    if (decisionGesture(decisionKind)) return true;
+    if (step) return false;
+    return null;
+}
+
+/** #2331 — why a comment's handback is refused, or null when it may go through. */
+export function handbackRefusal(h: {
+    decisionKind: string | null | undefined;
+    step: boolean;
+    handback: boolean | undefined;
+    /** Must a comment with no `then` carry a handback (an agent, rule on)? */
+    required: boolean;
+}): string | null {
+    const implicit = implicitHandback(h.decisionKind, h.step);
+    if (implicit !== null) {
+        if (h.handback === undefined || h.handback === implicit) return null;
+        const gesture = h.step ? "then: continue" : `then: ${decisionGesture(h.decisionKind)?.verb}`;
+        return `handback: ${h.handback} contradicts ${gesture}, which ${implicit ? "hands the ticket back" : "keeps the hand"}. `
+            + "Leave handback out, or change the then. Nothing was posted.";
+    }
+    if (h.handback !== undefined || !h.required) return null;
+    return "a comment without then: needs one, or handback. A step you finished on a ticket you hold: then: continue. "
+        + "A step to have validated: then: plan. Work done, or a ticket to drop or unblock: then: resolved / wontfix / escalate. "
+        + "Otherwise say whether you hand the ticket back: handback: true (a question, you wait for an answer; the ticket leaves your queue) "
+        + "or handback: false (you keep working on it; only on a ticket you hold). Nothing was posted.";
+}
+
+/**
+ * #2331 — what filing a ticket implies, deduced from who files it (the caller
+ * never sends it): the project's lead keeps it, and is reminded to attach a plan
+ * when there is none; anyone else — another project's agent, or a human from the
+ * board — hands it back.
+ */
+export function creationHandback(c: {
+    creatorIsHuman: boolean;
+    creatorLeadsProject: boolean;
+    hasPlan: boolean;
+}): { handback: boolean; warning: string | null } {
+    if (!c.creatorIsHuman && c.creatorLeadsProject) {
+        return {
+            handback: false,
+            warning: c.hasPlan
+                ? null
+                : "you filed this ticket on a project you lead without then: plan. If you already know how the work should go, "
+                    + "attach then: plan so a human validates the approach before you start.",
+        };
+    }
+    return { handback: true, warning: null };
+}
+
 /** Does this event make its author the ticket's last actor? Read from the table; a step does since #2326. */
 export function movesLastActor(kind: string, meta: string | null | undefined): boolean {
     if (kind === "comment_added" && isStepMeta(meta)) return REPLY_GESTURES.continue.movesLastActor;
@@ -223,10 +300,13 @@ export function movesLastActor(kind: string, meta: string | null | undefined): b
 /**
  * #2326 — as the ticket's last action, does this event keep its author in the
  * pool? A step does: "not done, I carry on" must not leave the ticket waiting on
- * someone, even right after the author's own question. Nothing else does.
+ * someone, even right after the author's own question. #2331 — nor does a
+ * comment posted with `handback: false`. Nothing else keeps its author.
  */
 export function keepsAuthorInPool(kind: string, meta: string | null | undefined): boolean {
-    return kind === "comment_added" && isStepMeta(meta) && REPLY_GESTURES.continue.keepsAuthorInPool;
+    if (kind !== "comment_added") return false;
+    if (isStepMeta(meta)) return REPLY_GESTURES.continue.keepsAuthorInPool;
+    return readHandback(meta) === false && REPLY_GESTURES.keep.keepsAuthorInPool;
 }
 
 /** What `stepRefusal` needs to know about the ticket. */
@@ -240,16 +320,16 @@ export interface StepHold {
 }
 
 /** Why `author` may not post a step on this ticket, or null when it may. */
-export function stepRefusal(h: StepHold): string | null {
+export function stepRefusal(h: StepHold, gesture: "then: continue" | "handback: false" = "then: continue"): string | null {
     if (h.ticketStatus !== "approved") {
-        return `then: continue needs an approved ticket; this one is "${h.ticketStatus}". Nothing was posted.`;
+        return `${gesture} needs an approved ticket; this one is "${h.ticketStatus}". Nothing was posted.`;
     }
     if (h.assignee === h.author || (h.claimLive && h.claimant === h.author)) return null;
     const holder = h.assignee ?? (h.claimLive ? h.claimant : null);
     if (holder) {
-        return `then: continue is for the agent holding the ticket, and it is held by ${holder}. Post a comment instead. Nothing was posted.`;
+        return `${gesture} is for the agent holding the ticket, and it is held by ${holder}. Post handback: true instead. Nothing was posted.`;
     }
-    return "then: continue is for the agent holding the ticket: claim it first (ticket_claim), then post the step. Nothing was posted.";
+    return `${gesture} is for the agent holding the ticket: claim it first (ticket_claim), then post again. Nothing was posted.`;
 }
 
 /**
@@ -313,7 +393,7 @@ export function withDecisionMatrix(doc: string): string {
 export function renderReplyGestureMatrix(): string {
     const yesNo = (b: boolean) => (b ? "yes" : "no");
     const lines = [
-        "Replies that carry no decision, so nobody accepts or rejects them:",
+        "Every decision above hands the ticket back (its author waits). The replies below carry no decision, so nobody accepts or rejects them; a comment with no `then` must say which one it is:",
         "",
         "| reply | stored as | meaning | makes the author the last actor | keeps the ticket in the author's pool | only the agent holding the ticket | flagged when nothing follows |",
         "|---|---|---|---|---|---|---|",

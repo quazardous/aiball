@@ -2,7 +2,7 @@
  * #2308 — `then: continue`: a step on a ticket the author holds.
  * What must hold, over the real HTTP route: an agent that does not hold the
  * ticket is refused and nothing is posted, whether nobody holds it or another
- * agent does; the holder's step lands as a step, needs no comment_only, and
+ * agent does; the holder's step lands as a step, needs no handback, and
  * leaves the ticket's last actor where it was; a step cannot carry a decision.
  */
 import { test, after } from "node:test";
@@ -81,7 +81,7 @@ test("a ticket another agent holds refuses the step and names the holder", async
     assert.equal(commentsOn(t).length, 0);
 });
 
-test("the holder's step lands as a step, needs no comment_only, and keeps the ticket in its pool", async () => {
+test("the holder's step lands as a step, needs no handback, and keeps the ticket in its pool", async () => {
     const t = ticket();
     setTicketClaim(t, "worker");
     const r = await step(t);
@@ -94,13 +94,13 @@ test("the holder's step lands as a step, needs no comment_only, and keeps the ti
 test("#2326 a step right after the agent's own question puts the ticket back in its pool (the #2210 case)", async () => {
     const t = ticket();
     setTicketClaim(t, "worker");
-    const question = await post({ project: "p-2308", kind: "comment_added", ticket_id: t, body: "a question", summary_until: "state", comment_only: true });
+    const question = await post({ project: "p-2308", kind: "comment_added", ticket_id: t, body: "a question", summary_until: "state", handback: true });
     assert.equal(question.status, 201, JSON.stringify(question.json));
     assert.equal(waiting(t), true, "a question leaves the worker waiting on the reporter");
     assert.equal((await step(t)).status, 201);
     assert.equal(lastActor(t), "worker");
     assert.equal(waiting(t), false, "the step puts the ticket back in the worker's pool");
-    const again = await post({ project: "p-2308", kind: "comment_added", ticket_id: t, body: "another question", summary_until: "state", comment_only: true });
+    const again = await post({ project: "p-2308", kind: "comment_added", ticket_id: t, body: "another question", summary_until: "state", handback: true });
     assert.equal(again.status, 201, JSON.stringify(again.json));
     assert.equal(waiting(t), true, "a comment after the step hands the ticket back again");
 });

@@ -77,11 +77,11 @@ meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status
 - **wontfix** — close without doing it. **escalation** — a blocker only a human
   can lift. Both are in the matrix below.
 - accept/reject goes through `POST /messages/:id/decide`.
-- A reply can also carry **no decision** (the second table below).
-  `comment_only: true` concludes nothing and hands the ticket back like any
-  comment, so it is kept for a question or a ticket still in moderation;
-  `then: continue` marks a step done on a ticket the author holds and keeps
-  the ticket in the author's pool (§4.1).
+- A reply can also carry **no decision** (the second table below). Every
+  message says whether it hands the ticket back: a decision does (its author
+  waits), `then: continue` does not (the author carries on), and a comment with
+  no `then` says it with `handback: true` or `handback: false`. A new ticket's
+  handback is deduced: the project's lead keeps it, anyone else hands it back.
 
 ### 3.1 The decision matrix
 
@@ -98,11 +98,12 @@ the table disagree.
 | `wontfix` | `wontfix` | `comment_added` | close without doing it: junk, out of scope, not reproducible | out of the proposer's pool until someone else acts | the ticket closes, not resolved; out of the pool, settled | back in the pool | — | no | no | `pending_wontfix` |
 | `escalate` | `escalation` | `comment_added` | a blocker only a human can lift | out of the proposer's pool until someone else acts | unblocked, the ticket stays open; back in the pool | back in the pool | priority up one notch, broadcast to followers | no | no | `pending_escalation` |
 
-Replies that carry no decision, so nobody accepts or rejects them:
+Every decision above hands the ticket back (its author waits). The replies below carry no decision, so nobody accepts or rejects them; a comment with no `then` must say which one it is:
 
 | reply | stored as | meaning | makes the author the last actor | keeps the ticket in the author's pool | only the agent holding the ticket | flagged when nothing follows |
 |---|---|---|---|---|---|---|
-| `comment_only: true` | — | concludes nothing: a question, a ticket still in moderation; strongly discouraged for anything else | yes | no | no | no |
+| `handback: true` | `meta.handback` | hands the ticket back: a question, an answer awaited | yes | no | no | no |
+| `handback: false` | `meta.handback` | keeps the hand and carries on, without marking a step | yes | yes | yes | no |
 | `then: continue` | `meta.step` | a step is done and the work goes on, nothing to validate | yes | yes | yes | yes |
 <!-- decision-matrix:end -->
 
@@ -132,8 +133,11 @@ actionable-for-C (whose-court) =
   tickets vanish from its queue.)*
 - **last_actor = C and a counterpart exists** → C acted last toward someone else
   → gated (awaiting them). *(e.g. agent posted a plan/reply, awaiting david.)*
-- **…unless C's last action is a step** (`then: continue`) → C is carrying on,
-  not waiting → stays actionable, even right after C's own question.
+- **…unless C's last action is a step** (`then: continue`) or a comment with
+  `handback: false` → C is carrying on, not waiting → stays actionable, even
+  right after C's own question.
+- **A ticket C filed with `handback`** (C does not lead the project) → gated even
+  before anyone else acts: C filed it for someone else.
 
 ### 4.2 What counts as an "action" (what sets `last_actor`)
 
@@ -143,7 +147,7 @@ actionable-for-C (whose-court) =
 | accept / reject a decision | the **decider** | *(mutates meta — no event, see §7)* |
 | resolve / close / reopen / block | the human who did it | `ticket_*` lifecycle |
 
-A **step** (`then: continue`) is an action like any comment, with one
+A **step** (`then: continue`), or a comment with `handback: false`, is an action like any comment, with one
 difference (§4.1): while it is the ticket's last action, its author is never
 "waiting on them", so the ticket stays in the author's pool.
 

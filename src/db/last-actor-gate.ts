@@ -65,14 +65,19 @@ export function eventHasForeignActor(ev: ActorEvent, consumerId: string): boolea
  * no foreign actor = sole participant (own backlog) → kept (returns false).
  * #2326 — nor when that last action is C's own step (`then: continue`): a step
  * says "not done, I carry on", so it never leaves C waiting on someone.
+ * #2331 — and a ticket C filed with `handback` (C does not lead the project)
+ * leaves C's pool even before anyone else acts: C filed it for someone else.
  */
 export function isExcludedForConsumer(
     lastActor: string | null,
     hasForeignActor: boolean,
     consumerId: string,
     lastActionKeepsAuthorInPool = false,
+    lastActionIsHandingBackCreation = false,
 ): boolean {
-    return lastActor === consumerId && hasForeignActor && !lastActionKeepsAuthorInPool;
+    return lastActor === consumerId
+        && (hasForeignActor || lastActionIsHandingBackCreation)
+        && !lastActionKeepsAuthorInPool;
 }
 
 /** One stored event, as the last-actor replay reads it. */

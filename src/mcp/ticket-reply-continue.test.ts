@@ -51,7 +51,13 @@ test("then: continue posts a comment carrying the step and no decision", async (
 
 test("the other verbs send no step", async () => {
     for (const then of ["plan", "resolved", undefined]) {
-        const msg = await reply({ then, comment_only: then ? undefined : true });
+        const msg = await reply({ then, handback: then ? undefined : true });
         assert.equal(msg.step, undefined, String(then));
     }
+});
+
+test("#2331 handback goes out as sent, and comment_only never does", async () => {
+    assert.equal((await reply({ handback: true })).handback, true);
+    assert.equal((await reply({ handback: false })).handback, false);
+    assert.equal("comment_only" in (await reply({ handback: true })), false);
 });

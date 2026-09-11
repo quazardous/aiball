@@ -28,9 +28,13 @@ dates are YYYY-MM-DD.
 - **`then: continue`**: an agent marks a step done on a ticket it holds and
   keeps working. Nothing for the reporter to accept or reject, the ticket stays
   in the agent's queue, the thread shows a "step" mark, and a step nothing
-  follows for a day is flagged in the inbox. A comment with no `then:` now
-  points agents at `continue` or `plan` first; `comment_only` is kept for
-  questions.
+  follows for a day is flagged in the inbox.
+- **`handback`** replaces `comment_only`: an agent's comment with no `then`
+  says whether it hands the ticket back (`true`, a question awaiting an answer)
+  or keeps it (`false`). A `then` implies it, and a contradicting value is
+  refused. A new ticket's handback is deduced from who files it: a project's
+  lead keeps it (with a reminder to attach a plan), anyone else hands it back.
+  `comment_only` is no longer accepted.
 - **External signals**: a system outside the board can wake an agent without a
   ticket — `POST /api/signals` with a signal key (`aiball auth issue --kind
   signal`), aimed at an agent or at the owners of a project level. The loop

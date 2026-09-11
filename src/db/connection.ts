@@ -253,6 +253,9 @@ export interface NewMessage {
     summary_until?: string | null;
     /** #2308 — `then: continue`: a step on a ticket the author holds. comment_added only. */
     step?: boolean;
+    /** #2331 — does this message hand the ticket back? Explicit on a comment
+     *  with no `then`; deduced at creation from who files the ticket. */
+    handback?: boolean;
     /** #B.245 tristate scope. `internal` = owners only + @mentions;
      *  `default` = subs + owners + @mentions; `broadcast` = +
      *  followers. Applies to every kind (ticket_created uses it the

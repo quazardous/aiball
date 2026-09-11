@@ -45,7 +45,7 @@ Open one when **someone else** needs to know something you can't say in the curr
 
 **Don't open one** for personal TODOs (local note), for the human in front of you (just ask), or for code-review of your own work (`/review`).
 
-**A ticket you create says what it is**, the same way a comment does: `then: "plan"` when the body already proposes how the work should go, or `comment_only: true` when it only sets down something to remember. A ticket with neither is refused and nothing is created.
+**A ticket you create** on a project you lead stays in your queue: attach `then: "plan"` when the body already proposes how the work should go (without it, the response reminds you). A ticket you file on someone else's project hands the ticket back automatically.
 
 ---
 
@@ -56,7 +56,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 - **`then: "resolved"`** — propose to close. Use when work shipped (commit landed, fix live) and scope is satisfied. Do this **immediately** — don't write "awaiting test" and wait.
 - **`then: "plan"`** — propose **how** you'll tackle. Reporter's accept = greenlight to execute.
 - **`then: "continue"`** — a step is done and you carry on, nothing to validate. Only on a ticket you hold (claim it first). The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
-- **Plain comment** (`comment_only: true`) — **strongly discouraged.** Only for what concludes nothing: a clarifying question, an answer to one, a ticket still in moderation. A progress note is a `then: "continue"`, not a plain comment. A reply with neither a `then:` nor `comment_only: true` is refused and nothing is posted; setting the flag is saying out loud that this comment concludes nothing, and it takes the ticket out of your queue.
+- **Plain comment** — say whether you hand the ticket back. `handback: true` for a clarifying question or anything you wait an answer on: the ticket leaves your queue. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
 
 ### The default is decision-bearing
 

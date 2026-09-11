@@ -47,7 +47,7 @@ import {
     type Priority,
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
-import { isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
+import { creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
 import { decisionGesture } from "../ticket-transitions.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
@@ -107,14 +107,15 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     // every close on a ticket the moderator didn't open returned 403. Same
     // pattern as api/tickets.ts:assign which has always done `consumerOf(req)`.
     if (!v.by_agent) v.by_agent = consumerOf(req);
-    // #2275 — an agent's comment, or a ticket it creates, carries a decision or
-    // says it is only a comment.
-    const noDecision = withoutDecisionRefusal(v, req.body, consumerOf(req));
+    // #2275 / #2331 — an agent's comment carries a then, or says whether it hands the ticket back.
+    const noDecision = withoutDecisionRefusal(v, consumerOf(req));
     if (noDecision) return badRequest(res, noDecision);
+    // #2331 — a project's lead filing a ticket without a plan is reminded, not refused.
+    const warning = v.kind === "ticket_created" ? creationHandbackFor(v).warning : null;
     try {
         const msg = submitMessage(v);
         applyPlatformTag(msg, req);
-        return res.status(201).json(withTagsOne(msg));
+        return res.status(201).json({ ...withTagsOne(msg), ...(warning ? { warnings: [warning] } : {}) });
     } catch (err) {
         const code = (err as { code?: string }).code;
         if (code === ERROR_CODES.FORBIDDEN_CLOSE) {

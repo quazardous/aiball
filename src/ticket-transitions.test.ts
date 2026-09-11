@@ -242,7 +242,7 @@ test("the inbox fold tracks each kind's latest decision from the stored comments
 
 test("then: continue is a reply gesture, not a decision, and a step is read tolerantly", () => {
     assert.equal(t.kindForVerb(t.STEP_VERB), null);
-    assert.deepEqual(Object.keys(t.REPLY_GESTURES), ["comment_only", "continue"]);
+    assert.deepEqual(Object.keys(t.REPLY_GESTURES), ["handback", "keep", "continue"]);
     assert.equal(t.isStepMeta(JSON.stringify({ step: true, summary_until: "s" })), true);
     for (const m of [null, undefined, "", "not json", "null", "{}", JSON.stringify({ step: "yes" })]) {
         assert.equal(t.isStepMeta(m), false, String(m));
@@ -349,4 +349,41 @@ test("the fold tracks the latest step and the row flags it once nothing followed
     // #2327 — the list marker: the last word is a step, until someone answers.
     assert.equal(row(quiet, 0).latest_is_step, true, "the last word is a step");
     assert.equal(row(answered, 24).latest_is_step, false, "david answered after the step");
+});
+
+// --- #2331: handback ---------------------------------------------------------
+
+test("#2331 every then implies a handback, and a comment with none must say it", () => {
+    for (const k of t.DECISION_KINDS) assert.equal(t.implicitHandback(k, false), true, k);
+    assert.equal(t.implicitHandback(null, true), false, "a step keeps the hand");
+    assert.equal(t.implicitHandback(null, false), null);
+    const base = { decisionKind: null, step: false, handback: undefined, required: true };
+    assert.match(t.handbackRefusal(base) ?? "", /handback: true/);
+    assert.equal(t.handbackRefusal({ ...base, required: false }), null, "not required: a human, or the rule off");
+    assert.equal(t.handbackRefusal({ ...base, handback: true }), null);
+    assert.equal(t.handbackRefusal({ ...base, handback: false }), null);
+    assert.equal(t.handbackRefusal({ ...base, decisionKind: "plan" }), null);
+    assert.match(t.handbackRefusal({ ...base, decisionKind: "plan", handback: false }) ?? "", /contradicts then: plan/);
+    assert.match(t.handbackRefusal({ ...base, step: true, handback: true }) ?? "", /contradicts then: continue/);
+    assert.match(t.handbackRefusal({ ...base, decisionKind: "plan", handback: false, required: false }) ?? "", /contradicts/,
+        "a contradiction is refused for anyone");
+});
+
+test("#2331 a new ticket's handback comes from who files it", () => {
+    assert.deepEqual(t.creationHandback({ creatorIsHuman: false, creatorLeadsProject: true, hasPlan: true }), { handback: false, warning: null });
+    const lead = t.creationHandback({ creatorIsHuman: false, creatorLeadsProject: true, hasPlan: false });
+    assert.equal(lead.handback, false);
+    assert.match(lead.warning ?? "", /then: plan/);
+    assert.deepEqual(t.creationHandback({ creatorIsHuman: false, creatorLeadsProject: false, hasPlan: false }), { handback: true, warning: null });
+    assert.deepEqual(t.creationHandback({ creatorIsHuman: true, creatorLeadsProject: false, hasPlan: false }), { handback: true, warning: null });
+});
+
+test("#2331 handback: false keeps its author in the pool; a creation that hands back leaves it", async () => {
+    const { isExcludedForConsumer } = await import("./db/last-actor-gate.js");
+    assert.equal(t.keepsAuthorInPool("comment_added", JSON.stringify({ handback: false })), true);
+    assert.equal(t.keepsAuthorInPool("comment_added", JSON.stringify({ handback: true })), false);
+    assert.equal(t.readHandback("{}"), null);
+    assert.equal(isExcludedForConsumer("agent", false, "agent"), false, "sole participant: kept");
+    assert.equal(isExcludedForConsumer("agent", false, "agent", false, true), true, "filed handing back: out, even alone");
+    assert.equal(isExcludedForConsumer("agent", true, "agent", true, false), false, "a last action that keeps wins");
 });
