@@ -159,6 +159,127 @@ the timer.
 
 ---
 
+## State diagrams
+
+The loop is a small network of XState machines (see
+[`SM-NETWORK.md`](./SM-NETWORK.md)). The four diagrams below are the ones that
+decide when a wake gets typed into the session. Arrow labels are the literal
+event types in the code, so each one can be checked against its machine.
+
+### 1. Boot, session, turns
+
+```mermaid
+stateDiagram-v2
+    [*] --> booting
+    booting --> booting: MODULE_SEEN
+    booting --> sealed: DEADLINE_REACHED
+    state sealed {
+        state "fresh" as sealed_fresh
+        state "settled" as sealed_settled
+        [*] --> sealed_fresh
+        sealed_fresh --> sealed_settled: after 10 s, emits loop start
+    }
+    sealed --> live: loop start, and no boot-time turn still running
+    state live {
+        state "no turn (idle)" as no_turn
+        state "in turn (busy)" as in_turn
+        [*] --> no_turn
+        no_turn --> in_turn: TURN_STARTED
+        in_turn --> no_turn: TURN_ENDED
+        in_turn --> in_turn: TURN_STARTED (after a lost Stop hook)
+        no_turn --> no_turn: every wake tempo, emits turn settled
+    }
+```
+
+| Event | Sent by |
+|---|---|
+| `MODULE_SEEN` | the pane scan, while a boot screen is visible: the boot floor (`claude_loop.boot_min_seconds`, 30 s), the resume picker, `/compact`… each lasting 10 s after it was last seen |
+| `DEADLINE_REACHED` | a 1 s timer, once every boot screen is past its deadline |
+| `loop:start` | the boot machine, 10 s after sealing |
+| `TURN_STARTED` | the `UserPromptSubmit` hook (not for the loop's own wake), and the loop itself right before it types a wake |
+| `TURN_ENDED` | the `Stop` hook, or the pane back at an idle prompt while a turn was still open |
+| `turn:settled` | the turn machine, `claude_loop.wake_tempo_seconds` (10 s) after the turn ended, then again every tempo — each one asks for a wake |
+
+Entering **live** unlocks the wake machine (`BOOT_READY`, diagram 3) and tries a
+first wake. The bar's *busy* colour is not a state of its own: it stays on while
+any sign of activity was seen in the last 4 s — an open turn, the
+`esc to interrupt` footer, `/compact`, the spinner line.
+
+### 2. Human presence — F9 and typing
+
+```mermaid
+stateDiagram-v2
+    state "off — bar ▶" as off
+    state "hold 10 min — bar ⏸ 웃Ns" as wait_10m
+    state "hold ∞ — bar ⏸ 웃∞" as wait_inf
+    [*] --> off
+    off --> wait_10m: F9 (ARM_10M), typing (HARD_ARM_10M), start with wait flag
+    wait_10m --> wait_inf: F9 (ARM_INF)
+    wait_inf --> off: F9 (ARM_OFF)
+    wait_10m --> off: EXPIRY_REACHED
+    wait_10m --> wait_10m: typing restarts the window (HARD_ARM_10M)
+```
+
+- **F9** goes through a 3 s debounce (the `pending_*` states, not drawn), so a
+  held key does not spin through the cycle. The window comes from
+  `claude_loop.presence_hold_seconds` (600 s by default), for F9 and for
+  `claude-loop start --wait`.
+- **Typing** is detected by the PTY proxy. It arms or restarts a 600 s hold,
+  except in **∞**, which only F9 releases. A red `⌨` joins the bar while a key
+  was typed in the last 5 s.
+- The words `loop` / `wait` / `stop` used in
+  [the tmux bar section](#3-the-tmux-bar-word--stop--boot--wait--loop) are the
+  internal names of `▶` / `⏸` / `⌨`.
+- When a hold clears, the loop tries a wake — deferred while typing is still hot.
+
+### 3. The wake machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> gated
+    gated --> gated: REQUEST_WAKE (dropped while booting)
+    gated --> idle: BOOT_READY
+    idle --> inFlight: REQUEST_WAKE
+    inFlight --> inFlight: WAKE_DELIVERED (phrase typed)
+    inFlight --> idle: WAKE_SKIPPED (a check said no)
+    inFlight --> cooldown: WAKE_COMPLETED, or after 30 s
+    cooldown --> idle: after 10 s
+```
+
+A `REQUEST_WAKE` arriving during `cooldown` is dropped: that 10 s window is what
+coalesces a burst of notifications into one wake. On `WAKE_DELIVERED` the event
+the phrase was built on is marked seen.
+
+### 4. What stops a wake
+
+```mermaid
+flowchart TD
+    A["tryWake(reason)"] --> B{"wake machine idle?"}
+    B -- no --> S0["skip: in flight or cooldown"]
+    B -- yes --> C{"zen marker?"}
+    C -- yes --> S1["skip: zen mode"]
+    C -- no --> D{"idle marker set?"}
+    D -- no --> S2["skip: claude busy or still booting"]
+    D -- yes --> E{"loop view allows it?"}
+    E -- no --> S3["skip, first reason that applies:<br/>not logged in · trust dialog · API unreachable ·<br/>boot grace · human typing in the last 5 s · presence hold ·<br/>busy-defer · esc to interrupt · /compact"]
+    E -- yes --> F{"work waiting?<br/>pings · actionable tickets · signals"}
+    F -- no --> S4["skip: drained"]
+    F -- yes --> G["pick the phrase:<br/>1. external signal<br/>2. unread event, or the live notification<br/>3. backlog ticket"]
+    G --> H{"phrase has content?"}
+    H -- no --> S5["skip: nothing actionable"]
+    H -- yes --> I["TURN_STARTED, type the phrase,<br/>mark the event seen"]
+```
+
+- Every skip is logged in `loop.log` as `skip wake (<reason>) — <why>`.
+- A manual `claude-loop wake` does not go through the loop-view check. A panic
+  wake only ignores busy-defer, `esc to interrupt` and `/compact`.
+- A consumer with `no_claim` and no personal pings is skipped before the work
+  check.
+- **busy-defer** is armed for 10 s after each delivered wake, by the Stop hook,
+  and by the API-error backoff (5 s, doubling, capped at 10 min).
+
+---
+
 ## Quickstart
 
 ```bash
