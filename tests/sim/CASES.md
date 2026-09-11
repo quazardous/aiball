@@ -28,6 +28,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
 | 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
 | 24 — A ticket waiting on another (`depends_on`) is blocked, and gets a `dependency_closed` event the moment the blocker closes | `dependency-closed` |
+| An agent holding a ticket posts `then: wait` + `wait_for`: the ticket is blocked, not "waiting on them", and its waited ticket's close accepts the wait and wakes it | `then-wait` |
 
 To add to `handback-refusals`: `then: continue` on a ticket the agent does not
 hold (409, the text points to claiming), and a `summary_until` over the budget

@@ -1,0 +1,23 @@
+name: an agent waits on another ticket with then wait, and is woken when that ticket closes
+steps:
+  - alpha-lead: ticket_new
+    args: { title: The ticket to wait for, body: Another piece of work that must land first. }
+    save: { target: id }
+  - alpha-lead: ticket_new
+    args: { title: Waits for the other ticket, body: Can only go on once the other one is done. }
+    save: { waiting: id }
+  - moderator: approve $target
+  - moderator: approve $waiting
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $waiting }
+  - alpha-lead: ticket_reply
+    args: { target_id: $waiting, body: Waiting for the other ticket to land., summary_until: Waiting for the other ticket., then: wait, wait_for: $target }
+    save: { wait: id }
+  # Blocked while the other ticket is open, even though the lead spoke last; no event queued on it.
+  - expect:
+      alpha-lead: { ticket: $waiting, backlog: blocked, act: false, gated: false, events: [] }
+  - wake: alpha-lead
+  - moderator: close $target
+  - expect:
+      alpha-lead: { ticket: $waiting, act: true, events: [dependency_closed], wake: event }
+  - view: [alpha-lead]

@@ -41,6 +41,8 @@ const ACCEPT_LABELS: Record<CommentDecision["kind"], string> = {
     wontfix: "accept wontfix → close",
     escalation: "accept escalation → action done",
     plan: "accept plan → keep open",
+    // #2297 — a wait ends by itself when the ticket it names closes; accepting it early lifts it.
+    wait: "stop waiting → the agent carries on",
 };
 
 function acceptLabel(kind: CommentDecision["kind"]): string {

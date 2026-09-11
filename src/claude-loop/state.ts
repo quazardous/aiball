@@ -2153,6 +2153,7 @@ export async function buildContextPhrase(
             resolution: { accepted: "The resolution was ACCEPTED, ticket closed", rejected: "REJECT — the resolution, ticket stays open" },
             wontfix: { accepted: "The wontfix was ACCEPTED, ticket closed", rejected: "REJECT — the wontfix, ticket stays open" },
             escalation: { accepted: "The escalation was ACCEPTED", rejected: "REJECT — the escalation" },
+            wait: { accepted: "The wait is over", rejected: "REJECT — the wait, carry on without it" },
         };
         const DECISION_EVENT_VERBS: Record<string, string> = Object.fromEntries(
             DECISION_KINDS.flatMap((k): Array<[string, string]> => [

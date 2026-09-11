@@ -256,6 +256,8 @@ export interface NewMessage {
     /** #2331 — does this message hand the ticket back? Explicit on a comment
      *  with no `then`; deduced at creation from who files the ticket. */
     handback?: boolean;
+    /** #2297 — the ticket a `then: wait` waits on. comment_added only. */
+    wait_for?: number | null;
     /** #B.245 tristate scope. `internal` = owners only + @mentions;
      *  `default` = subs + owners + @mentions; `broadcast` = +
      *  followers. Applies to every kind (ticket_created uses it the

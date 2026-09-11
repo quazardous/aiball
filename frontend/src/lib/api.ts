@@ -547,6 +547,8 @@ export interface InboxRow {
     /** #1835 — pending wontfix (close without resolution), awaiting the
      *  reporter. Same green attention band as plan / resolution. */
     pending_wontfix?: boolean;
+    /** #2297 — pending wait: the ticket waits on another one (`wait_for`). */
+    pending_wait?: boolean;
     /** #2308 — a step (then: continue) nothing has followed for
      *  tickets.step_stale_hours: the work it announced went quiet. */
     stalled_step?: boolean;

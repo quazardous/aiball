@@ -504,6 +504,14 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
                 icon: "pi pi-ban",
                 command: () => { void acceptActiveDecision("wontfix"); },
             });
+        } else if (active.decision.kind === "wait") {
+            // #2297 — a wait ends by itself when the ticket it names closes. The
+            // one human gesture is to lift it early, which hands the ticket back.
+            items.push({
+                label: "stop waiting → the agent carries on",
+                icon: "pi pi-play",
+                command: () => { void rejectActiveDecision(); },
+            });
         }
         return items;
     });

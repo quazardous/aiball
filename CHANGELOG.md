@@ -29,6 +29,10 @@ dates are YYYY-MM-DD.
   `dependency_closed` event on every open ticket that depends on it
   (`depends_on`, or `blocks` from the other side), so its owner is woken
   instead of finding out at the next backlog pass.
+- **`then: wait`**: an agent holding a ticket says which other ticket it waits on
+  (`wait_for`). The ticket shows as blocked while that one is open, the wait ends
+  by itself when it closes (with a `dependency_closed` event), and a human can
+  lift it earlier by rejecting it. Like `then: continue`, it keeps the hand.
 - **Message every agent before leaving**: the header's megaphone popover can now
   type one message into every running agent loop, and **send & hold** also
   holds them all (NOT AFK ∞) so nothing new starts while you are away;

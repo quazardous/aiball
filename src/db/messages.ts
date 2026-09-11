@@ -211,7 +211,12 @@ export function insertMessage(m: NewMessage): Message {
         if (m.kind === "comment_added" && (m.decision_kind || m.summary_until || m.step || typeof m.handback === "boolean")) {
             const meta: Record<string, unknown> = {};
             if (m.decision_kind) {
-                meta.decision = { kind: m.decision_kind, status: "pending" };
+                meta.decision = {
+                    kind: m.decision_kind,
+                    status: "pending",
+                    // #2297 — a wait records the ticket it waits on.
+                    ...(typeof m.wait_for === "number" ? { wait_for: m.wait_for } : {}),
+                };
             }
             // #2308 — `then: continue`: a step, which proposes nothing.
             if (m.step) {

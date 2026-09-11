@@ -56,6 +56,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 - **`then: "resolved"`** — propose to close. Use when work shipped (commit landed, fix live) and scope is satisfied. Do this **immediately** — don't write "awaiting test" and wait.
 - **`then: "plan"`** — propose **how** you'll tackle. Reporter's accept = greenlight to execute.
 - **`then: "continue"`** — a step is done and you carry on, nothing to validate. Only on a ticket you hold (claim it first). The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
+- **`then: "wait"` + `wait_for: <id>`** — you hold the ticket and cannot go on until another ticket lands. The ticket shows as blocked, and you are woken when that ticket closes; the human can lift the wait by rejecting it. Only for a real dependency on another ticket: not to wait on a machine, not to put work off.
 - **Plain comment** — say whether you hand the ticket back. `handback: true` for a clarifying question or anything you wait an answer on: the ticket leaves your queue. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
 
 ### The default is decision-bearing
@@ -68,6 +69,7 @@ For these three cases, use `then:`, NOT a plain comment :
 | "Tu préfères A ou B ?" | `then: "plan"` with A vs B |
 | "Claim = je code ?" | `then: "plan"` with the next concrete step |
 | "J'ai fini l'étape 2, je passe à la 3" | `then: "continue"` |
+| "Je ne peux avancer qu'une fois #N livré" | `then: "wait"` + `wait_for: N` |
 
 Skipping `then:` pushes cleanup overhead onto the human.
 
@@ -77,6 +79,7 @@ Skipping `then:` pushes cleanup overhead onto the human.
 - *this is done / can close* → `then: "resolved"`
 - *this shouldn't be done* → `then: "wontfix"`
 - *this step is done, I carry on* → `then: "continue"`
+- *I can only go on once #N lands* → `then: "wait"`, `wait_for: N`
 
 Leave it plain **only** when it genuinely hands the ball back — a clarifying question, missing context, a refinement to a still-valid plan. Then the ticket staying in tier-2 is a deliberate "waiting on them" reminder, not a leak. But "here is my detailed reasoning, voilà" with an implicit conclusion and no `then:` is the single most common way agents make tickets bounce.
 

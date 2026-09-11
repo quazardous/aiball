@@ -244,6 +244,9 @@ const LIFECYCLE_LABELS: Record<string, LifecycleLabel> = {
     wontfix_rejected: { icon: "pi pi-times", verb: "rejected the wontfix", severity: "danger" },
     escalation_accepted: { icon: "pi pi-check", verb: "accepted the escalation (action done)", severity: "success" },
     escalation_rejected: { icon: "pi pi-times", verb: "rejected the escalation", severity: "danger" },
+    // #2297 — a wait is accepted when the ticket it waits on closes; rejecting it lifts it.
+    wait_accepted: { icon: "pi pi-check", verb: "ended the wait", severity: "success" },
+    wait_rejected: { icon: "pi pi-times", verb: "lifted the wait: carry on without it", severity: "info" },
 };
 
 // Body edit (per #B.94). Toggle reveals a textarea seeded with the

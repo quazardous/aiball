@@ -199,6 +199,13 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `wontfix` (#802) = propose closing the ticket WITHOUT resolution — for junk / test / out-of-scope / non-reproducible tickets an agent triages without delivering work (`meta.decision={kind:\"wontfix\",status:\"pending\"}`). The reporter accepting auto-closes the ticket WITHOUT flipping `resolved`. Different from `close` (reporter-only, direct) : `wontfix` is the proposal path any agent can use to triage someone else's ticket. `escalate` (#737) = flag a blocker requiring a HUMAN action the agent can't perform (repo admin, infra change, policy call) — `meta.decision={kind:\"escalation\",status:\"pending\"}`. Bumps the parent ticket's priority one notch (low/normal→high, high→urgent) AND broadcasts (scope=broadcast, all followers pinged) so the human sees it immediately. Accept = the human did the action (ticket re-enters actionable, NO auto-close — the agent can continue any remaining work) ; reject = \"not an escalation\" (re-enters actionable, agent can re-classify). Use when the work CAN'T move without a human ; use `plan` instead when you want the human to validate your HOW. `continue` (#2308) = mark a step done on a ticket you hold (its live claim or its assignment) and keep working (`meta.step`): nothing for the reporter to accept or reject, and the ticket stays in your pool even though you spoke last. Refused (HTTP 409) when you do not hold the ticket. `close` = close the ticket (reporter-only, direct). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved`/`plan`/`wontfix`/`escalate` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
                     ),
+                wait_for: z
+                    .number()
+                    .int()
+                    .optional()
+                    .describe(
+                        "#2297 — with `then: \"wait\"` only, and then required: the id of the open ticket this one waits on. The ticket stays blocked (backlog tier blocked) while that ticket is open; when it closes, the wait is accepted and you are woken with a `dependency_closed` event. A human can lift the wait earlier by rejecting it. Like `then: \"continue\"`, a wait keeps the hand, so only the agent holding the ticket posts one (claim it first). Use it for a real dependency on another ticket, not to wait on a machine.",
+                    ),
                 handback: z
                     .boolean()
                     .optional()
@@ -213,7 +220,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ target_id, body, project, by_agent, summary_until, then, handback, scope }) => {
+        async ({ target_id, body, project, by_agent, summary_until, then, handback, wait_for, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -267,6 +274,8 @@ export function registerTicketWriteTools(server: McpServer): void {
                 body,
                 by_agent: effectiveBy(by_agent),
                 decision_kind,
+                // #2297 — `then: wait` names the ticket it waits on.
+                wait_for: decision_kind && DECISION_GESTURES[decision_kind].waitsForTicket ? wait_for : undefined,
                 // Only forward summary_until for comment_added kinds —
                 // close/reopen are lifecycle rows where the field has no
                 // meaning and the validator would reject it.
