@@ -160,6 +160,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `poll` no longer lists your pending tickets that were closed while waiting for
+  moderation: the list now matches the `my_pending` count.
 - `claude-loop wake` no longer types into Claude Code's folder trust dialog, where
   Enter picks "No, exit", and no longer wakes a session that is logged out or
   cannot reach the API.

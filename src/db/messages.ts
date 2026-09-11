@@ -350,6 +350,9 @@ export function listMessages(filters: {
      *  rebuild ONE ticket's entry with the same fold it uses for a whole
      *  project, instead of re-reading every message to repair one row. */
     ticket_id?: number;
+    /** #2339 — ticket rows only: drop the closed tickets, before `limit` cuts
+     *  the list. A comment has no open or closed of its own. */
+    open?: boolean;
 } = {}): Message[] {
     const db = getDb();
     const includeTickets = !filters.kind || filters.kind === "ticket_created";
@@ -380,7 +383,10 @@ export function listMessages(filters: {
         END`;
         const panicCase = sql`CASE WHEN ${schema.tickets.intent} = 'panic' THEN 1 ELSE 0 END`;
         const rows = q.orderBy(desc(panicCase), desc(priorityCase), desc(schema.tickets.id)).all();
-        for (const r of rows) out.push(ticketRowToMessage(r));
+        const closed = filters.open ? closedTicketIds(rows.map((r) => r.id)) : null;
+        for (const r of rows) {
+            if (!closed?.has(r.id)) out.push(ticketRowToMessage(r));
+        }
     }
 
     if (includeMessages) {
@@ -847,6 +853,7 @@ export function insertRelationEvent(opts: {
  * don't go through moderation (the audit lives in the message log).
  */
 import { inverseRelationKind, relationAxis, type RelationAxis, type RelationKind } from "../relations.js";
+import { closedTicketIds } from "./ticket-closed.js";
 export function insertTypedRelation(opts: {
     source_ticket_id: number;
     target_ticket_id: number;
@@ -1561,23 +1568,10 @@ export interface PlanToExecuteEntry {
  * shipped a "closing ends access" guarantee that never fired.
  *
  * Approved events only: a close still awaiting moderation has not happened.
+ * The rule itself lives in `closedTicketIds` (#2339), shared with the lists.
  */
 export function isTicketClosed(ticketId: number): boolean {
-    const lifecycle = getDb()
-        .select({ id: schema.messages.id, kind: schema.messages.kind })
-        .from(schema.messages)
-        .where(and(
-            eq(schema.messages.ticketId, ticketId),
-            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
-            eq(schema.messages.status, "approved"),
-        ))
-        .all();
-    let lastClose = 0, lastReopen = 0;
-    for (const l of lifecycle) {
-        if (l.kind === "ticket_closed") lastClose = Math.max(lastClose, l.id);
-        else lastReopen = Math.max(lastReopen, l.id);
-    }
-    return lastClose > lastReopen;
+    return closedTicketIds([ticketId]).has(ticketId);
 }
 
 export function listPlansToExecute(consumerId: string): PlanToExecuteEntry[] {

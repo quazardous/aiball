@@ -144,13 +144,15 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
 });
 
 messagesRouter.get("/messages", (req: Request, res: Response) => {
-    const { status, project, kind, by_agent, limit, summary } = req.query;
+    const { status, project, kind, by_agent, limit, summary, open } = req.query;
     const list = listMessages({
         status: status as MessageStatus | undefined,
         project: project as string | undefined,
         kind: kind as MessageKind | undefined,
         by_agent: typeof by_agent === "string" ? by_agent : undefined,
         limit: limit ? Number(limit) : undefined,
+        // #2339 — `open=1` drops closed tickets before the limit.
+        open: open === "1" || open === "true",
     });
     // #2198 — `summary=1` drops the bodies HERE, before they cross the socket.
     // poll() used to fetch every pending ticket with its full body and throw

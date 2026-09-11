@@ -1080,6 +1080,9 @@ export class AiballClient {
         if (opts.project) q.set("project", opts.project);
         if (opts.summary) q.set("summary", "1");
         if (opts.limit) q.set("limit", String(opts.limit));
+        // #2339 — poll lists the pending tickets it counts: a ticket closed
+        // while it waited in moderation is not waiting any more.
+        if (kind === "ticket_created") q.set("open", "1");
         return q.toString();
     }
     /**

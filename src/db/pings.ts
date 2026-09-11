@@ -33,6 +33,7 @@ import {
     type RuleItem,
     type Target,
 } from "./backlog-rules.js";
+import { closedTicketIds } from "./ticket-closed.js";
 
 // =====================================================================
 //  Helpers
@@ -543,31 +544,10 @@ export function pendingTicketsByAuthor(by_agent: string): number {
         .all();
     if (pendingRows.length === 0) return 0;
     const pendingIds = pendingRows.map((r) => r.id);
-    const lifecycle = db.select({
-        ticket_id: schema.messages.ticketId,
-        kind: schema.messages.kind,
-        id: schema.messages.id,
-    })
-        .from(schema.messages)
-        .where(and(
-            inArray(schema.messages.ticketId, pendingIds),
-            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
-            eq(schema.messages.status, "approved"),
-        ))
-        .all();
-    const lastClose = new Map<number, number>();
-    const lastReopen = new Map<number, number>();
-    for (const ev of lifecycle) {
-        if (ev.ticket_id == null) continue;
-        const map = ev.kind === "ticket_closed" ? lastClose : lastReopen;
-        const prev = map.get(ev.ticket_id) ?? 0;
-        if (ev.id > prev) map.set(ev.ticket_id, ev.id);
-    }
-    return pendingIds.filter((id) => {
-        const c = lastClose.get(id) ?? 0;
-        const r = lastReopen.get(id) ?? 0;
-        return c <= r;
-    }).length;
+    // #2339 — the same rule the pending list applies (`open=1`), so poll's
+    // count and list agree.
+    const closed = closedTicketIds(pendingIds);
+    return pendingIds.filter((id) => !closed.has(id)).length;
 }
 
 export function unreadCount(consumer_id: string, project: string | null | undefined): number {
