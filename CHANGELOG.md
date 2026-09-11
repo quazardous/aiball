@@ -171,6 +171,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **Closing a ticket accepts only its latest proposed resolution**: a close
+  used to accept every resolution still pending in the thread, even one replaced
+  since by newer plans, and could mark the ticket resolved on it. A replaced
+  resolution now stays as it was.
 - **The project stats count the resolutions agents propose today**: the
   "pending resolution" counter only saw the old resolution format and stayed
   low. It now counts the open tickets whose latest decision is a proposed

@@ -1815,10 +1815,14 @@ export function listPendingDecisionsForReporter(
 }
 
 /**
- * Find all approved comments on a ticket that carry a pending
- * `meta.decision.kind=="resolution"` block. Used when the ticket
- * closes to auto-accept the proposals (mirror of the legacy
+ * The approved comment carrying a pending `meta.decision.kind=="resolution"`
+ * block, when that resolution is the ticket's latest decision. Used when the
+ * ticket closes to auto-accept the proposal (mirror of the legacy
  * `listPendingResolvedForTicket` flow for `ticket_resolved` rows).
+ *
+ * #2371 — only the latest decision, of any kind: a resolution replaced since by
+ * a newer decision is not what the close validates. It stays pending in its
+ * comment, as history, and the list no longer badges it (#2370).
  */
 export function listPendingResolutionDecisionsForTicket(
     ticketId: number,
@@ -1831,20 +1835,20 @@ export function listPendingResolutionDecisionsForTicket(
             eq(schema.messages.status, "approved"),
         ))
         .all();
-    const out: Message[] = [];
+    let latest: { row: typeof rows[number]; kind: string | undefined; status: string | undefined } | null = null;
     for (const r of rows) {
         if (!r.meta) continue;
         try {
             const m = JSON.parse(r.meta) as { decision?: { kind?: string; status?: string } };
-            // #2308 — which pending decisions a close accepts is the table's `autoAcceptedOnClose`.
-            if (decisionGesture(m.decision?.kind)?.autoAcceptedOnClose && m.decision?.status === "pending") {
-                const parent = db.select({ project: schema.tickets.project })
-                    .from(schema.tickets).where(eq(schema.tickets.id, r.ticketId)).get();
-                out.push(messageRowToMessage(r, parent?.project ?? ""));
-            }
+            if (!decisionGesture(m.decision?.kind)) continue;
+            if (!latest || r.id > latest.row.id) latest = { row: r, kind: m.decision?.kind, status: m.decision?.status };
         } catch { /* malformed meta, skip */ }
     }
-    return out;
+    // #2308 — which pending decisions a close accepts is the table's `autoAcceptedOnClose`.
+    if (!latest || latest.status !== "pending" || !decisionGesture(latest.kind)?.autoAcceptedOnClose) return [];
+    const parent = db.select({ project: schema.tickets.project })
+        .from(schema.tickets).where(eq(schema.tickets.id, latest.row.ticketId)).get();
+    return [messageRowToMessage(latest.row, parent?.project ?? "")];
 }
 
 export function applyMessageDecision(
