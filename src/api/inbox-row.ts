@@ -130,9 +130,16 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
     // #2308 — the decision flags follow the transition table: one rule for
     // every kind rather than a hand-kept line per kind.
     const live = !(agg.closed || t.status === "rejected");
-    const pendingFlag = (kind: DecisionKind): boolean => (agg.decisions[kind].pending || ticketDecision(t, kind)) && live;
+    // #2370 — a kind's latest decision is the ticket's live one only while no
+    // newer decision of any kind replaced it: the actionable gate's last-wins
+    // rule, so the badge cannot disagree with the gate. A decision the ticket
+    // was filed with is replaced by the first decision in its thread.
+    const isLiveDecision = (kind: DecisionKind): boolean =>
+        agg.decisions[kind].latestId > 0 && agg.decisions[kind].latestId === agg.latestDecisionId;
+    const pendingFlag = (kind: DecisionKind): boolean =>
+        ((agg.decisions[kind].pending && isLiveDecision(kind)) || (ticketDecision(t, kind) && agg.latestDecisionId === 0)) && live;
     const rejectedFlag = (kind: DecisionKind): boolean =>
-        DECISION_GESTURES[kind].surfacesRejection && agg.decisions[kind].rejected && live;
+        DECISION_GESTURES[kind].surfacesRejection && agg.decisions[kind].rejected && isLiveDecision(kind) && live;
     return {
         id: t.id,
         project: t.project,
@@ -202,7 +209,7 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
             decision. */
         pending_decision_is_latest: ((): boolean => {
             if (!live) return false;
-            const first = kindsByAttention().find((k) => agg.decisions[k].pending);
+            const first = kindsByAttention().find((k) => agg.decisions[k].pending && isLiveDecision(k));
             const pendingId = first ? agg.decisions[first].latestId : 0;
             if (pendingId > 0) return pendingId === agg.lastSpeakerId;
             // #1835 — a decision filed WITH the ticket (`ticket_new({then})`)

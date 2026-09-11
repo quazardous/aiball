@@ -148,25 +148,34 @@ function rowWith(mutate: (agg: Agg) => void): Record<string, unknown> {
     return buildInboxRow(ticket as never, ctx as never) as unknown as Record<string, unknown>;
 }
 
-test("the inbox row raises each kind's flag and points at the most urgent pending decision", () => {
+test("the inbox row raises the flag of the ticket's latest decision, and only that one", () => {
     for (const kind of t.DECISION_KINDS) {
-        const row = rowWith((agg) => { agg.decisions[kind].pending = true; agg.decisions[kind].latestId = 11; agg.lastSpeakerId = 11; });
+        const row = rowWith((agg) => {
+            agg.decisions[kind].pending = true; agg.decisions[kind].latestId = 11; agg.latestDecisionId = 11; agg.lastSpeakerId = 11;
+        });
         for (const other of t.DECISION_KINDS) {
             const flag = t.DECISION_GESTURES[other].inboxFlag;
             assert.equal(row[flag], other === kind, `${kind} pending → ${flag}`);
         }
         assert.equal(row.pending_decision_is_latest, true, kind);
     }
+    // #2370 — an older pending decision replaced by a newer one is not pending
+    // any more, as the actionable gate reads it: last wins, whatever the kinds.
     const both = rowWith((agg) => {
         agg.decisions.plan.pending = true; agg.decisions.plan.latestId = 20;
         agg.decisions.escalation.pending = true; agg.decisions.escalation.latestId = 10;
-        agg.lastSpeakerId = 10;
+        agg.latestDecisionId = 20; agg.lastSpeakerId = 20;
     });
-    assert.equal(both.pending_decision_is_latest, true, "with a plan and an escalation pending, the row points at the escalation");
-    const rejected = rowWith((agg) => { for (const k of t.DECISION_KINDS) agg.decisions[k].rejected = true; });
-    assert.equal(rejected.latest_plan_rejected, true);
-    assert.equal(rejected.latest_resolution_rejected, true);
-    assert.equal("latest_wontfix_rejected" in rejected, false);
+    assert.deepEqual([both.pending_plan, both.pending_escalation, both.pending_decision_is_latest], [true, false, true],
+        "an escalation replaced by a newer plan: only the plan is pending");
+    for (const kind of ["plan", "resolution"] as const) {
+        const rejected = rowWith((agg) => { agg.decisions[kind].rejected = true; agg.decisions[kind].latestId = 5; agg.latestDecisionId = 5; });
+        assert.equal(rejected[`latest_${kind}_rejected`], true, `a ${kind} rejection that is the latest decision shows`);
+        const replaced = rowWith((agg) => { agg.decisions[kind].rejected = true; agg.decisions[kind].latestId = 5; agg.latestDecisionId = 9; });
+        assert.equal(replaced[`latest_${kind}_rejected`], false, `a ${kind} rejection replaced by a newer decision does not`);
+    }
+    const wontfix = rowWith((agg) => { agg.decisions.wontfix.rejected = true; agg.decisions.wontfix.latestId = 5; agg.latestDecisionId = 5; });
+    assert.equal("latest_wontfix_rejected" in wontfix, false);
 });
 
 test("a decision filed with the ticket itself raises its flag too, and a closed ticket raises none", () => {

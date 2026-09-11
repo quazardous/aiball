@@ -55,6 +55,11 @@ export interface InboxAgg {
      *  aggregate did not look at is how a pending wontfix once lit nothing
      *  (#1835). */
     decisions: Record<DecisionKind, DecisionTrack>;
+    /** #2370 — the id of the thread's latest decision of any kind; 0 when none.
+     *  A kind's latest decision is the ticket's live one only while it is this
+     *  one: a newer decision of any kind replaces it, as the actionable gate
+     *  reads it. */
+    latestDecisionId: number;
     lastSpeaker: string | null;
     lastSpeakerId: number;
     /** #2308 — the latest step (`then: continue`) on the thread; 0 and "" when none. */
@@ -73,6 +78,7 @@ export function emptyAgg(): InboxAgg {
         decisions: Object.fromEntries(
             DECISION_KINDS.map((k) => [k, { latestId: 0, pending: false, rejected: false }]),
         ) as Record<DecisionKind, DecisionTrack>,
+        latestDecisionId: 0,
         lastSpeaker: null,
         lastSpeakerId: 0,
         lastStepId: 0,
@@ -120,6 +126,9 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
         }
         if (m.kind === "ticket_resolved" && m.status === "pending") {
             cur.decisions.resolution.pending = true;
+            // #2370 — a legacy resolution row is a decision too, for what replaces what.
+            if (m.id > cur.decisions.resolution.latestId) cur.decisions.resolution.latestId = m.id;
+            if (m.id > cur.latestDecisionId) cur.latestDecisionId = m.id;
         }
         // #2308 — the latest step; the row flags it once nothing has followed.
         if (m.kind === "comment_added" && m.status === "approved" && m.id > cur.lastStepId && isStepMeta(m.meta ?? null)) {
@@ -133,6 +142,7 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
             const d = parseMeta(m.meta ?? null).decision;
             // #2308 — one fold for every kind: the latest decision of a kind wins.
             if (d?.kind && decisionGesture(d.kind)) {
+                if (m.id > cur.latestDecisionId) cur.latestDecisionId = m.id;
                 const track = cur.decisions[d.kind as DecisionKind];
                 if (track.latestId === 0 || m.id > track.latestId) {
                     track.latestId = m.id;

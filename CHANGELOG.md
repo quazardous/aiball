@@ -171,6 +171,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **A replaced decision no longer lights the list's badge**: a proposed resolution
+  nobody decided, replaced since by newer plans, kept "resolution proposed" on
+  the ticket's row. The row's decision badges (pending and rejected) now follow
+  the ticket's latest decision, the one that decides whose turn it is.
 - `poll` no longer lists your pending tickets that were closed while waiting for
   moderation: the list now matches the `my_pending` count.
 - `claude-loop wake` no longer types into Claude Code's folder trust dialog, where
