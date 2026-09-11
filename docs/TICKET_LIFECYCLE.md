@@ -79,8 +79,9 @@ meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status
 - accept/reject goes through `POST /messages/:id/decide`.
 - A reply can also carry **no decision** (the second table below).
   `comment_only: true` concludes nothing and hands the ticket back like any
-  comment; `then: continue` marks a step done on a ticket the author holds and
-  leaves the ticket where it was (§4.2).
+  comment, so it is kept for a question or a ticket still in moderation;
+  `then: continue` marks a step done on a ticket the author holds and leaves
+  the ticket where it was (§4.2).
 
 ### 3.1 The decision matrix
 
@@ -101,7 +102,7 @@ Replies that carry no decision, so nobody accepts or rejects them:
 
 | reply | stored as | meaning | makes the author the last actor | only the agent holding the ticket | flagged when nothing follows |
 |---|---|---|---|---|---|
-| `comment_only: true` | — | concludes nothing: a question, a note, a ticket still in moderation | yes | no | no |
+| `comment_only: true` | — | concludes nothing: a question, a ticket still in moderation; strongly discouraged for anything else | yes | no | no |
 | `then: continue` | `meta.step` | a step is done and the work goes on, nothing to validate | no | yes | yes |
 <!-- decision-matrix:end -->
 

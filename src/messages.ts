@@ -111,8 +111,11 @@ export function withoutDecisionRefusal(
         return "a ticket without then: plan needs comment_only: true. If you already know how the work should go, "
             + "attach then: plan; if the ticket only sets down something to remember, set comment_only: true. Nothing was created.";
     }
-    return "a comment without then: needs comment_only: true. If it concludes something, attach the matching then: "
-        + "(plan / resolved / wontfix / escalate / continue); if it only asks or informs, set comment_only: true. Nothing was posted.";
+    // #2308 — comment_only is the exception: the refusal points at the gestures first.
+    return "a comment without then: needs one. A step you finished on a ticket you hold: then: continue. A step to have validated: then: plan. "
+        + "Work done, or a ticket to drop or unblock: then: resolved / wontfix / escalate. "
+        + "comment_only: true is for a comment that concludes nothing (a question, a ticket still in moderation) and is strongly discouraged otherwise: "
+        + "the ticket leaves your queue and nobody holds it. Nothing was posted.";
 }
 
 export function validateNewMessage(input: unknown): ValidationError | NewMessage {

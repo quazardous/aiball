@@ -56,7 +56,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 - **`then: "resolved"`** — propose to close. Use when work shipped (commit landed, fix live) and scope is satisfied. Do this **immediately** — don't write "awaiting test" and wait.
 - **`then: "plan"`** — propose **how** you'll tackle. Reporter's accept = greenlight to execute.
 - **`then: "continue"`** — a step is done and you carry on, nothing to validate. Only on a ticket you hold (claim it first). The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
-- **Plain comment** — status updates with no deliverable, refinements to a still-valid plan, clarification answers, acks. **Posting one needs `comment_only: true`**: a reply with neither a `then:` nor `comment_only: true` is refused and nothing is posted. Setting the flag is saying out loud that this comment concludes nothing — if it does conclude something, attach the `then:` instead.
+- **Plain comment** (`comment_only: true`) — **strongly discouraged.** Only for what concludes nothing: a clarifying question, an answer to one, a ticket still in moderation. A progress note is a `then: "continue"`, not a plain comment. A reply with neither a `then:` nor `comment_only: true` is refused and nothing is posted; setting the flag is saying out loud that this comment concludes nothing, and it takes the ticket out of your queue.
 
 ### The default is decision-bearing
 
@@ -76,6 +76,7 @@ Skipping `then:` pushes cleanup overhead onto the human.
 - *this is HOW I'll do it* → `then: "plan"`
 - *this is done / can close* → `then: "resolved"`
 - *this shouldn't be done* → `then: "wontfix"`
+- *this step is done, I carry on* → `then: "continue"`
 
 Leave it plain **only** when it genuinely hands the ball back — a clarifying question, missing context, a refinement to a still-valid plan. Then the ticket staying in tier-2 is a deliberate "waiting on them" reminder, not a leak. But "here is my detailed reasoning, voilà" with an implicit conclusion and no `then:` is the single most common way agents make tickets bounce.
 

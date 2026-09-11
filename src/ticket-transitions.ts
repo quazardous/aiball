@@ -179,7 +179,7 @@ export const REPLY_GESTURES = {
     comment_only: {
         asked: "comment_only: true",
         stored: null,
-        meaning: "concludes nothing: a question, a note, a ticket still in moderation",
+        meaning: "concludes nothing: a question, a ticket still in moderation; strongly discouraged for anything else",
         movesLastActor: true,
         holderOnly: false,
         flaggedWhenNothingFollows: false,

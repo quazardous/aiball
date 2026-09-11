@@ -78,6 +78,8 @@ test("an agent's comment with neither then nor comment_only is refused, and noth
     const r = await comment(AGENT, t);
     assert.equal(r.status, 400);
     assert.match(r.json.error ?? "", /comment_only: true/);
+    assert.match(r.json.error ?? "", /then: continue/, "the refusal points at the gestures first");
+    assert.match(r.json.error ?? "", /strongly discouraged/);
     assert.equal(comments(t), 0);
 });
 
