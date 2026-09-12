@@ -32,7 +32,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
 | 16 — A follower sees an actionable ticket it cannot claim, and no backlog wake ever names it | `holder-follower-never-head` |
 | 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
-| 19 — The holder's own comment on a ticket in progress still gets a "Triage the ticket" wake. Decided: the backlog is a coaching loop | `holder-own-comment` |
+| 19 — The holder's own comment on a ticket in progress still gets a triage wake. Decided: the backlog is a coaching loop | `holder-own-comment` |
 | 20 — A ticket filed on another project with no `then` leaves its creator and lands actionable with that project's lead | `creation-cross-project-no-then` |
 | 21 — An agent's ticket waiting for moderation is in no backlog; a decision on it is refused at once (409); closed while waiting, it stays out | `creation-pending-ticket` |
 | 22 — A human "up" on an agent's ticket with no decision: actionable, unread, the human its last actor | `creation-human-up` |

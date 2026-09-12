@@ -29,10 +29,10 @@ export const TIER_LABEL: Record<0 | 1 | 2 | 3 | 4, string> = {
 
 /** How a backlog wake ends, by the head's tier — the loop's exact words. */
 export const WAKE_ENDING = {
-    triage: "Triage the ticket.",
-    followup: "Your pending decision is what gates this — re-examine whether it's still the right scope instead of just acking.",
-    waiting: "You spoke last: re-surfaced so you re-check it — chase them, or let it ride.",
-    blocked: "Blocked by an open dependency — re-check the chain: the blocker may be snoozed or stale.",
+    triage: "Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for.",
+    followup: "Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.",
+    waiting: "You spoke last — chase them or let it ride, but say which: a `then:` if the ball is yours, a `handback: true` comment naming what you wait for.",
+    blocked: "Blocked by an open dependency — check the chain: help on the blocker, or cut the relation if it is stale. Say which on the thread.",
 } as const;
 
 /** Same mapping as the loop: unknown, hot or actionable heads are triaged. */

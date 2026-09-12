@@ -250,6 +250,9 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **A backlog wake says which gesture it wants**: each tier's closing line now
+  asks for a `then:`, or a comment that hands the ticket back and names what it
+  waits for, instead of describing the situation and leaving the rest implied.
 - **A blocked ticket comes back half as often**: it still surfaces so it is not
   forgotten, but a backlog wake now keeps it out of the pool twice as long as
   any other ticket (`tickets.blocked_cooldown_multiplier`).

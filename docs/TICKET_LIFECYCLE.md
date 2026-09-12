@@ -247,7 +247,7 @@ silent.
 ### 5.0 The backlog wake — the tier ladder
 
 When the unread FIFO is empty but there is at least one ticket worth surfacing,
-the loop fires a **backlog wake** (`look #N: TITLE. Triage the ticket.`). The
+the loop fires a **backlog wake** (`look #N: TITLE.` + the tier's ask). The
 ticket #N is the head of the backlog set. Each ticket sits in the **highest
 tier it qualifies for** (`backlog_tier`, computed per consumer in
 `src/db/ticket-flags.ts`):
@@ -272,7 +272,7 @@ tier it qualifies for** (`backlog_tier`, computed per consumer in
   after a wake (`tickets.blocked_cooldown_multiplier`, twice by default): it must
   keep surfacing, but nothing moves on it between two wakes.
 
-A triage comment (§ in `skills/aiball/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
+A triage comment (§ in `skills/aiball/SKILL.md` → "`look #N: TITLE.` + the tier's ask")
 moves the ticket **from tier 1 to tier 3** within the same backlog — the agent
 becomes the last actor, so the wake stops pointing at it as long as a
 higher-tier ticket exists. Tickets only drop OUT of the backlog on a lifecycle

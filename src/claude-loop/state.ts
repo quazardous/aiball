@@ -2660,7 +2660,7 @@ export async function buildContextPhrase(
         //   decision   →  "Your <kind> was <verb> on #ID: TITLE by X (#hashid)"
         //                  (#830 david `a7pn65` — 8 kinds, plan/resolution/
         //                  wontfix/escalation × accepted/rejected)
-        //   backlog    →  culture + "look #ID: TITLE. Triage the ticket."
+        //   backlog    →  culture + "look #ID: TITLE." + the tier's ask (#2384)
         // #825 david `b63ez5` : drop the `no_head` cultural ping entirely.
         // Strict binary rule on the wake firing side (timer.ts:tryWake) —
         // fire ONLY on event OR backlog.
@@ -2698,10 +2698,13 @@ export async function buildContextPhrase(
             // Only the ask changes, so a re-surfaced ticket gets the re-examination
             // it was rotated back for instead of a reflex "standby".
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_comment:+ — {head_last_comment}.}"
-            + "{head_tier_triage:+ Triage the ticket.}"
-            + "{head_tier_followup:+ Your pending decision is what gates this — re-examine whether it's still the right scope instead of just acking.}"
-            + "{head_tier_waiting:+ You spoke last: re-surfaced so you re-check it — chase them, or let it ride.}"
-            + "{head_tier_blocked:+ Blocked by an open dependency — re-check the chain: the blocker may be snoozed or stale.}}";
+            // #2384 david — each ending names the GESTURE it wants, not just the
+            // situation: a `then:`, or a `handback: true` that says what is awaited.
+            // "re-check it" sent agents back to read, then post nothing.
+            + "{head_tier_triage:+ Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for.}"
+            + "{head_tier_followup:+ Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.}"
+            + "{head_tier_waiting:+ You spoke last — chase them or let it ride, but say which: a `then:` if the ball is yours, a `handback: true` comment naming what you wait for.}"
+            + "{head_tier_blocked:+ Blocked by an open dependency — check the chain: help on the blocker, or cut the relation if it is stale. Say which on the thread.}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

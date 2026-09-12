@@ -58,7 +58,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 - **`then: "continue"`** — a step is done and you carry on, nothing to validate. Only on a ticket you hold (claim it first). The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
 - **Plain comment** — say whether you hand the ticket back. `handback: true` for a clarifying question or anything you wait an answer on: the ticket leaves your queue. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
 - **Waiting on another ticket** — `ticket_relate` your ticket `depends_on` that one, and say so with `handback: false`. The ticket is blocked while the other is open and you get a `dependency_closed` event when it closes. Don't post `then: "continue"` cycle after cycle to keep it alive.
-- **Work that moves to another ticket** — when you carry the work on a recap or follow-up ticket, say it on the OLDER one: close it, or state there what now carries it. Nothing else can tell; left alone it keeps coming back as "Triage the ticket", and a `relates_to` relation does not change that.
+- **Work that moves to another ticket** — when you carry the work on a recap or follow-up ticket, say it on the OLDER one: close it, or state there what now carries it. Nothing else can tell; left alone it keeps coming back as a triage wake, and a `relates_to` relation does not change that.
 
 ### The default is decision-bearing
 
@@ -134,9 +134,9 @@ which case you're in**; read it, it's not decoration :
 
 | The wake ends with… | What's true | What's wanted |
 |---|---|---|
-| `Triage the ticket.` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath |
+| `Triage it, then close the loop…` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
 | `Your pending decision is what gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope — don't just ack |
-| `You spoke last: … chase them, or let it ride.` | You're waiting on them | Chase **or** deliberately let it ride |
+| `You spoke last — chase them or let it ride, but say which…` | You're waiting on them | Chase **or** deliberately let it ride — and post it: a `then:` if the ball came back to you, else a `handback: true` naming what you wait for |
 | `Blocked by an open dependency…` | A blocker gates it | Help on the **blocker**, not here |
 
 Only the first calls for triage. On the others, doing nothing can be the right

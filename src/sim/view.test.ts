@@ -49,7 +49,7 @@ test("the seat lists the backlog by tier, then the open tickets outside it", () 
     ], 0, row({ id: 2, title: "mine", backlog_tier: 1 }));
     const order = ["mine", "waiting", "outside"].map((t) => out.indexOf(` ${t}`));
     assert.deepEqual([...order].sort((x, y) => x - y), order, out);
-    assert.match(out, /next: look #2: mine\. Triage the ticket\./);
+    assert.match(out, /next: look #2: mine\. Triage it, then close the loop:/);
 });
 
 test("a cohort declares a moderator, projects with leads, and followers of known projects", () => {
