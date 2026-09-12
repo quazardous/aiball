@@ -178,6 +178,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **Answering a backlog wake no longer brings the ticket straight back**: the
+  wake asks the agent for a gesture, but posting it counted as the thread
+  moving, which voided the cooldown the wake had just set. The agent's own word
+  now keeps the ticket sunk; anyone else's still lifts it, and a step still
+  lifts it at once since it says there is work right now.
+
 - **The project stats count tickets resolved by an accepted resolution**: the
   resolved count (and the resolved percentage) only saw the old resolution
   format and missed nearly every resolved ticket. It now agrees with the list.

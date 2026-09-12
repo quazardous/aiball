@@ -1051,6 +1051,12 @@ export function recordBacklogWake(consumerId: string, ticketId: number): void {
  * window AND nothing has happened on the thread since (last_actor_at
  * still at-or-before the wake_at). When the reporter replies (= last_actor
  * advances past wake_at) the ticket re-enters the backlog immediately.
+ *
+ * #2386 — "nothing has happened" means nothing SOMEONE ELSE did. The wake
+ * asks this consumer for a gesture, and a comment is one: counting its own
+ * answer as movement voided the cooldown the wake had just set, so the
+ * ticket could come back on the very next pass (measured: 19 seconds). Its
+ * own last word therefore keeps it sunk; anyone else's still lifts it.
  */
 export function backlogCooldownExclusions(
     consumerId: string,
@@ -1078,6 +1084,7 @@ export function backlogCooldownExclusions(
     const ticketIds = rows.map((r) => r.ticketId);
     const tickets = db.select({
         id: schema.tickets.id,
+        lastActor: schema.tickets.lastActor,
         lastActorAt: schema.tickets.lastActorAt,
         project: schema.tickets.project,
     }).from(schema.tickets)
@@ -1085,13 +1092,22 @@ export function backlogCooldownExclusions(
         .all();
     const byTicket = new Map(tickets.map((t) => [t.id, t]));
     const wakeAtByTicket = new Map(rows.map((r) => [r.ticketId, r.wakeAt]));
+    // The tickets whose last action is a step (#2365), needed twice below.
+    const stepTickets = ticketsWhereLastActionIsStep([...byTicket.values()]);
     // Ticket → the cooldown window (seconds) that sinks it right now.
     const out = new Map<number, number>();
     for (const r of rows) {
-        const lastActorAt = byTicket.get(r.ticketId)?.lastActorAt;
+        const ticket = byTicket.get(r.ticketId);
+        const lastActorAt = ticket?.lastActorAt;
         // Exclude when the thread hasn't moved since the wake. A null
-        // last_actor_at (= no activity yet) also counts as "not moved".
-        if (lastActorAt === undefined || lastActorAt === null || lastActorAt <= r.wakeAt) {
+        // last_actor_at (= no activity yet) also counts as "not moved", and
+        // so does this consumer's own word (#2386): answering the wake is
+        // what the wake asked for, not news that voids its cooldown.
+        // A step is the exception (#2365): it says "I carry on", so it still
+        // lifts the sink at once — that is how the agent gets its turn back.
+        const movedSinceWake = lastActorAt !== undefined && lastActorAt !== null && lastActorAt > r.wakeAt;
+        const ownWordThatIsNotAStep = ticket?.lastActor === consumerId && !stepTickets.has(r.ticketId);
+        if (!movedSinceWake || ownWordThatIsNotAStep) {
             out.set(r.ticketId, cooldownSec);
         }
     }
@@ -1099,9 +1115,8 @@ export function backlogCooldownExclusions(
     // briefly: a step says there is work to do now, and the wake that follows it
     // used to hide that work for the whole cooldown. The short window
     // (`tickets.sink_then_continue_minutes`, 0 = none) only turns the queue over.
-    const candidates = [...out.keys()].map((id) => byTicket.get(id)).filter((t): t is NonNullable<typeof t> => !!t);
     const nowMs = Date.now();
-    for (const id of ticketsWhereLastActionIsStep(candidates)) {
+    for (const id of [...out.keys()].filter((id) => stepTickets.has(id))) {
         const minutes = Number(getConfig("tickets.sink_then_continue_minutes", byTicket.get(id)?.project) ?? 5);
         const windowSec = Math.min(cooldownSec, Math.max(0, Number.isFinite(minutes) ? minutes : 5) * 60);
         const wakeAtMs = Date.parse(wakeAtByTicket.get(id) ?? "");

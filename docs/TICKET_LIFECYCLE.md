@@ -297,6 +297,11 @@ at the human's expense); with it, a waiting thread re-surfaces about once per
 window instead of every heartbeat. A gated thread is therefore never silent
 *forever* — its silence is bounded by the cooldown.
 
+The window is lifted as soon as the thread moves — but only when someone
+*else* moves it. The wake asks the woken agent for a gesture, so its own reply
+is an answer, not news: it leaves the ticket cooled, and the thread comes back
+when the window runs out. Anyone else's word lifts it at once.
+
 A ticket whose last action is a step (`then: continue`) is cooled only briefly,
 5 minutes by default (`tickets.sink_then_continue_minutes`, 0 = not at all): a
 step says there is work to do now, so the pause only turns the queue over.

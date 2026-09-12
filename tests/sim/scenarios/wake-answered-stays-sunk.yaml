@@ -1,0 +1,24 @@
+name: answering a backlog wake does not bring the ticket straight back
+# The wake asks the agent for a gesture, and a comment is one. Its own answer
+# is not news: the ticket stays sunk for the cooldown, and comes back only when
+# that cooldown has run out. Anyone else's word still lifts the sink at once,
+# and so does the agent's own step — it says there is work right now.
+cooldown: 60s
+steps:
+  - alpha-lead: ticket_new
+    args: { title: Answered, body: The lead answers the wake it is given. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: none }
+  - alpha-lead: ticket_reply
+    args: { target_id: $ticket, body: Nothing new since the last pass., summary_until: In progress with the lead; nothing to hand back., handback: false }
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, last_actor: alpha-lead, wake: none }
+  - sleep: 70
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: triage }
+  - view: [alpha-lead]
