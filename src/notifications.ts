@@ -28,6 +28,7 @@ import {
     type Message,
 } from "./db.js";
 import { effectiveNotifyProjectBroadcasts, getConsumer, seesLevel } from "./db/consumers.js";
+import { isDecisionEventKind } from "./domain.js";
 import { getMessage } from "./db/messages.js";
 // #1573 — moved to a leaf module so the backlog rules can ask the same
 // question ("does this body mention X?") without importing the fan-out.
@@ -54,7 +55,7 @@ import { extractMentions } from "./mentions.js";
  * Pending-then-approved messages always reach every interested consumer
  * because the fan-out runs at approval time, not at submission.
  */
-export function fanOutPings(msg: Message): void {
+export function fanOutPings(msg: Message, opts?: { except?: string | null }): void {
     // #B.245 tristate: `internal` events skip subscriber fan-out
     // entirely — only @mentions reach (via fanOutMentions, called
     // separately at submit time). Moderators still see the row in
@@ -119,6 +120,20 @@ export function fanOutPings(msg: Message): void {
         }
     }
 
+    // #2388/#2380 david `75jv33` — the OUTCOME of a decision (plan_accepted,
+    // resolution_rejected, …) wakes the one whose proposal was decided, and
+    // nobody else. A reporter used to be woken by every accept on their ticket,
+    // including decisions they can neither take (no MCP tool accepts a plan) nor
+    // act on. The event stays in the thread for everyone; only the wake narrows.
+    // What still reaches them is what concerns them: a comment, a question, a
+    // decision awaiting their answer — and the close, which david keeps because
+    // it can unblock tickets on their side.
+    if (recipients.size > 0 && isDecisionEventKind(msg.kind)) {
+        const decided = msg.parent_id != null ? getMessage(msg.parent_id) : null;
+        const proposer = decided?.by_agent ?? null;
+        for (const r of [...recipients]) if (r !== proposer) recipients.delete(r);
+    }
+
     // #2241 — news on a ticket reaches only the agents that work on its level:
     // coders get `task`, cto agents `roadmap` and `milestone`, project owners
     // included. Humans get every level. Explicit @mentions are not filtered here
@@ -147,6 +162,11 @@ export function fanOutPings(msg: Message): void {
     if (msg.ticket_id !== null) {
         for (const m of mutedConsumersForTicket(msg.ticket_id)) recipients.delete(m);
     }
+
+    // #2380 — one recipient already heard this event through another message
+    // (the accept that produced it), and two wakes for one gesture is the noise
+    // this board spent #921/#980 removing.
+    if (opts?.except) recipients.delete(opts.except);
 
     const authorIsHuman = msg.by_agent != null && isHuman(msg.by_agent);
     // #B.191: when a human posts, skip pings to other humans — they

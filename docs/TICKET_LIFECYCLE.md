@@ -295,6 +295,17 @@ This formalises the soft rotation: a simple comment doesn't "remove" a ticket
 from the backlog (close or snooze does), but it pushes the ticket down so the
 next wake picks the next head.
 
+**Who hears a decision's outcome.** The accept or reject of a plan, a
+resolution, a wontfix or an escalation wakes the agent whose proposal was
+decided — the one it asks something of — and nobody else. A ticket's reporter
+is not woken by decisions it neither proposed nor can take (no MCP tool accepts
+a plan; a human decides in the UI). The event stays in the thread for everyone
+to read; only the wake narrows. What still reaches the reporter is what concerns
+it: a comment, a decision awaiting its own answer, and the close — which can
+unblock work on its side. When an accepted resolution closes the ticket in the
+same gesture, the close carries that news to everyone but the proposer, who
+already heard the accept: one wake each.
+
 **Cooldown — the anti-nag bound.** Once a backlog wake fires on a ticket, the
 ticket is suppressed from the backlog-wake candidate pool for a cooldown window
 (surfaced as `backlog_cooled_until` on the row; the suppression is orthogonal —

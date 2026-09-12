@@ -582,13 +582,19 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                             : effect === "close_unresolved"
                                 ? `(auto-close from accepted ${k} #${updated.hashid ?? id})`
                                 : undefined;
-                    // #921 — skip ping fan-out : `<kind>_accepted` a déjà
-                    // pingé ; le ticket_closed est redondant côté ping.
+                    // #921 — skip the blanket ping fan-out: the proposer already
+                    // heard it through `<kind>_accepted`, and two wakes for one
+                    // gesture is noise.
+                    // #2380 david `75jv33` — but that accept now wakes the
+                    // PROPOSER alone, so everyone else (the reporter first of
+                    // all) would hear nothing at all of a ticket closing on
+                    // them. The close fans out to them, minus the proposer:
+                    // one wake each, nobody left out.
                     // #980 N2 — skipBroadcast : le `<kind>_accepted` est aussi
                     // la SEULE notif UI (toaster + `e:` counter). Le refresh
                     // qu'il déclenche fait re-dériver `ticket.closed` (la row
                     // existe). Sans ça, l'auto-close re-broadcaste → 2e toaster.
-                    submitMessage({
+                    const closeMsg = submitMessage({
                         project: updated.project,
                         kind: "ticket_closed",
                         ticket_id: updated.ticket_id,
@@ -596,6 +602,9 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                         body: closeBody,
                         by_agent: by,
                     }, { skipFanOut: true, skipBroadcast: true });
+                    if (closeMsg.status === "approved") {
+                        fanOutPings(closeMsg, { except: updated.by_agent });
+                    }
                 }
             } catch {
                 /* malformed meta or close failed — don't fail the decide */

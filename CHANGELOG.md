@@ -265,6 +265,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **The outcome of a decision wakes the one whose proposal was decided, and
+  nobody else**: a ticket's reporter used to be woken by every accept and reject
+  on it, including decisions no agent can take. What still reaches them is what
+  concerns them — a comment, a decision awaiting their answer, and the close,
+  which can unblock work on their side.
+
 - **A snoozed blocker keeps blocking**: a ticket waiting on one that is asleep
   stayed in its agent's pool as if the wait were over. Asleep is not done, so it
   stays blocked until the snooze runs out. A blocker that was never approved, or

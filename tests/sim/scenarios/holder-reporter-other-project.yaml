@@ -1,9 +1,9 @@
 name: a ticket filed by another project's agent, planned and resolved by the lead
-# Case 18 (observed, waiting for a decision). beta-lead files in alpha. alpha-lead
-# plans, then resolves; the moderator accepts both. No MCP tool lets an agent
-# accept a plan (`ticket_decide` moderates pending posts), so the reporter agent
-# cannot. beta-lead is woken three times: the plan (a comment), the plan's
-# accept with the resolution, and the resolution's accept. After that, nothing.
+# Case 18. beta-lead files in alpha; alpha-lead plans, then resolves, and the
+# moderator accepts both. The reporter hears what concerns it — the lead's
+# comments, and the close, which can unblock work on its side — but not the
+# outcome of decisions it neither proposed nor could take: no MCP tool lets an
+# agent accept a plan (david, `75jv33`).
 steps:
   - beta-lead: ticket_new
     args: { project: alpha, title: Asked by beta, body: beta needs this from alpha. }
@@ -21,12 +21,15 @@ steps:
   - alpha-lead: ticket_reply
     args: { target_id: $ticket, body: Done for beta., summary_until: Delivered; waiting for the accept., then: resolved }
     save: { resolution: id }
+  # The plan's accept is NOT in the reporter's events: only the lead's comment is.
   - expect:
-      beta-lead: { ticket: $ticket, events: [plan_accepted, comment_added], wake: event }
+      beta-lead: { ticket: $ticket, events: [comment_added], wake: event }
   - wake: beta-lead
+  # The resolution's accept closes the ticket: the accept itself is silent for
+  # the reporter, the close is not.
   - moderator: accept $resolution
   - expect:
-      beta-lead: { ticket: $ticket, events: [resolution_accepted], wake: event }
+      beta-lead: { ticket: $ticket, events: [ticket_closed], wake: event }
   - wake: beta-lead
   - expect:
       beta-lead: { ticket: $ticket, events: [], wake: none }
