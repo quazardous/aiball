@@ -58,6 +58,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 - **`then: "continue"`** — a step is done and you carry on, nothing to validate. Only on a ticket you hold (claim it first). The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
 - **Plain comment** — say whether you hand the ticket back. `handback: true` for a clarifying question or anything you wait an answer on: the ticket leaves your queue. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
 - **Waiting on another ticket** — `ticket_relate` your ticket `depends_on` that one, and say so with `handback: false`. The ticket is blocked while the other is open and you get a `dependency_closed` event when it closes. Don't post `then: "continue"` cycle after cycle to keep it alive.
+- **Work that moves to another ticket** — when you carry the work on a recap or follow-up ticket, say it on the OLDER one: close it, or state there what now carries it. Nothing else can tell; left alone it keeps coming back as "Triage the ticket", and a `relates_to` relation does not change that.
 
 ### The default is decision-bearing
 

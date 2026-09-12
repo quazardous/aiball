@@ -2,10 +2,10 @@
 
 Cases gathered from real sessions (the aiball, qdadm, quarkernel and
 BookShepherd agents) and from tickets still waiting for a human decision. Each
-is written as setup → gestures → expected. **"Pin down"** marks a case where the
-rule is not settled or not known: the scenario's job is to show what the board
-does, so a human can decide whether that is right. Numbers are stable: a case
-keeps its number when it moves.
+is written as setup → gestures → expected. A case whose rule was not settled
+was played to show what the board does, and david decided each one; those still
+waiting for their change are listed below, with their ticket. Numbers are
+stable: a case keeps its number when it moves.
 
 Cohort of reference: `alpha-lead` (owner of alpha), `alpha-helper` (follower of
 alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
@@ -24,38 +24,38 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 2 — An accepted resolution closes the ticket, a reopen brings it back, a rejected resolution hands it back | `decision-resolution` |
 | 5 — A human comment refining an accepted plan reaches the claimant; no new plan is needed | `decision-scope-refined` |
 | 6 — Accepting a plan sends its author a `plan_accepted` event | `decision-accept-sends-execute` |
+| 7 — An accepted plan being worked with nothing to post: every cooldown names the ticket again. Decided: the nudge stays; starting before the accept is the agent's discipline | `decision-accepted-plan-in-progress` |
 | 8 — An accepted plan queued behind another ticket: a `depends_on` relation and a reply that keeps the hand block it quietly, and the other ticket's close brings it back with `dependency_closed` | `decision-accepted-plan-queued` |
 | 9 — A second plan on a held ticket gates it until accepted, then sends `plan_accepted` again | `decision-chained-plans` |
 | 10 — "No plan" in a plain human comment makes the ticket the agent's; its steps keep it there | `decision-no-plan-comment` |
+| 12 — A plan pending and nobody answers: nothing reminds either side. Decided: a pending plan is the human's (or, later, the pilot's) — no reminder | `decision-plan-pending-silent` |
 | 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
 | 16 — A follower sees an actionable ticket it cannot claim, and no backlog wake ever names it | `holder-follower-never-head` |
 | 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
+| 19 — The holder's own comment on a ticket in progress still gets a "Triage the ticket" wake. Decided: the backlog is a coaching loop | `holder-own-comment` |
 | 20 — A ticket filed on another project with no `then` leaves its creator and lands actionable with that project's lead | `creation-cross-project-no-then` |
 | 21 — An agent's ticket waiting for moderation is in no backlog; a decision on it is refused at once (409); closed while waiting, it stays out | `creation-pending-ticket` |
 | 22 — A human "up" on an agent's ticket with no decision: actionable, unread, the human its last actor | `creation-human-up` |
+| 23 — A blocker filed with `then: plan` behaves like any plan: whoever files it, a human files it and a human accepts it — nothing auto-accepts | `creation-blocker-as-plan` |
 | 24 — A ticket waiting on another (`depends_on`) is blocked, and gets a `dependency_closed` event the moment the blocker closes | `dependency-closed` |
+| 26 — A plan accepted while the ticket's dependency is still open leaves it blocked. Decided: no extra gate in the UI; an umbrella may be accepted with its children unfinished | `dependency-plan-accepted-while-blocked` |
 | 27 — A dependency written only in a plan's prose is invisible: the ticket is actionable while the other is open | `dependency-in-prose-only` |
+| 28 — Work carried on a recap ticket leaves the older one coming back as "Triage". Decided: a piloting matter — the agent says so on the older ticket | `dependency-work-on-recap-ticket` |
+| 31 — A hard deadline with normal priority ranks after older tickets; `high` is the intended gesture | `order-deadline-normal-priority` |
 | 33 — Every open ticket in the agent's court ends with a pending decision: empty backlog, no wake | `notify-all-pending-decisions` |
 
-## Observed, waiting for a decision
+## Decided, the change is in a ticket
 
-What the board does today; each needs a human answer before it becomes an expectation.
+What the board does today, and what david decided about it. Each scenario below
+still plays TODAY's behaviour; it becomes a written expectation when its ticket
+lands, and the case then moves to "Covered".
 
-3. **Human pushback on a pending plan, then a replacement plan** (`decision-pushback-replacement`). The human's comment lifts the pending plan's gate at once: the agent gets the comment as an event, then "Triage the ticket" (not "Your pending decision is what gates this"). The replacement plan gates the ticket again, and its accept hands it back.
-4. **Accepting a plan the agent has already replaced** (`decision-accept-superseded`). The accept goes through. The agent gets a `plan_accepted` event for the replaced plan, but the ticket stays gated by the newer pending plan: follow-up tier, then "Your pending decision is what gates this". Only the newer plan's accept opens it. Should an accept on a superseded plan be refused?
-7. **Accepted plan in progress, nothing to post** (`decision-accepted-plan-in-progress`). After the `plan_accepted` event, every idle cycle past the cooldown names the ticket again with "Triage the ticket", while the agent is simply working. Is that the intended nudge?
-11. **My decision pending, the other side spoke** (`decision-pending-other-spoke`). A human comment without a decision lifts the plan's gate at once, as in case 3: actionable, "Triage the ticket" after the comment's event, sunk after that wake, back when the cooldown ends. Another agent's question on a pending plan lifts the gate the same way, and makes the ticket hot. (The rule written here before, "follow-up tier", is not what the board does.)
-12. **Plan pending, reporter silent** (`decision-plan-pending-silent`). The agent's backlog does not show the ticket (it spoke last, the plan gates it) and nothing reminds the agent as cooldowns pass. Weeks cannot be simulated. Should anything remind either side?
-14. **Two accepted plans in flight, one claim slot** (`holder-claim-slot`). Claiming B does not release A: the agent holds both, and A stays out of the other owner's backlog. But the other owner can still claim A by id, with no refusal and no warning, and A leaves the first agent's pool. Should a claim on a ticket another agent holds be refused, or at least warned?
-18. **Reporter is another project's agent** (`holder-reporter-other-project`). No MCP tool lets an agent accept a plan, so `beta-lead` cannot. It is woken three times: the plan (a comment), the plan's accept with the resolution, and the resolution's accept; after that, nothing. Should it be woken for accepts that are not its own?
-19. **The latest event is the holder's own comment** (`holder-own-comment`). A `handback: false` note on a claimed ticket in progress: the next backlog wake says "Triage the ticket". Is that right for a ticket the agent is working?
-23. **Human-only blocker at creation** (`creation-blocker-as-plan`). Filed with `then: plan` (the only `then` `ticket_new` takes), it is gated and out of the lead's backlog, like a real plan. For the project's other owner it shows as follow-up, while the real plan shows nowhere. Is the follow-up for the other owner intended?
-25. **Blocked wake with nothing changed** (`dependency-blocked-wake-repeats`). A waits on B, B waits on the moderator. The blocked wake on A comes back at every cooldown although nothing moves. Should it be spaced out, or silent?
-26. **Plan accepted while the dependency is still open** (`dependency-plan-accepted-while-blocked`). The dependency wins: the agent gets the accept event, the ticket stays blocked. Is that the intended order?
-28. **Work carried on a recap ticket, linked only by text** (`dependency-work-on-recap-ticket`). The older ticket with the accepted plan gets no step and comes back first as "Triage the ticket"; a `relates_to` relation changes nothing. Should the older ticket be closed, or linked another way?
-30. **A long external wait after a step** (`dependency-external-wait-after-step`). "Waiting for the test suite, about 16 minutes", then nothing. The wake after the step sinks the ticket for 5 minutes, so it is named again every 5 minutes while the suite runs. Waiting on a machine has no gesture of its own. Is 5 minutes right here?
-31. **Hard deadline, normal priority** (`order-deadline-normal-priority`). There is no due date: the ticket ranks after older `normal` tickets, and raising it to `high` puts it first. Is `high` the intended gesture for a deadline?
-32. **A burst of "resolution accepted, ticket closed"** (`notify-burst-of-accepts`). One event wake per closed ticket, none needing action. Should they be grouped?
+- **3, 4 and 11 — a comment must not change the ticket's state, and only the latest decision can be accepted** (ticket #2376). Today a comment, human or agent, lifts a pending decision's gate at once, and an accept on a plan already replaced goes through. The "hot" tier another agent's comment raises is orthogonal and stays. Scenarios `decision-pushback-replacement`, `decision-accept-superseded`, `decision-pending-other-spoke`.
+- **14 — claiming a ticket another agent holds** goes through with no refusal, no warning and no trace on the thread (ticket #2379). Scenario `holder-claim-slot`.
+- **18 — the reporter is woken by accepts that are not its own** — three wakes for a ticket it filed in another project, including decisions it cannot take (ticket #2380). Scenario `holder-reporter-other-project`.
+- **25 — a blocked ticket comes back at every cooldown** while nothing moves. It must keep surfacing so it is not forgotten, but half as often (ticket #2377). Scenario `dependency-blocked-wake-repeats`.
+- **30 — waiting on a machine has no gesture of its own**: during a CI wait the ticket is named every 5 minutes. Nothing changes for now; a dated wake filed by the agent is under study (ticket #2381). Scenario `dependency-external-wait-after-step`.
+- **32 — a burst of accepted resolutions keeps one wake per closed ticket** (a close sometimes unblocks work), but a close should point at the tickets it frees (ticket #2378). Scenario `notify-burst-of-accepts`.
 
 ## Not simulator cases
 
