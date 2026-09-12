@@ -1,7 +1,7 @@
 name: a blocked ticket whose blocker waits on the human, with nothing changing
-# Case 25 (pin down). A depends on B; B waits on the moderator (the lead's own
-# pending resolution). Nothing moves. Does the blocked wake on A come back at
-# every cooldown?
+# Case 25. A depends on B; B waits on the moderator (the lead's own pending
+# resolution). Nothing moves: the blocked wake comes back, but only after twice
+# the cooldown (#2377) — it must not be forgotten, and must not nag either.
 cooldown: 60s
 steps:
   - alpha-lead: ticket_new
@@ -22,6 +22,10 @@ steps:
   - expect:
       alpha-lead: { ticket: $a, backlog: blocked, wake: blocked }
   - wake: alpha-lead
+  - expect:
+      alpha-lead: { ticket: $a, backlog: blocked, wake: none }
+  # #2377 — a blocked ticket sinks twice as long: one cooldown is not enough.
+  - sleep: 70
   - expect:
       alpha-lead: { ticket: $a, backlog: blocked, wake: none }
   - sleep: 70

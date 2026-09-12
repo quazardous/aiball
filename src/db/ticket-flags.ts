@@ -312,7 +312,8 @@ export function buildTicketFlagsContext(args: {
     const lastActorMeIds = lastActorExclusions(consumerId, ticketIds);
     const decisionGated = decisionGateByTicket(ticketIds);
     const cooledIds = cooldownSec > 0
-        ? backlogCooldownExclusions(consumerId, cooldownSec)
+        // #2377 — the blocked set decides which tickets stay sunk longer.
+        ? backlogCooldownExclusions(consumerId, cooldownSec, gatedByBlockerIds)
         : new Map<number, number>();
     // `backlogCooldownExclusions` already cross-checks against
     // `last_actor_at`; we just need the underlying wake_at to derive

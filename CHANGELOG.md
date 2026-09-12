@@ -250,6 +250,9 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **A blocked ticket comes back half as often**: it still surfaces so it is not
+  forgotten, but a backlog wake now keeps it out of the pool twice as long as
+  any other ticket (`tickets.blocked_cooldown_multiplier`).
 - **A step sinks its ticket for 5 minutes, not an hour**: the backlog wake that
   follows a `then: continue` used to put the ticket in the cooldown for the whole
   hour, hiding the work the step announced. The short pause only turns the queue

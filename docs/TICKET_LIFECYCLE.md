@@ -268,7 +268,9 @@ tier it qualifies for** (`backlog_tier`, computed per consumer in
   event, so whoever watches it is woken instead of finding out at the next pass.
   An open ticket merely LINKED to the closed one — lineage, or a cross-reference
   — gets `related_closed` instead: nothing changes for it, but the close is news
-  it would otherwise never hear.
+  it would otherwise never hear. A blocked ticket also sinks longer than the rest
+  after a wake (`tickets.blocked_cooldown_multiplier`, twice by default): it must
+  keep surfacing, but nothing moves on it between two wakes.
 
 A triage comment (§ in `skills/aiball/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
 moves the ticket **from tier 1 to tier 3** within the same backlog — the agent

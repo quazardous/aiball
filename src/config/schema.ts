@@ -129,6 +129,15 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2365 — a step says there is work to do now: the backlog wake that follows
     // it sinks the ticket only briefly, long enough to turn the queue over.
     {
+        key: "tickets.blocked_cooldown_multiplier",
+        scope: "global+project",
+        type: "number",
+        default: 2,
+        label: "Backlog cooldown multiplier for blocked tickets",
+        description:
+            "How much longer a backlog wake keeps a BLOCKED ticket (gated by an open depends_on) out of the wake pool, compared with any other ticket. It must keep surfacing so it is not forgotten, but nothing moves on it between two wakes. 1 = same cooldown as the rest.",
+    },
+    {
         key: "tickets.sink_then_continue_minutes",
         scope: "global+project",
         type: "number",

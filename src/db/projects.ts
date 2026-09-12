@@ -1055,10 +1055,16 @@ export function recordBacklogWake(consumerId: string, ticketId: number): void {
 export function backlogCooldownExclusions(
     consumerId: string,
     cooldownSec: number,
+    /** #2377 — the tickets gated by an open blocker; they stay sunk longer. */
+    blockedIds: ReadonlySet<number> = new Set<number>(),
 ): Map<number, number> {
     const db = getDb();
     if (cooldownSec <= 0) return new Map();
-    const cutoffIso = new Date(Date.now() - cooldownSec * 1000).toISOString();
+    // #2377 — a blocked ticket is held for a MULTIPLE of the cooldown, so the
+    // window this query reads has to be that much wider: read it with the
+    // largest multiplier configured anywhere, or a wake older than one plain
+    // cooldown drops out here and the longer hold never happens.
+    const cutoffIso = new Date(Date.now() - cooldownSec * maxBlockedMultiplier() * 1000).toISOString();
     const rows = db.select({
         ticketId: schema.backlogWakeLog.ticketId,
         wakeAt: schema.backlogWakeLog.wakeAt,
@@ -1102,7 +1108,33 @@ export function backlogCooldownExclusions(
         if (windowSec <= 0 || !Number.isFinite(wakeAtMs) || wakeAtMs + windowSec * 1000 <= nowMs) out.delete(id);
         else out.set(id, windowSec);
     }
+    // #2377 david — a blocked ticket keeps surfacing so it is not forgotten, but
+    // nothing moves on it between two wakes: it stays sunk
+    // `tickets.blocked_cooldown_multiplier` times longer than the rest.
+    for (const id of [...out.keys()]) {
+        if (!blockedIds.has(id)) continue;
+        const raw = Number(getConfig("tickets.blocked_cooldown_multiplier", byTicket.get(id)?.project) ?? 2);
+        const factor = Math.max(1, Number.isFinite(raw) ? raw : 2);
+        if (factor > 1) out.set(id, out.get(id)! * factor);
+    }
+    // No expiry pass here: a wake read through the widened window but already
+    // past its own hold yields no `backlog_cooled_until` downstream, which
+    // computes it only while the window is still in the future.
     return out;
+}
+
+/** #2377 — the largest `tickets.blocked_cooldown_multiplier` in force anywhere. */
+function maxBlockedMultiplier(): number {
+    const globalValue = Number(getConfig("tickets.blocked_cooldown_multiplier") ?? 2);
+    let max = Math.max(1, Number.isFinite(globalValue) ? globalValue : 2);
+    for (const r of getDb().select({ value: schema.configOverrides.value })
+        .from(schema.configOverrides)
+        .where(eq(schema.configOverrides.key, "tickets.blocked_cooldown_multiplier"))
+        .all()) {
+        const v = Number(r.value);
+        if (Number.isFinite(v) && v > max) max = v;
+    }
+    return max;
 }
 
 /** #2365 — the tickets whose last action (the comment at `last_actor_at`) is a step. */
