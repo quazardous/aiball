@@ -164,7 +164,19 @@ function onRowClick(r: InboxRow) {
                  The mapping lives in lib/labels.ts (LIFECYCLE_ICONS) so the
                  catalog stays auditable in one place; the only special case
                  is the snoozed tooltip which interpolates the wake-up date. -->
+            <svg
+                v-if="LIFECYCLE_ICONS[lifecycleStage(r)].path"
+                viewBox="0 -960 960 960"
+                width="1em"
+                height="1em"
+                fill="currentColor"
+                :style="`color: var(${LIFECYCLE_ICONS[lifecycleStage(r)].color}); vertical-align: -0.125em`"
+            >
+                <title>{{ LIFECYCLE_ICONS[lifecycleStage(r)].title }}</title>
+                <path :d="LIFECYCLE_ICONS[lifecycleStage(r)].path" />
+            </svg>
             <i
+                v-else
                 :class="LIFECYCLE_ICONS[lifecycleStage(r)].icon"
                 :title="lifecycleStage(r) === 'snoozed' ? snoozedTooltip(r.postponed_until) : LIFECYCLE_ICONS[lifecycleStage(r)].title"
                 :style="`color: var(${LIFECYCLE_ICONS[lifecycleStage(r)].color})`"

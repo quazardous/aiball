@@ -21,6 +21,12 @@ import type { LifecycleStage } from "./ticket-state";
 
 export interface StageIcon {
     icon: string;
+    /**
+     * #2382 david — an inline SVG path drawn instead of the icon font, on the
+     * Material 24×24 box (`viewBox="0 -960 960 960"`), for a glyph PrimeIcons
+     * does not have. When set, it wins over `icon`.
+     */
+    path?: string;
     /** A CSS variable name (incl. the `--` prefix) used as `color:`. */
     color: string;
     /** Tooltip shown on hover. */
@@ -131,11 +137,13 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         title: "stalled step — the agent marked a step done and nothing has followed since",
     },
     step: {
-        // #2327 david: the proposed resolution's circled check, in the step
-        // tag's blue instead of green. #2370 david (f8hms8): the lighter blue
-        // of the step tag's background, not its text.
+        // #2327 david: the step marker in the step tag's blue instead of green.
+        // #2382 david: the tag's background blue was too pale on white, and the
+        // circled check was not the right glyph — Material Symbols' `circle`, a
+        // plain filled disc, in a blue that reads at icon size.
         icon: "pi pi-check-circle",
-        color: "--p-tag-info-background",
+        path: "M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5Z",
+        color: "--p-sky-400",
         title: "step — the agent marked a part done and carries on; nothing to decide",
     },
     open: {
