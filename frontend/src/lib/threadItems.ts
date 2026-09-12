@@ -14,6 +14,7 @@ import { computed, type Ref } from "vue";
 import { type Message, type ThreadView as ThreadViewData } from "./api";
 import { readDecision } from "./decisions";
 import { topDown } from "./prefs";
+import { isRelationRowKind } from "./relationRows";
 
 export type ThreadItem =
     | { kind: "comment"; msg: Message }
@@ -42,8 +43,10 @@ export const STAGE_LABELS: Record<string, string> = {
     pending: "pending",
 };
 
+// The kinds and their labels live together in ./relationRows (#2388): a kind
+// routed here without a label used to throw mid-render and blank the thread.
 function isRelationKind(k: Message["kind"]): boolean {
-    return k === "ticket_sub_added" || k === "ticket_referenced" || k === "ticket_relation" || k === "dependency_closed" || k === "related_closed" || k === "dependency_rejected";
+    return isRelationRowKind(k);
 }
 
 export function useThreadItems(data: Ref<ThreadViewData | null>) {

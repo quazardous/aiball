@@ -11,6 +11,7 @@ import type { DeciderInfo, ThreadItem } from "../lib/threadItems";
 import { formatTicketRef } from "../lib/formatting";
 import { relativeTime as shortTime } from "../lib/format";
 import { ticketHref } from "../lib/base";
+import { relationRowLabel } from "../lib/relationRows";
 import CommentNode from "./CommentNode.vue";
 import MarkdownView from "./MarkdownView.vue";
 
@@ -23,23 +24,7 @@ defineProps<{
     stageLabels: Record<string, string>;
 }>();
 
-const RELATION_LABELS: Record<string, { icon: string; verbOne: string; verbMany: string }> = {
-    ticket_sub_added: {
-        icon: "pi pi-sitemap",
-        verbOne: "added sub-ticket",
-        verbMany: "added sub-tickets",
-    },
-    ticket_referenced: {
-        icon: "pi pi-link",
-        verbOne: "referenced from",
-        verbMany: "referenced from",
-    },
-    ticket_relation: {
-        icon: "pi pi-share-alt",
-        verbOne: "linked to",
-        verbMany: "linked to",
-    },
-};
+
 
 // #B.137: read meta.relation.kind from a ticket_relation event and
 // produce the inline verb. `ignored` is the tombstone — surface it
@@ -91,7 +76,7 @@ function decodeRelationEvent(m: Message): { verb: string; target: number | null 
                 class="thread-relation-row"
                 :data-kind="item.msgs[0].kind"
             >
-                <i :class="RELATION_LABELS[item.msgs[0].kind].icon" />
+                <i :class="relationRowLabel(item.msgs[0].kind).icon" />
                 <template v-if="item.msgs[0].kind === 'ticket_relation'">
                     <span class="thread-relation-row__refs">
                         <template v-for="(m, i2) in item.msgs" :key="m.id">
@@ -108,8 +93,8 @@ function decodeRelationEvent(m: Message): { verb: string; target: number | null 
                 <template v-else>
                     <span class="thread-relation-row__verb">{{
                         item.msgs.length > 1
-                            ? RELATION_LABELS[item.msgs[0].kind].verbMany
-                            : RELATION_LABELS[item.msgs[0].kind].verbOne
+                            ? relationRowLabel(item.msgs[0].kind).verbMany
+                            : relationRowLabel(item.msgs[0].kind).verbOne
                     }}</span>
                     <span class="thread-relation-row__refs">
                         <a

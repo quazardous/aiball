@@ -183,6 +183,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **A thread no longer goes blank when it carries a dependency or link event**:
+  the row had no label to render, which threw mid-render and took every comment
+  of that thread down with it — the comments were served, the page showed none.
+
 - **Answering a backlog wake no longer brings the ticket straight back**: the
   wake asks the agent for a gesture, but posting it counted as the thread
   moving, which voided the cooldown the wake had just set. The agent's own word
