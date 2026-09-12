@@ -35,6 +35,10 @@ const BASE_MESSAGE_KINDS = [
     // that closes (lineage or a cross-reference, not a gate): nothing changes for
     // it, but the close is news it would otherwise never hear.
     "related_closed",
+    // #2388 — posted by the daemon on each open ticket that was waiting on a
+    // ticket its moderator REJECTED. A rejection is not a close, so the gate
+    // lifts in silence and the relation becomes a dead letter: this says so.
+    "dependency_rejected",
     // #B.123 phase B: typed inter-ticket relation events
     // (relates_to / depends_on / blocks / duplicates / ignored stored
     // in meta.relation.kind). Lifecycle replay treats these as N-N graph

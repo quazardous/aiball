@@ -58,7 +58,8 @@ Only `approved` tickets are ever open/actionable.
 **Event kinds** (the append-only log):
 `ticket_created`, `comment_added`, `ticket_resolved`, `ticket_closed`,
 `ticket_reopened`, `ticket_blocked`, `ticket_relation`, `ticket_sub_added`,
-`ticket_referenced`, `dependency_closed`, `related_closed`.
+`ticket_referenced`, `dependency_closed`, `related_closed`,
+`dependency_rejected`.
 
 ---
 
@@ -262,10 +263,16 @@ tier it qualifies for** (`backlog_tier`, computed per consumer in
   thread would vanish from the backlog.
 - **Tier 3 — waiting on them.** I was the last actor, no decision pending: the
   ball is with the reporter. Soft reminder set, below the tiers above.
-- **Tier 4 — blocked.** Gated by an open `depends_on` blocker. Surfaced last so
-  the agent can check the chain — the blocker may be snoozed or forgotten. When
-  the blocker closes, each open ticket waiting on it gets a `dependency_closed`
+- **Tier 4 — blocked.** Gated by a `depends_on` blocker the board can still act
+  on: approved and not closed. A **snoozed** blocker keeps gating — asleep is not
+  done, and its dependent is still waiting on it — while a blocker that was never
+  approved, or was rejected, gates nothing: it does not exist for the board yet,
+  or will never. Surfaced last so the agent can check the chain. When the blocker
+  closes, each open ticket waiting on it gets a `dependency_closed`
   event, so whoever watches it is woken instead of finding out at the next pass.
+  A blocker its moderator **rejects** never closes, so its gate would lift with
+  nobody told: each ticket that was waiting on it gets a `dependency_rejected`
+  event instead, which is the cue to cut the relation or file the work again.
   An open ticket merely LINKED to the closed one — lineage, or a cross-reference
   — gets `related_closed` instead: nothing changes for it, but the close is news
   it would otherwise never hear. A blocked ticket also sinks longer than the rest

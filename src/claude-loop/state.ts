@@ -2194,6 +2194,8 @@ export async function buildContextPhrase(
             // #2297 — carries its own line of text; the label is the fallback.
             dependency_closed: "dependency closed",
             related_closed: "linked ticket closed",
+            // #2388 — the ticket this one waited on was rejected, not closed.
+            dependency_rejected: "dependency rejected",
         };
         // #1351 + #1363 — render ONE event as a compact line, SAME content as
         // its standalone wake : a comment shows its markdown-stripped body

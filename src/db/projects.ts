@@ -1789,9 +1789,14 @@ function computeActionableTicketIdsUncached(
         level: schema.tickets.level,
     }).from(schema.tickets).where(idScope(schema.tickets.id, scopeIds)).all();
     const openIds = new Set<number>();
+    // #2388 david — what still BLOCKS, which is not the same as what is open: a
+    // snoozed blocker is asleep, not done, and its dependent is still waiting on
+    // it. So the gate counts it while the backlog does not.
+    const blockerIds = new Set<number>();
     for (const t of tickets) {
         if (t.status !== "approved") continue;
         if (closedByTicket.get(t.id) === true) continue;
+        blockerIds.add(t.id);
         if (t.postponedUntil && t.postponedUntil > nowStr) continue;
         openIds.add(t.id);
     }
@@ -1834,8 +1839,8 @@ function computeActionableTicketIdsUncached(
     }
     const gatedByBlocker = new Set<number>();
     for (const r of latestPerPair.values()) {
-        if (r.kind === "depends_on" && openIds.has(r.target)) gatedByBlocker.add(r.source);
-        else if (r.kind === "blocks" && openIds.has(r.source)) gatedByBlocker.add(r.target);
+        if (r.kind === "depends_on" && blockerIds.has(r.target)) gatedByBlocker.add(r.source);
+        else if (r.kind === "blocks" && blockerIds.has(r.source)) gatedByBlocker.add(r.target);
     }
 
     // #265/#374: per-consumer "I acted last → awaiting someone else" gate,

@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **A rejected ticket tells the tickets that were waiting on it**: a rejection is
+  not a close, so the gate used to lift with nobody told and the relation stayed
+  a dead letter. Each ticket that depended on it now hears it once, with the cue
+  to cut the relation or file the work again.
+
 - **Mark a ticket as a step from the ticket itself**: the thread's actions and
   the list's bulk bar carry "mark as step", which tags the ticket's latest agent
   comment — the ticket stays with the agent, unnotified. A thread whose last
@@ -255,6 +260,11 @@ dates are YYYY-MM-DD.
   `start`, but nothing could put it in the file, so it had to be typed by hand.
 
 ### Changed
+
+- **A snoozed blocker keeps blocking**: a ticket waiting on one that is asleep
+  stayed in its agent's pool as if the wait were over. Asleep is not done, so it
+  stays blocked until the snooze runs out. A blocker that was never approved, or
+  was rejected, still gates nothing.
 
 - **A backlog wake says which gesture it wants**: each tier's closing line now
   asks for a `then:`, or a comment that hands the ticket back and names what it

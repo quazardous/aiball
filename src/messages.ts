@@ -550,26 +550,62 @@ function postCloseRelationEvents(closedTicketId: number, closer: string | null, 
         if (r.kind === "blocks") unblocked.add(r.target_ticket_id);
         else if (r.kind === "relates_to" || r.kind === "child_of" || r.kind === "parent_of") linked.add(r.target_ticket_id);
     }
-    const post = (id: number, kind: "dependency_closed" | "related_closed", body: string): void => {
-        if (isTicketClosed(id)) return;
-        const pseudo = insertRelationEvent({
-            target_ticket_id: id,
-            source_ticket_id: closedTicketId,
-            kind,
-            by_agent: closer,
-            body,
-        });
-        if (!pseudo) return;
-        // The same fan-out as the other relation events, in the close's own scope.
-        pseudo.scope = scope;
-        pushEvent(pseudo);
-        broadcast({ type: "message_created", data: pseudo });
-    };
+    const post = (id: number, kind: "dependency_closed" | "related_closed", body: string): void =>
+        postRelationNotice(id, closedTicketId, kind, closer, body, scope);
     for (const id of unblocked) {
         post(id, "dependency_closed", `#${closedTicketId} closed${title} — this ticket was waiting on it.`);
     }
     for (const id of linked) {
         if (!unblocked.has(id)) post(id, "related_closed", `#${closedTicketId} closed${title} — this ticket is linked to it.`);
+    }
+}
+
+/** The one write every relation notice shares: skip closed targets, fan out, broadcast. */
+function postRelationNotice(
+    targetTicketId: number,
+    sourceTicketId: number,
+    kind: "dependency_closed" | "related_closed" | "dependency_rejected",
+    by: string | null,
+    body: string,
+    scope: Message["scope"],
+): void {
+    if (isTicketClosed(targetTicketId)) return;
+    const pseudo = insertRelationEvent({
+        target_ticket_id: targetTicketId,
+        source_ticket_id: sourceTicketId,
+        kind,
+        by_agent: by,
+        body,
+    });
+    if (!pseudo) return;
+    // The same fan-out as the other relation events, in the source's own scope.
+    pseudo.scope = scope;
+    pushEvent(pseudo);
+    broadcast({ type: "message_created", data: pseudo });
+}
+
+/**
+ * #2388 david — a moderator REJECTED a ticket other tickets were waiting on.
+ * A rejection is not a close: the gate lifts (a rejected ticket is not open, so
+ * it stops blocking) and nothing was ever said, leaving the dependent back in
+ * its agent's pool with a relation that will never resolve. This says it once,
+ * on each ticket that was waiting, so the agent can cut the relation or re-file
+ * the work. Only the gate relations: a ticket merely linked hears nothing, the
+ * rejection of a ticket it references changes nothing for it.
+ */
+export function postRejectRelationEvents(rejectedTicketId: number, rejecter: string | null, scope: Message["scope"]): void {
+    const rejected = getMessage(rejectedTicketId);
+    const title = rejected?.title ? `: ${rejected.title}` : "";
+    for (const r of listTypedRelationsForTicket(rejectedTicketId)) {
+        if (r.kind !== "blocks") continue;
+        postRelationNotice(
+            r.target_ticket_id,
+            rejectedTicketId,
+            "dependency_rejected",
+            rejecter,
+            `#${rejectedTicketId} was rejected${title} — this ticket was waiting on it. Cut the relation, or file the work again.`,
+            scope,
+        );
     }
 }
 

@@ -43,7 +43,7 @@ export const STAGE_LABELS: Record<string, string> = {
 };
 
 function isRelationKind(k: Message["kind"]): boolean {
-    return k === "ticket_sub_added" || k === "ticket_referenced" || k === "ticket_relation" || k === "dependency_closed" || k === "related_closed";
+    return k === "ticket_sub_added" || k === "ticket_referenced" || k === "ticket_relation" || k === "dependency_closed" || k === "related_closed" || k === "dependency_rejected";
 }
 
 export function useThreadItems(data: Ref<ThreadViewData | null>) {

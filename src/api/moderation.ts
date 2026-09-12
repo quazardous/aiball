@@ -13,6 +13,7 @@
  * caller may moderate. This only applies the status and ripples it.
  */
 import { deletePingsForMessage, updateMessageStatus, type Message, type MessageStatus } from "../db.js";
+import { postRejectRelationEvents } from "../messages.js";
 import { emitLifecycle } from "../event-bus.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
@@ -31,6 +32,11 @@ export function applyModeration(existing: Message, status: MessageStatus, decide
         // The message will never be approved, so wipe those pings so it
         // stops surfacing as unread on their inboxes.
         deletePingsForMessage(existing.id);
+        // #2388 — a rejected ticket stops blocking, silently: tell the tickets
+        // that were waiting on it, the way a close tells them.
+        if (existing.kind === "ticket_created") {
+            postRejectRelationEvents(existing.id, decider, existing.scope);
+        }
     }
     // Transition ping: notify the message author that a moderator decided
     // their submission (#260), whichever path the decision came through.

@@ -263,6 +263,8 @@ const LIFECYCLE_LABELS: Record<string, LifecycleLabel> = {
     dependency_closed: { icon: "pi pi-flag", verb: "closed a ticket this one was waiting on:", severity: "success", showSource: true },
     // #2378 — merely linked, not a gate: news, not a green light.
     related_closed: { icon: "pi pi-link", verb: "closed a ticket linked to this one:", severity: "info", showSource: true },
+    // #2388 — rejected, not closed: the gate lifts but the work never lands.
+    dependency_rejected: { icon: "pi pi-flag", verb: "rejected a ticket this one was waiting on:", severity: "warn", showSource: true },
     // #830 — decision events render as lifecycle-style chips (no body).
     // Verb names the action ("accepted X's plan") so the thread audit
     // reads naturally without re-fetching the original proposal.

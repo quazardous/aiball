@@ -793,7 +793,7 @@ export function moveTicket(
 export function insertRelationEvent(opts: {
     target_ticket_id: number;
     source_ticket_id: number;
-    kind: "ticket_sub_added" | "ticket_referenced" | "dependency_closed" | "related_closed";
+    kind: "ticket_sub_added" | "ticket_referenced" | "dependency_closed" | "related_closed" | "dependency_rejected";
     by_agent: string | null;
     /** #2297 — a line of text; the relation pseudo-comments carry none. */
     body?: string;
