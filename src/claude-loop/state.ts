@@ -2193,6 +2193,7 @@ export async function buildContextPhrase(
             ticket_referenced: "referenced",
             // #2297 — carries its own line of text; the label is the fallback.
             dependency_closed: "dependency closed",
+            related_closed: "linked ticket closed",
         };
         // #1351 + #1363 — render ONE event as a compact line, SAME content as
         // its standalone wake : a comment shows its markdown-stripped body

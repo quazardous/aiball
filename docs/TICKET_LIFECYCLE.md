@@ -58,7 +58,7 @@ Only `approved` tickets are ever open/actionable.
 **Event kinds** (the append-only log):
 `ticket_created`, `comment_added`, `ticket_resolved`, `ticket_closed`,
 `ticket_reopened`, `ticket_blocked`, `ticket_relation`, `ticket_sub_added`,
-`ticket_referenced`, `dependency_closed`.
+`ticket_referenced`, `dependency_closed`, `related_closed`.
 
 ---
 
@@ -266,6 +266,9 @@ tier it qualifies for** (`backlog_tier`, computed per consumer in
   the agent can check the chain — the blocker may be snoozed or forgotten. When
   the blocker closes, each open ticket waiting on it gets a `dependency_closed`
   event, so whoever watches it is woken instead of finding out at the next pass.
+  An open ticket merely LINKED to the closed one — lineage, or a cross-reference
+  — gets `related_closed` instead: nothing changes for it, but the close is news
+  it would otherwise never hear.
 
 A triage comment (§ in `skills/aiball/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
 moves the ticket **from tier 1 to tier 3** within the same backlog — the agent

@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **A close tells the tickets it is linked to**: a ticket that was waiting on
+  the closed one already heard; a ticket merely linked to it — lineage or a
+  cross-reference — now hears too, as news rather than a green light.
 - **Tag an agent's comment as a step**: when an agent carried on but did not
   post `then: continue`, a moderator can tag its comment as a step from the
   comment's classify menu. The ticket stays in the agent's pool as if it had

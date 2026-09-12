@@ -1,4 +1,4 @@
-name: a ticket waiting on another is blocked, and hears it the moment the blocker closes
+name: a ticket waiting on another hears the blocker close; a merely linked one hears it too
 steps:
   - alpha-lead: ticket_new
     args: { title: The blocker, body: Must land first. }
@@ -8,12 +8,21 @@ steps:
     save: { waiting: id }
   - moderator: approve $blocker
   - moderator: approve $waiting
+  - alpha-lead: ticket_new
+    args: { title: Linked to the blocker, body: Not blocked by it, just linked to it. }
+    save: { linked: id }
+  - moderator: approve $linked
   - alpha-lead: ticket_relate
     args: { ticket_id: $waiting, target_id: $blocker, kind: depends_on }
+  - alpha-lead: ticket_relate
+    args: { ticket_id: $linked, target_id: $blocker, kind: relates_to }
   # While the blocker is open, the waiting ticket is blocked, and nothing is queued on it.
   - expect:
       alpha-lead: { ticket: $waiting, backlog: blocked, act: false, events: [] }
   - moderator: close $blocker
   - expect:
       alpha-lead: { ticket: $waiting, act: true, events: [dependency_closed], wake: event }
+  # Merely linked: the close is news, and the ticket was never blocked.
+  - expect:
+      alpha-lead: { ticket: $linked, act: true, events: [related_closed] }
   - view: [alpha-lead]

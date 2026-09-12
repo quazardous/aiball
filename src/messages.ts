@@ -529,32 +529,47 @@ function extractTicketRefs(
 }
 
 /**
- * #2297 — a ticket just closed: post `dependency_closed` on every open ticket
+ * #2297 / #2378 — a ticket just closed: post `dependency_closed` on every open ticket
  * that was waiting on it, so whoever watches that ticket hears the wait is over.
  * Before, a `depends_on` gate lifted in silence and the dependent only came back
  * at the next backlog pass, if at all. Relations are read as the closed ticket
  * sees them, where `A depends_on T` and `T blocks A` both show as `blocks`,
  * and a removed relation is already gone.
  */
-function postDependencyClosedEvents(closedTicketId: number, closer: string | null, scope: Message["scope"]): void {
+function postCloseRelationEvents(closedTicketId: number, closer: string | null, scope: Message["scope"]): void {
     const closed = getMessage(closedTicketId);
-    const dependents = new Set(listTypedRelationsForTicket(closedTicketId)
-        .filter((r) => r.kind === "blocks")
-        .map((r) => r.target_ticket_id));
-    for (const id of dependents) {
-        if (isTicketClosed(id)) continue;
+    const title = closed?.title ? `: ${closed.title}` : "";
+    // #2378 — two sets, two messages: a ticket whose gate just lifted, and a
+    // ticket merely linked, for which nothing changes but the news. A ticket in
+    // both hears the stronger one, once. `duplicates` is left out: a duplicate's
+    // close is its own story, and `depends_on` from here means THIS ticket was
+    // waiting, which its close does not free.
+    const unblocked = new Set<number>();
+    const linked = new Set<number>();
+    for (const r of listTypedRelationsForTicket(closedTicketId)) {
+        if (r.kind === "blocks") unblocked.add(r.target_ticket_id);
+        else if (r.kind === "relates_to" || r.kind === "child_of" || r.kind === "parent_of") linked.add(r.target_ticket_id);
+    }
+    const post = (id: number, kind: "dependency_closed" | "related_closed", body: string): void => {
+        if (isTicketClosed(id)) return;
         const pseudo = insertRelationEvent({
             target_ticket_id: id,
             source_ticket_id: closedTicketId,
-            kind: "dependency_closed",
+            kind,
             by_agent: closer,
-            body: `#${closedTicketId} closed${closed?.title ? `: ${closed.title}` : ""} — this ticket was waiting on it.`,
+            body,
         });
-        if (!pseudo) continue;
+        if (!pseudo) return;
         // The same fan-out as the other relation events, in the close's own scope.
         pseudo.scope = scope;
         pushEvent(pseudo);
         broadcast({ type: "message_created", data: pseudo });
+    };
+    for (const id of unblocked) {
+        post(id, "dependency_closed", `#${closedTicketId} closed${title} — this ticket was waiting on it.`);
+    }
+    for (const id of linked) {
+        if (!unblocked.has(id)) post(id, "related_closed", `#${closedTicketId} closed${title} — this ticket is linked to it.`);
     }
 }
 
@@ -790,7 +805,7 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
                 // qui reste pertinente sur un reopen ultérieur).
                 releaseTicketClaim(closedTicketId);
                 // #2297 — the tickets that were waiting on this one hear it closed.
-                postDependencyClosedEvents(closedTicketId, input.by_agent ?? null, msg.scope);
+                postCloseRelationEvents(closedTicketId, input.by_agent ?? null, msg.scope);
             }
         }
     }

@@ -37,11 +37,12 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 21 — An agent's ticket waiting for moderation is in no backlog; a decision on it is refused at once (409); closed while waiting, it stays out | `creation-pending-ticket` |
 | 22 — A human "up" on an agent's ticket with no decision: actionable, unread, the human its last actor | `creation-human-up` |
 | 23 — A blocker filed with `then: plan` behaves like any plan: whoever files it, a human files it and a human accepts it — nothing auto-accepts. It reads as follow-up for the project's other owner where an ordinary pending plan shows nowhere; decided: harmless, a project may carry tickets of its own shape | `creation-blocker-as-plan` |
-| 24 — A ticket waiting on another (`depends_on`) is blocked, and gets a `dependency_closed` event the moment the blocker closes | `dependency-closed` |
+| 24, 32 — A ticket waiting on another (`depends_on`) is blocked and gets `dependency_closed` the moment the blocker closes; a ticket merely linked to it gets `related_closed`, news rather than a gate | `dependency-closed` |
 | 26 — A plan accepted while the ticket's dependency is still open leaves it blocked. Decided: no extra gate in the UI; an umbrella may be accepted with its children unfinished | `dependency-plan-accepted-while-blocked` |
 | 27 — A dependency written only in a plan's prose is invisible: the ticket is actionable while the other is open | `dependency-in-prose-only` |
 | 28 — Work carried on a recap ticket leaves the older one coming back as "Triage". Decided: a piloting matter — the agent says so on the older ticket | `dependency-work-on-recap-ticket` |
 | 31 — A hard deadline with normal priority ranks after older tickets; `high` is the intended gesture | `order-deadline-normal-priority` |
+| 32 — A burst of accepted resolutions keeps one wake per closed ticket: a close sometimes unblocks work, so they are not grouped | `notify-burst-of-accepts` |
 | 33 — Every open ticket in the agent's court ends with a pending decision: empty backlog, no wake | `notify-all-pending-decisions` |
 
 ## Decided, the change is in a ticket
@@ -55,7 +56,6 @@ lands, and the case then moves to "Covered".
 - **18 — the reporter is woken by accepts that are not its own** — three wakes for a ticket it filed in another project, including decisions it cannot take (ticket #2380). Scenario `holder-reporter-other-project`.
 - **25 — a blocked ticket comes back at every cooldown** while nothing moves. It must keep surfacing so it is not forgotten, but half as often (ticket #2377). Scenario `dependency-blocked-wake-repeats`.
 - **30 — waiting on a machine has no gesture of its own**: during a CI wait the ticket is named every 5 minutes. Nothing changes for now; a dated wake filed by the agent is under study (ticket #2381). Scenario `dependency-external-wait-after-step`.
-- **32 — a burst of accepted resolutions keeps one wake per closed ticket** (a close sometimes unblocks work), but a close should point at the tickets it frees (ticket #2378). Scenario `notify-burst-of-accepts`.
 
 ## Not simulator cases
 
