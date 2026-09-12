@@ -34,6 +34,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 10 — "No plan" in a plain human comment makes the ticket the agent's; its steps keep it there | `decision-no-plan-comment` |
 | 12 — A plan pending and nobody answers: nothing reminds either side. Decided: a pending plan is the human's (or, later, the pilot's) — no reminder | `decision-plan-pending-silent` |
 | 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
+| 14 — A claim protects its ticket while its holder works: another agent's claim is refused; past the protection it can be taken over, and the thread records it | `holder-claim-slot` |
 | 16 — A follower sees a ticket of the project it follows, but it is never its work and no backlog wake names it | `holder-follower-never-head` |
 | 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
 | 18 — The reporter of a ticket filed in another project hears the agent's comments and the close, but not the outcome of decisions it cannot take | `holder-reporter-other-project` |
@@ -57,7 +58,6 @@ What the board does today, and what david decided about it. Each scenario below
 still plays TODAY's behaviour; it becomes a written expectation when its ticket
 lands, and the case then moves to "Covered".
 
-- **14 — claiming a ticket another agent holds** goes through with no refusal, no warning and no trace on the thread (ticket #2379). Scenario `holder-claim-slot`.
 - **30 — waiting on a machine has no gesture of its own**: during a CI wait the ticket is named every 5 minutes. Nothing changes for now; a dated wake filed by the agent is under study (ticket #2381). Scenario `dependency-external-wait-after-step`.
 
 ## Not simulator cases

@@ -50,6 +50,26 @@ export function isAssignedAway(
  * with no assignment → not away (falls through to the last_actor gate).
  * Supersedes `isAssignedAway` (kept for back-compat). `windowMs` in MS.
  */
+/**
+ * #2379 david `prrg57` — when a claim stops protecting its ticket, in epoch ms,
+ * or null when nothing protects it. The window runs from the holder's LAST
+ * ACTION on that ticket — its claim, or any message it posted since — so
+ * working on a ticket keeps the protection alive, which is what "tant qu'un
+ * agent est actif" means. Pure: the caller hands in the two timestamps.
+ */
+export function claimProtectionEnd(
+    claimedAt: string | null | undefined,
+    holderLastActionAt: string | null | undefined,
+    protectMinutes: number,
+): number | null {
+    if (!(protectMinutes > 0)) return null;
+    const times = [claimedAt, holderLastActionAt]
+        .map((iso) => (iso ? Date.parse(iso) : NaN))
+        .filter((ms) => Number.isFinite(ms));
+    if (times.length === 0) return null;
+    return Math.max(...times) + protectMinutes * 60_000;
+}
+
 export function isHeldByOther(
     assignee: string | null | undefined,
     claimant: string | null | undefined,

@@ -1,9 +1,9 @@
 name: two accepted plans in flight, and another owner claims the one the lead still holds
-# Case 14 (observed, waiting for a decision). alpha-lead holds A (plan accepted,
-# a step posted), then claims B to execute B's accepted plan. Claiming B does
-# not release A: the lead holds both, and A stays out of the other owner's
-# backlog. But the other owner can still claim A by id: the claim goes through
-# with no refusal and no warning, and A leaves the lead's pool.
+# Case 14, decided: a claim is a weak assign, PROTECTED while its holder works
+# (#2379, david). alpha-lead holds A (plan accepted, a step posted), then claims
+# B to execute B's accepted plan. Claiming B does not release A: the lead holds
+# both, and A stays out of the other owner's backlog. The other owner claiming A
+# by id is now REFUSED while the protection stands, and A stays the lead's.
 cohort: tests/sim/cohorts/two-owners.yaml
 steps:
   - alpha-lead: ticket_new
@@ -34,10 +34,11 @@ steps:
       alpha-second: { ticket: $a, backlog: none, act: false, claim: false }
   - expect:
       alpha-lead: { ticket: $b, act: true, claim: true }
-  # The other owner takes A anyway.
+  # The other owner tries to take A: refused, the lead is working on it.
   - alpha-second: ticket_claim
     args: { ticket_id: $a }
+    refused: is held by alpha-lead
   - view: [alpha-lead, alpha-second]
   - expect:
-      alpha-lead: { ticket: $a, backlog: none, act: false }
-      alpha-second: { ticket: $a, backlog: hot, act: true, claim: true }
+      alpha-lead: { ticket: $a, act: true, claim: true }
+      alpha-second: { ticket: $a, backlog: none, act: false, claim: false }

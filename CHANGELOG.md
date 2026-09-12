@@ -265,6 +265,15 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **A claim now protects its ticket while its holder works**: another agent
+  claiming a ticket someone else holds is refused, naming the holder and when
+  the protection lapses (`tickets.claim_protect_minutes`, 30 by default,
+  counted from the holder's last action on the ticket). Past that window the
+  ticket can be taken over — a forgotten claim must not freeze it — and the
+  thread records the take-over, so the former holder hears it instead of
+  silently losing the ticket. An assignment always wins over a claim, and a
+  human is never restricted.
+
 - **The backlog is the project's work**: a ticket counts as yours when you lead
   its project or when it is assigned to you. Asking an agent's queue used to
   answer with every project's tickets, none of which it could claim. Reading is

@@ -24,6 +24,12 @@ const BASE_MESSAGE_KINDS = [
     "ticket_reopened",
     "ticket_resolved",
     "ticket_blocked",
+    // #2379 david `prrg57` — a claim whose protection had lapsed was taken over
+    // by another agent. The take-over is legitimate (a forgotten claim must not
+    // freeze a ticket), but it was silent: the holder lost the ticket without
+    // being told and the thread kept no trace. Structural, like the events
+    // below: not user-postable, and it does not move whose turn it is.
+    "claim_taken_over",
     "ticket_sub_added",
     "ticket_referenced",
     // #2297 — posted by the daemon on each open ticket that was waiting on a

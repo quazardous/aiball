@@ -63,7 +63,8 @@ import { computeActionableTicketIds } from "../db/projects.js";
 import { ticketHasPayload } from "../db/payloads.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
 import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
-import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
+import { isAssignmentLive, claimsToAutoRelease, claimProtectionEnd, pickFocusClaim } from "../db/assignment-gate.js";
+import { getConfig } from "../db/config-overrides.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, type RelationKind } from "../relations.js";
@@ -98,7 +99,7 @@ import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
 import type { AuthenticatedRequest } from "../auth.js";
-import { moveTicketTo } from "../messages.js";
+import { moveTicketTo, submitMessage } from "../messages.js";
 import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
 
 export const ticketsRouter = Router();
@@ -158,6 +159,14 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
  * out of OTHER consumers' actionable pool until it expires (assign_window_sec),
  * is released, or the ticket closes. The assignee's own gating is unchanged.
  */
+/** #2379 — when the claim of `holder` stops protecting this ticket (epoch ms), or null. */
+function claimProtectedUntil(holder: string, ticketId: number, claimedAt: string | null, project: string): number | null {
+    const raw = Number(getConfig("tickets.claim_protect_minutes", project) ?? 30);
+    const minutes = Number.isFinite(raw) ? raw : 30;
+    const lastAction = ticketSelfLastActivity(holder, [ticketId]).get(ticketId) ?? null;
+    return claimProtectionEnd(claimedAt, lastAction, minutes);
+}
+
 ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const caller = consumerOf(req);
@@ -197,6 +206,31 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
         return res.status(403).json({
             error: `#${t.id} is a ${t.level ?? "task"} ticket, and this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets only`,
         });
+    }
+    // #2379 david `prrg57` — "claim est une version faible de assign… tant qu'un
+    // agent est actif sur un ticket son claim est protégé pendant X minutes, un
+    // autre agent ne peut pas claim un ticket protégé, le assign supplante le
+    // claim". Until now a claim by id went through on a ticket someone else held:
+    // the holder lost it without a word, and the thread kept no trace. A human
+    // still takes any ticket — moderating is the job.
+    let takenOverFrom: string | null = null;
+    if (isClaim && !isHuman(caller)) {
+        if (t.assignee && t.assignee !== caller) {
+            return res.status(409).json({
+                error: `#${t.id} is assigned to ${t.assignee} — an assignment supersedes a claim. Ask on the thread, or have a human reassign it.`,
+            });
+        }
+        if (t.claimant && t.claimant !== caller) {
+            const until = claimProtectedUntil(t.claimant, t.id, t.claimed_at ?? null, t.project);
+            if (until && until > Date.now()) {
+                return res.status(409).json({
+                    error: `#${t.id} is held by ${t.claimant}, who is working on it — protected until ${new Date(until).toISOString()}. Ask on the thread, or come back after that.`,
+                });
+            }
+            // Past the protection the ticket is takeable: a forgotten claim must
+            // not freeze it. But the take-over is said, so its holder hears it.
+            takenOverFrom = t.claimant;
+        }
     }
     // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,
     // persistent). Two distinct fields now — a ticket can be both.
@@ -238,6 +272,19 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
             // own-claim boost in work-order drops too).
             assignReleasedClaim = ar.released_claim;
         }
+    }
+    if (takenOverFrom) {
+        // A structural event: it says what happened and reaches the former
+        // holder through the usual fan-out (a claim subscribes its holder to the
+        // thread). It is not a comment — whose turn it is does not move.
+        submitMessage({
+            project: t.project,
+            kind: "claim_taken_over",
+            ticket_id: id,
+            parent_id: id,
+            body: `${caller} took over the claim held by ${takenOverFrom}, whose protection had lapsed.`,
+            by_agent: caller,
+        });
     }
     upsertTicketSubscription(target, id);
     // #448 david: the claim landed in the DB but the UI didn't reflect it live —
@@ -1430,6 +1477,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
                     m.kind === "ticket_reopened" ||
                     m.kind === "ticket_resolved" ||
                     m.kind === "ticket_blocked" ||
+                    m.kind === "claim_taken_over" ||
                     m.kind === "ticket_sub_added" ||
                     m.kind === "ticket_referenced" ||
                     m.kind === "dependency_closed" ||

@@ -2191,6 +2191,8 @@ export async function buildContextPhrase(
             // reads like a leak; these follow the convention of the two above.
             ticket_sub_added: "sub-ticket added",
             ticket_referenced: "referenced",
+            // #2379 — carries its own line of text; the label is the fallback.
+            claim_taken_over: "claim taken over",
             // #2297 — carries its own line of text; the label is the fallback.
             dependency_closed: "dependency closed",
             related_closed: "linked ticket closed",

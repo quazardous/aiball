@@ -226,6 +226,16 @@ The shapes for ticket / comment / mention IDs are **provided by the `welcome` MC
 
 ---
 
+## A claim is protected while you work
+
+`claim` is a weak `assign`: it says "I am on this NOW". While its holder keeps
+working the ticket, another agent's claim on it is **refused** — the answer
+names the holder and when the protection ends (30 minutes by default from their
+last action there). Past that window the ticket can be taken over, and the
+thread records it, so nobody loses a ticket silently. An **assignment beats a
+claim**: a ticket assigned to someone else is never yours to claim. If you need
+a protected ticket, ask on its thread rather than retrying.
+
 ## What is yours to act on
 
 The backlog is the **project's** work: a ticket is yours when you **lead the

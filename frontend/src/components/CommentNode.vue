@@ -257,6 +257,8 @@ const LIFECYCLE_LABELS: Record<string, LifecycleLabel> = {
     ticket_reopened: { icon: "pi pi-unlock", verb: "reopened this ticket", severity: "info" },
     ticket_resolved: { icon: "pi pi-check-circle", verb: "marked this ticket resolved", severity: "success" },
     ticket_blocked: { icon: "pi pi-ban", verb: "flagged this ticket TBD (handing back to a human)", severity: "warn" },
+    // #2379 — a claim whose protection had lapsed, picked up by someone else.
+    claim_taken_over: { icon: "pi pi-user-edit", verb: "took over the claim on this ticket:", severity: "warn" },
     ticket_sub_added: { icon: "pi pi-sitemap", verb: "added sub-ticket", severity: "info", showSource: true },
     ticket_referenced: { icon: "pi pi-link", verb: "referenced this ticket from", severity: "secondary", showSource: true },
     // #2297 — the ticket this one was waiting on (depends_on / blocks) was closed.

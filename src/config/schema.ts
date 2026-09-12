@@ -128,6 +128,20 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     // #2365 — a step says there is work to do now: the backlog wake that follows
     // it sinks the ticket only briefly, long enough to turn the queue over.
+    // #2379 david `prrg57` — "claim est une version faible de assign… tant
+    // qu'un agent est actif sur un ticket son claim est protégé pendant X
+    // minutes". Shorter and harder than the claim's liveness window
+    // (assign_window_sec): that one HIDES the ticket from other pools, this one
+    // REFUSES the take-over outright.
+    {
+        key: "tickets.claim_protect_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 30,
+        label: "Minutes a working agent's claim is protected",
+        description:
+            "How long a claim holds against another agent's claim, counted from its holder's last action on the ticket — working on it keeps the protection alive. Another agent's claim inside that window is refused; past it the ticket can be taken over, and the thread records it. An assignment always wins over a claim. 0 = no protection.",
+    },
     {
         key: "tickets.blocked_cooldown_multiplier",
         scope: "global+project",

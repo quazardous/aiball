@@ -59,7 +59,7 @@ Only `approved` tickets are ever open/actionable.
 `ticket_created`, `comment_added`, `ticket_resolved`, `ticket_closed`,
 `ticket_reopened`, `ticket_blocked`, `ticket_relation`, `ticket_sub_added`,
 `ticket_referenced`, `dependency_closed`, `related_closed`,
-`dependency_rejected`.
+`dependency_rejected`, `claim_taken_over`.
 
 ---
 
