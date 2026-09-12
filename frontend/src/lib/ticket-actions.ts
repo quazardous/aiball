@@ -30,6 +30,7 @@ export type BulkAction =
     | "mark_unread"
     | "snooze"
     | "unsnooze"
+    | "step"
     | "link";
 
 export function canApprove(r: InboxRow): boolean {
@@ -65,6 +66,15 @@ export function canMarkUnread(r: InboxRow): boolean {
 }
 
 /**
+ * #2383 — a step can be marked on an open ticket whose last word is not
+ * already a step. Whether its latest comment is an agent's is the daemon's
+ * call (it refuses otherwise, and the batch counts it as failed).
+ */
+export function canStep(r: InboxRow): boolean {
+    return isOpen(r) && !r.latest_is_step;
+}
+
+/**
  * Any non-rejected ticket can participate in a bulk-link star (#B.236
  * dkrus4 — "le plus recent vois les autres"). The bulkAction handler
  * adds the eligibility floor (need ≥ 2 selected to create any edge);
@@ -87,6 +97,7 @@ export const BULK_PREDICATES: Record<BulkAction, (r: InboxRow) => boolean> = {
     mark_unread: canMarkUnread,
     snooze: canSnooze,
     unsnooze: canUnsnooze,
+    step: canStep,
     link: canLink,
 };
 
@@ -103,6 +114,7 @@ export const BULK_LABELS: Record<BulkAction, string> = {
     mark_unread: "mark unread",
     snooze: "snooze",
     unsnooze: "unsnooze",
+    step: "mark as step",
     link: "link",
 };
 
@@ -246,6 +258,9 @@ export function useBulkActions(opts: {
                         case "unsnooze":
                             await api.unsnoozeTicket(r.id);
                             break;
+                        case "step":
+                            await api.stepTicket(r.id);
+                            break;
                     }
                     ok++;
                 } catch {
@@ -294,6 +309,7 @@ export function useBulkActions(opts: {
             mark_unread: bulkApplicableCount("mark_unread"),
             snooze: bulkApplicableCount("snooze"),
             unsnooze: bulkApplicableCount("unsnooze"),
+            step: bulkApplicableCount("step"),
             link: linkable >= 2 ? linkable : 0,
         };
     });

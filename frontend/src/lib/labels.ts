@@ -253,6 +253,14 @@ export const BULK_ACTION_META: Record<BulkAction, BulkActionMeta> = {
         order: 21,
         text: true,
     },
+    step: {
+        label: "mark as step",
+        icon: "pi pi-forward",
+        severity: "info",
+        tooltip: "Tag each selected ticket's latest agent comment as a step: the ticket stays with the agent, which is not notified. Tickets whose last word is not an agent's are refused and counted.",
+        order: 25,
+        text: true,
+    },
     close: {
         label: "close",
         icon: "pi pi-lock",

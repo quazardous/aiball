@@ -92,6 +92,7 @@ function ticketStateAfter(id: number, consumerId: string) {
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
 import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotes } from "./_helpers.js";
+import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
 import type { AuthenticatedRequest } from "../auth.js";
@@ -1180,6 +1181,50 @@ ticketsRouter.get("/tickets/:id/relations", (req, res) => {
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     res.json({ ticket_id: id, relations: listTypedRelationsForTicket(id), ticket: ticketStateAfter(id, consumerOf(req)) });
 });
+
+/**
+ * #2383 — mark a ticket as a step from the ticket itself (a button in the
+ * thread, a bulk action in the list). It tags the ticket's LATEST comment,
+ * which must be an agent's, as a step — the tagging itself is #2369's.
+ * Refused when the thread's last word is a human's: only the last action
+ * decides whose pool the ticket sits in, so tagging an older comment would
+ * change nothing.
+ */
+ticketsRouter.post("/tickets/:id/step", (req: Request, res: Response) => ticketStepRoute(req, res, true));
+ticketsRouter.post("/tickets/:id/unstep", (req: Request, res: Response) => ticketStepRoute(req, res, false));
+
+function ticketStepRoute(req: Request, res: Response, tag: boolean) {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "ticket id required");
+    const caller = consumerOf(req);
+    if (!isHuman(caller)) {
+        return res.status(403).json({ error: "only a registered human moderator can mark a ticket as a step" });
+    }
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    let latest: ReturnType<typeof getMessage> = null;
+    for (const m of listMessages({ kind: "comment_added", ticket_id: id })) {
+        if (m.status !== "approved") continue;
+        if (!latest || m.id > latest.id) latest = m;
+    }
+    if (!latest) {
+        return res.status(409).json({ error: "this ticket has no comment to mark as a step" });
+    }
+    if (!latest.by_agent || isHuman(latest.by_agent)) {
+        return res.status(409).json({
+            error: "the thread's last word is a human's — tagging an older comment would not move the ticket; answer the agent, or tag its own comment in the thread",
+        });
+    }
+    try {
+        const updated = tag ? tagMessageAsStep(latest.id, caller) : untagMessageStep(latest.id);
+        if (!updated) return notFound(res);
+        const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
+        return res.status(409).json({ error: (e as Error).message });
+    }
+}
 
 ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     const id = Number(req.params.id);

@@ -1175,6 +1175,11 @@ export const api = {
     /** #2369 — tag an agent's comment as a step after the fact, or remove that tag. */
     stepMessage: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/step`, {}),
+    /** #2383 — mark the ticket as a step (its latest agent comment), or remove that tag. */
+    stepTicket: (id: number) =>
+        req<Message>("POST", `/api/tickets/${id}/step`, {}),
+    unstepTicket: (id: number) =>
+        req<Message>("POST", `/api/tickets/${id}/unstep`, {}),
     unstepMessage: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/unstep`, {}),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null; level?: "task" | "milestone" | "roadmap" }) =>

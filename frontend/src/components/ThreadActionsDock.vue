@@ -78,6 +78,7 @@ const emit = defineEmits<{
     (e: "comment-reopen"): void;
     (e: "comment-close"): void;
     (e: "comment-mark-resolved"): void;
+    (e: "mark-step"): void;
     (e: "decide", action: "approve" | "reject"): void;
 }>();
 </script>
@@ -193,6 +194,19 @@ const emit = defineEmits<{
     <template v-else>
         <!-- snooze button now lives at the top of #extra-actions
              (#B.143) so every state inherits it; no per-branch dupe -->
+        <!-- #2383 david: the step gesture, from the ticket rather than from a
+             comment's classify menu. Tags the latest agent comment. -->
+        <Button
+            v-if="!ticket.closed && !ticket.resolved"
+            icon="pi pi-forward"
+            label="mark as step"
+            severity="info"
+            size="small"
+            text
+            :loading="resolutionBusy"
+            title="Tag the agent's last comment as a step: the ticket stays with the agent, which is not notified."
+            @click="emit('mark-step')"
+        />
         <SplitButton
             v-if="!ticket.resolved && !ticket.blocked"
             :label="hasBody ? 'comment and mark resolved' : 'mark resolved'"

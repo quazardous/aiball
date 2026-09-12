@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Mark a ticket as a step from the ticket itself**: the thread's actions and
+  the list's bulk bar carry "mark as step", which tags the ticket's latest agent
+  comment — the ticket stays with the agent, unnotified. A thread whose last
+  word is a human's is refused rather than quietly doing nothing.
 - **A close tells the tickets it is linked to**: a ticket that was waiting on
   the closed one already heard; a ticket merely linked to it — lineage or a
   cross-reference — now hears too, as news rather than a green light.

@@ -352,6 +352,24 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
         }
     }
 
+    /**
+     * #2383 — mark the ticket as a step: the daemon tags its latest agent
+     * comment (#2369), so the ticket stays with the agent without notifying it.
+     */
+    async function markAsStep() {
+        if (!data.value) return;
+        const tid = data.value.ticket.id;
+        resolutionBusy.value = true;
+        try {
+            await api.stepTicket(tid);
+            broadcastRefresh(tid);
+        } catch (e) {
+            error.value = (e as Error).message;
+        } finally {
+            resolutionBusy.value = false;
+        }
+    }
+
     async function commentAndReopen() {
         if (!data.value) return;
         const tid = data.value.ticket.id;
@@ -566,6 +584,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
         reclassifyActiveDecision,
         commentAndClose,
         commentAndReopen,
+        markAsStep,
         commentAndUndoReject,
         acceptMenu,
         rejectMenu,

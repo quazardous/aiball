@@ -394,6 +394,7 @@ const {
     rejectActiveDecision,
     commentAndClose,
     commentAndReopen,
+    markAsStep,
     commentAndUndoReject,
     acceptMenu,
     rejectMenu,
@@ -478,6 +479,7 @@ async function copyTicketRef() {
             @comment-reopen="commentAndReopen"
             @comment-close="commentAndClose"
             @comment-undo-reject="commentAndUndoReject"
+            @mark-step="markAsStep"
         />
         <Popover ref="snoozePopoverRef">
             <div class="snooze-popover">
