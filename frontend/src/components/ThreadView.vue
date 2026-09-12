@@ -394,7 +394,6 @@ const {
     rejectActiveDecision,
     commentAndClose,
     commentAndReopen,
-    markAsStep,
     commentAndUndoReject,
     acceptMenu,
     rejectMenu,
@@ -461,7 +460,6 @@ async function copyTicketRef() {
     <div class="thread-view" :class="{ 'thread-view--top-down': topDown }">
         <ThreadToolbar
             v-if="data"
-            @mark-step="markAsStep"
             :ticket="data.ticket"
             :is-snoozed="isSnoozed"
             :has-body="hasBody"
@@ -681,7 +679,6 @@ async function copyTicketRef() {
                 </template>
                 <template #extra-actions>
                     <ThreadActionsDock
-                        @mark-step="markAsStep"
                         :ticket="data.ticket"
                         :has-body="hasBody"
                         :active-decision="activeDecision"

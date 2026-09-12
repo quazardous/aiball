@@ -566,6 +566,14 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
             icon: "pi pi-compass",
             command: () => { void commentAndProposePlan(); },
         },
+        {
+            // #2383 david `kn337p` — grouped with the other "mark as…" gestures
+            // rather than a button of its own. Tags the ticket's last comment,
+            // which the daemon requires to be an agent's; it refuses otherwise.
+            label: "mark as step",
+            icon: "pi pi-forward",
+            command: () => { void markAsStep(); },
+        },
     ]);
 
     return {
