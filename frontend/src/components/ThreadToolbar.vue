@@ -34,6 +34,7 @@ const emit = defineEmits<{
     (e: "reject-resolution"): void;
     (e: "accept-resolution"): void;
     (e: "comment-mark-resolved"): void;
+    (e: "mark-step"): void;
     (e: "comment-reopen"): void;
     (e: "comment-close"): void;
     (e: "comment-undo-reject"): void;
@@ -72,6 +73,18 @@ const emit = defineEmits<{
              carries it, and each event renders its own per-scope
              picto in lists + cards. A ticket-wide flip no longer
              matches the model. -->
+        <!-- #2383 david (reopen): the step gesture also belongs here — this bar
+             is what a narrow window shows instead of the dock. -->
+        <Button
+            v-if="ticket.status !== 'rejected' && !ticket.closed"
+            icon="pi pi-forward"
+            severity="info"
+            size="small"
+            text
+            rounded
+            title="Mark as step: tag the agent's last comment so the ticket stays with it, unnotified."
+            @click="emit('mark-step')"
+        />
         <Button
             v-if="ticket.status !== 'rejected' && !ticket.closed && !isSnoozed"
             icon="pi pi-history"

@@ -461,6 +461,7 @@ async function copyTicketRef() {
     <div class="thread-view" :class="{ 'thread-view--top-down': topDown }">
         <ThreadToolbar
             v-if="data"
+            @mark-step="markAsStep"
             :ticket="data.ticket"
             :is-snoozed="isSnoozed"
             :has-body="hasBody"
@@ -479,7 +480,6 @@ async function copyTicketRef() {
             @comment-reopen="commentAndReopen"
             @comment-close="commentAndClose"
             @comment-undo-reject="commentAndUndoReject"
-            @mark-step="markAsStep"
         />
         <Popover ref="snoozePopoverRef">
             <div class="snooze-popover">
@@ -681,6 +681,7 @@ async function copyTicketRef() {
                 </template>
                 <template #extra-actions>
                     <ThreadActionsDock
+                        @mark-step="markAsStep"
                         :ticket="data.ticket"
                         :has-body="hasBody"
                         :active-decision="activeDecision"

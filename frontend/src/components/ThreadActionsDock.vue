@@ -98,6 +98,21 @@ const emit = defineEmits<{
         title="Set aside — type your context first if you want, then pick a duration. The ticket disappears from the open inbox until then."
         @click="(ev) => emit('open-snooze', ev)"
     />
+    <!-- #2383 david (reopen): the gesture belongs to every state, not just the
+         one with no decision pending — the ticket you want to hand back to its
+         agent is usually one you are deciding on. Same placement rule as the
+         snooze button above: outside the branches, so each one inherits it. -->
+    <Button
+        v-if="!ticket.closed && ticket.status !== 'rejected'"
+        icon="pi pi-forward"
+        label="mark as step"
+        severity="info"
+        size="small"
+        text
+        :loading="resolutionBusy"
+        title="Tag the agent's last comment as a step: the ticket stays with the agent, which is not notified. Refused when the thread's last word is not an agent's plain comment."
+        @click="emit('mark-step')"
+    />
     <template v-if="ticket.status === 'pending'">
         <Button
             icon="pi pi-times"
@@ -194,19 +209,6 @@ const emit = defineEmits<{
     <template v-else>
         <!-- snooze button now lives at the top of #extra-actions
              (#B.143) so every state inherits it; no per-branch dupe -->
-        <!-- #2383 david: the step gesture, from the ticket rather than from a
-             comment's classify menu. Tags the latest agent comment. -->
-        <Button
-            v-if="!ticket.closed && !ticket.resolved"
-            icon="pi pi-forward"
-            label="mark as step"
-            severity="info"
-            size="small"
-            text
-            :loading="resolutionBusy"
-            title="Tag the agent's last comment as a step: the ticket stays with the agent, which is not notified."
-            @click="emit('mark-step')"
-        />
         <SplitButton
             v-if="!ticket.resolved && !ticket.blocked"
             :label="hasBody ? 'comment and mark resolved' : 'mark resolved'"
