@@ -355,6 +355,10 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
     /**
      * #2383 — mark the ticket as a step: the daemon tags its latest agent
      * comment (#2369), so the ticket stays with the agent without notifying it.
+     * A body in the composer rides along, as it does for every other gesture
+     * of this dock (david `pnd67h`) — posted AFTER the tag, because the route
+     * refuses a thread whose last word is a human's. Writing one does notify
+     * the agent: the silent form is the gesture with an empty composer.
      */
     async function markAsStep() {
         if (!data.value) return;
@@ -362,6 +366,8 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
         resolutionBusy.value = true;
         try {
             await api.stepTicket(tid);
+            await postBodyAs("comment_added"); // a no-op on an empty composer
+            composerBody.value = "";
             broadcastRefresh(tid);
         } catch (e) {
             error.value = (e as Error).message;
@@ -570,7 +576,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
             // #2383 david `kn337p` — grouped with the other "mark as…" gestures
             // rather than a button of its own. Tags the ticket's last comment,
             // which the daemon requires to be an agent's; it refuses otherwise.
-            label: "mark as step",
+            label: hasBody.value ? "comment and mark as step" : "mark as step",
             icon: "pi pi-forward",
             command: () => { void markAsStep(); },
         },
