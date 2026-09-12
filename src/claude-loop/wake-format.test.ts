@@ -96,11 +96,12 @@ test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async
         null,
         PINGS_YAML,
     );
-    assert.match(res.phrase, /re-check the chain/i);
-    assert.doesNotMatch(res.phrase, /Triage the ticket/i);
+    // #2405 — the shipped template now carries the decided ending.
+    assert.match(res.phrase, /check the chain: help on the blocker/i);
+    assert.doesNotMatch(res.phrase, /Triage it/i);
 });
 
-test("#1470 tier-1 head still gets the plain Triage wording", async () => {
+test("#1470 tier-1 head gets the triage ask — and it names the gesture wanted", async () => {
     const res = await buildContextPhrase(
         stubClient({
             listTickets: async () => [{ id: 977, title: "backlog ticket", backlog_tier: 1 }],
@@ -108,13 +109,14 @@ test("#1470 tier-1 head still gets the plain Triage wording", async () => {
         null,
         PINGS_YAML,
     );
-    assert.match(res.phrase, /Triage the ticket/i);
+    // #2405 — "Triage the ticket." said nothing of what closing the loop takes.
+    assert.match(res.phrase, /Triage it, then close the loop: a `then:`/i);
 });
 
 test("#1470 unknown tier (older daemon) falls back to Triage — never an empty ask", async () => {
     // stubClient's default row carries no `backlog_tier` at all.
     const res = await buildContextPhrase(stubClient(), null, PINGS_YAML);
-    assert.match(res.phrase, /Triage the ticket/i);
+    assert.match(res.phrase, /Triage it, then close the loop/i);
 });
 
 // #1363 david `futbsc` — a backlog head whose last actor isn't me SHOWS that
