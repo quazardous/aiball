@@ -183,6 +183,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **The backlog wake now really asks for a gesture**: the wording decided for
+  each tier was changed in the code's fallback only, while the shipped template
+  — the one every loop actually renders — kept the old, vaguer sentences. Agents
+  never saw the new ask. Both now carry it, and a test holds them together.
+
 - **A thread no longer goes blank when it carries a dependency or link event**:
   the row had no label to render, which threw mid-render and took every comment
   of that thread down with it — the comments were served, the page showed none.

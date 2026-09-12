@@ -21,6 +21,23 @@ test("every wake ending the simulator prints is the loop's own wording", () => {
     }
 });
 
+/**
+ * #2405 david — the test above held the simulator to `state.ts`, which is only
+ * the FALLBACK: the shipped `wake_master` slot wins whenever it exists, and it
+ * does. So a wording could be decided, committed, delivered and still never
+ * reach a single agent — which is exactly what happened to the tier endings.
+ * The wake an agent reads comes from this file; hold it too.
+ */
+test("the SHIPPED wake template carries those same endings — it is what agents read", () => {
+    const shipped = readFileSync(join(ROOT, "config/defaults/claude-loop-pings.yaml"), "utf8");
+    for (const [key, ending] of Object.entries(WAKE_ENDING)) {
+        assert.ok(
+            shipped.includes(`{head_tier_${key}:+ ${ending}}`),
+            `config/defaults/claude-loop-pings.yaml no longer ends a ${key} wake with: ${ending}`,
+        );
+    }
+});
+
 test("the wake ending follows the head's tier, as the loop maps it", () => {
     // #2376 — a head in my court whose own `then:` still waits is asked to
     // confirm or amend it, not to triage from scratch.
