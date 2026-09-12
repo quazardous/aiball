@@ -71,6 +71,8 @@ import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
+import { getInboxAgg, isLiveDecision } from "../db/inbox-agg.js";
+import { DECISION_KINDS } from "../decisions.js";
 import { applyModeration } from "./moderation.js";
 
 /**
@@ -805,6 +807,27 @@ ticketsRouter.get("/tickets", (req, res) => {
         // #1573 — same effective value the claimable lens uses just above.
         canClaim: consumerCanClaim,
     });
+    // #2376 — the tickets carrying a live pending decision, read from the same
+    // aggregate the inbox badges use, so a row and a badge cannot disagree.
+    const pendingDecisionIds = new Set<number>();
+    {
+        const aggByProject = new Map<string, ReturnType<typeof getInboxAgg>>();
+        for (const m of buildFrom) {
+            let byTicket = aggByProject.get(m.project);
+            if (!byTicket) {
+                byTicket = getInboxAgg(m.project);
+                aggByProject.set(m.project, byTicket);
+            }
+            const agg = byTicket.get(m.id);
+            if (!agg) continue;
+            for (const kind of DECISION_KINDS) {
+                if (agg.decisions[kind].pending && isLiveDecision(agg, kind)) {
+                    pendingDecisionIds.add(m.id);
+                    break;
+                }
+            }
+        }
+    }
     const tickets = buildFrom.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
@@ -847,6 +870,12 @@ ticketsRouter.get("/tickets", (req, res) => {
             backlog_tier: flags.backlog_tier,
             backlog_cooled_until: flags.backlog_cooled_until,
             gated_by_decision: flags.gated_by_decision,
+            // #2376 david `a6zkyf` — a `then:` still waiting for its accept,
+            // whether or not it gates the ticket: a human's comment hands the
+            // ticket back to the agent while the proposal stays pending, and
+            // what is then wanted is to confirm or amend it, not to re-triage.
+            // The wake reads this to say so.
+            pending_decision: pendingDecisionIds.has(m.id),
             last_actor: flags.last_actor,
             last_actor_at: flags.last_actor_at,
             tags: tagsMap.get(m.id) ?? [],

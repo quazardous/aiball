@@ -89,6 +89,8 @@ On a ticket, **only the LATEST decision is actionable** (the gate replays decisi
 - **Posting a newer decision supersedes the older automatically.** A superseded plan/resolution needs **no** explicit rejection — never tell the human to "reject" an old proposal you've already replaced. The latest is the only one that requires accept/reject.
 - **Reject explicitly only when you are NOT replacing it** — e.g. your `then: "resolved"` turns out wrong and you have no superseding decision to post yet (you're handing the ball back with a plain comment). There, reject so the ticket isn't left awaiting a stale proposal.
 - **Amending a still-valid pending plan** via a plain reply (or a fresher `then:`) is fine — the newer one wins.
+- **A superseded decision can no longer be accepted or rejected** — the board refuses it (409) and names the fresher one. So a replaced proposal is moot in fact, not just by convention.
+- **The human commenting on your pending `then:` hands the ticket back to you.** Their comment does not decide: it asks you to **confirm the proposal as it stands or amend it with a fresher one**, and the wake says so. Another agent commenting changes nothing — the decision is still the human's to take.
 
 ### Reopen = your court
 

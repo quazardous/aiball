@@ -15,6 +15,8 @@ export interface ViewRow {
     unread?: boolean;
     backlog_tier: 0 | 1 | 2 | 3 | 4 | null;
     gated_by_decision: boolean;
+    /** #2376 — a `then:` of this thread still waiting for its accept. */
+    pending_decision?: boolean;
     last_actor: string | null;
     claimant?: string | null;
 }
@@ -29,15 +31,20 @@ export const TIER_LABEL: Record<0 | 1 | 2 | 3 | 4, string> = {
 
 /** How a backlog wake ends, by the head's tier — the loop's exact words. */
 export const WAKE_ENDING = {
+    confirm: "Your `then:` on it is still waiting for an accept — confirm it as it stands, or amend it with a fresher one; say which on the thread.",
     triage: "Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for.",
     followup: "Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.",
     waiting: "You spoke last — chase them or let it ride, but say which: a `then:` if the ball is yours, a `handback: true` comment naming what you wait for.",
     blocked: "Blocked by an open dependency — check the chain: help on the blocker, or cut the relation if it is stale. Say which on the thread.",
 } as const;
 
-/** Same mapping as the loop: unknown, hot or actionable heads are triaged. */
-export function wakeEnding(tier: ViewRow["backlog_tier"]): string {
-    if (tier === null || tier <= 1) return WAKE_ENDING.triage;
+/**
+ * Same mapping as the loop: unknown, hot or actionable heads are triaged —
+ * unless the thread carries a `then:` still waiting for its accept (#2376),
+ * which asks to confirm or amend it rather than to triage afresh.
+ */
+export function wakeEnding(tier: ViewRow["backlog_tier"], pendingDecision = false): string {
+    if (tier === null || tier <= 1) return pendingDecision ? WAKE_ENDING.confirm : WAKE_ENDING.triage;
     if (tier === 2) return WAKE_ENDING.followup;
     if (tier === 3) return WAKE_ENDING.waiting;
     return WAKE_ENDING.blocked;
@@ -50,7 +57,7 @@ export function wakeEnding(tier: ViewRow["backlog_tier"]): string {
 export function nextWake(unreadPings: number, head: ViewRow | null): string {
     if (unreadPings > 0) return `event wake: ${unreadPings} unread ping${unreadPings > 1 ? "s" : ""} first`;
     if (!head || head.backlog_tier === null) return "no wake: nothing in the backlog";
-    return `look #${head.id}: ${head.title}. ${wakeEnding(head.backlog_tier)}`;
+    return `look #${head.id}: ${head.title}. ${wakeEnding(head.backlog_tier, head.pending_decision === true)}`;
 }
 
 function cell(v: string, width: number): string {

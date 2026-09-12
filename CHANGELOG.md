@@ -265,6 +265,14 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **A comment on a pending decision: only a human's hands the ticket back**, to
+  its agent, which then confirms or amends its `then:` — the backlog wake asks
+  for exactly that instead of a blank triage. Another agent commenting decides
+  nothing, so the proposal keeps holding the ticket until the human answers.
+- **Only the latest decision of a thread can be accepted or rejected**: a
+  replaced proposal is refused, naming the fresher one. Accepting one used to
+  send its author an execute for work nobody was doing any more.
+
 - **The outcome of a decision wakes the one whose proposal was decided, and
   nobody else**: a ticket's reporter used to be woken by every accept and reject
   on it, including decisions no agent can take. What still reaches them is what

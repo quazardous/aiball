@@ -2395,6 +2395,8 @@ export async function buildContextPhrase(
         // into the re-examination the rotation exists for. null = unknown (older
         // daemon) → the template falls back to the plain triage wording.
         let headTier: number | null = null;
+        // #2376 david `a6zkyf` — the head's pending `then:`, if any.
+        let headPendingDecision = false;
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -2436,6 +2438,10 @@ export async function buildContextPhrase(
                     claimable?: boolean;
                     /** #1470 — drives the tier-aware CTA (see `headTier`). */
                     backlog_tier?: number | null;
+                    /** #2376 — a `then:` of this thread is still waiting for its
+                     *  accept, gating or not: the ask becomes "confirm or amend
+                     *  it" rather than a blank triage. */
+                    pending_decision?: boolean;
                 };
                 const rows: BacklogRow[] = Array.isArray(raw)
                     ? (raw as BacklogRow[])
@@ -2459,6 +2465,7 @@ export async function buildContextPhrase(
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
                     headTier = typeof top.backlog_tier === "number" ? top.backlog_tier : null;
+                    headPendingDecision = top.pending_decision === true;
                     // #1363 david `futbsc` — when the head's last actor isn't me,
                     // SHOW that last event's content (a bundle-style line) instead
                     // of asserting "<actor> is waiting on your reply". The old
@@ -2628,7 +2635,11 @@ export async function buildContextPhrase(
             // else-operator, so the "plain triage" inversion is computed here —
             // same convention as `no_head` above. Only one ever fires.
             head_tier: backlogMode && headTier !== null ? String(headTier) : "",
-            head_tier_triage: backlogMode && (headTier === null || headTier <= 1) ? "1" : "",
+            // #2376 — a ticket back in the agent's court while its own `then:`
+            // still waits for an accept asks for a confirmation, not a triage:
+            // the two branches are exclusive so the wake says exactly one thing.
+            head_tier_confirm: backlogMode && (headTier === null || headTier <= 1) && headPendingDecision ? "1" : "",
+            head_tier_triage: backlogMode && (headTier === null || headTier <= 1) && !headPendingDecision ? "1" : "",
             head_tier_followup: backlogMode && headTier === 2 ? "1" : "",
             head_tier_waiting: backlogMode && headTier === 3 ? "1" : "",
             head_tier_blocked: backlogMode && headTier === 4 ? "1" : "",
@@ -2703,6 +2714,7 @@ export async function buildContextPhrase(
             // #2384 david — each ending names the GESTURE it wants, not just the
             // situation: a `then:`, or a `handback: true` that says what is awaited.
             // "re-check it" sent agents back to read, then post nothing.
+            + "{head_tier_confirm:+ Your `then:` on it is still waiting for an accept — confirm it as it stands, or amend it with a fresher one; say which on the thread.}"
             + "{head_tier_triage:+ Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for.}"
             + "{head_tier_followup:+ Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.}"
             + "{head_tier_waiting:+ You spoke last — chase them or let it ride, but say which: a `then:` if the ball is yours, a `handback: true` comment naming what you wait for.}"

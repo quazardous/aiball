@@ -23,6 +23,9 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | An agent carried on but handed the ticket back; the moderator tags its reply as a step: the ticket is the agent's again, its last actor unchanged, and the agent is not notified | `moderator-step-tag` |
 | 1 — A rejected plan hands the ticket back, with a `plan_rejected` event | `decision-plan-rejected` |
 | 2 — An accepted resolution closes the ticket, a reopen brings it back, a rejected resolution hands it back | `decision-resolution` |
+| 3 — A pushback on a pending plan hands the ticket back with the plan still pending; the agent's replacement supersedes it without a reject | `decision-pushback-replacement` |
+| 3, 11 — A human's comment on a pending decision hands the ticket back to its agent, which must confirm or amend its `then:`; another agent's comment decides nothing, so the gate holds | `decision-pending-other-spoke` |
+| 4 — Only the latest decision of a thread can be accepted or rejected: a replaced one is refused with its reason | `decision-accept-superseded` |
 | 5 — A human comment refining an accepted plan reaches the claimant; no new plan is needed | `decision-scope-refined` |
 | 6 — Accepting a plan sends its author a `plan_accepted` event | `decision-accept-sends-execute` |
 | 7 — An accepted plan being worked with nothing to post: every cooldown names the ticket again. Decided: the nudge stays; starting before the accept is the agent's discipline | `decision-accepted-plan-in-progress` |
@@ -33,6 +36,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
 | 16 — A follower sees an actionable ticket it cannot claim, and no backlog wake ever names it | `holder-follower-never-head` |
 | 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
+| 18 — The reporter of a ticket filed in another project hears the agent's comments and the close, but not the outcome of decisions it cannot take | `holder-reporter-other-project` |
 | 19 — The holder's own comment on a ticket in progress still gets a triage wake. Decided: the backlog is a coaching loop | `holder-own-comment` |
 | 20 — A ticket filed on another project with no `then` leaves its creator and lands actionable with that project's lead | `creation-cross-project-no-then` |
 | 21 — An agent's ticket waiting for moderation is in no backlog; a decision on it is refused at once (409); closed while waiting, it stays out | `creation-pending-ticket` |
@@ -53,9 +57,7 @@ What the board does today, and what david decided about it. Each scenario below
 still plays TODAY's behaviour; it becomes a written expectation when its ticket
 lands, and the case then moves to "Covered".
 
-- **3, 4 and 11 — a comment must not change the ticket's state, and only the latest decision can be accepted** (ticket #2376). Today a comment, human or agent, lifts a pending decision's gate at once, and an accept on a plan already replaced goes through. The "hot" tier another agent's comment raises is orthogonal and stays. Scenarios `decision-pushback-replacement`, `decision-accept-superseded`, `decision-pending-other-spoke`.
 - **14 — claiming a ticket another agent holds** goes through with no refusal, no warning and no trace on the thread (ticket #2379). Scenario `holder-claim-slot`.
-- **18 — the reporter is woken by accepts that are not its own** — three wakes for a ticket it filed in another project, including decisions it cannot take (ticket #2380). Scenario `holder-reporter-other-project`.
 - **30 — waiting on a machine has no gesture of its own**: during a CI wait the ticket is named every 5 minutes. Nothing changes for now; a dated wake filed by the agent is under study (ticket #2381). Scenario `dependency-external-wait-after-step`.
 
 ## Not simulator cases

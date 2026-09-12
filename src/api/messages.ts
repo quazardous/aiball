@@ -54,7 +54,8 @@ import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
 import { emitLifecycle } from "../event-bus.js";
-import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
+import { badRequest, conflict, consumerOf, notFound, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
+import { getInboxAgg } from "../db/inbox-agg.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
 import { applyModeration } from "./moderation.js";
@@ -488,6 +489,24 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
             return badRequest(res, "new_kind must be a valid decision kind");
         }
         newKind = body.new_kind;
+    }
+    // #2376 david `dvqfvt` (case 4) — only the LATEST decision of a thread can
+    // be accepted or rejected. A replaced one is moot: deciding it sent the
+    // agent a `plan_accepted` for a plan nobody works on any more, while the
+    // newer decision kept the ticket gated. Same rule the list badges, the
+    // stats and the close already follow.
+    {
+        const target = getMessage(id);
+        const ticketId = target?.kind === "ticket_created" ? target.id : target?.ticket_id ?? null;
+        if (target && ticketId != null) {
+            const agg = getInboxAgg(target.project).get(ticketId);
+            const latest = agg?.latestDecisionId ?? 0;
+            if (latest > 0 && latest !== id) {
+                const newer = getMessage(latest);
+                const ref = newer?.hashid ? `#${newer.hashid}` : `message ${latest}`;
+                return conflict(res, `a newer decision replaced this one — decide ${ref} instead`);
+            }
+        }
     }
     try {
         const updated = applyMessageDecision(id, body.status, by, newKind);

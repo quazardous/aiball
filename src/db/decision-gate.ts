@@ -51,13 +51,12 @@ function isForeignActor(actor: string | null, proposer: string | null): boolean 
 
 /**
  * Rejoue `events` (ordre id asc) et renvoie, par ticket, true s'il est gaté.
- * `isHuman` est conservé pour back-compat de signature ; il n'est plus consulté
- * depuis #600 v7z5u6 (un commentaire plain ne lève plus une décision pending).
+ * `isHuman` décide qui lève un gate pending : depuis #2376, seul un commentaire
+ * HUMAIN le lève (celui d'un autre agent ne répond pas à la décision due).
  */
 export function computeDecisionGate(
     events: Iterable<DecisionGateEvent>,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _isHuman: (consumerId: string) => boolean,
+    isHuman: (consumerId: string) => boolean,
 ): Map<number, boolean> {
     const state = new Map<number, TicketGateState>();
     for (const ev of events) {
@@ -97,8 +96,17 @@ export function computeDecisionGate(
         // moot (l'autre a repris la parole au lieu d'accepter/rejeter). Un
         // commentaire du proposeur lui-même, ou sur un gate settled (proposer
         // null), reste no-op — la balle ne revient pas au backlog.
+        //
+        // #2376 david (a6zkyf) — "un commentaire de mon côté doit remettre le
+        // ticket du côté agent, à sa charge de confirmer le then du ticket".
+        // Seul un HUMAIN le fait : la décision lui appartient, donc sa parole
+        // rend la main à l'agent, charge à lui de confirmer ou d'amender son
+        // then: en attente. Un AUTRE AGENT qui parle ne répond à rien — la
+        // décision reste due — donc le gate tient. Le commentaire declenche son
+        // propre event dans les deux cas ; seul le backlog est en jeu ici.
         const st = state.get(ev.ticketId);
-        if (st?.gated && st.proposer !== null && isForeignActor(ev.byAgent, st.proposer)) {
+        const humanSpoke = !!ev.byAgent && isHuman(ev.byAgent);
+        if (st?.gated && st.proposer !== null && isForeignActor(ev.byAgent, st.proposer) && humanSpoke) {
             state.set(ev.ticketId, { gated: false, proposer: null });
         }
     }

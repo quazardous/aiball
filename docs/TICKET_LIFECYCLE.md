@@ -146,6 +146,11 @@ actionable-for-C (whose-court) =
 |---|---|---|
 | post a comment | the author | `comment_added` |
 | accept / reject a decision | the **decider** | *(mutates meta — no event, see §7)* |
+
+Only the thread's **latest** decision can be accepted or rejected; a replaced
+one is refused (409). Deciding a superseded proposal used to send its author an
+execute for work nobody was doing any more, while the newer decision kept the
+ticket gated.
 | resolve / close / reopen / block | the human who did it | `ticket_*` lifecycle |
 
 A **step** (`then: continue`), or a comment with `handback: false`, is an action like any comment, with one
@@ -166,7 +171,10 @@ cases):
 - agent posts a pending plan/resolution → agent is last_actor, counterpart
   exists → **gated** (= old "pending proposal awaiting human").
 - david comments after a pending proposal → david is last_actor → **un-gated**
-  (= the recency rule, for free).
+  (= the recency rule, for free). The proposal stays pending: the ticket comes
+  back to its agent **to confirm or amend its `then:`**, which is what the wake
+  then asks for. Only a HUMAN's comment does that — another agent speaking
+  decides nothing, the human still owes an answer, and the gate holds.
 - david accepts a plan → david is last_actor → **re-actionable** (= the
   go-signal, for free).
 - david reopens → david is last_actor → **re-actionable** (= **reopen fixed**).

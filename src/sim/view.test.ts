@@ -22,6 +22,11 @@ test("every wake ending the simulator prints is the loop's own wording", () => {
 });
 
 test("the wake ending follows the head's tier, as the loop maps it", () => {
+    // #2376 — a head in my court whose own `then:` still waits is asked to
+    // confirm or amend it, not to triage from scratch.
+    assert.equal(wakeEnding(1, true), WAKE_ENDING.confirm);
+    assert.equal(wakeEnding(null, true), WAKE_ENDING.confirm);
+    assert.equal(wakeEnding(3, true), WAKE_ENDING.waiting, "only a head in my court confirms");
     assert.equal(wakeEnding(null), WAKE_ENDING.triage);
     assert.equal(wakeEnding(0), WAKE_ENDING.triage);
     assert.equal(wakeEnding(1), WAKE_ENDING.triage);

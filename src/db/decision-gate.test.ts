@@ -49,10 +49,21 @@ test("#1113: plan pending + commentaire du PROPOSEUR (même agent) → reste gat
     assert.equal(g.get(1), true);
 });
 
-test("#1113: plan pending + commentaire d'un AGENT TIERS foreign → dé-gaté", () => {
+// #2376 david (a6zkyf) — renverse le cas #1113 pour les AGENTS : seule la
+// parole d'un humain rend la main, parce que seule elle répond à la décision
+// attendue. Un autre agent qui commente ne décide rien, le gate tient.
+test("#2376: plan pending + commentaire d'un AGENT TIERS → reste gaté", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }), // proposer=claude-aiball-dev
         ev({ kind: "comment_added", byAgent: "autre-agent" }), // foreign agent
+    ]);
+    assert.equal(g.get(1), true);
+});
+
+test("#2376: le commentaire humain, lui, rend la main à l'agent", () => {
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("plan", "pending") }),
+        ev({ kind: "comment_added", byAgent: "david" }),
     ]);
     assert.equal(g.get(1), false);
 });

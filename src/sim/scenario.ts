@@ -32,7 +32,7 @@ import { TIER_LABEL, type ViewRow } from "./view.js";
 
 export type ModeratorAction = "approve" | "reject" | "accept" | "refuse" | "comment" | "close" | "reopen" | "snooze" | "assign" | "step";
 export type Backlog = "hot" | "actionable" | "follow-up" | "waiting" | "blocked" | "none";
-export type Wake = "triage" | "followup" | "waiting" | "blocked" | "event" | "none";
+export type Wake = "triage" | "confirm" | "followup" | "waiting" | "blocked" | "event" | "none";
 
 export interface SeatExpectation {
     ticket: unknown;
@@ -75,7 +75,7 @@ export const DEFAULT_COOLDOWN_SEC = 3600;
 
 const MODERATOR_ACTIONS: readonly ModeratorAction[] = ["approve", "reject", "accept", "refuse", "comment", "close", "reopen", "snooze", "assign", "step"];
 const BACKLOGS: readonly Backlog[] = ["hot", "actionable", "follow-up", "waiting", "blocked", "none"];
-const WAKES: readonly Wake[] = ["triage", "followup", "waiting", "blocked", "event", "none"];
+const WAKES: readonly Wake[] = ["triage", "confirm", "followup", "waiting", "blocked", "event", "none"];
 
 /** `90`, `90s`, `2m`, `1h` → seconds; null when unreadable. */
 export function parseDuration(text: string): number | null {
@@ -200,7 +200,10 @@ function wakeOf(seat: Seat, ticketId: number): Wake | `about #${number}` {
     if (!seat.head || seat.head.backlog_tier === null) return "none";
     if (seat.head.id !== ticketId) return `about #${seat.head.id}`;
     const t = seat.head.backlog_tier;
-    return t <= 1 ? "triage" : t === 2 ? "followup" : t === 3 ? "waiting" : "blocked";
+    // #2376 — a head in my court whose own `then:` still waits for an accept is
+    // asked to confirm or amend it, not to triage afresh.
+    if (t <= 1) return seat.head.pending_decision === true ? "confirm" : "triage";
+    return t === 2 ? "followup" : t === 3 ? "waiting" : "blocked";
 }
 
 /** Every way the seat differs from the expectation; empty when it matches. */
