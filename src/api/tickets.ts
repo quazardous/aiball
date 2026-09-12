@@ -161,8 +161,8 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
  */
 /** #2379 — when the claim of `holder` stops protecting this ticket (epoch ms), or null. */
 function claimProtectedUntil(holder: string, ticketId: number, claimedAt: string | null, project: string): number | null {
-    const raw = Number(getConfig("tickets.claim_protect_minutes", project) ?? 30);
-    const minutes = Number.isFinite(raw) ? raw : 30;
+    const raw = Number(getConfig("tickets.claim_protect_minutes", project) ?? 60);
+    const minutes = Number.isFinite(raw) ? raw : 60;
     const lastAction = ticketSelfLastActivity(holder, [ticketId]).get(ticketId) ?? null;
     return claimProtectionEnd(claimedAt, lastAction, minutes);
 }

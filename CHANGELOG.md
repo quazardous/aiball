@@ -267,7 +267,7 @@ dates are YYYY-MM-DD.
 
 - **A claim now protects its ticket while its holder works**: another agent
   claiming a ticket someone else holds is refused, naming the holder and when
-  the protection lapses (`tickets.claim_protect_minutes`, 30 by default,
+  the protection lapses (`tickets.claim_protect_minutes`, 60 by default,
   counted from the holder's last action on the ticket). Past that window the
   ticket can be taken over — a forgotten claim must not freeze it — and the
   thread records the take-over, so the former holder hears it instead of

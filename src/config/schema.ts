@@ -137,7 +137,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         key: "tickets.claim_protect_minutes",
         scope: "global+project",
         type: "number",
-        default: 30,
+        default: 60,
         label: "Minutes a working agent's claim is protected",
         description:
             "How long a claim holds against another agent's claim, counted from its holder's last action on the ticket — working on it keeps the protection alive. Another agent's claim inside that window is refused; past it the ticket can be taken over, and the thread records it. An assignment always wins over a claim. 0 = no protection.",
