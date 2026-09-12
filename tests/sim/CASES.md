@@ -36,7 +36,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 20 — A ticket filed on another project with no `then` leaves its creator and lands actionable with that project's lead | `creation-cross-project-no-then` |
 | 21 — An agent's ticket waiting for moderation is in no backlog; a decision on it is refused at once (409); closed while waiting, it stays out | `creation-pending-ticket` |
 | 22 — A human "up" on an agent's ticket with no decision: actionable, unread, the human its last actor | `creation-human-up` |
-| 23 — A blocker filed with `then: plan` behaves like any plan: whoever files it, a human files it and a human accepts it — nothing auto-accepts | `creation-blocker-as-plan` |
+| 23 — A blocker filed with `then: plan` behaves like any plan: whoever files it, a human files it and a human accepts it — nothing auto-accepts. It reads as follow-up for the project's other owner where an ordinary pending plan shows nowhere; decided: harmless, a project may carry tickets of its own shape | `creation-blocker-as-plan` |
 | 24 — A ticket waiting on another (`depends_on`) is blocked, and gets a `dependency_closed` event the moment the blocker closes | `dependency-closed` |
 | 26 — A plan accepted while the ticket's dependency is still open leaves it blocked. Decided: no extra gate in the UI; an umbrella may be accepted with its children unfinished | `dependency-plan-accepted-while-blocked` |
 | 27 — A dependency written only in a plan's prose is invisible: the ticket is actionable while the other is open | `dependency-in-prose-only` |
