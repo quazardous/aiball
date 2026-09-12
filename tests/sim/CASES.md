@@ -34,7 +34,7 @@ alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 | 10 — "No plan" in a plain human comment makes the ticket the agent's; its steps keep it there | `decision-no-plan-comment` |
 | 12 — A plan pending and nobody answers: nothing reminds either side. Decided: a pending plan is the human's (or, later, the pilot's) — no reminder | `decision-plan-pending-silent` |
 | 13, 15, 29 — Two owners: a claim takes the ticket out of the other's backlog, a release brings it back; an assignment puts it with the assignee; close and reopen; a snooze hides it until it ends; the work order puts a high-priority ticket first | `moderator-gestures` |
-| 16 — A follower sees an actionable ticket it cannot claim, and no backlog wake ever names it | `holder-follower-never-head` |
+| 16 — A follower sees a ticket of the project it follows, but it is never its work and no backlog wake names it | `holder-follower-never-head` |
 | 17 — A `can_claim: false` specialist does not see a ticket until it is assigned to it | `specialist-pushed-only` |
 | 18 — The reporter of a ticket filed in another project hears the agent's comments and the close, but not the outcome of decisions it cannot take | `holder-reporter-other-project` |
 | 19 — The holder's own comment on a ticket in progress still gets a triage wake. Decided: the backlog is a coaching loop | `holder-own-comment` |

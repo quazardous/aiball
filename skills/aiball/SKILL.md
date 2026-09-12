@@ -226,6 +226,15 @@ The shapes for ticket / comment / mention IDs are **provided by the `welcome` MC
 
 ---
 
+## What is yours to act on
+
+The backlog is the **project's** work: a ticket is yours when you **lead the
+project** (owner) or when it is **assigned** to you. A project you merely follow
+is readable, never your queue — and `ticket_list({actionable})` says so when you
+hold no claim right. What you HEAR is a different rule: a thread you follow or
+filed still reaches you as an event, in any project. Being told is not being
+asked.
+
 ## Roles
 
 Four roles per ticket. Knowing which one you hold determines what you should and shouldn't do.

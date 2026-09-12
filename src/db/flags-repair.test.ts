@@ -43,6 +43,12 @@ const CONSUMERS: (string | undefined)[] = [ME, PEER, undefined];
 const db = getDb();
 createProject({ name: PROJECT });
 createProject({ name: OTHER_PROJECT });
+// #2394 — the backlog is the project's work: the agent must lead it to have any.
+const { upsertSubscription } = await import("./subscriptions.js");
+for (const who of [ME, PEER]) {
+    upsertSubscription(who, PROJECT, "owner");
+    upsertSubscription(who, OTHER_PROJECT, "owner");
+}
 
 let seq = 0;
 

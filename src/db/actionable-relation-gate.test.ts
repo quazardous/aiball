@@ -30,6 +30,9 @@ const HUMAN = "david";
 
 const db = getDb();
 createProject({ name: PROJECT });
+// #2394 — the backlog is the project's work: the agent must lead it to have any.
+const { upsertSubscription } = await import("./subscriptions.js");
+upsertSubscription(ME, PROJECT, "owner");
 
 let seq = 0;
 

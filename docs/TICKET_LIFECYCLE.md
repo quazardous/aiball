@@ -180,7 +180,20 @@ cases):
 - david reopens → david is last_actor → **re-actionable** (= **reopen fixed**).
 - david accepts a resolution → ticket closes → leaves the open set.
 
-### 4.4 Gates that stay separate from `last_actor`
+### 4.4 Whose work it is — the project gate
+
+The backlog is the **project's** work. A ticket is in an agent's court when that
+agent **leads the project** (subscription role `owner`), or when the ticket is
+**assigned** to it — a follower, a reporter or a passer-by sees only its own
+assignments, whether or not it may claim. Humans keep the whole board:
+moderating is the job.
+
+This gate governs the TICKET BACKLOG only — `actionable`, `claimable`, and the
+wake that reads them. **Event delivery keeps its own rules** (subscriptions,
+mentions, scope): an agent that filed a ticket in a neighbouring project still
+hears every comment and its close. Being told is not being asked.
+
+### 4.5 Gates that stay separate from `last_actor`
 
 - **blocked** (`ticket_blocked`) — suppressed until unblocked.
 - **relation gate** — an open `depends_on` / `blocks` blocker

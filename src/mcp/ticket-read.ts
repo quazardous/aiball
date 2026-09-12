@@ -8,7 +8,7 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { asLines, asText, client } from "./_helpers.js";
+import { asLines, asText, client, effectiveBy } from "./_helpers.js";
 import { expandToken } from "../search-synonyms.js";
 
 
@@ -22,6 +22,29 @@ interface SearchHitLine {
 }
 function locatorOf(h: SearchHitLine): string {
     return `#${h.ticket_id}${h.hashid ? `:${h.hashid}` : ""}`;
+}
+
+/**
+ * #2394 david `auuarz` — a consumer that cannot claim keeps the tickets
+ * ASSIGNED to it and nothing else. Asking for its work used to hand it every
+ * project's tickets; now the list is right, and this says why it is short, so
+ * "empty" does not read as "the board is broken". Memoized: `can_claim` barely
+ * moves, and a stale value would only change a sentence. Fail-open — a failed
+ * read means no warning, never a blocked list.
+ */
+const claimRight = new Map<string, { value: boolean; at: number }>();
+async function cannotClaim(): Promise<boolean> {
+    const me = effectiveBy();
+    const hit = claimRight.get(me);
+    if (hit && Date.now() - hit.at < 300_000) return !hit.value;
+    try {
+        const row = await client.getConsumer(me) as { can_claim?: boolean | number | null };
+        const value = row.can_claim === undefined || row.can_claim === null ? true : !!row.can_claim;
+        claimRight.set(me, { value, at: Date.now() });
+        return !value;
+    } catch {
+        return false;
+    }
 }
 
 export function registerTicketReadTools(server: McpServer): void {
@@ -39,7 +62,7 @@ export function registerTicketReadTools(server: McpServer): void {
                 actionable: z
                     .boolean()
                     .optional()
-                    .describe("If true, only tickets where the agent actually has work to do: not closed, NOT in awaiting-validation state (no pending resolution/plan proposal), not blocked, not gated by an open dependency. Strictly tighter than `open: true`. Matches the actionable_count surfaced on the sidebar."),
+                    .describe("If true, only tickets where the agent actually has work to do: not closed, NOT in awaiting-validation state (no pending resolution/plan proposal), not blocked, not gated by an open dependency. Strictly tighter than `open: true`. Matches the actionable_count surfaced on the sidebar. The pool is the PROJECTS YOU LEAD plus whatever is assigned to you — a project you only follow is readable, never your work. Events are not filtered by this: you still hear a thread you follow or filed."),
                 claimable: z
                     .boolean()
                     .optional()
@@ -117,6 +140,16 @@ export function registerTicketReadTools(server: McpServer): void {
                 title_contains,
                 limit: limit !== undefined ? String(limit) : undefined,
             });
+            // #2394 — only when the caller asked for ITS work; a plain listing
+            // is a reading, and says nothing about whose court anything is in.
+            if ((actionable || claimable) && await cannotClaim()) {
+                return asText({
+                    result: list,
+                    warnings: [
+                        "you cannot claim on this board: outside the tickets ASSIGNED to you, nothing here is yours to act on. Read what you like; act on your assignments.",
+                    ],
+                });
+            }
             return asText(list);
         },
     );

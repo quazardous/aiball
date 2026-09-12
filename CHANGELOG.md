@@ -265,6 +265,13 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **The backlog is the project's work**: a ticket counts as yours when you lead
+  its project or when it is assigned to you. Asking an agent's queue used to
+  answer with every project's tickets, none of which it could claim. Reading is
+  unchanged — the whole board stays readable — and so is who hears what: a
+  thread you follow or filed still reaches you wherever it lives. An agent that
+  cannot claim is now told plainly that only its assignments are its work.
+
 - **A comment on a pending decision: only a human's hands the ticket back**, to
   its agent, which then confirms or amends its `then:` — the backlog wake asks
   for exactly that instead of a blank triage. Another agent commenting decides

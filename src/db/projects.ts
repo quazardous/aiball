@@ -21,6 +21,7 @@ import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./l
 import { isHeldByOther } from "./assignment-gate.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { levelsVisibleTo, listHumans } from "./consumers.js";
+import { listSubscriptions } from "./subscriptions.js";
 import { computeDecisionGate } from "./decision-gate.js";
 import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
@@ -1868,6 +1869,27 @@ function computeActionableTicketIdsUncached(
         if (assignedAwaySet.has(id)) continue;
         if (awaitingOtherSet && awaitingOtherSet.has(id)) continue;
         actionableIds.add(id);
+    }
+
+    // #2394 david `s42zfg` / `auuarz` — the backlog is the PROJECT's work. A
+    // ticket is in an agent's court when that agent leads the project (owner),
+    // or when the ticket is assigned to it — a follower, a reporter or a
+    // passer-by sees only its own assignments. Before this, `actionable` was
+    // computed board-wide with no role check at all: an agent asking for its
+    // work got every project's tickets, all `claimable: false`, which is what
+    // david saw. Humans keep the whole board: moderating is their job.
+    // Scope: the TICKET BACKLOG only (david). Event delivery keeps its own
+    // rules — being told is not being asked.
+    if (consumerId && !listHumans().includes(consumerId)) {
+        const ledProjects = new Set(
+            listSubscriptions(consumerId).filter((sub) => sub.role === "owner").map((sub) => sub.project),
+        );
+        for (const t of tickets) {
+            if (!actionableIds.has(t.id)) continue;
+            if (ledProjects.has(t.project)) continue;
+            if (t.assignee === consumerId) continue;
+            actionableIds.delete(t.id);
+        }
     }
 
     // #447: per-agent work filters — narrow the actionable pool by tag (e.g. the
