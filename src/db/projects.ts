@@ -30,6 +30,7 @@ import { tagsForMessages } from "./tags.js";
 import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
 import { isStepMeta, keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
 import { getConfig } from "./config-overrides.js";
+import { parseMeta } from "../questions.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -1151,6 +1152,56 @@ function maxBlockedMultiplier(): number {
         if (Number.isFinite(v) && v > max) max = v;
     }
     return max;
+}
+
+/**
+ * #2449 david — the tickets whose last action is a step posted by `consumerId`,
+ * with the two windows that follow it, in ms since epoch:
+ * - `restUntil`: when the agent said it can resume (`then: continue` with
+ *   `continue_after_minutes`, stored as `meta.step_resume_at`). Without it the
+ *   agent resumes at once: `restUntil` is the step itself. Until then the
+ *   ticket stays out of the wake pool — waiting on a build is not a reason to
+ *   be named every minute.
+ * - `leadUntil`: from the resume, the ticket leads that agent's backlog
+ *   (tier 0, right after the events) for `tickets.step_hot_minutes`.
+ * Only steps with a window still open are returned.
+ */
+export function ownFreshSteps(consumerId: string, ticketIds: readonly number[], nowMs: number = Date.now()): Map<number, { at: string; restUntil: number; leadUntil: number }> {
+    const out = new Map<number, { at: string; restUntil: number; leadUntil: number }>();
+    if (ticketIds.length === 0) return out;
+    const rows = getDb().select({
+        id: schema.tickets.id,
+        project: schema.tickets.project,
+        lastActor: schema.tickets.lastActor,
+        lastActorAt: schema.tickets.lastActorAt,
+    }).from(schema.tickets)
+        .where(and(inArray(schema.tickets.id, [...ticketIds]), eq(schema.tickets.lastActor, consumerId)))
+        .all();
+    if (rows.length === 0) return out;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    // The step comment itself: the one at the ticket's last-action instant.
+    for (const m of getDb().select({
+        ticketId: schema.messages.ticketId,
+        createdAt: schema.messages.createdAt,
+        meta: schema.messages.meta,
+    }).from(schema.messages).where(and(
+        eq(schema.messages.kind, "comment_added"),
+        eq(schema.messages.status, "approved"),
+        eq(schema.messages.byAgent, consumerId),
+        inArray(schema.messages.ticketId, rows.map((r) => r.id)),
+    )).all()) {
+        const r = m.ticketId != null ? byId.get(m.ticketId) : undefined;
+        if (!r?.lastActorAt || r.lastActorAt !== m.createdAt || !isStepMeta(m.meta)) continue;
+        const atMs = Date.parse(r.lastActorAt);
+        if (!Number.isFinite(atMs)) continue;
+        const declared = Date.parse(parseMeta(m.meta).step_resume_at ?? "");
+        const restUntil = Number.isFinite(declared) && declared > atMs ? declared : atMs;
+        const raw = Number(getConfig("tickets.step_hot_minutes", r.project) ?? 30);
+        const leadMinutes = Math.max(0, Number.isFinite(raw) ? raw : 30);
+        const leadUntil = restUntil + leadMinutes * 60_000;
+        if (leadUntil > nowMs || restUntil > nowMs) out.set(m.ticketId!, { at: r.lastActorAt, restUntil, leadUntil });
+    }
+    return out;
 }
 
 /** #2365 — the tickets whose last action (the comment at `last_actor_at`) is a step. */

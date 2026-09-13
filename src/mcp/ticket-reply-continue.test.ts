@@ -61,3 +61,12 @@ test("#2331 handback goes out as sent, and comment_only never does", async () =>
     assert.equal((await reply({ handback: false })).handback, false);
     assert.equal("comment_only" in (await reply({ handback: true })), false);
 });
+
+test("#2449 continue_after_minutes goes out as the step's resume delay; absent, nothing is sent", async () => {
+    const later = await reply({ then: "continue", continue_after_minutes: 20 });
+    assert.equal(later.step, true);
+    assert.equal(later.step_after_minutes, 20, "the agent's delay reaches the daemon");
+
+    const atOnce = await reply({ then: "continue" });
+    assert.equal(atOnce.step_after_minutes, undefined, "resuming at once is the default, not a value");
+});

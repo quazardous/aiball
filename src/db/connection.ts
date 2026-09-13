@@ -253,6 +253,8 @@ export interface NewMessage {
     summary_until?: string | null;
     /** #2308 — `then: continue`: a step on a ticket the author holds. comment_added only. */
     step?: boolean;
+    /** #2449 — with a step: the agent resumes after this many minutes, not at once. */
+    step_after_minutes?: number;
     /** #2331 — does this message hand the ticket back? Explicit on a comment
      *  with no `then`; deduced at creation from who files the ticket. */
     handback?: boolean;

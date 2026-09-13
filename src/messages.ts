@@ -253,6 +253,17 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         if (decisionKind) return { error: "step and decision_kind are exclusive: then: continue proposes nothing" };
         step = true;
     }
+    // #2449 david — the agent says when it can resume: at once (absent, or 0) or
+    // after N minutes (waiting on a build, a test box…). Only with a step.
+    let stepAfterMinutes: number | undefined = undefined;
+    if (o.step_after_minutes !== undefined && o.step_after_minutes !== null) {
+        const n = o.step_after_minutes;
+        if (!step) return { error: "step_after_minutes only goes with a step (then: continue)" };
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > 1440) {
+            return { error: "step_after_minutes must be a whole number of minutes, from 0 to 1440" };
+        }
+        if (n > 0) stepAfterMinutes = n;
+    }
     // #B.245 tristate: composer-side `scope`. One of
     // `internal | default | broadcast`. Applies to every kind
     // (ticket_created and comment_added alike — each event decides
@@ -306,6 +317,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         decision_kind: decisionKind,
         summary_until: summaryUntil,
         ...(step ? { step: true } : {}),
+        ...(stepAfterMinutes !== undefined ? { step_after_minutes: stepAfterMinutes } : {}),
         ...(handback !== undefined ? { handback } : {}),
         scope,
         from_project: fromProject,

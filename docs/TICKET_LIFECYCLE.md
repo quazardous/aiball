@@ -341,6 +341,12 @@ The window is lifted as soon as the thread moves — but only when someone
 is an answer, not news: it leaves the ticket cooled, and the thread comes back
 when the window runs out. Anyone else's word lifts it at once.
 
+A ticket whose last action is the agent's own step **leads that agent's
+backlog** (tier 0, right after the events) for `tickets.step_hot_minutes`, 30 by
+default. The agent says when that starts: at once, or after the
+`continue_after_minutes` it declared with the step — until then the ticket stays
+out of its wake pool, however the wakes around it went.
+
 A ticket whose last action is a step (`then: continue`) is cooled only briefly,
 5 minutes by default (`tickets.sink_then_continue_minutes`, 0 = not at all): a
 step says there is work to do now, so the pause only turns the queue over.

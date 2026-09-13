@@ -226,6 +226,21 @@ The shapes for ticket / comment / mention IDs are **provided by the `welcome` MC
 
 ---
 
+## `then: "continue"` — say when you resume
+
+A step (`then: "continue"`) keeps the ticket yours and puts it at the **top of
+your backlog**, right after your events, for half an hour. Say when you can
+pick it up again:
+
+- **carrying on right away** → leave `continue_after_minutes` out: the next
+  wake brings you straight back to it;
+- **waiting on something** (a build, a test box, a deploy) →
+  `continue_after_minutes: N`: the ticket stays out of your wakes for N
+  minutes, then comes back first.
+
+Don't post a step to "keep" a ticket you are not about to work on — the top of
+the backlog is a promise.
+
 ## A claim is protected while you work
 
 `claim` is a weak `assign`: it says "I am on this NOW". While its holder keeps

@@ -133,6 +133,17 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // minutes". Shorter and harder than the claim's liveness window
     // (assign_window_sec): that one HIDES the ticket from other pools, this one
     // REFUSES the take-over outright.
+    // #2449 david — a step (then: continue) says "I carry on": its ticket goes
+    // to the top of its author's backlog for a while, right after the events.
+    {
+        key: "tickets.step_hot_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 30,
+        label: "Minutes a step keeps its ticket at the top of its author's backlog",
+        description:
+            "After an agent posts a step (then: continue), its ticket leads that agent's backlog — right after the events, ahead of every other ticket — for this long, counted from the step. Past it, the ticket ranks like any other. It only changes the order; the visible 'hot' mark keeps its own rule. 0 = a step gets no priority.",
+    },
     {
         key: "tickets.claim_protect_minutes",
         scope: "global+project",

@@ -34,6 +34,7 @@ import {
     lastActorExclusions,
     decisionGateByTicket,
     backlogCooldownExclusions,
+    ownFreshSteps,
     type ActionableTicketSet,
 } from "./projects.js";
 import { assignWindowSec } from "../autopoll/config.js";
@@ -127,6 +128,9 @@ export interface TicketFlagsContext {
      *  straight back to me. Optional so a caller that doesn't order a backlog
      *  (a human's inbox) can leave it out and change nothing. */
     othersHot?: Set<number>;
+    /** #2449 — tickets whose last action is this consumer's own step, still
+     *  inside `tickets.step_hot_minutes`. They rank as tier 0, like heat. */
+    freshOwnStepIds?: Set<number>;
     /** Per-ticket `(last_actor, last_actor_at)` denorm from the tickets
      *  table. Surfaced on the row for UI/agent introspection. */
     lastActorByTicket: Map<number, { actor: string | null; at: string | null }>;
@@ -207,7 +211,11 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         // agent not to do. The visible 🔥 below is untouched: as visibility it
         // was always right.
         const hotForTier = (ctx.othersHot ?? ctx.crossAgentHot).has(t.id);
-        if (hotForTier && inPool) {
+        // #2449 david — a fresh step of mine leads my backlog like heat does:
+        // the step is the one own word that says "come back to this now". The
+        // visible `hot` below keeps its own rule — only the rank moves.
+        const freshOwnStep = ctx.freshOwnStepIds?.has(t.id) ?? false;
+        if ((hotForTier || freshOwnStep) && inPool) {
             backlog_tier = 0;
         } else if (actionable) {
             // Tier 1 — ball in my court (formal).
@@ -330,6 +338,26 @@ export function buildTicketFlagsContext(args: {
             if (cooledIds.has(r.ticketId)) cooledWakeAt.set(r.ticketId, r.wakeAt);
         }
     }
+    // #2449 david — a step of mine RESTS its ticket until the resume I declared
+    // (`continue_after_minutes`; none = resume at once), then LEADS my backlog
+    // for `tickets.step_hot_minutes` (tier 0 below). The rest holds whether or
+    // not a backlog wake came before it: a step waiting on a build must not be
+    // named every minute.
+    const ownSteps = consumerId ? ownFreshSteps(consumerId, ticketIds, nowMs) : new Map<number, { at: string; restUntil: number; leadUntil: number }>();
+    const freshOwnStepIds = new Set<number>();
+    for (const [id, step] of ownSteps) {
+        if (step.leadUntil > nowMs) freshOwnStepIds.add(id);
+        if (cooldownSec <= 0 || step.restUntil <= nowMs) continue;
+        const restSec = Math.round((step.restUntil - Date.parse(step.at)) / 1000);
+        const heldUntil = cooledWakeAt.has(id)
+            ? Date.parse(cooledWakeAt.get(id)!) + (cooledIds.get(id) ?? cooldownSec) * 1000
+            : 0;
+        // Keep whichever hold ends later — a blocked multiplier, say, outlasts it.
+        if (step.restUntil > heldUntil) {
+            cooledWakeAt.set(id, step.at);
+            cooledIds.set(id, restSec);
+        }
+    }
     // Per-ticket (last_actor, last_actor_at) for UI/agent introspection.
     // #2102 — SCOPED to the ids asked for. This used to read the whole
     // `tickets` table with a comment calling it "a cheap scan even on large
@@ -372,6 +400,8 @@ export function buildTicketFlagsContext(args: {
         assignedToMeIds,
         crossAgentHot,
         othersHot,
+        // #2449 — the consumer's own fresh steps lead its backlog (once rested).
+        freshOwnStepIds,
         lastActorByTicket,
         closedSet,
         rulesCtx,

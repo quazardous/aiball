@@ -205,6 +205,15 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "#2331 — does this reply hand the ticket back? REQUIRED when there is no `then`: `true` = you hand it back (a question, you wait for an answer; the ticket leaves your queue until someone replies); `false` = you keep it and carry on (only on a ticket you hold; for a finished step prefer `then: \"continue\"`, which also marks the step). With a `then`, leave it out: every decision implies `true`, `then: \"continue\"` implies `false`, and a contradicting value is refused (HTTP 400).",
                     ),
+                continue_after_minutes: z
+                    .number()
+                    .int()
+                    .min(0)
+                    .max(1440)
+                    .optional()
+                    .describe(
+                        "#2449 — with `then: \"continue\"` only: when you can resume. Leave it out (the default) when you carry on at once — the ticket leads your backlog right away. Pass N when the next step waits on something (a build, a test box, a deploy): the ticket stays out of your wakes for N minutes, then leads your backlog. Refused (HTTP 400) without `then: \"continue\"`.",
+                    ),
                 scope: z
                     .enum(MESSAGE_SCOPES)
                     .optional()
@@ -213,7 +222,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ target_id, body, project, by_agent, summary_until, then, handback, scope }) => {
+        async ({ target_id, body, project, by_agent, summary_until, then, handback, continue_after_minutes, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -275,6 +284,8 @@ export function registerTicketWriteTools(server: McpServer): void {
                 handback: kind === "comment_added" ? handback : undefined,
                 // #2308 — `continue` posts a step: a comment that proposes nothing.
                 step: kind === "comment_added" && then === STEP_VERB ? true : undefined,
+                // #2449 — when the agent can resume; the daemon refuses it without a step.
+                step_after_minutes: continue_after_minutes,
                 // #B.245 tristate: forward composer-side `scope`.
                 // Default `'default'` (#253 — david reversed the prior
                 // ny8m8a directive for `'internal'`-by-default; replies
