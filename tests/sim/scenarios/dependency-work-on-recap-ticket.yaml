@@ -22,7 +22,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $r }
   - alpha-lead: ticket_reply
-    args: { target_id: $r, body: First step of O's plan, done here., summary_until: R carries O's plan; step one done., then: continue }
+    args: { target_id: $r, body: First step of O's plan, done here., summary_until: R carries O's plan; step one done., then: continue, continue_after_minutes: 0 }
   - view: [alpha-lead]
   - expect:
       alpha-lead: { ticket: $o, backlog: actionable, act: true }

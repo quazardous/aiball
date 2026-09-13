@@ -26,11 +26,11 @@ dates are YYYY-MM-DD.
 ### Added
 
 - **A step says when the agent resumes, and then leads its backlog**:
-  `then: "continue"` takes an optional `continue_after_minutes`. Without it the
-  agent carries on at once and the ticket goes to the top of its backlog, right
-  after the events, for `tickets.step_hot_minutes` (30 by default). With it —
-  waiting on a build, a test box — the ticket stays out of the agent's wakes for
-  that long, then leads.
+  `then: "continue"` requires `continue_after_minutes`. `0` means the agent
+  carries on at once: the ticket goes to the top of its backlog, right after the
+  events, for `tickets.step_hot_minutes` (30 by default). `N` — waiting on a
+  build, a test box — keeps the ticket out of the agent's wakes for N minutes,
+  then it leads. A step without it is refused, with the reason.
 
 ## [0.40.0] — 2026-09-13
 

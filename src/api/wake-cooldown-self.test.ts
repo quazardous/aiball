@@ -111,7 +111,7 @@ test("the agent's own step still lifts the sink at once — it says there is wor
     await call(WORKER, "POST", `/api/tickets/${t}/assign`, {}); // self-claim
     await wake(t);
 
-    await comment(WORKER, t, { step: true });
+    await comment(WORKER, t, { step: true, step_after_minutes: 0 });
 
     assert.equal(await cooledFor(t), 0, "a step is the one own word that lifts the sink");
 });

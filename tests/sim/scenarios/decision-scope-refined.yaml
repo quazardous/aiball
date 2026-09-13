@@ -12,14 +12,14 @@ steps:
   - moderator: accept $plan
   - wake: alpha-lead
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: First part done., summary_until: First part done; the rest is in progress., then: continue }
+    args: { target_id: $ticket, body: First part done., summary_until: First part done; the rest is in progress., then: continue, continue_after_minutes: 0 }
   - moderator: comment $ticket
     body: Also cover the empty case.
   - expect:
       alpha-lead: { ticket: $ticket, act: true, last_actor: david, wake: event }
   - wake: alpha-lead
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Empty case covered, as asked., summary_until: Both parts done, empty case included., then: continue }
+    args: { target_id: $ticket, body: Empty case covered, as asked., summary_until: Both parts done, empty case included., then: continue, continue_after_minutes: 0 }
   - alpha-lead: ticket_reply
     args: { target_id: $ticket, body: Delivered, empty case included., summary_until: Delivered; waiting for the moderator's accept., then: resolved }
   - expect:

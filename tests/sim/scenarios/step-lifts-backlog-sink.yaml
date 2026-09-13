@@ -22,6 +22,7 @@ steps:
       body: A step done, more to come.
       summary_until: One step done; the lead carries on.
       then: continue
+      continue_after_minutes: 0
   - expect:
       alpha-lead: { ticket: $ticket, act: true, wake: triage }
   # The wake that follows the step: a short sink (minutes, not the hour).

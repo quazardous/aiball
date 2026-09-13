@@ -118,7 +118,7 @@ test("only a human tags, only an agent's comment without a decision, and an agen
 
     const held = ticket("the agent's own step");
     assert.ok((await call(WORKER, "POST", `/api/tickets/${held}/assign`, {})).status < 300);
-    const step = await workerReply(held, { step: true });
+    const step = await workerReply(held, { step: true, step_after_minutes: 0 });
     assert.equal((await call(HUMAN, "POST", `/api/messages/${step}/unstep`)).status, 409, "a step the agent posted stays");
     assert.equal(meta(step).step, true);
 });

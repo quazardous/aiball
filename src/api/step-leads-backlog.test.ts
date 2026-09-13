@@ -8,7 +8,8 @@
  * - the agent decides when it resumes (david): at once by default, or after N
  *   minutes — then the ticket stays out of the wake pool until then, and leads
  *   once it is due;
- * - a resume delay without a step is refused.
+ * - a resume delay without a step is refused, and a step without a resume
+ *   delay is refused too — 0 is how an agent says "at once".
  * Only the RANK moves: the visible `hot` mark keeps its own rule (any agent's
  * recent activity), which this does not touch.
  */
@@ -80,7 +81,7 @@ test("a fresh step of mine leads my backlog, ahead of an older actionable ticket
     const older = ticket("an older ticket in my court");
     const stepped = ticket("the ticket I carry on");
     await call("POST", `/api/tickets/${stepped}/assign`, {});
-    await reply(stepped, { step: true });
+    await reply(stepped, { step: true, step_after_minutes: 0 });
 
     const rows = await backlog();
     const mine = rows.find((r) => r.id === stepped)!;
@@ -100,7 +101,7 @@ test("an ordinary comment of mine does not lead — the anti-loop rule stands", 
 test("past the window the step ranks like any other ticket", async () => {
     const t = ticket("a step from an hour ago");
     await call("POST", `/api/tickets/${t}/assign`, {});
-    await reply(t, { step: true });
+    await reply(t, { step: true, step_after_minutes: 0 });
     age(t, 60);
 
     assert.equal((await backlog()).find((r) => r.id === t)?.backlog_tier, 1);
@@ -113,7 +114,7 @@ async function backlogWithCooldown(): Promise<{ id: number; backlog_tier: number
 test("by default a step is due at once: it leads, and nothing holds it", async () => {
     const t = ticket("carry on right away");
     await call("POST", `/api/tickets/${t}/assign`, {});
-    await reply(t, { step: true });
+    await reply(t, { step: true, step_after_minutes: 0 });
 
     const row = (await backlogWithCooldown()).find((r) => r.id === t)!;
     assert.equal(row.backlog_tier, 0);
@@ -149,4 +150,14 @@ test("a resume delay without a step is refused", async () => {
     });
     assert.equal(r.status, 400, JSON.stringify(r.json));
     assert.match(String((r.json as { error?: string }).error), /only goes with a step/);
+});
+
+test("a step without its resume delay is refused, and the refusal teaches the gesture", async () => {
+    const t = ticket("a step that forgets when it resumes");
+    await call("POST", `/api/tickets/${t}/assign`, {});
+    const r = await call("POST", "/api/messages", {
+        project: P, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true,
+    });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match(String((r.json as { error?: string }).error), /continue_after_minutes — 0 if you carry on at once/);
 });

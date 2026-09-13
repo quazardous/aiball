@@ -62,7 +62,7 @@ async function post(payload: Record<string, unknown>) {
     return { status: res.status, json: await res.json() as { error?: string } };
 }
 const step = (ticketId: number, extra: Record<string, unknown> = {}) =>
-    post({ project: "p-2308", kind: "comment_added", ticket_id: ticketId, body: "step 1 done", summary_until: "state", step: true, ...extra });
+    post({ project: "p-2308", kind: "comment_added", ticket_id: ticketId, body: "step 1 done", summary_until: "state", step: true, step_after_minutes: 0, ...extra });
 
 test("an agent that holds nothing cannot post a step, and nothing is posted", async () => {
     const t = ticket();

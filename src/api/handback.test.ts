@@ -126,7 +126,7 @@ test("a then implies the handback, and a contradicting one is refused", async ()
     assert.equal(planKeeps.status, 400);
     assert.match(planKeeps.json.error ?? "", /contradicts then: plan/);
     setTicketClaim(t, "worker");
-    const stepHandsBack = await comment(AGENT, t, { step: true, handback: true });
+    const stepHandsBack = await comment(AGENT, t, { step: true, step_after_minutes: 0, handback: true });
     assert.equal(stepHandsBack.status, 400);
     assert.match(stepHandsBack.json.error ?? "", /contradicts then: continue/);
     assert.equal(comments(t), 2);

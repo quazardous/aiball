@@ -18,7 +18,7 @@ steps:
     args: { target_id: $ticket, body: A plan that claims to keep the hand., summary_until: s, then: plan, handback: false }
     refused: "contradicts then: plan"
   - alpha-helper: ticket_reply
-    args: { target_id: $ticket, body: A step on a ticket it does not hold., summary_until: s, then: continue }
+    args: { target_id: $ticket, body: A step on a ticket it does not hold., summary_until: s, then: continue, continue_after_minutes: 0 }
     refused: "then: continue"
   - alpha-lead: ticket_reply
     args: { target_id: $ticket, body: A reply whose summary is over budget., handback: true, summary_until: "The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget." }

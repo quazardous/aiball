@@ -343,9 +343,9 @@ when the window runs out. Anyone else's word lifts it at once.
 
 A ticket whose last action is the agent's own step **leads that agent's
 backlog** (tier 0, right after the events) for `tickets.step_hot_minutes`, 30 by
-default. The agent says when that starts: at once, or after the
-`continue_after_minutes` it declared with the step — until then the ticket stays
-out of its wake pool, however the wakes around it went.
+default. The agent must say when that starts, with every step:
+`continue_after_minutes: 0` for at once, or N minutes — until then the ticket
+stays out of its wake pool, however the wakes around it went.
 
 A ticket whose last action is a step (`then: continue`) is cooled only briefly,
 5 minutes by default (`tickets.sink_then_continue_minutes`, 0 = not at all): a

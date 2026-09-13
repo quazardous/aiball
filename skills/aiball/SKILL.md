@@ -229,11 +229,11 @@ The shapes for ticket / comment / mention IDs are **provided by the `welcome` MC
 ## `then: "continue"` — say when you resume
 
 A step (`then: "continue"`) keeps the ticket yours and puts it at the **top of
-your backlog**, right after your events, for half an hour. Say when you can
-pick it up again:
+your backlog**, right after your events, for half an hour. It **always** says
+when you pick it up again — a step without `continue_after_minutes` is refused:
 
-- **carrying on right away** → leave `continue_after_minutes` out: the next
-  wake brings you straight back to it;
+- **carrying on right away** → `continue_after_minutes: 0`: the next wake
+  brings you straight back to it;
 - **waiting on something** (a build, a test box, a deploy) →
   `continue_after_minutes: N`: the ticket stays out of your wakes for N
   minutes, then comes back first.

@@ -100,7 +100,7 @@ function backdate(ticketId: number, messageId: number, actionAgoSec: number, wak
 
 test("a wake after a step cools the ticket for 5 minutes; after a comment, for the whole cooldown", async () => {
     const stepped = await held("p-2365", "a step, then a wake");
-    await post("p-2365", stepped, { step: true });
+    await post("p-2365", stepped, { step: true, step_after_minutes: 0 });
     await wake(stepped);
     const step = await cooledFor("p-2365", stepped);
     assert.ok(step > 0 && step <= 300, `cooled for ${step}s, expected at most 5 minutes`);
@@ -114,7 +114,7 @@ test("a wake after a step cools the ticket for 5 minutes; after a comment, for t
 
 test("past the short window a step's ticket is a candidate again, a comment's is still cooled", async () => {
     const stepped = await held("p-2365", "stepped a while ago");
-    const stepId = await post("p-2365", stepped, { step: true });
+    const stepId = await post("p-2365", stepped, { step: true, step_after_minutes: 0 });
     await wake(stepped);
     backdate(stepped, stepId, 7 * 60, 6 * 60);
     assert.equal(await cooledFor("p-2365", stepped), 0, "the 5 minutes are over");
@@ -128,7 +128,7 @@ test("past the short window a step's ticket is a candidate again, a comment's is
 
 test("0 minutes never sinks a step's ticket", async () => {
     const stepped = await held("p-2365-zero", "a step on a project that never sinks them");
-    await post("p-2365-zero", stepped, { step: true });
+    await post("p-2365-zero", stepped, { step: true, step_after_minutes: 0 });
     await wake(stepped);
     assert.equal(await cooledFor("p-2365-zero", stepped), 0);
 });

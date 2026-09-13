@@ -20,6 +20,7 @@ steps:
       body: First step done.
       summary_until: First step done; the next one is in progress.
       then: continue
+      continue_after_minutes: 0
   - expect:
       alpha-lead: { ticket: $ticket, act: true, gated: false, last_actor: alpha-lead }
       alpha-helper: { ticket: $ticket, act: false }

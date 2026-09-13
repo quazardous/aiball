@@ -96,7 +96,14 @@ export function summaryOverBudget(length: number, max: number): string {
 export function withoutDecisionRefusal(msg: NewMessage, caller: string): string | null {
     if (msg.kind !== "comment_added") return null;
     const required = !isHuman(caller) && getConfig("tickets.require_then", msg.project) !== false;
-    const refusal = handbackRefusal({
+    // #2449 david `wng7h4` — a step says when its author resumes, every time:
+    // 0 for at once, N minutes when the next move waits on something. Required
+    // like the handback, and by the same rule, so the refusal is where an agent
+    // learns the gesture — at the moment it makes it.
+    const stepRefusal = required && msg.step === true && msg.step_after_minutes === undefined
+        ? "then: continue needs continue_after_minutes — 0 if you carry on at once, N (minutes) if the next step waits on something: a build, a test box, a deploy"
+        : null;
+    const refusal = stepRefusal ?? handbackRefusal({
         decisionKind: msg.decision_kind,
         step: msg.step === true,
         handback: msg.handback,
@@ -262,7 +269,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > 1440) {
             return { error: "step_after_minutes must be a whole number of minutes, from 0 to 1440" };
         }
-        if (n > 0) stepAfterMinutes = n;
+        stepAfterMinutes = n;
     }
     // #B.245 tristate: composer-side `scope`. One of
     // `internal | default | broadcast`. Applies to every kind
