@@ -587,7 +587,7 @@ clears `CL_X` from **both** files.
 `claude-loop` spawns two background processes per loop alongside the
 foreground `claude` binary: the **timer** (Node, runs the wake gate +
 SSE subscriber) and the **PTY proxy** (Python, fronts claude to intercept
-typing and inject wakes). David's directive (#783): when `claude` exits,
+typing and inject wakes). The rule: when `claude` exits,
 these satellites must die — leftover timers and proxies bind to the same
 state-dir as the next start and cause divergent behaviour (stale code
 running, stale F9 events, double SSE subscriptions).
@@ -633,7 +633,7 @@ Four mechanisms together enforce "no orphan satellites":
    after killing the named timer pid.
 
 `cmdReload` uses **SIGKILL** for the old timer pid, not the default
-SIGTERM (fix for #780). The timer's SIGTERM handler runs
+SIGTERM. The timer's SIGTERM handler runs
 `cleanShutdown` which also kills the tmux session — exactly what
 reload-not-restart is supposed to avoid. SIGKILL skips the handler,
 the new timer rebinds `timer.pid` + `loop.sock` cleanly, the watchdog
@@ -652,7 +652,7 @@ hook subprocesses (Stop, SessionStart, UserPromptSubmit) that POST
 events one-shot per fire. Without a liveness probe a connection can
 linger half-open for arbitrarily long when one side dies — the
 in-kernel TCP stack on UDS won't send FIN until the next write
-fails. Symptoms observed live (#788): F9 worked once per ~30s on
+fails. Symptoms observed live: F9 worked once per ~30s on
 aiball-dev because the proxy emitter never noticed the server-side
 socket was dead, kept silent-writing into the void until the next
 emit triggered EPIPE.
@@ -662,7 +662,7 @@ Server side (`src/claude-loop/ipc-events.ts:listenEvents`):
   `ws.ping()`. If the next tick finds `isAlive` still false, the
   server calls `ws.terminate()` and clears the interval.
 - `isAlive` resets on ANY inbound frame — `pong`, `ping`, or
-  `message`. The "any frame" leniency (#788) keeps connections
+  `message`. The "any frame" leniency keeps connections
   alive for write-only clients (e.g. the legacy `_ProxyEventEmitter`
   that didn't read pongs); a client actively sending events is
   demonstrably alive even when its read buffer is empty.
@@ -685,8 +685,7 @@ max (one ping + one tick).
 When a wake fires on a FIFO event (an unread comment / lifecycle /
 ticket-created head), the head's `message_id` is marked seen the
 moment the inject crosses the dedup gate, not at agent-side
-`ticket_get`. David's framing (#749): "un ping envoyé est forcément
-seen" — a delivered wake IS the agent's read of the event, no
+`ticket_get`. A delivered wake IS the agent's read of the event, no
 separate ack needed.
 
 Flow:
@@ -716,7 +715,7 @@ Two consequences:
   next attempt.
 - A backlog wake (no FIFO head, fired via `?backlog=1`) sets
   `headMessageId=null` and records `recordBacklogWake(ticket_id)`
-  instead — that's the cooldown clock for #786.
+  instead — that's the backlog cooldown's clock.
 
 ### One live loop per (cwd, agent)
 

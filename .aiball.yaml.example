@@ -273,12 +273,13 @@ project_type: public
 # Placeholder grammar + slot shapes documented in docs/CONFIGS.md.
 
 # prompts:
-#   wake_lead:
-#     directive: ["fyi:", "heads up —", "quick note:"]
-#     hint:      ["btw,", "fyi,"]
-#     imperative: ["**heads up**:", "**ACTION**:"]
+#   # `wake_master` is the whole wake sentence, including what each backlog
+#   # tier asks of the agent. Replacing it here replaces all of that: start
+#   # from the shipped slot in config/defaults/claude-loop-pings.yaml (it has
+#   # a directive, a hint and an imperative variant) and edit a copy — a
+#   # hand-written sample freezes today's wording into this project.
 #   wake_master:
-#     directive: "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture} {lead}}"
+#     directive: "<copied from config/defaults/claude-loop-pings.yaml, then edited>"
 #   # One-shot prompt fired at boot exit (after the tail-grace seal). Prepended
 #   # to the boot-ended-drain wake — the agent receives a single combined prompt.
 #   # Set to "" (empty) to opt out per-project.

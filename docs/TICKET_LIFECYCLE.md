@@ -199,10 +199,10 @@ hears every comment and its close. Being told is not being asked.
 - **relation gate** — an open `depends_on` / `blocks` blocker
   suppresses the dependent.
 - **hold gate** (`isHeldByOther`) — a hold by *someone other than C* drops the
-  ticket from C's pool (anti-collision). See §4.5.
+  ticket from C's pool (anti-collision). See §4.6.
 - **snoozed / closed / non-approved** — not open in the first place.
 
-### 4.5 Assignment vs claim — the two holds (#436 / #439)
+### 4.6 Assignment vs claim — the two holds
 
 Two distinct holds, both anti-collision, split from one fused field:
 
@@ -221,17 +221,17 @@ held by **someone other than C** — a *live* claim by another agent **OR** an
 no assignment → not gated (falls through to `last_actor`). Both holds clear on
 close/resolve (`releaseTicketHold`).
 
-- **One focus at a time (#439).** A self-claim auto-releases C's *other* **live**
+- **One focus at a time.** A self-claim auto-releases C's *other* **live**
   claims that are *bare pickups* — claims C never commented on (zero work lost).
   Claims C actually worked survive: posting an approved comment **auto-claims**
-  the ticket (#418), so a worked ticket's `claimed_at` *equals* C's latest comment
+  the ticket, so a worked ticket's `claimed_at` *equals* C's latest comment
   (`lastMs >= claimedMs`), whereas a bare pickup-claim's `claimed_at` is strictly
   after any earlier comment → released. The ticket just claimed is never dropped
   (re-claim stays idempotent). Stops an agent stacking locks that each drop a
   ticket from every other agent's pool. (`claimsToAutoRelease`, pure + tested;
   wired in `POST /tickets/:id/assign`, surfaced as `released_claims`, relayed by
   `ticket_claim`.)
-- **Token attribution (#439).** A turn's token-usage is attributed to C's
+- **Token attribution.** A turn's token-usage is attributed to C's
   **most-recently-claimed live** claim (the durable focus), falling back to the
   volatile `active-ticket` marker only when C holds no live claim — so an
   incidental ticket-scoped write mid-turn no longer mis-attributes the turn.
@@ -251,10 +251,10 @@ The keys, outer→inner (pure comparator in `src/db/work-order.ts`):
    `unread` → `actionable` (¬unread) → other open → the rest (closed/snoozed).
 2. **Priority** desc (urgent→low) — the **strongest** sort within a tier
    (david `xkehmv`: « priorité est le tri le plus fort »). Explicit priority wins.
-3. **Own live claim** (#430) — at **equal priority**, a ticket the consumer holds
-   a live claim on (its explicit focus, see §4.5) sorts first, **above** hot — the
+3. **Own live claim** — at **equal priority**, a ticket the consumer holds
+   a live claim on (its explicit focus, see §4.6) sorts first, **above** hot — the
    claim is the durable "what I'm on" signal where hot decays. Within-tier only.
-4. **Assigned-to-you** (#436) — a ticket a human handed the consumer; a weaker
+4. **Assigned-to-you** — a ticket a human handed the consumer; a weaker
    boost, below own-claim, above hot. Within-tier only.
 5. **Hot** (levier 1) — at equal priority + no claim/assignment distinction, a
    ticket in the requesting consumer's **hot-zone** sorts first (see §5.1).
@@ -385,7 +385,7 @@ boolean checks on the result.
 to mean wiring a new Set + a new AND/OR clause in the route handler
 (every consumer rebuilt the same logic). Now every consumer (UI, MCP,
 claude-loop) sees the same flag bag on the wire and filters locally.
-A bug in tier 2 (#790) becomes a single-function fix instead of a
+A bug in a tier becomes a single-function fix instead of a
 distributed audit.
 
 ### 5.1 The hot-zone

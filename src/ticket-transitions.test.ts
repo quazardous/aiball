@@ -28,6 +28,7 @@ type Kind = typeof t.DECISION_KINDS[number];
 type Scenario =
     | "pending"
     | "pending, then someone else comments"
+    | "pending, then another agent comments"
     | "pending, then the proposer comments"
     | "accepted"
     | "accepted, then someone else comments"
@@ -38,19 +39,19 @@ type Scenario =
 // behaviour is written down here.
 const EXPECTED: Record<Kind, Record<Scenario, boolean>> = {
     plan: {
-        "pending": true, "pending, then someone else comments": false, "pending, then the proposer comments": true,
+        "pending": true, "pending, then someone else comments": false, "pending, then another agent comments": true, "pending, then the proposer comments": true,
         "accepted": false, "accepted, then someone else comments": false, "rejected": false,
     },
     resolution: {
-        "pending": true, "pending, then someone else comments": false, "pending, then the proposer comments": true,
+        "pending": true, "pending, then someone else comments": false, "pending, then another agent comments": true, "pending, then the proposer comments": true,
         "accepted": true, "accepted, then someone else comments": true, "rejected": false,
     },
     wontfix: {
-        "pending": true, "pending, then someone else comments": false, "pending, then the proposer comments": true,
+        "pending": true, "pending, then someone else comments": false, "pending, then another agent comments": true, "pending, then the proposer comments": true,
         "accepted": true, "accepted, then someone else comments": true, "rejected": false,
     },
     escalation: {
-        "pending": true, "pending, then someone else comments": false, "pending, then the proposer comments": true,
+        "pending": true, "pending, then someone else comments": false, "pending, then another agent comments": true, "pending, then the proposer comments": true,
         "accepted": false, "accepted, then someone else comments": false, "rejected": false,
     },
 };
@@ -64,7 +65,10 @@ const plain = (by: string) => ({ ticketId: 1, kind: "comment_added", status: "ap
 function scenario(kind: string, s: Scenario) {
     switch (s) {
         case "pending": return [decided(kind, "pending")];
+        // "someone else" is the human the decision is owed by (#2376: only a
+        // human's word hands the ticket back); another agent's is not.
         case "pending, then someone else comments": return [decided(kind, "pending"), plain("david")];
+        case "pending, then another agent comments": return [decided(kind, "pending"), plain("neighbour")];
         case "pending, then the proposer comments": return [decided(kind, "pending"), plain("agent")];
         case "accepted": return [decided(kind, "accepted")];
         case "accepted, then someone else comments": return [decided(kind, "accepted"), plain("david")];
@@ -84,7 +88,7 @@ test("every decision kind has its row and its expected behaviour, and the two fa
 test("the gate replay follows the truth table, kind by kind and scenario by scenario", () => {
     for (const kind of t.DECISION_KINDS) {
         for (const [s, gated] of Object.entries(EXPECTED[kind]) as [Scenario, boolean][]) {
-            assert.equal(computeDecisionGate(scenario(kind, s), () => false).get(1), gated, `${kind}: ${s}`);
+            assert.equal(computeDecisionGate(scenario(kind, s), (id) => id === "david").get(1), gated, `${kind}: ${s}`);
         }
     }
     assert.equal(t.gateEffect("nope", "pending"), null, "an unknown kind is inert");

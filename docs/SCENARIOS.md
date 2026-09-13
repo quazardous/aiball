@@ -14,8 +14,7 @@ For a while these two lived in separate worlds. A user story like *"when
 the user types a keystroke just after boot exit, NOT AFK 10m arms"* was
 described once on each side — or worse, only on one — with no
 cross-reference and no guarantee the unit + integration tests stayed
-consistent. **`docs/SCENARIOS.md` and the yaml extension introduced in
-#748 close that gap.**
+consistent. **`docs/SCENARIOS.md` and its yaml extension close that gap.**
 
 ## The shared format
 
@@ -64,7 +63,7 @@ unit:
    standalone. The `name:` becomes the test title; if you can't read it
    without prior context, neither can the next reader.
 3. Use the same fixture across related entries to keep the diff small.
-   Pull defaults from `baseInput()` in `loop-state.test.ts` (#629
+   Pull defaults from `baseInput()` in `loop-state.test.ts` (the
    convention : post-boot, claude ready) when the scenario doesn't care
    about boot-grace.
 4. Run `npm test` — every `unit:` entry shows up as a `node:test`
@@ -122,12 +121,12 @@ there immediately changes both test suites — no separate registration.
 
 ## Roadmap (what this enables)
 
-- #745 phase B cleanup — every marker drop references an AFK SM
+- Marker cleanup — every marker drop references an AFK SM
   scenario; remove the marker, run the yaml runner, see if any user
   story regresses.
-- #727 V1 hooks UDS — hook event dispatch gets its own scenarios
+- Hooks over the UDS — hook event dispatch gets its own scenarios
   (`hook-sm-*.yaml`) that both runners exercise.
-- Wake-queue refactor (#749) — the new SM gets a dedicated scenarios
+- Wake-queue refactor — the new SM gets a dedicated scenarios
   file (`wake-queue-*.yaml`) from day 1 so the FIFO semantics are
   pinned at every step.
 

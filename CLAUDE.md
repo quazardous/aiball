@@ -75,6 +75,10 @@ Root:
 - [`GNOME-EXTENSION.md`](./docs/GNOME-EXTENSION.md) — the GNOME Shell top-bar indicator (#2090): install, what it deliberately does NOT do (no supervision — systemd already does it), why it holds no token, and the version-treadmill it commits to.
 - [`UI-KIT.md`](./docs/UI-KIT.md) — how the Vue frontend is structured: build & entry, routing, component layout, the data layer, styling, and the UI-kit primitives + conventions.
 - [`TICKET_LIFECYCLE.md`](./docs/TICKET_LIFECYCLE.md) — TARGET design: ticket states/events + the per-consumer `actionable` gate (`last_actor` model unifying #265/#273/#358).
+- [`PROMPT-GLOSSARY.md`](./docs/PROMPT-GLOSSARY.md) — the vocabulary of agent-facing text (wake phrases, MCP tool descriptions, the skill): the canonical verb → tool mapping.
+- [`SCENARIOS.md`](./docs/SCENARIOS.md) — user stories as the single source of truth for the loop's tests, unit and integration alike.
+- [`INTEGRATION-TESTS.md`](./docs/INTEGRATION-TESTS.md) — the end-to-end `claude-loop` harness under `tests/integration/`.
+- [`FAKE-CLAUDE.md`](./docs/FAKE-CLAUDE.md) — `bin/fake-claude`, the scriptable `claude` stand-in those tests drive.
 
 ## Conventions
 

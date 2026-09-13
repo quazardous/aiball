@@ -28,6 +28,10 @@ const HUMAN = "david";
 
 const db = getDb();
 createProject({ name: PROJECT });
+// #2394 — the backlog is the project's work: both agents lead it here.
+const { upsertSubscription } = await import("./subscriptions.js");
+upsertSubscription(ME, PROJECT, "owner");
+upsertSubscription(OTHER, PROJECT, "owner");
 
 /** An open, approved ticket whose last actor is the human (→ ball in the
  *  agent pool, not "awaiting someone else"). `assignee` optionally hands it to

@@ -26,6 +26,11 @@ const B = "agent-b";
 const PROJECT = "sim-418";
 
 const db = getDb();
+// #2394 — the backlog is the project's work: both agents lead the project, as
+// the "shared pool" these scenarios describe assumes.
+const { upsertSubscription } = await import("./subscriptions.js");
+upsertSubscription(A, PROJECT, "owner");
+upsertSubscription(B, PROJECT, "owner");
 function seed(id: number) {
     // status 'approved' + no comments → last_actor null → in everyone's pool.
     db.insert(schema.tickets).values({

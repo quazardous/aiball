@@ -13,12 +13,12 @@ uv run --with pytest pytest -q
 
 ## What's in the box
 
-- **`bin/fake-claude --probe-mode SCENARIO`** (#637 slice 1) — non-event-loop runner that renders a built-in scenario synchronously to stdout, advances through it on stdin lines. See `--list-probes` for the catalog.
-- **`tests/integration/conftest.py`** (#637 slice 2) — pytest fixtures :
+- **`bin/fake-claude --probe-mode SCENARIO`** — non-event-loop runner that renders a built-in scenario synchronously to stdout, advances through it on stdin lines. See `--list-probes` for the catalog.
+- **`tests/integration/conftest.py`** — pytest fixtures :
   - `loop_runner(scenario, interval_s=1)` spawns a real `claude-loop` with `CL_CLAUDE_CMD=fake-claude --probe-mode SCENARIO`, runs ONE heartbeat cycle (`--once`), returns a `LoopHandle` with name + state_dir + `.inspect()` shortcut. Cleanup at teardown.
   - `wait_for(predicate, timeout, interval)` sync poll with exception-swallowing — lets tests use one-liners like `wait_for(lambda: handle.inspect()["pane"]["compacting"])` without race-window guards.
-- **`tests/integration/test_smoke.py`** (#637 slice 2) — fixture smoke tests : 1 loop-runner E2E + 3 pure `wait_for` units.
-- **`tests/integration/test_reference_bugs.py`** (#637 slice 3) — bug-specific regression tests. New bugs land here as the harness matures.
+- **`tests/integration/test_smoke.py`** — fixture smoke tests : 1 loop-runner E2E + 3 pure `wait_for` units.
+- **`tests/integration/test_reference_bugs.py`** — bug-specific regression tests. New bugs land here as the harness matures.
 
 ## Adding a new scenario
 
