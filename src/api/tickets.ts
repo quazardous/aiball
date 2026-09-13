@@ -33,6 +33,7 @@ import {
     listSubTickets,
     subTicketCounts,
     getTicketStages,
+    getTicketTitles,
     getTicketBookends,
     getMessage,
     getMessageByHashid,
@@ -1844,9 +1845,14 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     const targetStages = typedRelations.length > 0
         ? getTicketStages(typedRelations.map((r) => r.target_ticket_id))
         : new Map<number, string>();
+    // #2432 — and with its title, for the chip's tooltip.
+    const targetTitles = typedRelations.length > 0
+        ? getTicketTitles(typedRelations.map((r) => r.target_ticket_id))
+        : new Map<number, string>();
     const typedRelationsWithStage = typedRelations.map((r) => ({
         ...r,
         target_stage: targetStages.get(r.target_ticket_id) ?? "open",
+        target_title: targetTitles.get(r.target_ticket_id) ?? null,
     }));
     // #283: resolve `/uploads/<sha>.<ext>` refs in the bodies we're about to
     // ship into ready-to-open attachments, so a cold-start agent doesn't have
@@ -1893,7 +1899,7 @@ const RELATION_CHIP_KINDS = new Set([
 ]);
 const isRelationChipKind = (kind: string): boolean => RELATION_CHIP_KINDS.has(kind);
 
-function enrichRelationStages<T extends { id: number; kind: string; source_ticket_id?: number | null }>(comments: T[]): (T & { source_ticket_stage?: string })[] {
+function enrichRelationStages<T extends { id: number; kind: string; source_ticket_id?: number | null }>(comments: T[]): (T & { source_ticket_stage?: string; source_ticket_title?: string | null })[] {
     const sourceIds = new Set<number>();
     for (const c of comments) {
         if (isRelationChipKind(c.kind) && typeof c.source_ticket_id === "number") {
@@ -1902,9 +1908,15 @@ function enrichRelationStages<T extends { id: number; kind: string; source_ticke
     }
     if (sourceIds.size === 0) return comments;
     const stages = getTicketStages([...sourceIds]);
+    // #2432 — the rows name the other ticket by number; hovering says which.
+    const titles = getTicketTitles([...sourceIds]);
     return comments.map((c) => {
         if (isRelationChipKind(c.kind) && typeof c.source_ticket_id === "number") {
-            return { ...c, source_ticket_stage: stages.get(c.source_ticket_id) ?? "open" };
+            return {
+                ...c,
+                source_ticket_stage: stages.get(c.source_ticket_id) ?? "open",
+                source_ticket_title: titles.get(c.source_ticket_id) ?? null,
+            };
         }
         return c;
     });

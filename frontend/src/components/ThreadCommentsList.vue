@@ -101,6 +101,7 @@ function decodeRelationEvent(m: Message): { verb: string; target: number | null 
                             v-for="(m, i2) in item.msgs"
                             :key="m.id"
                             :href="ticketHref(m.source_ticket_id as number)"
+                            :title="m.source_ticket_title ? `${formatTicketRef(m.source_ticket_id as number)}: ${m.source_ticket_title}` : undefined"
                             class="thread-relation-row__ref"
                         >
                             {{ formatTicketRef(m.source_ticket_id as number) }}<span

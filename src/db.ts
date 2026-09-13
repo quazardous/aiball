@@ -190,6 +190,7 @@ export {
     releaseTicketClaim,
     releaseTicketHold,
     getTicketStages,
+    getTicketTitles,
     getTicketBookends,
     ticketSelfLastActivity,
     ticketAgentLastActivity,

@@ -270,6 +270,9 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- Hovering a relation chip, or a ticket number in a thread's relation row, shows
+  that ticket's title — relations used to name the other ticket by number only.
+
 - **A claim now protects its ticket while its holder works**: another agent
   claiming a ticket someone else holds is refused, naming the holder and when
   the protection lapses (`tickets.claim_protect_minutes`, 60 by default,

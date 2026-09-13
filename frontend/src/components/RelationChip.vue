@@ -20,6 +20,23 @@ const emit = defineEmits<{
     (e: "open-menu", payload: { event: Event; relation: { target_ticket_id: number; kind: RelationKind } }): void;
 }>();
 
+// #2432 david — the chip names its target by number; hovering says what that
+// ticket is. The title leads, the provenance (who set the relation, when)
+// follows on its own line.
+const tooltip = computed(() => {
+    const r = props.relation;
+    const ref = formatTicketRef(r.target_ticket_id);
+    const head = r.target_title ? `${ref}: ${r.target_title}` : `Open ${ref}`;
+    const kind = RELATION_LABELS[r.reciprocal
+        ? (r.kind === "blocks" ? "depends_on" : r.kind === "depends_on" ? "blocks" : r.kind)
+        : r.kind];
+    const when = new Date(r.last_event_at).toLocaleString();
+    const provenance = r.reciprocal
+        ? `reciprocal view of \`${kind}\` set on ${ref} by ${r.by_agent ?? "?"} on ${when}`
+        : `${kind}, set by ${r.by_agent ?? "?"} on ${when}`;
+    return `${head}\n${provenance}`;
+});
+
 // #B.123 follow-up: target stage badge so the chip carries the
 // target ticket's lifecycle state inline. "open" suppresses the
 // badge (default state = no extra noise).
@@ -42,9 +59,7 @@ const STAGE_LABELS: Record<string, string> = {
         <a
             :href="ticketHref(relation.target_ticket_id)"
             class="thread-relations__chip-link"
-            :title="relation.reciprocal
-                ? `Open ${formatTicketRef(relation.target_ticket_id)} — reciprocal view of \`${RELATION_LABELS[relation.kind === 'blocks' ? 'depends_on' : relation.kind === 'depends_on' ? 'blocks' : relation.kind]}\` set on ${formatTicketRef(relation.target_ticket_id)} by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`
-                : `Open ${formatTicketRef(relation.target_ticket_id)} — ${RELATION_LABELS[relation.kind]}, set by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`"
+            :title="tooltip"
         >
             <span class="thread-relations__kind">{{ RELATION_LABELS[relation.kind] }}</span>
             <span class="thread-relations__target">{{ formatTicketRef(relation.target_ticket_id) }}</span>

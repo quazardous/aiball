@@ -79,6 +79,8 @@ export interface Message {
      *  ticket_referenced / ticket_sub_added rows so the UI can render a
      *  small "where is this relation pointing now?" badge. */
     source_ticket_stage?: TicketStage;
+    /** #2432 — the other ticket's title, for the row's tooltip. */
+    source_ticket_title?: string | null;
     /** Sidecar JSON (raw string from the DB). Carries question audit
      *  (#B.104) and decision-on-comment (#B.129). Parsed lazily by
      *  components that need it. */
@@ -480,6 +482,8 @@ export interface TicketRelation {
      *  rejected). Enriched server-side; backfill defaults to "open"
      *  when the stage isn't known. */
     target_stage?: TicketStage;
+    /** #2432 — the target ticket's title, for the chip's tooltip. */
+    target_title?: string | null;
     /** #B.197: true when this chip is the inverse view of an event
      *  authored on the OTHER ticket (e.g. "#196 blocks #189" shows
      *  on #189 as `depends_on #196` with reciprocal=true). Frontend

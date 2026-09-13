@@ -47,6 +47,22 @@ export type TicketStage =
     | "open";
 
 /**
+ * #2432 david — the titles of a set of tickets, one roundtrip. A relation chip
+ * or row names its target by number only; hovering it should say what that
+ * number is.
+ */
+export function getTicketTitles(ids: number[]): Map<number, string> {
+    const out = new Map<number, string>();
+    if (ids.length === 0) return out;
+    const rows = getDb().select({ id: schema.tickets.id, title: schema.tickets.title })
+        .from(schema.tickets)
+        .where(inArray(schema.tickets.id, [...new Set(ids)]))
+        .all();
+    for (const r of rows) if (r.title) out.set(r.id, r.title);
+    return out;
+}
+
+/**
  * Compute the lifecycle stage of a set of tickets in one DB roundtrip
  * per kind of state — used by the thread API to enrich
  * ticket_referenced / ticket_sub_added pseudo-comments with the target
