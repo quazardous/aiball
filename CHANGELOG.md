@@ -23,8 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-09-13
+
 ### Added
 
+- **A board simulator** (`npm run sim`): the real daemon and UI in a throwaway
+  container, a cohort of agents on the real MCP handlers, and scenarios that
+  play agent and moderator gestures and check what each agent's queue and next
+  wake would be. `sim up --from-live --as <agents>` seats real agents on a
+  sanitized copy of the live board.
 - **A rejected ticket tells the tickets that were waiting on it**: a rejection is
   not a close, so the gate used to lift with nobody told and the relation stayed
   a dead letter. Each ticket that depended on it now hears it once, with the cue
@@ -181,104 +188,72 @@ dates are YYYY-MM-DD.
   it; revoking destroys the values and keeps a note of when, by whom, and which
   keys were held. See `docs/PAYLOADS.md`.
 
-### Fixed
+- A proxy node can ask to be paired instead of being handed a token. Run
+  `aiball proxy pair` on the node, compare the short code it prints with the one
+  in the clickable notice on the hub, and approve — no credential is copied
+  between machines. Approving is what creates the token, and the node collects
+  it once.
 
-- **`claude-loop reload` now picks up changes to the wake template**: each loop
-  renders its wakes from a copy of the template taken when it started, and no
-  reload refreshed that copy — a wording change reached no loop until a full
-  restart. Every reload (the command, the automatic one after a commit, the
-  hotkey) now refreshes it from the file it was copied from, a custom
-  `--pings` template included. Loops started before this change cannot know
-  their source: `reload` says so and points to `restart`, and `list` /
-  `check` flag any loop whose template lags.
+  The hub only listens for pairing while you have opened a short window, from
+  the Nodes panel. It is shut by default and shuts again on restart: this is the
+  one route in aiball that writes for a caller who has not proved anything, and
+  it exists for a gesture you make a few times a year.
+- A ticket filed into a project its author doesn't belong to now records where
+  it came from, and the thread shows a "from X" tag. Filing next door is
+  legitimate — it's the first reason to open a ticket at all — but until now it
+  looked exactly like filing there by mistake. The field existed and was never
+  set; nothing fills it when the origin is ambiguous, since a wrong origin is
+  worse than none.
+- The repository is now installable as a Claude Code plugin, and declares itself
+  as a marketplace of one. The two skills it already ships are picked up from
+  their existing location — nothing moved. This is also what makes it
+  discoverable by the community directories, which crawl GitHub for valid
+  marketplace manifests rather than taking submissions.
 
-- **The backlog wake now really asks for a gesture**: the wording decided for
-  each tier was changed in the code's fallback only, while the shipped template
-  — the one every loop actually renders — kept the old, vaguer sentences. Agents
-  never saw the new ask. Both now carry it, and a test holds them together.
+  Installing the plugin does not install aiball: the skills describe tools that
+  only exist next to a running daemon and its MCP server.
+- Two MCP tools that read the links people write but never record. `ticket_neighbors`
+  answers "what should I read before touching this", and surfaces neighbours in other
+  projects — which nothing else showed. `graph_audit` reports corpus hygiene: open
+  tickets whose whole cohort has closed, open children under closed parents,
+  cross-project pairs that reference each other with no typed relation, and small
+  knots of tickets that are really one investigation.
 
-- **A thread no longer goes blank when it carries a dependency or link event**:
-  the row had no label to render, which threw mid-render and took every comment
-  of that thread down with it — the comments were served, the page showed none.
+  Both read a graph compiled from `#N` references in ticket bodies and comments,
+  rebuilt whenever the message log moves. The motivation was a measurement: typed
+  relations are curated by hand, and all but four of them were already stated in
+  prose, while thousands of prose links had never been typed.
 
-- **Answering a backlog wake no longer brings the ticket straight back**: the
-  wake asks the agent for a gesture, but posting it counted as the thread
-  moving, which voided the cooldown the wake had just set. The agent's own word
-  now keeps the ticket sunk; anyone else's still lifts it, and a step still
-  lifts it at once since it says there is work right now.
+  Every finding is a candidate, never a verdict — the tools close nothing and
+  propose nothing, and each result carries a citation pointing at the sentence it
+  was read from, so you can check rather than trust.
 
-- **The project stats count tickets resolved by an accepted resolution**: the
-  resolved count (and the resolved percentage) only saw the old resolution
-  format and missed nearly every resolved ticket. It now agrees with the list.
-- **Closing a ticket accepts only its latest proposed resolution**: a close
-  used to accept every resolution still pending in the thread, even one replaced
-  since by newer plans, and could mark the ticket resolved on it. A replaced
-  resolution now stays as it was.
-- **The project stats count the resolutions agents propose today**: the
-  "pending resolution" counter only saw the old resolution format and stayed
-  low. It now counts the open tickets whose latest decision is a proposed
-  resolution, the ones the list badges.
-- **A replaced decision no longer lights the list's badge**: a proposed resolution
-  nobody decided, replaced since by newer plans, kept "resolution proposed" on
-  the ticket's row. The row's decision badges (pending and rejected) now follow
-  the ticket's latest decision, the one that decides whose turn it is.
-- `poll` no longer lists your pending tickets that were closed while waiting for
-  moderation: the list now matches the `my_pending` count.
-- `claude-loop wake` no longer types into Claude Code's folder trust dialog, where
-  Enter picks "No, exit", and no longer wakes a session that is logged out or
-  cannot reach the API.
-- A loop no longer re-injects the same updates wake after wake: when a live
-  notification about one ticket took over the wake, the pending updates of
-  another ticket were glued onto the phrase without being marked seen.
-- **A loop started in a folder Claude Code has never trusted no longer types into
-  its trust dialog.** The dialog's selection arrow looked like a ready prompt, so
-  the first wake could answer it with the default "No, exit" and close claude.
-  The loop now holds every wake while the dialog is on screen and paints the bar
-  orange with an "attach to answer" hint, and `claude-loop start` warns up front
-  when the folder is not trusted. The question is never answered for you.
-- **Commenting on a ticket that does not exist answers 404 instead of crashing**:
-  the API used to fail with a 500 carrying a server stack trace in an HTML page.
-  Any unexpected server error is now a plain JSON 500, with the details kept
-  in the daemon log.
-- **Several actions now take effect immediately instead of a moment later.**
-  Accepting or rejecting a decision, snoozing or waking a ticket, adding a
-  blocking relation, and the hold released when a ticket closes all changed the
-  database but left cached queues holding the previous answer — so for a few
-  seconds a ticket could still look gated after its plan was accepted, or still
-  look ready after a resolution was proposed. Nothing signalled it and it
-  cleared itself, which is why it went unnoticed for so long.
+  The graph spans every project, because references cross project lines; what
+  each consumer reads is a projection of it. You see your own projects in full,
+  and past them only that a link crosses, named by project — the crossing is
+  reported because a dependency you cannot see is the one that hurts, while
+  what sits on the other side stays out of reach.
+- `poll()` now reports whether a human is around — as **facts**, not a verdict:
+  how long since the last human message, and how fresh the loop's own state is.
+  An agent picks its own threshold from what it is about to commit, since three
+  minutes is enough to decide a rename and nowhere near enough for a refactor.
+  A stale heartbeat reads as unknown, not absent.
 
-- Loops no longer inherit a sibling project's working directory. The tmux
-  server is shared between loops and keeps the environment of whichever project
-  started it first, so every other pane saw that project's `AIBALL_CWD`. aiball
-  itself was immune, but a hook, a script or a command typed in the pane read
-  the wrong project's directory. Loops pick this up on their next start.
+- The standing instruction is also reachable from the header, next to the
+  go-to field: one click, type, save. Its icon turns green while an instruction
+  is live on the project, so one left behind after coming back is visible
+  without opening anything.
 
-- Reading a ticket over MCP marks its events read again. The acknowledgement was
-  bounded by the highest id in the response, but the ticket's own id was mixed
-  into that calculation — and on a header-only read it was the only one, so the
-  bound landed far below every event id and nothing was ever marked read. Events
-  on a thread an agent had consulted, even a closed one, stayed in its unread
-  queue indefinitely.
-- The Windows loop bar no longer prints raw format markup where the window chip
-  should be blank. Blanking it with an empty value made the multiplexer fall
-  back to its own default and render half of it literally, so a fragment like
-  `#{window_flags}` sat in the middle of the bar. Running loops pick this up on
-  their next start.
-- A sub-agent no longer receives the whole project's backlog. `init --sub-agent`
-  marked it assignment-only but left it subscribed to the project as an *owner*,
-  and project owners are exactly who events fan out to — so it was woken for
-  everything, like the maintainer it was meant to work under, while being unable
-  to claim any of it. It is now subscribed as a follower, which is what a
-  sub-agent was always meant to be. Existing sub-agents pick this up by
-  re-running the command, and doing so no longer renames one that already has a
-  name.
-- `init` can now write `consumer.role` at all, and a new `--role lead|crew` flag
-  exposes it directly. The key was already read from config and settable on
-  `start`, but nothing could put it in the file, so it had to be typed by hand.
+- A per-project **standing instruction**, set from the project's settings page
+  and shown at the head of every wake — event and backlog alike. Leave one
+  before stepping away ("light debugging only, no big changes") and clear it
+  when you are back; empty means wakes read exactly as they did. The field is a
+  single-line input, and past entries are suggested from the browser.
 
 ### Changed
 
+- The last two ticket mutations return the same row as the list, like the others.
+- A stale candidate in the graph audit says who holds it.
 - Hovering a relation chip, or a ticket number in a thread's relation row, shows
   that ticket's title — relations used to name the other ticket by number only.
 
@@ -452,71 +427,132 @@ dates are YYYY-MM-DD.
   project has an upstream — sit behind its chevron instead of taking their own
   spot in the toolbar.
 
-### Added
+- The post-boot reminder and the aiball skill now both say that what surfaces
+  may be old rather than new, and how to check a thread's current state instead
+  of trusting its own account of itself. Companion to the age marker below: the
+  marker shows the gap, this explains what to do about it.
 
-- A proxy node can ask to be paired instead of being handed a token. Run
-  `aiball proxy pair` on the node, compare the short code it prints with the one
-  in the clickable notice on the hub, and approve — no credential is copied
-  between machines. Approving is what creates the token, and the node collects
-  it once.
+- A wake now stamps the event it announces — "2026-08-20 11:42" — when it has
+  been waiting more than an hour. Fresh wakes are unchanged, so the stamp
+  showing up is itself the signal that something sat in the queue. Matters when
+  the loop runs unattended: what surfaces then is backlog, and an undated
+  imperative reads like it just happened.
 
-  The hub only listens for pairing while you have opened a short window, from
-  the Nodes panel. It is shut by default and shuts again on restart: this is the
-  one route in aiball that writes for a caller who has not proved anything, and
-  it exists for a gesture you make a few times a year.
-- A ticket filed into a project its author doesn't belong to now records where
-  it came from, and the thread shows a "from X" tag. Filing next door is
-  legitimate — it's the first reason to open a ticket at all — but until now it
-  looked exactly like filing there by mistake. The field existed and was never
-  set; nothing fills it when the origin is ambiguous, since a wrong origin is
-  worse than none.
-- The repository is now installable as a Claude Code plugin, and declares itself
-  as a marketplace of one. The two skills it already ships are picked up from
-  their existing location — nothing moved. This is also what makes it
-  discoverable by the community directories, which crawl GitHub for valid
-  marketplace manifests rather than taking submissions.
-
-  Installing the plugin does not install aiball: the skills describe tools that
-  only exist next to a running daemon and its MCP server.
-- Two MCP tools that read the links people write but never record. `ticket_neighbors`
-  answers "what should I read before touching this", and surfaces neighbours in other
-  projects — which nothing else showed. `graph_audit` reports corpus hygiene: open
-  tickets whose whole cohort has closed, open children under closed parents,
-  cross-project pairs that reference each other with no typed relation, and small
-  knots of tickets that are really one investigation.
-
-  Both read a graph compiled from `#N` references in ticket bodies and comments,
-  rebuilt whenever the message log moves. The motivation was a measurement: typed
-  relations are curated by hand, and all but four of them were already stated in
-  prose, while thousands of prose links had never been typed.
-
-  Every finding is a candidate, never a verdict — the tools close nothing and
-  propose nothing, and each result carries a citation pointing at the sentence it
-  was read from, so you can check rather than trust.
-
-  The graph spans every project, because references cross project lines; what
-  each consumer reads is a projection of it. You see your own projects in full,
-  and past them only that a link crosses, named by project — the crossing is
-  reported because a dependency you cannot see is the one that hurts, while
-  what sits on the other side stays out of reach.
-- `poll()` now reports whether a human is around — as **facts**, not a verdict:
-  how long since the last human message, and how fresh the loop's own state is.
-  An agent picks its own threshold from what it is about to commit, since three
-  minutes is enough to decide a rename and nowhere near enough for a refactor.
-  A stale heartbeat reads as unknown, not absent.
-
-- The standing instruction is also reachable from the header, next to the
-  go-to field: one click, type, save. Its icon turns green while an instruction
-  is live on the project, so one left behind after coming back is visible
-  without opening anything.
-
-- A per-project **standing instruction**, set from the project's settings page
-  and shown at the head of every wake — event and backlog alike. Leave one
-  before stepping away ("light debugging only, no big changes") and clear it
-  when you are back; empty means wakes read exactly as they did. The field is a
-  single-line input, and past entries are suggested from the browser.
+- The embedded terminal view now shows the agent's **whole** pane, scaled down
+  to fit, instead of a fixed-size window cut out of it — a wide pane no longer
+  loses most of its columns off-screen. Fullscreen is unchanged and stays the
+  place to read at real size; enabling typing switches to it, since the
+  miniature's cells are too small to click accurately.
 
 ### Fixed
+
+- The goto box refuses a ticket number that does not exist.
+- A ticket toast opens the ticket, not one of its comments.
+- Tag names are really unique, and the shipped tag catalog can gain a tag after
+  the first boot.
+- `POST /api/consumers` changes only the fields it is sent.
+- `claude-loop start --init` writes where `--cwd` says, and seeds the config
+  blocks that are missing; `start` refuses a `--role` the runtime would ignore.
+- A loop's terminal session is created at the terminal's size.
+- On Windows, an empty window-status format renders the multiplexer's default,
+  and a refused restart says why and what to do.
+- A typed presence hold follows `presence_hold_seconds`.
+- A wake bundle that opens on a ticket's creation no longer repeats its title.
+- Deleting, renaming or purging a project drops its inbox counters.
+- `aiball check` names the file it reads and what it verifies.
+- **`claude-loop reload` now picks up changes to the wake template**: each loop
+  renders its wakes from a copy of the template taken when it started, and no
+  reload refreshed that copy — a wording change reached no loop until a full
+  restart. Every reload (the command, the automatic one after a commit, the
+  hotkey) now refreshes it from the file it was copied from, a custom
+  `--pings` template included. Loops started before this change cannot know
+  their source: `reload` says so and points to `restart`, and `list` /
+  `check` flag any loop whose template lags.
+
+- **The backlog wake now really asks for a gesture**: the wording decided for
+  each tier was changed in the code's fallback only, while the shipped template
+  — the one every loop actually renders — kept the old, vaguer sentences. Agents
+  never saw the new ask. Both now carry it, and a test holds them together.
+
+- **A thread no longer goes blank when it carries a dependency or link event**:
+  the row had no label to render, which threw mid-render and took every comment
+  of that thread down with it — the comments were served, the page showed none.
+
+- **Answering a backlog wake no longer brings the ticket straight back**: the
+  wake asks the agent for a gesture, but posting it counted as the thread
+  moving, which voided the cooldown the wake had just set. The agent's own word
+  now keeps the ticket sunk; anyone else's still lifts it, and a step still
+  lifts it at once since it says there is work right now.
+
+- **The project stats count tickets resolved by an accepted resolution**: the
+  resolved count (and the resolved percentage) only saw the old resolution
+  format and missed nearly every resolved ticket. It now agrees with the list.
+- **Closing a ticket accepts only its latest proposed resolution**: a close
+  used to accept every resolution still pending in the thread, even one replaced
+  since by newer plans, and could mark the ticket resolved on it. A replaced
+  resolution now stays as it was.
+- **The project stats count the resolutions agents propose today**: the
+  "pending resolution" counter only saw the old resolution format and stayed
+  low. It now counts the open tickets whose latest decision is a proposed
+  resolution, the ones the list badges.
+- **A replaced decision no longer lights the list's badge**: a proposed resolution
+  nobody decided, replaced since by newer plans, kept "resolution proposed" on
+  the ticket's row. The row's decision badges (pending and rejected) now follow
+  the ticket's latest decision, the one that decides whose turn it is.
+- `poll` no longer lists your pending tickets that were closed while waiting for
+  moderation: the list now matches the `my_pending` count.
+- `claude-loop wake` no longer types into Claude Code's folder trust dialog, where
+  Enter picks "No, exit", and no longer wakes a session that is logged out or
+  cannot reach the API.
+- A loop no longer re-injects the same updates wake after wake: when a live
+  notification about one ticket took over the wake, the pending updates of
+  another ticket were glued onto the phrase without being marked seen.
+- **A loop started in a folder Claude Code has never trusted no longer types into
+  its trust dialog.** The dialog's selection arrow looked like a ready prompt, so
+  the first wake could answer it with the default "No, exit" and close claude.
+  The loop now holds every wake while the dialog is on screen and paints the bar
+  orange with an "attach to answer" hint, and `claude-loop start` warns up front
+  when the folder is not trusted. The question is never answered for you.
+- **Commenting on a ticket that does not exist answers 404 instead of crashing**:
+  the API used to fail with a 500 carrying a server stack trace in an HTML page.
+  Any unexpected server error is now a plain JSON 500, with the details kept
+  in the daemon log.
+- **Several actions now take effect immediately instead of a moment later.**
+  Accepting or rejecting a decision, snoozing or waking a ticket, adding a
+  blocking relation, and the hold released when a ticket closes all changed the
+  database but left cached queues holding the previous answer — so for a few
+  seconds a ticket could still look gated after its plan was accepted, or still
+  look ready after a resolution was proposed. Nothing signalled it and it
+  cleared itself, which is why it went unnoticed for so long.
+
+- Loops no longer inherit a sibling project's working directory. The tmux
+  server is shared between loops and keeps the environment of whichever project
+  started it first, so every other pane saw that project's `AIBALL_CWD`. aiball
+  itself was immune, but a hook, a script or a command typed in the pane read
+  the wrong project's directory. Loops pick this up on their next start.
+
+- Reading a ticket over MCP marks its events read again. The acknowledgement was
+  bounded by the highest id in the response, but the ticket's own id was mixed
+  into that calculation — and on a header-only read it was the only one, so the
+  bound landed far below every event id and nothing was ever marked read. Events
+  on a thread an agent had consulted, even a closed one, stayed in its unread
+  queue indefinitely.
+- The Windows loop bar no longer prints raw format markup where the window chip
+  should be blank. Blanking it with an empty value made the multiplexer fall
+  back to its own default and render half of it literally, so a fragment like
+  `#{window_flags}` sat in the middle of the bar. Running loops pick this up on
+  their next start.
+- A sub-agent no longer receives the whole project's backlog. `init --sub-agent`
+  marked it assignment-only but left it subscribed to the project as an *owner*,
+  and project owners are exactly who events fan out to — so it was woken for
+  everything, like the maintainer it was meant to work under, while being unable
+  to claim any of it. It is now subscribed as a follower, which is what a
+  sub-agent was always meant to be. Existing sub-agents pick this up by
+  re-running the command, and doing so no longer renames one that already has a
+  name.
+- `init` can now write `consumer.role` at all, and a new `--role lead|crew` flag
+  exposes it directly. The key was already read from config and settable on
+  `start`, but nothing could put it in the file, so it had to be typed by hand.
 
 - Answering a question about one ticket no longer reads the whole board. Four
   derived-state queries scanned every ticket or every message to report on the
@@ -602,25 +638,6 @@ dates are YYYY-MM-DD.
   to lives in another one. It used to navigate by id alone, so the thread opened
   while the sidebar, the inbox and every scoped count stayed behind — visible
   only when jumping across projects, which is what made it look intermittent.
-
-### Changed
-
-- The post-boot reminder and the aiball skill now both say that what surfaces
-  may be old rather than new, and how to check a thread's current state instead
-  of trusting its own account of itself. Companion to the age marker below: the
-  marker shows the gap, this explains what to do about it.
-
-- A wake now stamps the event it announces — "2026-08-20 11:42" — when it has
-  been waiting more than an hour. Fresh wakes are unchanged, so the stamp
-  showing up is itself the signal that something sat in the queue. Matters when
-  the loop runs unattended: what surfaces then is backlog, and an undated
-  imperative reads like it just happened.
-
-- The embedded terminal view now shows the agent's **whole** pane, scaled down
-  to fit, instead of a fixed-size window cut out of it — a wide pane no longer
-  loses most of its columns off-screen. Fullscreen is unchanged and stays the
-  place to read at real size; enabling typing switches to it, since the
-  miniature's cells are too small to click accurately.
 
 ## [0.39.0] — 2026-07-28
 
