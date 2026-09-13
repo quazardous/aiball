@@ -150,6 +150,14 @@ export interface Plate {
      */
     pings_path: string;
     /**
+     * #2413 — where `pings_path` was COPIED FROM at start: the shipped default,
+     * or the file given with `--pings`. The loop renders every wake from its
+     * copy, so without the source a reload could never refresh it — a wording
+     * change reached no loop short of a full restart. Absent on plates written
+     * before this field existed.
+     */
+    pings_src?: string | null;
+    /**
      * Working directory the tmux session was spawned in. Recorded so
      * `list`/`tail`/etc. can show it.
      */
@@ -248,6 +256,39 @@ export function installRootSha(): string | null {
  * lag the repo. Null in either spot returns false (we can't claim
  * staleness without evidence both ways).
  */
+/**
+ * #2413 — bring the loop's copy of its wake template back in line with the
+ * source it was copied from. Called by every reload path (the CLI `reload`,
+ * the SHA-moved self-reload, the reload hotkey) BEFORE the new timer starts, so
+ * the fresh process renders from the fresh template.
+ * - `refreshed`: the source differed, the copy now matches it;
+ * - `unchanged`: already identical;
+ * - `no-source`: an older plate that never recorded one — only a restart
+ *   re-copies it;
+ * - `missing-source`: the recorded source is gone; the copy is kept.
+ */
+export type PingsRefresh = "refreshed" | "unchanged" | "no-source" | "missing-source";
+export function refreshPingsSnapshot(sd: string, plate: Pick<Plate, "pings_src">): PingsRefresh {
+    const src = plate.pings_src ?? null;
+    if (!src) return "no-source";
+    if (!existsSync(src)) return "missing-source";
+    const dest = pingsPath(sd);
+    const fresh = readFileSync(src);
+    if (existsSync(dest) && readFileSync(dest).equals(fresh)) return "unchanged";
+    writeFileSync(dest, fresh);
+    return "refreshed";
+}
+
+/** #2413 — what `list` / `check` say about a loop's wake template, or null when it is current. */
+export function pingsSnapshotNote(sd: string, plate: Pick<Plate, "pings_src">): string | null {
+    const src = plate.pings_src ?? null;
+    if (!src) return "wake template frozen at start (older loop) — restart to pick up template changes";
+    if (!existsSync(src)) return null;
+    const dest = pingsPath(sd);
+    if (existsSync(dest) && readFileSync(dest).equals(readFileSync(src))) return null;
+    return "wake template has changed since boot — reload to pick it up";
+}
+
 export function isLoopStale(plate: Plate): boolean {
     const at = plate.started_at_sha ?? null;
     if (!at) return false;

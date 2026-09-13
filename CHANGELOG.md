@@ -183,6 +183,15 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- **`claude-loop reload` now picks up changes to the wake template**: each loop
+  renders its wakes from a copy of the template taken when it started, and no
+  reload refreshed that copy — a wording change reached no loop until a full
+  restart. Every reload (the command, the automatic one after a commit, the
+  hotkey) now refreshes it from the file it was copied from, a custom
+  `--pings` template included. Loops started before this change cannot know
+  their source: `reload` says so and points to `restart`, and `list` /
+  `check` flag any loop whose template lags.
+
 - **The backlog wake now really asks for a gesture**: the wording decided for
   each tier was changed in the code's fallback only, while the shipped template
   — the one every loop actually renders — kept the old, vaguer sentences. Agents

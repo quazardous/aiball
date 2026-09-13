@@ -70,6 +70,7 @@ import {
     writePlate,
     ensureDir,
     zenPath,
+    pingsSnapshotNote,
     type Plate,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
@@ -732,6 +733,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         interval,
         check_cmd: opts.checkCmd,
         pings_path: pingsPath(sd),
+        // #2413 — so a reload can refresh the copy from where it came.
+        pings_src: resolve(pingsSrc),
         cwd,
         claude_args: opts.claudeArgs,
         // #B.225: stamp the install-root SHA so `list` / `check` can
@@ -1442,6 +1445,9 @@ function cmdList(): void {
                 `${"".padEnd(24)}  source has moved since boot: ${plate.started_at_sha.slice(0, 7)} → ${currentSha.slice(0, 7)} (reload to pick up changes)\n`,
             );
         }
+        // #2413 — the wake template is a copy taken at start; say when it lags.
+        const pingsNote = pingsSnapshotNote(sd, plate);
+        if (pingsNote) process.stdout.write(`${"".padEnd(24)}  ${pingsNote}\n`);
         found++;
     }
     if (found === 0) process.stdout.write("(no loops)\n");
@@ -1650,6 +1656,9 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 const stamped = plate.started_at_sha ?? null;
                 const current = installRootSha();
                 process.stdout.write(`    started_at_sha: ${stamped ?? "(unset — pre-#B.225 loop)"}\n`);
+                // #2413 — the wake template lags the same way code does.
+                const pingsNote = pingsSnapshotNote(sd, plate);
+                if (pingsNote) process.stdout.write(`    !! ${pingsNote}\n`);
                 if (stamped && current && stamped !== current) {
                     process.stdout.write(`    !! source has moved since boot: ${stamped.slice(0, 7)} → ${current.slice(0, 7)} (restart to reload)\n`);
                 } else if (stamped && current && stamped === current) {

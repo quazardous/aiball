@@ -93,6 +93,7 @@ import {
     loopLogPath,
     loopPidPath,
     claimLoopAsKernel,
+    refreshPingsSnapshot,
     type Plate,
     type WakeHint,
     type WakeEventHint,
@@ -576,6 +577,10 @@ function respawnKernel(reason: string): void {
     log(`respawning kernel — ${reason}`);
     try {
         const plate = readPlate(sd!);
+        // #2413 — same refresh as the CLI reload: a self-reload after a commit
+        // must pick up the wake template that commit changed.
+        const pingsRefresh = refreshPingsSnapshot(sd!, plate);
+        if (pingsRefresh !== "unchanged") log(`respawnKernel: wake template ${pingsRefresh}`);
         const sha = installRootSha();
         if (sha) { plate.started_at_sha = sha; try { writePlate(sd!, plate); } catch { /* best effort */ } }
     } catch { /* no plate — proceed with the respawn anyway */ }

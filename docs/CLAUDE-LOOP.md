@@ -554,7 +554,7 @@ liveness markers (PID-stamped) :
 | `plate.json`      | cli on start    | structured config (interval, check_cmd…)  |
 | `env`             | cli on start, `reload --set` | **persistent** bash-sourceable CL_* env vars (template + deliberate `--set`) |
 | `env.local`       | cli on start (from shell) | **volatile** CL_* overrides — see below |
-| `pings.yaml`      | cli on start    | copy of the wake-phrase pool              |
+| `pings.yaml`      | cli on start, every reload | copy of the wake template — every wake renders from it; each reload refreshes it from the file it was copied from (`plate.pings_src`) |
 | `proxy-alive`     | PTY proxy       | proxy is really fronting claude (PID-stamped) |
 | `kill-on-exit.sh` | cli on start    | bash trap script sourced in the tmux pane wrapper — SIGKILLs timer + proxy when claude exits |
 | `zen`             | cli `zen` / `touch` | mute markers — keeps the wake gate closed (file-only by design : safety override that must survive process restarts) |
@@ -796,6 +796,16 @@ ping_messages:
 `--pings /path/to/custom.yaml`. The phrase is purely cosmetic —
 claude reads "user typed X", inspects its context, decides what to
 do. The wrapper doesn't try to know what "work" is.
+
+The same file carries the `wake_master` template — the sentence that tells an
+agent what a wake wants. **This file wins over the fallback in
+`src/claude-loop/state.ts`**: change the wording here, in every tone. A loop
+renders from the copy it took at start, and every reload (`claude-loop reload`,
+the automatic reload after a commit, the hotkey) refreshes that copy from its
+source — a custom `--pings` file stays the source. A loop started before the
+source was recorded cannot be refreshed that way: `reload` says so, and
+`claude-loop restart` re-copies the shipped file. `list` and `check` flag a
+loop whose template lags.
 
 ---
 

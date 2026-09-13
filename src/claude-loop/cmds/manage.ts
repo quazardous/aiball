@@ -37,6 +37,7 @@ import {
     loopSockPath,
     sendShutdownToTimer,
     zenPath,
+    refreshPingsSnapshot,
     type Plate,
 } from "../state.js";
 import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
@@ -318,6 +319,18 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
         if (unsets.length > 0 && existsSync(envLocalPath(sd))) {
             patchEnvSet(envLocalPath(sd), unsets);
         }
+    }
+
+    // #2413 — the loop renders its wakes from a COPY of its template taken at
+    // start. Refresh it before the new timer boots, or a reload keeps the old
+    // wording forever (it did: a decided wording reached no loop for a day).
+    const pingsRefresh = refreshPingsSnapshot(sd, readPlate(sd));
+    if (pingsRefresh === "refreshed") {
+        process.stdout.write(`claude-loop: wake template refreshed from its source\n`);
+    } else if (pingsRefresh === "no-source") {
+        process.stdout.write(
+            `claude-loop: this loop predates template tracking — its wake template stays as it was at start; \`claude-loop restart ${name}\` picks up template changes\n`,
+        );
     }
 
     let oldPid: number | null = null;
