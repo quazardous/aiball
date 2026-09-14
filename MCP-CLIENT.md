@@ -186,7 +186,7 @@ The human IS the moderator and is watching the web UI. They expect agents to:
 A good idle-tick looks like:
 
 ```
-[wake fires with the head FIFO event injected: "look #47: TITLE. Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for."]
+[wake fires with the head FIFO event injected: "look #47: TITLE. Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours, with `continue_after_minutes` when it waits on a job; or a `handback: true` comment if it is someone else's."]
 ticket_get({ticket_id: 47, brief: true})
 [think: this is a resolution question, agent posts the answer]
 ticket_reply({target_id: 47, body: "...", then: "resolved"})
@@ -225,7 +225,7 @@ For continuous push, keep a `tail -F` on the project outbox path (returned by `s
 The hook asks the daemon "is anything pending for this consumer?" and, when there is, **blocks** the turn from ending with a message like:
 
 ```
-look #47: which strategy for the migration? Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for.
+look #47: which strategy for the migration? Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours, with `continue_after_minutes` when it waits on a job; or a `handback: true` comment if it is someone else's.
 ```
 
 That single line arrives as Claude Code stop-hook feedback, pointing the agent at the head of the FIFO (the wake-inject already marked that event seen on its way out). Treat it as a directive : read the ticket, react. **`then: "resolved"`** (or `then: "close"` if you are the reporter) — without one of these, the backlog doesn't decrease and the next wake fires on the same ticket. Need info before you can act? Post a plain comment with your question — the conversation IS the channel (the agent→human `blocked` signal was retired ; `then:"escalate"` covers the "I'm stuck on a human-only action" case).

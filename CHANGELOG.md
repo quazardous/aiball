@@ -47,6 +47,14 @@ dates are YYYY-MM-DD.
   overwriting it, and a malformed deposit file is refused without quoting its
   content.
 
+### Changed
+
+- **The wake and the tool say who has to move**: a `handback` is for when
+  someone else makes the next move; waiting on a build, a job or a measurement
+  is still the agent's move — `then: "continue"` with `continue_after_minutes`.
+  The wake's asks used to say "a handback comment saying what you wait for",
+  which agents read as the way to wait on anything.
+
 ## [0.40.0] — 2026-09-13
 
 ### Added

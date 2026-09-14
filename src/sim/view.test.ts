@@ -30,10 +30,15 @@ test("every wake ending the simulator prints is the loop's own wording", () => {
  */
 test("the SHIPPED wake template carries those same endings — it is what agents read", () => {
     const shipped = readFileSync(join(ROOT, "config/defaults/claude-loop-pings.yaml"), "utf8");
+    // #2457 — in EVERY tone: one tone right and the other two stale passed before.
+    const tones = (shipped.match(/\{head_tier_triage:\+ /g) ?? []).length;
+    assert.ok(tones >= 1, "the shipped template has no tier asks at all");
     for (const [key, ending] of Object.entries(WAKE_ENDING)) {
-        assert.ok(
-            shipped.includes(`{head_tier_${key}:+ ${ending}}`),
-            `config/defaults/claude-loop-pings.yaml no longer ends a ${key} wake with: ${ending}`,
+        const found = shipped.split(`{head_tier_${key}:+ ${ending}}`).length - 1;
+        assert.equal(
+            found,
+            tones,
+            `config/defaults/claude-loop-pings.yaml ends a ${key} wake with the current wording in ${found} of its ${tones} tones: ${ending}`,
         );
     }
 });

@@ -2758,9 +2758,9 @@ export async function buildContextPhrase(
             // situation: a `then:`, or a `handback: true` that says what is awaited.
             // "re-check it" sent agents back to read, then post nothing.
             + "{head_tier_confirm:+ Your `then:` on it is still waiting for an accept — confirm it as it stands, or amend it with a fresher one; say which on the thread.}"
-            + "{head_tier_triage:+ Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for.}"
+            + "{head_tier_triage:+ Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours, with `continue_after_minutes` when it waits on a job; or a `handback: true` comment if it is someone else's.}"
             + "{head_tier_followup:+ Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.}"
-            + "{head_tier_waiting:+ You spoke last — chase them or let it ride, but say which: a `then:` if the ball is yours, a `handback: true` comment naming what you wait for.}"
+            + "{head_tier_waiting:+ You spoke last — chase them or let it ride, but say which: `then: continue` if the ball is yours (with `continue_after_minutes` to wait on a job), a `handback: true` comment if someone else must move.}"
             + "{head_tier_blocked:+ Blocked by an open dependency — check the chain: help on the blocker, or cut the relation if it is stale. Say which on the thread.}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override

@@ -32,9 +32,9 @@ export const TIER_LABEL: Record<0 | 1 | 2 | 3 | 4, string> = {
 /** How a backlog wake ends, by the head's tier — the loop's exact words. */
 export const WAKE_ENDING = {
     confirm: "Your `then:` on it is still waiting for an accept — confirm it as it stands, or amend it with a fresher one; say which on the thread.",
-    triage: "Triage it, then close the loop: a `then:` (plan / continue / resolved), or a `handback: true` comment saying what you wait for.",
+    triage: "Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours, with `continue_after_minutes` when it waits on a job; or a `handback: true` comment if it is someone else's.",
     followup: "Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.",
-    waiting: "You spoke last — chase them or let it ride, but say which: a `then:` if the ball is yours, a `handback: true` comment naming what you wait for.",
+    waiting: "You spoke last — chase them or let it ride, but say which: `then: continue` if the ball is yours (with `continue_after_minutes` to wait on a job), a `handback: true` comment if someone else must move.",
     blocked: "Blocked by an open dependency — check the chain: help on the blocker, or cut the relation if it is stale. Say which on the thread.",
 } as const;
 

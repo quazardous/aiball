@@ -110,7 +110,8 @@ test("#1470 tier-1 head gets the triage ask — and it names the gesture wanted"
         PINGS_YAML,
     );
     // #2405 — "Triage the ticket." said nothing of what closing the loop takes.
-    assert.match(res.phrase, /Triage it, then close the loop: a `then:`/i);
+    // #2457 — the ask names who must move: continue for the agent, handback for someone else.
+    assert.match(res.phrase, /Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours/i);
 });
 
 test("#1470 unknown tier (older daemon) falls back to Triage — never an empty ask", async () => {

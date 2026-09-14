@@ -138,7 +138,7 @@ which case you're in**; read it, it's not decoration :
 |---|---|---|
 | `Triage it, then close the loop…` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
 | `Your pending decision is what gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope — don't just ack |
-| `You spoke last — chase them or let it ride, but say which…` | You're waiting on them | Chase **or** deliberately let it ride — and post it: a `then:` if the ball came back to you, else a `handback: true` naming what you wait for |
+| `You spoke last — chase them or let it ride, but say which…` | You spoke last | Chase **or** deliberately let it ride — and post it: `then: continue` if the next move is yours (with `continue_after_minutes` to wait on a job), a `handback: true` comment if someone else must move |
 | `Blocked by an open dependency…` | A blocker gates it | Help on the **blocker**, not here |
 
 Only the first calls for triage. On the others, doing nothing can be the right
@@ -240,6 +240,16 @@ when you pick it up again — a step without `continue_after_minutes` is refused
 
 Don't post a step to "keep" a ticket you are not about to work on — the top of
 the backlog is a promise.
+
+## `handback` or `then: continue`? Ask who has to move
+
+| Who makes the next move? | Gesture |
+|---|---|
+| **someone else** — answer a question, review, decide | `handback: true` — the ticket leaves your queue until they speak |
+| **you, later** — a build, a job, a measurement, a deploy to finish | `then: "continue"` with `continue_after_minutes: N` — it stays yours and comes back in N minutes |
+
+`handback` is not a way to wait. Handing a ticket back to nobody takes it out of
+your queue, and nothing will bring it back until someone else writes on it.
 
 ## Handing a secret over
 

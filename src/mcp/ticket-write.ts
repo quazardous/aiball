@@ -203,7 +203,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .boolean()
                     .optional()
                     .describe(
-                        "#2331 — does this reply hand the ticket back? REQUIRED when there is no `then`: `true` = you hand it back (a question, you wait for an answer; the ticket leaves your queue until someone replies); `false` = you keep it and carry on (only on a ticket you hold; for a finished step prefer `then: \"continue\"`, which also marks the step). With a `then`, leave it out: every decision implies `true`, `then: \"continue\"` implies `false`, and a contradicting value is refused (HTTP 400).",
+                        "#2331 — does this reply hand the ticket back? REQUIRED when there is no `then`: `true` = the next move belongs to SOMEONE ELSE — a question, a review, a decision; the ticket leaves your queue until someone replies. Not for waiting on a build, a job or a measurement: that move is still yours — use `then: \"continue\"` with `continue_after_minutes`. `false` = you keep it and carry on (only on a ticket you hold; for a finished step prefer `then: \"continue\"`, which also marks the step). With a `then`, leave it out: every decision implies `true`, `then: \"continue\"` implies `false`, and a contradicting value is refused (HTTP 400).",
                     ),
                 continue_after_minutes: z
                     .number()
