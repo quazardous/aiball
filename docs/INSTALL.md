@@ -340,6 +340,23 @@ The backup holds secrets (tokens, payloads, password hashes): it is written `070
 
 `aiball restore` checks everything before changing anything: every file against its sha256, the database's integrity, and a schema no newer than the installed code (an older one migrates when the daemon starts). It refuses while the daemon runs, because stopping it disconnects every loop. That is your call, not a side effect. The current data and config are not overwritten: they are renamed to `<dir>.pre-restore-<date>`.
 
+## Moving a project folder
+
+A plain `mv` of a project folder leaves its state on the old path: Claude Code's history for it (transcripts, prompt history, trust and per-project settings) and its claude-loop registration. `aiball relocate` moves the folder and that state together:
+
+```bash
+aiball relocate ~/dev/projects/old/app ~/dev/projects/new/app                 # dry run: prints the plan, changes nothing
+aiball relocate ~/dev/projects/old/app ~/dev/projects/new/app --apply
+aiball relocate ~/dev/projects/old/app ~/dev/projects/new/app --state-only --apply   # folder already moved by hand
+```
+
+- **Refusals**: it refuses while a claude-loop or any other process runs in the old folder. The shell you run it from does not count. With `--state-only`, it also refuses while a claude session runs in the new folder.
+- **Claude Code state**: the history directory `~/.claude/projects/<key>` and its subfolders' directories are renamed. Their `cwd` values, the `project` entries of `~/.claude/history.jsonl` and the `projects` keys of `~/.claude.json` are rewritten. Only those fields are touched: a transcript's commands and file reads keep the paths they had.
+- **Backups**: every rewritten file keeps a `.bak-relocate-<date>` copy. A file that changes while it is rewritten is left alone and reported; run the command again.
+- **Links and references**: symlinks into the old path under `~/.local/bin`, `~/bin` and every `--scan <dir>` are listed; `--fix-links` repoints them. Text files that mention the old path, a `.code-workspace` for instance, are listed and never rewritten.
+
+Claude Code's files are internal and undocumented; the dry run is how you check a newer Claude Code has not changed them.
+
 ## What's NOT in the Linux path
 
 - **macOS launchd unit**. The installer skips it (no `launchctl`

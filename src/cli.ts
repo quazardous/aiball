@@ -19,6 +19,7 @@ import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
 import { registerPayloadCommands } from "./cli/payload.js";
 import { registerBackupCommands } from "./cli/backup.js";
+import { registerRelocateCommands } from "./cli/relocate.js";
 import { registerTicketCommands } from "./cli/ticket.js";
 import { registerAdminCommands } from "./cli/admin.js";
 import { registerAutopollCommands } from "./cli/autopoll.js";
@@ -65,6 +66,7 @@ program
 registerTicketCommands(program);
 registerPayloadCommands(program);
 registerBackupCommands(program);
+registerRelocateCommands(program);
 registerAdminCommands(program);
 registerAutopollCommands(program);
 registerConsumerCommands(program);

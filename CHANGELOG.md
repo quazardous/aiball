@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **`aiball relocate`: move a project folder without losing its state**. The
+  folder moves together with its Claude Code history (transcripts, prompt
+  history, trust and settings) and its loop registration. A dry run comes first,
+  the command refuses while something runs in the folder, and every rewritten
+  file keeps a backup. `--state-only` catches up a folder already moved by hand.
+
 - **`aiball backup` and `aiball restore`**: a consistent snapshot of the board
   while the daemon runs (database, uploads, spool, config, with a sha256
   manifest), and a restore that checks all of it first, refuses a schema newer
