@@ -453,7 +453,7 @@ async function doDelete() {
                  #2326 david: after the author's name, with the other markers. -->
             <Tag
                 v-if="isStep"
-                :value="stepMeta.resumeAt ? `${STEP_LABEL} · resumes ${shortResume(stepMeta.resumeAt)}` : STEP_LABEL"
+                :value="STEP_LABEL"
                 severity="info"
                 :title="stepMeta.tagged
                     ? `a step, tagged by ${stepMeta.tagged.by}: the agent carries on — nothing to accept or reject`
@@ -462,6 +462,12 @@ async function doDelete() {
                         : 'a step: the agent marked this part done and carries on — nothing to accept or reject'"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
+            <!-- #2456 david — the resume reads right after the step chip, in the chip's own colour. -->
+            <span
+                v-if="isStep && stepMeta.resumeAt"
+                :title="`the agent resumes at ${new Date(stepMeta.resumeAt).toLocaleString()}`"
+                style="font-size: var(--fs-2xs); margin-left: 0.3rem; color: var(--p-tag-info-color); font-weight: 600"
+            >resumes {{ shortResume(stepMeta.resumeAt) }}</span>
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;
                  accept/reject lives under the composer). -->
             <Tag

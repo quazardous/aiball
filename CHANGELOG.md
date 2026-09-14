@@ -41,7 +41,7 @@ dates are YYYY-MM-DD.
 ### Fixed
 
 - A step that waits shows when its agent resumes: in the tooltip of the list's step
-  marker, and on the step chip in the thread. It is no longer flagged as a quiet
+  marker, and right after the step chip in the thread. It is no longer flagged as a quiet
   step before it is even due.
 - `aiball payload dump --format env` merges into an existing file instead of
   overwriting it, and a malformed deposit file is refused without quoting its
