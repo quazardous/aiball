@@ -20,6 +20,7 @@ const registrars = [
     (await import("./subscription.js")).registerSubscriptionTools,
     (await import("./inbox.js")).registerInboxTools,
     (await import("./upload.js")).registerUploadTools,
+    (await import("./payload.js")).registerPayloadTools,
     (await import("./welcome.js")).registerWelcomeTools,
     (await import("./ticket-import.js")).registerTicketImportTool,
 ];

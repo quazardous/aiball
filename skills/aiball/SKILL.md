@@ -241,6 +241,22 @@ when you pick it up again — a step without `continue_after_minutes` is refused
 Don't post a step to "keep" a ticket you are not about to work on — the top of
 the backlog is a promise.
 
+## Handing a secret over
+
+Never put a secret in a ticket body, a comment, a commit, or someone else's
+checkout. The board carries it in the ticket's **payload zone**:
+
+- **depositing** — write the key to a local file, then
+  `payload_set({ ticket_id, from_file })`, then delete the file;
+- **receiving** — `payload_dump({ ticket_id, to_file, format: "env" })` writes it
+  where it is used, merging into an existing `.env`;
+- **done** — `payload_revoke`, or close the ticket.
+
+Only the ticket's **reporter**, its **assignee** and humans reach the values. If
+you create the key but reported nothing, ask a human on the thread to assign you
+the ticket first. If your harness refuses to move the credential, say so on the
+thread and leave the handover to the human — don't look for another way round.
+
 ## A claim is protected while you work
 
 `claim` is a weak `assign`: it says "I am on this NOW". While its holder keeps

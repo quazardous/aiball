@@ -25,12 +25,24 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Agents can hand a secret over on the board**: four MCP tools —
+  `payload_show`, `payload_set`, `payload_dump`, `payload_revoke` — under the
+  payload zone's access rule (reporter, assignee, humans). A value never passes
+  through a tool argument or answer: `payload_set` reads a file on the agent's
+  host, `payload_dump` writes one.
+
 - **A step says when the agent resumes, and then leads its backlog**:
   `then: "continue"` requires `continue_after_minutes`. `0` means the agent
   carries on at once: the ticket goes to the top of its backlog, right after the
   events, for `tickets.step_hot_minutes` (30 by default). `N` — waiting on a
   build, a test box — keeps the ticket out of the agent's wakes for N minutes,
   then it leads. A step without it is refused, with the reason.
+
+### Fixed
+
+- `aiball payload dump --format env` merges into an existing file instead of
+  overwriting it, and a malformed deposit file is refused without quoting its
+  content.
 
 ## [0.40.0] — 2026-09-13
 

@@ -11,24 +11,22 @@
  * `--stdout` exists for a human at a keyboard who knows what their scrollback
  * is worth.
  */
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import type { Command } from "commander";
+import { readDepositFile, writeDumpFile } from "../payload-files.js";
 import { buildClient, die, gOpts, jsonline, out } from "./_helpers.js";
 
 /** `k=v` pairs from the command line, or a JSON object from a file. */
 function collectPayload(opts: { set?: string[]; fromFile?: string }): Record<string, unknown> {
     const payload: Record<string, unknown> = {};
     if (opts.fromFile) {
-        let parsed: unknown;
+        // #2454 — the parse error used to quote the file (Node's JSON errors
+        // carry a snippet of the input): a malformed secret file echoed its own
+        // secret into the terminal. The shared reader names the file, never it.
         try {
-            parsed = JSON.parse(readFileSync(opts.fromFile, "utf8"));
+            Object.assign(payload, readDepositFile(opts.fromFile));
         } catch (e) {
-            die(`cannot read ${opts.fromFile} as JSON: ${(e as Error).message}`);
+            die((e as Error).message);
         }
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-            die(`${opts.fromFile} must contain a JSON object of key -> value`);
-        }
-        Object.assign(payload, parsed as Record<string, unknown>);
     }
     for (const pair of opts.set ?? []) {
         const eq = pair.indexOf("=");
@@ -36,15 +34,6 @@ function collectPayload(opts: { set?: string[]; fromFile?: string }): Record<str
         payload[pair.slice(0, eq)] = pair.slice(eq + 1);
     }
     return payload;
-}
-
-/** Render a payload as a `.env` file rather than JSON. */
-function asEnv(payload: Record<string, unknown>): string {
-    return (
-        Object.entries(payload)
-            .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
-            .join("\n") + "\n"
-    );
 }
 
 function fmtView(v: unknown): string {
@@ -112,7 +101,7 @@ export function registerPayloadCommands(program: Command): void {
         .description("Retrieve the payload's VALUES — the deliberate gesture")
         .requiredOption("--id <id>", "Ticket id")
         .option("--to <path>", "Write the values here, mode 0600 (the normal path)")
-        .option("--format <format>", "json | env (with --to)", "json")
+        .option("--format <format>", "json | env (with --to; env merges into an existing file)", "json")
         .option("--stdout", "Print to stdout instead. Your terminal keeps it — say it on purpose")
         .action(async (opts, cmd) => {
             const globalOpts = gOpts(cmd);
@@ -130,13 +119,12 @@ export function registerPayloadCommands(program: Command): void {
                 jsonline(res);
                 return;
             }
-            const text =
-                opts.format === "env" ? asEnv(res.payload) : JSON.stringify(res.payload, null, 2) + "\n";
-            writeFileSync(opts.to, text, { mode: 0o600 });
-            // Re-assert the mode: an existing file keeps its own permissions,
-            // so the `mode` above only applies to a file we created.
-            chmodSync(opts.to, 0o600);
-            process.stderr.write(`wrote ${Object.keys(res.payload).length} key(s) to ${opts.to} (mode 0600)\n`);
+            // #2454 — an env dump merges into an existing file instead of
+            // rewriting it: the other keys of a service's .env stay put.
+            const written = writeDumpFile(opts.to, res.payload, opts.format);
+            process.stderr.write(
+                `${written.merged ? "merged" : "wrote"} ${written.keys.length} key(s) ${written.merged ? "into" : "to"} ${opts.to} (mode 0600)\n`,
+            );
         });
 
     payload

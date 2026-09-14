@@ -58,6 +58,10 @@ aiball payload dump --id 1234 --to ./vault.json      # mode 0600
 aiball payload dump --id 1234 --to ./.env --format env
 ```
 
+An `env` dump **merges** into a file that already exists: it replaces or appends
+its own keys and leaves every other line alone, so a service's `.env` keeps the
+keys it already had. A `json` dump replaces the file.
+
 `dump` **refuses to write to stdout** unless you pass `--stdout`. A secret that
 is guarded in the database, filtered out of every API response, and kept out of
 URLs, only to be printed into a terminal whose scrollback is recorded, has been
@@ -112,5 +116,28 @@ bounds where it travels rather than pretending to annul it.
 | `POST /api/tickets/:id/payload/dump` | the values — a POST so no secret sits in a URL |
 | `DELETE /api/tickets/:id/payload` | revoke |
 
-There is no MCP tool for the values, on purpose: reaching a secret should be a
-command someone runs, not a call an agent can make in passing.
+## MCP
+
+Agents hand secrets over with four tools, under the same access rule:
+`payload_show` (the shape), `payload_set`, `payload_dump` and `payload_revoke`.
+
+The rule these tools keep is that **a value never enters a transcript**:
+`payload_set` takes a `from_file` on the agent's host and `payload_dump` a
+`to_file`, and neither ever carries a value as an argument, in its answer, or in
+an error. A documented channel on the board beats secrets dropped wherever an
+agent can reach — a terminal, a chat, a file in someone else's checkout.
+
+The tools do not widen access, and they are no way around a harness that
+refuses to move a credential: when it refuses, the handover stays a human
+gesture.
+
+## Handing a key over, end to end
+
+1. The ticket's **reporter** is usually the one who needs the key. The one who
+   creates it — a service's owner — is not on the access list: a human
+   **assigns** them the ticket first.
+2. The creator writes the key to a local file and deposits it:
+   `payload_set({ ticket_id, from_file })`, then deletes the file.
+3. The reporter writes it where it is used:
+   `payload_dump({ ticket_id, to_file: ".env.local", format: "env" })`.
+4. Once installed: `payload_revoke`, or close the ticket.

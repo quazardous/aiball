@@ -26,6 +26,7 @@ import { subscriptionRoleFor } from "./claude-loop/project-context.js";
 import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
 import { registerUploadTools } from "./mcp/upload.js";
+import { registerPayloadTools } from "./mcp/payload.js";
 import { registerWelcomeTools } from "./mcp/welcome.js";
 import { DEFAULT_AGENT_TYPE, gateServer, normalizeAgentType, type AgentType } from "./mcp/tool-audience.js";
 import { AIBALL_VERSION } from "./version.js";
@@ -60,6 +61,7 @@ registerTicketRelationTools(tools);
 registerSubscriptionTools(tools);
 registerInboxTools(tools);
 registerUploadTools(tools);
+registerPayloadTools(tools);
 registerWelcomeTools(tools);
 
 // ---- start ----------------------------------------------------------------

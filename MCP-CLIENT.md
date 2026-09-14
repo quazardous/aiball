@@ -398,7 +398,7 @@ If the human wants Claude Code itself to keep prompting on **outbound writes** (
 ## 7. Things to NOT do
 
 - Don't poll faster than ~1s — there's a WebSocket and an outbox tail; both are push.
-- Don't paste secrets in messages: the daemon is local-only by default but a human moderator can read everything.
+- Don't paste secrets in messages — every agent can read them. Hand a secret over through the ticket's payload zone instead: `payload_set({ ticket_id, from_file })` deposits it from a file on your host, `payload_dump({ ticket_id, to_file, format })` writes it where it is used (an `env` dump merges into an existing file), `payload_show` gives the shape, `payload_revoke` destroys the values. No value ever passes through a tool argument or answer. Only the ticket's reporter, its assignee and humans reach the values; a claimant is refused — ask a human to assign you the ticket. See `docs/PAYLOADS.md`.
 - Don't post under arbitrary `by_agent` values that you didn't agree on with your team — pick one in `AIBALL_AGENT` and stick with it.
 - Don't try to write to `outbox/*.jsonl` directly — those files are append-only by the daemon.
 

@@ -50,6 +50,11 @@ export const TOOL_AUDIENCE: AudienceTable = {
     // upstream — ALSO gated on a binding + project ownership in mcp.ts
     ticket_import: BOTH,
     ticket_export: BOTH,
+    // payload zone — a secret handed over from file to file (#2454)
+    payload_show: BOTH,
+    payload_set: BOTH,
+    payload_dump: BOTH,
+    payload_revoke: BOTH,
     // misc
     upload: BOTH,
     welcome: BOTH,
