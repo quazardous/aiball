@@ -98,6 +98,32 @@ export function tmuxName(name: string): string {
  */
 export const WAKE_AGE_MIN_MS = 60 * 60 * 1000;
 
+/**
+ * #2458 — minutes since this loop's previous backlog wake on the head, when it
+ * comes back inside `windowSec` and nobody else has acted on it since; null
+ * otherwise. Someone else moving in between is a legitimate reason to come
+ * back — only a ticket that returns on its own asks for the hint.
+ */
+export function backlogRewakeMinutes(input: {
+    lastWakeAt: string | null | undefined;
+    lastActor: string | null | undefined;
+    lastActorAt: string | null | undefined;
+    me: string | null | undefined;
+    nowMs: number;
+    windowSec: number;
+}): number | null {
+    if (input.windowSec <= 0 || !input.lastWakeAt) return null;
+    const wakeMs = Date.parse(input.lastWakeAt);
+    if (!Number.isFinite(wakeMs)) return null;
+    const ageMs = input.nowMs - wakeMs;
+    if (ageMs < 0 || ageMs >= input.windowSec * 1000) return null;
+    const actorMs = input.lastActorAt ? Date.parse(input.lastActorAt) : NaN;
+    if (input.lastActor && input.lastActor !== input.me && Number.isFinite(actorMs) && actorMs > wakeMs) {
+        return null;
+    }
+    return Math.max(1, Math.round(ageMs / 60_000));
+}
+
 export function formatWakeStamp(createdAt: string | null | undefined, nowMs: number): string {
     if (!createdAt) return "";
     const at = Date.parse(createdAt);
@@ -2440,6 +2466,9 @@ export async function buildContextPhrase(
         let headTier: number | null = null;
         // #2376 david `a6zkyf` — the head's pending `then:`, if any.
         let headPendingDecision = false;
+        // #2458 — minutes since the previous backlog wake on this head, when it
+        // came back on its own too soon; "" otherwise.
+        let headRewakeMinutes = "";
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -2485,6 +2514,9 @@ export async function buildContextPhrase(
                      *  accept, gating or not: the ask becomes "confirm or amend
                      *  it" rather than a blank triage. */
                     pending_decision?: boolean;
+                    last_actor_at?: string | null;
+                    /** #2458 — this consumer's previous backlog wake on it. */
+                    backlog_last_wake_at?: string | null;
                 };
                 const rows: BacklogRow[] = Array.isArray(raw)
                     ? (raw as BacklogRow[])
@@ -2509,6 +2541,15 @@ export async function buildContextPhrase(
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
                     headTier = typeof top.backlog_tier === "number" ? top.backlog_tier : null;
                     headPendingDecision = top.pending_decision === true;
+                    const rewake = backlogRewakeMinutes({
+                        lastWakeAt: top.backlog_last_wake_at,
+                        lastActor: top.last_actor,
+                        lastActorAt: top.last_actor_at,
+                        me: process.env.AIBALL_AGENT,
+                        nowMs: Date.now(),
+                        windowSec: Math.max(0, Number(process.env[CL_ENV.BACKLOG_REWAKE_WINDOW_SEC] ?? 1800)),
+                    });
+                    if (rewake !== null) headRewakeMinutes = String(rewake);
                     // #1363 david `futbsc` — when the head's last actor isn't me,
                     // SHOW that last event's content (a bundle-style line) instead
                     // of asserting "<actor> is waiting on your reply". The old
@@ -2686,6 +2727,8 @@ export async function buildContextPhrase(
             head_tier_followup: backlogMode && headTier === 2 ? "1" : "",
             head_tier_waiting: backlogMode && headTier === 3 ? "1" : "",
             head_tier_blocked: backlogMode && headTier === 4 ? "1" : "",
+            // #2458 — the ticket came back too soon after its previous wake.
+            head_rewake_minutes: backlogMode ? headRewakeMinutes : "",
             // #1350 — "1" when the head EVENT wake is for a ticket this consumer
             // isn't responsible for (non-claimable). The template appends
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
@@ -2761,7 +2804,11 @@ export async function buildContextPhrase(
             + "{head_tier_triage:+ Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours, with `continue_after_minutes` when it waits on a job; or a `handback: true` comment if it is someone else's.}"
             + "{head_tier_followup:+ Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.}"
             + "{head_tier_waiting:+ You spoke last — chase them or let it ride, but say which: `then: continue` if the ball is yours (with `continue_after_minutes` to wait on a job), a `handback: true` comment if someone else must move.}"
-            + "{head_tier_blocked:+ Blocked by an open dependency — check the chain: help on the blocker, or cut the relation if it is stale. Say which on the thread.}}";
+            + "{head_tier_blocked:+ Blocked by an open dependency — check the chain: help on the blocker, or cut the relation if it is stale. Say which on the thread.}"
+            // #2458 david — a ticket that keeps coming back is usually a step
+            // declared with `continue_after_minutes: 0` while the next move waits
+            // on a job. Say how to rest it, on whatever tier it came back as.
+            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` the real delay in `continue_after_minutes` (not 0) and it rests until then.}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

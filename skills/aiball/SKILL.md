@@ -144,6 +144,11 @@ which case you're in**; read it, it's not decoration :
 Only the first calls for triage. On the others, doing nothing can be the right
 answer — say so in a line rather than re-posting.
 
+Whatever the ending, a wake may add **`It is back N min after your last wake on
+it…`**: the ticket returned on its own, nobody else moved. That is almost always
+a `then: continue` with `continue_after_minutes: 0` while the next step waits on
+something. Give the real delay instead, and the ticket rests until then.
+
 **Triage = ONE of three gestures, in order of preference :**
 
 1. **Do it** — claim and work if the next step is yours. Real action (status comment, code, decision) drops the ticket from the backlog.

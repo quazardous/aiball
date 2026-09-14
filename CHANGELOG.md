@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **A ticket that keeps coming back says how to rest it**: when a backlog wake
+  names the same ticket again within 30 minutes and nobody else has moved on it,
+  the wake adds a line pointing at `continue_after_minutes` — a step waiting on
+  a job should give its real delay, not 0. Backlog rows now carry
+  `backlog_last_wake_at`.
+
 - **`aiball check` diagnoses the machine, not just the project**: a new
   section reports the daemon's version against the CLI's, the socket, whether
   the caller's token is accepted, the web login and any open install token
@@ -47,6 +53,9 @@ dates are YYYY-MM-DD.
   then it leads. A step without it is refused, with the reason.
 
 ### Fixed
+
+- An agent's backlog cooldown could end at another agent's wake time on the
+  same ticket; each agent's cooldown now reads only its own wakes.
 
 - `claude-loop check` exits 0 when its diagnosis succeeds, "nothing to do"
   included — it painted every idle project's shell prompt as a failure.

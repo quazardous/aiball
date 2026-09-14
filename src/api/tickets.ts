@@ -917,6 +917,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             claimable: flags.claimable,
             backlog_tier: flags.backlog_tier,
             backlog_cooled_until: flags.backlog_cooled_until,
+            backlog_last_wake_at: flags.backlog_last_wake_at,
             gated_by_decision: flags.gated_by_decision,
             // #2376 david `a6zkyf` — a `then:` still waiting for its accept,
             // whether or not it gates the ticket: a human's comment hands the

@@ -25,6 +25,7 @@
  * without mocks. The impure factory `buildTicketFlagsContext` is the
  * single place where DB reads happen.
  */
+import { and, eq } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
 import { idScope } from "./scope-ids.js";
@@ -85,6 +86,10 @@ export interface TicketFlags {
      * whose `backlog_tier !== null`. */
     backlog_tier: 0 | 1 | 2 | 3 | 4 | null;
     backlog_cooled_until: string | null;
+    /** #2458 — when this consumer's backlog wake last named the ticket, cooled
+     *  or not; null outside the backlog. Lets the loop see a ticket coming
+     *  back too soon after its previous wake. */
+    backlog_last_wake_at: string | null;
     gated_by_decision: boolean;
     last_actor: string | null;
     last_actor_at: string | null;
@@ -112,6 +117,9 @@ export interface TicketFlagsContext {
      *  recent wake fired. The flag function turns wake_at + cooldown_sec
      *  into `backlog_cooled_until` (only when still in the future). */
     cooledWakeAt: Map<number, string>;
+    /** #2458 — this consumer's last backlog wake per ticket, whatever the
+     *  cooldown says. Optional: omitted → `backlog_last_wake_at` stays null. */
+    lastWakeAt?: Map<number, string>;
     /** #2365 — the cooldown window each cooled ticket is held for (seconds):
      *  the whole cooldown, or the short one after a step. */
     cooledWindowSec?: Map<number, number>;
@@ -258,6 +266,7 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         hot,
         backlog_tier,
         backlog_cooled_until,
+        backlog_last_wake_at: backlog_tier !== null ? (ctx.lastWakeAt?.get(t.id) ?? null) : null,
         gated_by_decision,
         last_actor,
         last_actor_at,
@@ -326,15 +335,23 @@ export function buildTicketFlagsContext(args: {
     // `backlogCooldownExclusions` already cross-checks against
     // `last_actor_at`; we just need the underlying wake_at to derive
     // the "until" timestamp for the row. Read the log once.
+    // #2458 — THIS consumer's rows only. The log is keyed (consumer, ticket)
+    // and the read used to take every consumer's, so another agent's wake on
+    // the same ticket could stand in for mine and shift my cooldown's end.
+    const lastWakeAt = new Map<number, string>();
     const cooledWakeAt = new Map<number, string>();
-    if (cooledIds.size > 0) {
+    if (consumerId) {
         const rows = db.select({
             ticketId: schema.backlogWakeLog.ticketId,
             wakeAt: schema.backlogWakeLog.wakeAt,
         }).from(schema.backlogWakeLog)
-            .where(idScope(schema.backlogWakeLog.ticketId, ticketIds))
+            .where(and(
+                eq(schema.backlogWakeLog.consumerId, consumerId),
+                idScope(schema.backlogWakeLog.ticketId, ticketIds),
+            ))
             .all();
         for (const r of rows) {
+            lastWakeAt.set(r.ticketId, r.wakeAt);
             if (cooledIds.has(r.ticketId)) cooledWakeAt.set(r.ticketId, r.wakeAt);
         }
     }
@@ -395,6 +412,7 @@ export function buildTicketFlagsContext(args: {
         lastActorMeIds,
         decisionGated,
         cooledWakeAt,
+        lastWakeAt,
         cooledWindowSec: cooledIds,
         ownClaimIds,
         assignedToMeIds,

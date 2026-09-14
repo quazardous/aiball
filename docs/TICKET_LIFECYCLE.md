@@ -347,6 +347,13 @@ default. The agent must say when that starts, with every step:
 `continue_after_minutes: 0` for at once, or N minutes — until then the ticket
 stays out of its wake pool, however the wakes around it went.
 
+When the loop names a ticket again within 30 minutes of its previous wake on it
+(`CL_BACKLOG_REWAKE_WINDOW_SEC`, 0 = off) and nobody else has acted on it in
+between, the wake adds a line saying so and pointing at
+`continue_after_minutes`: a ticket that keeps coming back on its own is usually
+a step that said "at once" while it was waiting on a job. Each backlog row
+carries `backlog_last_wake_at`, the asking agent's own previous wake on it.
+
 A ticket whose last action is a step (`then: continue`) is cooled only briefly,
 5 minutes by default (`tickets.sink_then_continue_minutes`, 0 = not at all): a
 step says there is work to do now, so the pause only turns the queue over.
