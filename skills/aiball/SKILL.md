@@ -243,6 +243,11 @@ the backlog is a promise.
 
 ## `handback` or `then: continue`? Ask who has to move
 
+**`handback` is the last reflex, not the first.** Before it, ask in this order:
+is this done or decided (`then: "resolved"` / `"plan"`)? is the next move
+mine, now or later (`then: "continue"`)? Only when neither holds — the move
+belongs to someone else — hand the ticket back.
+
 | Who makes the next move? | Gesture |
 |---|---|
 | **someone else** — answer a question, review, decide | `handback: true` — the ticket leaves your queue until they speak |
