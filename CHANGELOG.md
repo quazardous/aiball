@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-09-14
+
 ### Added
 
 - **`aiball relocate`: move a project folder without losing its state**. The
@@ -91,9 +93,11 @@ dates are YYYY-MM-DD.
 - `claude-loop check` exits 0 when its diagnosis succeeds, "nothing to do"
   included — it painted every idle project's shell prompt as a failure.
   `--exit-code` keeps the check-cmd verdict (0 = work, 1 = nothing) for scripts.
+
 - A step that waits shows when its agent resumes: in the tooltip of the list's step
   marker, and right after the step chip in the thread. It is no longer flagged as a quiet
   step before it is even due.
+
 - `aiball payload dump --format env` merges into an existing file instead of
   overwriting it, and a malformed deposit file is refused without quoting its
   content.
