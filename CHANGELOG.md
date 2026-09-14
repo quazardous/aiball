@@ -40,7 +40,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
-- A step that waits shows when its agent resumes: in the list next to the step
+- A step that waits shows when its agent resumes: in the tooltip of the list's step
   marker, and on the step chip in the thread. It is no longer flagged as a quiet
   step before it is even due.
 - `aiball payload dump --format env` merges into an existing file instead of
