@@ -64,8 +64,8 @@ import { computeActionableTicketIds } from "../db/projects.js";
 import { ticketHasPayload } from "../db/payloads.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
 import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
-import { isAssignmentLive, claimsToAutoRelease, claimProtectionEnd, pickFocusClaim } from "../db/assignment-gate.js";
-import { getConfig } from "../db/config-overrides.js";
+import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
+import { claimProtectedUntil, ticketClaimHeldUntil } from "../db/claim-hold.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, type RelationKind } from "../relations.js";
@@ -161,12 +161,6 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
  * is released, or the ticket closes. The assignee's own gating is unchanged.
  */
 /** #2379 — when the claim of `holder` stops protecting this ticket (epoch ms), or null. */
-function claimProtectedUntil(holder: string, ticketId: number, claimedAt: string | null, project: string): number | null {
-    const raw = Number(getConfig("tickets.claim_protect_minutes", project) ?? 60);
-    const minutes = Number.isFinite(raw) ? raw : 60;
-    const lastAction = ticketSelfLastActivity(holder, [ticketId]).get(ticketId) ?? null;
-    return claimProtectionEnd(claimedAt, lastAction, minutes);
-}
 
 ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     const id = Number(req.params.id);
@@ -1596,6 +1590,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     const hdrClaimable = hdrCanClaim
         ? hdrActionable && hdrOwnedProjects.has(t.project)
         : t.assignee === flagConsumer && hdrActionable;
+    const claimHeldEnd = ticketClaimHeldUntil(t);
     const headerBase = {
         id: t.id,
         project: t.project,
@@ -1623,7 +1618,12 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         assigned_at: t.assigned_at ?? null,
         claimant: t.claimant ?? null,
         claimed_at: t.claimed_at ?? null,
-        is_claim: t.claimant != null,
+        // #2460 — a lapsed claim stays on record (claimant, claimed_at) but is
+        // no longer held: `is_claim` says whether it is, `claim_until` until when
+        // (the later of the assign window and the holder's working protection).
+        // It was `claimant != null`, and showed a claim the step gate refused.
+        is_claim: claimHeldEnd !== null && claimHeldEnd > Date.now(),
+        claim_until: claimHeldEnd !== null ? new Date(claimHeldEnd).toISOString() : null,
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
         tags: listMessageTags(t.id),

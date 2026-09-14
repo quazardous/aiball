@@ -54,6 +54,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An agent still working on a ticket it claimed hours earlier was refused its
+  own `then: "continue"` while every other check said it held the ticket. A
+  claim now holds for the same span everywhere — the assign window, or while its
+  holder keeps acting there — and `ticket_get` gives `is_claim` and
+  `claim_until` from that rule; a lapsed claim's refusal says it lapsed.
+
 - An agent's backlog cooldown could end at another agent's wake time on the
   same ticket; each agent's cooldown now reads only its own wakes.
 

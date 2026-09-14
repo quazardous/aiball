@@ -26,10 +26,11 @@ import { purgeSeenPingsForTicket } from "./db.js";
 import { isTicketClosed } from "./db/messages.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
-import { isHeldByOther, isAssignmentLive } from "./db/assignment-gate.js";
+import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { getConsumer } from "./db/consumers.js";
 import { getConfig } from "./db/config-overrides.js";
+import { ticketClaimHeldUntil } from "./db/claim-hold.js";
 import { listSubscriptions } from "./db/subscriptions.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
@@ -505,7 +506,9 @@ function assertStepByHolder(input: NewMessage): void {
         ticketStatus: t.status,
         assignee: t.assignee ?? null,
         claimant: t.claimant ?? null,
-        claimLive: isAssignmentLive(t.claimed_at, Date.now(), assignWindowSec() * 1000),
+        // #2460 — held by the same rule a rival's claim meets: the assign window,
+        // or the holder still working there.
+        claimLive: (ticketClaimHeldUntil(t) ?? 0) > Date.now(),
     }, keeping ? "handback: false" : "then: continue");
     if (!refusal) return;
     const err = new Error(refusal);

@@ -70,6 +70,27 @@ export function claimProtectionEnd(
     return Math.max(...times) + protectMinutes * 60_000;
 }
 
+/**
+ * #2460 — until when does `claimedAt`'s holder hold the ticket (ms), or null
+ * when nothing holds it. Two clocks used to answer "does the agent hold it?":
+ * the assign window from the claim (4 h), read by the step gate and the header,
+ * and the protection from the holder's last action (#2379), read by a rival's
+ * claim. An agent still working past the first was protected against rivals
+ * yet refused its own `then: continue`. Held = the later of the two ends.
+ */
+export function claimHeldUntil(
+    claimedAt: string | null | undefined,
+    holderLastActionAt: string | null | undefined,
+    windowMs: number,
+    protectMinutes: number,
+): number | null {
+    const claimed = claimedAt ? Date.parse(claimedAt) : NaN;
+    const liveEnd = Number.isFinite(claimed) ? claimed + windowMs : null;
+    const protectEnd = claimProtectionEnd(claimedAt, holderLastActionAt, protectMinutes);
+    if (liveEnd === null) return protectEnd;
+    return protectEnd === null ? liveEnd : Math.max(liveEnd, protectEnd);
+}
+
 export function isHeldByOther(
     assignee: string | null | undefined,
     claimant: string | null | undefined,

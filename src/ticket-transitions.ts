@@ -329,6 +329,10 @@ export function stepRefusal(h: StepHold, gesture: "then: continue" | "handback: 
     if (holder) {
         return `${gesture} is for the agent holding the ticket, and it is held by ${holder}. Post handback: true instead. Nothing was posted.`;
     }
+    // #2460 — the author's own claim, lapsed: say so, the header still names it.
+    if (h.claimant === h.author) {
+        return `${gesture} is for the agent holding the ticket, and your claim has lapsed (it holds for the assign window after claiming, or while you keep acting on the ticket). Claim it again (ticket_claim), then post again. Nothing was posted.`;
+    }
     return `${gesture} is for the agent holding the ticket: claim it first (ticket_claim), then post again. Nothing was posted.`;
 }
 

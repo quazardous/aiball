@@ -300,7 +300,7 @@ test("only the agent holding the ticket may post a step", () => {
     const base = { author: "agent", ticketStatus: "approved", assignee: null, claimant: "agent", claimLive: true };
     assert.equal(t.stepRefusal(base), null, "its live claim");
     assert.equal(t.stepRefusal({ ...base, claimant: null, claimLive: false, assignee: "agent" }), null, "its assignment");
-    assert.match(t.stepRefusal({ ...base, claimLive: false }) ?? "", /claim it first/, "its claim expired");
+    assert.match(t.stepRefusal({ ...base, claimLive: false }) ?? "", /your claim has lapsed.*ticket_claim/, "its claim lapsed: said so, with the way back (#2460)");
     assert.match(t.stepRefusal({ ...base, claimant: null, claimLive: false }) ?? "", /claim it first/, "nobody holds it");
     assert.match(t.stepRefusal({ ...base, claimant: "other" }) ?? "", /held by other/, "another agent's claim");
     assert.match(t.stepRefusal({ ...base, claimant: null, claimLive: false, assignee: "other" }) ?? "", /held by other/, "assigned to another");
