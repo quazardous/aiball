@@ -25,6 +25,14 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **`aiball check` diagnoses the machine, not just the project**: a new
+  section reports the daemon's version against the CLI's, the socket, whether
+  the caller's token is accepted, the web login and any open install token
+  (with its expiry), `tmux` and `claude` versions, which PTY proxy a loop would
+  get (and why it fell back to Python), and the tailnet URL when a tailscale
+  provider is configured. Each problem comes with the command that fixes it;
+  `--json` carries the same lines.
+
 - **Agents can hand a secret over on the board**: four MCP tools —
   `payload_show`, `payload_set`, `payload_dump`, `payload_revoke` — under the
   payload zone's access rule (reporter, assignee, humans). A value never passes

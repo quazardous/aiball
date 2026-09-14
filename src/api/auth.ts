@@ -45,7 +45,11 @@ export const authRouter = Router();
  */
 authRouter.get("/auth/status", (req, res) => {
     const ready = anyHumanCredentials();
-    const hasInstall = listTokens({ kind: "install" }).length > 0;
+    // Expired rows linger until the purge; setup refuses them, so they must
+    // not reopen the form either (#2282 — `aiball check` reports the expiry).
+    const now = new Date().toISOString();
+    const installs = listTokens({ kind: "install" }).filter((t) => !t.expires_at || t.expires_at > now);
+    const hasInstall = installs.length > 0;
     const tokenStr = (() => {
         const a = req.header("authorization");
         if (a && /^bearer\s+/i.test(a)) return a.replace(/^bearer\s+/i, "").trim();
@@ -66,6 +70,10 @@ authRouter.get("/auth/status", (req, res) => {
         // /setup path. The frontend uses this to decide whether to show
         // the setup form at all.
         install_available: hasInstall,
+        // When the latest-expiring install token lapses; null = none open, or
+        // one that never expires. The token itself is never exposed here.
+        install_expires_at: installs.reduce<string | null>(
+            (acc, t) => (t.expires_at && (!acc || t.expires_at > acc) ? t.expires_at : acc), null),
         me,
     });
 });

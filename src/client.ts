@@ -1272,6 +1272,17 @@ export class AiballClient {
         return this.http<{ ok: boolean; ts: string; version?: string }>("GET", "/api/health");
     }
 
+    /** Public auth probe: is web login set up, is an install token open, and
+     *  does the daemon accept the bearer this client sends (`me`). */
+    authStatus() {
+        return this.http<{
+            ready: boolean;
+            install_available: boolean;
+            install_expires_at: string | null;
+            me: { consumer_id: string; kind: string } | null;
+        }>("GET", "/api/auth/status");
+    }
+
     /**
      * #394 local node probe — never relayed (mounted before the proxy relay in
      * app.ts). Tells whether THIS daemon is a proxy node and, if so, the

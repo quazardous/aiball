@@ -124,7 +124,7 @@ What it does:
 After install, the daemon is live and you can iterate with:
 
 ```bash
-aiball check        # health probe (config + consumer + daemon + deps)
+aiball check        # health probe (project, machine, deps)
 aiball --version
 systemctl --user status aiball
 ```
@@ -299,17 +299,25 @@ enough — no shell restart needed.
 
 ```bash
 aiball --version                       # version baked into package.json
-aiball check                           # config + consumer + daemon + deps probe
+aiball check                           # project + machine + deps probe
 systemctl --user status aiball          # unit health
 readlink -f ~/.local/lib/aiball         # symlink target (Path 3) or real dir (Path 2)
 ls -l ~/.local/share/aiball/sock        # socket present + writable
 curl --unix-socket ~/.local/share/aiball/sock http://_/api/health
 ```
 
-`aiball check` shows the resolved `.aiball.yaml`, the consumer
-identity, the daemon reachability, and the python3 PTY-proxy
-availability. It does **not** introspect the install layout (symlink vs
-hard) — use `readlink -f` for that.
+`aiball check` shows the resolved `.aiball.yaml` and the consumer
+identity, then a **machine** section: the daemon's version against the
+CLI's, the socket, whether the caller's token is accepted, the web login
+and any install token still open (with its expiry), the `tmux` and
+`claude` versions, which PTY proxy a loop would get (Rust, or the
+deprecated Python fallback and why), and — when a tailscale provider is
+configured — the URL it serves. Every warning or error line carries the
+command that fixes it (`aiball restart`, `aiball auth reinit`,
+`aiball providers up --all`, …); `aiball check --json` returns the same
+lines under `machine`. It reports, never repairs, and does **not**
+introspect the install layout (symlink vs hard) — use `readlink -f` for
+that.
 
 ## What's NOT in the Linux path
 

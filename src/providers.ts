@@ -90,7 +90,7 @@ export interface ProviderResult {
  * Resolve the daemon's port to proxy: `AIBALL_PORT` env → the systemd bind
  * drop-in (`~/.config/systemd/user/aiball.service.d/bind.conf`) → 7777.
  */
-function resolveDaemonPort(): number {
+export function resolveDaemonPort(): number {
     const env = process.env.AIBALL_PORT;
     if (env && /^\d+$/.test(env)) return Number(env);
     const dropin = join(homedir(), ".config", "systemd", "user", "aiball.service.d", "bind.conf");

@@ -391,8 +391,9 @@ rustup default stable-x86_64-pc-windows-gnu
 cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
 ```
 
-`claude-loop check` reports whether the binary is built. Note that `aiball check`
-only probes for `cargo` — the toolchain, not the artifact.
+`aiball check` (its machine section) and `claude-loop check` both report whether
+the binary is built; the dependencies section of `aiball check` probes `cargo`,
+the toolchain.
 
 #### If the build fails on `dlltool`
 

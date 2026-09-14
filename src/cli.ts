@@ -185,7 +185,7 @@ program
 program
     .command("check")
     .description(
-        "Project-level health check: .aiball.yaml, hook wiring, agent id resolution, daemon reachability, prerequisites, installed commands.",
+        "Health check: the project (.aiball.yaml, hook wiring, agent id resolution) and the machine under it (daemon version + socket, token, tmux/claude, PTY proxy, tailscale), prerequisites, installed commands.",
     )
     .option("--json", "Machine-readable JSON output")
     .action(async (opts: { json?: boolean }, cmd) => {
@@ -238,6 +238,17 @@ program
             upstreamInfo = { bindings: upstreamBindings, choice, probes };
         }
 
+        // #2282 — the machine under the project: versions, socket, token,
+        // tools, PTY proxy, tailnet. Probed once, judged by a pure function.
+        const dependencies = checkPrereqs();
+        const { probeMachine, assembleMachineReport } = await import("./machine-check.js");
+        const machine = assembleMachineReport(await probeMachine({
+            client,
+            cliVersion: AIBALL_VERSION,
+            proxyImpl: cfg.claude_loop.proxy_impl,
+            dependencies,
+        }));
+
         const payload = {
             cwd: userCwd(),
             config: {
@@ -272,13 +283,14 @@ program
             // cannot carry. Probed through src/sysdeps.ts — the same lookup the
             // proxy launch uses — and each miss carries the install command for
             // THIS machine's package manager.
-            dependencies: checkPrereqs(),
+            dependencies,
             // #1583 — the commands as the SHELL sees them. Prerequisites say
             // what the machine is missing; this says what the install has lost.
             // Probed by running them, because a launcher whose target vanished
             // still passes an existence test — that's how a whole Windows box
             // went silent after the `.cmd` files were dropped.
             shims: checkShims(),
+            machine,
             // #B.154: deprecation surface — `.mcp.json` env block is
             // the legacy identity-injection mechanism; users should
             // migrate to `.aiball.yaml consumer:*`. Independent of
@@ -315,6 +327,9 @@ program
         process.stdout.write(`\nconsumer\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.project)} project: ${payload.consumer.project ?? "(unresolved)"} ${payload.consumer.project_source ? `[from ${payload.consumer.project_source}]` : ""}\n`);
+        if (payload.daemon.up && payload.consumer.agent) {
+            process.stdout.write(`  ${ok(payload.daemon.unread_pings === 0)} unread pings: ${payload.daemon.unread_pings ?? "?"}\n`);
+        }
         if (payload.upstream) {
             const u = payload.upstream;
             // `auto` picks the first passing probe, gh first — mirror that here
@@ -338,10 +353,11 @@ program
                 process.stdout.write(`  ! transport "${u.choice}" is configured but not usable — upstream calls will fail (no silent fallback)\n`);
             }
         }
-        process.stdout.write(`\ndaemon\n`);
-        process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);
-        if (payload.daemon.up && payload.consumer.agent) {
-            process.stdout.write(`  ${ok(payload.daemon.unread_pings === 0)} unread pings for ${payload.consumer.agent}: ${payload.daemon.unread_pings ?? "?"}\n`);
+        process.stdout.write(`\nmachine\n`);
+        const mark = { ok: "✓", warn: "!", error: "✗" } as const;
+        for (const l of payload.machine) {
+            process.stdout.write(`  ${mark[l.status]} ${l.id.replace("_", " ")}: ${l.detail}\n`);
+            if (l.fix && l.status !== "ok") process.stdout.write(`     fix: ${l.fix}\n`);
         }
         process.stdout.write(`\ndependencies\n`);
         for (const d of payload.dependencies) {
