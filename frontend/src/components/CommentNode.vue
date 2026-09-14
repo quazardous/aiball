@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { DECISION_GESTURES, STEP_LABEL, isStepMeta } from "@shared/ticket-transitions";
+import { shortResume } from "../lib/labels";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import Button from "primevue/button";
 import SplitButton from "primevue/splitbutton";
@@ -169,12 +170,17 @@ async function untag() {
 // tags its comment as a step. Agents' comments always carry a summary_until
 // (humans are exempt), which is how the menu tells them apart; the daemon
 // refuses a human's comment anyway.
-const stepMeta = computed((): { summary: boolean; tagged: { by: string } | null } => {
+const stepMeta = computed((): { summary: boolean; tagged: { by: string } | null; resumeAt: string | null } => {
     try {
-        const m = JSON.parse(props.msg.meta ?? "null") as { summary_until?: unknown; step_tagged?: { by: string } } | null;
-        return { summary: typeof m?.summary_until === "string", tagged: m?.step_tagged ?? null };
+        const m = JSON.parse(props.msg.meta ?? "null") as { summary_until?: unknown; step_tagged?: { by: string }; step_resume_at?: string } | null;
+        return {
+            summary: typeof m?.summary_until === "string",
+            tagged: m?.step_tagged ?? null,
+            // #2456 — when the agent said it resumes (continue_after_minutes).
+            resumeAt: typeof m?.step_resume_at === "string" ? m.step_resume_at : null,
+        };
     } catch {
-        return { summary: false, tagged: null };
+        return { summary: false, tagged: null, resumeAt: null };
     }
 });
 async function stepTag(tag: boolean) {
@@ -447,11 +453,13 @@ async function doDelete() {
                  #2326 david: after the author's name, with the other markers. -->
             <Tag
                 v-if="isStep"
-                :value="STEP_LABEL"
+                :value="stepMeta.resumeAt ? `${STEP_LABEL} · resumes ${shortResume(stepMeta.resumeAt)}` : STEP_LABEL"
                 severity="info"
                 :title="stepMeta.tagged
                     ? `a step, tagged by ${stepMeta.tagged.by}: the agent carries on — nothing to accept or reject`
-                    : 'a step: the agent marked this part done and carries on — nothing to accept or reject'"
+                    : stepMeta.resumeAt
+                        ? `a step: the agent waits on something and resumes at ${new Date(stepMeta.resumeAt).toLocaleString()} — nothing to accept or reject`
+                        : 'a step: the agent marked this part done and carries on — nothing to accept or reject'"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;

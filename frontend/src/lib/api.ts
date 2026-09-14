@@ -556,6 +556,8 @@ export interface InboxRow {
     stalled_step?: boolean;
     /** #2327 — the last word on the ticket is a step (then: continue). */
     latest_is_step?: boolean;
+    /** #2456 — when the latest step's agent resumes (ISO); null = at once. */
+    step_resume_at?: string | null;
     /** #656 david `2c9qm4`: true iff a pending decision exists AND
      *  the decision-bearing comment IS the latest comment on the
      *  thread (no newer activity past it). UI uses this to keep

@@ -13,6 +13,8 @@ import {
     STATUS_SEVERITY,
     type StatusFilter,
     snoozedTooltip,
+    shortResume,
+    stepResumeTooltip,
 } from "../lib/labels";
 import PriorityIcon from "./PriorityIcon.vue";
 import { scopeIcon, scopeTitle, type Scope } from "../lib/scope";
@@ -181,6 +183,13 @@ function onRowClick(r: InboxRow) {
                 :title="lifecycleStage(r) === 'snoozed' ? snoozedTooltip(r.postponed_until) : LIFECYCLE_ICONS[lifecycleStage(r)].title"
                 :style="`color: var(${LIFECYCLE_ICONS[lifecycleStage(r)].color})`"
             />
+            <!-- #2456 david — a step that waits shows when its agent resumes. -->
+            <span
+                v-if="lifecycleStage(r) === 'step' && r.step_resume_at && Date.parse(r.step_resume_at) > Date.now()"
+                class="inbox-step-resume"
+                :title="stepResumeTooltip(r.step_resume_at)"
+                :style="`color: var(${LIFECYCLE_ICONS.step.color})`"
+            >↻ {{ shortResume(r.step_resume_at) }}</span>
         </template>
         <!-- #542 david : `from` (reporter/owner) déplacé du title-line vers
              le chip-line après les tags. Le `#from` slot du ListRow n'est

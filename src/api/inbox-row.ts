@@ -221,6 +221,11 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         /** #2327 — the ticket’s last word is a step (`then: continue`); the
             list shows a discreet blue check. */
         latest_is_step: live && agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,
+        /** #2456 david — when that step's agent resumes (`continue_after_minutes`),
+            so the list can show it; null for a step that carries on at once. */
+        step_resume_at: live && agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId && agg.lastStepResumeAt
+            ? agg.lastStepResumeAt
+            : null,
         stalled_step: live && isStepStalled(
             agg.lastStepAt || null,
             agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,

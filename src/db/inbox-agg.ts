@@ -65,6 +65,8 @@ export interface InboxAgg {
     /** #2308 — the latest step (`then: continue`) on the thread; 0 and "" when none. */
     lastStepId: number;
     lastStepAt: string;
+    /** #2456 — when the latest step's author said it resumes (ISO), or "". */
+    lastStepResumeAt: string;
 }
 
 export function emptyAgg(): InboxAgg {
@@ -83,6 +85,7 @@ export function emptyAgg(): InboxAgg {
         lastSpeakerId: 0,
         lastStepId: 0,
         lastStepAt: "",
+        lastStepResumeAt: "",
     };
 }
 
@@ -135,7 +138,12 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
             cur.lastStepId = m.id;
             // #2369 — a step a human tagged later dates from the tag: tagging an old
             // comment must not flag it as a step nothing has followed.
-            cur.lastStepAt = parseMeta(m.meta ?? null).step_tagged?.at ?? m.created_at;
+            const stepMeta = parseMeta(m.meta ?? null);
+            cur.lastStepAt = stepMeta.step_tagged?.at ?? m.created_at;
+            // #2456 — a step that declared a later resume is not quiet before
+            // it is due: its staleness counts from the resume.
+            cur.lastStepResumeAt = stepMeta.step_resume_at ?? "";
+            if (cur.lastStepResumeAt && cur.lastStepResumeAt > cur.lastStepAt) cur.lastStepAt = cur.lastStepResumeAt;
         }
         let syntheticResolved: Message | null = null;
         if (m.kind === "comment_added" && m.status === "approved") {

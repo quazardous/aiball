@@ -157,6 +157,22 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
  * Snooze rows want the actual wake-up date in the tooltip when
  * available; fall back to the catalog title otherwise.
  */
+/**
+ * #2456 david — the time a step's agent resumes, short enough for a list row:
+ * the time alone today, the date and time on another day.
+ */
+export function shortResume(iso: string): string {
+    const d = new Date(iso);
+    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return sameDay ? time : `${d.toLocaleDateString([], { day: "2-digit", month: "2-digit" })} ${time}`;
+}
+
+/** #2456 — the full sentence behind the short form. */
+export function stepResumeTooltip(iso: string): string {
+    return `step — the agent resumes at ${new Date(iso).toLocaleString()}`;
+}
+
 export function snoozedTooltip(postponed_until: string | null | undefined): string {
     if (!postponed_until) return LIFECYCLE_ICONS.snoozed.title;
     return `snoozed until ${new Date(postponed_until).toLocaleString()}`;
