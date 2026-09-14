@@ -66,6 +66,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A tool call could fail with a bare `write EPIPE` when the daemon's socket
+  closed the connection before reading the request. The call is now retried
+  like a reset connection: the daemon never ran it, so a retry cannot run it
+  twice. A transport error that still gets through names the call and the socket.
+
 - A thread with several `then: "continue"` steps marked each of them, with its
   resume time long past; only the latest counts, and only the latest shows as a
   step now.

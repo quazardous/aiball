@@ -131,3 +131,7 @@ test("#855 withRetry: arbitrary error propagates immediately, NO retry", async (
 test("#855 withRetry: defaults to RETRY_BACKOFF_MS sequence (3 retries)", () => {
     assert.deepEqual(RETRY_BACKOFF_MS, [300, 1000, 3000]);
 });
+
+test("#2462 retriable: EPIPE (connection closed while the request was written)", () => {
+    assert.equal(isRetriableHttpError({ code: "EPIPE" }), true);
+});

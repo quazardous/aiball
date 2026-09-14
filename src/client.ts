@@ -202,7 +202,7 @@ export class AiballClient {
                     res.on("error", reject);
                 },
             );
-            req.on("error", reject);
+            req.on("error", (e: Error & { code?: string }) => reject(transportError(e, method, path, `unix:${this.socketPath}`)));
             req.on("timeout", () => {
                 req.destroy(new Error(`${method} ${path} → timeout after ${this.timeoutMs}ms`));
             });
@@ -1346,7 +1346,26 @@ export function isRetriableHttpError(e: unknown): boolean {
     // versions and no code on others — match by message too.
     if (err.code === "ECONNRESET") return true;
     if (typeof err.message === "string" && /socket hang up/i.test(err.message)) return true;
+    // #2462 — `write EPIPE`: the peer closed the connection while the request was
+    // still being written. The daemon never received a complete request, so it
+    // ran nothing and a replay cannot double-write — the same footing as the
+    // ECONNRESET above, which differs only in when the client noticed. Observed
+    // as a `ticket_claim` failing three times with that bare text and no retry.
+    if (err.code === "EPIPE") return true;
     return false;
+}
+
+/**
+ * #2462 — a transport error (EPIPE, ECONNRESET, ENOENT…) arrives from Node as
+ * bare text: `write EPIPE` said nothing of which call, on which socket, so the
+ * one report of it could not be traced. Keep the code (the retry policy reads
+ * it), put the request and the transport in front of the message.
+ */
+export function transportError(e: Error & { code?: string }, method: string, path: string, via: string): Error {
+    const wrapped = new Error(`${method} ${path} via ${via}: ${e.message}`) as Error & { code?: string; cause?: unknown };
+    if (e.code) wrapped.code = e.code;
+    wrapped.cause = e;
+    return wrapped;
 }
 
 /**
