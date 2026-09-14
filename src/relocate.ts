@@ -99,22 +99,42 @@ export function rewriteFieldPaths(text: string, fields: string[], oldPath: strin
     return { text: out, count };
 }
 
-/** Rename the `projects` keys equal to `old` or under it. Returns the count. */
+/**
+ * Rename the `projects` keys equal to `old` or under it. Returns the count.
+ *
+ * Claude may already have an entry for the new path: opening Claude in a
+ * folder moved by hand creates a fresh one, next to the old entry that holds
+ * the trust, the settings and the session record. Renaming over it lost one of
+ * the two. They are merged instead: the new entry's non-null values win (they
+ * are the more recent), the old entry fills in everything else.
+ */
 export function rewriteClaudeJsonProjects(json: Record<string, unknown>, oldPath: string, newPath: string): number {
     const projects = json.projects as Record<string, unknown> | undefined;
     if (!projects || typeof projects !== "object") return 0;
-    let count = 0;
+    const moved = new Map<string, unknown>();
+    for (const [k, v] of Object.entries(projects)) {
+        if (under(k, oldPath)) moved.set(newPath + k.slice(oldPath.length), v);
+    }
+    if (moved.size === 0) return 0;
     const next: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(projects)) {
-        if (under(k, oldPath)) {
-            next[newPath + k.slice(oldPath.length)] = v;
-            count++;
-        } else {
+        if (under(k, oldPath)) continue;
+        if (!moved.has(k)) {
             next[k] = v;
+            continue;
+        }
+        const old = moved.get(k);
+        moved.delete(k);
+        if (old && v && typeof old === "object" && typeof v === "object") {
+            const fresh = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x !== null && x !== undefined));
+            next[k] = { ...(old as Record<string, unknown>), ...fresh };
+        } else {
+            next[k] = v ?? old;
         }
     }
-    if (count > 0) json.projects = next;
-    return count;
+    for (const [k, v] of moved) next[k] = v;
+    json.projects = next;
+    return Object.keys(projects).filter((k) => under(k, oldPath)).length;
 }
 
 function readCwds(dir: string): Set<string> {

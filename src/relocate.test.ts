@@ -79,6 +79,21 @@ test("field rewrites touch only the named fields, only the old path and what lie
     assert.deepEqual(Object.keys(json.projects as object).sort(), ["/a/jobbox2", "/b/jobbox", "/b/jobbox/wrap"]);
 });
 
+test("an entry Claude already made for the new path is merged with the old one, not overwritten", () => {
+    const json: Record<string, unknown> = { projects: {
+        "/a/jobbox": { hasTrustDialogAccepted: true, lastSessionId: "old-session", lastCost: 12, allowedTools: ["x"] },
+        "/b/jobbox": { hasTrustDialogAccepted: true, lastSessionId: null, lastCost: null, exampleFilesGeneratedAt: 99, lastGracefulShutdown: false },
+    } };
+    assert.equal(rewriteClaudeJsonProjects(json, "/a/jobbox", "/b/jobbox"), 1);
+    const p = json.projects as Record<string, Record<string, unknown>>;
+    assert.deepEqual(Object.keys(p), ["/b/jobbox"]);
+    assert.equal(p["/b/jobbox"].lastSessionId, "old-session", "the old record fills what the fresh entry left null");
+    assert.equal(p["/b/jobbox"].lastCost, 12);
+    assert.deepEqual(p["/b/jobbox"].allowedTools, ["x"]);
+    assert.equal(p["/b/jobbox"].exampleFilesGeneratedAt, 99, "the fresh entry's values win");
+    assert.equal(p["/b/jobbox"].lastGracefulShutdown, false);
+});
+
 test("a dry run lists everything and changes nothing", () => {
     const m = machine();
     const before = readFileSync(join(m.claudeDir, "history.jsonl"), "utf8");
