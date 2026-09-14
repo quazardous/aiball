@@ -345,7 +345,9 @@ A ticket whose last action is the agent's own step **leads that agent's
 backlog** (tier 0, right after the events) for `tickets.step_hot_minutes`, 30 by
 default. The agent must say when that starts, with every step:
 `continue_after_minutes: 0` for at once, or N minutes — until then the ticket
-stays out of its wake pool, however the wakes around it went.
+stays out of its wake pool, however the wakes around it went. N is at most
+`tickets.step_after_max_minutes` (120 by default, set per project): a longer
+wait is refused, since it is not one step waiting on a job any more.
 
 When the loop names a ticket again within 30 minutes of its previous wake on it
 (`CL_BACKLOG_REWAKE_WINDOW_SEC`, 0 = off) and nobody else has acted on it in

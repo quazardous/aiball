@@ -101,9 +101,15 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): string 
     // 0 for at once, N minutes when the next move waits on something. Required
     // like the handback, and by the same rule, so the refusal is where an agent
     // learns the gesture — at the moment it makes it.
+    // #2481 david — "c'est 2h le max (modifiable par projet en conf)". For
+    // everyone, humans included: the limit is the project's, not a requirement.
+    const rawMax = Number(getConfig("tickets.step_after_max_minutes", msg.project) ?? 120);
+    const maxAfter = Number.isFinite(rawMax) && rawMax >= 0 ? rawMax : 120;
     const stepRefusal = required && msg.step === true && msg.step_after_minutes === undefined
         ? "then: continue needs continue_after_minutes — 0 if you carry on at once, N (minutes) if the next step waits on something: a build, a test box, a deploy"
-        : null;
+        : msg.step === true && msg.step_after_minutes !== undefined && msg.step_after_minutes > maxAfter
+            ? `continue_after_minutes is at most ${maxAfter} on this project (tickets.step_after_max_minutes) — a longer wait is not one step waiting on a job: hand the ticket back, or propose a plan`
+            : null;
     const refusal = stepRefusal ?? handbackRefusal({
         decisionKind: msg.decision_kind,
         step: msg.step === true,
@@ -267,8 +273,10 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     if (o.step_after_minutes !== undefined && o.step_after_minutes !== null) {
         const n = o.step_after_minutes;
         if (!step) return { error: "step_after_minutes only goes with a step (then: continue)" };
-        if (typeof n !== "number" || !Number.isInteger(n) || n < 0 || n > 1440) {
-            return { error: "step_after_minutes must be a whole number of minutes, from 0 to 1440" };
+        // The upper bound is the project's (`tickets.step_after_max_minutes`),
+        // checked where the project is known: `withoutDecisionRefusal`.
+        if (typeof n !== "number" || !Number.isInteger(n) || n < 0) {
+            return { error: "step_after_minutes must be a whole number of minutes, 0 or more" };
         }
         stepAfterMinutes = n;
     }

@@ -144,6 +144,16 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "After an agent posts a step (then: continue), its ticket leads that agent's backlog — right after the events, ahead of every other ticket — for this long, counted from the step. Past it, the ticket ranks like any other. It only changes the order; the visible 'hot' mark keeps its own rule. 0 = a step gets no priority.",
     },
+    // #2481 david — "c'est 2h le max (modifiable par projet en conf)".
+    {
+        key: "tickets.step_after_max_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 120,
+        label: "Longest wait a step may declare (minutes)",
+        description:
+            "The most an agent may put in continue_after_minutes on a step (then: continue). A longer wait is refused with this limit in the reason — past it the work is not one step waiting on a job any more: hand the ticket back, or propose a plan.",
+    },
     {
         key: "tickets.claim_protect_minutes",
         scope: "global+project",

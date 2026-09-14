@@ -209,10 +209,9 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .number()
                     .int()
                     .min(0)
-                    .max(1440)
                     .optional()
                     .describe(
-                        "#2449 — REQUIRED with `then: \"continue\"`, refused with anything else: when you resume. `0` = you carry on at once, and the ticket leads your backlog right away. `N` = the next step waits on something (a build, a test box, a deploy): the ticket stays out of your wakes for N minutes, then leads your backlog. A step without it is refused (HTTP 400).",
+                        "#2449 — REQUIRED with `then: \"continue\"`, refused with anything else: when you resume. `0` = you carry on at once, and the ticket leads your backlog right away. `N` = the next step waits on something (a build, a test box, a deploy): the ticket stays out of your wakes for N minutes, then leads your backlog. At most the project's `tickets.step_after_max_minutes` (120 by default): a longer wait is refused with the limit — hand the ticket back or propose a plan instead. A step without it is refused (HTTP 400).",
                     ),
                 scope: z
                     .enum(MESSAGE_SCOPES)

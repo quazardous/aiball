@@ -113,3 +113,21 @@ test("a step cannot also carry a decision", async () => {
     assert.match(r.json.error ?? "", /exclusive/);
     assert.equal(commentsOn(t).length, 0);
 });
+
+// #2481 david — "c'est 2h le max (modifiable par projet en conf)".
+test("a step may wait up to the project's limit, 120 minutes by default, and not a minute more", async () => {
+    const { setConfigOverride } = await import("../db/config-overrides.js");
+    const t = ticket();
+    setTicketClaim(t, "worker");
+    const atMax = await step(t, { step_after_minutes: 120 });
+    assert.equal(atMax.status, 201, JSON.stringify(atMax.json));
+
+    const over = await step(t, { step_after_minutes: 121 });
+    assert.equal(over.status, 400);
+    assert.match(over.json.error ?? "", /at most 120 on this project \(tickets\.step_after_max_minutes\)/);
+    assert.equal(commentsOn(t).length, 1, "the refused step left nothing");
+
+    setConfigOverride("p-2308", "tickets.step_after_max_minutes", 240);
+    const raised = await step(t, { step_after_minutes: 200 });
+    assert.equal(raised.status, 201, "the project raised its limit");
+});

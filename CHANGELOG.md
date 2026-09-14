@@ -66,6 +66,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A step could declare a wait of up to 24 hours. `continue_after_minutes` is now
+  capped by `tickets.step_after_max_minutes`, 2 hours by default and set per
+  project; a longer wait is refused with the limit in the reason.
+
 - A tool call could fail with a bare `write EPIPE` when the daemon's socket
   closed the connection before reading the request. The call is now retried
   like a reset connection: the daemon never ran it, so a retry cannot run it
