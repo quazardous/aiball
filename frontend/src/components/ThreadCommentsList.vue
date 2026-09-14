@@ -19,6 +19,8 @@ defineProps<{
     items: ThreadItem[];
     isEmpty: boolean;
     latestPendingId: number | null;
+    /** #2470 — the only step comment that shows as a step. */
+    latestStepId: number | null;
     decidersByMessage: Map<number, DeciderInfo>;
     latestSummaryUntil: { text: string; by: string | null; ts: string; id: number } | null;
     stageLabels: Record<string, string>;
@@ -57,6 +59,7 @@ function decodeRelationEvent(m: Message): { verb: string; target: number | null 
                 <CommentNode
                     :msg="item.msg"
                     :show-pending-tag="item.msg.id === latestPendingId"
+                    :superseded-step="item.msg.id !== latestStepId"
                     :decider="decidersByMessage.get(item.msg.id) ?? null"
                 />
             </li>

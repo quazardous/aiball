@@ -66,6 +66,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A thread with several `then: "continue"` steps marked each of them, with its
+  resume time long past; only the latest counts, and only the latest shows as a
+  step now.
+
 - An agent still working on a ticket it claimed hours earlier was refused its
   own `then: "continue"` while every other check said it held the ticket. A
   claim now holds for the same span everywhere — the assign window, or while its

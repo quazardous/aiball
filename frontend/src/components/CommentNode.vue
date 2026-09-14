@@ -40,6 +40,12 @@ const props = defineProps<{
      * chip. Null when not a decider comment.
      */
     decider?: DeciderInfo | null;
+    /**
+     * #2470 — a step followed by a later one on the thread. Only the latest
+     * counts (the backlog and the inbox read it alone), so an earlier one reads
+     * as a plain comment: no step chip, no resume time long past.
+     */
+    supersededStep?: boolean;
 }>();
 /**
  * Refresh fan-out after a state-mutating action on this comment. We
@@ -104,7 +110,9 @@ const questionStats = computed(() =>
 // constraint ("on change pas le layout actuel").
 const decision = computed(() => readDecision(props.msg));
 // #2308 — a step (`then: continue`): work done and going on, nothing to decide.
-const isStep = computed(() => isStepMeta(props.msg.meta));
+const isStepComment = computed(() => isStepMeta(props.msg.meta));
+// #2470 — shown as a step only while no later step supersedes it.
+const isStep = computed(() => isStepComment.value && !props.supersededStep);
 const decisionChipLabel = computed(() => {
     const d = decision.value;
     if (!d) return "";
@@ -215,7 +223,7 @@ const classifyActions = computed(() => {
         items.push({ label: "remove tag", icon: "pi pi-trash", command: () => { void untag(); } });
     }
     // #2369 — an agent's plain comment can be tagged as the step it did not post.
-    if (!d && !isStep.value && stepMeta.value.summary) {
+    if (!d && !isStepComment.value && stepMeta.value.summary) {
         items.push({ label: "tag as step", icon: "pi pi-forward", command: () => { void stepTag(true); } });
     }
     if (stepMeta.value.tagged) {

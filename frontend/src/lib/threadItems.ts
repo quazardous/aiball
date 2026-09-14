@@ -15,6 +15,7 @@ import { type Message, type ThreadView as ThreadViewData } from "./api";
 import { readDecision } from "./decisions";
 import { topDown } from "./prefs";
 import { isRelationRowKind } from "./relationRows";
+import { latestStepId as findLatestStepId } from "./latestStep";
 
 export type ThreadItem =
     | { kind: "comment"; msg: Message }
@@ -198,11 +199,15 @@ export function useThreadItems(data: Ref<ThreadViewData | null>) {
         return latest;
     });
 
+    // #2470 — only the latest step shows as one.
+    const latestStepId = computed<number | null>(() => findLatestStepId(flatComments.value));
+
     return {
         flatComments,
         decidersByMessage,
         latestSummaryUntil,
         threadItems,
         latestPendingId,
+        latestStepId,
     };
 }
