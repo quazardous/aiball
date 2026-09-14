@@ -1501,7 +1501,7 @@ function formatProjectCwd(name: string | undefined, plate: Plate | null): string
  * also breaks down the ping counters so the cause of a 0 is visible
  * (wrong agent? wrong project? actually no pings?).
  */
-async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; config?: boolean }): Promise<void> {
+async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; config?: boolean; exitCode?: boolean }): Promise<void> {
     const ctx = resolveProjectContext();
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
@@ -1726,7 +1726,11 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
             if (projectSubs.length === 0) {
                 process.stdout.write(`  hint   : consumer '${ping.consumer_id}' looks ephemeral (random fallback?). Set AIBALL_AGENT to a stable id and subscribe it to the projects you care about.\n`);
             }
-            process.exit(hasWork ? 0 : 1);
+            // A diagnosis that succeeded exits 0, whatever the verdict: "nothing to
+            // do" is a healthy answer, and exiting 1 painted every idle project's
+            // prompt as a failure. `--exit-code` keeps the check-cmd contract
+            // (0 = work, 1 = nothing) for a script that branches on it.
+            process.exit(opts.exitCode ? (hasWork ? 0 : 1) : 0);
         } catch (e) {
             process.stderr.write(`  ERROR: ${(e as Error).message ?? String(e)}\n`);
             process.exit(2);
@@ -1737,7 +1741,8 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         process.stdout.write(`\n`);
         const verdict = r.status === 0 ? "WAKE (exit 0)" : `SLEEP (exit ${r.status})`;
         process.stdout.write(`  verdict: ${verdict}\n`);
-        process.exit(r.status ?? 2);
+        if (r.status === null) process.exit(2); // the check-cmd itself did not run to completion
+        process.exit(opts.exitCode ? r.status : 0);
     }
 }
 
@@ -2367,7 +2372,8 @@ async function main(): Promise<void> {
         .description("Diagnose what the check-cmd would do right now (no claude spawn)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")
         .option("--config", "Also inspect the loop's state dir + .aiball.yaml in its cwd (autopoll wiring)")
-        .action((name: string | undefined, opts: { checkCmd?: string; config?: boolean }) => cmdCheck(name, opts));
+        .option("--exit-code", "Exit with the check-cmd's verdict (0 = work to do, 1 = nothing) instead of 0 on a successful diagnosis — for scripts")
+        .action((name: string | undefined, opts: { checkCmd?: string; config?: boolean; exitCode?: boolean }) => cmdCheck(name, opts));
     program.command("status [name]")
         .description("Show this project's connection status: resolved project + default agent (and their sources), the loaded .aiball.yaml, the connection type the aiball client would use (local Unix socket vs remote HTTP, token or not), and a live daemon reachability probe. Name optional — annotates the loop registered for the current cwd.")
         .action((name: string | undefined) => cmdStatus(name));
