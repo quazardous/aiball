@@ -104,8 +104,8 @@ If you add a new table with FK references to either, follow the same split patte
 
 ## Testing a migration
 
-1. **Backup the live DB first**: `cp ~/.local/share/aiball/aiball.db /tmp/aiball-test.db`. WAL files matter — also copy `*-wal` and `*-shm`.
-2. Run the migration against the test file: `sqlite3 /tmp/aiball-test.db < drizzle/migrations/NNNN_…sql`.
+1. **Back up the live DB first**: `aiball backup /tmp/aiball-bk`. It takes a consistent snapshot even while the daemon writes; a plain `cp` of `aiball.db` does not (the file and its WAL are copied at different instants). The snapshot is `/tmp/aiball-bk/aiball.db`, a single file.
+2. Run the migration against a copy of the snapshot: `cp /tmp/aiball-bk/aiball.db /tmp/aiball-test.db && sqlite3 /tmp/aiball-test.db < drizzle/migrations/NNNN_…sql`.
 3. Verify: row counts, `PRAGMA foreign_key_check`, sample queries.
 4. Only then restart the daemon to apply on the live DB.
 

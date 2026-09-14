@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **`aiball backup` and `aiball restore`**: a consistent snapshot of the board
+  while the daemon runs (database, uploads, spool, config, with a sha256
+  manifest), and a restore that checks all of it first, refuses a schema newer
+  than the install or a running daemon, and sets the current data aside rather
+  than overwriting it.
+
 - **A ticket that keeps coming back says how to rest it**: when a backlog wake
   names the same ticket again within 30 minutes and nobody else has moved on it,
   the wake adds a line pointing at `continue_after_minutes` — a step waiting on

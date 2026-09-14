@@ -319,6 +319,27 @@ lines under `machine`. It reports, never repairs, and does **not**
 introspect the install layout (symlink vs hard) — use `readlink -f` for
 that.
 
+## Back up and restore
+
+```bash
+aiball backup ~/backups/aiball-2026-09-14      # new or empty directory; safe while the daemon runs
+aiball restore ~/backups/aiball-2026-09-14 --dry-run   # check only
+systemctl --user stop aiball                    # restore refuses a running daemon
+aiball restore ~/backups/aiball-2026-09-14
+systemctl --user start aiball
+```
+
+`aiball backup` writes a directory:
+
+- `aiball.db`: a consistent snapshot, taken through SQLite's online backup (a plain `cp` while the daemon writes can copy the file and its WAL at different instants). Checked with `integrity_check`.
+- `home/`: the rest of `$AIBALL_HOME` (uploads, spool, outbox, `cli-env`), without the socket, the pid file or the live WAL.
+- `config/`: `~/.config/aiball/`.
+- `manifest.json`: aiball version, last applied migration, row counts per table, sha256 of every file.
+
+The backup holds secrets (tokens, payloads, password hashes): it is written `0700`/`0600`. Keep it private.
+
+`aiball restore` checks everything before changing anything: every file against its sha256, the database's integrity, and a schema no newer than the installed code (an older one migrates when the daemon starts). It refuses while the daemon runs, because stopping it disconnects every loop. That is your call, not a side effect. The current data and config are not overwritten: they are renamed to `<dir>.pre-restore-<date>`.
+
 ## What's NOT in the Linux path
 
 - **macOS launchd unit**. The installer skips it (no `launchctl`

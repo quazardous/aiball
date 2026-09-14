@@ -287,7 +287,7 @@ export interface NewRule {
 let sqlite: Database.Database | null = null;
 let dbInstance: BetterSQLite3Database<typeof schema> | null = null;
 
-function migrationsFolder(): string {
+export function migrationsFolder(): string {
     // db.ts compiles/runs from src/ at dev time (tsx) or dist/ if built.
     // The drizzle/ folder lives at the repo root, two levels up from src/.
     // src/db/connection.ts adds another level, hence the extra ".." candidate.
