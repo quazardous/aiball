@@ -35,8 +35,12 @@ const MEMBERSHIP_KINDS = new Set([
 ]);
 
 export interface InboxUpdateCtx {
-    /** Ticket ids currently held by the browser — the visible page. */
+    /** Ticket ids currently held by the browser — the visible page, in order. */
     visible: ReadonlySet<number>;
+    /** The list's sort (`activity`, `priority`, `created_desc`…). */
+    sort?: string;
+    /** The page shown, 1-based. */
+    page?: number;
 }
 
 /**
@@ -65,6 +69,17 @@ export function decideInboxUpdate(
     // Not on screen: it may need to ENTER the page (in activity order, a
     // comment sends its ticket to the top). Only the server can say.
     if (!ctx.visible.has(ticketId)) return { kind: "refetch" };
+
+    // #2518 david — "si un ticket est modifié par un agent la liste n'est pas
+    // mise à jour". In activity order — the default — any event on a ticket
+    // moves it to the top. Patching the row in place refreshed its content and
+    // left it where it was: the list showed `2518, 2254` while the server said
+    // `2254, 2518`, until a navigation re-read it. Only the row already first
+    // on the first page cannot move.
+    if (ctx.sort === "activity") {
+        const first = ctx.visible.values().next().value;
+        if ((ctx.page ?? 1) !== 1 || first !== ticketId) return { kind: "refetch" };
+    }
 
     return { kind: "patch", ticketId };
 }

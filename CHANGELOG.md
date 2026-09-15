@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- In the list sorted by recent activity, the default, a comment or a decision
+  on a ticket already on screen refreshed the row but left it in place instead of
+  moving it to the top; the list now re-reads its page in that case.
+
 ## [0.41.0] — 2026-09-14
 
 ### Added

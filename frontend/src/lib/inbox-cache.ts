@@ -90,7 +90,11 @@ export function useInboxCache(opts: UseInboxCacheOpts) {
      */
     async function applyEvent(m: Message): Promise<void> {
         if (!enabled.value) return;
-        const decision = decideInboxUpdate(m, { visible: new Set(rows.value.map((r) => r.id)) });
+        const decision = decideInboxUpdate(m, {
+            visible: new Set(rows.value.map((r) => r.id)),
+            sort: filters.sortBy.value,
+            page: filters.page.value,
+        });
         if (decision.kind === "ignore") return;
         if (decision.kind === "refetch") { await fetchPage().catch(() => {}); return; }
         try {

@@ -61,3 +61,25 @@ test("a decision event on a visible row is a content change", () => {
         );
     }
 });
+
+// #2518 — in activity order (the default) an event moves its ticket to the top.
+test("activity order: an event on a visible row that is not first re-reads the page", () => {
+    const activity = (...visible: number[]) => ({ visible: new Set(visible), sort: "activity", page: 1 });
+    assert.deepEqual(decideInboxUpdate(msg("comment_added", 7), activity(42, 7)), { kind: "refetch" }, "must jump above 42");
+    assert.deepEqual(decideInboxUpdate(msg("comment_added", 42), activity(42, 7)), { kind: "patch", ticketId: 42 }, "already first");
+    assert.deepEqual(
+        decideInboxUpdate(msg("comment_added", 42), { visible: new Set([42, 7]), sort: "activity", page: 2 }),
+        { kind: "refetch" },
+        "first of page 2 still leaves for page 1",
+    );
+});
+
+test("orders an event cannot change keep the cheap row patch", () => {
+    for (const sort of ["created_desc", "created_asc", "priority"]) {
+        assert.deepEqual(
+            decideInboxUpdate(msg("comment_added", 7), { visible: new Set([42, 7]), sort, page: 3 }),
+            { kind: "patch", ticketId: 7 },
+            sort,
+        );
+    }
+});
