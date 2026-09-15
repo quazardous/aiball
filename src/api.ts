@@ -54,6 +54,7 @@ import { messagesRouter } from "./api/messages.js";
 import { payloadsRouter } from "./api/payloads.js";
 import { pingsRouter } from "./api/pings.js";
 import { signalsRouter } from "./api/signals.js";
+import { keyTicketsRouter } from "./api/key-tickets.js";
 import { signalKeysRouter } from "./api/signal-keys.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
 import { rulesRouter } from "./api/rules.js";
@@ -647,6 +648,8 @@ api.get("/search", (req: Request, res: Response) => {
 // broadcast, brief/digest/full thread fetch) all moved to
 // ./api/tickets.ts (#B.213 phase 1.G).
 api.use(payloadsRouter);
+// #2526 — POST /api/tickets, for an API key with the scope tickets:create.
+api.use(keyTicketsRouter);
 api.use(ticketsRouter);
 
 // -------- consumers (#B.79) -----------------------------------------------

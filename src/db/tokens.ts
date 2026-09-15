@@ -33,6 +33,9 @@ export interface Token {
     created_at: string;
     last_used_at: string | null;
     expires_at: string | null;
+    /** #2526 — an API key's scopes and projects, JSON; null on other kinds. */
+    scopes?: string | null;
+    projects?: string | null;
 }
 
 function rowToToken(r: schema.Token): Token {
@@ -45,6 +48,8 @@ function rowToToken(r: schema.Token): Token {
         created_at: r.createdAt,
         last_used_at: r.lastUsedAt,
         expires_at: r.expiresAt,
+        scopes: r.scopes ?? null,
+        projects: r.projects ?? null,
     };
 }
 
@@ -71,6 +76,9 @@ export interface IssueTokenInput {
     note?: string | null;
     /** ISO8601 timestamp. NULL = no expiry. */
     expires_at?: string | null;
+    /** #2526 — an API key's scopes and projects, JSON-encoded by the caller. */
+    scopes?: string | null;
+    projects?: string | null;
 }
 
 export function issueToken(input: IssueTokenInput): Token {
@@ -84,6 +92,8 @@ export function issueToken(input: IssueTokenInput): Token {
         note: input.note ?? null,
         createdAt: now,
         expiresAt: input.expires_at ?? null,
+        scopes: input.scopes ?? null,
+        projects: input.projects ?? null,
     }).run();
     return {
         token,

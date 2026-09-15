@@ -101,7 +101,11 @@ export function registerAuthCommands(program: Command): void {
             "Mint a NODE token instead — a trusted-proxy SERVICE token (#394), NOT bound to a consumer. It lets a proxy node assert relayed identities via x-aiball-consumer. Put it in the node's `proxy.token`.",
         )
         .option("--note <note>", "Who the key is given to and why — required with --kind signal")
-        .action((opts: { consumer?: string; label?: string; kind: string; node?: boolean; note?: string }) => {
+        .option("--scope <scope>", "#2526: with --kind signal, a scope the key holds: signals (default), tickets:create (repeatable)",
+            (v: string, acc: string[]) => [...acc, v], [] as string[])
+        .option("--project <name>", "#2526: with --scope tickets:create, a project the key may create tickets in (repeatable, at least one)",
+            (v: string, acc: string[]) => [...acc, v], [] as string[])
+        .action((opts: { consumer?: string; label?: string; kind: string; node?: boolean; note?: string; scope: string[]; project: string[] }) => {
             // #394 volet C: a node token is a service credential for the proxy
             // node — no consumer, kind 'node'. The daemon then trusts the
             // forwarded x-aiball-consumer (X-Forwarded-For style).
@@ -146,18 +150,30 @@ export function registerAuthCommands(program: Command): void {
             if (opts.kind === "signal") {
                 if (!opts.label) die("auth issue --kind signal: --label <source> is required — it names the system posting signals");
                 if (!opts.note) die("auth issue --kind signal: --note \"<who it is given to, and why>\" is required");
-                const minted = issueSignalKey(opts.label, opts.note);
+                const minted = issueSignalKey(
+                    opts.label, opts.note,
+                    opts.scope.length ? opts.scope : undefined,
+                    opts.project.length ? opts.project : undefined,
+                );
                 if ("error" in minted) die(`auth issue --kind signal: ${minted.error}`);
                 const t = { token: minted.token };
                 process.stdout.write([
-                    `Signal key issued for source '${opts.label}' (${minted.key.note}):`,
+                    `Key issued for source '${opts.label}' (${minted.key.note}) — scopes: ${minted.key.scopes.join(", ")}${minted.key.projects.length ? `; projects: ${minted.key.projects.join(", ")}` : ""}:`,
                     ``,
                     `  ${t.token}`,
                     ``,
-                    `It can only POST /api/signals, on the socket or over HTTP:`,
-                    `  curl --unix-socket ~/.local/share/aiball/sock -H 'Authorization: Bearer ${t.token}' \\`,
-                    `       -H 'content-type: application/json' http://x/api/signals \\`,
-                    `       -d '{"target":{"consumer":"<agent>"},"title":"something needs attention"}'`,
+                    ...(minted.key.scopes.includes("signals") ? [
+                        `POST /api/signals, on the socket or over HTTP:`,
+                        `  curl --unix-socket ~/.local/share/aiball/sock -H 'Authorization: Bearer ${t.token}' \\`,
+                        `       -H 'content-type: application/json' http://x/api/signals \\`,
+                        `       -d '{"target":{"consumer":"<agent>"},"title":"something needs attention"}'`,
+                    ] : []),
+                    ...(minted.key.scopes.includes("tickets:create") ? [
+                        `POST /api/tickets, approved at once, in ${minted.key.projects.join(", ")}:`,
+                        `  curl --unix-socket ~/.local/share/aiball/sock -H 'Authorization: Bearer ${t.token}' \\`,
+                        `       -H 'content-type: application/json' http://x/api/tickets \\`,
+                        `       -d '{"project":"${minted.key.projects[0]}","title":"…","external_id":"<your id>"}'`,
+                    ] : []),
                     `Revoke it with: aiball auth revoke ${t.token.slice(0, 16)}`,
                     ``,
                 ].join("\n"));

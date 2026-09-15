@@ -12,7 +12,7 @@ import {
     listProjectSignals,
     listSignalKeys,
     revokeSignalKey,
-    updateSignalKeyNote,
+    updateSignalKey,
 } from "../db/signal-keys.js";
 import { consumerOf, notFound } from "./_helpers.js";
 
@@ -32,14 +32,16 @@ signalKeysRouter.get("/signal-keys", (req: Request, res: Response) => {
 
 signalKeysRouter.post("/signal-keys", (req: Request, res: Response) => {
     if (!moderatorOnly(req, res)) return;
-    const r = issueSignalKey(req.body?.label, req.body?.note);
+    const r = issueSignalKey(req.body?.label, req.body?.note, req.body?.scopes, req.body?.projects);
     if ("error" in r) return res.status(r.status).json({ error: r.error });
     res.status(201).json(r);
 });
 
 signalKeysRouter.patch("/signal-keys/:key_id", (req: Request, res: Response) => {
     if (!moderatorOnly(req, res)) return;
-    const r = updateSignalKeyNote(String(req.params.key_id), req.body?.note);
+    const r = updateSignalKey(String(req.params.key_id), {
+        note: req.body?.note, scopes: req.body?.scopes, projects: req.body?.projects,
+    });
     if ("error" in r) return res.status(r.status).json({ error: r.error });
     res.json(r);
 });

@@ -11,6 +11,7 @@
 import { Router, type Request, type Response } from "express";
 import { readBearerToken, type AuthenticatedRequest } from "../auth.js";
 import { getTokenAndTouch } from "../db/tokens.js";
+import { keyScopes } from "../db/signal-keys.js";
 import { isHuman } from "../db/consumers.js";
 import { ackSignal, listPendingSignals, parseSignalBody, postSignal } from "../db/signals.js";
 import { emitSignal } from "../event-bus.js";
@@ -42,7 +43,12 @@ function signalSourceOf(req: Request): { source: string } | { status: 401 | 403;
     if (onSocket && bearer) {
         const row = getTokenAndTouch(bearer);
         if (!row) return { status: 401, error: "invalid or expired signal key" };
-        if (row.kind === "signal") return { source: row.label ?? "unnamed" };
+        // #2526 — on the socket too, a key needs the scope for this door.
+        if (row.kind === "signal") {
+            return keyScopes(row).includes("signals")
+                ? { source: row.label ?? "unnamed" }
+                : { status: 403, error: "this key lacks the scope signals" };
+        }
     }
     return { status: 403, error: "posting a signal needs a signal key — aiball --human auth issue --kind signal --label <source>" };
 }

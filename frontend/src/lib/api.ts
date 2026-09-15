@@ -1465,8 +1465,11 @@ export const api = {
     listSignalKeys: (project?: string) =>
         req<SignalKeyView[]>("GET", `/api/signal-keys${project ? `?project=${encodeURIComponent(project)}` : ""}`),
     /** #2276 — the ONLY answer that carries the token: show it once. */
-    createSignalKey: (label: string, note: string) =>
-        req<{ key: SignalKeyView; token: string }>("POST", "/api/signal-keys", { label, note }),
+    createSignalKey: (label: string, note: string, grants?: { scopes: string[]; projects: string[] }) =>
+        req<{ key: SignalKeyView; token: string }>("POST", "/api/signal-keys", { label, note, ...(grants ?? {}) }),
+    /** #2526 — change what a key may do, and where it may create tickets. */
+    updateSignalKeyGrants: (key_id: string, scopes: string[], projects: string[]) =>
+        req<SignalKeyView>("PATCH", `/api/signal-keys/${encodeURIComponent(key_id)}`, { scopes, projects }),
     updateSignalKeyNote: (key_id: string, note: string) =>
         req<SignalKeyView>("PATCH", `/api/signal-keys/${encodeURIComponent(key_id)}`, { note }),
     revokeSignalKey: (key_id: string) =>
@@ -1487,6 +1490,10 @@ export interface SignalKeyView {
     last_used_at: string | null;
     signals_sent: number;
     signals_to_project?: number;
+    /** #2526 — `signals`, `tickets:create`. */
+    scopes: string[];
+    /** #2526 — where it may create tickets. */
+    projects: string[];
 }
 
 /** #2276 — a signal a project received, with each recipient's delivery state. */

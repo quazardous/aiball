@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **API keys with scopes, and tickets filed by a key**: a key holds `signals`
+  (what every key could do, and the default) and/or `tickets:create`, which
+  lets an external system file tickets, already approved, in the projects the
+  key names (`POST /api/tickets`, safe to retry with `external_id`). Granted
+  from the Signals tab or `aiball auth issue --scope … --project …`.
+
 - **Wake focus**: beside a project's standing instruction, a list of tickets
   (`123, 456`, or `!789` for all but) that alone may wake the project's owner
   agents, until cleared or an optional end time. Backlog and events outside it

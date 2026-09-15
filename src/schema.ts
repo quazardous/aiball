@@ -733,6 +733,11 @@ export const tokens = sqliteTable("tokens", {
     /** #2276: free text on the token — for a signal key, who it was given to
      *  and why (required when minting one). NULL on other kinds. */
     note: text("note"),
+    /** #2526 — an API key's scopes, JSON array (`signals`, `tickets:create`).
+     *  NULL on a signal key = ["signals"]. */
+    scopes: text("scopes"),
+    /** #2526 — the projects a key may create tickets in, JSON array. */
+    projects: text("projects"),
     /** #424: peer IP stamped when a `node` token relays — the proxy node's
      *  address. Lets the Nodes panel show it + group the consumers it relays
      *  (consumers.last_seen_via='node' with matching last_seen_ip). NULL for

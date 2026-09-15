@@ -738,6 +738,12 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
 export interface SubmitOpts {
     skipFanOut?: boolean;
     /**
+     * #2526 — approved at insertion (decided by `auto`, authored by the key's source): a ticket
+     * created by an API key holding `tickets:create`. The moderation happened
+     * when a human granted that scope. Only the key route sets it.
+     */
+    preApprovedByKey?: boolean;
+    /**
      * #980 Niveau 2 — suppress the `message_created` + `message_decided`
      * WS broadcasts for this message. Used for an auto-close `ticket_closed`
      * that rides on an accepted resolution/wontfix : the decision event
@@ -830,7 +836,7 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // kept in case a legacy MCP client still posts one — it'll fail
     // validation upstream, but if it slipped through somehow, the
     // historical auto-approve path stays.
-    const autoApproveLifecycle = ownerLifecycle || input.kind === "ticket_blocked";
+    const autoApproveLifecycle = ownerLifecycle || input.kind === "ticket_blocked" || opts.preApprovedByKey === true;
     const decision = autoApproveLifecycle
         ? { decision: "auto" as const, matched_rule_id: null }
         : evaluate({

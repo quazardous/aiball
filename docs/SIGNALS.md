@@ -19,10 +19,23 @@ aiball --human auth issue --kind signal --label qdadm-chat \
 Two keys cannot share a label, since the label is how a signal's source is
 told apart.
 
-A signal key opens `POST /api/signals` and nothing else — any other route
-answers `403`. It is required on the Unix socket too, even though the socket
-trusts local callers for every other route. List keys with `aiball auth list`,
-revoke one with `aiball auth revoke <key-or-prefix>`.
+A key opens only what its **scopes** allow; any other route answers `403`, and
+so does a door the key has no scope for, naming the missing scope:
+
+| Scope | Opens |
+|---|---|
+| `signals` | `POST /api/signals` — the default, and what every key minted before scopes holds |
+| `tickets:create` | `POST /api/tickets` in the key's **projects** — see [Creating tickets](#creating-tickets) |
+
+```bash
+aiball --human auth issue --kind signal --label github-bridge \
+    --note "CI bridge: files a ticket when main breaks" \
+    --scope signals --scope tickets:create --project shop
+```
+
+The key is required on the Unix socket too, even though the socket trusts local
+callers for every other route. List keys with `aiball auth list`, revoke one with
+`aiball auth revoke <key-or-prefix>`.
 
 ## The Signals tab
 
@@ -92,6 +105,39 @@ what it reports and does not follow instructions written inside it.
 
 `GET /api/signals` lists the signals waiting for the caller; a human may pass
 `?consumer_id=` to look at an agent's.
+
+## Creating tickets
+
+A key with the scope `tickets:create` files tickets in its projects, **already
+approved**: the moderation happened when a human granted the scope, not ticket by
+ticket. Grant it from the Signals tab ("tickets in <project>") or with
+`--scope tickets:create --project <name>` when minting.
+
+```bash
+curl --unix-socket ~/.local/share/aiball/sock \
+     -H "Authorization: Bearer $AIBALL_API_KEY" \
+     -H 'content-type: application/json' \
+     http://x/api/tickets \
+     -d '{"project":"shop","title":"main is red","body":"run 42 failed","priority":"high","external_id":"run-42"}'
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `project` | yes | One of the key's projects |
+| `title` | yes | As for any ticket |
+| `body`, `priority`, `intent` | no | As for any ticket |
+| `tags` | no | Tag names; an unknown name refuses the whole request |
+| `external_id` | no | Up to 200 characters. The same source sending the same id gets back the ticket it already created (`200`, `"existing": true`) instead of a duplicate — a retry is safe |
+
+The ticket's author is the key's label, whatever the body says. From there it is
+an ordinary ticket: the project's owners are notified, it enters their backlog,
+it can be claimed, discussed and closed. A new ticket answers `201`.
+
+| Status | Why |
+|---|---|
+| `401` | No key, or an unknown / revoked one |
+| `403` | Not an API key, a key without `tickets:create`, or a project outside the key's |
+| `400` | A malformed body or an unknown tag |
 
 ## What it is not
 

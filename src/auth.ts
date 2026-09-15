@@ -21,6 +21,7 @@ import {
     type Token,
 } from "./db.js";
 import { getConsumer, updateConsumer } from "./db/consumers.js";
+import { keyProjects, keyScopes } from "./db/signal-keys.js";
 
 // The options overload of `crypto.scrypt` doesn't survive `promisify`'s
 // type inference, so we keep the callback form behind a typed helper.
@@ -110,6 +111,9 @@ export interface AuthenticatedRequest extends Request {
     /** #2255 — set for a `signal` key: the label it was minted with, which IS
      *  the source of the signals it posts. */
     signal_source?: string;
+    /** #2526 — for a signal key: what it may do, and where it may create tickets. */
+    signal_scopes?: string[];
+    signal_projects?: string[];
 }
 
 // Paths are relative to the router mount (`api = Router()` mounted at
@@ -215,13 +219,25 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
     // #2255 — a signal key opens exactly one door. It is bound to no consumer
     // and its label is the source of what it posts.
     if (row.kind === "signal") {
-        if (req.method !== "POST" || req.path !== "/signals") {
-            res.status(403).json({ error: "a signal key can only POST /api/signals" });
+        // #2526 — each door needs its scope. A key minted before scopes existed
+        // holds `signals` only, so it keeps exactly the one door it had.
+        const scopes = keyScopes(row);
+        const door = req.method === "POST" && req.path === "/signals" ? "signals"
+            : req.method === "POST" && req.path === "/tickets" ? "tickets:create"
+            : null;
+        if (!door) {
+            res.status(403).json({ error: `an API key can only POST /api/signals (scope signals) or POST /api/tickets (scope tickets:create)` });
+            return;
+        }
+        if (!scopes.includes(door)) {
+            res.status(403).json({ error: `this key lacks the scope ${door}` });
             return;
         }
         const ar = req as AuthenticatedRequest;
         ar.token_kind = "signal";
         ar.signal_source = row.label ?? "unnamed";
+        ar.signal_scopes = scopes;
+        ar.signal_projects = keyProjects(row);
         next();
         return;
     }

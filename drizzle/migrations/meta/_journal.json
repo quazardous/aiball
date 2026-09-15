@@ -505,6 +505,13 @@
       "when": 1782700000020,
       "tag": "0071_project_wake_focus",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1782700000021,
+      "tag": "0072_token_scopes",
+      "breakpoints": true
     }
   ]
 }

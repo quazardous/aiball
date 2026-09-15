@@ -85,6 +85,7 @@ function signalSort(row: ProjectSignal, key: string): string | number {
 const keyColumns: DataListColumn[] = [
     { key: "label", label: "Source", sortable: true, defaultDir: "asc" },
     { key: "note", label: "Given to, and why" },
+    { key: "grants", label: "May" },
     { key: "last_used_at", label: "Last used", sortable: true, defaultDir: "desc" },
     { key: "signals", label: "Signals here / all", sortable: true, defaultDir: "desc" },
     { key: "actions", label: "" },
@@ -129,21 +130,45 @@ const newLabel = ref("");
 const newNote = ref("");
 const minting = ref(false);
 const minted = ref<{ label: string; token: string } | null>(null);
+// #2526 — mint the key able to create tickets in this project, already approved.
+const newCanCreate = ref(false);
 const canMint = computed(() => !!newLabel.value.trim() && !!newNote.value.trim() && !minting.value);
 
 async function mint(): Promise<void> {
     if (!canMint.value) return;
     minting.value = true;
     try {
-        const r = await api.createSignalKey(newLabel.value.trim(), newNote.value.trim());
+        const r = await api.createSignalKey(
+            newLabel.value.trim(), newNote.value.trim(),
+            newCanCreate.value ? { scopes: ["signals", "tickets:create"], projects: [props.project] } : undefined,
+        );
         minted.value = { label: r.key.label, token: r.token };
         newLabel.value = "";
         newNote.value = "";
+        newCanCreate.value = false;
         await load();
     } catch (e) {
         toast.add({ severity: "error", summary: "Key not minted", detail: reason(e), life: 8000 });
     } finally {
         minting.value = false;
+    }
+}
+
+/** #2526 — may this key create tickets HERE? Toggled one project at a time. */
+function createsHere(k: SignalKeyView): boolean {
+    return k.scopes.includes("tickets:create") && k.projects.includes(props.project);
+}
+async function toggleCreateHere(k: SignalKeyView): Promise<void> {
+    const on = !createsHere(k);
+    const projects = on ? [...new Set([...k.projects, props.project])] : k.projects.filter((p) => p !== props.project);
+    const scopes = projects.length && (on || k.scopes.includes("tickets:create"))
+        ? [...new Set([...k.scopes, "tickets:create"])]
+        : k.scopes.filter((s) => s !== "tickets:create");
+    try {
+        const updated = await api.updateSignalKeyGrants(k.key_id, scopes.length ? scopes : ["signals"], projects);
+        keys.value = keys.value.map((x) => (x.key_id === k.key_id ? { ...x, scopes: updated.scopes, projects: updated.projects } : x));
+    } catch (e) {
+        toast.add({ severity: "error", summary: "Key not changed", detail: reason(e), life: 8000 });
     }
 }
 
@@ -291,6 +316,23 @@ async function revoke(k: SignalKeyView): Promise<void> {
                         <Button icon="pi pi-pencil" size="small" text severity="secondary" title="Edit the note" @click="startEdit(row)" />
                     </span>
                 </template>
+                <template #cell-grants="{ row }">
+                    <span class="project-signals__grants">
+                        <code v-for="s in row.scopes" :key="s">{{ s }}</code>
+                        <span v-if="row.projects.length" class="project-signals__missing">in {{ row.projects.join(", ") }}</span>
+                        <Button
+                            size="small"
+                            text
+                            :severity="createsHere(row) ? 'danger' : 'secondary'"
+                            :icon="createsHere(row) ? 'pi pi-minus' : 'pi pi-plus'"
+                            :label="createsHere(row) ? `tickets in ${project}` : `tickets in ${project}`"
+                            :title="createsHere(row)
+                                ? `Stop this key creating tickets in ${project}`
+                                : `Let this key create tickets in ${project}, approved at once`"
+                            @click="toggleCreateHere(row)"
+                        />
+                    </span>
+                </template>
                 <template #cell-last_used_at="{ row }">
                     <span :title="`minted ${fmt(row.created_at)}`">{{ row.last_used_at ? fmt(row.last_used_at) : "never" }}</span>
                 </template>
@@ -303,6 +345,9 @@ async function revoke(k: SignalKeyView): Promise<void> {
             <form class="project-signals__mint" @submit.prevent="mint">
                 <InputText v-model="newLabel" placeholder="Source label, e.g. qdadm-chat" aria-label="Source label" />
                 <InputText v-model="newNote" placeholder="Given to whom, and why" aria-label="Note" class="project-signals__mint-note" />
+                <label class="project-signals__mint-create" :title="`The key may also create tickets in ${project}, approved at once`">
+                    <input v-model="newCanCreate" type="checkbox"> may create tickets here
+                </label>
                 <Button type="submit" icon="pi pi-key" label="Mint a key" :loading="minting" :disabled="!canMint" />
             </form>
         </section>
@@ -314,6 +359,18 @@ async function revoke(k: SignalKeyView): Promise<void> {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+}
+.project-signals__grants {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+}
+.project-signals__mint-create {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
 }
 .project-signals__id {
     display: block;
