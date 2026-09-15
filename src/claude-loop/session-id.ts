@@ -30,6 +30,7 @@
  * without spawning claude.
  */
 import { createHash } from "node:crypto";
+import { closeSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 
 export type SessionMode = "legacy" | "auto" | "managed" | "fixed";
 
@@ -37,6 +38,109 @@ export type SessionMode = "legacy" | "auto" | "managed" | "fixed";
  *  Lives in the loop cwd (survives the state-dir wipe on restart); add it to
  *  `.gitignore` so it never gets committed. */
 export const SESSION_ID_FILE = ".aiball-session_id";
+
+/**
+ * #2523 david — "il faut que le .aiball-session_id soit une structure avec la
+ * session par défaut et les sessions pour chaque sous-agent". Several loops
+ * share one project folder — the main one and its crew agents — and each
+ * resumes its own session. The file used to hold one bare id, which a second
+ * agent could only overwrite.
+ *
+ *     { "default": "<uuid>", "agents": { "<crew agent>": "<uuid>" } }
+ *
+ * `default` is the folder's main loop; `agents.<name>` a crew agent's.
+ */
+export interface SessionFile {
+    default: string | null;
+    agents: Record<string, string>;
+}
+
+/** The entry key of a loop: its agent for a crew, `default` otherwise. */
+export function sessionKeyFor(role: string | null | undefined, agent: string | null | undefined): string {
+    return role === "crew" && agent ? `agent:${agent}` : "default";
+}
+
+/**
+ * Read the file's text. An old file holding one bare id is that id as
+ * `default`. Anything unreadable comes back empty with `corrupt: true`, so the
+ * loop starts a fresh session instead of dying at boot.
+ */
+export function parseSessionFile(text: string | null | undefined): { file: SessionFile; corrupt: boolean } {
+    const empty = (): SessionFile => ({ default: null, agents: {} });
+    const raw = (text ?? "").trim();
+    if (!raw) return { file: empty(), corrupt: false };
+    if (isValidUuid(raw)) return { file: { default: raw.toLowerCase(), agents: {} }, corrupt: false };
+    try {
+        const j = JSON.parse(raw) as { default?: unknown; agents?: unknown };
+        if (!j || typeof j !== "object" || Array.isArray(j)) return { file: empty(), corrupt: true };
+        const file = empty();
+        if (typeof j.default === "string" && isValidUuid(j.default)) file.default = j.default.toLowerCase();
+        if (j.agents && typeof j.agents === "object" && !Array.isArray(j.agents)) {
+            for (const [name, id] of Object.entries(j.agents as Record<string, unknown>)) {
+                if (typeof id === "string" && isValidUuid(id)) file.agents[name] = id.toLowerCase();
+            }
+        }
+        return { file, corrupt: false };
+    } catch {
+        return { file: empty(), corrupt: true };
+    }
+}
+
+export function serializeSessionFile(file: SessionFile): string {
+    return JSON.stringify({ default: file.default, agents: file.agents }, null, 2) + "\n";
+}
+
+/** The id recorded for `key`, or null. */
+export function sessionEntry(file: SessionFile, key: string): string | null {
+    if (key === "default") return file.default;
+    return file.agents[key.slice("agent:".length)] ?? null;
+}
+
+/**
+ * Record `id` under `key` in the session file at `path`: take a short lock,
+ * read, set that one entry, write a temp file, rename it over, release.
+ *
+ * The rename alone keeps a reader from seeing half a file, but not two loops of
+ * the same folder from each reading the old file and the second write dropping
+ * the first one's entry — the very overwrite the structure exists to prevent.
+ * The lock serialises the read-modify-write. A lock older than a few seconds is
+ * a crashed writer's and is taken over; past the wait, the write goes ahead
+ * unlocked rather than lose the session id altogether.
+ */
+export function recordSessionEntry(path: string, key: string, id: string): void {
+    const lock = `${path}.lock`;
+    let held = false;
+    const deadline = Date.now() + 2000;
+    while (!held) {
+        try {
+            closeSync(openSync(lock, "wx"));
+            held = true;
+        } catch {
+            try {
+                if (Date.now() - statSync(lock).mtimeMs > 5000) unlinkSync(lock);
+            } catch { /* released meanwhile */ }
+            if (Date.now() > deadline) break;
+            const until = Date.now() + 5;
+            while (Date.now() < until) { /* short spin: a hook process, no event loop to yield to */ }
+        }
+    }
+    try {
+        let text: string | null = null;
+        try { text = readFileSync(path, "utf8"); } catch { /* no file yet */ }
+        const next = withSessionEntry(parseSessionFile(text).file, key, id);
+        const tmp = `${path}.${process.pid}.tmp`;
+        writeFileSync(tmp, serializeSessionFile(next));
+        renameSync(tmp, path);
+    } finally {
+        if (held) try { unlinkSync(lock); } catch { /* already gone */ }
+    }
+}
+
+/** A copy of `file` with `key` set to `id` — every other entry untouched. */
+export function withSessionEntry(file: SessionFile, key: string, id: string): SessionFile {
+    if (key === "default") return { default: id.toLowerCase(), agents: { ...file.agents } };
+    return { default: file.default, agents: { ...file.agents, [key.slice("agent:".length)]: id.toLowerCase() } };
+}
 
 /** Fixed aiball namespace UUID for the v5 derivation (any constant works —
  *  this one is arbitrary + stable so derived ids never change across versions). */
@@ -86,6 +190,12 @@ export interface SessionResolveInput {
     /** Read the persisted `.claude-session_id` for this cwd (injected; `auto`
      *  only). Return null when absent/unreadable. */
     readPersistedId: () => string | null;
+    /**
+     * #2523 — `auto` only: with no session of its own to resume, start from a
+     * fork of this one (the main loop's), under a new id. Ignored when the
+     * loop has its own session, or when this one is gone.
+     */
+    forkFrom?: string | null;
 }
 
 export interface SessionResolvePlan {
@@ -123,6 +233,24 @@ export interface SessionResolvePlan {
 function resolveAuto(
     readPersistedId: () => string | null,
     sessionExists: (id: string) => boolean,
+    forkFrom: string | null = null,
+): SessionResolvePlan {
+    const fresh = resolveOwnAuto(readPersistedId, sessionExists);
+    if (fresh.sessionId !== null || !forkFrom) return fresh;
+    // #2523 — nothing of its own to resume: fork the main loop's session. The
+    // SessionStart hook then records the NEW id under this loop's own entry, so
+    // the next start resumes the fork, never the original.
+    const source = isValidUuid(forkFrom) ? forkFrom.toLowerCase() : null;
+    if (source && sessionExists(source)) {
+        return { mode: "auto", sessionId: null, args: ["--resume", source, "--fork-session"], warning: fresh.warning };
+    }
+    const why = `--fork asked, but the main loop has no session to fork (${source ?? "none recorded"}) — starting a fresh one`;
+    return { ...fresh, warning: fresh.warning ? `${fresh.warning} ; ${why}` : why };
+}
+
+function resolveOwnAuto(
+    readPersistedId: () => string | null,
+    sessionExists: (id: string) => boolean,
 ): SessionResolvePlan {
     const persisted = readPersistedId();
     if (persisted && isValidUuid(persisted)) {
@@ -151,7 +279,7 @@ export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
     }
 
     if (mode === "auto") {
-        return resolveAuto(readPersistedId, sessionExists);
+        return resolveAuto(readPersistedId, sessionExists, input.forkFrom ?? null);
     }
 
     let id: string;

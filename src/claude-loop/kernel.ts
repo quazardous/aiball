@@ -175,7 +175,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
+import { bootReminderFor, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -2166,7 +2166,9 @@ async function mainSse(): Promise<void> {
         }
         try {
             const promptMap = mergePrompts(loadPromptsFromYaml(pingsPath(sd!)), {});
-            const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
+            // #2523 — a crew agent is told who it is and that it waits; never to triage.
+            const boot = bootReminderFor(process.env.AIBALL_ROLE);
+            const reminder = renderSlot(promptMap, boot.slot, { agent: process.env.AIBALL_AGENT ?? "" }, boot.fallback);
             if (reminder.length === 0) return;
             const typing = humanIsTyping(sd!);
             const present = humanPresentHold(sd!);

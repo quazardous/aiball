@@ -306,6 +306,23 @@ export function wakeCountdownArmable(opts: {
  *   - `humanPrompted` : a turn started before session-live = a human prompt
  *                       (the WakeMachine is gated during boot → no auto wake).
  */
+/**
+ * #2523 david — "le fait d'être appelé en crew devrait déclencher un prompt du
+ * style : vous êtes le crew <nom>, vous attendez des demandes explicites". The
+ * main loop's boot reminder sends it to triage its queue; a crew agent has no
+ * queue to triage and must not go looking for one.
+ */
+export const CREW_BOOT_REMINDER =
+    "You are the crew agent {agent}. You wait for explicit requests: a ticket assigned to you, or a message addressed to you. "
+    + "Nothing else is yours to pick up — when nothing is asked, do nothing; the loop wakes you when something is.";
+
+/** The boot reminder a loop gets: its slot, and the text when that slot is missing. */
+export function bootReminderFor(role: string | null | undefined): { slot: string; fallback: string } {
+    return role === "crew"
+        ? { slot: "post_boot_crew_reminder", fallback: CREW_BOOT_REMINDER }
+        : { slot: "post_boot_skill_reminder", fallback: "" };
+}
+
 export function shouldInjectBootstrapSkill(opts: {
     typing: boolean;
     hold: boolean;

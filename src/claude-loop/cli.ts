@@ -33,7 +33,7 @@ import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
 import { applyBootstrapOptions } from "../cli/bootstrap-options.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import { cmdCrewCreate, cmdCrewList } from "./crew.js";
-import { resolveSession, normalizeSessionMode, SESSION_ID_FILE, type SessionResolvePlan } from "./session-id.js";
+import { resolveSession, normalizeSessionMode, SESSION_ID_FILE, parseSessionFile, sessionEntry, sessionKeyFor, type SessionResolvePlan } from "./session-id.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
@@ -240,6 +240,11 @@ interface StartOpts {
      *  (today's default); `crew` = follower + no_claim (assignment-only).
      *  Overrides `.aiball.yaml consumer.role` for this launch. */
     role?: "lead" | "crew";
+    /** #2523 — `--crew <name>`: a crew agent in this folder (= `--agent <name>
+     *  --role crew`), next to the folder's main loop. */
+    crew?: string;
+    /** #2523 — with `--crew`: the first start forks the main loop's session. */
+    fork?: boolean;
     /** #2180 — set the agent's type on its record BEFORE claude boots (the MCP
      *  server reads it at start-up). */
     type?: "coder" | "cto";
@@ -356,13 +361,20 @@ function sessionExists(cwd: string, id: string): boolean {
  * loop state-dir, which is wiped on restart) so continuity survives a restart.
  * Returns null when absent/unreadable → the caller starts a fresh session.
  */
-function readPersistedSessionId(cwd: string): string | null {
+function readPersistedSessionId(cwd: string, key: string): string | null {
+    let text: string;
     try {
-        const v = readFileSync(join(cwd, SESSION_ID_FILE), "utf8").trim();
-        return v || null;
+        text = readFileSync(join(cwd, SESSION_ID_FILE), "utf8");
     } catch {
         return null;
     }
+    // #2523 — a structure now (`default` + one entry per crew agent); an old
+    // bare id reads as `default`. An unreadable file must not kill the boot.
+    const { file, corrupt } = parseSessionFile(text);
+    if (corrupt) {
+        process.stderr.write(`claude-loop: ${SESSION_ID_FILE} is unreadable — starting a fresh session (the SessionStart hook rewrites it)\n`);
+    }
+    return sessionEntry(file, key);
 }
 
 /**
@@ -520,6 +532,22 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #390: explicit flags override the resolved identity (the loop's
     // consumer/project are passed at launch, independent of any local
     // .aiball.yaml — David's "consumer_id pas propre au remote").
+    // #2523 — `--crew <name>`: a crew agent in the folder of the main loop.
+    // Its name may not be the main loop's own agent — that would be a second
+    // copy of the main agent, not a crew.
+    const mainAgent = ctx.agent;
+    if (opts.fork && !opts.crew) die("--fork goes with --crew: only a crew agent starts from the main loop's session");
+    if (opts.crew) {
+        if (opts.consumer && opts.consumer !== opts.crew) die(`--crew ${opts.crew} and --agent ${opts.consumer} name two different agents — --crew already sets the agent`);
+        if (opts.role === "lead") die("--crew and --role lead contradict each other");
+        if (opts.crew === mainAgent) die(`--crew ${opts.crew}: that is this folder's main agent — a crew agent needs a name of its own`);
+        opts.consumer = opts.crew;
+        opts.role = "crew";
+        process.stderr.write(
+            `claude-loop: crew ${opts.crew} works in this folder's git working tree, shared with the other agents here — `
+            + `edits to the same files collide. For an isolated worktree: claude-loop crew create ${opts.crew} --start\n`,
+        );
+    }
     if (opts.consumer) ctx.agent = opts.consumer;
     if (opts.project) ctx.project = opts.project;
     // #1435 slice 1 — `--role lead|crew` overrides the resolved role. A crew
@@ -602,14 +630,20 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // `legacy` yields an empty plan → the always_resume block runs unchanged ;
     // `auto` resumes the persisted id (or starts fresh, the hook persists it) ;
     // `managed` derives the id from the loop name (restart-proof).
+    // #2523 david — a crew resumes its OWN session, recorded under its name in
+    // `.aiball-session_id` like the main loop's: `auto`, not `managed`. A
+    // managed id is fixed by the loop name, so after a `/clear` a restart
+    // resumed the session from before it.
     const effectiveSessionMode =
-        ctx.role === "crew" ? "managed" : normalizeSessionMode(ctx.claude.session_mode);
+        ctx.role === "crew" ? "auto" : normalizeSessionMode(ctx.claude.session_mode);
+    const sessionKey = sessionKeyFor(ctx.role, ctx.agent);
     const sessionPlan: SessionResolvePlan = resolveSession({
         mode: effectiveSessionMode,
         configuredId: ctx.claude.session_id,
         loopName: name,
         sessionExists: (id) => sessionExists(cwd, id),
-        readPersistedId: () => readPersistedSessionId(cwd),
+        readPersistedId: () => readPersistedSessionId(cwd, sessionKey),
+        forkFrom: opts.fork && ctx.role === "crew" ? readPersistedSessionId(cwd, "default") : null,
     });
     if (sessionPlan.warning) {
         process.stderr.write(`claude-loop: ${sessionPlan.warning}\n`);
@@ -841,6 +875,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #1549 — propagate the EFFECTIVE session mode so the SessionStart hook
         // knows whether to detect+persist the session id (`auto` only).
         `export AIBALL_SESSION_MODE=${shQuote(effectiveSessionMode)}`,
+        // #2523 — which entry of `.aiball-session_id` the hook records into.
+        `export AIBALL_SESSION_KEY=${shQuote(sessionKey)}`,
         // #480 david : le timer + les hooks sont spawn sans `cwd:` explicite
         // côté Node, donc ils héritent du cwd du shell de lancement
         // (typiquement le dev checkout aiball/). `loadConfig()` no-arg
@@ -2177,6 +2213,8 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--aiball-token <token>", "#390: bearer token for the remote daemon (mint with `aiball auth issue --consumer <id>` on the daemon host). Required with --aiball-url.")
         .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
         .option("--agent <id>", "#420: alias for --consumer (the loop's agent identity). Set a distinct one to run several loops in the same dir.")
+        .option("--crew <name>", "#2523: start a crew agent in this folder, next to its main loop — assignment-only, its own session, told at start that it waits for explicit requests. Same as --agent <name> --role crew.")
+        .option("--fork", "#2523: with --crew, the first start forks the main loop's session (its context, a new id) instead of starting empty.")
         .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
         // #1435: multi-agent role sugar — lead (owner + can-claim, today's
         // default) or crew (follower + assignment-only worktree worker).
@@ -2208,6 +2246,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             role?: string;
+            crew?: string; fork?: boolean;
             type?: string; denyCode?: boolean;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
@@ -2233,6 +2272,8 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 consumer: opts.consumer ?? opts.agent, // #420: --agent is an alias for --consumer
                 project: opts.project,
                 role: opts.role === "lead" || opts.role === "crew" ? opts.role : undefined,
+                crew: opts.crew,
+                fork: opts.fork === true,
                 type: opts.type === "coder" || opts.type === "cto" ? opts.type : undefined,
                 denyCode: opts.denyCode === true,
                 cwd: opts.cwd,

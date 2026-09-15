@@ -23,10 +23,10 @@
  *     bar-boot state until the watchers end (= picker dismissed)
  *   - this hook just emits the SessionStart event and exits
  */
-import { readFileSync, appendFileSync, writeFileSync } from "node:fs";
+import { readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { CL_ENV } from "./env-vars.js";
-import { SESSION_ID_FILE, isValidUuid } from "./session-id.js";
+import { SESSION_ID_FILE, isValidUuid, recordSessionEntry } from "./session-id.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
 import { sendEventOnce } from "./ipc-events.js";
 import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
@@ -83,9 +83,12 @@ try {
 // already own the id up front). Best-effort — never blocks claude's boot.
 if (process.env.AIBALL_SESSION_MODE === "auto" && sessionId && isValidUuid(sessionId)) {
     const projectCwd = process.env.AIBALL_PROJECT_CWD ?? process.cwd();
+    // #2523 — only this loop's entry: the main loop's `default`, or a crew
+    // agent's own. Another loop in the same folder keeps its session.
+    const key = process.env.AIBALL_SESSION_KEY || "default";
     try {
-        writeFileSync(join(projectCwd, SESSION_ID_FILE), sessionId + "\n");
-        log(`auto: persisted session id ${sessionId} → ${SESSION_ID_FILE}`);
+        recordSessionEntry(join(projectCwd, SESSION_ID_FILE), key, sessionId);
+        log(`auto: persisted session id ${sessionId} → ${SESSION_ID_FILE} [${key}]`);
     } catch (e) { log(`auto: persist session id failed ${(e as Error).message ?? e}`); }
 }
 

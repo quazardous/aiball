@@ -191,6 +191,9 @@ prompts:
   # `121a042` qui leakait sur d'autres messages, désactivé en #882).
   # Empty string → opt-out. Override per-project via `.aiball.yaml`.
   post_boot_skill_reminder: "Check the /aiball skill to triage your queue — some of what surfaces is old, so re-check the current state before acting on it."
+  # #2523 — what a crew agent (`claude-loop start --crew <name>`) gets instead:
+  # it waits for explicit requests and never triages. Empty string → opt-out.
+  post_boot_crew_reminder: "You are the crew agent {agent}. You wait for explicit requests: a ticket assigned to you, or a message addressed to you. Nothing else is yours to pick up — when nothing is asked, do nothing; the loop wakes you when something is."
 
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same

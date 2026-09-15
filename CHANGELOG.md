@@ -23,6 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- **A crew agent next to a project's main loop**: `claude-loop start --crew
+  <name>` runs an assignment-only agent in the same folder. It is told at start
+  that it waits for explicit requests instead of being sent to triage, and it
+  resumes its own session. `--fork` starts it from a fork of the main loop's
+  session. `.aiball-session_id` now holds the main session and one per crew agent;
+  an old file still reads as the main one.
+
 ### Fixed
 
 - In the list sorted by recent activity, the default, a comment or a decision

@@ -104,6 +104,39 @@ loop still starts, with a warning naming the command to run instead. For an
 existing agent, `aiball --human agent set <id> --type cto` does the same from
 any terminal; restart the agent's loop for it to apply.
 
+### A crew agent in the same folder
+
+A project's main loop can have crew agents next to it, in the same folder:
+
+```sh
+claude-loop start --crew reviewer          # a new, empty session
+claude-loop start --crew reviewer --fork   # first start: a fork of the main loop's session
+```
+
+`--crew <name>` is `--agent <name> --role crew`:
+
+- **Explicit requests only**: a crew agent never claims. Its backlog holds only
+  the tickets assigned to it.
+- **Boot message**: at start it is told who it is and that it waits for explicit
+  requests (the `post_boot_crew_reminder` slot), instead of the main loop's
+  "triage your queue".
+- **Refusals**: the name may not be the folder's main agent. `--fork` goes with
+  `--crew` only.
+- **Its own session.** `.aiball-session_id` holds every loop of the folder:
+  `{ "default": "<main loop>", "agents": { "<name>": "<crew session>" } }`. Each
+  loop's SessionStart hook records only its own entry, under a short lock, so a
+  `/clear` is followed on restart and one loop never takes another's session.
+  With no entry, a crew starts a new session. An old file holding one bare id
+  reads as `default`.
+- **`--fork`** starts a crew with no session of its own from a fork of the main
+  loop's (`claude --resume <id> --fork-session`): the main loop's context under a
+  new id, the main session untouched. Later starts resume the crew's own entry.
+  The boot message still reminds it that the main loop's work is not its own.
+
+`start` warns that a crew agent shares the folder's git working tree: two agents
+editing the same files collide. `claude-loop crew create <name> --start` gives
+a crew agent an isolated worktree instead.
+
 ## Core cycle
 
 ```
