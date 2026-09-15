@@ -14,7 +14,7 @@
  * Always emits `{}` and exits 0 — never block claude's stop.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { LOOP_SOCK_KIND, MUX_CMD, PANE_BUSY_DELAY_MS, humanPresentHold, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
@@ -22,6 +22,7 @@ import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
+import { SESSION_ID_FILE, isValidUuid, parseSessionFile, recordSessionEntry, sessionEntry } from "./session-id.js";
 import { createLogger } from "../log.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
 import { sendEventOnce } from "./ipc-events.js";
@@ -87,6 +88,31 @@ const logger = createLogger({
 });
 function log(msg: string): void {
     logger.info(msg);
+}
+
+// #2523 — record this loop's session id from the Stop hook too. A session
+// started with `--resume <id> --fork-session` (a crew's `--fork`) fires no
+// SessionStart hook at all — observed on two crew loops: no hook log, boot
+// sealed by deadline, no entry in `.aiball-session_id` — so the fork was never
+// recorded and the next start would fork again instead of resuming. Every turn
+// ends in a Stop carrying the session id; writing only when the entry differs
+// keeps it to one write per new session.
+if (process.env.AIBALL_SESSION_MODE === "auto") {
+    try {
+        const raw = readFileSync(0, "utf8");
+        const sessionId = raw ? (JSON.parse(raw) as { session_id?: unknown }).session_id : undefined;
+        const key = process.env.AIBALL_SESSION_KEY || "default";
+        const projectCwd = process.env.AIBALL_PROJECT_CWD ?? process.cwd();
+        if (typeof sessionId === "string" && isValidUuid(sessionId)) {
+            const path = join(projectCwd, SESSION_ID_FILE);
+            let text: string | null = null;
+            try { text = readFileSync(path, "utf8"); } catch { /* none yet */ }
+            if (sessionEntry(parseSessionFile(text).file, key) !== sessionId.toLowerCase()) {
+                recordSessionEntry(path, key, sessionId);
+                log(`auto: persisted session id ${sessionId} → ${SESSION_ID_FILE} [${key}] (from Stop)`);
+            }
+        }
+    } catch (e) { log(`auto: persist session id from Stop failed ${(e as Error).message ?? e}`); }
 }
 
 /**
