@@ -2,8 +2,10 @@
  * #2526 — POST /api/tickets: an external system files a ticket with an API key
  * holding the scope `tickets:create`.
  *
- * The ticket is created already approved: the moderation happened once, when a
- * human granted the scope for the key's projects. Its author is the key's
+ * Moderation (david: "approuvé n'est pas le défaut, le défaut est la config
+ * d'auto-approbation"): a ticket goes through the project's usual moderation —
+ * its rules and strategy — like any post by that author. `approved: true` asks
+ * for it approved at once; the key holder chooses, ticket by ticket. Its author is the key's
  * source (its label), never a field of the body, so a caller cannot file as
  * someone else. From there it is an ordinary ticket — fanned out to the owners,
  * in their backlog, claimable and closable.
@@ -143,7 +145,10 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
     if ("error" in v) return res.status(400).json({ error: v.error });
     v.by_agent = grant.source;
 
-    const msg = submitMessage(v, { preApprovedByKey: true });
+    if (body.approved !== undefined && typeof body.approved !== "boolean") {
+        return res.status(400).json({ error: "approved must be true or false" });
+    }
+    const msg = submitMessage(v, { preApprovedByKey: body.approved === true });
     if (externalId) recordExternalId(msg.id, externalId);
     if (tagIds.length) setMessageTags(msg.id, tagIds, grant.source);
     if (assignee) {

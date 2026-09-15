@@ -27,9 +27,10 @@ dates are YYYY-MM-DD.
 
 - **API keys with scopes, and tickets filed by a key**: a key holds `signals`
   (what every key could do, and the default) and/or `tickets:create`, which
-  lets an external system file tickets, already approved, in the projects the
-  key names (`POST /api/tickets`, optionally assigned to a consumer of the
-  project, safe to retry with `external_id`). Granted
+  lets an external system file tickets in the projects the
+  key names (`POST /api/tickets`: moderated like any post unless the request
+  asks `approved: true`, optionally assigned to a consumer of the project, safe
+  to retry with `external_id`). Granted
   from the Signals tab or `aiball auth issue --scope … --project …`.
 
 - **Wake focus**: beside a project's standing instruction, a list of tickets

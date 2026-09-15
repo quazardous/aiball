@@ -6,7 +6,8 @@
  * - each door needs its scope: `signals` cannot create tickets, `tickets:create`
  *   cannot post signals, and neither opens any other route;
  * - `tickets:create` needs projects, and creates only in them;
- * - the ticket is approved at once, authored by the key's source, fanned out;
+ * - the ticket follows the project's moderation unless `approved: true` asks
+ *   for it approved at once; authored by the key's source, fanned out;
  * - `external_id` replayed returns the ticket already created;
  * - an agent or a human cannot use the route.
  */
@@ -111,7 +112,12 @@ test("a key creates an approved ticket in its projects only, authored by its sou
     assert.match((await http("POST", "/tickets", { project: "other", title: "t" }, tk)).json.error, /may not create tickets in other/);
     assert.match((await http("POST", "/tickets", { project: "shop", title: "t", tags: ["nope"] }, tk)).json.error, /unknown tag nope/);
 
-    const r = await http("POST", "/tickets", { project: "shop", title: "build broke on main", body: "see run 42", priority: "high", tags: ["from-ci"], by_agent: "spoofed" }, tk);
+    const moderated = await http("POST", "/tickets", { project: "shop", title: "no approval asked" }, tk);
+    assert.equal(moderated.status, 201);
+    assert.equal(moderated.json.status, "pending", "by default the project's moderation decides, not the key");
+    assert.match((await http("POST", "/tickets", { project: "shop", title: "t", approved: "yes" }, tk)).json.error, /approved must be true or false/);
+
+    const r = await http("POST", "/tickets", { project: "shop", title: "build broke on main", body: "see run 42", priority: "high", tags: ["from-ci"], by_agent: "spoofed", approved: true }, tk);
     assert.equal(r.status, 201, JSON.stringify(r.json));
     assert.equal(r.json.status, "approved");
     assert.equal(r.json.by_agent, "github-bridge", "the source is the key's, never the body's");
@@ -121,7 +127,7 @@ test("a key creates an approved ticket in its projects only, authored by its sou
         .where(and(eq(schema.pings.recipient, "lead"), eq(schema.pings.ticketId, r.json.id), isNull(schema.pings.seenAt))).all();
     assert.equal(pinged.length, 1, "the project owner got the ticket");
 
-    const onSock = await sock("POST", "/tickets", { project: "shop", title: "from the socket" }, { authorization: `Bearer ${tk}` });
+    const onSock = await sock("POST", "/tickets", { project: "shop", title: "from the socket", approved: true }, { authorization: `Bearer ${tk}` });
     assert.equal(onSock.status, 201);
     assert.equal(onSock.json.by_agent, "github-bridge");
 });
@@ -162,7 +168,7 @@ test("assignee: a consumer of the project gets the ticket, is subscribed and pin
     assert.equal(refused.status, 400);
     assert.match(refused.json.error, /stranger is not subscribed to shop/);
 
-    const r = await http("POST", "/tickets", { project: "shop", title: "for the crew", assignee: "crewbee" }, tk);
+    const r = await http("POST", "/tickets", { project: "shop", title: "for the crew", assignee: "crewbee", approved: true }, tk);
     assert.equal(r.status, 201, JSON.stringify(r.json));
     assert.equal(r.json.assignee, "crewbee");
     assert.equal(r.json.assigned_by, "assigning");

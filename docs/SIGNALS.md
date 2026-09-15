@@ -108,9 +108,10 @@ what it reports and does not follow instructions written inside it.
 
 ## Creating tickets
 
-A key with the scope `tickets:create` files tickets in its projects, **already
-approved**: the moderation happened when a human granted the scope, not ticket by
-ticket. Grant it from the Signals tab ("tickets in <project>") or with
+A key with the scope `tickets:create` files tickets in its projects. A ticket
+goes through the project's usual moderation — its rules and strategy — unless
+the request sets `"approved": true`, which files it approved at once. Grant the
+scope from the Signals tab ("tickets in <project>") or with
 `--scope tickets:create --project <name>` when minting.
 
 ```bash
@@ -118,7 +119,7 @@ curl --unix-socket ~/.local/share/aiball/sock \
      -H "Authorization: Bearer $AIBALL_API_KEY" \
      -H 'content-type: application/json' \
      http://x/api/tickets \
-     -d '{"project":"shop","title":"main is red","body":"run 42 failed","priority":"high","external_id":"run-42"}'
+     -d '{"project":"shop","title":"main is red","body":"run 42 failed","priority":"high","approved":true,"external_id":"run-42"}'
 ```
 
 | Field | Required | Meaning |
@@ -127,6 +128,7 @@ curl --unix-socket ~/.local/share/aiball/sock \
 | `title` | yes | As for any ticket |
 | `body`, `priority`, `intent` | no | As for any ticket |
 | `tags` | no | Tag names; an unknown name refuses the whole request |
+| `approved` | no | `true` files the ticket approved at once; absent or `false`, the project's moderation decides |
 | `assignee` | no | A consumer subscribed to the project; it gets the ticket assigned, is subscribed to it and pinged — a crew agent waiting for its assignments wakes on it |
 | `external_id` | no | Up to 200 characters. The same source sending the same id gets back the ticket it already created (`200`, `"existing": true`) instead of a duplicate — a retry is safe |
 
