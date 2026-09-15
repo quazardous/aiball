@@ -11,6 +11,11 @@
  * `external_id` makes retries safe: the same source sending the same id gets
  * the ticket it already created back (200), not a duplicate.
  *
+ * `assignee` (david, on the plan: "il faut un assignee") hands the ticket to a
+ * consumer of the project at creation, the way a human assigns one: it is
+ * subscribed to the thread and pinged, so a crew agent waiting for its
+ * assignments is woken by it.
+ *
  * Like the signals route, the key is required on the Unix socket too: the
  * middleware trusts a socket caller without a token, so this route checks.
  */
@@ -21,6 +26,11 @@ import { getTokenAndTouch } from "../db/tokens.js";
 import { keyProjects, keyScopes } from "../db/signal-keys.js";
 import { getDb } from "../db/connection.js";
 import { getTagByName, setMessageTags } from "../db/tags.js";
+import { setTicketAssignment } from "../db/tickets.js";
+import { insertPing } from "../db/pings.js";
+import { listProjectSubscribers, upsertTicketSubscription } from "../db/subscriptions.js";
+import { getMessage } from "../db.js";
+import { broadcast } from "../ws.js";
 import * as schema from "../schema.js";
 import { submitMessage, validateNewMessage } from "../messages.js";
 import { withTagsOne } from "./_helpers.js";
@@ -110,6 +120,17 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
         }
     }
 
+    // The assignee must already work on the project: a key hands work to one of
+    // its consumers, it does not recruit someone new.
+    let assignee: string | null = null;
+    if (body.assignee !== undefined && body.assignee !== null) {
+        if (typeof body.assignee !== "string" || !body.assignee.trim()) return res.status(400).json({ error: "assignee must be a consumer id" });
+        assignee = body.assignee.trim();
+        if (!listProjectSubscribers(project).includes(assignee)) {
+            return res.status(400).json({ error: `${assignee} is not subscribed to ${project} — assign a consumer of the project` });
+        }
+    }
+
     const v = validateNewMessage({
         kind: "ticket_created",
         project,
@@ -125,5 +146,16 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
     const msg = submitMessage(v, { preApprovedByKey: true });
     if (externalId) recordExternalId(msg.id, externalId);
     if (tagIds.length) setMessageTags(msg.id, tagIds, grant.source);
-    res.status(201).json({ ...withTagsOne(msg), existing: false });
+    if (assignee) {
+        setTicketAssignment(msg.id, assignee, grant.source);
+        upsertTicketSubscription(assignee, msg.id);
+        // The creation fan-out reached the owners; a follower or crew assignee
+        // was not among them. The ping is idempotent, so an owner is not
+        // pinged twice.
+        insertPing(assignee, { id: msg.id, kind: msg.kind, intent: msg.intent }, grant.source);
+        const updated = getMessage(msg.id);
+        if (updated) broadcast({ type: "message_edited", data: updated });
+    }
+    const out = getMessage(msg.id) ?? msg;
+    res.status(201).json({ ...withTagsOne(out), existing: false });
 });

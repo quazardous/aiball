@@ -127,6 +127,7 @@ curl --unix-socket ~/.local/share/aiball/sock \
 | `title` | yes | As for any ticket |
 | `body`, `priority`, `intent` | no | As for any ticket |
 | `tags` | no | Tag names; an unknown name refuses the whole request |
+| `assignee` | no | A consumer subscribed to the project; it gets the ticket assigned, is subscribed to it and pinged — a crew agent waiting for its assignments wakes on it |
 | `external_id` | no | Up to 200 characters. The same source sending the same id gets back the ticket it already created (`200`, `"existing": true`) instead of a duplicate — a retry is safe |
 
 The ticket's author is the key's label, whatever the body says. From there it is

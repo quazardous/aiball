@@ -151,3 +151,25 @@ test("a key's scopes and projects can be edited, and the change applies at once"
     assert.deepEqual(up.json.scopes, ["signals", "tickets:create"]);
     assert.equal((await http("POST", "/tickets", { project: "shop", title: "t" }, minted.token)).status, 201);
 });
+
+test("assignee: a consumer of the project gets the ticket, is subscribed and pinged; anyone else is refused", async () => {
+    upsertConsumer({ consumer_id: "crewbee", kind: "agent" });
+    upsertSubscription("crewbee", "shop", "follower");
+    upsertConsumer({ consumer_id: "stranger", kind: "agent" });
+    const tk = (await mint("assigning", ["tickets:create"], ["shop"])).json.token as string;
+
+    const refused = await http("POST", "/tickets", { project: "shop", title: "t", assignee: "stranger" }, tk);
+    assert.equal(refused.status, 400);
+    assert.match(refused.json.error, /stranger is not subscribed to shop/);
+
+    const r = await http("POST", "/tickets", { project: "shop", title: "for the crew", assignee: "crewbee" }, tk);
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.json.assignee, "crewbee");
+    assert.equal(r.json.assigned_by, "assigning");
+    const pinged = getDb().select().from(schema.pings)
+        .where(and(eq(schema.pings.recipient, "crewbee"), eq(schema.pings.ticketId, r.json.id))).all();
+    assert.equal(pinged.length, 1, "a follower assignee is pinged, the creation fan-out alone would not have");
+    const subs = getDb().select().from(schema.ticketSubscriptions)
+        .where(and(eq(schema.ticketSubscriptions.consumerId, "crewbee"), eq(schema.ticketSubscriptions.ticketId, r.json.id))).all();
+    assert.equal(subs.length, 1);
+});
