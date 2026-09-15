@@ -8,6 +8,7 @@
 import { eq } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
+import type { StoredWakeFocus } from "../wake-focus.js";
 
 export type Strategy = "manual" | "auto" | "auto-reply";
 export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
@@ -63,6 +64,17 @@ export function getProjectStandingPrompt(project: string): string | null {
 export function setProjectStandingPrompt(project: string, text: string | null): void {
     if (!project) throw new Error("project required");
     setPref(project, "standingPrompt", text);
+}
+
+/** #2525 — the project's stored wake focus, active or not; null when none. */
+export function getProjectWakeFocus(project: string): StoredWakeFocus | null {
+    if (!project) return null;
+    return getPref(project, "wakeFocus") ?? null;
+}
+
+export function setProjectWakeFocus(project: string, focus: StoredWakeFocus | null): void {
+    if (!project) throw new Error("project required");
+    setPref(project, "wakeFocus", focus);
 }
 
 /** Effective strategy used by the rule engine: per-project override

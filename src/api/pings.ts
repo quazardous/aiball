@@ -19,6 +19,7 @@ import { onPing, onControl, onSignal } from "../event-bus.js";
 import { drainPrompts } from "../loop-prompts.js";
 import { presenceConnect, presenceDisconnect } from "../live-presence.js";
 import { badRequest } from "./_helpers.js";
+import { wakeFocusHidesTicket } from "../db/backlog-rules.js";
 
 export const pingsRouter = Router();
 
@@ -79,6 +80,9 @@ pingsRouter.get("/events", (req, res) => {
         unread: unreadPingCount(consumer),
     })}\n\n`);
     const off = onPing(consumer, (payload) => {
+        // #2525 — a ping on a ticket outside the project's wake focus stays
+        // unread and is not pushed: the loop wakes on this push directly.
+        if (payload.ticket_id !== undefined && wakeFocusHidesTicket(consumer, payload.ticket_id)) return;
         res.write(`event: ping\ndata: ${JSON.stringify(payload)}\n\n`);
     });
     // #442: out-of-band control events (e.g. remote hard-kill) ride the same

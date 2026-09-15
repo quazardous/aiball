@@ -776,6 +776,16 @@ export interface Launcher {
     icon?: string;
 }
 
+/** #2525 — the standing instruction and the wake focus of a project. */
+export interface StandingPromptView {
+    project: string;
+    standing_prompt: string | null;
+    focus_tickets?: string | null;
+    focus_until?: string | null;
+    focus_active?: boolean;
+    focus_line?: string;
+}
+
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
     /** #1200 — token-usage-over-time series (per project snapshots). */
@@ -876,9 +886,16 @@ export const api = {
             { strategy },
         ),
     getProjectStandingPrompt: (name: string) =>
-        req<{ project: string; standing_prompt: string | null }>(
+        req<StandingPromptView>(
             "GET",
             `/api/projects/${encodeURIComponent(name)}/standing-prompt`,
+        ),
+    /** #2525 — the wake focus, beside the standing instruction. */
+    setProjectWakeFocus: (name: string, focus_tickets: string | null, focus_until: string | null) =>
+        req<StandingPromptView>(
+            "PATCH",
+            `/api/projects/${encodeURIComponent(name)}/standing-prompt`,
+            { focus_tickets, focus_until },
         ),
     setProjectStandingPrompt: (name: string, standing_prompt: string | null) =>
         req<{ project: string; standing_prompt: string | null }>(

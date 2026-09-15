@@ -27,6 +27,7 @@ import * as schema from "../schema.js";
 import { mentions } from "../mentions.js";
 import { getDb, nowIso } from "./connection.js";
 import { getConsumer } from "./consumers.js";
+import { activeFocus, focusHides, type WakeFocus } from "../wake-focus.js";
 
 export type Target =
     | "unread-list"
@@ -57,6 +58,10 @@ export interface BacklogRulesCtx {
      *  (the rule that reads it is inert otherwise), so a normal consumer
      *  pays nothing for it. */
     mentionsMeIds: Set<number>;
+    /** #2525 — the wake focus in force on each project this consumer owns, for
+     *  an AGENT owner only. Absent project = no focus. Optional so a caller
+     *  that built a ctx before #2525 changes nothing. */
+    focusByProject?: ReadonlyMap<string, WakeFocus>;
 }
 
 /**
@@ -75,6 +80,8 @@ export interface RuleItem {
     commentKind?: string | null;
     /** Ticket assignee. */
     assignee?: string | null;
+    /** #2525 — the ticket's project, for the wake focus. */
+    project?: string | null;
 }
 
 export interface BacklogRule {
@@ -182,6 +189,25 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
             && !(ctx.mentionsMeIds?.has(item.ticketId) ?? false),
         excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
     },
+    {
+        // #2525 david — a project's wake focus narrows what wakes its owner
+        // agents to a list of tickets. Out of the backlog and the wake FIFO, and
+        // out of the unread list and count too: the loop counts and drains
+        // those, and an event it can count but not deliver would spin it. The
+        // ping stays unread — nothing is acked — so it arrives when the focus
+        // is lifted. Not `actionable-pool` / `hot-tier`: the focus decides what
+        // wakes, not what the agent may read or rank.
+        //
+        // Assignments are no exception (david accepted the plan with this):
+        // the focus is what the human wants the agent on, and an assignment
+        // outside it would leak straight back in.
+        name: "outside-focus",
+        when: (ctx, item) => {
+            if (!item.project) return false;
+            return focusHides(ctx.focusByProject?.get(item.project), item.ticketId);
+        },
+        excludesFrom: new Set<Target>(["unread-list", "unread-count", "fifo-wake", "backlog-tier"]),
+    },
 ]);
 
 export class BacklogRules {
@@ -235,10 +261,11 @@ export function buildBacklogRulesCtx(
     const canClaim = opts.canClaim ?? (getConsumer(consumerId)?.can_claim !== false);
     // Only a specialist reads this set, so only a specialist pays for it.
     const mentionsMeIds = canClaim ? new Set<number>() : ticketsMentioning(consumerId);
+    const focusByProject = wakeFocusFor(consumerId, nowMs);
     if (opts.closedIds && opts.snoozedIds) {
         return {
             consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds,
-            claimedByOtherIds, canClaim, mentionsMeIds,
+            claimedByOtherIds, canClaim, mentionsMeIds, focusByProject,
         };
     }
     const db = getDb();
@@ -276,7 +303,50 @@ export function buildBacklogRulesCtx(
             .all();
         snoozedIds = new Set(rows.map((r) => r.id));
     }
-    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds };
+    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds, focusByProject };
+}
+
+/**
+ * #2525 — does the wake focus keep ticket `ticketId` from waking `consumerId`?
+ * For the live ping stream, which pushes one event at a time outside any list
+ * the rules engine filters: a loop wakes on that push directly, so an event the
+ * FIFO hides must not be pushed either.
+ */
+export function wakeFocusHidesTicket(consumerId: string, ticketId: number, nowMs = Date.now()): boolean {
+    const t = getDb().select({ project: schema.tickets.project }).from(schema.tickets)
+        .where(eq(schema.tickets.id, ticketId)).get();
+    if (!t) return false;
+    return focusHides(wakeFocusFor(consumerId, nowMs).get(t.project), ticketId);
+}
+
+/**
+ * #2525 — the focus in force on each project `consumerId` owns, when it is an
+ * agent. A human is never filtered, and an agent only on the projects it owns:
+ * a follower or a crew agent has no backlog there to narrow.
+ */
+function wakeFocusFor(consumerId: string, nowMs: number): Map<string, WakeFocus> {
+    const out = new Map<string, WakeFocus>();
+    const consumer = getConsumer(consumerId);
+    if (!consumer || consumer.kind === "human") return out;
+    const rows = getDb().select({ project: schema.projects.name, focus: schema.projects.wakeFocus })
+        .from(schema.subscriptions)
+        .innerJoin(schema.projects, eq(schema.projects.name, schema.subscriptions.project))
+        .where(and(
+            eq(schema.subscriptions.consumerId, consumerId),
+            eq(schema.subscriptions.role, "owner"),
+            isNotNull(schema.projects.wakeFocus),
+        ))
+        .all();
+    for (const r of rows) {
+        let stored: { tickets: string; until: string | null } | null = null;
+        try {
+            const j = JSON.parse(r.focus ?? "") as { tickets?: unknown; until?: unknown };
+            if (typeof j.tickets === "string") stored = { tickets: j.tickets, until: typeof j.until === "string" ? j.until : null };
+        } catch { /* unreadable: no focus */ }
+        const focus = activeFocus(stored, nowMs);
+        if (focus) out.set(r.project, focus);
+    }
+    return out;
 }
 
 /**

@@ -2016,7 +2016,7 @@ export async function buildContextPhrase(
             // best-effort like the row above: a failed lookup costs the
             // reminder, never the wake.
             project
-                ? (client.getProjectStandingPrompt(project).catch(() => null) as Promise<{ standing_prompt?: string | null } | null>)
+                ? (client.getProjectStandingPrompt(project).catch(() => null) as Promise<{ standing_prompt?: string | null; focus_line?: string } | null>)
                 : Promise.resolve(null),
         ]);
         // Resolve the head's ticket id : a `ticket_created` msg IS the
@@ -2053,7 +2053,11 @@ export async function buildContextPhrase(
         // consumer's: the project one says "what matters here, right now", the
         // consumer one says "how you work in general", and the situational
         // instruction is the one that should be read first.
-        const standingPrompt = (standingR?.standing_prompt ?? "").trim();
+        // #2525 — a wake focus in force opens the line, so the agent knows why it
+        // sees only part of its work. Not for a crew agent: the focus narrows
+        // the project's owners, and a crew only ever had its assignments.
+        const focusLine = process.env.AIBALL_ROLE === "crew" ? "" : (standingR?.focus_line ?? "").trim();
+        const standingPrompt = [focusLine, (standingR?.standing_prompt ?? "").trim()].filter(Boolean).join(" · ");
         // #374 (#kjsejy): open and actionable are DISTINCT counts. We always
         // state the TRUE open count when waking so a gated backlog (open>0,
         // actionable=0) never reads as "nothing to do"; `actionableCount`

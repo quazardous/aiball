@@ -196,6 +196,7 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         ticketId: t.id,
         ticketByAgent: t.byAgent ?? null,
         assignee: t.assignee ?? null,
+        project: t.project,
     };
     const excludedFromBacklog = defaultBacklogRules.excludes(ctx.rulesCtx, ruleItem, "backlog-tier");
     let backlog_tier: 0 | 1 | 2 | 3 | 4 | null = null;

@@ -61,16 +61,17 @@ function targetInArray(ids: number[]) {
  * unreadCount / listPings / unreadPingCount) délèguent au moteur — chacun
  * en passant le `Target` qui matche sa surface logique.
  */
-function ticketRowToRuleItem(t: { id: number; byAgent: string | null; assignee: string | null }): RuleItem {
+function ticketRowToRuleItem(t: { id: number; byAgent: string | null; assignee: string | null; project?: string | null }): RuleItem {
     return {
         ticketId: t.id,
         ticketByAgent: t.byAgent,
         assignee: t.assignee,
+        project: t.project ?? null,
     };
 }
 function messageRowToRuleItem(
     m: { byAgent: string | null; kind: string },
-    parent: { id: number; byAgent: string | null; assignee: string | null },
+    parent: { id: number; byAgent: string | null; assignee: string | null; project?: string | null },
 ): RuleItem {
     return {
         ticketId: parent.id,
@@ -78,6 +79,7 @@ function messageRowToRuleItem(
         commentByAgent: m.byAgent,
         commentKind: m.kind,
         assignee: parent.assignee,
+        project: parent.project ?? null,
     };
 }
 

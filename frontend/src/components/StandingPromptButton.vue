@@ -42,6 +42,18 @@ const saved = ref("");
 const busy = ref(false);
 const error = ref<string | null>(null);
 const history = ref<string[]>([]);
+// #2525 — the wake focus: which of the project's tickets may wake its owner agents.
+const focusTickets = ref("");
+const focusUntil = ref(""); // datetime-local value, local time
+const savedFocus = ref({ tickets: "", until: "", active: false, line: "" });
+
+function toLocalInput(iso: string | null | undefined): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 async function refresh(): Promise<void> {
     if (!props.project) return;
@@ -49,6 +61,9 @@ async function refresh(): Promise<void> {
         const r = await api.getProjectStandingPrompt(props.project);
         saved.value = r.standing_prompt ?? "";
         value.value = saved.value;
+        savedFocus.value = { tickets: r.focus_tickets ?? "", until: toLocalInput(r.focus_until), active: r.focus_active === true, line: r.focus_line ?? "" };
+        focusTickets.value = savedFocus.value.tickets;
+        focusUntil.value = savedFocus.value.until;
         error.value = null;
     } catch (e) {
         error.value = (e as Error).message;
@@ -72,12 +87,21 @@ function open(event: MouseEvent): void {
 async function save(): Promise<void> {
     if (!props.project) return;
     const next = value.value.trim();
-    if (next === saved.value) { popoverRef.value?.hide(); return; }
+    const focusChanged = focusTickets.value.trim() !== savedFocus.value.tickets || focusUntil.value !== savedFocus.value.until;
+    if (next === saved.value && !focusChanged) { popoverRef.value?.hide(); return; }
     busy.value = true;
     try {
-        const r = await api.setProjectStandingPrompt(props.project, next || null);
+        if (focusChanged) {
+            const tickets = focusTickets.value.trim();
+            const until = tickets && focusUntil.value ? new Date(focusUntil.value).toISOString() : null;
+            await api.setProjectWakeFocus(props.project, tickets || null, until);
+        }
+        const r = next === saved.value
+            ? await api.getProjectStandingPrompt(props.project)
+            : await api.setProjectStandingPrompt(props.project, next || null);
         saved.value = r.standing_prompt ?? "";
         value.value = saved.value;
+        await refresh();
         history.value = rememberStandingPrompt(props.project, saved.value);
         popoverRef.value?.hide();
     } catch (e) {
@@ -92,6 +116,8 @@ async function save(): Promise<void> {
  *  than none. It never touches the history. */
 async function clear(): Promise<void> {
     value.value = "";
+    focusTickets.value = "";
+    focusUntil.value = "";
     await save();
 }
 
@@ -157,7 +183,7 @@ function describeLoopResult(r: LoopHoldResult): string {
             text
             rounded
             class="standing-prompt-btn"
-            :class="{ 'standing-prompt-btn--set': !!saved }"
+            :class="{ 'standing-prompt-btn--set': !!saved || savedFocus.active }"
             :aria-label="!project
                 ? 'Message every agent (a standing instruction needs a project)'
                 : saved
@@ -165,8 +191,8 @@ function describeLoopResult(r: LoopHoldResult): string {
                     : `Set a standing instruction for ${project}`"
             :title="!project
                 ? 'Message every agent loop. The standing instruction is per project: pick one to set it.'
-                : saved
-                    ? `Every wake on ${project} starts with: “${saved}”`
+                : saved || savedFocus.active
+                    ? [saved ? `Every wake on ${project} starts with: “${saved}”` : '', savedFocus.active ? `Wake ${savedFocus.line}.` : ''].filter(Boolean).join(' ')
                     : `No standing instruction on ${project}. Wakes read as usual.`"
             @click="open"
         />
@@ -191,6 +217,34 @@ function describeLoopResult(r: LoopHoldResult): string {
                 <datalist id="standing-prompt-pop-history">
                     <option v-for="h in history" :key="h" :value="h" />
                 </datalist>
+                <!-- #2525 — the wake focus. -->
+                <div class="standing-prompt-pop__head">Wake focus</div>
+                <p class="standing-prompt-pop__hint">
+                    Only these tickets wake the project's owner agents — backlog and
+                    events. <code>123, 456</code> keeps just those; <code>!789</code> keeps all
+                    but it. Events outside stay unread until you clear it. Humans and
+                    explicit reads are not filtered.
+                </p>
+                <div class="standing-prompt-pop__focus">
+                    <input
+                        v-model="focusTickets"
+                        type="text"
+                        class="standing-prompt-pop__input"
+                        placeholder="e.g. 2518, 2523   or   !2180"
+                        :disabled="busy || !project"
+                        @keyup.enter="save"
+                    >
+                    <input
+                        v-model="focusUntil"
+                        type="datetime-local"
+                        class="standing-prompt-pop__until"
+                        title="Optional: the focus stops applying at this time"
+                        :disabled="busy || !project || !focusTickets.trim()"
+                    >
+                </div>
+                <div v-if="savedFocus.tickets && !savedFocus.active" class="standing-prompt-pop__hint">
+                    The saved focus has ended and no longer applies.
+                </div>
                 <div v-if="error" class="standing-prompt-pop__error">{{ error }}</div>
                 <div class="standing-prompt-pop__actions">
                     <Button
@@ -198,7 +252,7 @@ function describeLoopResult(r: LoopHoldResult): string {
                         severity="secondary"
                         size="small"
                         text
-                        :disabled="busy || !saved"
+                        :disabled="busy || (!saved && !savedFocus.tickets)"
                         @click="clear"
                     />
                     <Button label="save" size="small" :loading="busy" :disabled="!project" @click="save" />
@@ -251,6 +305,13 @@ function describeLoopResult(r: LoopHoldResult): string {
    noticing from across the header. */
 .standing-prompt-btn--set :deep(.pi) {
     color: var(--p-green-500);
+}
+.standing-prompt-pop__focus {
+    display: flex;
+    gap: 0.5rem;
+}
+.standing-prompt-pop__focus .standing-prompt-pop__input {
+    flex: 1;
 }
 .standing-prompt-pop {
     display: flex;

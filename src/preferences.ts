@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "./schema.js";
 import { getDb } from "./db/connection.js";
 import { isStrategy, type Strategy } from "./domain.js";
+import type { StoredWakeFocus } from "./wake-focus.js";
 
 export interface ProjectPrefs {
     /** Per-project moderation strategy override (#B.127, rebased
@@ -33,6 +34,9 @@ export interface ProjectPrefs {
      *  text, trimmed; empty clears it. NULL/undefined → nothing is shown,
      *  and the wake reads exactly as it does today. */
     standingPrompt?: string;
+    /** #2525 — which of the project's tickets may wake its owner agents, for
+     *  now. See `src/wake-focus.ts`. */
+    wakeFocus?: StoredWakeFocus;
 }
 
 export type ProjectPrefKey = keyof ProjectPrefs;
@@ -76,6 +80,23 @@ const PREF_DEFS: { [K in ProjectPrefKey]: PrefDef<K> } = {
             if (v === null || v === undefined) return null;
             const s = String(v).trim();
             return s ? s : null;
+        },
+    },
+    wakeFocus: {
+        column: "wakeFocus",
+        read: (r) => {
+            if (!r.wakeFocus) return undefined;
+            try {
+                const j = JSON.parse(r.wakeFocus) as { tickets?: unknown; until?: unknown };
+                if (typeof j.tickets !== "string" || !j.tickets.trim()) return undefined;
+                return { tickets: j.tickets, until: typeof j.until === "string" ? j.until : null };
+            } catch {
+                return undefined;
+            }
+        },
+        encode: (v) => {
+            if (!v || !v.tickets.trim()) return null;
+            return JSON.stringify({ tickets: v.tickets.trim(), until: v.until ?? null });
         },
     },
 };

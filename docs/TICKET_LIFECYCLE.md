@@ -349,6 +349,14 @@ stays out of its wake pool, however the wakes around it went. N is at most
 `tickets.step_after_max_minutes` (120 by default, set per project): a longer
 wait is refused, since it is not one step waiting on a job any more.
 
+A project's **wake focus**, set beside its standing instruction, narrows what
+wakes the project's owner agents to a list of tickets: `123, 456` keeps only
+those, `!789` keeps all but it, with an optional end time. It filters the backlog
+and the events the loop counts and drains; an event on a ticket outside it stays
+unread and arrives once the focus is lifted, and every wake opens with
+`focus: #123, #456 only`. Assignments are filtered too. Humans, crew agents and
+explicit reads (`ticket_get`, `ticket_list`) are not.
+
 When the loop names a ticket again within 30 minutes of its previous wake on it
 (`CL_BACKLOG_REWAKE_WINDOW_SEC`, 0 = off) and nobody else has acted on it in
 between, the wake adds a line saying so and pointing at

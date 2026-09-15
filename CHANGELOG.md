@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Wake focus**: beside a project's standing instruction, a list of tickets
+  (`123, 456`, or `!789` for all but) that alone may wake the project's owner
+  agents, until cleared or an optional end time. Backlog and events outside it
+  are held, unread, until the focus is lifted; the wake says what the focus is.
+
 - **A crew agent next to a project's main loop**: `claude-loop start --crew
   <name>` runs an assignment-only agent in the same folder. It is told at start
   that it waits for explicit requests instead of being sent to triage, and it

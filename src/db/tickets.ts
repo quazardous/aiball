@@ -51,6 +51,14 @@ export type TicketStage =
  * or row names its target by number only; hovering it should say what that
  * number is.
  */
+/** #2525 — which of `ids` are tickets of `project`. */
+export function listTicketIdsInProject(project: string, ids: number[]): number[] {
+    if (ids.length === 0) return [];
+    return getDb().select({ id: schema.tickets.id }).from(schema.tickets)
+        .where(and(eq(schema.tickets.project, project), inArray(schema.tickets.id, ids)))
+        .all().map((r) => r.id);
+}
+
 export function getTicketTitles(ids: number[]): Map<number, string> {
     const out = new Map<number, string>();
     if (ids.length === 0) return out;

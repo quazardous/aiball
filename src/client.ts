@@ -903,7 +903,7 @@ export class AiballClient {
      *  edits it precisely so the NEXT wake picks it up, so a cached value
      *  would defeat the point. */
     getProjectStandingPrompt(project: string) {
-        return this.http<{ project: string; standing_prompt?: string | null }>(
+        return this.http<{ project: string; standing_prompt?: string | null; focus_line?: string }>(
             "GET",
             `/api/projects/${encodeURIComponent(project)}/standing-prompt`,
         );

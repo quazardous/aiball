@@ -29,6 +29,9 @@ import {
     setProjectStandingPrompt,
 } from "./db.js";
 import { captureTokenSnapshotIfDue, getTokenTimeseries } from "./db.js";
+import { getProjectWakeFocus, setProjectWakeFocus } from "./db/settings.js";
+import { listTicketIdsInProject } from "./db/tickets.js";
+import { activeFocus, describeFocus, parseFocusTickets } from "./wake-focus.js";
 import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -218,10 +221,26 @@ api.get("/presence", (req: Request, res: Response) => {
 // single-line text input rather than a textarea — david's call, so that the
 // widget reminds him to stay short instead of a validator rejecting a paste
 // after the fact.
+/** #2525 — the standing prompt, and the wake focus beside it. */
+function standingPromptView(project: string) {
+    const focus = getProjectWakeFocus(project);
+    const active = activeFocus(focus, Date.now());
+    return {
+        project,
+        standing_prompt: getProjectStandingPrompt(project),
+        focus_tickets: focus?.tickets ?? null,
+        focus_until: focus?.until ?? null,
+        // Past its end the stored focus no longer applies: the wake and the
+        // filters read this, the form still shows what was typed.
+        focus_active: active !== null,
+        focus_line: describeFocus(active),
+    };
+}
+
 api.get("/projects/:project/standing-prompt", (req: Request, res: Response) => {
     const project = String(req.params.project ?? "");
     if (!project) return badRequest(res, "project required");
-    res.json({ project, standing_prompt: getProjectStandingPrompt(project) });
+    res.json(standingPromptView(project));
 });
 
 api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) => {
@@ -231,13 +250,33 @@ api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) =>
     if (v !== null && v !== undefined && typeof v !== "string") {
         return badRequest(res, "standing_prompt must be a string or null");
     }
-    setProjectStandingPrompt(project, v ?? null);
+    // #2525 — the wake focus, checked whole before anything is written.
+    const hasFocus = req.body && ("focus_tickets" in req.body || "focus_until" in req.body);
+    let nextFocus: { tickets: string; until: string | null } | null = null;
+    if (hasFocus) {
+        const tickets = req.body.focus_tickets;
+        const until = req.body.focus_until;
+        if (tickets !== null && tickets !== undefined && typeof tickets !== "string") return badRequest(res, "focus_tickets must be a string or null");
+        if (until !== null && until !== undefined && (typeof until !== "string" || !Number.isFinite(Date.parse(until)))) {
+            return badRequest(res, "focus_until must be an ISO date or null");
+        }
+        if (typeof tickets === "string" && tickets.trim()) {
+            const parsed = parseFocusTickets(tickets);
+            if ("error" in parsed) return badRequest(res, parsed.error);
+            const known = new Set(listTicketIdsInProject(project, parsed.ids));
+            const foreign = parsed.ids.filter((id) => !known.has(id));
+            if (foreign.length) return badRequest(res, `not a ticket of ${project}: ${foreign.map((id) => `#${id}`).join(", ")}`);
+            nextFocus = { tickets: tickets.trim(), until: typeof until === "string" ? new Date(until).toISOString() : null };
+        }
+    }
+    if (v !== undefined) setProjectStandingPrompt(project, v ?? null);
+    if (hasFocus) setProjectWakeFocus(project, nextFocus);
     // No broadcast. The strategy pair above emits one because moderation
     // strategy changes what every open board does next; this only changes what
     // the next wake says, it is edited from a single page, and that page
     // re-reads on load. Adding a WS event type for a decorative field would
     // cost more than it carries.
-    res.json({ project, standing_prompt: getProjectStandingPrompt(project) });
+    res.json(standingPromptView(project));
 });
 
 /**

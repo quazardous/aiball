@@ -77,6 +77,8 @@ export const projects = sqliteTable("projects", {
     /** #1832 — standing instruction shown at the head of every wake on
      *  this project. Set before going AFK, cleared on return. NULL = none. */
     standingPrompt: text("standing_prompt"),
+    /** #2525 — the wake focus: JSON {tickets, until}. NULL = no focus. */
+    wakeFocus: text("wake_focus"),
 });
 
 export const tickets = sqliteTable("tickets", {
