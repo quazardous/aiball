@@ -2812,7 +2812,7 @@ export async function buildContextPhrase(
             // #2458 david — a ticket that keeps coming back is usually a step
             // declared with `continue_after_minutes: 0` while the next move waits
             // on a job. Say how to rest it, on whatever tier it came back as.
-            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` the real delay in `continue_after_minutes` (not 0) and it rests until then.}}";
+            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` a `continue_after_minutes` (not 0): the soonest a look is worth it, not how long the job takes. It rests until then.}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

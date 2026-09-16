@@ -186,6 +186,25 @@ program
         );
     });
 
+// #2629 — is continue_after_minutes judged well? Declared delay against when
+// the agent came back on the ticket, by delay bucket.
+program
+    .command("steps")
+    .description("How agents judge continue_after_minutes: per delay bucket, how many steps came back early (< half), on time, late (> 1.1×) or not yet. When the job really finished is not known: a trend, not a verdict.")
+    .option("--project <name>", "One project")
+    .option("--since <days>", "Only steps posted in the last N days")
+    .action(async (opts: { project?: string; since?: string }, cmd) => {
+        const g = gOpts(cmd);
+        const days = opts.since ? Number(opts.since) : null;
+        if (days !== null && !(days > 0)) die("--since takes a number of days");
+        const r = await buildClient(g).stepTiming(opts.project ?? null, days);
+        out(r, g, () => [
+            `steps with a delay${r.project ? ` on ${r.project}` : ""}${r.since ? ` since ${r.since.slice(0, 10)}` : ""}:`,
+            "delay (min)  steps  avg declared  early (<½)  on time  late (>1.1×)  not back",
+            ...r.buckets.map((b) => `${b.bucket.padEnd(11)}  ${String(b.steps).padStart(5)}  ${String(b.avg_declared).padStart(12)}  ${String(b.early).padStart(10)}  ${String(b.on_time).padStart(7)}  ${String(b.late).padStart(12)}  ${String(b.pending).padStart(8)}`),
+        ].join("\n"));
+    });
+
 // #2586 — the version the daemon runs, the one on disk, the latest release,
 // and the command that updates THIS install the way it was installed.
 program

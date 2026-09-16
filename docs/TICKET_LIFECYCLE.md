@@ -347,7 +347,10 @@ default. The agent must say when that starts, with every step:
 `continue_after_minutes: 0` for at once, or N minutes — until then the ticket
 stays out of its wake pool, however the wakes around it went. N is at most
 `tickets.step_after_max_minutes` (120 by default, set per project): a longer
-wait is refused, since it is not one step waiting on a job any more.
+wait is refused, since it is not one step waiting on a job any more. N asks for
+the soonest a look is worth it, not how long the job takes: an early look costs
+one more step, a late one leaves finished work waiting. `aiball steps` shows,
+per delay, how many steps came back early, on time or late.
 
 A project's **wake focus**, set beside its standing instruction, narrows what
 wakes the project's owner agents to a list of tickets: `123, 456` keeps only

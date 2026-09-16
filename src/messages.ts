@@ -106,7 +106,7 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): string 
     const rawMax = Number(getConfig("tickets.step_after_max_minutes", msg.project) ?? 120);
     const maxAfter = Number.isFinite(rawMax) && rawMax >= 0 ? rawMax : 120;
     const stepRefusal = required && msg.step === true && msg.step_after_minutes === undefined
-        ? "then: continue needs continue_after_minutes — 0 if you carry on at once, N (minutes) if the next step waits on something: a build, a test box, a deploy"
+        ? "then: continue needs continue_after_minutes — 0 if you carry on at once, N (minutes) if the next step waits on something (a build, a test box, a deploy): the soonest a look is worth it, not how long the job takes"
         : msg.step === true && msg.step_after_minutes !== undefined && msg.step_after_minutes > maxAfter
             ? `continue_after_minutes is at most ${maxAfter} on this project (tickets.step_after_max_minutes) — a longer wait is not one step waiting on a job: hand the ticket back, or propose a plan`
             : null;

@@ -1312,6 +1312,15 @@ export class AiballClient {
         return this.http<{ ok: boolean; proxy: boolean; upstream: string | null }>("GET", "/api/node");
     }
 
+    /** #2629 — declared step delays against when the agent came back. */
+    stepTiming(project: string | null, sinceDays: number | null) {
+        const qs = new URLSearchParams();
+        if (project) qs.set("project", project);
+        if (sinceDays) qs.set("since_days", String(sinceDays));
+        return this.http<{ project: string | null; since: string | null; buckets: Array<{ bucket: string; steps: number; avg_declared: number; early: number; on_time: number; late: number; pending: number }> }>(
+            "GET", `/api/steps/timing${qs.size ? `?${qs}` : ""}`);
+    }
+
     /** #2586 — running / installed / latest release, as the daemon last checked. */
     version() {
         return this.http<VersionInfo>("GET", "/api/version");

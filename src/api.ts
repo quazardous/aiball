@@ -1,4 +1,5 @@
 import { projectTicketStates } from "./db/inbox-agg.js";
+import { stepTimingReport, stepTimingRows } from "./db/step-timing.js";
 import { Router, type Request, type Response } from "express";
 import {
     getMessage,
@@ -349,6 +350,14 @@ api.post("/projects", (req, res) => {
         created_by: typeof raw.created_by === "string" ? raw.created_by : null,
     });
     res.status(201).json(project);
+});
+
+// #2629 — declared step delays against when the agent actually came back.
+api.get("/steps/timing", (req, res) => {
+    const project = typeof req.query.project === "string" && req.query.project ? req.query.project : null;
+    const days = Number(req.query.since_days);
+    const since = Number.isFinite(days) && days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : null;
+    res.json({ project, since, buckets: stepTimingReport(stepTimingRows({ project, since })) });
 });
 
 api.get("/projects/:name/stats", (req, res) => {

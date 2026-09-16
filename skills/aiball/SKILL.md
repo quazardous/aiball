@@ -147,7 +147,8 @@ answer — say so in a line rather than re-posting.
 Whatever the ending, a wake may add **`It is back N min after your last wake on
 it…`**: the ticket returned on its own, nobody else moved. That is almost always
 a `then: continue` with `continue_after_minutes: 0` while the next step waits on
-something. Give the real delay instead, and the ticket rests until then.
+something. Give a delay instead (the soonest a look is worth it), and the ticket
+rests until then.
 
 **Triage = ONE of three gestures, in order of preference :**
 
@@ -241,7 +242,10 @@ when you pick it up again — a step without `continue_after_minutes` is refused
   brings you straight back to it;
 - **waiting on something** (a build, a test box, a deploy) →
   `continue_after_minutes: N`: the ticket stays out of your wakes for N
-  minutes, then comes back first.
+  minutes, then comes back first. **N is the soonest a look is worth it, not
+  how long the job takes.** When in doubt, pick the smaller: looking too early
+  costs one look and another step; looking too late leaves finished work
+  waiting, and nothing wakes you for it. A job of about 20 minutes: 10.
 
 Don't post a step to "keep" a ticket you are not about to work on — the top of
 the backlog is a promise.

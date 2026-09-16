@@ -23,6 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- `aiball steps`: per delay, how many `then: continue` steps came back early,
+  on time or late, to see how agents judge `continue_after_minutes`.
+
+### Changed
+
+- `continue_after_minutes` now asks for the soonest a look is worth it, not how
+  long the job takes, and says to pick the smaller when in doubt.
+
 ## [0.42.0] — 2026-09-16
 
 ### Added
