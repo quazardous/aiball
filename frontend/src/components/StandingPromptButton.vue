@@ -121,17 +121,19 @@ async function clear(): Promise<void> {
     await save();
 }
 
-// #2333 — the message to every agent loop.
-const DEFAULT_LOOP_MESSAGE = "Priority message from the operator: I am disconnecting. Stabilise now: finish or park "
-    + "your current step, leave nothing half-done (commit what is green, revert what is not), post the ticket state "
-    + "(then: continue or handback), then stop. Your loop is held until I am back.";
-const loopMessage = ref(DEFAULT_LOOP_MESSAGE);
+// #2333 — the message to every agent loop. #2579 — the default is the
+// placeholder, not a prefilled value: the field opens empty, and an empty field
+// sends the placeholder.
+const DEFAULT_LOOP_MESSAGE = "I'll be back. Until then, stabilise: finish or park your current step, "
+    + "commit what is green, revert what is not, post the ticket state (then: continue or handback), and stop.";
+const loopMessage = ref("");
+const loopMessageToSend = computed(() => loopMessage.value.trim() || DEFAULT_LOOP_MESSAGE);
 const liveLoops = ref<Consumer[]>([]);
 const loopBusy = ref(false);
 const loopError = ref<string | null>(null);
 const loopResults = ref<LoopHoldResult[] | null>(null);
 const loopNames = computed(() => liveLoops.value.map((c) => c.consumer_id).join(", "));
-const canSendLoops = computed(() => !loopBusy.value && liveLoops.value.length > 0 && loopMessage.value.trim().length > 0);
+const canSendLoops = computed(() => !loopBusy.value && liveLoops.value.length > 0);
 
 async function refreshLoops(): Promise<void> {
     try {
@@ -158,7 +160,7 @@ async function runLoopControl(call: () => Promise<{ results: LoopHoldResult[] }>
 }
 
 function messageAll(hold: boolean): Promise<void> {
-    return runLoopControl(() => api.messageAllLoops(loopMessage.value.trim(), hold));
+    return runLoopControl(() => api.messageAllLoops(loopMessageToSend.value, hold));
 }
 
 function releaseAll(): Promise<void> {
@@ -263,7 +265,8 @@ function describeLoopResult(r: LoopHoldResult): string {
                     <p class="standing-prompt-pop__hint">
                         Typed into each running agent session now, whatever it is doing.
                         <strong>send &amp; hold</strong> also holds every loop (NOT AFK ∞): no
-                        auto-wake starts new work until you release them.
+                        auto-wake starts new work until you release them. Left empty, the
+                        placeholder is sent.
                     </p>
                     <div class="loop-message__loops">
                         <template v-if="liveLoops.length">{{ liveLoops.length }} running: {{ loopNames }}</template>
@@ -273,6 +276,7 @@ function describeLoopResult(r: LoopHoldResult): string {
                         v-model="loopMessage"
                         rows="4"
                         auto-resize
+                        :placeholder="DEFAULT_LOOP_MESSAGE"
                         class="loop-message__text"
                         :disabled="loopBusy"
                     />
