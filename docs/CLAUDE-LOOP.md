@@ -951,15 +951,16 @@ excludes them by default.
 
 ### Scrolling back
 
-In an attached loop the mouse wheel scrolls the pane: the multiplexer enters
-copy-mode, and `q` leaves it. The loop keeps 10000 lines of scrollback per
-session instead of the multiplexer's default 2000.
+The loop keeps 10000 lines of scrollback per session instead of the
+multiplexer's default 2000. To read it, enter copy-mode with `prefix + [` (or
+`prefix + PageUp`), move with the wheel, the arrows or PageUp, and leave with
+`q`.
 
-This works because the loop starts Claude Code with the mouse off
-(`CLAUDE_CODE_DISABLE_MOUSE=1`). A program that asks for the mouse gets every
-wheel notch, and Claude Code reads them as Up/Down, walking through its prompt
-history instead. For the same reason, selecting text with the mouse belongs to
-the multiplexer, not to Claude Code.
+On Windows, psmux 3.3.8 turns a wheel notch into Up arrows whenever the program
+in front of the pane is not a shell, so over Claude Code the wheel walks the
+prompt history instead of entering copy-mode. psmux has fixed this upstream
+(the wheel follows the pane's own terminal state, as in tmux); until a release
+carries it, use `prefix + [`. Once in copy-mode, the wheel scrolls.
 
 ---
 

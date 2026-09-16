@@ -1197,10 +1197,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "new-session", "-d", "-s", tname, "-c", cwd, ...sizeArgs, "--", bashCmd, "-lc", innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
-    // The wheel scrolls the pane's scrollback (claude does not take the mouse,
-    // see CLAUDE_CODE_DISABLE_MOUSE), and the default 2000 lines is a few
-    // minutes of a claude session. Set right after creation: psmux applies it
-    // to the existing pane; tmux may keep its creation-time limit for it.
+    // Copy-mode reads the pane's scrollback, and the default 2000 lines is a
+    // few minutes of a claude session. Set right after creation: psmux applies
+    // it to the existing pane; tmux may keep its creation-time limit for it.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "history-limit", "10000"], { stdio: "ignore" });
 
     // Status bar so a loop session is visually distinct. Initial

@@ -38,7 +38,7 @@ dates are YYYY-MM-DD.
   re-run stops the running install before replacing it.
 
 - A loop keeps 10000 lines of scrollback instead of the multiplexer's default
-  2000, now that the mouse wheel scrolls the pane.
+  2000.
 
 ## [0.43.0] — 2026-09-16
 
