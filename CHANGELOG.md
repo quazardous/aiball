@@ -31,6 +31,11 @@ dates are YYYY-MM-DD.
   installers now record it). The daemon checks GitHub when it starts;
   `aiball version [--check]` and a new `aiball check` line read the same
   answer. `updates.check: false` turns the check off.
+- **`aiball update`, and *Install the update* in the tray and the GNOME
+  extension**: runs that command after a confirmation naming the agent loops
+  the daemon restart disconnects, logs it, and says how it ended. A dev
+  checkout off `main` or with uncommitted changes is refused, never switched
+  or stashed.
 - **API keys with scopes, and tickets filed by a key**: a key holds `signals`
   (what every key could do, and the default) and/or `tickets:create`, which
   lets an external system file tickets in the projects the

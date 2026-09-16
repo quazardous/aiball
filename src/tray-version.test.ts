@@ -50,3 +50,31 @@ test("the tray's version line, update command and tooltip", { skip: !hasPwsh && 
     assert.equal(unknown.line, "version unknown");
     assert.equal(unknown.tip, "aiball - running (http://127.0.0.1:7777)");
 });
+
+test("the tray's install confirmation and its after-update balloon", { skip: !hasPwsh && "pwsh not installed" }, () => {
+    const dry = JSON.stringify({ ok: true, mode: "edge", command: "Set-Location C:\\a; git pull --ff-only --tags; .\\install.ps1", loops: ["a-claude"] }).replace(/'/g, "''");
+    const go = pwshJson(`Get-InstallConfirmation ('${dry}' | ConvertFrom-Json) | ConvertTo-Json -Compress`) as { ok: boolean; text: string };
+    assert.equal(go.ok, true);
+    assert.match(go.text, /disconnects 1 agent loop\(s\) \(a-claude\)/);
+    assert.match(go.text, /aiball closes now and comes back/);
+    const no = pwshJson(`Get-InstallConfirmation ('{"ok":false,"reason":"no record","command":"re-run"}' | ConvertFrom-Json) | ConvertTo-Json -Compress`) as { ok: boolean; text: string };
+    assert.equal(no.ok, false);
+    assert.match(no.text, /Cannot update from here: no record/);
+
+    const st = JSON.stringify({ state: "failed", finished_at: "2026-09-16T10:00:00Z", failed_step: "npm install", error: "exited with 1", log: "C:\\h\\update.log" });
+    const first = pwshJson(`@{ t = (Get-UpdateResultBalloon ('${st}' | ConvertFrom-Json) $null) } | ConvertTo-Json -Compress`) as { t: string };
+    assert.match(first.t, /failed at npm install \(exited with 1\)/);
+    const again = pwshJson(`$s = ('${st}' | ConvertFrom-Json); @{ t = (Get-UpdateResultBalloon $s ([string]$s.finished_at)) } | ConvertTo-Json -Compress`) as { t: string | null };
+    assert.equal(again.t, null, "shown once");
+    const running = pwshJson(`@{ t = (Get-UpdateResultBalloon ('{"state":"running","finished_at":null}' | ConvertFrom-Json) $null) } | ConvertTo-Json -Compress`) as { t: string | null };
+    assert.equal(running.t, null);
+});
+
+test("the tray stops the daemon and quits before the update runs, and reports the last run at start", () => {
+    const tray = readFileSync(join(BIN, "aiball-tray.ps1"), "utf8");
+    const fn = tray.slice(tray.indexOf("function Start-UpdateInstall"), tray.indexOf("# The last update's outcome"));
+    const order = ["Get-InstallConfirmation", "YesNo", "Stop-Daemon", "update --yes", "Application]::Exit()"].map((k) => fn.indexOf(k));
+    assert.ok(order.every((i) => i >= 0), JSON.stringify(order));
+    assert.deepEqual([...order].sort((a, b) => a - b), order, "confirm, then stop the daemon, then hand over, then quit");
+    assert.match(tray, /Update-State\r?\nShow-UpdateResult/);
+});

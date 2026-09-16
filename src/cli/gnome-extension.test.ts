@@ -321,3 +321,31 @@ test("the version section reads the CLI, and offers this install's command only 
     assert.match(ver.versionMenu(ver.parseVersion(cli({ ...daemon, check_disabled: true, latest: "0.42.0", update_available: true }))).line, /update check off/);
     assert.equal(ver.versionMenu(ver.parseVersion("aiball: command not found")).line, "version unknown");
 });
+
+test("Install the update: the confirmation names the loops cut, a refusal offers no button, the result says how it ended", () => {
+    const v = ver as unknown as {
+        VERSION: Record<string, string[]>;
+        installConfirmation: (dry: unknown) => { ok: boolean; title: string; body: string; button: string | null };
+        updateResult: (text: string | null) => string;
+    };
+    assert.deepEqual(v.VERSION.dryRun, ["aiball", "--json", "update", "--dry-run"]);
+    assert.deepEqual(v.VERSION.install, ["aiball", "--json", "update", "--yes"]);
+
+    const go = v.installConfirmation({ ok: true, mode: "release", command: "cd /c && git pull --ff-only --tags && ./install.sh", loops: ["a-claude", "b-claude"] });
+    assert.equal(go.button, "Install and restart");
+    assert.match(go.body, /disconnects 2 agent loops \(a-claude, b-claude\)/);
+    assert.match(go.body, /cd \/c && git pull/);
+    assert.match(v.installConfirmation({ ok: true, mode: "dev", command: "x", loops: [] }).body, /No agent loop is connected/);
+
+    const no = v.installConfirmation({ ok: false, reason: "the checkout has uncommitted changes", command: "cd /s && git pull" });
+    assert.equal(no.ok, false);
+    assert.equal(no.button, null, "nothing to click when it cannot run");
+    assert.match(no.body, /uncommitted changes[\s\S]*cd \/s && git pull/);
+    assert.equal(v.installConfirmation(null).button, null);
+
+    assert.equal(v.updateResult(JSON.stringify({ status: { state: "ok" } })), "aiball updated.");
+    assert.equal(v.updateResult(JSON.stringify({ status: { state: "failed", failed_step: "npm install", error: "exited with 1", log: "/h/update.log" } })),
+        "aiball update failed at npm install (exited with 1). Log: /h/update.log");
+    assert.match(v.updateResult(JSON.stringify({ ok: false, reason: "no record" })), /cannot update from here: no record/);
+    assert.match(v.updateResult("command not found"), /did not report/);
+});

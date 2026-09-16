@@ -210,8 +210,13 @@ checks GitHub when it starts, and the tray reads the answer through
 records it in `%USERPROFILE%\.config\aiball\install.json` — a copy of the
 checkout (`git pull` then `install.ps1` with the same flags) or a dev install
 (`-Symlink` / `-Minimal`: `git pull`, `npm install`, frontend build,
-`aiball restart`). `updates.check: false` in the global config turns the check
-off. See *Staying up to date* in [INSTALL.md](./INSTALL.md).
+`aiball restart`). *Install the update* runs it: after a confirmation that
+names the agent loops the restart disconnects, the tray stops the daemon, hands
+over to `aiball update`, and closes, since the installer replaces the directory
+the tray runs from. A runner outside that directory does the update, logs it to
+`%USERPROFILE%\.local\share\aiball\update.log`, and relaunches the tray
+whether it succeeded or not; the tray then starts the daemon and says how the
+update ended. `updates.check: false` in the global config turns the check off. See *Staying up to date* in [INSTALL.md](./INSTALL.md).
 
 Want the daemon **without** a tray? `install.ps1 -NoTray` (task runs the daemon
 directly, no icon) or `-Service` (true background service, survives logout).

@@ -222,6 +222,62 @@ program
         );
     });
 
+// #2588 — run that update. The tray and the GNOME extension call this after a
+// confirmation built from `--dry-run`, which names the loops a restart cuts.
+program
+    .command("update")
+    .description("Update this install the way it was installed (the command `aiball version` shows). Restarts the daemon, which disconnects every agent loop.")
+    .option("--yes", "Do not ask for confirmation")
+    .option("--dry-run", "Say what would run, and which loops the restart disconnects, without running it")
+    .action(async (opts: { yes?: boolean; dryRun?: boolean }, cmd) => {
+        const { readInstallInfo } = await import("./install-info.js");
+        const { planUpdate, readGitState, runUpdate, updatePaths, windowsRunnerScript } = await import("./update-run.js");
+        const g = gOpts(cmd);
+        const info = readInstallInfo();
+        const plan = planUpdate(info, info.mode === "dev" && info.source ? readGitState(info.source) : null);
+        let loops: string[] = [];
+        try {
+            loops = (await buildClient(g).listConsumers()).filter((c) => c.kind !== "human" && c.present === true).map((c) => c.consumer_id);
+        } catch {
+            // Daemon down (the tray stops it before a Windows update): no loop to cut.
+        }
+        const paths = updatePaths();
+        const summary = { ...plan, loops, log: paths.log, status_file: paths.status };
+        const human = () => [
+            plan.ok ? `update (${plan.mode}):\n  ${plan.command}` : `cannot update from here: ${plan.reason}\n  by hand: ${plan.command}`,
+            loops.length ? `restarting the daemon disconnects ${loops.length} loop(s): ${loops.join(", ")}` : "no agent loop is connected",
+        ].join("\n");
+        if (!plan.ok) {
+            out(summary, g, human);
+            process.exit(1);
+        }
+        if (opts.dryRun) return out(summary, g, human);
+        if (!opts.yes) {
+            if (!process.stdin.isTTY) die("aiball update: pass --yes to run without a terminal to confirm in");
+            process.stdout.write(`${human()}\n`);
+            const { createInterface } = await import("node:readline/promises");
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            const answer = (await rl.question("Run it? [y/N] ")).trim().toLowerCase();
+            rl.close();
+            if (answer !== "y" && answer !== "yes") die("aiball update: cancelled");
+        }
+        if (process.platform === "win32") {
+            // install.ps1 replaces the install dir this process runs from: hand
+            // over to a runner outside it, detached, and exit.
+            const { spawn } = await import("node:child_process");
+            const runner = join(tmpdir(), `aiball-update-${Date.now()}.ps1`);
+            const tray = join(import.meta.dirname, "..", "bin", "aiball-tray.cmd");
+            writeFileSync(runner, "\uFEFF" + windowsRunnerScript(plan, paths, tray));
+            spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", runner], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+            return out({ ...summary, runner, started: true }, g, () => `update started in the background — log: ${paths.log}`);
+        }
+        const status = await runUpdate(plan, paths);
+        out({ ...summary, status }, g, () => status.state === "ok"
+            ? `update done — log: ${paths.log}`
+            : `update failed at \`${status.failed_step}\` (${status.error}) — log: ${paths.log}`);
+        if (status.state !== "ok") process.exit(1);
+    });
+
 program
     .command("check")
     .description(

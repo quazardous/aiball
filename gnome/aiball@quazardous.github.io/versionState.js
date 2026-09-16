@@ -11,6 +11,9 @@
 export const VERSION = Object.freeze({
     read: ['aiball', '--json', 'version'],
     check: ['aiball', '--json', 'version', '--check'],
+    // #2588 — the update itself: a dry run builds the confirmation, then it runs.
+    dryRun: ['aiball', '--json', 'update', '--dry-run'],
+    install: ['aiball', '--json', 'update', '--yes'],
 });
 
 /** The CLI's JSON, or null when it did not run or did not answer JSON. */
@@ -47,4 +50,48 @@ export function versionMenu(v) {
     }
     if (d.latest) return {...none, line: `aiball ${d.running} — up to date`};
     return {...none, line: `aiball ${d.running}${d.error ? ' — could not check for updates' : ''}`};
+}
+
+/**
+ * #2588 — the confirmation for "Install the update", from `aiball --json update
+ * --dry-run`. `ok: false` means it cannot run from here (no recorded install, a
+ * dev checkout off main or with uncommitted changes): the dialog says why and
+ * gives the command, and offers no install button.
+ */
+export function installConfirmation(dry) {
+    if (!dry || typeof dry !== 'object')
+        return {ok: false, title: 'Cannot update from here', body: 'aiball update did not answer.', button: null};
+    if (!dry.ok) {
+        return {
+            ok: false,
+            title: 'Cannot update from here',
+            body: `${dry.reason}.\n\nBy hand:\n${dry.command}`,
+            button: null,
+        };
+    }
+    const loops = Array.isArray(dry.loops) ? dry.loops : [];
+    const cut = loops.length
+        ? `The daemon restarts: this disconnects ${loops.length} agent loop${loops.length > 1 ? 's' : ''} (${loops.join(', ')}).`
+        : 'The daemon restarts. No agent loop is connected.';
+    return {
+        ok: true,
+        title: 'Install the aiball update?',
+        body: `${cut}\n\nRuns (${dry.mode} install):\n${dry.command}`,
+        button: 'Install and restart',
+    };
+}
+
+/** #2588 — the notification once `aiball --json update --yes` has returned. */
+export function updateResult(text) {
+    let r = null;
+    try {
+        r = JSON.parse(String(text ?? ''));
+    } catch {
+        // No JSON: the command could not run at all.
+    }
+    const st = r?.status;
+    if (st?.state === 'ok') return 'aiball updated.';
+    if (st?.state === 'failed') return `aiball update failed at ${st.failed_step} (${st.error}). Log: ${st.log}`;
+    if (r && r.ok === false) return `aiball cannot update from here: ${r.reason}.`;
+    return 'aiball update did not report a result — see ~/.local/share/aiball/update.log';
 }

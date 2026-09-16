@@ -58,8 +58,10 @@ nobody reads. Everything else is one click away in the menu:
 
 - the daemon's state and version,
 - whether an update is out, with *Copy the update command* (the exact command
-  for how this machine was installed), *Release notes*, and *Check for
-  updates*. It reads `aiball --json version` when the menu opens; the daemon
+  for how this machine was installed), *Install the update*, *Release notes*,
+  and *Check for updates*. *Install the update* runs `aiball update` after a
+  dialog that names the agent loops the daemon restart disconnects, or says why
+  it cannot run from here, and a notification says how it ended. It reads `aiball --json version` when the menu opens; the daemon
   checks GitHub when it starts, so the extension makes no network call. A new
   release shows one notification, not one per refresh. See *Staying up to
   date* in [INSTALL.md](./INSTALL.md);

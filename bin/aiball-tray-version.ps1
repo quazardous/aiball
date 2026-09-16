@@ -46,3 +46,31 @@ function Get-TrayTooltip([string]$state, $look, [string]$url) {
     }
     return $t.Substring(0, 63)
 }
+
+# The confirmation for "Install the update", from `aiball --json update --dry-run`.
+# ok = $false: it cannot run from here, the text says why and gives the command.
+function Get-InstallConfirmation($dry) {
+    if (-not $dry) {
+        return @{ ok = $false; text = 'aiball update did not answer.' }
+    }
+    if (-not $dry.ok) {
+        return @{ ok = $false; text = "Cannot update from here: $($dry.reason).`r`n`r`nBy hand:`r`n$($dry.command)" }
+    }
+    $loops = @($dry.loops | Where-Object { $_ })
+    $cut = if ($loops.Count -gt 0) {
+        "The daemon restarts: this disconnects $($loops.Count) agent loop(s) ($($loops -join ', '))."
+    } else { 'The daemon restarts. No agent loop is connected.' }
+    return @{
+        ok   = $true
+        text = "Install the aiball update?`r`n`r`n$cut`r`naiball closes now and comes back when the update is done.`r`n`r`nRuns ($($dry.mode) install):`r`n$($dry.command)"
+    }
+}
+
+# The balloon after an update, from update-status.json, once per finished run.
+# $seen is the finished_at already shown (or $null).
+function Get-UpdateResultBalloon($status, $seen) {
+    if (-not $status -or -not $status.finished_at -or $status.finished_at -eq $seen) { return $null }
+    if ($status.state -eq 'ok') { return 'aiball updated.' }
+    if ($status.state -eq 'failed') { return "aiball update failed at $($status.failed_step) ($($status.error)). Log: $($status.log)" }
+    return $null
+}

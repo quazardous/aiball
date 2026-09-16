@@ -892,6 +892,11 @@ export class AiballClient {
 
     /** #397: fetch a single consumer (incl. `micro_prompt`). Used by the wake
      *  builder to inject `{consumer_prompt}` into the relance prompt. */
+    /** #2588 — every consumer, with `present` = its loop is connected now. */
+    listConsumers() {
+        return this.http<Array<{ consumer_id: string; kind: string; present: boolean | null }>>("GET", "/api/consumers");
+    }
+
     getConsumer(id: string) {
         return this.http<{ consumer_id: string; micro_prompt?: string | null; agent_type?: string | null }>(
             "GET",

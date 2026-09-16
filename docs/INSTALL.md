@@ -269,7 +269,19 @@ clone it came from, and the flags worth repeating (`--port`, `--host`,
 | `dev` | `./install.sh --symlink` | `cd <checkout> && git pull --ff-only --tags && npm install && npm --prefix frontend run build && aiball restart` |
 
 An install made before the record existed reads `unknown`: re-run the installer
-once and the command becomes exact. Two situations are told apart: *an update is
+once and the command becomes exact.
+
+`aiball update` runs that command. It restarts the daemon, which disconnects
+every agent loop, so it lists the connected loops and asks first (`--yes` skips
+the question, `--dry-run` only says what would run). Its output goes to
+`~/.local/share/aiball/update.log`, and how the last run ended to
+`update-status.json` next to it. It refuses, and gives the command to run by
+hand, when there is no install record, or when a `dev` checkout is not on
+`main` or has uncommitted changes: it never switches the branch of the
+checkout the daemon runs from, and never stashes. The GNOME extension and the
+Windows tray call it from *Install the update*, after the same confirmation.
+
+Two situations are told apart: *an update is
 available* (a newer release than what is installed) and *restart the daemon*
 (newer code is installed, but the daemon still runs the old one).
 

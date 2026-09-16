@@ -20,12 +20,14 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
+import * as Dialog from 'resource:///org/gnome/shell/ui/dialog.js';
 
 import {defaultSocketPath, getJson} from './aiballClient.js';
 import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './daemonActions.js';
 import {TAILNET, aiballTailnetUrl, tailnetMenu, tailscaleConnection, tailscaleProvider} from './tailscaleState.js';
 import {HEALTH_PATH, ICON_LOCAL, NODE_PATH, actionLabel, daemonView, presentation} from './nodeState.js';
-import {VERSION, parseVersion, versionMenu} from './versionState.js';
+import {VERSION, installConfirmation, parseVersion, updateResult, versionMenu} from './versionState.js';
 
 /*
  * Two cadences, because the two reads do not cost the same thing.
@@ -133,6 +135,10 @@ class AiballIndicator extends PanelMenu.Button {
             if (this._version.command)
                 St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, this._version.command);
         });
+        // #2588 — run it: a dry run builds the confirmation, which names the
+        // loops the restart disconnects; nothing runs without that click.
+        this._versionInstall = this._addAction('Install the update', () => this._confirmInstall());
+        this._updating = false;
         this._versionNotes = this._addAction('Release notes', () => {
             if (this._version.releaseUrl) Gio.AppInfo.launch_default_for_uri(this._version.releaseUrl, null);
         });
@@ -248,10 +254,50 @@ class AiballIndicator extends PanelMenu.Button {
         this._showVersion(versionMenu(parseVersion(text)));
     }
 
+    async _confirmInstall() {
+        const text = await this._capture(VERSION.dryRun);
+        if (this._cancellable.is_cancelled()) return;
+        let dry = null;
+        try {
+            dry = JSON.parse(text ?? '');
+        } catch {
+            // Shown as "did not answer" below.
+        }
+        const c = installConfirmation(dry);
+        const dialog = new ModalDialog.ModalDialog();
+        dialog.contentLayout.add_child(new Dialog.MessageDialogContent({title: c.title, description: c.body}));
+        const buttons = [{label: c.ok ? 'Cancel' : 'Close', action: () => dialog.close()}];
+        if (c.ok) {
+            buttons.push({
+                label: c.button,
+                action: () => {
+                    dialog.close();
+                    this._runInstall();
+                },
+            });
+        }
+        dialog.setButtons(buttons);
+        dialog.open();
+    }
+
+    async _runInstall() {
+        this._updating = true;
+        this._showVersion(this._version);
+        const text = await this._capture(VERSION.install);
+        if (this._cancellable.is_cancelled()) return;
+        this._updating = false;
+        Main.notify('aiball', updateResult(text));
+        this._refreshHealth();
+        this._refreshVersion();
+    }
+
     _showVersion(state) {
         this._version = state;
         this._versionItem.label.text = state.line;
         this._versionCopy.visible = !!state.command;
+        this._versionInstall.visible = !!state.command || this._updating;
+        this._versionInstall.label.text = this._updating ? 'Updating…' : 'Install the update';
+        this._versionInstall.setSensitive(!this._updating);
         this._versionNotes.visible = !!state.releaseUrl;
         // One notification per release, not one per refresh.
         if (state.notifyKey && state.notifyKey !== this._notifiedVersion) {

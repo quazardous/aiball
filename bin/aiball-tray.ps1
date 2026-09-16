@@ -279,12 +279,67 @@ function Show-Version($look) {
     $script:versionLook = $look
     $versionItem.Text = $look.line
     $copyUpdate.Visible = [bool]$look.command
+    $installUpdate.Visible = [bool]$look.command
     $releaseNotes.Visible = [bool]$look.releaseUrl
     # One balloon per release, not one per read.
     if ($look.notifyKey -and $look.notifyKey -ne $script:notifiedVersion) {
         $script:notifiedVersion = $look.notifyKey
         $ni.ShowBalloonTip(10000, 'aiball', "$($look.line). Right-click the icon to copy the update command.", [System.Windows.Forms.ToolTipIcon]::Info)
     }
+}
+
+# #2588 -- run the update. install.ps1 replaces the directory this tray runs
+# from, and the tray owns the daemon: so the tray stops the daemon, hands over to
+# `aiball update --yes` (which starts a runner outside the install dir) and
+# quits. The runner relaunches the tray at the end, success or not, and the new
+# tray says how it went from update-status.json.
+function Invoke-AiballJson([string]$cliArgs, [int]$timeoutMs) {
+    try {
+        $shim = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\aiball.cmd'
+        $exe = if (Test-Path $shim) { "`"$shim`"" } else { 'aiball' }
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = 'cmd.exe'
+        $psi.Arguments = "/d /s /c `"$exe --json $cliArgs`""
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.CreateNoWindow = $true
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $out = $p.StandardOutput.ReadToEndAsync()
+        if (-not $p.WaitForExit($timeoutMs)) { return $null }
+        return ($out.Result | ConvertFrom-Json)
+    } catch { return $null }
+}
+function Start-UpdateInstall {
+    $c = Get-InstallConfirmation (Invoke-AiballJson 'update --dry-run' 30000)
+    if (-not $c.ok) {
+        [System.Windows.Forms.MessageBox]::Show($c.text, 'aiball update', 'OK', 'Information') | Out-Null
+        return
+    }
+    $answer = [System.Windows.Forms.MessageBox]::Show($c.text, 'aiball update', 'YesNo', 'Question')
+    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+    $script:quitting = $true
+    Stop-Daemon
+    $shim = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\aiball.cmd'
+    $exe = if (Test-Path $shim) { "`"$shim`"" } else { 'aiball' }
+    Start-Process -FilePath 'cmd.exe' -ArgumentList "/d /s /c `"$exe update --yes`"" -WindowStyle Hidden
+    $ni.Visible = $false
+    $ni.Dispose()
+    [System.Windows.Forms.Application]::Exit()
+}
+
+# The last update's outcome, shown once by the tray the runner relaunched.
+$updateStatusFile = Join-Path $aiballHome 'update-status.json'
+$updateSeenFile   = Join-Path $aiballHome 'update-status.seen'
+function Show-UpdateResult {
+    try {
+        if (-not (Test-Path $updateStatusFile)) { return }
+        $status = Get-Content -Raw $updateStatusFile | ConvertFrom-Json
+        $seen = if (Test-Path $updateSeenFile) { (Get-Content -Raw $updateSeenFile).Trim() } else { $null }
+        $text = Get-UpdateResultBalloon $status $seen
+        if (-not $text) { return }
+        [System.IO.File]::WriteAllText($updateSeenFile, [string]$status.finished_at)
+        $ni.ShowBalloonTip(10000, 'aiball', $text, [System.Windows.Forms.ToolTipIcon]::Info)
+    } catch { }
 }
 
 # --- tray icon + menu -------------------------------------------------------
@@ -326,6 +381,9 @@ $copyUpdate = $menu.Items.Add("Copy the update command")
 $copyUpdate.Add_Click({
     if ($script:versionLook.command) { [System.Windows.Forms.Clipboard]::SetText($script:versionLook.command) }
 })
+$installUpdate = $menu.Items.Add("Install the update")
+$installUpdate.Add_Click({ Start-UpdateInstall })
+$installUpdate.Visible = $false
 $releaseNotes = $menu.Items.Add("Release notes")
 $releaseNotes.Add_Click({ if ($script:versionLook.releaseUrl) { Open-Url $script:versionLook.releaseUrl } })
 $checkUpdates = $menu.Items.Add("Check for updates")
@@ -395,6 +453,7 @@ function Update-State {
 # Start the daemon now (non-blocking) and show the icon immediately.
 Start-Daemon
 Update-State
+Show-UpdateResult
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000

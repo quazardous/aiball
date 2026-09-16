@@ -61,33 +61,54 @@ function psq(s: string): string {
     return /^[\w.:\\/@=+-]+$/.test(s) ? s : `'${s.replace(/'/g, "''")}'`;
 }
 
+export interface UpdateStep {
+    /** Run in the install's source directory. */
+    argv: string[];
+    /** How the step reads in the command shown to a human, when it differs. */
+    display?: string;
+    /** The daemon restart: on Windows the tray does it (it owns the daemon). */
+    restart?: boolean;
+}
+
 /**
- * The command that updates this install the way it was installed — shown, not
- * run: installing from a desktop component is a later step.
+ * #2588 — the steps that update this install the way it was installed, run by
+ * `aiball update` and shown by `aiball version`: one list, so what is shown is
+ * what runs. Null without a recorded source.
  *
  * `install.sh` ships the latest tag REACHABLE from the clone's HEAD, so fetching
  * tags is not enough: the clone is pulled first. `install.ps1` copies the
  * checkout as it is (`edge`). A `dev` install runs the checkout itself: pull,
  * dependencies, frontend, restart.
  */
-export function updateCommand(info: InstallInfo): string {
-    const flags = info.flags.join(" ");
+export function updateSteps(info: InstallInfo): UpdateStep[] | null {
+    if (!info.source) return null;
     const win = info.platform === "windows";
-    if (!info.source) {
+    const pull: UpdateStep = { argv: ["git", "pull", "--ff-only", "--tags"] };
+    if (info.mode === "dev") {
+        return [
+            pull,
+            { argv: ["npm", "install"] },
+            { argv: ["npm", "--prefix", "frontend", "run", "build"] },
+            { argv: ["aiball", "restart"], restart: true },
+        ];
+    }
+    const flags = [...(info.mode === "edge" && !win ? ["--edge"] : []), ...info.flags];
+    const installer: UpdateStep = win
+        ? { argv: ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".\\install.ps1", ...flags], display: [".\\install.ps1", ...flags].join(" ") }
+        : { argv: ["./install.sh", ...flags] };
+    return [pull, installer];
+}
+
+/** The command a human pastes: the same steps, from the source directory. */
+export function updateCommand(info: InstallInfo): string {
+    const win = info.platform === "windows";
+    const steps = updateSteps(info);
+    if (!steps) {
         return win
             ? "git pull in your aiball clone, then re-run install.ps1"
             : "git pull in your aiball clone, then re-run ./install.sh";
     }
-    const join = (parts: string[]) => parts.join(win ? "; " : " && ");
-    const cd = win ? `Set-Location ${psq(info.source)}` : `cd ${shq(info.source)}`;
-    const pull = "git pull --ff-only --tags";
-    const installer = win ? ".\\install.ps1" : "./install.sh";
-    switch (info.mode) {
-    case "release":
-    case "edge":
-    case "unknown":
-        return join([cd, pull, `${installer}${info.mode === "edge" && !win ? " --edge" : ""}${flags ? ` ${flags}` : ""}`]);
-    case "dev":
-        return join([cd, pull, "npm install", "npm --prefix frontend run build", "aiball restart"]);
-    }
+    const q = win ? psq : shq;
+    const cd = win ? `Set-Location ${psq(info.source!)}` : `cd ${shq(info.source!)}`;
+    return [cd, ...steps.map((s) => s.display ?? s.argv.map(q).join(" "))].join(win ? "; " : " && ");
 }
