@@ -199,6 +199,34 @@ export interface WaitCreditRow {
     refunded: number;
 }
 
+/** #2646 — the project's rules, sent with a balance so an agent is told how to earn, in the configured amounts. */
+export interface WaitCreditRules {
+    floor: number;
+    refund: boolean;
+    resolved: number;
+    resolved_no_commit: number;
+    wontfix: number;
+    commit_lines_per_minute: number;
+    commit_max: number;
+    commit_max_age_hours: number;
+    max_commits_per_comment: number;
+}
+
+export function waitCreditRules(project: string): WaitCreditRules {
+    const c = waitCreditConfig(project);
+    return {
+        floor: c.floor,
+        refund: c.refund,
+        resolved: c.resolved,
+        resolved_no_commit: c.resolvedNoCommit,
+        wontfix: c.wontfix,
+        commit_lines_per_minute: c.linesPerMinute,
+        commit_max: c.maxPerCommit,
+        commit_max_age_hours: c.commitMaxAgeHours,
+        max_commits_per_comment: c.maxCommitsPerComment,
+    };
+}
+
 /** Is the wait credit on for this project? */
 export function waitCreditEnabled(project: string): boolean {
     return waitCreditConfig(project).enabled;

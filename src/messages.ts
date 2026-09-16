@@ -20,7 +20,7 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
-import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance, waitCreditEnabled } from "./db/wait-credit.js";
+import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance, waitCreditEnabled, waitCreditRules } from "./db/wait-credit.js";
 import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
@@ -1011,6 +1011,7 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
                 refunded,
                 ...(stepGrant ? { step: { requested: stepGrant.requested, granted: stepGrant.granted, spent: stepGrant.spent } } : {}),
                 ...(creditCommits ? { commits: creditCommits } : {}),
+                rules: waitCreditRules(creditProject),
             },
         };
     }

@@ -312,6 +312,12 @@ test("#2640 every part of the scheme is a per-project setting: off, no refund, c
     assert.equal((s.json.wait_credit as Credit).balance, 30);
     const back = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", handback: true });
     assert.equal((back.json.wait_credit as Credit).refunded, 0, "no refund when refunds are off");
+    const r = (back.json.wait_credit as Credit & { rules: Record<string, unknown> }).rules;
+    assert.equal(r.refund, false, "#2646 the reply carries the project's rules");
+    assert.equal(r.floor, 5);
+    assert.equal(r.resolved_no_commit, 10);
+    const bl = (await call(WORKER, "GET", `/api/tickets?project=${PO}&backlog=1&limit=50`)).json as unknown as Array<{ backlog_tier: number | null; wait_credit_rules: Record<string, unknown> | null }>;
+    assert.ok(bl.filter((x) => x.backlog_tier !== null).every((x) => x.wait_credit_rules?.refund === false), "and so do backlog rows");
 
     setConfigOverride(PO, "tickets.wait_credit_resolved_no_commit_minutes", 7);
     const res = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", decision_kind: "resolution" });

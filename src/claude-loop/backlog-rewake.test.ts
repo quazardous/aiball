@@ -88,3 +88,22 @@ test("#2640 a backlog wake shows the agent's wait credit on the project, when th
     assert.equal(shipped.split(clause).length - 1, (shipped.match(/\{head_tier_triage:\+ /g) ?? []).length, "every tone");
     assert.ok(readFileSync(STATE_TS, "utf8").includes(clause), "and the fallback");
 });
+
+test("#2646 under the floor the wake says how to earn credit back, commits included, in the project's amounts", async () => {
+    const prev = process.env.AIBALL_AGENT;
+    process.env.AIBALL_AGENT = "claude-test";
+    const rules = { floor: 5, resolved: 45, resolved_no_commit: 3, wontfix: 2, commit_lines_per_minute: 50, commit_max: 12 };
+    try {
+        const low = await buildContextPhrase(stubClient({ wait_credit_minutes: 2, wait_credit_rules: rules }), null, PINGS_YAML);
+        assert.match(low.phrase, /Your wait credit on this project: 2 min\. You are short of it: credit comes back when a ticket closes on your accepted resolution \(\+45 min with a commit cited on that ticket, \+3 without\) or wontfix \(\+2\), and with each commit you cite on a reply as `commits: \[<sha>\]` \(\+1 min per 50 changed lines, 12 max\)\./);
+        const fine = await buildContextPhrase(stubClient({ wait_credit_minutes: 5, wait_credit_rules: rules }), null, PINGS_YAML);
+        assert.match(fine.phrase, /Your wait credit on this project: 5 min\./);
+        assert.doesNotMatch(fine.phrase, /short of it/, "at the floor, no explanation");
+    } finally {
+        if (prev === undefined) delete process.env.AIBALL_AGENT; else process.env.AIBALL_AGENT = prev;
+    }
+    const clause = "{head_wait_credit_low:+ You are short of it:";
+    const shipped = readFileSync(PINGS_YAML, "utf8");
+    assert.equal(shipped.split(clause).length - 1, (shipped.match(/\{head_tier_triage:\+ /g) ?? []).length, "every tone");
+    assert.ok(readFileSync(STATE_TS, "utf8").includes(clause), "and the fallback");
+});

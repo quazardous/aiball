@@ -18,7 +18,7 @@
  * Local helper `enrichRelationStages` is kept private — only the GET
  * /tickets/:id thread builder uses it.
  */
-import { waitCreditBalance, waitCreditEnabled } from "../db/wait-credit.js";
+import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 import { Router, type Request, type Response } from "express";
 import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
@@ -922,6 +922,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             backlog_cooled_until: flags.backlog_cooled_until,
             backlog_last_wake_at: flags.backlog_last_wake_at,
             wait_credit_minutes: flags.backlog_tier !== null ? waitCreditOf(m.project) : null,
+            wait_credit_rules: flags.backlog_tier !== null && waitCreditOf(m.project) !== null ? waitCreditRules(m.project) : null,
             gated_by_decision: flags.gated_by_decision,
             // #2376 david `a6zkyf` — a `then:` still waiting for its accept,
             // whether or not it gates the ticket: a human's comment hands the

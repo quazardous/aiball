@@ -597,4 +597,6 @@ export interface WaitCreditEffect {
     refunded: number;
     step?: { requested: number; granted: number; spent: number };
     commits?: Array<{ commit: string; minutes: number; reason: string | null }>;
+    /** #2646 — how credit is earned on this project, in its configured amounts. */
+    rules?: import("./wait-credit.js").WaitCreditRules;
 }

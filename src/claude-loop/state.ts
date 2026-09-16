@@ -2474,6 +2474,7 @@ export async function buildContextPhrase(
         // came back on its own too soon; "" otherwise.
         let headRewakeMinutes = "";
         let headWaitCredit = "";
+        let headCreditVars: Record<string, string> = {};
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -2524,6 +2525,8 @@ export async function buildContextPhrase(
                     backlog_last_wake_at?: string | null;
                     /** #2640 — this consumer's wait credit on the row's project. */
                     wait_credit_minutes?: number | null;
+                    /** #2646 — how credit is earned there, in the project's amounts. */
+                    wait_credit_rules?: { floor: number; resolved: number; resolved_no_commit: number; wontfix: number; commit_lines_per_minute: number; commit_max: number } | null;
                 };
                 const rows: BacklogRow[] = Array.isArray(raw)
                     ? (raw as BacklogRow[])
@@ -2558,6 +2561,18 @@ export async function buildContextPhrase(
                     });
                     if (rewake !== null) headRewakeMinutes = String(rewake);
                     if (typeof top.wait_credit_minutes === "number") headWaitCredit = String(top.wait_credit_minutes);
+                    // #2646 — under the floor, the wake says how to earn it back.
+                    const rules = top.wait_credit_rules;
+                    if (typeof top.wait_credit_minutes === "number" && rules && top.wait_credit_minutes < rules.floor) {
+                        headCreditVars = {
+                            head_wait_credit_low: "1",
+                            head_credit_resolved: String(rules.resolved),
+                            head_credit_resolved_no_commit: String(rules.resolved_no_commit),
+                            head_credit_wontfix: String(rules.wontfix),
+                            head_credit_commit_lines: String(rules.commit_lines_per_minute),
+                            head_credit_commit_max: String(rules.commit_max),
+                        };
+                    }
                     // #1363 david `futbsc` — when the head's last actor isn't me,
                     // SHOW that last event's content (a bundle-style line) instead
                     // of asserting "<actor> is waiting on your reply". The old
@@ -2738,6 +2753,12 @@ export async function buildContextPhrase(
             // #2458 — the ticket came back too soon after its previous wake.
             head_rewake_minutes: backlogMode ? headRewakeMinutes : "",
             head_wait_credit: backlogMode ? headWaitCredit : "",
+            head_wait_credit_low: backlogMode ? (headCreditVars.head_wait_credit_low ?? "") : "",
+            head_credit_resolved: headCreditVars.head_credit_resolved ?? "",
+            head_credit_resolved_no_commit: headCreditVars.head_credit_resolved_no_commit ?? "",
+            head_credit_wontfix: headCreditVars.head_credit_wontfix ?? "",
+            head_credit_commit_lines: headCreditVars.head_credit_commit_lines ?? "",
+            head_credit_commit_max: headCreditVars.head_credit_commit_max ?? "",
             // #1350 — "1" when the head EVENT wake is for a ticket this consumer
             // isn't responsible for (non-claimable). The template appends
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
@@ -2817,7 +2838,7 @@ export async function buildContextPhrase(
             // #2458 david — a ticket that keeps coming back is usually a step
             // declared with `continue_after_minutes: 0` while the next move waits
             // on a job. Say how to rest it, on whatever tier it came back as.
-            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` a `continue_after_minutes` (not 0): the soonest a look is worth it, not how long the job takes. It rests until then.}{head_wait_credit:+ Your wait credit on this project: {head_wait_credit} min.}}";
+            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` a `continue_after_minutes` (not 0): the soonest a look is worth it, not how long the job takes. It rests until then.}{head_wait_credit:+ Your wait credit on this project: {head_wait_credit} min.}{head_wait_credit_low:+ You are short of it: credit comes back when a ticket closes on your accepted resolution (+{head_credit_resolved} min with a commit cited on that ticket, +{head_credit_resolved_no_commit} without) or wontfix (+{head_credit_wontfix}), and with each commit you cite on a reply as `commits: [<sha>]` (+1 min per {head_credit_commit_lines} changed lines, {head_credit_commit_max} max).}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced
