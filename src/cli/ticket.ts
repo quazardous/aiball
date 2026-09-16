@@ -90,6 +90,7 @@ export function registerTicketCommands(program: Command): void {
         .option("--by <agent>", "Author override")
         .option("--handback", "Hand the ticket back: a question, you wait for an answer (an agent's comment needs --handback or --keep)")
         .option("--keep", "Keep the ticket and carry on (only on a ticket you hold)")
+        .option("--commits <shas>", "Commits this comment delivers, comma-separated, or \"none\" (an agent's comment needs it)")
         .action(async (opts, cmd) => {
             const client = buildClient(gOpts(cmd));
             const ticketId = Number(opts.id);
@@ -117,6 +118,10 @@ export function registerTicketCommands(program: Command): void {
                 ticket_id: ticketId,
                 parent_id: parent,
                 ...(opts.keep ? { handback: false } : opts.handback ? { handback: true } : {}),
+                // #2652 — "none" says it explicitly; absent, the daemon warns or refuses.
+                ...(typeof opts.commits === "string"
+                    ? { commits: opts.commits.trim() === "none" ? null : opts.commits.split(",").map((c: string) => c.trim()).filter(Boolean) }
+                    : {}),
             });
             out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "comment"));
         });

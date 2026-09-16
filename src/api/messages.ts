@@ -49,7 +49,7 @@ import {
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
-import { creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
+import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
 import { decisionGesture } from "../ticket-transitions.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
@@ -113,8 +113,12 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     // #2275 / #2331 — an agent's comment carries a then, or says whether it hands the ticket back.
     const noDecision = withoutDecisionRefusal(v, consumerOf(req));
     if (noDecision) return badRequest(res, noDecision);
+    // #2652 — an agent's comment says which commits it delivers, or that it delivers none.
+    const clientFeatures = String(req.headers["x-aiball-client"] ?? "").split(",").map((f) => f.trim());
+    const commitsRule = commitsRequirement(v, consumerOf(req), clientFeatures.includes("commits"));
+    if (commitsRule.refusal) return badRequest(res, commitsRule.refusal);
     // #2331 — a project's lead filing a ticket without a plan is reminded, not refused.
-    const warning = v.kind === "ticket_created" ? creationHandbackFor(v).warning : null;
+    const warning = v.kind === "ticket_created" ? creationHandbackFor(v).warning : commitsRule.warning;
     try {
         const msg = submitMessage(v);
         applyPlatformTag(msg, req);

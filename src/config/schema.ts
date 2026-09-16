@@ -126,6 +126,17 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "When on, an agent's comment with no then: must set handback (true: it hands the ticket back, false: it keeps it), or it is refused with an explanation and nothing is posted. Humans are exempt.",
     },
+    // #2652 david — « il faut que le champ commit soit obligatoire ».
+    {
+        key: "tickets.require_commits",
+        scope: "global+project",
+        type: "boolean",
+        default: true,
+        protected: true,
+        label: "Agent comments need commits",
+        description:
+            "When on, an agent's comment must say which commits it delivers (commits: [\"<sha>\"]) or that it delivers none (commits: null or \"none\"), or it is refused with an explanation. A client from before the field is warned instead of refused until it reconnects. Humans, close and reopen are exempt.",
+    },
     // #2308 — a step (`then: continue`) keeps a ticket in its author's pool; one
     // that nothing follows is flagged in the inbox after this many hours.
     {

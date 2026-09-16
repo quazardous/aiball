@@ -247,6 +247,10 @@ when you pick it up again — a step without `continue_after_minutes` is refused
   costs one look and another step; looking too late leaves finished work
   waiting, and nothing wakes you for it. A job of about 20 minutes: 10.
 
+**Every comment says its commits.** `commits` is required on a comment: the SHAs
+it delivers (`commits: ["9e32067"]`), or `commits: null` when it delivers none.
+Without it the comment is refused. Close and reopen don't take it.
+
 **Waiting costs wait credit.** Each project gives you 60 minutes to start with.
 A wait spends its minutes; short of credit it is capped to your balance, never
 under 5 minutes. Coming back on the ticket before the wait ends gives the rest

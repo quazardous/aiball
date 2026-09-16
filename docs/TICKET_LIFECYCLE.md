@@ -374,6 +374,12 @@ waits and nothing said), `tickets.wait_credit_refund`, every amount
 commits the lines per minute, the cap per commit, the oldest commit that still
 earns and how many count per comment. `aiball steps` lists every balance.
 
+An agent's comment must carry `commits`: the SHAs it delivers, or `null` /
+`"none"` for none, said explicitly. Without it the comment is refused
+(`tickets.require_commits`, per project); a client that does not declare the
+field (`x-aiball-client: commits`) is warned instead, so a loop started before
+it is not blocked. Humans, close and reopen are exempt.
+
 A project's **wake focus**, set beside its standing instruction, narrows what
 wakes the project's owner agents to a list of tickets: `123, 456` keeps only
 those, `!789` keeps all but it, with an optional end time. It filters the backlog

@@ -123,6 +123,23 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): string 
 }
 
 /**
+ * #2652 david — « il faut que le champ commit soit obligatoire (avec une valeur
+ * explicite none ou null) ». An agent's comment says which commits it
+ * delivers, or explicitly that it delivers none. `refuse` is the client
+ * declaring it knows the field (`x-aiball-client: commits`): a loop still
+ * running an MCP server from before the field is warned, not refused, so it is
+ * not blocked until it reconnects.
+ */
+export function commitsRequirement(msg: NewMessage, caller: string, refuse: boolean): { refusal: string | null; warning: string | null } {
+    if (msg.kind !== "comment_added" || isHuman(caller) || msg.commits !== undefined) return { refusal: null, warning: null };
+    if (getConfig("tickets.require_commits", msg.project) === false) return { refusal: null, warning: null };
+    const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit";
+    return refuse
+        ? { refusal: reason, warning: null }
+        : { refusal: null, warning: `${reason}. Your MCP server predates the field: reconnect it (/mcp) — posts without it will be refused.` };
+}
+
+/**
  * #2331 — the handback a new ticket carries, deduced from who files it (never
  * sent by the caller), and the reminder a project's lead gets when it files one
  * without a plan. Read-only: the route asks it for the warning, `submitMessage`
@@ -282,8 +299,13 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         stepAfterMinutes = n;
     }
     // #2640 — commits cited as proof of work: a list of SHAs, on a comment.
-    let commits: string[] | undefined = undefined;
-    if (o.commits !== undefined && o.commits !== null) {
+    // #2652 — `null`, `"none"` or `[]` say explicitly "no commit here"; they
+    // all become null, which is not the same as the field being absent.
+    let commits: string[] | null | undefined = undefined;
+    if (o.commits === null || o.commits === "none" || (Array.isArray(o.commits) && o.commits.length === 0)) {
+        if (kind !== "comment_added") return { error: "commits only go with a comment" };
+        commits = null;
+    } else if (o.commits !== undefined) {
         if (!Array.isArray(o.commits) || !o.commits.every((c) => typeof c === "string")) {
             return { error: "commits must be a list of commit SHAs" };
         }

@@ -47,6 +47,8 @@ export interface ClientOptions {
      * Same-uid clients use this for token-less local access.
      */
     socketPath?: string;
+    /** #2652 — protocol features this client knows, sent as `x-aiball-client`. */
+    features?: string[];
 }
 
 export interface SpoolResult {
@@ -65,6 +67,7 @@ export class AiballClient {
     readonly url: string;
     readonly home: string;
     readonly spoolDir: string;
+    readonly features: string[];
     readonly outboxDir: string;
     readonly timeoutMs: number;
     readonly agentId: string;
@@ -89,6 +92,7 @@ export class AiballClient {
         this.socketPath =
             opts.socketPath ?? (envSock && envSock !== "" ? envSock : null);
         this.token = opts.token ?? process.env.AIBALL_TOKEN ?? null;
+        this.features = opts.features ?? [];
     }
 
     /**
@@ -134,6 +138,9 @@ export class AiballClient {
         // as the two hints above — the client states a fact about itself, the
         // daemon decides what to do with it (a closed three-value map).
         headers["x-aiball-platform"] = process.platform;
+        // #2652 — what this client knows of the protocol (the daemon only
+        // enforces a newly required field on a client that declares it).
+        if (this.features.length) headers["x-aiball-client"] = this.features.join(",");
         const payload = body ? JSON.stringify(body) : undefined;
         // #855 — retry-with-backoff on transient daemon-down errors so
         // an `aiball restart` (or tsx-watch reload) doesn't kill in-flight

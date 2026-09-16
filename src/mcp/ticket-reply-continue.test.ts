@@ -85,3 +85,11 @@ test("#2640 the answer starts with the wait credit in words when the daemon send
     assert.match(text, /Wait credit on p-2308: this step waits 20 min\. 40 min left/);
     stub.postMessage = async (msg: Record<string, unknown>) => { sent.push(msg); return { id: 43 }; };
 });
+
+test("#2652 the MCP client declares commits, and a reply sends null as null", async () => {
+    assert.deepEqual((client as unknown as { features: string[] }).features, ["commits"]);
+    const msg = await reply({ handback: true, commits: null });
+    assert.ok("commits" in msg, "the key is sent");
+    assert.equal(msg.commits, null);
+    assert.equal((await reply({ handback: true, commits: "none" })).commits, "none");
+});

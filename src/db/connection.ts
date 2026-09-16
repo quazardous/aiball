@@ -257,8 +257,10 @@ export interface NewMessage {
     step?: boolean;
     /** #2449 — with a step: the agent resumes after this many minutes, not at once. */
     step_after_minutes?: number;
-    /** #2640 — commits the author cites as proof of work (wait credit). comment_added only. */
-    commits?: string[];
+    /** #2640 — commits the author cites as proof of work (wait credit). comment_added only.
+     *  #2652 — `null` = "this comment delivers no commit", said explicitly;
+     *  undefined = the field was not sent. */
+    commits?: string[] | null;
     /** #2331 — does this message hand the ticket back? Explicit on a comment
      *  with no `then`; deduced at creation from who files the ticket. */
     handback?: boolean;

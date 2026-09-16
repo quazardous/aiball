@@ -215,11 +215,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                         "#2449 — REQUIRED with `then: \"continue\"`, refused with anything else: when you resume. `0` = you carry on at once, and the ticket leads your backlog right away. `N` = the next step waits on something (a build, a test box, a deploy): the ticket stays out of your wakes for N minutes, then leads your backlog. N is the soonest a look is worth it, not how long the job takes. When in doubt, pick the smaller: looking too early costs one look and another step; looking too late leaves finished work waiting. A job of about 20 minutes: 10. Waiting spends your wait credit on the project (earned by tickets closed on your accepted resolution or wontfix, and by the commits you cite): short of it the wait is capped to your balance, never under 5 minutes; coming back before the end gives the rest back. The answer carries `wait_credit` with your balance. At most the project's `tickets.step_after_max_minutes` (120 by default): a longer wait is refused with the limit — hand the ticket back or propose a plan instead. A step without it is refused (HTTP 400).",
                     ),
                 commits: z
-                    .array(z.string())
-                    .max(100)
+                    .union([z.array(z.string()).max(100), z.null(), z.literal("none")])
                     .optional()
                     .describe(
-                        "#2640 — commits this comment delivers (SHAs), as proof of work. Each earns wait credit once, from its changed lines, read in your checkout; a commit too old, unknown there, already counted or past the per-comment limit earns nothing and the answer says why (all of it set per project). Only on a comment (not close/reopen).",
+                        "#2652 — REQUIRED on a comment (refused without it; not on close/reopen): the commits this comment delivers, or `null` when it delivers none. #2640 — SHAs, as proof of work. Each earns wait credit once, from its changed lines, read in your checkout; a commit too old, unknown there, already counted or past the per-comment limit earns nothing and the answer says why (all of it set per project). Only on a comment (not close/reopen).",
                     ),
                 scope: z
                     .enum(MESSAGE_SCOPES)

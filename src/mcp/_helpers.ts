@@ -18,7 +18,8 @@ import { AiballClient } from "../client.js";
 import { captureTokenUsage, projectTranscriptDir } from "../claude-loop/token-capture.js";
 import { CL_ENV } from "../claude-loop/env-vars.js";
 
-export const client = new AiballClient();
+// #2652 — this MCP server sends `commits` on every comment it posts.
+export const client = new AiballClient({ features: ["commits"] });
 
 /**
  * #404: record the ticket the agent is currently focused on (the last
