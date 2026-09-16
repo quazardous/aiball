@@ -16,7 +16,8 @@
  */
 import { and, eq, sql } from "drizzle-orm";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
 import { getConfig } from "./config-overrides.js";
@@ -140,6 +141,29 @@ export function earnOnClose(consumerId: string, project: string, ticketId: numbe
     return record({ consumerId, project, kind: how === "resolved" ? "earn_resolved" : "earn_wontfix", minutes, ticketId }) ? minutes : 0;
 }
 
+/**
+ * #2661 — the git repositories an agent's folder stands for: the folder itself
+ * when it is inside one, otherwise every repository found up to three levels
+ * below it (dependencies and hidden folders skipped).
+ */
+export function gitRepositoriesAt(dir: string, maxDepth = 3): string[] {
+    const top = spawnSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8", timeout: 10_000 });
+    if (top.status === 0 && top.stdout.trim()) return [top.stdout.trim()];
+    const found: string[] = [];
+    const walk = (d: string, depth: number) => {
+        if (depth > maxDepth || found.length >= 50) return;
+        let entries: import("node:fs").Dirent[];
+        try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
+        if (depth > 0 && entries.some((e) => e.name === ".git")) { found.push(d); return; }
+        for (const e of entries) {
+            if (!e.isDirectory() || e.name.startsWith(".") || e.name === "node_modules") continue;
+            walk(join(d, e.name), depth + 1);
+        }
+    };
+    walk(dir, 0);
+    return found.sort();
+}
+
 export interface CommitCredit {
     commit: string;
     minutes: number;
@@ -162,16 +186,27 @@ export function earnForCommits(
     nowMs = Date.now(),
 ): CommitCredit[] {
     const cfg = waitCreditConfig(project);
+    let repos: string[] | null = null; // looked up once, on the first commit that needs it
     return commits.map((c, i): CommitCredit => {
         const commit = c.trim();
         if (!cfg.enabled) return { commit, minutes: 0, reason: "wait credit is off on this project" };
         if (i >= cfg.maxCommitsPerComment) return { commit, minutes: 0, reason: `past the ${cfg.maxCommitsPerComment} commits counted per comment` };
         if (!/^[0-9a-f]{7,40}$/i.test(commit)) return { commit, minutes: 0, reason: "not a commit SHA" };
-        if (!cwd || !existsSync(cwd)) return { commit, minutes: 0, reason: "the agent's checkout is not readable from the daemon" };
-        const git = (args: string[]) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10_000 });
-        const full = git(["rev-parse", "--verify", "--quiet", `${commit}^{commit}`]);
-        if (full.status !== 0) return { commit, minutes: 0, reason: "not a commit in the agent's checkout" };
-        const sha = full.stdout.trim();
+        if (!cwd || !existsSync(cwd)) return { commit, minutes: 0, reason: "the agent's folder is not readable from the daemon" };
+        // #2661 — the agent's folder may hold several repositories (a workspace
+        // like BookShepherd/{bms,bms-core,…}) rather than be one: look in each.
+        repos ??= gitRepositoriesAt(cwd);
+        if (repos.length === 0) return { commit, minutes: 0, reason: `no git repository in or under ${cwd}` };
+        let repo: string | null = null;
+        let sha = "";
+        for (const r of repos) {
+            const full = spawnSync("git", ["-C", r, "rev-parse", "--verify", "--quiet", `${commit}^{commit}`], { encoding: "utf8", timeout: 10_000 });
+            if (full.status === 0) { repo = r; sha = full.stdout.trim(); break; }
+        }
+        if (!repo) {
+            return { commit, minutes: 0, reason: `not a commit in ${repos.length === 1 ? repos[0] : `any of the ${repos.length} repositories under ${cwd}`}` };
+        }
+        const git = (args: string[]) => spawnSync("git", ["-C", repo!, ...args], { encoding: "utf8", timeout: 10_000 });
         const when = Number(git(["show", "-s", "--format=%ct", sha]).stdout.trim()) * 1000;
         if (!(when > 0) || nowMs - when > cfg.commitMaxAgeHours * 3_600_000) {
             return { commit, minutes: 0, reason: `older than ${cfg.commitMaxAgeHours} h` };

@@ -206,7 +206,7 @@ test("a cited commit earns from its diff once, in the agent's checkout; the rest
     const [ok, tooOld, unknown, bad] = r.credit!.commits!;
     assert.deepEqual(ok, { commit: fresh.slice(0, 7), minutes: 2, reason: null }, "45 lines / 20 = 2 minutes");
     assert.match(tooOld.reason ?? "", /older than 48 h/);
-    assert.match(unknown.reason ?? "", /not a commit in the agent's checkout/);
+    assert.match(unknown.reason ?? "", /^not a commit in \//);
     assert.match(bad.reason ?? "", /not a commit SHA/);
     assert.equal(r.credit?.balance, before + 2);
 
@@ -331,4 +331,38 @@ test("#2640 every part of the scheme is a per-project setting: off, no refund, c
     const [first, second] = (c.json.wait_credit as Credit).commits!;
     assert.doesNotMatch(first.reason ?? "", /past the/);
     assert.match(second.reason ?? "", /past the 1 commits counted per comment/);
+});
+
+test("#2661 an agent whose folder holds several repositories: the commit is found in the one that has it", async () => {
+    const { earnForCommits, gitRepositoriesAt } = await import("../db/wait-credit.js");
+    const WS = mkdtempSync(join(tmpdir(), "aiball-2661-ws-"));
+    const repo = (name: string) => {
+        const d = join(WS, name);
+        spawnSync("git", ["init", "-q", "-b", "main", d]);
+        const g = (args: string[], env: Record<string, string> = {}) => spawnSync("git", ["-C", d, ...args], { encoding: "utf8", env: { ...process.env, ...env } }).stdout.trim();
+        g(["config", "user.email", "t@t"]); g(["config", "user.name", "t"]);
+        return { d, g };
+    };
+    const a = repo("bms-core");
+    const b = repo("bms");
+    spawnSync("mkdir", ["-p", join(WS, "node_modules", "dep", ".git")]);
+    writeFileSync(join(b.d, "x.txt"), Array.from({ length: 60 }, (_, i) => `l${i}`).join("\n") + "\n");
+    b.g(["add", "-A"]); b.g(["commit", "-qm", "work"]);
+    const sha = b.g(["rev-parse", "HEAD"]);
+    writeFileSync(join(a.d, "y.txt"), "y\n"); a.g(["add", "-A"]); a.g(["commit", "-qm", "other"]);
+
+    assert.deepEqual(gitRepositoriesAt(WS), [b.d, a.d].sort(), "both repositories, node_modules skipped");
+    assert.deepEqual(gitRepositoriesAt(join(b.d)), [b.d], "inside a repository: that one");
+
+    const createProjectP = "p-2661";
+    createProject({ name: createProjectP });
+    const t = submitMessage({ project: createProjectP, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
+    const [found, missing] = earnForCommits("worker", createProjectP, t, WS, [sha.slice(0, 7), "abcdef1"]);
+    assert.deepEqual(found, { commit: sha.slice(0, 7), minutes: 3, reason: null }, "found in bms: 60 lines / 20 = 3");
+    assert.match(missing.reason ?? "", /not a commit in any of the 2 repositories under /);
+
+    const EMPTY = mkdtempSync(join(tmpdir(), "aiball-2661-empty-"));
+    assert.match(earnForCommits("worker", createProjectP, t, EMPTY, ["abcdef1"])[0].reason ?? "", /no git repository in or under /);
+    rmSync(WS, { recursive: true, force: true });
+    rmSync(EMPTY, { recursive: true, force: true });
 });
