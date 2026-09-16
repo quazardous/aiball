@@ -116,7 +116,11 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     // #2652 — an agent's comment says which commits it delivers, or that it delivers none.
     const clientFeatures = String(req.headers["x-aiball-client"] ?? "").split(",").map((f) => f.trim());
     // #2653 — an older client can only write them in the body: read that line.
-    if (v.kind === "comment_added" && v.commits === undefined && !clientFeatures.includes("commits")) {
+    // #2660 — whatever the client advertises: Claude Code can run a recent MCP
+    // server (advertising `commits`) behind a tool schema it kept from before,
+    // so the agent cannot send the field. A client that knows the field sends
+    // the key (null included) and never reaches this.
+    if (v.kind === "comment_added" && v.commits === undefined) {
         const fromBody = commitsFromBody(v.body);
         if (fromBody !== undefined) v.commits = fromBody;
     }

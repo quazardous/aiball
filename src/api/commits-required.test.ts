@@ -149,8 +149,13 @@ test("#2653 an older client that writes `commits: [...]` as the last body line g
     const said = await post({ body: "nothing\ncommits: none" }, { knowsCommits: false });
     assert.equal((JSON.parse(String(said.json.meta)) as { commits: unknown }).commits, null);
 
+    // #2660 — a client advertising the field behind a stale tool schema can only write the line: it is read too.
     const declared = await post({ body: "x\ncommits: [deadbeef]" });
-    assert.equal(declared.status, 400, "a client that knows the field must send it as the field");
-    const warned = await post({}, { knowsCommits: false });
-    assert.match(String((warned.json.warnings as string[])[0]), /a parameter of ticket_reply, not text in the body/);
+    assert.equal(declared.status, 201, JSON.stringify(declared.json));
+    assert.deepEqual((JSON.parse(String(declared.json.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef"]);
+    const refused = await post({ body: "no line" });
+    assert.equal(refused.status, 400);
+    assert.match(String(refused.json.error), /end the body with a line `commits: \[<sha>, <sha>\]` or `commits: none`/, "the refusal gives the way out");
+    const withKey = await post({ body: "x\ncommits: [deadbeef]", commits: null });
+    assert.equal((JSON.parse(String(withKey.json.meta)) as { commits: unknown }).commits, null, "the key, when sent, wins over the line");
 });
