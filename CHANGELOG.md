@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-09-16
+
 ### Added
 
 - The Windows installer now provides the PTY proxy the loops cannot start
