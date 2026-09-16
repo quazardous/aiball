@@ -49,7 +49,7 @@ import {
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
-import { commitsFromBody, commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
+import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
 import { decisionGesture } from "../ticket-transitions.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
@@ -115,15 +115,6 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     if (noDecision) return badRequest(res, noDecision);
     // #2652 — an agent's comment says which commits it delivers, or that it delivers none.
     const clientFeatures = String(req.headers["x-aiball-client"] ?? "").split(",").map((f) => f.trim());
-    // #2653 — an older client can only write them in the body: read that line.
-    // #2660 — whatever the client advertises: Claude Code can run a recent MCP
-    // server (advertising `commits`) behind a tool schema it kept from before,
-    // so the agent cannot send the field. A client that knows the field sends
-    // the key (null included) and never reaches this.
-    if (v.kind === "comment_added" && v.commits === undefined) {
-        const fromBody = commitsFromBody(v.body);
-        if (fromBody !== undefined) v.commits = fromBody;
-    }
     const commitsRule = commitsRequirement(v, consumerOf(req), clientFeatures.includes("commits"));
     if (commitsRule.refusal) return badRequest(res, commitsRule.refusal);
     // #2331 — a project's lead filing a ticket without a plan is reminded, not refused.

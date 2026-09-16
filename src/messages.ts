@@ -136,28 +136,10 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): string 
 export function commitsRequirement(msg: NewMessage, caller: string, refuse: boolean): { refusal: string | null; warning: string | null } {
     if (msg.kind !== "comment_added" || isHuman(caller) || msg.commits !== undefined) return { refusal: null, warning: null };
     if (getConfig("tickets.require_commits", msg.project) === false) return { refusal: null, warning: null };
-    const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit. If your ticket_reply tool has no commits parameter (the session kept its tool schema from before the field: /mcp does not refresh it, only a new Claude Code session does, e.g. restarting the loop), end the body with a line `commits: [<sha>, <sha>]` or `commits: none`";
+    const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit. If your ticket_reply tool has no commits parameter, the session kept its tool schema from before the field: /mcp does not refresh it, restart the loop (a new Claude Code session)";
     return refuse
         ? { refusal: reason, warning: null }
         : { refusal: null, warning: `${reason}. Your client does not declare the field yet: restart the loop (a new Claude Code session) — posts without it will be refused.` };
-}
-
-/**
- * #2653 — a client from before `commits` (an MCP server not reconnected) can
- * only put it in the body. The last body line `commits: [a, b]`, `commits:
- * none` or `commits: null` is read as the field for such a client; the body is
- * left as written.
- */
-export function commitsFromBody(body: string | null | undefined): string[] | null | undefined {
-    if (!body) return undefined;
-    const lines = body.trimEnd().split("\n");
-    const m = /^\s*commits\s*:\s*(.+?)\s*$/i.exec(lines[lines.length - 1] ?? "");
-    if (!m) return undefined;
-    const v = m[1].replace(/^`|`$/g, "").trim();
-    if (/^(none|null|\[\s*\])$/i.test(v)) return null;
-    const list = /^\[(.*)\]$/.exec(v)?.[1] ?? v;
-    const shas = list.split(/[\s,]+/).map((s) => s.replace(/^["'`]|["'`]$/g, "")).filter(Boolean);
-    return shas.length && shas.every((s) => /^[0-9a-f]{7,40}$/i.test(s)) ? shas : undefined;
 }
 
 /**

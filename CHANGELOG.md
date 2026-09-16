@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Removed
+
+- A comment's last body line `commits: [...]` is no longer read as its
+  commits: only the `commits` field counts. A session whose tool schema lacks
+  it must restart its loop.
+
 ## [0.44.0] — 2026-09-16
 
 ### Added

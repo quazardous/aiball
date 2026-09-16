@@ -131,31 +131,12 @@ test("#2653 the comment keeps its commits in meta: each with its credit, null fo
     assert.deepEqual((JSON.parse(String(stored?.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef", "cafebabe"]);
 });
 
-test("#2653 an older client that writes `commits: [...]` as the last body line gets them read as the field", async () => {
-    const { commitsFromBody } = await import("../messages.js");
-    assert.deepEqual(commitsFromBody("status\n\ncommits: [38e2c869, 1537854e]"), ["38e2c869", "1537854e"]);
-    assert.deepEqual(commitsFromBody("x\ncommits: `[\"38e2c869\"]`"), ["38e2c869"]);
-    assert.equal(commitsFromBody("x\ncommits: none"), null);
-    assert.equal(commitsFromBody("x\ncommits: null"), null);
-    assert.equal(commitsFromBody("commits: [38e2c869]\nmore text after"), undefined, "only the last line");
-    assert.equal(commitsFromBody("x\ncommits: [not-a-sha]"), undefined);
-
-    const r = await post({ body: "Umbrella status.\n\ncommits: [deadbeef, cafebabe]" }, { knowsCommits: false });
-    assert.equal(r.status, 201, JSON.stringify(r.json));
-    assert.equal(r.json.warnings, undefined, "said in the body: no warning");
-    assert.deepEqual((JSON.parse(String(r.json.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef", "cafebabe"]);
-    assert.match(String(r.json.body), /commits: \[deadbeef, cafebabe\]$/, "the body is left as written");
-
-    const said = await post({ body: "nothing\ncommits: none" }, { knowsCommits: false });
-    assert.equal((JSON.parse(String(said.json.meta)) as { commits: unknown }).commits, null);
-
-    // #2660 — a client advertising the field behind a stale tool schema can only write the line: it is read too.
+test("#2662 no body-line fallback: only the field counts", async () => {
     const declared = await post({ body: "x\ncommits: [deadbeef]" });
-    assert.equal(declared.status, 201, JSON.stringify(declared.json));
-    assert.deepEqual((JSON.parse(String(declared.json.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef"]);
-    const refused = await post({ body: "no line" });
-    assert.equal(refused.status, 400);
-    assert.match(String(refused.json.error), /only a new Claude Code session does, e\.g\. restarting the loop\), end the body with a line `commits: \[<sha>, <sha>\]` or `commits: none`/, "the refusal gives the way out");
-    const withKey = await post({ body: "x\ncommits: [deadbeef]", commits: null });
-    assert.equal((JSON.parse(String(withKey.json.meta)) as { commits: unknown }).commits, null, "the key, when sent, wins over the line");
+    assert.equal(declared.status, 400, "a line in the body is not the field");
+    assert.match(String(declared.json.error), /restart the loop \(a new Claude Code session\)/);
+    const old = await post({ body: "x\ncommits: [deadbeef]" }, { knowsCommits: false });
+    assert.equal(old.status, 201);
+    assert.equal("commits" in (JSON.parse(String(old.json.meta)) as object), false, "an undeclared client's body line is not read either");
+    assert.ok(old.json.warnings, "it is warned");
 });
