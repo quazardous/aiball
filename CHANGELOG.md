@@ -23,6 +23,14 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- The mouse wheel in a loop scrolls the terminal again instead of walking back
+  through Claude Code's prompt history. Claude Code asks for the mouse, and the
+  multiplexer then hands every wheel notch to it rather than to its own
+  scrollback; loops now start Claude Code with the mouse off, so the wheel
+  scrolls the pane and text selection belongs to the multiplexer.
+
 ## [0.42.0] — 2026-09-16
 
 ### Added

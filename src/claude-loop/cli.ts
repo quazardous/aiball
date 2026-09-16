@@ -816,6 +816,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // enabling fullscreen there can't brick your loops. Sourced before env.local,
         // so a power user who really wants fullscreen can unset it there.
         `export CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`,
+        // The wheel scrolls the mux's scrollback, not claude's prompt history.
+        // Claude Code turns mouse tracking on (`?1000h` / `?1006h`), and a
+        // multiplexer forwards the wheel to any pane whose program asked for
+        // the mouse instead of entering copy-mode: the notches reach claude,
+        // which reads them as Up/Down and walks the prompt history. With the
+        // mouse off claude never asks, so the wheel falls through to
+        // `scroll-enter-copy-mode` (psmux) / the copy-mode binding (tmux), and
+        // drag-select is the mux's too. Same override rule as above: set before
+        // env.local, so it can be unset there.
+        `export CLAUDE_CODE_DISABLE_MOUSE=1`,
         // CLI-only flags (no yaml backing, no shell override) :
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
