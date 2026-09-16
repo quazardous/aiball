@@ -111,3 +111,22 @@ test("humans, close and reopen are exempt; the project setting lifts the rule", 
     assert.equal(off.status, 201, JSON.stringify(off.json));
     assert.equal(off.json.warnings, undefined);
 });
+
+test("#2653 the comment keeps its commits in meta: each with its credit, null for none, absent when not sent", async () => {
+    const listed = await post({ commits: ["deadbeef", "cafebabe"] });
+    const m = JSON.parse(String(listed.json.meta)) as { commits: Array<{ sha: string; minutes: number; reason: string | null }> };
+    assert.deepEqual(m.commits.map((c) => c.sha), ["deadbeef", "cafebabe"]);
+    assert.ok(m.commits.every((c) => c.minutes === 0 && typeof c.reason === "string"), "unreadable here: no credit, and the reason is kept");
+    assert.equal((JSON.parse(String(listed.json.meta)) as { handback?: boolean }).handback, true, "the rest of the meta is kept");
+
+    const none = await post({ commits: "none" });
+    assert.equal((JSON.parse(String(none.json.meta)) as { commits: unknown }).commits, null);
+
+    const old = await post({}, { knowsCommits: false });
+    assert.equal("commits" in (JSON.parse(String(old.json.meta)) as object), false);
+
+    // Read back from the thread, not just from the post's answer.
+    const thread = await fetch(`${BASE}/api/tickets/${t}?full=1`, { headers: { authorization: `Bearer ${BOSS}` } }).then((r) => r.json()) as { comments?: Array<{ id: number; meta: string | null }> };
+    const stored = thread.comments?.find((c) => c.id === listed.json.id);
+    assert.deepEqual((JSON.parse(String(stored?.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef", "cafebabe"]);
+});

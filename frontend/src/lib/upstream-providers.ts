@@ -31,6 +31,8 @@ export interface UpstreamProvider {
     refPrefix: string;
     parseRef(ref: string): UpstreamTarget | null;
     buildUrl(target: UpstreamTarget, num: number): string;
+    /** #2653 — a commit's page in that repository, when the provider has one. */
+    buildCommitUrl?(target: UpstreamTarget, sha: string): string;
 }
 
 export const githubProvider: UpstreamProvider = {
@@ -44,7 +46,29 @@ export const githubProvider: UpstreamProvider = {
     buildUrl(target, num) {
         return `https://github.com/${target.owner}/${target.repo}/issues/${num}`;
     },
+    buildCommitUrl(target, sha) {
+        return `https://github.com/${target.owner}/${target.repo}/commit/${sha}`;
+    },
 };
+
+/**
+ * #2653 — a commit's URL in the project's default linked repository, or null
+ * when the project has none (or its provider cannot link a commit).
+ */
+export function resolveCommitUrl(
+    sha: string,
+    bindings: readonly UpstreamBinding[],
+    providers: readonly UpstreamProvider[] = BUILT_IN_PROVIDERS,
+): string | null {
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+    for (const p of providers) {
+        if (!p.buildCommitUrl) continue;
+        const def = bindings.find((b) => b.kind === p.id && b.default) ?? bindings.find((b) => b.kind === p.id);
+        const target = def ? p.parseRef(def.ref) : null;
+        if (target) return p.buildCommitUrl(target, sha);
+    }
+    return null;
+}
 
 export const BUILT_IN_PROVIDERS: UpstreamProvider[] = [githubProvider];
 

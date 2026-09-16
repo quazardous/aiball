@@ -10,6 +10,7 @@ import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
 import MarkdownView from "./MarkdownView.vue";
 import CommentVotes from "./CommentVotes.vue";
+import CommentCommits from "./CommentCommits.vue";
 import { api, type Message } from "../lib/api";
 import { bus } from "../lib/bus";
 import { scopeIcon, scopeTitle } from "../lib/scope";
@@ -681,6 +682,8 @@ async function doDelete() {
                 >room_service</span>
             </span>
         </div>
+        <!-- #2653 david — the commits the comment delivers, under its buttons. -->
+        <CommentCommits v-if="msg.kind === 'comment_added' && !deleted" :msg="msg" />
     </div>
 </template>
 

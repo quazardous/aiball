@@ -20,6 +20,9 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
+import { eq } from "drizzle-orm";
+import { getDb } from "./db/connection.js";
+import * as schema from "./schema.js";
 import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance, waitCreditEnabled, waitCreditRules } from "./db/wait-credit.js";
 import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
@@ -797,6 +800,16 @@ export interface SubmitOpts {
  * Single source of truth for "a new message arrived" — used by both the HTTP
  * API and the spool drainer so behavior is identical regardless of channel.
  */
+function parseMetaObject(meta: string | null | undefined): Record<string, unknown> {
+    if (!meta) return {};
+    try {
+        const m = JSON.parse(meta) as unknown;
+        return m && typeof m === "object" && !Array.isArray(m) ? m as Record<string, unknown> : {};
+    } catch {
+        return {};
+    }
+}
+
 export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message {
     // #2215 — a comment or lifecycle event aimed at a ticket that does not exist
     // used to reach the insert and die on the foreign key as a raw SqliteError:
@@ -852,6 +865,22 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
         if (input.commits?.length) {
             creditCommits = earnForCommits(creditAgent, creditProject, msg.ticket_id, getConsumer(creditAgent)?.cwd ?? null, input.commits);
         }
+    }
+    // #2653 — the comment keeps what it said about its commits, for the thread
+    // to show under it: each commit with what it earned (or why not), or null
+    // for "no commit" said explicitly. Absent when the field was not sent.
+    if (msg.kind === "comment_added" && input.commits !== undefined) {
+        const commits = input.commits === null
+            ? null
+            : input.commits.map((sha, i) => ({
+                sha,
+                minutes: creditCommits?.[i]?.minutes ?? 0,
+                reason: creditCommits?.[i]?.reason ?? null,
+            }));
+        const meta = { ...parseMetaObject(msg.meta), commits };
+        const json = JSON.stringify(meta);
+        getDb().update(schema.messages).set({ meta: json }).where(eq(schema.messages.id, msg.id)).run();
+        msg = { ...msg, meta: json };
     }
     autoSubscribeAuthor(msg);
     // Fan out delivery pings at INSERTION. Since #697 F3 (david `hwct2h`),
