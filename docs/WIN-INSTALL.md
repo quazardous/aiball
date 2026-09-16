@@ -202,6 +202,17 @@ say so rather than stopping a daemon nothing would bring back.
 > makes the restart commands refuse. They name this as the reason when it
 > happens.
 
+**Updates.** The tray's tooltip carries the running version, and its menu
+says whether a newer release is out, with *Copy the update command*, *Release
+notes* and *Check for updates*; a new release shows one balloon. The daemon
+checks GitHub when it starts, and the tray reads the answer through
+`aiball --json version`. The command matches how you installed: `install.ps1`
+records it in `%USERPROFILE%\.config\aiball\install.json` — a copy of the
+checkout (`git pull` then `install.ps1` with the same flags) or a dev install
+(`-Symlink` / `-Minimal`: `git pull`, `npm install`, frontend build,
+`aiball restart`). `updates.check: false` in the global config turns the check
+off. See *Staying up to date* in [INSTALL.md](./INSTALL.md).
+
 Want the daemon **without** a tray? `install.ps1 -NoTray` (task runs the daemon
 directly, no icon) or `-Service` (true background service, survives logout).
 

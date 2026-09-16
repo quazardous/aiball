@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- **Version and updates in the tray and the GNOME extension**: both show the
+  running version, say when a newer release is out, and copy the exact update
+  command for how the machine was installed (release, edge or dev — the
+  installers now record it). The daemon checks GitHub when it starts;
+  `aiball version [--check]` and a new `aiball check` line read the same
+  answer. `updates.check: false` turns the check off.
 - **API keys with scopes, and tickets filed by a key**: a key holds `signals`
   (what every key could do, and the default) and/or `tickets:create`, which
   lets an external system file tickets in the projects the

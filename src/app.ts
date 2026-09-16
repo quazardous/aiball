@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { api } from "./api.js";
 import { serveUpload } from "./api/uploads.js";
 import { loadProxy, proxyMiddleware, proxyLandingHtml } from "./proxy.js";
+import { mountVersionRoutes } from "./api/version-routes.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -70,6 +71,7 @@ export function createApp(): express.Express {
         // remote (in proxy mode /api/health relays → reports the REMOTE, not us).
         // The tray reads it to show a `[proxy]` badge; details live on the page.
         app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: true, upstream: proxy.url }));
+        mountVersionRoutes(app);
         const fwd = proxyMiddleware(proxy);
         app.use("/api", fwd);
         app.use("/uploads", fwd);
@@ -87,6 +89,7 @@ export function createApp(): express.Express {
     // Local node probe (public — before the bearer-auth'd router): liveness +
     // not-a-proxy. Mirrors the proxy-mode route so the tray uses one endpoint.
     app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: false, upstream: null }));
+    mountVersionRoutes(app);
     app.use("/api", api);
 
     // #841 — was `express.static(UPLOADS_DIR, ...)`. Custom handler so

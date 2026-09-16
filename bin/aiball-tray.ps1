@@ -23,6 +23,9 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Version wording (pure, tested under pwsh): Get-VersionLook, Get-TrayTooltip.
+. (Join-Path $PSScriptRoot 'aiball-tray-version.ps1')
+
 # Singleton: a second instance exits silently (mutex), so double-clicking a
 # shortcut while the logon-launched tray is up doesn't stack icons.
 $mutexName = 'Local\aiball-tray-singleton'
@@ -235,6 +238,55 @@ function Disable-Autostart {
     try { Disable-ScheduledTask -TaskName $AutostartTask -ErrorAction SilentlyContinue | Out-Null } catch { }
 }
 
+# --- version + update check ------------------------------------------------
+# `aiball --json version` gives the running / latest versions (from the
+# daemon's check at its start) and the update command for THIS install. It is a
+# node process, so it runs WITHOUT blocking the message loop: started here, its
+# output collected by the timer tick once it has exited.
+$script:versionProc = $null
+$script:versionOut  = $null
+$script:versionLook = Get-VersionLook $null
+$script:notifiedVersion = $null
+function Start-VersionRead([bool]$check) {
+    if ($script:versionProc -and -not $script:versionProc.HasExited) { return }
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        # The shim install.ps1 writes; `aiball` on PATH otherwise (-Minimal).
+        $shim = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\aiball.cmd'
+        $exe = if (Test-Path $shim) { "`"$shim`"" } else { 'aiball' }
+        $psi.FileName = 'cmd.exe'
+        $psi.Arguments = "/d /s /c `"$exe --json version$(if ($check) { ' --check' } else { '' })`""
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.CreateNoWindow = $true
+        $script:versionProc = [System.Diagnostics.Process]::Start($psi)
+        $script:versionOut = $script:versionProc.StandardOutput.ReadToEndAsync()
+    } catch {
+        $script:versionProc = $null
+    }
+}
+function Receive-VersionRead {
+    if (-not $script:versionProc -or -not $script:versionProc.HasExited) { return }
+    if (-not $script:versionOut.IsCompleted) { return }
+    $text = $script:versionOut.Result
+    $script:versionProc.Dispose()
+    $script:versionProc = $null
+    $v = $null
+    try { $v = $text | ConvertFrom-Json } catch { }
+    Show-Version (Get-VersionLook $v)
+}
+function Show-Version($look) {
+    $script:versionLook = $look
+    $versionItem.Text = $look.line
+    $copyUpdate.Visible = [bool]$look.command
+    $releaseNotes.Visible = [bool]$look.releaseUrl
+    # One balloon per release, not one per read.
+    if ($look.notifyKey -and $look.notifyKey -ne $script:notifiedVersion) {
+        $script:notifiedVersion = $look.notifyKey
+        $ni.ShowBalloonTip(10000, 'aiball', "$($look.line). Right-click the icon to copy the update command.", [System.Windows.Forms.ToolTipIcon]::Info)
+    }
+}
+
 # --- tray icon + menu -------------------------------------------------------
 $ni = New-Object System.Windows.Forms.NotifyIcon
 $icoPath = Join-Path $PSScriptRoot '..\assets\aiball.ico'
@@ -263,7 +315,23 @@ $autostart.Add_Click({
 $menu.Items.Add($autostart) | Out-Null
 # Refresh checkmark on each open so external changes (Settings > Apps >
 # Startup, Task Scheduler) are reflected the next time the menu pops up.
-$menu.Add_Opening({ $autostart.Checked = (Test-AutostartEnabled) })
+$menu.Add_Opening({
+    $autostart.Checked = (Test-AutostartEnabled)
+    Start-VersionRead $false
+})
+$menu.Items.Add("-") | Out-Null
+$versionItem = $menu.Items.Add("version...")
+$versionItem.Enabled = $false
+$copyUpdate = $menu.Items.Add("Copy the update command")
+$copyUpdate.Add_Click({
+    if ($script:versionLook.command) { [System.Windows.Forms.Clipboard]::SetText($script:versionLook.command) }
+})
+$releaseNotes = $menu.Items.Add("Release notes")
+$releaseNotes.Add_Click({ if ($script:versionLook.releaseUrl) { Open-Url $script:versionLook.releaseUrl } })
+$checkUpdates = $menu.Items.Add("Check for updates")
+$checkUpdates.Add_Click({ Start-VersionRead $true })
+$copyUpdate.Visible = $false
+$releaseNotes.Visible = $false
 $menu.Items.Add("-") | Out-Null
 $quit = $menu.Items.Add("Quit aiball")
 # Quitting closes the WHOLE app: stop the daemon, then tear down the tray.
@@ -294,8 +362,11 @@ function Update-State {
     # Before anything else: say we are here. A daemon about to stop for a
     # restart reads this, and staleness is what tells it to refuse.
     Write-Heartbeat
+    Receive-VersionRead
     $info = Get-NodeInfo
     if ($info.up) {
+        # A daemon that just came up may run another version: read it again.
+        if ($script:iconState -eq 'down' -or $null -eq $script:iconState) { Start-VersionRead $false }
         # Recompose the icon only on a transition (proxy on/off, remote up/down).
         $state = "$($info.proxy)|$($info.remoteUp)"
         if ($state -ne $script:iconState) {
@@ -304,9 +375,9 @@ function Update-State {
         }
         if ($info.proxy) {
             $r = if ($info.remoteUp) { "remote up" } else { "remote DOWN" }
-            $ni.Text = "aiball proxy - $r ($url)"
+            $ni.Text = Get-TrayTooltip "proxy, $r" $script:versionLook $url
         } else {
-            $ni.Text = "aiball - running ($url)"
+            $ni.Text = Get-TrayTooltip 'running' $script:versionLook $url
         }
     } else {
         if ($script:iconState -ne 'down') { Set-TrayIcon $false $false; $script:iconState = 'down' }

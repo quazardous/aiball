@@ -19,6 +19,20 @@ import { createHash } from "node:crypto";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import type { ControlEvent } from "./event-bus.js"; // #451: typed control payload
 
+/** #2586 — `GET /api/version`; see src/update-check.ts. */
+export interface VersionInfo {
+    running: string;
+    installed: string;
+    latest: string | null;
+    release_url: string | null;
+    checked_at: string | null;
+    error: string | null;
+    update_available: boolean;
+    restart_needed: boolean;
+    check_disabled: boolean;
+    mode: "release" | "edge" | "dev" | "unknown";
+}
+
 export interface ClientOptions {
     url?: string;
     home?: string;
@@ -1291,6 +1305,16 @@ export class AiballClient {
      */
     node() {
         return this.http<{ ok: boolean; proxy: boolean; upstream: string | null }>("GET", "/api/node");
+    }
+
+    /** #2586 — running / installed / latest release, as the daemon last checked. */
+    version() {
+        return this.http<VersionInfo>("GET", "/api/version");
+    }
+
+    /** #2586 — ask the daemon to check GitHub now (answers its cache within a minute). */
+    checkVersion() {
+        return this.http<VersionInfo>("POST", "/api/version/check", {});
     }
 }
 

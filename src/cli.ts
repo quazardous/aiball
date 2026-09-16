@@ -186,6 +186,42 @@ program
         );
     });
 
+// #2586 — the version the daemon runs, the one on disk, the latest release,
+// and the command that updates THIS install the way it was installed.
+program
+    .command("version")
+    .description("Running, installed and latest aiball versions, and the update command for this install (install.sh / install.ps1 mode).")
+    .option("--check", "Ask the daemon to check GitHub now instead of reading its last check")
+    .action(async (opts: { check?: boolean }, cmd) => {
+        const { readInstallInfo, updateCommand } = await import("./install-info.js");
+        const client = buildClient(gOpts(cmd));
+        const info = readInstallInfo();
+        let v: Awaited<ReturnType<typeof client.version>> | null = null;
+        let error: string | null = null;
+        try {
+            v = opts.check ? await client.checkVersion() : await client.version();
+        } catch (e) {
+            const msg = (e as Error).message;
+            // A daemon that predates the route answers Express's HTML 404.
+            error = /Cannot (GET|POST) \/api\/version/.test(msg) ? "this daemon predates /api/version — aiball restart" : msg;
+        }
+        const command = updateCommand(info);
+        out(
+            { cli: AIBALL_VERSION, daemon: v, daemon_error: error, install: info, update_command: command },
+            gOpts(cmd),
+            () => {
+                const rows = [`cli        v${AIBALL_VERSION}`, `install    ${info.mode}${info.source ? ` (${info.source})` : ""}`];
+                if (!v) return [...rows, `daemon     ${error?.startsWith("this daemon") ? error : `not reachable — ${error}`}`].join("\n");
+                rows.push(`daemon     v${v.running}${v.restart_needed ? ` — v${v.installed} is installed: aiball restart` : ""}`);
+                if (v.check_disabled) rows.push("latest     not checked (updates.check: false)");
+                else if (v.latest) rows.push(`latest     v${v.latest}${v.update_available ? " — update available" : ""}`);
+                else rows.push(`latest     unknown${v.error ? ` — ${v.error}` : " (not checked yet)"}`);
+                if (v.update_available) rows.push("", "update with:", `  ${command}`);
+                return rows.join("\n");
+            },
+        );
+    });
+
 program
     .command("check")
     .description(

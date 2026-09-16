@@ -21,12 +21,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AiballClient } from "./client.js";
 import { BUILD_CMD, resolveProxyLaunch, type ProxyLaunch } from "./claude-loop/proxy-launch.js";
+import { readInstallInfo, updateCommand } from "./install-info.js";
 import type { PrereqStatus } from "./sysdeps.js";
 
 export type MachineStatus = "ok" | "warn" | "error";
 
 export interface MachineLine {
-    id: "daemon" | "socket" | "caller" | "web_login" | "tmux" | "claude" | "pty_proxy" | "tailscale";
+    id: "daemon" | "update" | "socket" | "caller" | "web_login" | "tmux" | "claude" | "pty_proxy" | "tailscale";
     status: MachineStatus;
     detail: string;
     /** Ready-to-paste command (or instruction) that clears a warn/error. */
@@ -62,6 +63,14 @@ export interface MachineProbes {
     /** How the CLI reaches the daemon: its socket, a bearer token, or neither. */
     transport: "socket" | "token" | "none";
     daemon: { up: boolean; version: string | null; error: string | null };
+    /** `/api/version` plus the command for this install; null when unanswered. */
+    update: {
+        latest: string | null;
+        update_available: boolean;
+        check_disabled: boolean;
+        error: string | null;
+        command: string;
+    } | null;
     /** `/api/auth/status`; null when the daemon did not answer it. */
     auth: {
         ready: boolean;
@@ -102,6 +111,17 @@ export function assembleMachineReport(p: MachineProbes): MachineLine[] {
         });
     } else {
         lines.push({ id: "daemon", status: "ok", detail: `up, v${p.daemon.version ?? "?"}` });
+    }
+
+    // --- update ---------------------------------------------------------
+    if (p.update && !p.update.check_disabled) {
+        if (p.update.update_available && p.update.latest) {
+            lines.push({ id: "update", status: "warn", detail: `v${p.update.latest} is out`, fix: p.update.command });
+        } else if (p.update.latest) {
+            lines.push({ id: "update", status: "ok", detail: `v${p.update.latest} is the latest release` });
+        } else if (p.update.error) {
+            lines.push({ id: "update", status: "warn", detail: `could not check: ${p.update.error}` });
+        }
     }
 
     // --- socket ---------------------------------------------------------
@@ -339,6 +359,22 @@ export async function probeMachine(input: ProbeMachineInput): Promise<MachinePro
         }
     }
 
+    let update: MachineProbes["update"] = null;
+    if (daemon.up) {
+        try {
+            const v = await client.version();
+            update = {
+                latest: v.latest,
+                update_available: v.update_available,
+                check_disabled: v.check_disabled,
+                error: v.error,
+                command: updateCommand(readInstallInfo()),
+            };
+        } catch {
+            update = null; // an older daemon has no /api/version
+        }
+    }
+
     const dep = (cmd: string) => dependencies.find((d) => d.cmd === cmd);
     const muxCmd = process.platform === "win32" ? "psmux" : "tmux";
     const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -359,6 +395,7 @@ export async function probeMachine(input: ProbeMachineInput): Promise<MachinePro
         socket: sockPath ? { path: sockPath, exists: isSocket(sockPath) } : null,
         transport: client.socketPath ? "socket" : client.token ? "token" : "none",
         daemon,
+        update,
         auth,
         agent: client.agentId ?? null,
         tmux: { cmd: muxCmd, version: firstVersionLine("tmux", ["-V"]), install: dep(muxCmd)?.install ?? null },

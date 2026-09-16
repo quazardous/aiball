@@ -17,6 +17,7 @@ function healthy(over: Partial<MachineProbes> = {}): MachineProbes {
         socket: { path: "/home/u/.local/share/aiball/sock", exists: true },
         transport: "socket",
         daemon: { up: true, version: "0.40.0", error: null },
+        update: null,
         auth: { ready: true, install_available: false, install_expires_at: null, me: null },
         agent: "proj-claude",
         tmux: { cmd: "tmux", version: "tmux 3.7c", install: "sudo dnf install tmux" },
@@ -177,4 +178,19 @@ test("serveHandlesDaemon matches port, path and the daemon's port — nothing lo
     assert.equal(serveHandlesDaemon(status, 8443, undefined, 7777), false, "root handler proxies elsewhere");
     assert.equal(serveHandlesDaemon(status, 8443, "/aiball", 77), false, "port suffix must not match a prefix");
     assert.equal(serveHandlesDaemon(null, 8443, "/aiball", 7777), false);
+});
+
+test("an update line: warn with this install's command when a release is out, silent when the check is off", () => {
+    const upd = (over: Partial<NonNullable<MachineProbes["update"]>>) => ({
+        latest: "0.40.0", update_available: false, check_disabled: false, error: null, command: "cd /c && git pull --ff-only --tags && ./install.sh", ...over,
+    });
+    const out = line(assembleMachineReport(healthy({ update: upd({ latest: "0.42.0", update_available: true }) })), "update");
+    assert.equal(out.status, "warn");
+    assert.equal(out.detail, "v0.42.0 is out");
+    assert.equal(out.fix, "cd /c && git pull --ff-only --tags && ./install.sh");
+
+    assert.equal(line(assembleMachineReport(healthy({ update: upd({}) })), "update").status, "ok");
+    assert.match(line(assembleMachineReport(healthy({ update: upd({ latest: null, error: "GitHub answered 403" }) })), "update").detail, /403/);
+    assert.equal(assembleMachineReport(healthy({ update: upd({ check_disabled: true, latest: "0.42.0", update_available: true }) })).some((l) => l.id === "update"), false);
+    assert.equal(assembleMachineReport(healthy()).some((l) => l.id === "update"), false, "an older daemon without /api/version: no line");
 });

@@ -246,6 +246,41 @@ No `--no-systemd` daemon? Start it manually:
 cd ~/.local/lib/aiball && npm start   # foreground
 ```
 
+## Staying up to date
+
+The daemon asks GitHub for the latest aiball release each time it starts. The
+GNOME extension, the Windows tray, `aiball version` and `aiball check` read that
+answer from the daemon; none of them goes to the network itself.
+
+```bash
+aiball version            # running, installed, latest, and the update command
+aiball version --check    # ask the daemon to check again now
+```
+
+The update command depends on how you installed, so each installer records it
+in `~/.config/aiball/install.json` (honours `XDG_CONFIG_HOME`): the mode, the
+clone it came from, and the flags worth repeating (`--port`, `--host`,
+`--no-systemd` — never a proxy token).
+
+| Mode | Installed with | Update command |
+| --- | --- | --- |
+| `release` | `./install.sh` | `cd <clone> && git pull --ff-only --tags && ./install.sh <flags>` |
+| `edge` | `./install.sh --edge` | the same, with `--edge` |
+| `dev` | `./install.sh --symlink` | `cd <checkout> && git pull --ff-only --tags && npm install && npm --prefix frontend run build && aiball restart` |
+
+An install made before the record existed reads `unknown`: re-run the installer
+once and the command becomes exact. Two situations are told apart: *an update is
+available* (a newer release than what is installed) and *restart the daemon*
+(newer code is installed, but the daemon still runs the old one).
+
+To turn the check off — no outbound call at all — set it in the global config:
+
+```yaml
+# ~/.config/aiball/config.yaml
+updates:
+  check: false
+```
+
 ## Environment variables
 
 The CLI and MCP read these at every invocation. Defaults are sensible
@@ -287,6 +322,10 @@ enough — no shell restart needed.
 ├── cli-env                       # sourced by the bin/ wrappers
 ├── uploads/                      # content-addressable image store
 └── spool/                        # offline ticket spool (drained on next daemon start)
+
+~/.config/aiball/
+├── config.yaml                   # global config (optional)
+└── install.json                  # how this machine was installed (update command)
 
 ~/.config/systemd/user/
 ├── aiball.service                # the unit

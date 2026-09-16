@@ -443,6 +443,9 @@ if ($Uninstall) {
         }
     }
 
+    $installRecord = Join-Path $env:USERPROFILE '.config\aiball\install.json'
+    if (Test-Path $installRecord) { Remove-Item -Force $installRecord }
+
     # Same story for data dirs: check all three. PurgeData applies
     # to whichever exist. USERPROFILE\.local\share is the current
     # per-user data dir (matches the daemon's homedir() default);
@@ -640,6 +643,34 @@ New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 New-Item -ItemType Directory -Force -Path $LogDir  | Out-Null
 Log "ensured data dir: $DataDir"
 Log "ensured log dir:  $LogDir"
+
+# --- install record ---------------------------------------------------------
+# How this install was made, so the tray and `aiball version` can give the
+# update command that keeps it that way. Same file as install.sh:
+# <home>\.config\aiball\install.json (the daemon's globalConfigPath dir).
+# The flags repeated are the ones that shape the install.
+$installMode = if ($Symlink -or $Minimal) { 'dev' } else { 'edge' }
+$repeatFlags = @()
+foreach ($sw in 'Service', 'System', 'Minimal', 'NoTray', 'NoClaudeLoop', 'StopHook') {
+    if ($PSBoundParameters.ContainsKey($sw) -and $PSBoundParameters[$sw]) { $repeatFlags += "-$sw" }
+}
+if ($PSBoundParameters.ContainsKey('Port'))     { $repeatFlags += @('-Port', "$Port") }
+if ($PSBoundParameters.ContainsKey('BindHost')) { $repeatFlags += @('-BindHost', $BindHost) }
+try {
+    $installRecord = Join-Path $env:USERPROFILE '.config\aiball\install.json'
+    New-Item -ItemType Directory -Force -Path (Split-Path $installRecord -Parent) | Out-Null
+    $pkgVersion = (Get-Content -Raw (Join-Path $AppDir 'package.json') | ConvertFrom-Json).version
+    [ordered]@{
+        mode         = $installMode
+        source       = $SrcDir
+        version      = $pkgVersion
+        flags        = [string[]]$repeatFlags
+        platform     = 'windows'
+        installed_at = (Get-Date).ToUniversalTime().ToString('o')
+    } | ConvertTo-Json | Set-Content -Encoding utf8 $installRecord
+} catch {
+    Warn "could not write the install record: $_ (update hints will be generic)"
+}
 
 # --- daemon launcher (handles log redirection for Scheduled Task) ---------
 # Scheduled Tasks don't capture stdout natively. The launcher .cmd cd's

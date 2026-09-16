@@ -102,6 +102,7 @@ uninstall() {
     else
         rm -rf "$PREFIX_LIB"
     fi
+    rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/aiball/install.json"
     local data_dir="$HOME/.local/share/aiball"
     if $PURGE; then
         rm -rf "$data_dir"
@@ -161,16 +162,20 @@ fi
 # points at this checkout.
 INSTALL_SRC="$SRC_DIR"
 INSTALL_WHAT="this checkout"
+INSTALL_MODE=edge   # recorded in install.json: release | edge | dev
+$SYMLINK && INSTALL_MODE=dev
 if ! $SYMLINK && ! $EDGE && command -v git >/dev/null 2>&1 \
     && git -C "$SRC_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     if exact_tag="$(git -C "$SRC_DIR" describe --exact-match --tags HEAD 2>/dev/null)"; then
         INSTALL_WHAT="$exact_tag (this checkout)"
+        INSTALL_MODE=release
     elif latest_tag="$(git -C "$SRC_DIR" describe --tags --abbrev=0 2>/dev/null)"; then
         EXPORT_DIR="$(mktemp -d)"
         trap 'rm -rf "$EXPORT_DIR"' EXIT
         git -C "$SRC_DIR" archive "$latest_tag" | tar -x -C "$EXPORT_DIR"
         INSTALL_SRC="$EXPORT_DIR"
         INSTALL_WHAT="$latest_tag (latest release; ./install.sh --edge installs this checkout instead)"
+        INSTALL_MODE=release
     else
         warn "no release tag in this clone — installing this checkout as it is"
     fi
@@ -352,6 +357,24 @@ if [[ "$GNOME_EXT" != "no" ]] && command -v aiball >/dev/null 2>&1; then
         aiball init gnome-extension --offer || warn "GNOME extension offer failed"
     fi
 fi
+
+# --- install record -----------------------------------------------------------
+# How this install was made, so the tray, the GNOME extension and
+# `aiball version` can give the update command that keeps it that way. The
+# flags repeated are the ones that shape the install — never the proxy token.
+REPEAT_FLAGS=()
+[[ -n "$PORT" ]] && REPEAT_FLAGS+=(--port "$PORT")
+[[ -n "$HOST" ]] && REPEAT_FLAGS+=(--host "$HOST")
+$NO_SYSTEMD && REPEAT_FLAGS+=(--no-systemd)
+INSTALL_RECORD="${XDG_CONFIG_HOME:-$HOME/.config}/aiball/install.json"
+mkdir -p "$(dirname "$INSTALL_RECORD")"
+node -e '
+    const [out, mode, source, pkgDir, ...flags] = process.argv.slice(1);
+    let version = null;
+    try { version = JSON.parse(require("fs").readFileSync(pkgDir + "/package.json", "utf8")).version; } catch {}
+    require("fs").writeFileSync(out, JSON.stringify({ mode, source, version, flags, platform: "posix", installed_at: new Date().toISOString() }, null, 2) + "\n");
+' "$INSTALL_RECORD" "$INSTALL_MODE" "$SRC_DIR" "$PREFIX_LIB" "${REPEAT_FLAGS[@]}" \
+    || warn "could not write $INSTALL_RECORD — update hints will be generic"
 
 printf '\n────────────────────────────────────────────────────────────────────\n'
 printf "${c_green}aiball installed.${c_off}\n"

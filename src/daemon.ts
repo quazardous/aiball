@@ -14,6 +14,7 @@ import { startScheduler, CRON_TASKS } from "./cron/index.js";
 import { registerAutomationRuntime } from "./automation/runtime.js";
 import { loadProxy, startProxyWsClient } from "./proxy.js";
 import { attachProxyWs } from "./proxy-ws.js";
+import { checkForUpdatesAtBoot } from "./api/version-routes.js";
 
 /**
  * #407 — SIGUSR2 = reload config in place, no downtime (driven by `aiball
@@ -142,6 +143,8 @@ function main(): void {
         // runner owns the catch, the overlap guard and the health record. Add a
         // periodic job THERE, not here.
         startScheduler(CRON_TASKS);
+        // #2586 — the latest release, for the tray / extension / `aiball version`.
+        checkForUpdatesAtBoot();
         // #505 — en mode proxy, on ouvre une WS persistante vers `papy`. Elle
         // sert à la fois de heartbeat (chaque frame bumpe `tokens.last_used_at`
         // → pastille up/down) ET de canal d'ordres pour les ops cross-host

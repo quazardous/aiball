@@ -39,7 +39,7 @@ test("it lands the whole extension, not just a manifest", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "nodeState.js", "stylesheet.css", "icons/aiball-symbolic.svg", "icons/aiball-proxy-symbolic.svg"]) {
+    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "nodeState.js", "versionState.js", "stylesheet.css", "icons/aiball-symbolic.svg", "icons/aiball-proxy-symbolic.svg"]) {
         assert.ok(existsSync(join(dir, f)), `${f} is missing — the shell needs all of them`);
     }
 });
@@ -281,4 +281,43 @@ test("the stylesheet colours both trouble states", () => {
 
 after(() => {
     for (const d of targets) rmSync(d, { recursive: true, force: true });
+});
+
+const VERSION_FILE = join(import.meta.dirname, "..", "..", "gnome", GNOME_EXTENSION_UUID, "versionState.js");
+type VersionLook = { line: string; command: string | null; releaseUrl: string | null; restart: boolean; notifyKey: string | null };
+const ver = await import(pathToFileURL(VERSION_FILE).href) as {
+    VERSION: { read: string[]; check: string[] };
+    parseVersion: (text: string | null) => unknown;
+    versionMenu: (v: unknown) => VersionLook;
+};
+
+test("the version module stays loadable outside the shell (no gi:// or resource:// import)", () => {
+    assert.doesNotMatch(stripComments(readFileSync(VERSION_FILE, "utf8")), /gi:\/\/|resource:\/\//);
+});
+
+test("the version section reads the CLI, and offers this install's command only when an update is out", () => {
+    assert.deepEqual(ver.VERSION.read, ["aiball", "--json", "version"]);
+    assert.deepEqual(ver.VERSION.check, ["aiball", "--json", "version", "--check"]);
+    const daemon = { running: "0.41.0", installed: "0.41.0", latest: "0.41.0", release_url: "https://gh/r", error: null, update_available: false, restart_needed: false, check_disabled: false };
+    const cli = (d: object | null) => JSON.stringify({ cli: "0.41.0", daemon: d, update_command: "cd /c && git pull --ff-only --tags && ./install.sh" });
+
+    const current = ver.versionMenu(ver.parseVersion(cli(daemon)));
+    assert.equal(current.line, "aiball 0.41.0 — up to date");
+    assert.equal(current.command, null);
+    assert.equal(current.notifyKey, null);
+
+    const out = ver.versionMenu(ver.parseVersion(cli({ ...daemon, latest: "0.42.0", update_available: true })));
+    assert.equal(out.line, "aiball 0.41.0 — 0.42.0 is available");
+    assert.equal(out.command, "cd /c && git pull --ff-only --tags && ./install.sh");
+    assert.equal(out.releaseUrl, "https://gh/r");
+    assert.equal(out.notifyKey, "0.42.0");
+
+    const pulled = ver.versionMenu(ver.parseVersion(cli({ ...daemon, installed: "0.42.0", restart_needed: true })));
+    assert.equal(pulled.restart, true);
+    assert.match(pulled.line, /0\.42\.0 is installed — restart the daemon/);
+    assert.equal(pulled.command, null);
+
+    assert.match(ver.versionMenu(ver.parseVersion(cli(null))).line, /daemon not reachable/);
+    assert.match(ver.versionMenu(ver.parseVersion(cli({ ...daemon, check_disabled: true, latest: "0.42.0", update_available: true }))).line, /update check off/);
+    assert.equal(ver.versionMenu(ver.parseVersion("aiball: command not found")).line, "version unknown");
 });

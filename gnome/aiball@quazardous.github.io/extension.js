@@ -25,6 +25,7 @@ import {defaultSocketPath, getJson} from './aiballClient.js';
 import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './daemonActions.js';
 import {TAILNET, aiballTailnetUrl, tailnetMenu, tailscaleConnection, tailscaleProvider} from './tailscaleState.js';
 import {HEALTH_PATH, ICON_LOCAL, NODE_PATH, actionLabel, daemonView, presentation} from './nodeState.js';
+import {VERSION, parseVersion, versionMenu} from './versionState.js';
 
 /*
  * Two cadences, because the two reads do not cost the same thing.
@@ -121,6 +122,23 @@ class AiballIndicator extends PanelMenu.Button {
             () => this._runThen(TAILNET.expose, () => this._refreshTailnet()));
         this._showTailnet(tailnetMenu({provider: null}));
 
+        // #2586 — the version, and an update when one is out: read from
+        // `aiball version`, which knows how this machine was installed.
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._versionItem = new PopupMenu.PopupMenuItem('version…', {reactive: false});
+        this.menu.addMenuItem(this._versionItem);
+        this._version = versionMenu(null);
+        this._notifiedVersion = null;
+        this._versionCopy = this._addAction('Copy the update command', () => {
+            if (this._version.command)
+                St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, this._version.command);
+        });
+        this._versionNotes = this._addAction('Release notes', () => {
+            if (this._version.releaseUrl) Gio.AppInfo.launch_default_for_uri(this._version.releaseUrl, null);
+        });
+        this._addAction('Check for updates', () => this._refreshVersion(VERSION.check));
+        this._showVersion(this._version);
+
         // The one refresh that is always worth paying for: the menu is open,
         // so somebody is actually reading the numbers.
         this.menu.connect('open-state-changed', (_menu, open) => {
@@ -129,12 +147,14 @@ class AiballIndicator extends PanelMenu.Button {
                 this._refreshCounters();
                 this._refreshAutostart();
                 this._refreshTailnet();
+                this._refreshVersion();
             }
         });
 
         this._refreshHealth();
         this._refreshCounters();
         this._refreshAutostart();
+        this._refreshVersion();
         this._healthSource = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, HEALTH_INTERVAL_S, () => {
                 this._refreshHealth();
@@ -222,6 +242,24 @@ class AiballIndicator extends PanelMenu.Button {
         }));
     }
 
+    async _refreshVersion(argv = VERSION.read) {
+        const text = await this._capture(argv);
+        if (this._cancellable.is_cancelled()) return;
+        this._showVersion(versionMenu(parseVersion(text)));
+    }
+
+    _showVersion(state) {
+        this._version = state;
+        this._versionItem.label.text = state.line;
+        this._versionCopy.visible = !!state.command;
+        this._versionNotes.visible = !!state.releaseUrl;
+        // One notification per release, not one per refresh.
+        if (state.notifyKey && state.notifyKey !== this._notifiedVersion) {
+            this._notifiedVersion = state.notifyKey;
+            Main.notify('aiball', `${state.line}. The menu copies the update command for this install.`);
+        }
+    }
+
     _showTailnet(state) {
         for (const item of [this._tailnetSeparator, this._tailnetItem, this._tailnetOpen,
             this._tailnetCopy, this._tailnetExpose])
@@ -285,6 +323,8 @@ class AiballIndicator extends PanelMenu.Button {
         const p = presentation(view, BOARD_URL);
         const proxy = view.state.startsWith('proxy');
         this._presentation = p;
+        // A daemon that just came up may run another version: read it again.
+        if (p.localUp && this._up === false) this._refreshVersion();
         this._up = p.localUp;
         this._boardUrl = p.boardUrl;
         for (const {action, item} of this._actionItems) {

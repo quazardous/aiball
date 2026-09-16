@@ -57,6 +57,12 @@ is the count that should make you look up; a bar full of numbers is a bar
 nobody reads. Everything else is one click away in the menu:
 
 - the daemon's state and version,
+- whether an update is out, with *Copy the update command* (the exact command
+  for how this machine was installed), *Release notes*, and *Check for
+  updates*. It reads `aiball --json version` when the menu opens; the daemon
+  checks GitHub when it starts, so the extension makes no network call. A new
+  release shows one notification, not one per refresh. See *Staying up to
+  date* in [INSTALL.md](./INSTALL.md);
 - tickets to moderate, actionable tickets, open tickets — summed across every
   project,
 - how many loops are running,

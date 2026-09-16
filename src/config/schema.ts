@@ -68,6 +68,17 @@ export interface ConfigSchemaEntry {
  * the others are declared and consumed as each gets wired.
  */
 export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
+    // #2586 — the daemon asks GitHub for the latest release when it starts.
+    {
+        key: "updates.check",
+        scope: "global",
+        type: "boolean",
+        default: true,
+        sources: ["db", "file"],
+        label: "Check for updates",
+        description:
+            "true (default) = when the daemon starts, and when someone asks, it reads the latest aiball release on GitHub so the tray, the GNOME extension and `aiball version` can say an update is out. false = no outbound call.",
+    },
     // #449 — DB-source ticket defaults (admin Settings).
     {
         key: "tickets.default_priority",
