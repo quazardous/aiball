@@ -8,7 +8,7 @@
  * closes) ; `refresh` out (backstop re-load after a Stop, mirrors the
  * old in-parent `setTimeout(load, 1500)`).
  */
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type Consumer } from "../lib/api";
@@ -16,6 +16,8 @@ import { useNotify } from "../lib/notify";
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import { relativeTime } from "../lib/format";
 import FieldRow from "./ui/FieldRow.vue";
+import { type WaitCreditMove, type WaitCreditRow, moveLabel } from "../lib/waitCredit";
+import { pushRoute } from "../lib/base";
 
 const props = defineProps<{ original: Consumer }>();
 const emit = defineEmits<{
@@ -24,6 +26,22 @@ const emit = defineEmits<{
 }>();
 
 const notify = useNotify();
+
+// #2645 — the agent's wait credit (#2640): per project, and its latest movements.
+const credits = ref<WaitCreditRow[] | null>(null);
+const moves = ref<WaitCreditMove[]>([]);
+watch(() => props.original?.consumer_id, async (id) => {
+    credits.value = null;
+    moves.value = [];
+    if (!id || props.original.kind === "human") return;
+    try {
+        const r = await api.consumerWaitCredit(id);
+        credits.value = r.credits;
+        moves.value = r.moves;
+    } catch {
+        // An older daemon has no such route: the section stays hidden.
+    }
+}, { immediate: true });
 const confirmDialog = useConfirm();
 const stopBusy = ref(false);
 const deleteBusy = ref(false);
@@ -191,6 +209,30 @@ async function doPrune(consumer_id: string, del: boolean): Promise<void> {
             </span>
         </FieldRow>
 
+        <FieldRow v-if="credits" label="wait credit">
+            <div class="consumer-edit__credit">
+                <div v-if="credits.length === 0" class="consumer-edit__status-none">
+                    no movement yet — every project starts at its configured credit
+                </div>
+                <table v-else class="consumer-edit__credit-table">
+                    <thead><tr><th>project</th><th>balance</th><th>earned</th><th>spent</th><th>refunded</th></tr></thead>
+                    <tbody>
+                        <tr v-for="c in credits" :key="c.project">
+                            <td>{{ c.project }}</td><td><strong>{{ c.balance }}</strong></td><td>{{ c.earned }}</td><td>{{ c.spent }}</td><td>{{ c.refunded }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <ul v-if="moves.length" class="consumer-edit__credit-moves">
+                    <li v-for="m in moves" :key="m.id">
+                        <span class="consumer-edit__credit-when">{{ relativeTime(m.created_at) }}</span>
+                        <span class="consumer-edit__credit-project">[{{ m.project }}]</span>
+                        <a v-if="m.ticket_id !== null" href="#" @click.prevent="pushRoute(`/b/${m.ticket_id}`)">{{ moveLabel(m) }}</a>
+                        <span v-else>{{ moveLabel(m) }}</span>
+                    </li>
+                </ul>
+            </div>
+        </FieldRow>
+
         <div class="consumer-edit__meta">
             <div><strong>created</strong> {{ original.created_at ? relativeTime(original.created_at) : "—" }}</div>
             <div><strong>last seen</strong> {{ original.last_seen_at ? relativeTime(original.last_seen_at) : "never" }}</div>
@@ -267,6 +309,34 @@ async function doPrune(consumer_id: string, del: boolean): Promise<void> {
     font-size: var(--fs-sm);
     color: var(--p-text-muted-color);
     font-style: italic;
+}
+.consumer-edit__credit-table {
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+.consumer-edit__credit-table th,
+.consumer-edit__credit-table td {
+    padding: 0.15rem 0.75rem 0.15rem 0;
+    text-align: left;
+}
+.consumer-edit__credit-table th {
+    font-weight: 500;
+    opacity: 0.7;
+}
+.consumer-edit__credit-moves {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    font-size: 0.85em;
+}
+.consumer-edit__credit-moves li {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.consumer-edit__credit-when,
+.consumer-edit__credit-project {
+    opacity: 0.7;
 }
 .consumer-edit__meta {
     display: flex;

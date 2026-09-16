@@ -3,6 +3,7 @@
  * Carved out of api.ts on 2026-05-19 — behavior-preserving move.
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
+import { type WaitCreditRow, listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
 import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
 import { clearFlagsCache } from "../db/flags-cache.js";
@@ -57,12 +58,29 @@ consumersRouter.get("/consumers", (_req, res) => {
     // this session → client falls back to the `state_updated_at` freshness bridge.
     // #1185 — per-consumer raw ping tally (total + unseen) for the list.
     const pings = pingCountsByConsumer();
+    // #2645 — each agent's wait credit, per project (see db/wait-credit.ts).
+    const credits = new Map<string, WaitCreditRow[]>();
+    for (const row of listWaitCredits()) credits.set(row.consumer_id, [...(credits.get(row.consumer_id) ?? []), row]);
     res.json(listConsumers().map((c) => ({
         ...c,
         present: presenceRunning(c.consumer_id),
         ping_count: pings.get(c.consumer_id)?.total ?? 0,
         ping_unseen: pings.get(c.consumer_id)?.unseen ?? 0,
+        wait_credit: c.kind === "human" ? null : (credits.get(c.consumer_id) ?? []),
     })));
+});
+
+// #2645 — one agent's wait credit: per project, and its latest movements.
+consumersRouter.get("/consumers/:consumer_id/wait-credit", (req: Request, res: Response) => {
+    const c = getConsumer(String(req.params.consumer_id));
+    if (!c) return notFound(res, "consumer not found");
+    if (c.kind === "human") return res.json({ consumer_id: c.consumer_id, credits: null, moves: [] });
+    const limit = Number(req.query.limit);
+    res.json({
+        consumer_id: c.consumer_id,
+        credits: listWaitCredits().filter((r) => r.consumer_id === c.consumer_id),
+        moves: listWaitCreditMoves(c.consumer_id, Number.isFinite(limit) ? limit : 30),
+    });
 });
 
 // #397: single consumer lookup (incl. micro_prompt) — the claude-loop timer

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { creditCell, creditTooltip } from "../lib/waitCredit";
 import { computed, onMounted, ref } from "vue";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
@@ -152,6 +153,7 @@ const columns: DataListColumn[] = [
     { key: "kind", label: "Kind", sortable: true, defaultDir: "asc", cellClass: "col-kind" },
     { key: "display_name", label: "Display name", sortable: true, defaultDir: "asc", cellClass: "col-display" },
     { key: "pings", label: "Pings", sortable: true, defaultDir: "desc", cellClass: "col-pings" },
+    { key: "wait_credit", label: "Wait credit", sortable: true, defaultDir: "desc", cellClass: "col-wait-credit" },
     { key: "node", label: "Node", cellClass: "col-node" },
     { key: "activity", label: "Activity", sortable: true, defaultDir: "desc", cellClass: "activity-cell" },
     { key: "enabled", label: "Active", sortable: true, defaultDir: "desc", cellClass: "col-enabled" },
@@ -164,6 +166,7 @@ function sortValue(r: Consumer, key: string): string | number {
         case "kind": return r.kind;
         case "display_name": return (r.display_name ?? "").toLowerCase();
         case "pings": return r.ping_count ?? 0;
+        case "wait_credit": return creditCell(r.wait_credit).sort;
         case "activity": return r.last_seen_at ? Date.parse(r.last_seen_at) : 0;
         case "enabled": return r.enabled ? 1 : 0;
         default: return "";
@@ -275,6 +278,9 @@ const visibleRows = computed<Consumer[]>(() => {
                         class="consumers-pings__unseen"
                     > ({{ (row as Consumer).ping_unseen }})</span>
                 </span>
+            </template>
+            <template #cell-wait_credit="{ row }">
+                <span :title="creditTooltip((row as Consumer).wait_credit)">{{ creditCell((row as Consumer).wait_credit).text }}</span>
             </template>
             <template #cell-node="{ row }">
                 <a

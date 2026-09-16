@@ -201,3 +201,26 @@ export function listWaitCredits(project: string | null = null): WaitCreditRow[] 
         refunded: r.refunded,
     }));
 }
+
+export interface WaitCreditMoveRow {
+    id: number;
+    project: string;
+    kind: string;
+    minutes: number;
+    ticket_id: number | null;
+    message_id: number | null;
+    ref: string | null;
+    requested: number | null;
+    created_at: string;
+}
+
+/** #2645 — one agent's latest movements, newest first, for the consumer page. */
+export function listWaitCreditMoves(consumerId: string, limit = 30): WaitCreditMoveRow[] {
+    return getDb().all<WaitCreditMoveRow>(sql`
+        SELECT id, project, kind, minutes, ticket_id, message_id, ref, requested, created_at
+        FROM wait_credit_moves
+        WHERE consumer_id = ${consumerId}
+        ORDER BY id DESC
+        LIMIT ${Math.max(1, Math.min(200, limit))}
+    `);
+}

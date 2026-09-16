@@ -1,4 +1,5 @@
 import type { DecisionKind } from "@shared/ticket-transitions";
+import type { WaitCreditMove, WaitCreditRow } from "./waitCredit";
 import { withBase } from "./base";
 
 export interface Tag {
@@ -689,6 +690,8 @@ export interface Consumer {
     /** #1185 — raw ping tally from the DB : total rows + still-unseen. */
     ping_count?: number;
     ping_unseen?: number;
+    /** #2645 — wait credit per project; null for a human, [] before any movement. */
+    wait_credit?: WaitCreditRow[] | null;
     /** #B.177 B1: current claude-loop state (null = no loop tracking). */
     state?: ConsumerState | null;
     /** #B.177 B1: ISO8601 of when current state was entered. */
@@ -1401,6 +1404,12 @@ export const api = {
         ),
     /** #442: remotely hard-kill the claude-loop running as this consumer.
      *  `delivered` = a live loop was connected to receive the control event. */
+    /** #2645 — one agent's wait credit per project, and its latest movements. */
+    consumerWaitCredit: (consumer_id: string) =>
+        req<{ consumer_id: string; credits: WaitCreditRow[] | null; moves: WaitCreditMove[] }>(
+            "GET",
+            `/api/consumers/${encodeURIComponent(consumer_id)}/wait-credit`,
+        ),
     stopLoop: (consumer_id: string) =>
         req<{ consumer_id: string; action: string; delivered: boolean }>(
             "POST",

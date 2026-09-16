@@ -234,3 +234,23 @@ test("a human's post carries no wait credit, and commits on a close are refused"
     assert.equal(r.status, 400);
     assert.match(String(r.json.error), /commits only go with a comment/);
 });
+
+test("#2645 the consumers list carries each agent's credit per project, and a consumer's page its movements; a human has none", async () => {
+    const list = (await call(BOSS, "GET", "/api/consumers")).json as unknown as Array<{ consumer_id: string; wait_credit: Array<{ project: string; balance: number; earned: number }> | null }>;
+    const worker = list.find((c) => c.consumer_id === "worker")!;
+    const c = worker.wait_credit!.find((r) => r.project === "p-2640-c")!;
+    assert.equal(c.balance, 95);
+    assert.equal(c.earned, 35);
+    assert.equal(list.find((x) => x.consumer_id === "boss")!.wait_credit, null);
+
+    const page = (await call(BOSS, "GET", "/api/consumers/worker/wait-credit")).json as { credits: Array<{ project: string; balance: number }>; moves: Array<{ kind: string; minutes: number; ticket_id: number | null; ref: string | null }> };
+    assert.deepEqual(page.credits.map((r) => [r.project, r.balance]).sort(), worker.wait_credit!.map((r) => [r.project, r.balance]).sort(), "the page and the list agree");
+    const kinds = new Set(page.moves.map((m) => m.kind));
+    for (const k of ["spend", "refund", "earn_resolved", "earn_wontfix", "earn_commit"]) assert.ok(kinds.has(k), `a ${k} movement is listed`);
+    assert.ok(page.moves.find((m) => m.kind === "earn_commit")?.ref?.match(/^[0-9a-f]{40}$/), "a commit movement names its SHA");
+
+    const human = (await call(BOSS, "GET", "/api/consumers/boss/wait-credit")).json as { credits: unknown; moves: unknown[] };
+    assert.equal(human.credits, null);
+    assert.deepEqual(human.moves, []);
+    assert.equal((await call(BOSS, "GET", "/api/consumers/nobody/wait-credit")).status, 404);
+});
