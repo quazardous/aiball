@@ -80,6 +80,19 @@ test("#885 tier 2 follow-up — last_actor=david + gated_by_decision", () => {
     assert.equal(flags.last_actor, "david");
 });
 
+test("#2649 follow-up only when the pending decision is mine: another agent's pending plan is not my move", () => {
+    const base = {
+        decisionGated: new Map([[1, true]]),
+        lastActorByTicket: new Map([[1, { actor: "david", at: "2026-06-06T06:34:39Z" }]]),
+    };
+    assert.equal(computeTicketFlags(buildRow(), buildCtx({ ...base, decisionProposer: new Map([[1, "me"]]) })).backlog_tier, 2);
+    const theirs = computeTicketFlags(buildRow(), buildCtx({ ...base, decisionProposer: new Map([[1, "other-agent"]]) }));
+    assert.equal(theirs.backlog_tier, null, "someone else's pending decision: out of my backlog");
+    assert.equal(theirs.gated_by_decision, true, "the flag itself still says the ticket is gated");
+    assert.equal(computeTicketFlags(buildRow(), buildCtx({ ...base, decisionProposer: new Map() })).backlog_tier, null, "a settled gate has no proposer: not mine either");
+    assert.equal(computeTicketFlags(buildRow(), buildCtx({ ...base, actionableIds: new Set([1]), decisionProposer: new Map([[1, "other-agent"]]) })).backlog_tier, 1, "actionable stays actionable");
+});
+
 test("tier null — last actor=me but pending decision", () => {
     const flags = computeTicketFlags(
         buildRow(),

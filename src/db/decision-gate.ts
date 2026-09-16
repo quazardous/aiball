@@ -58,6 +58,32 @@ export function computeDecisionGate(
     events: Iterable<DecisionGateEvent>,
     isHuman: (consumerId: string) => boolean,
 ): Map<number, boolean> {
+    const gated = new Map<number, boolean>();
+    for (const [id, st] of replayDecisionGate(events, isHuman)) gated.set(id, st.gated);
+    return gated;
+}
+
+/**
+ * #2649 — for each ticket gated by a PENDING decision, who proposed it. A
+ * ticket gated by a settled state (accepted resolution, legacy resolved) or not
+ * gated at all is absent. "Your pending decision gates this" is only true for
+ * the agent named here.
+ */
+export function computeDecisionGateProposers(
+    events: Iterable<DecisionGateEvent>,
+    isHuman: (consumerId: string) => boolean,
+): Map<number, string> {
+    const out = new Map<number, string>();
+    for (const [id, st] of replayDecisionGate(events, isHuman)) {
+        if (st.gated && st.proposer) out.set(id, st.proposer);
+    }
+    return out;
+}
+
+function replayDecisionGate(
+    events: Iterable<DecisionGateEvent>,
+    isHuman: (consumerId: string) => boolean,
+): Map<number, TicketGateState> {
     const state = new Map<number, TicketGateState>();
     for (const ev of events) {
         if (ev.ticketId == null) continue;
@@ -111,9 +137,7 @@ export function computeDecisionGate(
         }
     }
 
-    const gated = new Map<number, boolean>();
-    for (const [id, st] of state) gated.set(id, st.gated);
-    return gated;
+    return state;
 }
 
 function applyDecisionSignal(

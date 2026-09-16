@@ -22,7 +22,7 @@ import { isHeldByOther } from "./assignment-gate.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { levelsVisibleTo, listHumans } from "./consumers.js";
 import { listSubscriptions } from "./subscriptions.js";
-import { computeDecisionGate } from "./decision-gate.js";
+import { computeDecisionGate, computeDecisionGateProposers } from "./decision-gate.js";
 import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 import { presenceRunning } from "../live-presence.js";
@@ -1663,6 +1663,22 @@ export function decisionGateByTicket(ticketIds?: readonly number[]): Map<number,
     return getCachedDecisionGate(() => decisionGateByTicketUncached());
 }
 function decisionGateByTicketUncached(ticketIds?: readonly number[]): Map<number, boolean> {
+    const { events, isHuman } = decisionGateEvents(ticketIds);
+    return computeDecisionGate(events, isHuman);
+}
+
+/**
+ * #2649 — who proposed the pending decision gating each of `ticketIds`.
+ * Uncached and meant for a handful of ids: the backlog asks only about the
+ * tickets it would otherwise put on the follow-up tier.
+ */
+export function decisionGateProposerByTicket(ticketIds: readonly number[]): Map<number, string> {
+    if (ticketIds.length === 0) return new Map();
+    const { events, isHuman } = decisionGateEvents(ticketIds);
+    return computeDecisionGateProposers(events, isHuman);
+}
+
+function decisionGateEvents(ticketIds?: readonly number[]): { events: Array<{ createdAt: string; ticketId: number; kind: string; status: string; meta: string | null; byAgent: string | null }>; isHuman: (id: string) => boolean } {
     const db = getDb();
     // #961 — `ticket_created` is a VIRTUAL kind synthesized from the
     // `tickets` table via `ticketRowToMessage()`. The `_messages` table
@@ -1734,7 +1750,7 @@ function decisionGateByTicketUncached(ticketIds?: readonly number[]): Map<number
     // bâtit le set humain une fois pour que le yield-sur-commentaire ne tape
     // pas la table consumers à chaque ligne.
     const humans = new Set(listHumans());
-    return computeDecisionGate(merged, (id) => humans.has(id));
+    return { events: merged, isHuman: (id) => humans.has(id) };
 }
 
 export function computeActionableTicketIds(

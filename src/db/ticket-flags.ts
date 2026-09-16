@@ -34,6 +34,7 @@ import {
     computeActionableTicketIds,
     lastActorExclusions,
     decisionGateByTicket,
+    decisionGateProposerByTicket,
     backlogCooldownExclusions,
     ownFreshSteps,
     type ActionableTicketSet,
@@ -113,6 +114,10 @@ export interface TicketFlagsContext {
      *  then:resolved is sitting unresolved on the thread; the ticket is
      *  in awaiting-validation state and should NOT appear in the wake. */
     decisionGated: Map<number, boolean>;
+    /** #2649 — proposer of the pending decision gating a ticket (only asked
+     *  for gated tickets whose last actor is someone else). Omitted → the old
+     *  behaviour: any pending decision counts. */
+    decisionProposer?: Map<number, string>;
     /** Per-ticket wake_at ISO from the backlog wake log. Empty when no
      *  recent wake fired. The flag function turns wake_at + cooldown_sec
      *  into `backlog_cooled_until` (only when still in the future). */
@@ -208,7 +213,11 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         // depends_on — le blocker peut être snoozed / oublié, l'agent
         // doit aider le reporter à débloquer.
         const lastActorOther = last_actor != null && last_actor !== ctx.consumerId;
-        const followUp = lastActorOther && gated_by_decision;
+        // #2649 — "Your pending decision gates this": only when the pending
+        // decision is this consumer's. Another agent's plan waiting for its
+        // accept is the human's move, not mine.
+        const myDecision = ctx.decisionProposer ? ctx.decisionProposer.get(t.id) === ctx.consumerId : true;
+        const followUp = lastActorOther && gated_by_decision && myDecision;
         const lastActorMe = ctx.lastActorMeIds.has(t.id);
         const waiting = lastActorMe && !gated_by_decision;
         const blocked = ctx.gatedByBlockerIds.has(t.id);
@@ -405,6 +414,12 @@ export function buildTicketFlagsContext(args: {
         // backlog and claimable can't disagree.
         canClaim,
     });
+    // #2649 — the follow-up tier needs to know WHOSE pending decision gates a
+    // ticket. Asked only about the gated tickets whose last actor is not me.
+    const followUpCandidates = consumerId
+        ? ticketIds.filter((id) => decisionGated.get(id) === true && (lastActorByTicket.get(id)?.actor ?? null) !== consumerId)
+        : [];
+    const decisionProposer = decisionGateProposerByTicket(followUpCandidates);
     return {
         consumerId,
         unreadIds,
@@ -412,6 +427,7 @@ export function buildTicketFlagsContext(args: {
         openIds,
         lastActorMeIds,
         decisionGated,
+        decisionProposer,
         cooledWakeAt,
         lastWakeAt,
         cooledWindowSec: cooledIds,

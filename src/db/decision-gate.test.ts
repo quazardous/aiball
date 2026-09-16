@@ -2,7 +2,7 @@
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeDecisionGate, type DecisionGateEvent } from "./decision-gate.js";
+import { computeDecisionGate, computeDecisionGateProposers, type DecisionGateEvent } from "./decision-gate.js";
 
 // Humains du jeu de test : david. Tout le reste = agent.
 const isHuman = (id: string) => id === "david";
@@ -236,4 +236,15 @@ test("tickets indépendants ne se mélangent pas", () => {
     ]);
     assert.equal(g.get(1), true);
     assert.equal(g.get(2), false);
+});
+
+test("#2649 the proposer of a pending gate is named; a settled or lifted gate names nobody", () => {
+    const ev = (o: Partial<DecisionGateEvent>): DecisionGateEvent => ({ ticketId: 1, kind: "comment_added", status: "approved", meta: null, byAgent: "a", ...o });
+    const plan = (by: string, status = "pending") => ev({ byAgent: by, meta: JSON.stringify({ decision: { kind: "plan", status } }) });
+    assert.equal(computeDecisionGateProposers([plan("agent-a")], isHuman).get(1), "agent-a");
+    assert.equal(computeDecisionGateProposers([plan("agent-a"), ev({ byAgent: "agent-b" })], isHuman).get(1), "agent-a", "another agent speaking keeps the gate and its proposer");
+    assert.equal(computeDecisionGateProposers([plan("agent-a"), plan("agent-b")], isHuman).get(1), "agent-b", "the latest proposal wins");
+    assert.equal(computeDecisionGateProposers([plan("agent-a"), ev({ byAgent: "david" })], isHuman).has(1), false, "a human speaking lifts it");
+    const resolution = ev({ byAgent: "agent-a", meta: JSON.stringify({ decision: { kind: "resolution", status: "accepted" } }) });
+    assert.equal(computeDecisionGateProposers([resolution], isHuman).has(1), false, "a settled gate has no proposer");
 });
