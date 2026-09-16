@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-09-16
+
 ### Added
 
 - **Version and updates in the tray and the GNOME extension**: both show the
@@ -55,6 +57,11 @@ dates are YYYY-MM-DD.
   resumes its own session. `--fork` starts it from a fork of the main loop's
   session. `.aiball-session_id` now holds the main session and one per crew agent;
   an old file still reads as the main one.
+
+### Changed
+
+- The message to every agent opens empty: its default text is the placeholder,
+  sent when the field is left empty.
 
 ### Fixed
 
