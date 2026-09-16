@@ -23,6 +23,7 @@ function healthy(over: Partial<MachineProbes> = {}): MachineProbes {
         tmux: { cmd: "tmux", version: "tmux 3.7c", install: "sudo dnf install tmux" },
         claude: { cmd: "claude", version: "2.1.270 (Claude Code)", install: null },
         proxy: { kind: "rust", bin: "/x/cl-pty-proxy" },
+        proxyVersion: "0.40.0",
         cargo: { present: true, install: null },
         tailscale: null,
         ...over,
@@ -135,6 +136,24 @@ test("PTY proxy: the Python fallback says WHY — unbuilt, or no cargo to build 
 
     const refuse = line(assembleMachineReport(healthy({ proxy: { kind: "refuse", reason: "x" } })), "pty_proxy");
     assert.equal(refuse.status, "error");
+});
+
+test("PTY proxy: a built binary that does not match this install is stale, not ok", () => {
+    const ok = line(assembleMachineReport(healthy()), "pty_proxy");
+    assert.equal(ok.status, "ok");
+    assert.match(ok.detail, /built from v0\.40\.0/);
+
+    // Built from an older aiball: it exists and runs, and may ignore what the loop sends.
+    const older = line(assembleMachineReport(healthy({ proxyVersion: "0.39.0" })), "pty_proxy");
+    assert.equal(older.status, "warn");
+    assert.match(older.detail, /v0\.39\.0, this install is v0\.40\.0/);
+    assert.equal(older.fix, BUILD_CMD);
+
+    // Older than `--version` itself: nothing to match, which must not read as a match.
+    const silent = line(assembleMachineReport(healthy({ proxyVersion: null })), "pty_proxy");
+    assert.equal(silent.status, "warn");
+    assert.match(silent.detail, /predates version reporting/);
+    assert.equal(silent.fix, BUILD_CMD);
 });
 
 test("tailscale: each broken stage names its own fix; a working serve prints the URL", () => {

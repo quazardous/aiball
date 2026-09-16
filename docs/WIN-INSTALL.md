@@ -395,8 +395,22 @@ your input box. Those failures are all silent, so a loop running without a proxy
 looks fine and isn't — which is why the fallback that used to launch claude
 directly was removed rather than warned about.
 
-The binary isn't committed (it's platform-specific; `target/` is gitignored), so
-each machine builds it once:
+The binary isn't committed (it's platform-specific; `target/` is gitignored).
+`install.ps1` provides it, unless `-NoClaudeLoop`:
+
+- with `cargo` (on the PATH, or in `%USERPROFILE%\.cargo\bin` right after a
+  rustup install), it **builds** it;
+- without `cargo`, it **downloads** the binary published with the release of
+  the version being installed.
+
+It does this when the binary is missing **and when it is stale**. The proxy
+reports the aiball version it was built from (`cl-pty-proxy.exe --version`), and
+a binary left over from an older install still runs while ignoring what the loop
+now sends it. A loop that is running holds the `.exe` open; the installer renames
+it aside rather than failing, and the running loop carries on with the old one
+until it restarts.
+
+To build it by hand:
 
 ```powershell
 # One time: the Rust GNU toolchain.
@@ -407,8 +421,12 @@ rustup default stable-x86_64-pc-windows-gnu
 cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
 ```
 
-`aiball check` (its machine section) and `claude-loop check` both report whether
-the binary is built; the dependencies section of `aiball check` probes `cargo`,
+`aiball check` (its machine section) reports whether the binary is built **and
+whether it matches this install**: a proxy built from another version, or one
+too old to report its version at all, is flagged with the command to rebuild
+it. Binaries published with releases before version reporting existed are
+flagged that way too, until the next release. `claude-loop check` reports
+whether it is built; the dependencies section of `aiball check` probes `cargo`,
 the toolchain.
 
 #### If the build fails on `dlltool`

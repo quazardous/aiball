@@ -637,6 +637,91 @@ try {
     }
 } finally { Pop-Location }
 
+# --- Rust PTY proxy (cl-pty-proxy.exe) --------------------------------------
+# On Windows the Rust proxy is the ONLY proxy: `claude-loop start` refuses
+# without it. Built where the loop looks for it ($AppDir\windows\cl-pty-proxy\
+# target\release). Rebuilt when missing OR stale: the binary bakes in the aiball
+# version it was built from (`--version`), and one from an older install still
+# runs while ignoring what the loop now sends it. Without cargo, the release's
+# own binary is downloaded instead. Every failure here is a warning — the daemon
+# runs without it, only the loops need it. -NoClaudeLoop opts out.
+function Get-ProxyVersion($exe) {
+    # A binary older than `--version` takes the flag for a program to launch, so
+    # it runs without the CL_* environment (inside a loop that would point it at
+    # the live loop's state) and is given 5s.
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $exe
+        $psi.Arguments = '--version'
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        foreach ($k in @($psi.EnvironmentVariables.Keys)) { if ($k -like 'CL_*') { $psi.EnvironmentVariables.Remove($k) } }
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $out = $p.StandardOutput.ReadToEndAsync()
+        if (-not $p.WaitForExit(5000)) { try { $p.Kill() } catch { }; return $null }
+        $first = ($out.Result -split "`r?`n")[0].Trim()
+        if ($first -match '^\d+\.\d+\.\d+\S*$') { return $first }
+    } catch { }
+    return $null
+}
+
+if (-not $NoClaudeLoop) {
+    $proxyDir = Join-Path $AppDir 'windows\cl-pty-proxy'
+    $proxyExe = Join-Path $proxyDir 'target\release\cl-pty-proxy.exe'
+    $appVersion = (Get-Content -Raw (Join-Path $AppDir 'package.json') | ConvertFrom-Json).version
+    $builtFrom = if (Test-Path $proxyExe) { Get-ProxyVersion $proxyExe } else { $null }
+
+    if ($builtFrom -eq $appVersion) {
+        Log "Rust PTY proxy up to date (v$builtFrom)"
+    } elseif (Test-Path (Join-Path $proxyDir 'Cargo.toml')) {
+        if (Test-Path $proxyExe) {
+            $was = if ($builtFrom) { "v$builtFrom" } else { 'a build older than version reporting' }
+            Log "Rust PTY proxy is $was, this install is v$appVersion - replacing it"
+        }
+        # A running loop holds the .exe open, so it cannot be overwritten; Windows
+        # does allow renaming it, and the loop keeps running on the renamed file.
+        $aside = "$proxyExe.old"
+        if (Test-Path $proxyExe) {
+            Remove-Item -Force $aside -ErrorAction SilentlyContinue
+            try { Move-Item -Force $proxyExe $aside } catch { Warn "could not move the old proxy aside: $($_.Exception.Message)" }
+        }
+
+        # On PATH, or where rustup puts it before a new shell picks the PATH up.
+        $cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+        if (-not $cargo) {
+            $userCargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+            if (Test-Path $userCargo) { $cargo = $userCargo }
+        }
+        if ($cargo) {
+            Log "building the Rust PTY proxy (one-time, ~30s)"
+            & $cargo build --release --quiet --manifest-path (Join-Path $proxyDir 'Cargo.toml')
+            if ($LASTEXITCODE -ne 0) { Warn "Rust proxy build failed (exit $LASTEXITCODE)" }
+        } else {
+            $url = "https://github.com/quazardous/aiball/releases/download/v$appVersion/cl-pty-proxy-windows-x86_64.exe"
+            Log "cargo not found - downloading the release proxy for v$appVersion"
+            try {
+                New-Item -ItemType Directory -Force -Path (Split-Path $proxyExe -Parent) | Out-Null
+                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $proxyExe
+            } catch {
+                Warn "download failed: $($_.Exception.Message)"
+                Warn "  install Rust (winget install Rustlang.Rustup), then re-run install.ps1 to build it"
+            }
+        }
+
+        if (Test-Path $proxyExe) {
+            Remove-Item -Force $aside -ErrorAction SilentlyContinue   # still in use by a loop: left for next time
+            $now = Get-ProxyVersion $proxyExe
+            if ($now -eq $appVersion) { Log "Rust PTY proxy ready (v$now)" }
+            else { Warn "Rust PTY proxy installed but reports $(if ($now) { "v$now" } else { 'no version' }) - aiball check will flag it" }
+        } else {
+            if (Test-Path $aside) { Move-Item -Force $aside $proxyExe -ErrorAction SilentlyContinue }
+            Warn "no usable Rust PTY proxy - claude-loop start will refuse until one is built"
+        }
+    }
+}
+
 # --- data + log dirs --------------------------------------------------------
 
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null

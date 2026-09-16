@@ -23,6 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- The Windows installer now provides the PTY proxy the loops cannot start
+  without: it builds it when Rust is installed, downloads the release's binary
+  when it is not, and replaces a binary left over from an older install instead
+  of keeping it. `cl-pty-proxy --version` reports the aiball version the proxy
+  was built from, and `aiball check` flags a proxy that does not match the
+  install — present but stale was previously reported as fine.
+
 ### Fixed
 
 - The mouse wheel in a loop scrolls the terminal again instead of walking back
