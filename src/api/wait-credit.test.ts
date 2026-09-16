@@ -254,3 +254,31 @@ test("#2645 the consumers list carries each agent's credit per project, and a co
     assert.deepEqual(human.moves, []);
     assert.equal((await call(BOSS, "GET", "/api/consumers/nobody/wait-credit")).status, 404);
 });
+
+test("#2645 trim: every waiting step comes down to N minutes from now, the cut-off credit comes back, only a human may", async () => {
+    const P4 = "p-2640-trim";
+    createProject({ name: P4 });
+    upsertSubscription("worker", P4, "owner");
+    const t = submitMessage({ project: P4, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
+    await call(WORKER, "POST", `/api/tickets/${t}/assign`, {});
+    const step = await call(WORKER, "POST", "/api/messages", { project: P4, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 45 });
+    assert.equal((step.json.wait_credit as Credit).balance, 15);
+
+    // Read the inbox first, so a stale cache would show the old resume.
+    await call(BOSS, "GET", `/api/inbox?ids=${t}&project=${P4}`);
+    assert.equal((await call(WORKER, "POST", "/api/steps/trim", { max_minutes: 5 })).status, 403);
+    const r = await call(BOSS, "POST", "/api/steps/trim", { max_minutes: 5 });
+    assert.equal(r.status, 200);
+    const mine = (r.json.trimmed as Array<{ message_id: number; refunded: number; to: string }>).find((x) => x.message_id === step.json.id)!;
+    assert.ok(mine, "the 45-minute step was trimmed");
+    assert.equal(mine.refunded, 40, "the 40 minutes cut off come back (to the nearest minute)");
+    const left = (Date.parse(mine.to) - Date.now()) / 60_000;
+    assert.ok(left > 4 && left <= 5, `resumes in ${left.toFixed(1)} min`);
+    assert.equal(waitCreditBalance("worker", P4), 55);
+    const inbox = (await call(BOSS, "GET", `/api/inbox?ids=${t}&project=${P4}`)).json as unknown as { rows?: Array<{ id: number; step_resume_at: string | null }> } | Array<{ id: number; step_resume_at: string | null }>;
+    const rows = Array.isArray(inbox) ? inbox : (inbox.rows ?? []);
+    assert.equal(rows.find((x) => x.id === t)?.step_resume_at, mine.to, "the inbox shows the new resume at once (caches invalidated)");
+
+    const again = await call(BOSS, "POST", "/api/steps/trim", { max_minutes: 5 });
+    assert.equal((again.json.trimmed as unknown[]).length, 0, "nothing left to trim");
+});

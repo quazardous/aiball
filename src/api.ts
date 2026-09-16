@@ -1,4 +1,7 @@
 import { projectTicketStates } from "./db/inbox-agg.js";
+import { trimStepWaits } from "./db/wait-credit.js";
+import { invalidateInboxAgg } from "./db/inbox-agg.js";
+import { invalidateFlagsCache } from "./db/projects.js";
 import { listWaitCredits } from "./db/wait-credit.js";
 import { stepTimingReport, stepTimingRows } from "./db/step-timing.js";
 import { Router, type Request, type Response } from "express";
@@ -359,6 +362,17 @@ api.get("/steps/timing", (req, res) => {
     const days = Number(req.query.since_days);
     const since = Number.isFinite(days) && days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : null;
     res.json({ project, since, buckets: stepTimingReport(stepTimingRows({ project, since })), credits: listWaitCredits(project) });
+});
+
+// #2645 david — cut every waiting step down to at most N minutes from now.
+api.post("/steps/trim", (req, res) => {
+    if (!isHuman(consumerOf(req))) return res.status(403).json({ error: "only a human moderator can trim the agents' waits" });
+    const max = Number((req.body ?? {}).max_minutes);
+    if (!Number.isInteger(max) || max < 0) return badRequest(res, "max_minutes: a whole number of minutes, 0 or more");
+    const trimmed = trimStepWaits(max);
+    for (const t of trimmed) invalidateInboxAgg(t.project, t.ticket_id);
+    if (trimmed.length) invalidateFlagsCache(trimmed.map((t) => t.ticket_id));
+    res.json({ max_minutes: max, trimmed });
 });
 
 api.get("/projects/:name/stats", (req, res) => {

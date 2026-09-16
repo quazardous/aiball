@@ -224,3 +224,44 @@ export function listWaitCreditMoves(consumerId: string, limit = 30): WaitCreditM
         LIMIT ${Math.max(1, Math.min(200, limit))}
     `);
 }
+
+export interface TrimmedStep {
+    message_id: number;
+    ticket_id: number;
+    project: string;
+    by_agent: string | null;
+    from: string;
+    to: string;
+    refunded: number;
+}
+
+/**
+ * #2645 david — « rabote tous les then:continue à dans 5 minutes »: every step
+ * still waiting longer than `maxMinutes` from now resumes at now + maxMinutes.
+ * Credit spent on the part cut off comes back as a refund. The caller
+ * invalidates the caches for the returned tickets.
+ */
+export function trimStepWaits(maxMinutes: number, nowMs = Date.now()): TrimmedStep[] {
+    const limit = new Date(nowMs + maxMinutes * 60_000).toISOString();
+    const rows = getDb().all<{ id: number; ticket_id: number; project: string; by_agent: string | null; resume_at: string }>(sql`
+        SELECT m.id, m.ticket_id, t.project, m.by_agent, json_extract(m.meta, '$.step_resume_at') AS resume_at
+        FROM _messages m JOIN tickets t ON t.id = m.ticket_id
+        WHERE json_extract(m.meta, '$.step') = 1
+          AND json_extract(m.meta, '$.step_resume_at') > ${limit}
+    `);
+    return rows.map((r) => {
+        getDb().run(sql`UPDATE _messages SET meta = json_set(meta, '$.step_resume_at', ${limit}) WHERE id = ${r.id}`);
+        let refunded = 0;
+        const spend = getDb().all<{ spent: number }>(sql`
+            SELECT -minutes AS spent FROM wait_credit_moves WHERE kind = 'spend' AND message_id = ${r.id}
+        `)[0];
+        if (spend && r.by_agent) {
+            const cut = Math.round((Date.parse(r.resume_at) - Date.parse(limit)) / 60_000);
+            const minutes = Math.min(spend.spent, cut);
+            if (minutes > 0 && record({ consumerId: r.by_agent, project: r.project, kind: "refund", minutes, ticketId: r.ticket_id, messageId: r.id })) {
+                refunded = minutes;
+            }
+        }
+        return { message_id: r.id, ticket_id: r.ticket_id, project: r.project, by_agent: r.by_agent, from: r.resume_at, to: limit, refunded };
+    });
+}
