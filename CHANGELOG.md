@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-09-16
+
 ### Added
 
 - `install.ps1 -Prefix <dir> -Port <n>` installs a second, separate aiball
@@ -41,6 +43,13 @@ dates are YYYY-MM-DD.
   Short of credit the wait is capped, never under 5 minutes; coming back early
   gives the rest back. The balance is on every reply, in backlog wakes and in
   `aiball steps`.
+- The wait credit is shown on the consumers list (sortable, per-project detail
+  in the tooltip) and on a consumer's page with its latest movements.
+- The commits a comment delivers are shown under its buttons: short SHA, the
+  credit it earned or why not, linked to the commit when the project has a
+  GitHub repository bound.
+- `POST /api/steps/trim` (human only) cuts every waiting step down to N
+  minutes, giving back the credit cut off.
 
 ### Changed
 
@@ -53,6 +62,18 @@ dates are YYYY-MM-DD.
   2000.
 - `continue_after_minutes` now asks for the soonest a look is worth it, not how
   long the job takes, and says to pick the smaller when in doubt.
+
+### Fixed
+
+- With no project filter, the standing instruction and wake focus of the open
+  ticket's project show instead of an empty, disabled field.
+- A backlog wake no longer tells an agent « your pending decision gates this »
+  for another agent's plan.
+- A plan can always be amended, including on a ticket still waiting for
+  moderation.
+- A cited commit is looked up in every repository under the agent's folder,
+  and a client whose tool schema predates `commits` can give them as the last
+  body line.
 
 ## [0.43.0] — 2026-09-16
 
