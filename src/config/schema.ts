@@ -189,9 +189,18 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         scope: "global+project",
         type: "number",
         default: 30,
-        label: "Wait credit earned by a ticket closed resolved (minutes)",
+        label: "Wait credit earned by a ticket closed resolved, with a commit (minutes)",
         description:
-            "Earned once per ticket by the agent whose resolution was accepted.",
+            "Earned once per ticket by the agent whose resolution was accepted, when it cited a commit on that ticket (commits: [...]) before it closed.",
+    },
+    {
+        key: "tickets.wait_credit_resolved_no_commit_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 10,
+        label: "Wait credit earned by a ticket closed resolved, without a commit (minutes)",
+        description:
+            "Earned once per ticket by the agent whose resolution was accepted when it cited no commit on that ticket: a resolution without code is worth less.",
     },
     {
         key: "tickets.wait_credit_wontfix_minutes",

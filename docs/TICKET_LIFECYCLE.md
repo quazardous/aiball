@@ -358,7 +358,8 @@ minus what it waited:
 
 | Movement | Minutes | Once per |
 |---|---|---|
-| a ticket closed on the agent's accepted resolution | +30 | ticket |
+| a ticket closed on the agent's accepted resolution, having cited a commit on it | +30 | ticket |
+| a ticket closed on the agent's accepted resolution, no commit cited on it | +10 | ticket |
 | a ticket closed on the agent's accepted wontfix | +5 | ticket |
 | a commit cited on a reply (`commits`), read in the agent's checkout, at most 48 h old | +1 per 20 changed lines, 30 max | commit |
 | a step's wait | − what it waits | step |

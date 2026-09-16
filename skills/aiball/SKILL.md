@@ -251,7 +251,8 @@ when you pick it up again — a step without `continue_after_minutes` is refused
 A wait spends its minutes; short of credit it is capped to your balance, never
 under 5 minutes. Coming back on the ticket before the wait ends gives the rest
 back — so look early. You earn credit by proof of work: a ticket closed on
-your accepted resolution (30 min) or wontfix (5 min), and the commits you cite
+your accepted resolution (30 min if you cited a commit on that ticket, 10 without)
+or wontfix (5 min), and the commits you cite
 on a reply with `commits: ["<sha>", …]` (1 min per 20 changed lines, 30 max,
 once per commit, fresh commits only). The reply answers `wait_credit` with your
 balance, and backlog wakes say it.

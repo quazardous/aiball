@@ -58,6 +58,7 @@ export function waitCreditConfig(project: string) {
         start: num("tickets.wait_credit_start_minutes", project, 60),
         floor: num("tickets.step_min_wait_minutes", project, 5),
         resolved: num("tickets.wait_credit_resolved_minutes", project, 30),
+        resolvedNoCommit: num("tickets.wait_credit_resolved_no_commit_minutes", project, 10),
         wontfix: num("tickets.wait_credit_wontfix_minutes", project, 5),
         linesPerMinute: num("tickets.wait_credit_commit_lines_per_minute", project, 20),
         maxPerCommit: num("tickets.wait_credit_commit_max_minutes", project, 30),
@@ -111,10 +112,19 @@ export function recordStepSpend(consumerId: string, project: string, ticketId: n
     record({ consumerId, project, kind: "spend", minutes: -grant.spent, ticketId, messageId, requested: grant.requested });
 }
 
-/** A ticket closed on the agent's accepted resolution (or wontfix). Once per ticket. */
+/**
+ * A ticket closed on the agent's accepted resolution (or wontfix). Once per
+ * ticket. david: « une résolution sans commit ne redonne que 10 minutes » — a
+ * resolution earns the full amount only when the agent cited a commit on that
+ * ticket before it closed.
+ */
 export function earnOnClose(consumerId: string, project: string, ticketId: number, how: "resolved" | "wontfix"): number {
     const cfg = waitCreditConfig(project);
-    const minutes = how === "resolved" ? cfg.resolved : cfg.wontfix;
+    const withCommit = getDb().all<{ n: number }>(sql`
+        SELECT COUNT(*) AS n FROM wait_credit_moves
+        WHERE kind = 'earn_commit' AND consumer_id = ${consumerId} AND ticket_id = ${ticketId}
+    `)[0]?.n > 0;
+    const minutes = how === "wontfix" ? cfg.wontfix : withCommit ? cfg.resolved : cfg.resolvedNoCommit;
     if (minutes <= 0) return 0;
     return record({ consumerId, project, kind: how === "resolved" ? "earn_resolved" : "earn_wontfix", minutes, ticketId }) ? minutes : 0;
 }
