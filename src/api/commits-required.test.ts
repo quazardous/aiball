@@ -130,3 +130,27 @@ test("#2653 the comment keeps its commits in meta: each with its credit, null fo
     const stored = thread.comments?.find((c) => c.id === listed.json.id);
     assert.deepEqual((JSON.parse(String(stored?.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef", "cafebabe"]);
 });
+
+test("#2653 an older client that writes `commits: [...]` as the last body line gets them read as the field", async () => {
+    const { commitsFromBody } = await import("../messages.js");
+    assert.deepEqual(commitsFromBody("status\n\ncommits: [38e2c869, 1537854e]"), ["38e2c869", "1537854e"]);
+    assert.deepEqual(commitsFromBody("x\ncommits: `[\"38e2c869\"]`"), ["38e2c869"]);
+    assert.equal(commitsFromBody("x\ncommits: none"), null);
+    assert.equal(commitsFromBody("x\ncommits: null"), null);
+    assert.equal(commitsFromBody("commits: [38e2c869]\nmore text after"), undefined, "only the last line");
+    assert.equal(commitsFromBody("x\ncommits: [not-a-sha]"), undefined);
+
+    const r = await post({ body: "Umbrella status.\n\ncommits: [deadbeef, cafebabe]" }, { knowsCommits: false });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.json.warnings, undefined, "said in the body: no warning");
+    assert.deepEqual((JSON.parse(String(r.json.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef", "cafebabe"]);
+    assert.match(String(r.json.body), /commits: \[deadbeef, cafebabe\]$/, "the body is left as written");
+
+    const said = await post({ body: "nothing\ncommits: none" }, { knowsCommits: false });
+    assert.equal((JSON.parse(String(said.json.meta)) as { commits: unknown }).commits, null);
+
+    const declared = await post({ body: "x\ncommits: [deadbeef]" });
+    assert.equal(declared.status, 400, "a client that knows the field must send it as the field");
+    const warned = await post({}, { knowsCommits: false });
+    assert.match(String((warned.json.warnings as string[])[0]), /a parameter of ticket_reply, not text in the body/);
+});

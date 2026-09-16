@@ -139,7 +139,25 @@ export function commitsRequirement(msg: NewMessage, caller: string, refuse: bool
     const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit";
     return refuse
         ? { refusal: reason, warning: null }
-        : { refusal: null, warning: `${reason}. Your MCP server predates the field: reconnect it (/mcp) — posts without it will be refused.` };
+        : { refusal: null, warning: `${reason}. It is a parameter of ticket_reply, not text in the body — your MCP server predates it: reconnect it (/mcp). Until then, a last body line \`commits: [<sha>, <sha>]\` or \`commits: none\` is read as the field.` };
+}
+
+/**
+ * #2653 — a client from before `commits` (an MCP server not reconnected) can
+ * only put it in the body. The last body line `commits: [a, b]`, `commits:
+ * none` or `commits: null` is read as the field for such a client; the body is
+ * left as written.
+ */
+export function commitsFromBody(body: string | null | undefined): string[] | null | undefined {
+    if (!body) return undefined;
+    const lines = body.trimEnd().split("\n");
+    const m = /^\s*commits\s*:\s*(.+?)\s*$/i.exec(lines[lines.length - 1] ?? "");
+    if (!m) return undefined;
+    const v = m[1].replace(/^`|`$/g, "").trim();
+    if (/^(none|null|\[\s*\])$/i.test(v)) return null;
+    const list = /^\[(.*)\]$/.exec(v)?.[1] ?? v;
+    const shas = list.split(/[\s,]+/).map((s) => s.replace(/^["'`]|["'`]$/g, "")).filter(Boolean);
+    return shas.length && shas.every((s) => /^[0-9a-f]{7,40}$/i.test(s)) ? shas : undefined;
 }
 
 /**
