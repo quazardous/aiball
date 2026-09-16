@@ -949,6 +949,19 @@ Leave it off unless you are tuning the pane detectors for that project: the
 frames are verbatim screen dumps, which is exactly why `claude-loop bug`
 excludes them by default.
 
+### Scrolling back
+
+The loop keeps 10000 lines of scrollback per session instead of the
+multiplexer's default 2000. To read it, enter copy-mode with `prefix + [` (or
+`prefix + PageUp`), move with the wheel, the arrows or PageUp, and leave with
+`q`.
+
+On Windows, psmux 3.3.8 turns a wheel notch into Up arrows whenever the program
+in front of the pane is not a shell, so over Claude Code the wheel walks the
+prompt history instead of entering copy-mode. psmux has fixed this upstream
+(the wheel follows the pane's own terminal state, as in tmux); until a release
+carries it, use `prefix + [`. Once in copy-mode, the wheel scrolls.
+
 ---
 
 ## Files

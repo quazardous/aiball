@@ -412,6 +412,13 @@ fn run_inject_server(
 // --- main -------------------------------------------------------------------
 
 fn main() {
+    // `--version` answers and exits before anything else: no console mode, no
+    // PTY, no presence marker. Checked on both platforms, ahead of the argv
+    // parsing that would otherwise take it for the program to launch.
+    if env::args().nth(1).as_deref() == Some("--version") {
+        println!("{}", env!("AIBALL_VERSION"));
+        std::process::exit(0);
+    }
     let code = real_main();
     std::process::exit(code);
 }

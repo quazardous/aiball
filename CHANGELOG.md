@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `install.ps1 -Prefix <dir> -Port <n>` installs a second, separate aiball
+  under one directory (its own task, data, config and commands) to rehearse an
+  install or an upgrade without touching the one the machine runs.
+  `-Tarball <file>` installs a given package tarball.
 - `aiball steps`: per delay, how many `then: continue` steps came back early,
   on time or late, to see how agents judge `continue_after_minutes`.
 - An agent's comment must say which commits it delivers (`commits`), or
@@ -40,8 +44,36 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- The Windows copy install is now the npm package: `install.ps1` packs the
+  checkout and installs the tarball, instead of mirroring the source tree and
+  building on the machine. What ships is exactly the package's file list, and a
+  re-run stops the running install before replacing it.
+
+- A loop keeps 10000 lines of scrollback instead of the multiplexer's default
+  2000.
 - `continue_after_minutes` now asks for the soonest a look is worth it, not how
   long the job takes, and says to pick the smaller when in doubt.
+
+## [0.43.0] — 2026-09-16
+
+### Added
+
+- The Windows installer now provides the PTY proxy the loops cannot start
+  without: it builds it when Rust is installed, downloads the release's binary
+  when it is not, and replaces a binary left over from an older install instead
+  of keeping it. `cl-pty-proxy --version` reports the aiball version the proxy
+  was built from, and `aiball check` flags a proxy that does not match the
+  install — present but stale was previously reported as fine.
+
+### Changed
+
+- Loops start Claude Code with its mouse support off. This was meant to let the
+  mouse wheel scroll the terminal instead of walking back through Claude Code's
+  prompt history, and it does not: on Windows, psmux 3.3.8 turns the wheel into
+  arrow keys whenever Claude Code is in front, whatever Claude Code asks for.
+  Until a psmux release carries its fix, enter copy-mode with `prefix + [` to
+  scroll. *(Corrected after release: this entry first announced the wheel as
+  fixed.)*
 
 ## [0.42.0] — 2026-09-16
 

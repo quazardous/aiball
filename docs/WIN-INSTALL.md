@@ -100,11 +100,16 @@ pwsh -File install.ps1 -AuthInit   # same but also starts the daemon + mints set
 
 What it does:
 1. Verifies prereqs (`node >=20`, `npm`, `git`).
-2. Copies the source tree to `%LOCALAPPDATA%\Programs\aiball\` via
-   `robocopy /MIR` (or symlinks with `-Symlink` — see Path 5).
-3. Runs `npm install` in the install dir. Dies loudly if it fails
-   (daemon needs the deps). Builds the frontend bundle if missing;
-   failures here only Warn (daemon still serves the API, no SPA).
+2. Packs the checkout with `npm pack` (which builds the frontend into the
+   tarball) and installs that tarball into `%LOCALAPPDATA%\Programs\aiball\`.
+   The package lands in `Programs\aiball\node_modules\aiball\`, with its
+   dependencies nested under it. What ships is exactly the package's `files`
+   list. Nothing is built on the machine except the Rust PTY proxy. Pass
+   `-Tarball <file.tgz>` to install a given tarball instead of packing.
+   A re-run replaces the previous install whole: it stops this install's tray
+   and daemon first, and stops with a message if a running `claude-loop` still
+   holds files in it.
+3. Dies loudly if the install fails (the daemon needs the deps).
 4. Creates `%USERPROFILE%\.local\share\aiball\` (DB + uploads) and
    `%LOCALAPPDATA%\aiball\` (logs + daemon launcher).
 5. Writes `.cmd` shims in `%LOCALAPPDATA%\Microsoft\WindowsApps\` for
@@ -176,9 +181,33 @@ aiball-daemon` (or a vite dev server) without re-running the installer.
 | `-NoClaudeLoop` | skip auto-install of psmux + Git Bash PATH (claude-loop deps) |
 | `-NoAuthInit` | skip auto-mint of setup token + auto-open browser |
 | `-StopHook` | also wire the Claude Code Stop hook globally (`~/.claude/settings.json`) so autopoll triggers in every Claude Code session |
+| `-Prefix <dir> -Port <n>` | a separate install entirely under `<dir>`, see below |
+| `-Tarball <file.tgz>` | install this package tarball instead of packing the checkout |
 | `-Uninstall` | remove everything (keeps the data dir unless `-PurgeData`) |
 | `-PurgeData` | with `-Uninstall`, also wipe the data dir |
 | `-Yes` | skip interactive confirmations |
+
+### Rehearsing an install or an upgrade (`-Prefix`)
+
+`-Prefix` installs a second, separate aiball under one directory, beside the one
+the machine runs, so the copy install can be tried without touching it:
+
+```powershell
+pwsh -File install.ps1 -Prefix C:\tmp\aiball-try -Port 7791 -NoAuthInit
+$env:PATH = "C:\tmp\aiball-try\bin;$env:PATH"   # its commands, in this shell only
+aiball --version; aiball check
+pwsh -File install.ps1 -Uninstall -Prefix C:\tmp\aiball-try -Port 7791 -PurgeData -Yes
+```
+
+Everything lives under the prefix: `lib` (the package), `bin` (the shims, not on
+`PATH`), `data`, `logs` and `config` (the install record). The shims point at
+that install's own daemon, data and config. The scheduled task is named
+`aiball-daemon-<hash of the prefix>`, so it never replaces the machine's
+`aiball-daemon`. The tray is off, since it only knows the default locations.
+`-Port` is required: the installer stops whatever listens on that port.
+
+To rehearse an upgrade, install an older version with `-Tarball`, then re-run
+the installer on the same prefix.
 
 ## Daemon lifecycle
 
@@ -395,8 +424,22 @@ your input box. Those failures are all silent, so a loop running without a proxy
 looks fine and isn't — which is why the fallback that used to launch claude
 directly was removed rather than warned about.
 
-The binary isn't committed (it's platform-specific; `target/` is gitignored), so
-each machine builds it once:
+The binary isn't committed (it's platform-specific; `target/` is gitignored).
+`install.ps1` provides it, unless `-NoClaudeLoop`:
+
+- with `cargo` (on the PATH, or in `%USERPROFILE%\.cargo\bin` right after a
+  rustup install), it **builds** it;
+- without `cargo`, it **downloads** the binary published with the release of
+  the version being installed.
+
+It does this when the binary is missing **and when it is stale**. The proxy
+reports the aiball version it was built from (`cl-pty-proxy.exe --version`), and
+a binary left over from an older install still runs while ignoring what the loop
+now sends it. A loop that is running holds the `.exe` open; the installer renames
+it aside rather than failing, and the running loop carries on with the old one
+until it restarts.
+
+To build it by hand:
 
 ```powershell
 # One time: the Rust GNU toolchain.
@@ -407,8 +450,12 @@ rustup default stable-x86_64-pc-windows-gnu
 cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
 ```
 
-`aiball check` (its machine section) and `claude-loop check` both report whether
-the binary is built; the dependencies section of `aiball check` probes `cargo`,
+`aiball check` (its machine section) reports whether the binary is built **and
+whether it matches this install**: a proxy built from another version, or one
+too old to report its version at all, is flagged with the command to rebuild
+it. Binaries published with releases before version reporting existed are
+flagged that way too, until the next release. `claude-loop check` reports
+whether it is built; the dependencies section of `aiball check` probes `cargo`,
 the toolchain.
 
 #### If the build fails on `dlltool`

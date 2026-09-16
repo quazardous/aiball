@@ -83,6 +83,9 @@ export interface MachineProbes {
     tmux: ToolProbe;
     claude: ToolProbe;
     proxy: ProxyLaunch;
+    /** The aiball version the Rust proxy says it was built from (`--version`).
+     *  Null when it prints none: a binary older than the flag. */
+    proxyVersion: string | null;
     cargo: { present: boolean; install: string | null };
     /** Null when no tailscale provider is configured — the line is skipped. */
     tailscale: TailscaleProbe | null;
@@ -216,7 +219,22 @@ export function assembleMachineReport(p: MachineProbes): MachineLine[] {
 
     // --- PTY proxy ------------------------------------------------------
     if (p.proxy.kind === "rust") {
-        lines.push({ id: "pty_proxy", status: "ok", detail: `Rust proxy built — ${p.proxy.bin}` });
+        // Present is not enough: a binary built before a contract change still
+        // exists and still runs, and ignores what the loop now sends it. The
+        // proxy bakes in the aiball version it was built from, so a binary that
+        // does not match this install is named as stale.
+        if (p.proxyVersion === p.cliVersion) {
+            lines.push({ id: "pty_proxy", status: "ok", detail: `Rust proxy built from v${p.proxyVersion} — ${p.proxy.bin}` });
+        } else {
+            lines.push({
+                id: "pty_proxy",
+                status: "warn",
+                detail: p.proxyVersion
+                    ? `Rust proxy built from v${p.proxyVersion}, this install is v${p.cliVersion} — it may not understand what the loop sends`
+                    : `Rust proxy predates version reporting, so it cannot be matched to v${p.cliVersion} — ${p.proxy.bin}`,
+                fix: BUILD_CMD,
+            });
+        }
     } else if (p.proxy.kind === "python") {
         const why = p.cargo.present ? "cl-pty-proxy is not built" : "cargo is not installed, so cl-pty-proxy cannot be built";
         lines.push({
@@ -296,6 +314,25 @@ function firstVersionLine(cmd: string, args: string[]): string | null {
         const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 5000, shell: process.platform === "win32" });
         if (r.status !== 0) return null;
         return (r.stdout || r.stderr || "").split(/\r?\n/)[0]?.trim() || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * `<proxy> --version`, or null when it prints no version.
+ *
+ * A binary older than the flag takes `--version` for the program to launch and
+ * runs its proxy path until that fails. So the call runs without the `CL_*`
+ * environment — inside a loop that would point the old binary at the live
+ * loop's state dir and presence marker — and with a timeout.
+ */
+function proxyBuiltFrom(bin: string): string | null {
+    try {
+        const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("CL_")));
+        const r = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 5000, env, stdio: ["ignore", "pipe", "ignore"] });
+        const first = (r.stdout ?? "").split(/\r?\n/)[0]?.trim() ?? "";
+        return /^\d+\.\d+\.\d+\S*$/.test(first) ? first : null;
     } catch {
         return null;
     }
@@ -401,6 +438,7 @@ export async function probeMachine(input: ProbeMachineInput): Promise<MachinePro
         tmux: { cmd: muxCmd, version: firstVersionLine("tmux", ["-V"]), install: dep(muxCmd)?.install ?? null },
         claude: { cmd: "claude", version: firstVersionLine("claude", ["--version"]), install: null },
         proxy,
+        proxyVersion: proxy.kind === "rust" ? proxyBuiltFrom(proxy.bin) : null,
         cargo: { present: dep("cargo")?.present ?? false, install: dep("cargo")?.install ?? null },
         tailscale: await probeTailscale(),
     };

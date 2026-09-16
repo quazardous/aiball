@@ -816,6 +816,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // enabling fullscreen there can't brick your loops. Sourced before env.local,
         // so a power user who really wants fullscreen can unset it there.
         `export CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`,
+        // The wheel scrolls the mux's scrollback, not claude's prompt history.
+        // Claude Code turns mouse tracking on (`?1000h` / `?1006h`), and a
+        // multiplexer forwards the wheel to any pane whose program asked for
+        // the mouse instead of entering copy-mode: the notches reach claude,
+        // which reads them as Up/Down and walks the prompt history. With the
+        // mouse off claude never asks, so the wheel falls through to
+        // `scroll-enter-copy-mode` (psmux) / the copy-mode binding (tmux), and
+        // drag-select is the mux's too. Same override rule as above: set before
+        // env.local, so it can be unset there.
+        `export CLAUDE_CODE_DISABLE_MOUSE=1`,
         // CLI-only flags (no yaml backing, no shell override) :
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
@@ -1187,6 +1197,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "new-session", "-d", "-s", tname, "-c", cwd, ...sizeArgs, "--", bashCmd, "-lc", innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
+    // Copy-mode reads the pane's scrollback, and the default 2000 lines is a
+    // few minutes of a claude session. Set right after creation: psmux applies
+    // it to the existing pane; tmux may keep its creation-time limit for it.
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "history-limit", "10000"], { stdio: "ignore" });
 
     // Status bar so a loop session is visually distinct. Initial
     // state is `boot` (yellow, transitional) — claude is loading,

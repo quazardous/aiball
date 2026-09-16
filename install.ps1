@@ -13,9 +13,12 @@
     What it does:
       1. Verifies prereqs (node>=20, npm, git) + warns on Node>=24
          (better-sqlite3 prebuilt bindings lag — see WIN-INSTALL.md).
-      2. Provisions %LOCALAPPDATA%\Programs\aiball (Copy-Item, or
-         New-Item -SymbolicLink with --Symlink + dev-mode/admin).
-      3. npm install + frontend build in the install dir.
+      2. Provisions %LOCALAPPDATA%\Programs\aiball: npm packs this checkout
+         (the frontend is built into the tarball) and installs the tarball
+         there, so the package lands in node_modules\aiball. With --Symlink
+         (dev-mode/admin) it is a symlink to this checkout instead.
+      3. Dev layouts only (-Symlink / -Minimal): npm install + frontend build
+         in the checkout.
       4. Ensures %APPDATA%\aiball and the log dir exist.
       5. Writes a daemon-launcher.cmd in the install dir (handles log
          redirection — Scheduled Tasks don't capture stdout natively).
@@ -106,6 +109,18 @@
 .PARAMETER Yes
     Skip interactive confirmations (--PurgeData prompt).
 
+.PARAMETER Prefix
+    Install a separate aiball entirely under this directory (lib, bin, data,
+    logs, config), beside the one the machine runs, to rehearse the copy
+    install or an upgrade. Its scheduled task gets a name of its own, the tray
+    is off, and its shims in <Prefix>\bin (not on PATH) talk to its own daemon.
+    Requires an explicit -Port. -Uninstall -Prefix <dir> -Port <n> removes it.
+    Incompatible with -Minimal, -Service / -System, -StopHook.
+
+.PARAMETER Tarball
+    Install this package tarball instead of packing the checkout (copy install
+    only). Useful to install a given version, e.g. before rehearsing its upgrade.
+
 .EXAMPLE
     PS> .\install.ps1
     Fresh user install (copy-mode, Scheduled Task at logon).
@@ -150,11 +165,38 @@ param(
     [switch] $StopHook,
     [switch] $Yes,
     [int]    $Port = 7777,
-    [string] $BindHost = '127.0.0.1'
+    [string] $BindHost = '127.0.0.1',
+    [string] $Prefix,
+    [string] $Tarball
 )
 
 # -System implies -Service.
 if ($System) { $Service = $true }
+
+# -Prefix installs a whole second aiball into one directory, beside the one this
+# machine already runs, so the copy install can be rehearsed (an upgrade
+# included) without touching it. Everything an install writes outside its own
+# directory is either moved under the prefix or skipped: the task gets a name of
+# its own, the data, logs, config and install record live under the prefix, and
+# the tray is off (it only knows %LOCALAPPDATA%\aiball). The port must be given:
+# the installer stops whatever listens on it.
+if ($Prefix) {
+    $bad = @()
+    if ($Minimal)  { $bad += '-Minimal (-Prefix is a copy install)' }
+    if ($Service)  { $bad += '-Service / -System (one service name per machine)' }
+    if ($StopHook) { $bad += '-StopHook (writes the global ~/.claude/settings.json)' }
+    if (-not $PSBoundParameters.ContainsKey('Port')) { $bad += 'a default -Port (pass the port of this install explicitly)' }
+    if ($bad) {
+        Write-Host "[aiball] -Prefix is incompatible with: $($bad -join ', ')" -ForegroundColor Red
+        exit 1
+    }
+    $Prefix = [System.IO.Path]::GetFullPath($Prefix)
+    $NoTray = $true
+}
+if ($Tarball -and ($Minimal -or $Symlink)) {
+    Write-Host "[aiball] -Tarball only applies to a copy install, not -Minimal / -Symlink" -ForegroundColor Red
+    exit 1
+}
 
 # -Minimal is an in-place install: daemon registered as a Scheduled
 # Task but pointing at $SrcDir directly (no copy, no CLI shims, no
@@ -187,8 +229,21 @@ $DataDir   = if ($System) { Join-Path $env:PROGRAMDATA 'aiball' } `
                      else { Join-Path $env:USERPROFILE '.local\share\aiball' }
 $LogDir    = if ($System) { Join-Path $env:PROGRAMDATA 'aiball\logs' } `
                      else { Join-Path $env:LOCALAPPDATA 'aiball' }
-$LogFile   = Join-Path $LogDir           'daemon.log'
+$ConfigHome = Join-Path $env:USERPROFILE '.config'   # the daemon's globalConfigPath base
 $TaskName  = 'aiball-daemon'   # scheduled task name (and service name — separate namespaces in Windows)
+if ($Prefix) {
+    $PrefixLib  = Join-Path $Prefix 'lib'
+    $PrefixBin  = Join-Path $Prefix 'bin'       # not on PATH: put it there to use this install
+    $DataDir    = Join-Path $Prefix 'data'
+    $LogDir     = Join-Path $Prefix 'logs'
+    $ConfigHome = Join-Path $Prefix 'config'
+    # One task per prefix: the hash keeps the name stable across re-runs.
+    $sha = [System.Security.Cryptography.SHA1]::Create()
+    $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Prefix.ToLowerInvariant())) | Select-Object -First 4 | ForEach-Object { $_.ToString('x2') })
+    $TaskName = "aiball-daemon-$hash"
+}
+$LogFile   = Join-Path $LogDir           'daemon.log'
+$InstallRecord = Join-Path $ConfigHome 'aiball\install.json'
 $SvcName   = 'aiball-daemon'
 $Shims     = @('aiball', 'aiball-mcp', 'claude-loop')
 
@@ -197,12 +252,16 @@ $Shims     = @('aiball', 'aiball-mcp', 'claude-loop')
 $DesktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop'))   'aiball.lnk'
 $StartLnk   = Join-Path ([Environment]::GetFolderPath('Programs'))  'aiball.lnk'
 $StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup'))   'aiball-tray.lnk'
-# $AppDir = where the daemon source actually lives at runtime. Full
-# install copies the source to $PrefixLib; -Minimal uses $SrcDir
-# directly (no copy). Drives daemon-launcher.cmd's LIB var, the
-# scheduled task working dir, npm install location, sanity check
-# Push-Location, and the shortcut targets.
-$AppDir     = if ($Minimal) { $SrcDir } else { $PrefixLib }
+# $AppDir = where the daemon source actually lives at runtime. The copy install
+# is npm's layout: the package lands in $PrefixLib\node_modules\aiball, installed
+# from its tarball. -Symlink points $PrefixLib at $SrcDir; -Minimal uses $SrcDir
+# directly (no copy). Drives daemon-launcher.cmd's LIB var, the scheduled task
+# working dir, sanity check Push-Location, the shims and the shortcut targets.
+$FromTarball = -not $Minimal -and -not $Symlink
+if ($FromTarball -and (Test-Path $PrefixLib) -and (Get-Item $PrefixLib -Force).LinkType -eq 'SymbolicLink') {
+    $FromTarball = $false   # an existing dev symlink is kept, see provisioning below
+}
+$AppDir     = if ($Minimal) { $SrcDir } elseif ($FromTarball) { Join-Path $PrefixLib 'node_modules\aiball' } else { $PrefixLib }
 $AiballIco  = Join-Path $AppDir 'assets\aiball.ico'
 $TrayCmd    = Join-Path $AppDir 'bin\aiball-tray.cmd'
 
@@ -390,6 +449,30 @@ function Stop-AiballTray {
 
 # --- uninstall path ---------------------------------------------------------
 
+if ($Uninstall -and $Prefix) {
+    # Only what this prefix owns: its task, its port, its directory. The tray,
+    # the service and the machine's own install are someone else's.
+    Remove-AiballTask
+    Stop-AiballOnPort $Port
+    foreach ($d in @($PrefixBin, $PrefixLib, $LogDir, $ConfigHome)) {
+        if (Test-Path $d) {
+            $item = Get-Item $d -Force
+            if ($item.LinkType -eq 'SymbolicLink') { $item.Delete() } else { Remove-Item -Recurse -Force $d }
+            Log "removed $d"
+        }
+    }
+    if (Test-Path $DataDir) {
+        if ($PurgeData -and ($Yes -or (Read-Host "delete data dir $DataDir (DB + uploads)? [y/N]") -match '^[yY]')) {
+            Remove-Item -Recurse -Force $DataDir
+            Log "removed data dir: $DataDir"
+        } else {
+            Warn "data dir kept at $DataDir (pass -PurgeData to remove)"
+        }
+    }
+    if ((Test-Path $Prefix) -and -not (Get-ChildItem -Force $Prefix)) { Remove-Item -Force $Prefix }
+    exit 0
+}
+
 if ($Uninstall) {
     Log "removing daemon registration (scheduled task and/or service)"
     Stop-AiballTray   # #tray-couple: stop the tray first so it can't restart the daemon
@@ -421,7 +504,9 @@ if ($Uninstall) {
 
     if (Test-Path $PrefixLib) {
         # Symlink vs real dir: Remove-Item -Recurse follows symlinks on
-        # older PowerShell. Detect and unlink first to be safe.
+        # older PowerShell. Detect and unlink first to be safe. A copy install
+        # is npm's prefix: node_modules plus the package.json and lock npm
+        # writes beside it, all removed with the directory.
         $item = Get-Item $PrefixLib -Force
         if ($item.LinkType -eq 'SymbolicLink') {
             $item.Delete()
@@ -443,8 +528,7 @@ if ($Uninstall) {
         }
     }
 
-    $installRecord = Join-Path $env:USERPROFILE '.config\aiball\install.json'
-    if (Test-Path $installRecord) { Remove-Item -Force $installRecord }
+    if (Test-Path $InstallRecord) { Remove-Item -Force $InstallRecord }
 
     # Same story for data dirs: check all three. PurgeData applies
     # to whichever exist. USERPROFILE\.local\share is the current
@@ -586,28 +670,68 @@ if (-not $Minimal) {
         New-Item -ItemType SymbolicLink -Path $PrefixLib -Target $SrcDir | Out-Null
         Log "symlinked $PrefixLib -> $SrcDir (dev install)"
     } else {
-        Log "copying source to $PrefixLib"
-        if (Test-Path $PrefixLib) { Remove-Item -Recurse -Force $PrefixLib }
+        # The package's tarball is the install: `files` in package.json is the
+        # one list of what ships, and `prepack` has already built frontend/dist
+        # into it. Nothing is built on this machine except the Rust proxy.
+        if ($Tarball) {
+            $tgz = (Resolve-Path $Tarball).Path
+        } else {
+            $packDir = Join-Path ([System.IO.Path]::GetTempPath()) "aiball-pack-$([guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Force -Path $packDir | Out-Null
+            Push-Location $SrcDir
+            try {
+                # prepack builds the frontend, so its dependencies must be there.
+                if (-not (Test-Path (Join-Path $SrcDir 'frontend\node_modules'))) {
+                    Log "installing frontend build dependencies in $SrcDir\frontend"
+                    npm --prefix frontend install --no-audit --no-fund
+                    if ($LASTEXITCODE -ne 0) { Die "frontend 'npm install' failed in $SrcDir (exit $LASTEXITCODE)" }
+                }
+                Log "packing $SrcDir (builds the frontend, ~30s)"
+                npm pack --pack-destination $packDir | Out-Host
+                if ($LASTEXITCODE -ne 0) { Die "npm pack failed in $SrcDir (exit $LASTEXITCODE)" }
+            } finally { Pop-Location }
+            $tgz = (Get-ChildItem $packDir -Filter 'aiball-*.tgz' | Select-Object -First 1).FullName
+            if (-not $tgz) { Die "npm pack produced no tarball in $packDir" }
+        }
+
+        # The install being replaced may be running: its tray restarts the
+        # daemon, the daemon holds the SQLite binding open, and a loop holds the
+        # PTY proxy open. Stop what this install owns; a loop still running from
+        # it makes the removal fail below, with the reason.
+        if (-not $Prefix) { Stop-AiballTray }
+        if (Test-TaskExists $TaskName) { try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop } catch { } }
+        Stop-AiballOnPort $Port
+
+        if (Test-Path $PrefixLib) {
+            # Removed whole, not installed over: npm keeps a package.json and a
+            # lock in the prefix, and a lock inherited from the previous install
+            # would pin what this one resolves.
+            Log "removing the previous install at $PrefixLib"
+            try { Remove-Item -Recurse -Force $PrefixLib -ErrorAction Stop }
+            catch { Die "could not remove $PrefixLib ($($_.Exception.Message)). A claude-loop running from this install holds its files: stop the loops, then re-run." }
+        }
         New-Item -ItemType Directory -Force -Path $PrefixLib | Out-Null
-        # Mirror rsync excludes from install.sh. Robocopy is the right tool
-        # (Copy-Item -Recurse is slow + chokes on long paths).
-        $robocopyArgs = @(
-            $SrcDir, $PrefixLib,
-            '/MIR',           # mirror tree
-            '/XD', 'node_modules', '.git', 'var', 'frontend\node_modules',
-            '/XF', '*.log', '.env',
-            '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'   # quiet
-        )
-        & robocopy.exe @robocopyArgs | Out-Null
-        # Robocopy exit codes: 0-7 are success (with caveats), 8+ are errors.
-        if ($LASTEXITCODE -ge 8) { Die "robocopy failed with exit $LASTEXITCODE" }
+
+        # nested: aiball's dependencies go under the package's own node_modules
+        # (as `npm i -g` lays them out). claude-loop runs its timer and hooks
+        # through <package>\node_modules\.bin\tsx, which a hoisted layout
+        # would put one level up, out of its reach.
+        Log "installing $(Split-Path $tgz -Leaf) into $PrefixLib"
+        npm install --prefix $PrefixLib --install-strategy=nested --no-audit --no-fund $tgz
+        if ($LASTEXITCODE -ne 0) {
+            Die "npm install of $tgz failed (exit $LASTEXITCODE). The daemon needs the deps to run — fix the error above and re-run install.ps1."
+        }
+        if ($packDir) { Remove-Item -Recurse -Force $packDir -ErrorAction SilentlyContinue }
     }
 } else {
     Log "minimal install: running daemon in place from $SrcDir (no copy)"
 }
 
-# --- npm install + frontend build in the install dir ----------------------
+# --- npm install + frontend build in the install dir (dev layouts) -------
+# A copy install came complete from its tarball; -Minimal and -Symlink run the
+# checkout itself, which needs its dependencies and a built frontend.
 
+if (-not $FromTarball) {
 Log "running npm install in $AppDir"
 Push-Location $AppDir
 try {
@@ -636,6 +760,92 @@ try {
         Log "frontend bundle already present"
     }
 } finally { Pop-Location }
+}
+
+# --- Rust PTY proxy (cl-pty-proxy.exe) --------------------------------------
+# On Windows the Rust proxy is the ONLY proxy: `claude-loop start` refuses
+# without it. Built where the loop looks for it ($AppDir\windows\cl-pty-proxy\
+# target\release). Rebuilt when missing OR stale: the binary bakes in the aiball
+# version it was built from (`--version`), and one from an older install still
+# runs while ignoring what the loop now sends it. Without cargo, the release's
+# own binary is downloaded instead. Every failure here is a warning — the daemon
+# runs without it, only the loops need it. -NoClaudeLoop opts out.
+function Get-ProxyVersion($exe) {
+    # A binary older than `--version` takes the flag for a program to launch, so
+    # it runs without the CL_* environment (inside a loop that would point it at
+    # the live loop's state) and is given 5s.
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $exe
+        $psi.Arguments = '--version'
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+        foreach ($k in @($psi.EnvironmentVariables.Keys)) { if ($k -like 'CL_*') { $psi.EnvironmentVariables.Remove($k) } }
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $out = $p.StandardOutput.ReadToEndAsync()
+        if (-not $p.WaitForExit(5000)) { try { $p.Kill() } catch { }; return $null }
+        $first = ($out.Result -split "`r?`n")[0].Trim()
+        if ($first -match '^\d+\.\d+\.\d+\S*$') { return $first }
+    } catch { }
+    return $null
+}
+
+if (-not $NoClaudeLoop) {
+    $proxyDir = Join-Path $AppDir 'windows\cl-pty-proxy'
+    $proxyExe = Join-Path $proxyDir 'target\release\cl-pty-proxy.exe'
+    $appVersion = (Get-Content -Raw (Join-Path $AppDir 'package.json') | ConvertFrom-Json).version
+    $builtFrom = if (Test-Path $proxyExe) { Get-ProxyVersion $proxyExe } else { $null }
+
+    if ($builtFrom -eq $appVersion) {
+        Log "Rust PTY proxy up to date (v$builtFrom)"
+    } elseif (Test-Path (Join-Path $proxyDir 'Cargo.toml')) {
+        if (Test-Path $proxyExe) {
+            $was = if ($builtFrom) { "v$builtFrom" } else { 'a build older than version reporting' }
+            Log "Rust PTY proxy is $was, this install is v$appVersion - replacing it"
+        }
+        # A running loop holds the .exe open, so it cannot be overwritten; Windows
+        # does allow renaming it, and the loop keeps running on the renamed file.
+        $aside = "$proxyExe.old"
+        if (Test-Path $proxyExe) {
+            Remove-Item -Force $aside -ErrorAction SilentlyContinue
+            try { Move-Item -Force $proxyExe $aside } catch { Warn "could not move the old proxy aside: $($_.Exception.Message)" }
+        }
+
+        # On PATH, or where rustup puts it before a new shell picks the PATH up.
+        $cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+        if (-not $cargo) {
+            $userCargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+            if (Test-Path $userCargo) { $cargo = $userCargo }
+        }
+        if ($cargo) {
+            Log "building the Rust PTY proxy (one-time, ~30s)"
+            & $cargo build --release --quiet --manifest-path (Join-Path $proxyDir 'Cargo.toml')
+            if ($LASTEXITCODE -ne 0) { Warn "Rust proxy build failed (exit $LASTEXITCODE)" }
+        } else {
+            $url = "https://github.com/quazardous/aiball/releases/download/v$appVersion/cl-pty-proxy-windows-x86_64.exe"
+            Log "cargo not found - downloading the release proxy for v$appVersion"
+            try {
+                New-Item -ItemType Directory -Force -Path (Split-Path $proxyExe -Parent) | Out-Null
+                Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $proxyExe
+            } catch {
+                Warn "download failed: $($_.Exception.Message)"
+                Warn "  install Rust (winget install Rustlang.Rustup), then re-run install.ps1 to build it"
+            }
+        }
+
+        if (Test-Path $proxyExe) {
+            Remove-Item -Force $aside -ErrorAction SilentlyContinue   # still in use by a loop: left for next time
+            $now = Get-ProxyVersion $proxyExe
+            if ($now -eq $appVersion) { Log "Rust PTY proxy ready (v$now)" }
+            else { Warn "Rust PTY proxy installed but reports $(if ($now) { "v$now" } else { 'no version' }) - aiball check will flag it" }
+        } else {
+            if (Test-Path $aside) { Move-Item -Force $aside $proxyExe -ErrorAction SilentlyContinue }
+            Warn "no usable Rust PTY proxy - claude-loop start will refuse until one is built"
+        }
+    }
+}
 
 # --- data + log dirs --------------------------------------------------------
 
@@ -654,10 +864,11 @@ $repeatFlags = @()
 foreach ($sw in 'Service', 'System', 'Minimal', 'NoTray', 'NoClaudeLoop', 'StopHook') {
     if ($PSBoundParameters.ContainsKey($sw) -and $PSBoundParameters[$sw]) { $repeatFlags += "-$sw" }
 }
+if ($Prefix)                                    { $repeatFlags += @('-Prefix', $Prefix) }
 if ($PSBoundParameters.ContainsKey('Port'))     { $repeatFlags += @('-Port', "$Port") }
 if ($PSBoundParameters.ContainsKey('BindHost')) { $repeatFlags += @('-BindHost', $BindHost) }
 try {
-    $installRecord = Join-Path $env:USERPROFILE '.config\aiball\install.json'
+    $installRecord = $InstallRecord
     New-Item -ItemType Directory -Force -Path (Split-Path $installRecord -Parent) | Out-Null
     $pkgVersion = (Get-Content -Raw (Join-Path $AppDir 'package.json') | ConvertFrom-Json).version
     [ordered]@{
@@ -686,7 +897,13 @@ $launcherPath = Join-Path $LogDir 'daemon-launcher.cmd'
 # the daemon writes/reads from %PROGRAMDATA%\aiball.
 $envOverrides = if ($System) {
     "set `"AIBALL_HOME=$DataDir`""
+} elseif ($Prefix) {
+    # A prefixed install keeps its data and config to itself.
+    "set `"AIBALL_HOME=$DataDir`"`r`nset `"XDG_CONFIG_HOME=$ConfigHome`""
 } else { '' }
+# The checkout runs its source through its own dev dependencies; a package
+# installed from its tarball has an entrypoint for the daemon.
+$daemonCmd = if ($FromTarball) { "node `"%LIB%\bin\aiball-daemon`"" } else { 'npx.cmd --no-install tsx src\daemon.ts' }
 $launcherBody = @"
 @echo off
 setlocal EnableExtensions
@@ -712,7 +929,7 @@ set "AIBALL_HOST=$BindHost"
 $envOverrides
 
 echo [%date% %time%] launching aiball daemon (port $Port) >> "%LOG%"
-npx.cmd --no-install tsx src\daemon.ts >> "%LOG%" 2>&1
+$daemonCmd >> "%LOG%" 2>&1
 "@
 [System.IO.File]::WriteAllText($launcherPath, ($launcherBody -replace "`r?`n","`r`n"))
 Log "wrote daemon launcher: $launcherPath"
@@ -764,11 +981,25 @@ foreach ($name in $Shims) {
         continue
     }
     $shimPath = Join-Path $PrefixBin "$name.cmd"
-    $shimBody = @"
+    $shimBody = if ($Prefix) {
+        # Pointed at this install's own daemon, data and config, not the
+        # machine's. setlocal: typed in a cmd.exe console, `set` would outlive it.
+        @"
+@echo off
+setlocal
+set "AIBALL_HOME=$DataDir"
+set "XDG_CONFIG_HOME=$ConfigHome"
+set "AIBALL_URL=http://${BindHost}:${Port}"
+node "$target" %*
+exit /b %errorlevel%
+"@
+    } else {
+        @"
 @echo off
 node "$target" %*
 exit /b %errorlevel%
 "@
+    }
     [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
     Log "wrote shim: $shimPath -> $target"
 }
@@ -1026,7 +1257,7 @@ Write-Host ''
 if ($Minimal) {
     Write-Host "  mode:        minimal (in-place — daemon runs from $SrcDir)"
 } else {
-    Write-Host "  install dir: $PrefixLib$(if ($Symlink) { '  (symlink -> ' + $SrcDir + ')' })"
+    Write-Host "  install dir: $PrefixLib$(if ($Symlink) { '  (symlink -> ' + $SrcDir + ')' } else { '  (package: ' + $AppDir + ')' })"
 }
 Write-Host "  data dir:    $DataDir"
 Write-Host "  log file:    $LogFile"
