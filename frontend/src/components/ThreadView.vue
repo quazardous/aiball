@@ -37,9 +37,12 @@ const props = defineProps<{
      *  about one. Distinct from `ticketId`, which is where they ARE. */
     focusMessageId?: number | null;
 }>();
-const emit = defineEmits<{ (e: "back"): void; (e: "focused"): void }>();
+const emit = defineEmits<{ (e: "back"): void; (e: "focused"): void; (e: "project", project: string | null): void }>();
 
 const data = ref<ThreadViewData | null>(null);
+// #2613 — tell the shell which project the open ticket is in: with no project
+// filter, the megaphone edits that one.
+watch(() => data.value?.ticket.project ?? null, (p) => emit("project", p), { immediate: true });
 const error = ref<string | null>(null);
 const decideBusy = ref(false);
 // #740 david `a9rucr` — the composer hosts an assignee picker, but the

@@ -42,6 +42,7 @@ import { setUnauthorizedHandler } from "./lib/api";
 import Sidebar, { type ProjectListItem, type ProjectPage, type SettingsPanel } from "./components/Sidebar.vue";
 import TagsPanel from "./components/TagsPanel.vue";
 import ThreadView from "./components/ThreadView.vue";
+import { megaphoneProject } from "./lib/megaphoneProject";
 
 const toast = useToast();
 
@@ -154,6 +155,8 @@ const project = ref<string | null>(
 );
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
+// #2613 — the open ticket's project, reported by ThreadView once loaded.
+const openTicketProject = ref<string | null>(null);
 // Routed as /consumers/<id> via lib/router.ts (#B.193).
 const consumerEditId = ref<string | null>(null);
 const automationRuleEditId = ref<string | null>(null);
@@ -720,7 +723,7 @@ watch(showSnoozed, (v) => {
             :global-snoozed-count="globalSnoozedCount"
             :global-open-count="globalOpenCount"
             :show-snoozed="showSnoozed"
-            :project="project"
+            :project="megaphoneProject(project, openTicketId, openTicketProject)"
             :dark="dark"
             @update:show-snoozed="showSnoozed = $event"
             @update:dark="dark = $event"
@@ -809,6 +812,7 @@ watch(showSnoozed, (v) => {
                     :focus-message-id="pendingFocusId"
                     @back="openTicketId = null"
                     @focused="pendingFocusId = null"
+                    @project="openTicketProject = $event"
                 />
 
                 <!-- #471 — unified overview = Detail+Stats+Settings tabs + Danger zone. -->
