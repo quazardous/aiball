@@ -1,13 +1,12 @@
 <script setup lang="ts">
 /**
- * #2653 — the commits a comment said it delivers (#2652), under its buttons:
- * one chip per commit (short SHA, the wait credit it earned or why not), linked
- * to the commit when the project has a GitHub repository bound, otherwise a
- * click copies the SHA. A discreet "no commit" when the agent said none;
- * nothing when the comment never said.
+ * #2653 — the commits a comment said it delivers (#2652), under its buttons.
+ * #2663 david — discreet: a small muted line of short SHAs, no tag, no score;
+ * linked to the commit when the project has a GitHub repository bound,
+ * otherwise a click copies the SHA. No commit (none said, or never said):
+ * nothing is rendered at all.
  */
 import { computed, ref } from "vue";
-import Tag from "primevue/tag";
 import type { Message } from "../lib/api";
 import { commitsView } from "../lib/commentCommits";
 import { resolveCommitUrl, upstreamBindings } from "../lib/upstream-providers";
@@ -15,7 +14,10 @@ import { resolveCommitUrl, upstreamBindings } from "../lib/upstream-providers";
 const props = defineProps<{ msg: Message }>();
 const copied = ref<string | null>(null);
 
-const view = computed(() => commitsView(props.msg.meta, (sha) => resolveCommitUrl(sha, upstreamBindings.value[props.msg.project] ?? [])));
+const chips = computed(() => {
+    const v = commitsView(props.msg.meta, (sha) => resolveCommitUrl(sha, upstreamBindings.value[props.msg.project] ?? []));
+    return v.state === "list" ? v.chips : [];
+});
 
 async function copy(sha: string): Promise<void> {
     try {
@@ -29,30 +31,26 @@ async function copy(sha: string): Promise<void> {
 </script>
 
 <template>
-    <div v-if="view.state !== 'absent'" class="comment-commits">
-        <span v-if="view.state === 'none'" class="comment-commits__none" title="The agent said this comment delivers no commit">no commit</span>
-        <template v-else>
-            <component
-                :is="chip.url ? 'a' : 'span'"
-                v-for="chip in view.chips"
-                :key="chip.sha"
-                class="comment-commits__chip"
-                :href="chip.url ?? undefined"
-                :target="chip.url ? '_blank' : undefined"
-                :rel="chip.url ? 'noopener noreferrer' : undefined"
+    <div v-if="chips.length" class="comment-commits">
+        <template v-for="(chip, i) in chips" :key="chip.sha">
+            <span v-if="i > 0" class="comment-commits__sep">·</span>
+            <a
+                v-if="chip.url"
+                class="comment-commits__sha"
+                :href="chip.url"
+                target="_blank"
+                rel="noopener noreferrer"
                 :title="chip.title"
-                :role="chip.url ? undefined : 'button'"
-                @click="chip.url ? undefined : copy(chip.sha)"
-            >
-                <Tag
-                    :severity="chip.earned ? 'success' : 'secondary'"
-                    style="font-size: var(--fs-2xs)"
-                >
-                    <i class="pi pi-code" style="font-size: var(--fs-2xs)" />
-                    <code class="comment-commits__sha">{{ copied === chip.sha ? "copied" : chip.short }}</code>
-                    <span class="comment-commits__credit">{{ chip.credit }}</span>
-                </Tag>
-            </component>
+            >{{ chip.short }}</a>
+            <span
+                v-else
+                class="comment-commits__sha comment-commits__sha--copy"
+                role="button"
+                tabindex="0"
+                :title="chip.title"
+                @click="copy(chip.sha)"
+                @keydown.enter.prevent="copy(chip.sha)"
+            >{{ copied === chip.sha ? "copied" : chip.short }}</span>
         </template>
     </div>
 </template>
@@ -61,21 +59,22 @@ async function copy(sha: string): Promise<void> {
 .comment-commits {
     display: flex;
     flex-wrap: wrap;
+    align-items: baseline;
     gap: 0.3rem;
-    margin-top: 0.25rem;
-}
-.comment-commits__chip {
-    text-decoration: none;
-    cursor: pointer;
+    margin-top: 0.15rem;
+    font-size: var(--fs-2xs);
+    opacity: 0.55;
 }
 .comment-commits__sha {
-    margin: 0 0.3rem;
+    font-family: var(--font-mono, monospace);
+    color: inherit;
+    text-decoration: none;
 }
-.comment-commits__credit {
-    opacity: 0.8;
+.comment-commits__sha:hover {
+    text-decoration: underline;
+    opacity: 1;
 }
-.comment-commits__none {
-    font-size: var(--fs-2xs);
-    opacity: 0.45;
+.comment-commits__sha--copy {
+    cursor: pointer;
 }
 </style>

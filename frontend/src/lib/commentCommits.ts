@@ -44,7 +44,7 @@ export function commitsView(meta: string | null | undefined, commitUrl: (sha: st
                 short: c.sha.slice(0, 7),
                 credit,
                 earned,
-                title: `commit ${c.sha} — ${earned ? `earned ${c.minutes} min of wait credit` : `no wait credit: ${credit}`}${url ? "" : " — click to copy the SHA"}`,
+                title: `commit ${c.sha}${url ? "" : " — click to copy the SHA"}`,
                 url,
             };
         });

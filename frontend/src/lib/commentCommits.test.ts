@@ -18,6 +18,7 @@ test("absent, none, and a list with credit or reason", () => {
     if (v.state !== "list") return;
     assert.deepEqual(v.chips.map((c) => [c.short, c.credit, c.earned]), [["9e32067", "+30 min", true], ["deadbee", "older than 48 h", false]]);
     assert.match(v.chips[0].title, /click to copy the SHA/);
+    assert.doesNotMatch(v.chips[0].title, /credit|min/, "#2663 no score in what is shown");
     assert.deepEqual(commitsView("{broken", noUrl), { state: "absent" });
 });
 
