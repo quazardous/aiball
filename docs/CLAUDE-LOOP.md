@@ -949,6 +949,18 @@ Leave it off unless you are tuning the pane detectors for that project: the
 frames are verbatim screen dumps, which is exactly why `claude-loop bug`
 excludes them by default.
 
+### Scrolling back
+
+In an attached loop the mouse wheel scrolls the pane: the multiplexer enters
+copy-mode, and `q` leaves it. The loop keeps 10000 lines of scrollback per
+session instead of the multiplexer's default 2000.
+
+This works because the loop starts Claude Code with the mouse off
+(`CLAUDE_CODE_DISABLE_MOUSE=1`). A program that asks for the mouse gets every
+wheel notch, and Claude Code reads them as Up/Down, walking through its prompt
+history instead. For the same reason, selecting text with the mouse belongs to
+the multiplexer, not to Claude Code.
+
 ---
 
 ## Files

@@ -23,6 +23,11 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Changed
+
+- A loop keeps 10000 lines of scrollback instead of the multiplexer's default
+  2000, now that the mouse wheel scrolls the pane.
+
 ## [0.43.0] — 2026-09-16
 
 ### Added
