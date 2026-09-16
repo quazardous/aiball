@@ -51,13 +51,15 @@ dates are YYYY-MM-DD.
   was built from, and `aiball check` flags a proxy that does not match the
   install — present but stale was previously reported as fine.
 
-### Fixed
+### Changed
 
-- The mouse wheel in a loop scrolls the terminal again instead of walking back
-  through Claude Code's prompt history. Claude Code asks for the mouse, and the
-  multiplexer then hands every wheel notch to it rather than to its own
-  scrollback; loops now start Claude Code with the mouse off, so the wheel
-  scrolls the pane and text selection belongs to the multiplexer.
+- Loops start Claude Code with its mouse support off. This was meant to let the
+  mouse wheel scroll the terminal instead of walking back through Claude Code's
+  prompt history, and it does not: on Windows, psmux 3.3.8 turns the wheel into
+  arrow keys whenever Claude Code is in front, whatever Claude Code asks for.
+  Until a psmux release carries its fix, enter copy-mode with `prefix + [` to
+  scroll. *(Corrected after release: this entry first announced the wheel as
+  fixed.)*
 
 ## [0.42.0] — 2026-09-16
 
