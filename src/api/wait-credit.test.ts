@@ -288,3 +288,41 @@ test("#2645 trim: every waiting step comes down to N minutes from now, the cut-o
     const again = await call(BOSS, "POST", "/api/steps/trim", { max_minutes: 5 });
     assert.equal((again.json.trimmed as unknown[]).length, 0, "nothing left to trim");
 });
+
+test("#2640 every part of the scheme is a per-project setting: off, no refund, commit age and count", async () => {
+    const { setConfigOverride } = await import("../db/config-overrides.js");
+    const PO = "p-2640-off";
+    createProject({ name: PO });
+    upsertSubscription("worker", PO, "owner");
+    const t = submitMessage({ project: PO, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
+    await call(WORKER, "POST", `/api/tickets/${t}/assign`, {});
+
+    setConfigOverride(PO, "tickets.wait_credit_enabled", false);
+    const off = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 100 });
+    assert.equal(off.json.wait_credit, undefined, "off: the reply says nothing about credit");
+    const meta = JSON.parse(String(off.json.meta)) as { step_resume_at: string };
+    assert.ok((Date.parse(meta.step_resume_at) - Date.now()) / 60_000 > 99, "off: the 100 minutes are granted, uncapped");
+    assert.equal(waitCreditBalance("worker", PO), 60, "off: nothing spent");
+    const rows = (await call(WORKER, "GET", `/api/tickets?project=${PO}&backlog=1&limit=50`)).json as unknown as Array<{ wait_credit_minutes: number | null }>;
+    assert.ok(rows.every((r) => r.wait_credit_minutes === null), "off: wakes say nothing");
+
+    setConfigOverride(PO, "tickets.wait_credit_enabled", true);
+    setConfigOverride(PO, "tickets.wait_credit_refund", false);
+    const s = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 30 });
+    assert.equal((s.json.wait_credit as Credit).balance, 30);
+    const back = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", handback: true });
+    assert.equal((back.json.wait_credit as Credit).refunded, 0, "no refund when refunds are off");
+
+    setConfigOverride(PO, "tickets.wait_credit_resolved_no_commit_minutes", 7);
+    const res = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", decision_kind: "resolution" });
+    assert.equal((await call(BOSS, "POST", `/api/messages/${res.json.id}/decide`, { status: "accepted" })).status, 200);
+    assert.equal(waitCreditBalance("worker", PO), 37, "the amounts are the project's");
+
+    setConfigOverride(PO, "tickets.wait_credit_max_commits_per_comment", 1);
+    setConfigOverride(PO, "tickets.wait_credit_commit_max_age_hours", 1);
+    const t2 = submitMessage({ project: PO, kind: "ticket_created", title: "t2", body: "x", by_agent: "boss" }).id;
+    const c = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t2, body: "b", summary_until: "s", handback: true, commits: ["deadbeef", "cafebabe"] });
+    const [first, second] = (c.json.wait_credit as Credit).commits!;
+    assert.doesNotMatch(first.reason ?? "", /past the/);
+    assert.match(second.reason ?? "", /past the 1 commits counted per comment/);
+});

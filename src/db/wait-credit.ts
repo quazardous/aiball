@@ -48,6 +48,11 @@ export function commitMinutes(changedLines: number, linesPerMinute: number, maxP
     return Math.min(maxPerCommit, Math.floor(changedLines / linesPerMinute));
 }
 
+function bool(key: string, project: string, fallback: boolean): boolean {
+    const v = getConfig(key, project);
+    return typeof v === "boolean" ? v : fallback;
+}
+
 function num(key: string, project: string, fallback: number): number {
     const v = Number(getConfig(key, project) ?? fallback);
     return Number.isFinite(v) && v >= 0 ? v : fallback;
@@ -55,6 +60,10 @@ function num(key: string, project: string, fallback: number): number {
 
 export function waitCreditConfig(project: string) {
     return {
+        enabled: bool("tickets.wait_credit_enabled", project, true),
+        refund: bool("tickets.wait_credit_refund", project, true),
+        commitMaxAgeHours: num("tickets.wait_credit_commit_max_age_hours", project, 48),
+        maxCommitsPerComment: num("tickets.wait_credit_max_commits_per_comment", project, 20),
         start: num("tickets.wait_credit_start_minutes", project, 60),
         floor: num("tickets.step_min_wait_minutes", project, 5),
         resolved: num("tickets.wait_credit_resolved_minutes", project, 30),
@@ -87,6 +96,7 @@ function record(move: Omit<schema.NewWaitCreditMove, "createdAt">): boolean {
  * waiting, gives back what is left. Called before the new message lands.
  */
 export function refundOnReturn(consumerId: string, project: string, ticketId: number, nowMs = Date.now()): number {
+    if (!waitCreditConfig(project).refund) return 0;
     const step = getDb().all<{ message_id: number; spent: number; resume_at: string | null }>(sql`
         SELECT s.message_id, -s.minutes AS spent, json_extract(m.meta, '$.step_resume_at') AS resume_at
         FROM wait_credit_moves s
@@ -120,6 +130,7 @@ export function recordStepSpend(consumerId: string, project: string, ticketId: n
  */
 export function earnOnClose(consumerId: string, project: string, ticketId: number, how: "resolved" | "wontfix"): number {
     const cfg = waitCreditConfig(project);
+    if (!cfg.enabled) return 0;
     const withCommit = getDb().all<{ n: number }>(sql`
         SELECT COUNT(*) AS n FROM wait_credit_moves
         WHERE kind = 'earn_commit' AND consumer_id = ${consumerId} AND ticket_id = ${ticketId}
@@ -136,9 +147,6 @@ export interface CommitCredit {
     reason: string | null;
 }
 
-/** How long ago a commit may be to still earn: the work has to be fresh. */
-export const COMMIT_MAX_AGE_HOURS = 48;
-
 /**
  * Commits the agent cites on a reply, read in the project checkout it runs in
  * (`consumers.cwd`). A SHA earns once, whoever cites it; a commit that cannot
@@ -154,8 +162,10 @@ export function earnForCommits(
     nowMs = Date.now(),
 ): CommitCredit[] {
     const cfg = waitCreditConfig(project);
-    return commits.map((c): CommitCredit => {
+    return commits.map((c, i): CommitCredit => {
         const commit = c.trim();
+        if (!cfg.enabled) return { commit, minutes: 0, reason: "wait credit is off on this project" };
+        if (i >= cfg.maxCommitsPerComment) return { commit, minutes: 0, reason: `past the ${cfg.maxCommitsPerComment} commits counted per comment` };
         if (!/^[0-9a-f]{7,40}$/i.test(commit)) return { commit, minutes: 0, reason: "not a commit SHA" };
         if (!cwd || !existsSync(cwd)) return { commit, minutes: 0, reason: "the agent's checkout is not readable from the daemon" };
         const git = (args: string[]) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10_000 });
@@ -163,8 +173,8 @@ export function earnForCommits(
         if (full.status !== 0) return { commit, minutes: 0, reason: "not a commit in the agent's checkout" };
         const sha = full.stdout.trim();
         const when = Number(git(["show", "-s", "--format=%ct", sha]).stdout.trim()) * 1000;
-        if (!(when > 0) || nowMs - when > COMMIT_MAX_AGE_HOURS * 3_600_000) {
-            return { commit, minutes: 0, reason: `older than ${COMMIT_MAX_AGE_HOURS} h` };
+        if (!(when > 0) || nowMs - when > cfg.commitMaxAgeHours * 3_600_000) {
+            return { commit, minutes: 0, reason: `older than ${cfg.commitMaxAgeHours} h` };
         }
         const stat = git(["show", "--numstat", "--format=", sha]);
         let lines = 0;
@@ -187,6 +197,11 @@ export interface WaitCreditRow {
     earned: number;
     spent: number;
     refunded: number;
+}
+
+/** Is the wait credit on for this project? */
+export function waitCreditEnabled(project: string): boolean {
+    return waitCreditConfig(project).enabled;
 }
 
 /** Every agent x project that has a movement, with its balance. */

@@ -167,6 +167,42 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     // #2640 david — the wait credit: « les minutes qu'on attend sont prises sur un budget temps qu'on doit gagner par preuve de travail ».
     {
+        key: "tickets.wait_credit_enabled",
+        scope: "global+project",
+        type: "boolean",
+        default: true,
+        label: "Wait credit",
+        description:
+            "true (default) = continue_after_minutes spends an agent's wait credit, earned by proof of work. false = waits are free and uncapped (still at most tickets.step_after_max_minutes), nothing is earned, spent or refunded, and replies and wakes say nothing about credit.",
+    },
+    {
+        key: "tickets.wait_credit_refund",
+        scope: "global+project",
+        type: "boolean",
+        default: true,
+        label: "Wait credit: refund an early return",
+        description:
+            "true (default) = an agent speaking on a ticket again before its step's wait ends gets the rest of that wait back. false = a wait is spent in full once declared.",
+    },
+    {
+        key: "tickets.wait_credit_commit_max_age_hours",
+        scope: "global+project",
+        type: "number",
+        default: 48,
+        label: "Wait credit: oldest commit that still earns (hours)",
+        description:
+            "A cited commit whose commit date is older than this earns nothing: the credit rewards fresh work.",
+    },
+    {
+        key: "tickets.wait_credit_max_commits_per_comment",
+        scope: "global+project",
+        type: "number",
+        default: 20,
+        label: "Wait credit: commits counted per comment",
+        description:
+            "The most commits one comment can cite for credit; the ones past it earn nothing and the answer says so.",
+    },
+    {
         key: "tickets.wait_credit_start_minutes",
         scope: "global+project",
         type: "number",

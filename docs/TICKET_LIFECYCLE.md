@@ -367,9 +367,12 @@ minus what it waited:
 
 Short of credit the wait is capped to the balance, never under
 `tickets.step_min_wait_minutes` (5), and that floor costs nothing past zero; a
-step asking 0 is always granted. Humans have no credit. All the amounts are
-`tickets.wait_credit_*` settings, per project. `aiball steps` lists every
-balance.
+step asking 0 is always granted. Humans have no credit. The whole scheme is
+per-project settings: `tickets.wait_credit_enabled` (off = free, uncapped
+waits and nothing said), `tickets.wait_credit_refund`, every amount
+(`tickets.wait_credit_*_minutes`, `tickets.step_min_wait_minutes`), and for
+commits the lines per minute, the cap per commit, the oldest commit that still
+earns and how many count per comment. `aiball steps` lists every balance.
 
 A project's **wake focus**, set beside its standing instruction, narrows what
 wakes the project's owner agents to a list of tickets: `123, 456` keeps only

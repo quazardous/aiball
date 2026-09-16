@@ -216,10 +216,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
                 commits: z
                     .array(z.string())
-                    .max(20)
+                    .max(100)
                     .optional()
                     .describe(
-                        "#2640 — commits this comment delivers (SHAs), as proof of work. Each earns wait credit once, from its changed lines, read in your checkout; a commit older than 48 h, unknown there, or already counted earns nothing and the answer says why. Only on a comment (not close/reopen).",
+                        "#2640 — commits this comment delivers (SHAs), as proof of work. Each earns wait credit once, from its changed lines, read in your checkout; a commit too old, unknown there, already counted or past the per-comment limit earns nothing and the answer says why (all of it set per project). Only on a comment (not close/reopen).",
                     ),
                 scope: z
                     .enum(MESSAGE_SCOPES)

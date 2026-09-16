@@ -18,7 +18,7 @@
  * Local helper `enrichRelationStages` is kept private — only the GET
  * /tickets/:id thread builder uses it.
  */
-import { waitCreditBalance } from "../db/wait-credit.js";
+import { waitCreditBalance, waitCreditEnabled } from "../db/wait-credit.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 import { Router, type Request, type Response } from "express";
 import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
@@ -875,7 +875,7 @@ ticketsRouter.get("/tickets", (req, res) => {
     // backlog wake can show it where the agent chooses its next wait.
     const waitCredits = new Map<string, number>();
     const waitCreditOf = (project: string): number | null => {
-        if (!consumerId || isHuman(consumerId)) return null;
+        if (!consumerId || isHuman(consumerId) || !waitCreditEnabled(project)) return null;
         if (!waitCredits.has(project)) waitCredits.set(project, waitCreditBalance(consumerId, project));
         return waitCredits.get(project)!;
     };

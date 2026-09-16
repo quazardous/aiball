@@ -20,7 +20,7 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
-import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance } from "./db/wait-credit.js";
+import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance, waitCreditEnabled } from "./db/wait-credit.js";
 import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
@@ -288,7 +288,8 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
             return { error: "commits must be a list of commit SHAs" };
         }
         if (kind !== "comment_added") return { error: "commits only go with a comment" };
-        if (o.commits.length > 20) return { error: "commits: at most 20 per comment" };
+        // A payload guard only: how many earn is `tickets.wait_credit_max_commits_per_comment`.
+        if (o.commits.length > 100) return { error: "commits: at most 100 per comment" };
         commits = o.commits as string[];
     }
     // #B.245 tristate: composer-side `scope`. One of
@@ -811,7 +812,8 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // drawn from the balance (capped, never under the floor). Humans have none.
     const creditAgent = input.kind === "comment_added" && input.ticket_id != null && input.by_agent && !isHuman(input.by_agent)
         ? input.by_agent : null;
-    const creditProject = creditAgent && input.ticket_id != null ? (getMessage(input.ticket_id)?.project ?? input.project) : null;
+    const ticketProject = creditAgent && input.ticket_id != null ? (getMessage(input.ticket_id)?.project ?? input.project) : null;
+    const creditProject = ticketProject && waitCreditEnabled(ticketProject) ? ticketProject : null;
     let refunded = 0;
     let stepGrant: WaitGrant | null = null;
     if (creditAgent && creditProject && input.ticket_id != null) {
