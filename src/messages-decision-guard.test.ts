@@ -145,3 +145,22 @@ test("#569 — human author bypass : then:resolved on pending OK for moderator",
     });
     assert.ok(msg.id > 0);
 });
+
+test("#2654 — a plan that amends a plan already waiting passes on a pending ticket, whoever posted the first; a first plan, a resolution or a wontfix do not", async () => {
+    upsertConsumer({ consumer_id: "agent-y", kind: "agent" });
+    const withPlan = submitMessage({ project: "p569", kind: "ticket_created", title: "filed with a plan", body: "x", by_agent: "agent-x", decision_kind: "plan" });
+    assert.equal(withPlan.status, "pending", "fixture precondition : ticket is pending");
+    const amend = (by: string, kind: "plan" | "resolution" | "wontfix", ticket = withPlan.id) => submitMessage({
+        project: "p569", kind: "comment_added", ticket_id: ticket, body: `${kind} by ${by}`,
+        decision_kind: kind, summary_until: "s", by_agent: by,
+    });
+    assert.doesNotThrow(() => amend("agent-x", "plan"), "the same agent amends its plan");
+    assert.doesNotThrow(() => amend("agent-y", "plan"), "another agent amends it too");
+    const { decisionGateProposerByTicket } = await import("./db/projects.js");
+    assert.equal(decisionGateProposerByTicket([withPlan.id]).get(withPlan.id), "agent-y", "the latest plan is the one waiting");
+    for (const kind of ["resolution", "wontfix"] as const) {
+        assert.throws(() => amend("agent-x", kind), (e: Error & { code?: string }) => e.code === "PARENT_PENDING_MODERATION", `${kind} still waits for approval`);
+    }
+    const bare = freshPendingTicket();
+    assert.throws(() => amend("agent-x", "plan", bare), (e: Error & { code?: string }) => e.code === "PARENT_PENDING_MODERATION", "a first plan still waits for approval");
+});

@@ -20,7 +20,7 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "./db/connection.js";
 import * as schema from "./schema.js";
 import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance, waitCreditEnabled, waitCreditRules } from "./db/wait-credit.js";
@@ -514,7 +514,30 @@ function assertCloseAuthority(input: NewMessage): void {
  * pédagogique).
  *
  * Exempte close/reopen (qui ont leur propre `assertCloseAuthority`).
+ *
+ * #2654 david — « on doit toujours pouvoir amender un plan ». A `plan` that
+ * amends one already waiting on the ticket passes, whoever posted that one:
+ * `ticket_new({then: "plan"})` creates a pending ticket carrying a plan, and
+ * the refusal left that plan frozen until moderation. A FIRST plan, and any
+ * resolution or wontfix, still wait for the ticket to be approved.
  */
+function hasPendingPlan(ticketId: number): boolean {
+    const onTicket = getDb().all<{ n: number }>(sql`
+        SELECT COUNT(*) AS n FROM tickets
+        WHERE id = ${ticketId}
+          AND json_extract(meta, '$.decision.kind') = 'plan'
+          AND json_extract(meta, '$.decision.status') = 'pending'
+    `)[0]?.n ?? 0;
+    if (onTicket > 0) return true;
+    const onComment = getDb().all<{ n: number }>(sql`
+        SELECT COUNT(*) AS n FROM _messages
+        WHERE ticket_id = ${ticketId} AND kind = 'comment_added' AND status != 'rejected'
+          AND json_extract(meta, '$.decision.kind') = 'plan'
+          AND json_extract(meta, '$.decision.status') = 'pending'
+    `)[0]?.n ?? 0;
+    return onComment > 0;
+}
+
 function assertDecisionOnApprovedTicket(input: NewMessage): void {
     if (input.kind !== "comment_added") return;
     if (!input.decision_kind) return;
@@ -526,6 +549,7 @@ function assertDecisionOnApprovedTicket(input: NewMessage): void {
     const parent = getMessage(input.ticket_id);
     if (!parent || parent.kind !== "ticket_created") return;
     if (parent.status === "approved") return;
+    if (input.decision_kind === "plan" && hasPendingPlan(input.ticket_id)) return;
     const err = new Error(
         `cannot propose ${input.decision_kind} on a ticket in status "${parent.status}" — the reporter must moderate (approve) the ticket first ; post a plain comment_added (without "then:") until then`,
     );
