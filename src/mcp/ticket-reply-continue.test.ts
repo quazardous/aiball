@@ -76,3 +76,12 @@ test("#2640 commits go out on a comment, never on close/reopen, and absent they 
     assert.equal((await reply({ then: "continue", continue_after_minutes: 0 })).commits, undefined);
     assert.equal((await reply({ then: "close", commits: ["ef93fbb"] })).commits, undefined);
 });
+
+test("#2640 the answer starts with the wait credit in words when the daemon sends it", async () => {
+    stub.postMessage = async (msg: Record<string, unknown>) => { sent.push(msg); return { id: 43, wait_credit: { project: "p-2308", balance: 40, refunded: 0, step: { requested: 20, granted: 20, spent: 20 } } }; };
+    const out = await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "continue", continue_after_minutes: 20 }) as { content: Array<{ text: string }> };
+    const text = out.content[0].text;
+    assert.ok(text.indexOf("wait_credit_note") < text.indexOf("\"id\""), "the note comes first");
+    assert.match(text, /Wait credit on p-2308: this step waits 20 min\. 40 min left/);
+    stub.postMessage = async (msg: Record<string, unknown>) => { sent.push(msg); return { id: 43 }; };
+});

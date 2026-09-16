@@ -7,6 +7,7 @@
  *
  * Exposed entry point: `registerTicketWriteTools(server)`.
  */
+import { type WaitCreditAnswer, waitCreditNote } from "./wait-credit-note.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MESSAGE_SCOPES } from "../domain.js";
@@ -320,7 +321,9 @@ export function registerTicketWriteTools(server: McpServer): void {
                     }
                 } catch { /* malformed meta, skip */ }
             }
-            return asText({ ...(res as object), your_decision: yourDecision });
+            // #2640 — what the post did to the wait credit, in words, first.
+            const note = waitCreditNote((res as { wait_credit?: WaitCreditAnswer } | null)?.wait_credit);
+            return asText({ ...(note ? { wait_credit_note: note } : {}), ...(res as object), your_decision: yourDecision });
         },
     );
 
