@@ -80,6 +80,8 @@ export type MessageRow = schema.Message;
  * itself stores the two shapes in separate physical tables.
  */
 export interface Message {
+    /** #2640 — on the answer to a post only: what the post did to the author's wait credit. */
+    wait_credit?: WaitCreditEffect;
     id: number;
     project: string;
     kind: MessageKind;
@@ -255,6 +257,8 @@ export interface NewMessage {
     step?: boolean;
     /** #2449 — with a step: the agent resumes after this many minutes, not at once. */
     step_after_minutes?: number;
+    /** #2640 — commits the author cites as proof of work (wait credit). comment_added only. */
+    commits?: string[];
     /** #2331 — does this message hand the ticket back? Explicit on a comment
      *  with no `then`; deduced at creation from who files the ticket. */
     handback?: boolean;
@@ -583,4 +587,14 @@ export function messageRowToMessage(m: schema.Message, project: string): Message
         source_ticket_id: m.sourceTicketId ?? null,
         meta: m.meta ?? null,
     };
+}
+
+/** #2640 — what one post did to its author's wait credit (see db/wait-credit.ts). */
+export interface WaitCreditEffect {
+    project: string;
+    balance: number;
+    /** Given back from the author's previous step on the ticket, returning early. */
+    refunded: number;
+    step?: { requested: number; granted: number; spent: number };
+    commits?: Array<{ commit: string; minutes: number; reason: string | null }>;
 }

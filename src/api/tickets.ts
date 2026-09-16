@@ -18,6 +18,7 @@
  * Local helper `enrichRelationStages` is kept private — only the GET
  * /tickets/:id thread builder uses it.
  */
+import { waitCreditBalance } from "../db/wait-credit.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 import { Router, type Request, type Response } from "express";
 import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
@@ -870,6 +871,14 @@ ticketsRouter.get("/tickets", (req, res) => {
             }
         }
     }
+    // #2640 — the asking agent's wait credit on each row's project, so a
+    // backlog wake can show it where the agent chooses its next wait.
+    const waitCredits = new Map<string, number>();
+    const waitCreditOf = (project: string): number | null => {
+        if (!consumerId || isHuman(consumerId)) return null;
+        if (!waitCredits.has(project)) waitCredits.set(project, waitCreditBalance(consumerId, project));
+        return waitCredits.get(project)!;
+    };
     const tickets = buildFrom.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
@@ -912,6 +921,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             backlog_tier: flags.backlog_tier,
             backlog_cooled_until: flags.backlog_cooled_until,
             backlog_last_wake_at: flags.backlog_last_wake_at,
+            wait_credit_minutes: flags.backlog_tier !== null ? waitCreditOf(m.project) : null,
             gated_by_decision: flags.gated_by_decision,
             // #2376 david `a6zkyf` — a `then:` still waiting for its accept,
             // whether or not it gates the ticket: a human's comment hands the

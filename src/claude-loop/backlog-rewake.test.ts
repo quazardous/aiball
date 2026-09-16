@@ -69,3 +69,22 @@ test("the hint is in every shipped tone and in the state.ts fallback, word for w
     const tones = (shipped.match(/\{head_tier_triage:\+ /g) ?? []).length;
     assert.equal(shipped.split(fallback).length - 1, tones);
 });
+
+test("#2640 a backlog wake shows the agent's wait credit on the project, when the daemon sends it", async () => {
+    const prev = process.env.AIBALL_AGENT;
+    process.env.AIBALL_AGENT = "claude-test";
+    try {
+        const withCredit = await buildContextPhrase(stubClient({ wait_credit_minutes: 35 }), null, PINGS_YAML);
+        assert.match(withCredit.phrase, /Your wait credit on this project: 35 min\./);
+        const zero = await buildContextPhrase(stubClient({ wait_credit_minutes: 0 }), null, PINGS_YAML);
+        assert.match(zero.phrase, /Your wait credit on this project: 0 min\./, "an empty credit is said, not hidden");
+        const older = await buildContextPhrase(stubClient({}), null, PINGS_YAML);
+        assert.doesNotMatch(older.phrase, /wait credit/, "an older daemon sends nothing: nothing is said");
+    } finally {
+        if (prev === undefined) delete process.env.AIBALL_AGENT; else process.env.AIBALL_AGENT = prev;
+    }
+    const clause = "{head_wait_credit:+ Your wait credit on this project: {head_wait_credit} min.}";
+    const shipped = readFileSync(PINGS_YAML, "utf8");
+    assert.equal(shipped.split(clause).length - 1, (shipped.match(/\{head_tier_triage:\+ /g) ?? []).length, "every tone");
+    assert.ok(readFileSync(STATE_TS, "utf8").includes(clause), "and the fallback");
+});

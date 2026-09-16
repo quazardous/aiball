@@ -1317,7 +1317,7 @@ export class AiballClient {
         const qs = new URLSearchParams();
         if (project) qs.set("project", project);
         if (sinceDays) qs.set("since_days", String(sinceDays));
-        return this.http<{ project: string | null; since: string | null; buckets: Array<{ bucket: string; steps: number; avg_declared: number; early: number; on_time: number; late: number; pending: number }> }>(
+        return this.http<{ project: string | null; since: string | null; buckets: Array<{ bucket: string; steps: number; avg_declared: number; early: number; on_time: number; late: number; pending: number }>; credits?: Array<{ consumer_id: string; project: string; balance: number; earned: number; spent: number; refunded: number }> }>(
             "GET", `/api/steps/timing${qs.size ? `?${qs}` : ""}`);
     }
 

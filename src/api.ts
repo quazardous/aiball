@@ -1,4 +1,5 @@
 import { projectTicketStates } from "./db/inbox-agg.js";
+import { listWaitCredits } from "./db/wait-credit.js";
 import { stepTimingReport, stepTimingRows } from "./db/step-timing.js";
 import { Router, type Request, type Response } from "express";
 import {
@@ -357,7 +358,7 @@ api.get("/steps/timing", (req, res) => {
     const project = typeof req.query.project === "string" && req.query.project ? req.query.project : null;
     const days = Number(req.query.since_days);
     const since = Number.isFinite(days) && days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : null;
-    res.json({ project, since, buckets: stepTimingReport(stepTimingRows({ project, since })) });
+    res.json({ project, since, buckets: stepTimingReport(stepTimingRows({ project, since })), credits: listWaitCredits(project) });
 });
 
 api.get("/projects/:name/stats", (req, res) => {

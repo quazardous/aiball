@@ -202,6 +202,12 @@ program
             `steps with a delay${r.project ? ` on ${r.project}` : ""}${r.since ? ` since ${r.since.slice(0, 10)}` : ""}:`,
             "delay (min)  steps  avg declared  early (<½)  on time  late (>1.1×)  not back",
             ...r.buckets.map((b) => `${b.bucket.padEnd(11)}  ${String(b.steps).padStart(5)}  ${String(b.avg_declared).padStart(12)}  ${String(b.early).padStart(10)}  ${String(b.on_time).padStart(7)}  ${String(b.late).padStart(12)}  ${String(b.pending).padStart(8)}`),
+            "",
+            "wait credit (minutes):",
+            ...(r.credits?.length
+                ? ["agent / project                      balance  earned   spent  refunded",
+                    ...r.credits.map((c) => `${`${c.consumer_id} / ${c.project}`.padEnd(36)} ${String(c.balance).padStart(7)} ${String(c.earned).padStart(7)} ${String(c.spent).padStart(7)} ${String(c.refunded).padStart(9)}`)]
+                : ["  no movement yet"]),
         ].join("\n"));
     });
 

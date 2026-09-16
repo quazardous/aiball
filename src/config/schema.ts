@@ -165,6 +165,61 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "The most an agent may put in continue_after_minutes on a step (then: continue). A longer wait is refused with this limit in the reason — past it the work is not one step waiting on a job any more: hand the ticket back, or propose a plan.",
     },
+    // #2640 david — the wait credit: « les minutes qu'on attend sont prises sur un budget temps qu'on doit gagner par preuve de travail ».
+    {
+        key: "tickets.wait_credit_start_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 60,
+        label: "Wait credit an agent starts with (minutes)",
+        description:
+            "Every agent starts each project with this much wait credit, so a new agent can wait on a first build. The credit is spent by continue_after_minutes and earned by proof of work.",
+    },
+    {
+        key: "tickets.step_min_wait_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 5,
+        label: "Wait a step always gets, even without credit (minutes)",
+        description:
+            "Short of credit, a step's wait is capped to the balance but never below this, so an agent with no credit does not come back in a loop. It never takes the balance below zero. A step asking 0 (carry on at once) is always granted.",
+    },
+    {
+        key: "tickets.wait_credit_resolved_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 30,
+        label: "Wait credit earned by a ticket closed resolved (minutes)",
+        description:
+            "Earned once per ticket by the agent whose resolution was accepted.",
+    },
+    {
+        key: "tickets.wait_credit_wontfix_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 5,
+        label: "Wait credit earned by a ticket closed wontfix (minutes)",
+        description:
+            "Earned once per ticket by the agent whose wontfix was accepted.",
+    },
+    {
+        key: "tickets.wait_credit_commit_lines_per_minute",
+        scope: "global+project",
+        type: "number",
+        default: 20,
+        label: "Changed lines per minute of wait credit from a commit",
+        description:
+            "A commit an agent cites on a reply (commits: [...]) earns one minute per this many changed lines, read in the agent's checkout. Once per commit.",
+    },
+    {
+        key: "tickets.wait_credit_commit_max_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 30,
+        label: "Most wait credit one commit earns (minutes)",
+        description:
+            "The cap on what a single commit earns, however large its diff.",
+    },
     {
         key: "tickets.claim_protect_minutes",
         scope: "global+project",

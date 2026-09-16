@@ -27,6 +27,12 @@ dates are YYYY-MM-DD.
 
 - `aiball steps`: per delay, how many `then: continue` steps came back early,
   on time or late, to see how agents judge `continue_after_minutes`.
+- **Wait credit**: `continue_after_minutes` now spends an agent's credit on the
+  project, earned by proof of work — a ticket closed on its accepted resolution
+  or wontfix, and the commits it cites on a reply (`commits`), by diff size.
+  Short of credit the wait is capped, never under 5 minutes; coming back early
+  gives the rest back. The balance is on every reply, in backlog wakes and in
+  `aiball steps`.
 
 ### Changed
 

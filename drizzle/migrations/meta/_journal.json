@@ -512,6 +512,13 @@
       "when": 1782700000021,
       "tag": "0072_token_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1782700000022,
+      "tag": "0073_wait_credit",
+      "breakpoints": true
     }
   ]
 }

@@ -20,6 +20,7 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
+import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance } from "./db/wait-credit.js";
 import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
@@ -280,6 +281,16 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         }
         stepAfterMinutes = n;
     }
+    // #2640 — commits cited as proof of work: a list of SHAs, on a comment.
+    let commits: string[] | undefined = undefined;
+    if (o.commits !== undefined && o.commits !== null) {
+        if (!Array.isArray(o.commits) || !o.commits.every((c) => typeof c === "string")) {
+            return { error: "commits must be a list of commit SHAs" };
+        }
+        if (kind !== "comment_added") return { error: "commits only go with a comment" };
+        if (o.commits.length > 20) return { error: "commits: at most 20 per comment" };
+        commits = o.commits as string[];
+    }
     // #B.245 tristate: composer-side `scope`. One of
     // `internal | default | broadcast`. Applies to every kind
     // (ticket_created and comment_added alike — each event decides
@@ -334,6 +345,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         summary_until: summaryUntil,
         ...(step ? { step: true } : {}),
         ...(stepAfterMinutes !== undefined ? { step_after_minutes: stepAfterMinutes } : {}),
+        ...(commits !== undefined ? { commits } : {}),
         ...(handback !== undefined ? { handback } : {}),
         scope,
         from_project: fromProject,
@@ -794,7 +806,29 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // Consumers and can tag kind/display_name retroactively (#B.79).
     // No-op when already present.
     if (input.by_agent) ensureConsumer(input.by_agent);
+    // #2640 — the wait credit. An agent speaking on a ticket again gets back
+    // what its previous step there had not waited yet; a step's wait is then
+    // drawn from the balance (capped, never under the floor). Humans have none.
+    const creditAgent = input.kind === "comment_added" && input.ticket_id != null && input.by_agent && !isHuman(input.by_agent)
+        ? input.by_agent : null;
+    const creditProject = creditAgent && input.ticket_id != null ? (getMessage(input.ticket_id)?.project ?? input.project) : null;
+    let refunded = 0;
+    let stepGrant: WaitGrant | null = null;
+    if (creditAgent && creditProject && input.ticket_id != null) {
+        refunded = refundOnReturn(creditAgent, creditProject, input.ticket_id);
+        if (input.step === true && input.step_after_minutes !== undefined && input.step_after_minutes > 0) {
+            stepGrant = planStepWait(creditAgent, creditProject, input.step_after_minutes);
+            input = { ...input, step_after_minutes: stepGrant.granted };
+        }
+    }
     let msg = insertMessage(input);
+    let creditCommits: CommitCredit[] | undefined = undefined;
+    if (creditAgent && creditProject && msg.ticket_id != null) {
+        if (stepGrant) recordStepSpend(creditAgent, creditProject, msg.ticket_id, msg.id, stepGrant);
+        if (input.commits?.length) {
+            creditCommits = earnForCommits(creditAgent, creditProject, msg.ticket_id, getConsumer(creditAgent)?.cwd ?? null, input.commits);
+        }
+    }
     autoSubscribeAuthor(msg);
     // Fan out delivery pings at INSERTION. Since #697 F3 (david `hwct2h`),
     // `fanOutPings` itself gates the subscriber / owner / follower paths
@@ -965,6 +999,18 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
             if (upTo != null) markTicketSeen(msg.by_agent, msg.ticket_id, { upTo });
             else markTicketSeen(msg.by_agent, msg.ticket_id);
         } catch { /* best-effort — pings table errors must not fail the message insert */ }
+    }
+    if (creditAgent && creditProject) {
+        return {
+            ...msg,
+            wait_credit: {
+                project: creditProject,
+                balance: waitCreditBalance(creditAgent, creditProject),
+                refunded,
+                ...(stepGrant ? { step: { requested: stepGrant.requested, granted: stepGrant.granted, spent: stepGrant.spent } } : {}),
+                ...(creditCommits ? { commits: creditCommits } : {}),
+            },
+        };
     }
     return msg;
 }

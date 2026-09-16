@@ -2473,6 +2473,7 @@ export async function buildContextPhrase(
         // #2458 — minutes since the previous backlog wake on this head, when it
         // came back on its own too soon; "" otherwise.
         let headRewakeMinutes = "";
+        let headWaitCredit = "";
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -2521,6 +2522,8 @@ export async function buildContextPhrase(
                     last_actor_at?: string | null;
                     /** #2458 — this consumer's previous backlog wake on it. */
                     backlog_last_wake_at?: string | null;
+                    /** #2640 — this consumer's wait credit on the row's project. */
+                    wait_credit_minutes?: number | null;
                 };
                 const rows: BacklogRow[] = Array.isArray(raw)
                     ? (raw as BacklogRow[])
@@ -2554,6 +2557,7 @@ export async function buildContextPhrase(
                         windowSec: Math.max(0, Number(process.env[CL_ENV.BACKLOG_REWAKE_WINDOW_SEC] ?? 1800)),
                     });
                     if (rewake !== null) headRewakeMinutes = String(rewake);
+                    if (typeof top.wait_credit_minutes === "number") headWaitCredit = String(top.wait_credit_minutes);
                     // #1363 david `futbsc` — when the head's last actor isn't me,
                     // SHOW that last event's content (a bundle-style line) instead
                     // of asserting "<actor> is waiting on your reply". The old
@@ -2733,6 +2737,7 @@ export async function buildContextPhrase(
             head_tier_blocked: backlogMode && headTier === 4 ? "1" : "",
             // #2458 — the ticket came back too soon after its previous wake.
             head_rewake_minutes: backlogMode ? headRewakeMinutes : "",
+            head_wait_credit: backlogMode ? headWaitCredit : "",
             // #1350 — "1" when the head EVENT wake is for a ticket this consumer
             // isn't responsible for (non-claimable). The template appends
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
@@ -2812,7 +2817,7 @@ export async function buildContextPhrase(
             // #2458 david — a ticket that keeps coming back is usually a step
             // declared with `continue_after_minutes: 0` while the next move waits
             // on a job. Say how to rest it, on whatever tier it came back as.
-            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` a `continue_after_minutes` (not 0): the soonest a look is worth it, not how long the job takes. It rests until then.}}";
+            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` a `continue_after_minutes` (not 0): the soonest a look is worth it, not how long the job takes. It rests until then.}{head_wait_credit:+ Your wait credit on this project: {head_wait_credit} min.}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

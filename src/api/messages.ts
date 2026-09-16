@@ -17,6 +17,7 @@
  *
  * `decide()` helper is local — shared by approve/reject; not exported.
  */
+import { earnOnClose } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
 import { ERROR_CODES, MESSAGE_SCOPES, TICKET_LEVELS, type TicketLevel } from "../domain.js";
 import { seesLevel } from "../db/consumers.js";
@@ -623,6 +624,11 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                     }, { skipFanOut: true, skipBroadcast: true });
                     if (closeMsg.status === "approved") {
                         fanOutPings(closeMsg, { except: updated.by_agent });
+                        // #2640 — a ticket closed on an agent's accepted
+                        // resolution or wontfix is proof of work: wait credit.
+                        if (updated.by_agent && !isHuman(updated.by_agent)) {
+                            earnOnClose(updated.by_agent, updated.project, updated.ticket_id, effect === "close_resolved" ? "resolved" : "wontfix");
+                        }
                     }
                 }
             } catch {

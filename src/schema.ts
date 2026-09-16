@@ -1054,3 +1054,30 @@ export const ticketPayloads = sqliteTable("ticket_payloads", {
      *  credential was destroyed. Non-secret by construction. */
     revokedKeys: text("revoked_keys"),
 });
+
+/**
+ * #2640 — one movement of an agent's wait credit (see migration 0073). The
+ * balance is `tickets.wait_credit_start_minutes` plus the sum of `minutes`
+ * for one consumer x project. The once-only guards are partial unique indexes
+ * in the migration.
+ */
+export const waitCreditMoves = sqliteTable("wait_credit_moves", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    consumerId: text("consumer_id").notNull(),
+    project: text("project").notNull(),
+    /** earn_resolved | earn_wontfix | earn_commit | spend | refund */
+    kind: text("kind").notNull(),
+    /** Signed: a spend is negative. */
+    minutes: integer("minutes").notNull(),
+    ticketId: integer("ticket_id"),
+    /** The step a spend or refund belongs to. */
+    messageId: integer("message_id"),
+    /** A commit's full SHA. */
+    ref: text("ref"),
+    /** On a spend: the minutes the agent asked for. */
+    requested: integer("requested"),
+    createdAt: text("created_at").notNull(),
+});
+
+export type WaitCreditMove = typeof waitCreditMoves.$inferSelect;
+export type NewWaitCreditMove = typeof waitCreditMoves.$inferInsert;

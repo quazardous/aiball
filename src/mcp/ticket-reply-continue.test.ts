@@ -70,3 +70,9 @@ test("#2449 continue_after_minutes goes out as the step's resume delay; absent, 
     const atOnce = await reply({ then: "continue" });
     assert.equal(atOnce.step_after_minutes, undefined, "resuming at once is the default, not a value");
 });
+
+test("#2640 commits go out on a comment, never on close/reopen, and absent they are not sent", async () => {
+    assert.deepEqual((await reply({ then: "continue", continue_after_minutes: 10, commits: ["ef93fbb"] })).commits, ["ef93fbb"]);
+    assert.equal((await reply({ then: "continue", continue_after_minutes: 0 })).commits, undefined);
+    assert.equal((await reply({ then: "close", commits: ["ef93fbb"] })).commits, undefined);
+});

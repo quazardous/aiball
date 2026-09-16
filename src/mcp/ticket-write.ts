@@ -211,7 +211,14 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .min(0)
                     .optional()
                     .describe(
-                        "#2449 — REQUIRED with `then: \"continue\"`, refused with anything else: when you resume. `0` = you carry on at once, and the ticket leads your backlog right away. `N` = the next step waits on something (a build, a test box, a deploy): the ticket stays out of your wakes for N minutes, then leads your backlog. N is the soonest a look is worth it, not how long the job takes. When in doubt, pick the smaller: looking too early costs one look and another step; looking too late leaves finished work waiting. A job of about 20 minutes: 10. At most the project's `tickets.step_after_max_minutes` (120 by default): a longer wait is refused with the limit — hand the ticket back or propose a plan instead. A step without it is refused (HTTP 400).",
+                        "#2449 — REQUIRED with `then: \"continue\"`, refused with anything else: when you resume. `0` = you carry on at once, and the ticket leads your backlog right away. `N` = the next step waits on something (a build, a test box, a deploy): the ticket stays out of your wakes for N minutes, then leads your backlog. N is the soonest a look is worth it, not how long the job takes. When in doubt, pick the smaller: looking too early costs one look and another step; looking too late leaves finished work waiting. A job of about 20 minutes: 10. Waiting spends your wait credit on the project (earned by tickets closed on your accepted resolution or wontfix, and by the commits you cite): short of it the wait is capped to your balance, never under 5 minutes; coming back before the end gives the rest back. The answer carries `wait_credit` with your balance. At most the project's `tickets.step_after_max_minutes` (120 by default): a longer wait is refused with the limit — hand the ticket back or propose a plan instead. A step without it is refused (HTTP 400).",
+                    ),
+                commits: z
+                    .array(z.string())
+                    .max(20)
+                    .optional()
+                    .describe(
+                        "#2640 — commits this comment delivers (SHAs), as proof of work. Each earns wait credit once, from its changed lines, read in your checkout; a commit older than 48 h, unknown there, or already counted earns nothing and the answer says why. Only on a comment (not close/reopen).",
                     ),
                 scope: z
                     .enum(MESSAGE_SCOPES)
@@ -221,7 +228,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ target_id, body, project, by_agent, summary_until, then, handback, continue_after_minutes, scope }) => {
+        async ({ target_id, body, project, by_agent, summary_until, then, handback, continue_after_minutes, commits, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -285,6 +292,8 @@ export function registerTicketWriteTools(server: McpServer): void {
                 step: kind === "comment_added" && then === STEP_VERB ? true : undefined,
                 // #2449 — when the agent can resume; the daemon refuses it without a step.
                 step_after_minutes: continue_after_minutes,
+                // #2640 — commits cited as proof of work, on a comment only.
+                commits: kind === "comment_added" ? commits : undefined,
                 // #B.245 tristate: forward composer-side `scope`.
                 // Default `'default'` (#253 — david reversed the prior
                 // ny8m8a directive for `'internal'`-by-default; replies

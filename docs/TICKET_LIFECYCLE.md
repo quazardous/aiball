@@ -352,6 +352,24 @@ the soonest a look is worth it, not how long the job takes: an early look costs
 one more step, a late one leaves finished work waiting. `aiball steps` shows,
 per delay, how many steps came back early, on time or late.
 
+That wait is drawn from the agent's **wait credit** on the project, its start
+(`tickets.wait_credit_start_minutes`, 60) plus what it earned by proof of work
+minus what it waited:
+
+| Movement | Minutes | Once per |
+|---|---|---|
+| a ticket closed on the agent's accepted resolution | +30 | ticket |
+| a ticket closed on the agent's accepted wontfix | +5 | ticket |
+| a commit cited on a reply (`commits`), read in the agent's checkout, at most 48 h old | +1 per 20 changed lines, 30 max | commit |
+| a step's wait | − what it waits | step |
+| coming back on the ticket before that wait ends | + what was left | step |
+
+Short of credit the wait is capped to the balance, never under
+`tickets.step_min_wait_minutes` (5), and that floor costs nothing past zero; a
+step asking 0 is always granted. Humans have no credit. All the amounts are
+`tickets.wait_credit_*` settings, per project. `aiball steps` lists every
+balance.
+
 A project's **wake focus**, set beside its standing instruction, narrows what
 wakes the project's owner agents to a list of tickets: `123, 456` keeps only
 those, `!789` keeps all but it, with an optional end time. It filters the backlog
