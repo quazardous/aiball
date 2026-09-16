@@ -23,7 +23,19 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- `install.ps1 -Prefix <dir> -Port <n>` installs a second, separate aiball
+  under one directory (its own task, data, config and commands) to rehearse an
+  install or an upgrade without touching the one the machine runs.
+  `-Tarball <file>` installs a given package tarball.
+
 ### Changed
+
+- The Windows copy install is now the npm package: `install.ps1` packs the
+  checkout and installs the tarball, instead of mirroring the source tree and
+  building on the machine. What ships is exactly the package's file list, and a
+  re-run stops the running install before replacing it.
 
 - A loop keeps 10000 lines of scrollback instead of the multiplexer's default
   2000, now that the mouse wheel scrolls the pane.
