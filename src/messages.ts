@@ -136,10 +136,10 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): string 
 export function commitsRequirement(msg: NewMessage, caller: string, refuse: boolean): { refusal: string | null; warning: string | null } {
     if (msg.kind !== "comment_added" || isHuman(caller) || msg.commits !== undefined) return { refusal: null, warning: null };
     if (getConfig("tickets.require_commits", msg.project) === false) return { refusal: null, warning: null };
-    const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit. If your ticket_reply tool has no commits parameter (a stale tool schema: reconnect the MCP server with /mcp), end the body with a line `commits: [<sha>, <sha>]` or `commits: none`";
+    const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit. If your ticket_reply tool has no commits parameter (the session kept its tool schema from before the field: /mcp does not refresh it, only a new Claude Code session does, e.g. restarting the loop), end the body with a line `commits: [<sha>, <sha>]` or `commits: none`";
     return refuse
         ? { refusal: reason, warning: null }
-        : { refusal: null, warning: `${reason}. Your MCP server predates the field: reconnect it (/mcp) — posts without it will be refused.` };
+        : { refusal: null, warning: `${reason}. Your client does not declare the field yet: restart the loop (a new Claude Code session) — posts without it will be refused.` };
 }
 
 /**

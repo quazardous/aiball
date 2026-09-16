@@ -84,7 +84,7 @@ test("null, \"none\" and [] say no commit; a list of SHAs is taken as before", a
 test("a client from before the field is warned, not refused", async () => {
     const r = await post({}, { knowsCommits: false });
     assert.equal(r.status, 201, JSON.stringify(r.json));
-    assert.match(String((r.json.warnings as string[])[0]), /reconnect it \(\/mcp\)/);
+    assert.match(String((r.json.warnings as string[])[0]), /restart the loop \(a new Claude Code session\)/);
 });
 
 test("humans, close and reopen are exempt; the project setting lifts the rule", async () => {
@@ -155,7 +155,7 @@ test("#2653 an older client that writes `commits: [...]` as the last body line g
     assert.deepEqual((JSON.parse(String(declared.json.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef"]);
     const refused = await post({ body: "no line" });
     assert.equal(refused.status, 400);
-    assert.match(String(refused.json.error), /end the body with a line `commits: \[<sha>, <sha>\]` or `commits: none`/, "the refusal gives the way out");
+    assert.match(String(refused.json.error), /only a new Claude Code session does, e\.g\. restarting the loop\), end the body with a line `commits: \[<sha>, <sha>\]` or `commits: none`/, "the refusal gives the way out");
     const withKey = await post({ body: "x\ncommits: [deadbeef]", commits: null });
     assert.equal((JSON.parse(String(withKey.json.meta)) as { commits: unknown }).commits, null, "the key, when sent, wins over the line");
 });
