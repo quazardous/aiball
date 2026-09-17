@@ -805,7 +805,11 @@ ticketsRouter.get("/tickets", (req, res) => {
             ))
             .slice(0, limit)
         : null;
-    const buildFrom = pageCreated ?? created;
+    // #2682 — a closed ticket is never in the backlog (the `closed` rule
+    // excludes it from `backlog-tier`, against this very `closedSet`), so the
+    // backlog path does not pay flags for it. On aiball that is most of the
+    // project: the loops ask for this on every wake attempt.
+    const buildFrom = pageCreated ?? (onlyBacklog ? created.filter((m) => !closedSet.has(m.id)) : created);
     const buildIds = buildFrom.map((m) => m.id);
 
     // #2164 — these two feed the BUILT rows only (the visible flame, and the
