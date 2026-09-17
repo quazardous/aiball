@@ -175,18 +175,6 @@ export interface AutomationRule {
 
 /** #447: a per-agent work filter — narrows which tickets a consumer picks up,
  *  by tag. Applied server-side in the actionable/claimable gate. */
-export interface WorkFilter {
-    id: number;
-    consumer_id: string;
-    project: string | null;
-    mode: "only" | "except";
-    match_tags: string[];
-    enabled: 0 | 1;
-    position: number;
-    note: string | null;
-    created_at: string;
-}
-
 /** #449: one schema key resolved for the config-manager UI — meta + each layer
  *  (global/project override) + the effective value. Mirrors the backend's
  *  ResolvedConfig. `value`/layers are string|number|boolean per the key's type. */
@@ -1218,21 +1206,6 @@ export const api = {
         ),
 
     // #447: per-agent work filters.
-    listWorkFilters: (consumerId?: string) =>
-        req<WorkFilter[]>(
-            "GET",
-            `/api/work-filters${consumerId ? `?consumer_id=${encodeURIComponent(consumerId)}` : ""}`,
-        ),
-    addWorkFilter: (body: {
-        consumer_id: string;
-        project?: string | null;
-        mode?: "only" | "except";
-        match_tags: string[];
-        note?: string | null;
-    }) => req<WorkFilter>("POST", "/api/work-filters", body),
-    delWorkFilter: (id: number) => req<void>("DELETE", `/api/work-filters/${id}`),
-    toggleWorkFilter: (id: number, enabled: boolean) =>
-        req<WorkFilter>("PATCH", `/api/work-filters/${id}`, { enabled }),
 
     // #457 slice 4: unified automation rules CRUD.
     listAutomationRules: (filters?: { trigger?: AutomationTrigger; enabledOnly?: boolean }) => {

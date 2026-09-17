@@ -948,7 +948,6 @@ export interface ProjectRenameResult {
     tickets: number;
     tickets_from_project: number;
     subscriptions: number;
-    work_filters: number;
     automation_rules: number;
     consumers: number;
     config_overrides: number;
@@ -1008,10 +1007,6 @@ export function renameProject(oldName: string, newName: string): ProjectRenameRe
             .set({ project: newTrim })
             .where(eq(schema.subscriptions.project, oldTrim))
             .run().changes;
-        const workFilters = tx.update(schema.workFilters)
-            .set({ project: newTrim })
-            .where(eq(schema.workFilters.project, oldTrim))
-            .run().changes;
         const automationRules = tx.update(schema.automationRules)
             .set({ matchProject: newTrim })
             .where(eq(schema.automationRules.matchProject, oldTrim))
@@ -1035,7 +1030,6 @@ export function renameProject(oldName: string, newName: string): ProjectRenameRe
             tickets,
             tickets_from_project: ticketsFromProject,
             subscriptions,
-            work_filters: workFilters,
             automation_rules: automationRules,
             consumers,
             config_overrides: configOverrides,

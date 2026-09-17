@@ -308,24 +308,6 @@ export const messages = sqliteTable("_messages", {
 // up, by tag. Stored here in the daemon DB (not per-machine config) so every
 // loop hitting this daemon shares the same filter. Applied in the actionable/
 // claimable gate. Mirrors the `rules` table's shape (position + enabled mute).
-export const workFilters = sqliteTable("work_filters", {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    /** The agent (consumer_id) this filter constrains. */
-    consumerId: text("consumer_id").notNull(),
-    /** Optional project scope. NULL = applies across all the consumer's projects. */
-    project: text("project"),
-    /** 'only' = work ONLY matching tickets; 'except' = never work matching ones. */
-    mode: text("mode").notNull().default("only"),
-    /** JSON array of tag names (any-of): a ticket matches if it carries ≥1. */
-    matchTags: text("match_tags").notNull().default("[]"),
-    enabled: integer("enabled").notNull().default(1),
-    position: integer("position").notNull().default(0),
-    note: text("note"),
-    createdAt: text("created_at").notNull(),
-}, (t) => [
-    index("idx_work_filters_consumer").on(t.consumerId),
-]);
-
 // #457 — unified automation engine (event-driven rule engine). Single table
 // for ALL automation rules : the legacy `rules` (moderation) + `work_filters`
 // (pickup gate) migrate into this in slice 3, AND new triggers
@@ -840,8 +822,6 @@ export type Message = typeof messages.$inferSelect;
 export type NewMessageRow = typeof messages.$inferInsert;
 
 
-export type WorkFilterRow = typeof workFilters.$inferSelect;
-export type NewWorkFilterRow = typeof workFilters.$inferInsert;
 
 export type AutomationRuleRow = typeof automationRules.$inferSelect;
 export type NewAutomationRuleRow = typeof automationRules.$inferInsert;

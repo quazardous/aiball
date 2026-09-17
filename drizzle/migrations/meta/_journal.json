@@ -526,6 +526,13 @@
       "when": 1782700000023,
       "tag": "0074_drop_legacy_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1782700000024,
+      "tag": "0075_drop_legacy_work_filters",
+      "breakpoints": true
     }
   ]
 }

@@ -67,7 +67,6 @@ import { agentsRouter } from "./api/agents.js";
 import { subscriptionsRouter } from "./api/subscriptions.js";
 import { tagsRouter } from "./api/tags.js";
 import { ticketsRouter } from "./api/tickets.js";
-import { workFiltersRouter } from "./api/work-filters.js";
 import { managedConfigRouter } from "./api/managed-config.js";
 import { ticketSubscriptionsRouter } from "./api/ticket-subscriptions.js";
 import { uploadsRouter } from "./api/uploads.js";
@@ -692,10 +691,9 @@ api.use(configRouter);
 // -------- work filters + agent helpers --------------------------------------
 // /feed-path → ./api/agent-helpers.ts (#B.213 phase 1.C). Moderation rules are
 // automation rules (`message_posted` + `decision`) since #2697.
-api.use(workFiltersRouter);
-// #457 — unified automation engine CRUD (separate URL prefix `/automation/*`
-// so the legacy `/rules` + `/work-filters` keep serving their existing UI
-// sections until slice 3 migrates them onto this engine).
+// #457 — the unified automation engine's CRUD, under `/automation/*`. It is
+// the only rule surface left: the legacy `/rules` (#2697) and `/work-filters`
+// (#2718) wrote tables the engine had stopped reading.
 api.use(automationRouter);
 // #464 — live tmux/psmux pane mirror (SSE). Read-only ; one stream per
 // open browser tab. Auth + bearer already gated upstream.

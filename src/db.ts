@@ -131,16 +131,6 @@ export {
 } from "./db/projects.js";
 
 export {
-    insertWorkFilter,
-    listWorkFilters,
-    deleteWorkFilter,
-    setWorkFilterEnabled,
-    type WorkFilter,
-    type WorkFilterMode,
-    type NewWorkFilter,
-} from "./db/work-filters.js";
-
-export {
     getConfig,
     getResolvedConfig,
     setConfigOverride,
