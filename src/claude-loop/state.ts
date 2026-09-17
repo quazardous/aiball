@@ -3147,6 +3147,9 @@ export function createLoopServer(
             // barre rouge alors que tout marche"). The persistent proxy sends
             // hello / keystroke / marker / reload — never `hook` — so excluding
             // `hook` keys the link signal on the real proxy peer.
+            // #2682 — `marker` is not proxy-only: the stop hook and the CLI send
+            // markers over one-shot connections. Those are never tagged, at the
+            // transport (`sendEventOnce` sets ONE_SHOT_HEADER).
             if ((inner as { event?: unknown }).event !== "hook") markAsProxy();
             try {
                 handlers.onProxyEvent(inner as Record<string, unknown>);

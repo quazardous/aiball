@@ -328,3 +328,47 @@ t("listenEvents : a non-tapping client never fires onProxyConnect/Disconnect", a
         server.close();
     });
 });
+
+// #2682 — the stop hook and the CLI send `marker` proxy events over ONE-SHOT
+// connections (`sendEventOnce`). Tagging those as the proxy made each hook's
+// close read as link-down: BookShepherd's bar went RED ~35 times a day with the
+// real proxy still attached. A one-shot connection is never the proxy, whatever
+// it sends, and its churn leaves a live proxy's link alone.
+t("listenEvents : a one-shot sender is never the proxy, even with a marker", async () => {
+    await withTmpSocketPath(async (sockPath) => {
+        let proxyConnects = 0;
+        let proxyDisconnects = 0;
+        let received = 0;
+        const server = listenEvents(sockPath, (_ev, { markAsProxy }) => { received++; markAsProxy(); }, {
+            onProxyConnect: () => { proxyConnects++; },
+            onProxyDisconnect: () => { proxyDisconnects++; },
+        });
+        await sleep(50);
+        // The real proxy is attached.
+        const proxy = openEventChannel(sockPath, { reconnectMs: 50 });
+        try {
+            await sleep(120);
+            proxy.send({ kind: "proxyEvent", data: { event: "hello" } });
+            await sleep(120);
+            assert.equal(proxyConnects, 1, "the persistent proxy tagged");
+
+            // A stop hook fires a wake: two markers, each on its own one-shot connection.
+            await sendEventOnce(sockPath, { kind: "proxyEvent", data: { event: "marker", name: "set_wake_in_flight", now_ms: 1 } });
+            await sendEventOnce(sockPath, { kind: "proxyEvent", data: { event: "marker", name: "set_last_wake_at", now_ms: 1 } });
+            await sleep(150);
+            assert.equal(received, 3, "the markers were still delivered");
+            assert.equal(proxyConnects, 1, "a one-shot marker never tags as the proxy");
+            assert.equal(proxyDisconnects, 0, "a one-shot close never reads as the proxy leaving");
+
+            proxy.close();
+            await sleep(150);
+            assert.equal(proxyDisconnects, 1, "the real proxy leaving still does");
+        } finally {
+            // A failed assertion must not leave the channel reconnecting and the
+            // server listening: the run would hang instead of going red.
+            proxy.close();
+            server.close();
+        }
+    });
+});
+

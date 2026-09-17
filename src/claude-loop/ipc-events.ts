@@ -87,6 +87,12 @@ export interface EventChannel {
 const DEFAULT_RECONNECT_MS = 1_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_SEND_ONCE_TIMEOUT_MS = 2_000;
+/** #2682 — `sendEventOnce` announces itself on the upgrade request. A connection
+ *  that carries one event and closes can never be the persistent proxy, whatever
+ *  that event is: the stop hook and the CLI send `marker` proxy events too
+ *  (`set_wake_in_flight`, `set_wake_requested`), and tagging them as the proxy
+ *  made their close read as link-down — the RED bar with the proxy still up. */
+export const ONE_SHOT_HEADER = "x-cl-oneshot";
 // #769 Phase 1 — heartbeat ping/pong constants. Server pings every
 // HEARTBEAT_PING_MS; if no pong returns by the next tick, the connection
 // is treated as dead and terminated. 15s/30s is conservative — fast
@@ -173,8 +179,9 @@ export function listenEvents(
         // PROXY_EVENT frame, incl. the connect `hello`). Only a tagged
         // connection's close is a link-down signal ; hook one-shots never tag.
         let isProxy = false;
+        const oneShot = req.headers[ONE_SHOT_HEADER] === "1";
         const markAsProxy = (): void => {
-            if (isProxy) return;
+            if (isProxy || oneShot) return;
             isProxy = true;
             try { opts.onProxyConnect?.(); } catch { /* consumer threw */ }
         };
@@ -401,7 +408,7 @@ export async function sendEventOnce(
             finish(undefined, new Error(`ipc-events: no address for '${socketPath}'`));
             return;
         }
-        try { ws = new WebSocket(url); }
+        try { ws = new WebSocket(url, { headers: { [ONE_SHOT_HEADER]: "1" } }); }
         catch (e) {
             clearTimeout(timer);
             finish(undefined, e as Error);
