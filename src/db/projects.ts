@@ -191,29 +191,144 @@ export function isRootActive(root: string): boolean {
 
 /**
  * #2682 — every loop asks for this on each SSE ping, heartbeat and wake
- * attempt; recomputed each time it kept the daemon busy ~40% of the time
- * (~100 ms of aggregates over every ticket and message, per call). Memoized per
- * (consumer, landscape), dropped on every write that invalidates the flags
- * cache (so counts never lag a write), with the same 5 s ceiling for what no
- * write signals (snooze reveal, token usage).
+ * attempt; recomputed each time it kept the daemon busy ~40% of the time.
+ *
+ * ~110 ms of that is aggregates over every ticket and message, the same for
+ * every caller; the per-consumer part (actionable set, already cached by the
+ * flags cache, and unread pings) is a few ms. So the shared base is cached
+ * ONCE for all callers, and the per-consumer overlay is applied per call. A
+ * cache keyed per (consumer, landscape) almost never hit: ~15 keys, each asked
+ * every ~13 s, against a 5 s ceiling.
+ *
+ * The base is dropped on every write that invalidates the flags cache (so
+ * counts never lag a write), with the same 5 s ceiling for what no write
+ * signals (snooze reveal, token usage, loop presence).
  */
 const DETAILED_TTL_MS = 5_000;
-const detailedCache = new Map<string, { val: ProjectMeta[]; at: number }>();
+
+interface ProjectsBase {
+    /** Consumer-independent fields, landscape included; never handed out as is. */
+    projects: ProjectMeta[];
+    /** Open, approved, not closed, not snoozed — the tickets `actionable_count` counts over. */
+    visibleOpen: { id: number; project: string }[];
+    closedIds: Set<number>;
+    snoozedIds: Set<number>;
+}
+
+let baseCache: { val: ProjectsBase; at: number } | null = null;
 
 export function invalidateProjectsDetailed(): void {
-    detailedCache.clear();
+    baseCache = null;
 }
 
 export function listProjectsDetailed(consumer_id?: string, landscape = false, nowMs = Date.now()): ProjectMeta[] {
-    const key = `${consumer_id ?? ""}\0${landscape ? 1 : 0}`;
-    const hit = detailedCache.get(key);
-    if (hit && nowMs - hit.at < DETAILED_TTL_MS) return hit.val;
-    const val = listProjectsDetailedUncached(consumer_id, landscape);
-    detailedCache.set(key, { val, at: nowMs });
-    return val;
+    if (!baseCache || nowMs - baseCache.at >= DETAILED_TTL_MS) {
+        baseCache = { val: buildProjectsBase(), at: nowMs };
+    }
+    return overlayConsumer(baseCache.val, consumer_id, landscape);
 }
 
-function listProjectsDetailedUncached(consumer_id?: string, landscape = false): ProjectMeta[] {
+function overlayConsumer(base: ProjectsBase, consumer_id: string | undefined, landscape: boolean): ProjectMeta[] {
+    const projects = base.projects.map((p) => {
+        const copy: ProjectMeta = { ...p };
+        if (!landscape) {
+            delete copy.landscape_hash;
+            delete copy.landscape_last_activity;
+        }
+        return copy;
+    });
+    const byName = new Map(projects.map((p) => [p.name, p]));
+
+    // #1368 — `actionable_count` DELEGATES to the canonical gate instead of
+    // re-deriving it inline. The inline copy had drifted: it applied the
+    // decision / blocked / depends_on / last-actor gates but MISSED the
+    // #418/#436 held-by-other exclusion (a ticket assigned or claimed by
+    // ANOTHER agent leaves this consumer's actionable pool). So it counted
+    // other agents' work as actionable for you — which armed the wake countdown
+    // for a ticket the backlog picker (canonical gate) then refused to surface:
+    // the drain skipped and re-armed forever (david's "syndrome event fantôme",
+    // `o:3 b:0 e:0 📨 Ns` on runic), and the UI sidebar over-counted too.
+    // One source of truth now; the set is cached (flags-cache) so this is cheap.
+    const { actionableIds } = computeActionableTicketIds(consumer_id);
+    const actionablePerProject = new Map<string, number>();
+    for (const t of base.visibleOpen) {
+        if (actionableIds.has(t.id)) {
+            actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
+        }
+    }
+    for (const p of projects) p.actionable_count = actionablePerProject.get(p.name) ?? 0;
+
+    if (consumer_id) {
+        const db = getDb();
+        // Per-project unread for this consumer = **count of distinct OPEN
+        // tickets** that have at least one unseen ping (NOT count of pings,
+        // and **closed/rejected tickets are excluded**). This matches the
+        // default "Unread" filter in the UI, which lives behind the
+        // `onlyOpen=true` filter most of the time — so the sidebar badge
+        // and the row list agree on the same number.
+        //
+        // Two sources of ticket ids: pings on the ticket-root, pings on
+        // any of its comments. Merge into a Set per project, then drop
+        // tickets that the base's lifecycle replay flagged as closed.
+        // Self-pings are filtered (an agent's own posts don't count as
+        // unread for themselves).
+        const ticketIdsFromTicketPings = db.select({
+            ticket_id: schema.tickets.id,
+            project: schema.tickets.project,
+        })
+            .from(schema.pings)
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
+            .where(and(
+                eq(schema.pings.recipient, consumer_id),
+                isNull(schema.pings.seenAt),
+                or(
+                    isNull(schema.tickets.byAgent),
+                    ne(schema.tickets.byAgent, consumer_id),
+                ),
+            ))
+            .all();
+        const ticketIdsFromCommentPings = db.select({
+            ticket_id: schema.messages.ticketId,
+            project: schema.tickets.project,
+        })
+            .from(schema.pings)
+            .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+            .where(and(
+                eq(schema.pings.recipient, consumer_id),
+                isNull(schema.pings.seenAt),
+                or(
+                    isNull(schema.messages.byAgent),
+                    ne(schema.messages.byAgent, consumer_id),
+                ),
+            ))
+            .all();
+        const byProjectSets = new Map<string, Set<number>>();
+        function note(project: string, ticket_id: number) {
+            // #643 david `nch7je` : un unread = "quelque chose que j'ai pas
+            // lu", indépendant du status moderation. Pending compte donc
+            // comme unread (revers partiel du #456). Snoozed reste exclu
+            // (ticket repoussé dans le temps, pas due maintenant). Closed
+            // reste exclu (ticket clos = plus actionnable).
+            if (base.closedIds.has(ticket_id)) return; // exclut fermés
+            if (base.snoozedIds.has(ticket_id)) return; // exclut snoozés (repoussés)
+            let s = byProjectSets.get(project);
+            if (!s) {
+                s = new Set();
+                byProjectSets.set(project, s);
+            }
+            s.add(ticket_id);
+        }
+        for (const r of ticketIdsFromTicketPings) note(r.project, r.ticket_id);
+        for (const r of ticketIdsFromCommentPings) note(r.project, r.ticket_id);
+        for (const p of byName.values()) {
+            p.unread_for_consumer = byProjectSets.get(p.name)?.size ?? 0;
+        }
+    }
+    return projects;
+}
+
+function buildProjectsBase(): ProjectsBase {
     const db = getDb();
     // Aggregates by project across tickets + messages. Two queries merged
     // in JS — small data sizes, simpler than a SQL UNION/GROUP dance.
@@ -500,7 +615,6 @@ function listProjectsDetailedUncached(consumer_id?: string, landscape = false): 
     }).from(schema.tickets).all();
     const nowStr = nowIso();
     const openPerProject = new Map<string, number>();
-    const actionablePerProject = new Map<string, number>();
     const snoozedPerProject = new Map<string, number>();
     // #379: par projet, les entrées de paysage (tickets ouverts non-snoozés) +
     // la dernière activité. Peuplé seulement quand `landscape` est demandé.
@@ -512,17 +626,7 @@ function listProjectsDetailedUncached(consumer_id?: string, landscape = false): 
     // `actionable_count`. `computeActionableTicketIds` already does it, so this
     // duplicate — one more copy free to drift — is gone along with its query.
 
-    // #1368 — `actionable_count` DELEGATES to the canonical gate instead of
-    // re-deriving it inline. The inline copy had drifted: it applied the
-    // decision / blocked / depends_on / last-actor gates but MISSED the
-    // #418/#436 held-by-other exclusion (a ticket assigned or claimed by
-    // ANOTHER agent leaves this consumer's actionable pool). So it counted
-    // other agents' work as actionable for you — which armed the wake countdown
-    // for a ticket the backlog picker (canonical gate) then refused to surface:
-    // the drain skipped and re-armed forever (david's "syndrome event fantôme",
-    // `o:3 b:0 e:0 📨 Ns` on runic), and the UI sidebar over-counted too.
-    // One source of truth now; the set is cached (flags-cache) so this is cheap.
-    const { actionableIds } = computeActionableTicketIds(consumer_id);
+    const visibleOpen: { id: number; project: string }[] = [];
 
     for (const t of openCounts) {
         if (t.status !== "approved") continue;
@@ -534,7 +638,7 @@ function listProjectsDetailedUncached(consumer_id?: string, landscape = false): 
             continue;
         }
         openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
-        if (landscape) {
+        {
             let entries = landscapeEntriesPerProject.get(t.project);
             if (!entries) { entries = []; landscapeEntriesPerProject.set(t.project, entries); }
             entries.push({ id: t.id, lastActorAt: t.lastActorAt ?? null });
@@ -542,18 +646,13 @@ function listProjectsDetailedUncached(consumer_id?: string, landscape = false): 
                 landscapeLastActivityPerProject.set(t.project, t.lastActorAt);
             }
         }
-        // #1368 — single source of truth: the canonical set already folds in
-        // every gate (resolved/blocked #B.119, depends_on #B.123 B.4,
-        // last-actor #265/#374, AND held-by-other #418/#436).
-        if (actionableIds.has(t.id)) {
-            actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
-        }
+        // #1368 — counted per consumer in overlayConsumer, over this list.
+        visibleOpen.push({ id: t.id, project: t.project });
     }
     for (const p of byProject.values()) {
         p.open_count = openPerProject.get(p.name) ?? 0;
-        p.actionable_count = actionablePerProject.get(p.name) ?? 0;
         p.snoozed_count = snoozedPerProject.get(p.name) ?? 0;
-        if (landscape) {
+        {
             // sha1 sur les tickets ouverts non-snoozés de la vision agent (#379).
             p.landscape_hash = landscapeHash(landscapeEntriesPerProject.get(p.name) ?? []);
             p.landscape_last_activity = landscapeLastActivityPerProject.get(p.name) ?? null;
@@ -578,77 +677,6 @@ function listProjectsDetailedUncached(consumer_id?: string, landscape = false): 
                 n++;
             }
             p.resolved_count = n;
-        }
-    }
-
-    if (consumer_id) {
-        // Per-project unread for this consumer = **count of distinct OPEN
-        // tickets** that have at least one unseen ping (NOT count of pings,
-        // and **closed/rejected tickets are excluded**). This matches the
-        // default "Unread" filter in the UI, which lives behind the
-        // `onlyOpen=true` filter most of the time — so the sidebar badge
-        // and the row list agree on the same number.
-        //
-        // Two sources of ticket ids: pings on the ticket-root, pings on
-        // any of its comments. Merge into a Set per project, then drop
-        // tickets that the lifecycle replay above flagged as closed.
-        // Self-pings are filtered (an agent's own posts don't count as
-        // unread for themselves).
-        const ticketIdsFromTicketPings = db.select({
-            ticket_id: schema.tickets.id,
-            project: schema.tickets.project,
-        })
-            .from(schema.pings)
-            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
-            .where(and(
-                eq(schema.pings.recipient, consumer_id),
-                isNull(schema.pings.seenAt),
-                or(
-                    isNull(schema.tickets.byAgent),
-                    ne(schema.tickets.byAgent, consumer_id),
-                ),
-            ))
-            .all();
-        const ticketIdsFromCommentPings = db.select({
-            ticket_id: schema.messages.ticketId,
-            project: schema.tickets.project,
-        })
-            .from(schema.pings)
-            .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
-            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-            .where(and(
-                eq(schema.pings.recipient, consumer_id),
-                isNull(schema.pings.seenAt),
-                or(
-                    isNull(schema.messages.byAgent),
-                    ne(schema.messages.byAgent, consumer_id),
-                ),
-            ))
-            .all();
-        const snoozedTicketIds = new Set<number>();
-        for (const t of openCounts) {
-            if (t.postponedUntil && t.postponedUntil > nowStr) snoozedTicketIds.add(t.id);
-        }
-        const byProjectSets = new Map<string, Set<number>>();
-        function note(project: string, ticket_id: number) {
-            // #643 david `nch7je` : un unread = "quelque chose que j'ai pas
-            // lu", indépendant du status moderation. Pending compte donc
-            // comme unread (revers partiel du #456). Snoozed reste exclu
-            // (ticket repoussé dans le temps, pas due maintenant). Closed
-            // reste exclu (ticket clos = plus actionnable).
-            if (closedByTicket.get(ticket_id) === true) return; // exclut fermés
-            if (snoozedTicketIds.has(ticket_id)) return; // exclut snoozés (repoussés)
-            let s = byProjectSets.get(project);
-            if (!s) {
-                s = new Set();
-                byProjectSets.set(project, s);
-            }
-            s.add(ticket_id);
-        }
-        for (const r of ticketIdsFromTicketPings) note(r.project, r.ticket_id);
-        for (const r of ticketIdsFromCommentPings) note(r.project, r.ticket_id);
-        for (const p of byProject.values()) {
-            p.unread_for_consumer = byProjectSets.get(p.name)?.size ?? 0;
         }
     }
 
@@ -756,9 +784,20 @@ function listProjectsDetailedUncached(consumer_id?: string, landscape = false): 
         }
     }
 
-    return [...byProject.values()].sort((a, b) =>
-        b.last_activity.localeCompare(a.last_activity),
-    );
+    const snoozedIds = new Set<number>();
+    for (const t of openCounts) {
+        if (t.postponedUntil && t.postponedUntil > nowStr) snoozedIds.add(t.id);
+    }
+    const closedIds = new Set<number>();
+    for (const [id, closed] of closedByTicket) if (closed) closedIds.add(id);
+    return {
+        projects: [...byProject.values()].sort((a, b) =>
+            b.last_activity.localeCompare(a.last_activity),
+        ),
+        visibleOpen,
+        closedIds,
+        snoozedIds,
+    };
 }
 
 /**
