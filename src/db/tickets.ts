@@ -341,7 +341,7 @@ export function setTicketClaim(ticket_id: number, claimant: string, at: string =
 /**
  * #439 one-focus: every ticket this consumer currently holds a CLAIM on
  * ({id, claimed_at}). Closed/resolved tickets already have their hold cleared
- * (`releaseTicketHold` fires on close), so this surfaces only open claims —
+ * (`releaseTicketClaim` fires on close), so this surfaces only open claims —
  * liveness + comment checks are left to the pure `claimsToAutoRelease`.
  */
 export function ticketsClaimedBy(consumer_id: string): { id: number; claimed_at: string }[] {
@@ -376,19 +376,6 @@ export function releaseTicketClaim(ticket_id: number): void {
         .run();
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
-    invalidateFlagsCache([ticket_id]);
-}
-
-/**
- * #436: clear BOTH holds (assignment + claim). Fired on close/resolve so a later
- * reopen starts fresh. Also zeroes the vestigial `is_claim`.
- */
-export function releaseTicketHold(ticket_id: number): void {
-    getDb().update(schema.tickets)
-        .set({ assignee: null, assignedBy: null, assignedAt: null, claimant: null, claimedAt: null, isClaim: 0 })
-        .where(eq(schema.tickets.id, ticket_id))
-        .run();
-    // #2165 — same held-by-other set the claim/assign writers repair.
     invalidateFlagsCache([ticket_id]);
 }
 

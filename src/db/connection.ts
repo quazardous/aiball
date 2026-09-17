@@ -219,18 +219,6 @@ export interface Subscription {
     role: SubscriptionRole;
 }
 
-export interface Rule {
-    id: number;
-    position: number;
-    match_project: string | null;
-    match_kind: MessageKind | null;
-    match_by_agent: string | null;
-    decision: RuleDecision;
-    enabled: number;
-    note: string | null;
-    created_at: string;
-}
-
 export interface NewMessage {
     project: string;
     kind: MessageKind;
@@ -275,15 +263,6 @@ export interface NewMessage {
      *  filed in `project` (the target) on behalf of an agent that lives
      *  in `from_project`. NULL = intra-project (the common case). */
     from_project?: string | null;
-}
-
-export interface NewRule {
-    position?: number;
-    match_project?: string | null;
-    match_kind?: MessageKind | null;
-    match_by_agent?: string | null;
-    decision: RuleDecision;
-    note?: string | null;
 }
 
 // =====================================================================

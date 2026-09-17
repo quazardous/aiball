@@ -304,20 +304,6 @@ export const messages = sqliteTable("_messages", {
     index("idx_messages_source").on(t.sourceTicketId),
 ]);
 
-export const rules = sqliteTable("rules", {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    position: integer("position").notNull().default(0),
-    matchProject: text("match_project"),
-    matchKind: text("match_kind"),
-    matchByAgent: text("match_by_agent"),
-    decision: text("decision").notNull(),
-    enabled: integer("enabled").notNull().default(1),
-    note: text("note"),
-    createdAt: text("created_at").notNull(),
-}, (t) => [
-    index("idx_rules_position").on(t.position),
-]);
-
 // #447: per-agent work filters — narrow which tickets a consumer (agent) picks
 // up, by tag. Stored here in the daemon DB (not per-machine config) so every
 // loop hitting this daemon shares the same filter. Applied in the actionable/
@@ -853,8 +839,6 @@ export type NewTicket = typeof tickets.$inferInsert;
 export type Message = typeof messages.$inferSelect;
 export type NewMessageRow = typeof messages.$inferInsert;
 
-export type Rule = typeof rules.$inferSelect;
-export type NewRuleRow = typeof rules.$inferInsert;
 
 export type WorkFilterRow = typeof workFilters.$inferSelect;
 export type NewWorkFilterRow = typeof workFilters.$inferInsert;

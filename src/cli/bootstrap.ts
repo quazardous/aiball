@@ -107,7 +107,7 @@ async function runMigrateFrom(oldName: string, projectFlag: string | undefined):
         const cascadeBits = [
             `tickets:${result.tickets}`,
             `subs:${result.subscriptions}`,
-            `rules:${result.rules + result.automation_rules}`,
+            `rules:${result.automation_rules}`,
             `work_filters:${result.work_filters}`,
             `consumers:${result.consumers}`,
             `from_project:${result.tickets_from_project}`,

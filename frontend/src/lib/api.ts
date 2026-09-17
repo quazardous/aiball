@@ -108,18 +108,6 @@ export type TicketStage =
     | "pending"
     | "open";
 
-export interface Rule {
-    id: number;
-    position: number;
-    match_project: string | null;
-    match_kind: string | null;
-    match_by_agent: string | null;
-    decision: "auto" | "review";
-    enabled: 0 | 1;
-    note: string | null;
-    created_at: string;
-}
-
 /** #457 — unified automation rule (slice 4). Server returns a `triggers`
  *  JSON-decoded list and a typed `action` discriminated union. */
 export type AutomationTrigger =
@@ -1228,18 +1216,6 @@ export const api = {
             `/api/messages/${messageId}/questions/${encodeURIComponent(questionId)}/answer`,
             body,
         ),
-
-    listRules: () => req<Rule[]>("GET", "/api/rules"),
-    addRule: (body: {
-        decision: "auto" | "review";
-        match_project?: string | null;
-        match_kind?: string | null;
-        match_by_agent?: string | null;
-        note?: string | null;
-    }) => req<Rule>("POST", "/api/rules", body),
-    delRule: (id: number) => req<void>("DELETE", `/api/rules/${id}`),
-    toggleRule: (id: number, enabled: boolean) =>
-        req<Rule>("PATCH", `/api/rules/${id}`, { enabled }),
 
     // #447: per-agent work filters.
     listWorkFilters: (consumerId?: string) =>

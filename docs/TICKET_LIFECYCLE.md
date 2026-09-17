@@ -218,8 +218,9 @@ A ticket can be **both** at once. The **hold gate** (`isHeldByOther`,
 `src/db/assignment-gate.ts`) drops a ticket from C's actionable pool when it is
 held by **someone other than C** — a *live* claim by another agent **OR** an
 *assignment* to another consumer. Held-by-C, unheld, or an *expired* claim with
-no assignment → not gated (falls through to `last_actor`). Both holds clear on
-close/resolve (`releaseTicketHold`).
+no assignment → not gated (falls through to `last_actor`). Closing a ticket
+releases its claim and keeps its assignment: responsibility survives a close,
+focus does not.
 
 - **One focus at a time.** A self-claim auto-releases C's *other* **live**
   claims that are *bare pickups* — claims C never commented on (zero work lost).

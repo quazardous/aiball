@@ -25,9 +25,7 @@ export {
     type MessageRow,
     type SubscriptionRole,
     type Subscription,
-    type Rule,
     type NewMessage,
-    type NewRule,
 } from "./db/connection.js";
 
 export {
@@ -133,13 +131,6 @@ export {
 } from "./db/projects.js";
 
 export {
-    insertRule,
-    listRules,
-    deleteRule,
-    setRuleEnabled,
-} from "./db/rules.js";
-
-export {
     insertWorkFilter,
     listWorkFilters,
     deleteWorkFilter,
@@ -188,7 +179,6 @@ export {
     ticketsClaimedBy,
     releaseTicketAssignment,
     releaseTicketClaim,
-    releaseTicketHold,
     getTicketStages,
     getTicketTitles,
     getTicketBookends,

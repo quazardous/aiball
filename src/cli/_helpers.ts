@@ -253,6 +253,7 @@ export function fmtRuleList(v: unknown): string {
             const x = r as {
                 id?: number;
                 decision?: string;
+                action?: { decision?: string };
                 enabled?: boolean | number;
                 match_project?: string;
                 match_kind?: string;
@@ -265,7 +266,7 @@ export function fmtRuleList(v: unknown): string {
                 x.match_kind ? `kind=${x.match_kind}` : null,
                 x.match_by_agent ? `by=${x.match_by_agent}` : null,
             ].filter(Boolean).join(" ");
-            return `${status} #${String(x.id).padStart(3)} ${(x.decision ?? "?").padEnd(7)} ${filters || "(matches everything)"}${x.note ? ` — ${x.note}` : ""}`;
+            return `${status} #${String(x.id).padStart(3)} ${(x.action?.decision ?? x.decision ?? "?").padEnd(7)} ${filters || "(matches everything)"}${x.note ? ` — ${x.note}` : ""}`;
         })
         .join("\n");
 }

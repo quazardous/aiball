@@ -519,6 +519,13 @@
       "when": 1782700000022,
       "tag": "0073_wait_credit",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1782700000023,
+      "tag": "0074_drop_legacy_rules",
+      "breakpoints": true
     }
   ]
 }

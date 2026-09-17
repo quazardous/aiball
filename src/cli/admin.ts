@@ -84,8 +84,8 @@ export function registerAdminCommands(program: Command): void {
                 ...(opts.note ? { note: opts.note } : {}),
             });
             out(r, gOpts(cmd), (v) => {
-                const x = v as { id?: number; decision?: string };
-                return `rule #${x.id ?? "?"} added (decision=${x.decision ?? "?"})`;
+                const x = v as { id?: number; action?: { decision?: string } };
+                return `rule #${x.id ?? "?"} added (decision=${x.action?.decision ?? "?"})`;
             });
         });
 
@@ -149,7 +149,7 @@ export function registerAdminCommands(program: Command): void {
         .action(async (oldName: string, newName: string, _opts, cmd) => {
             const client = buildClient(gOpts(cmd));
             const r = await client.renameProject(oldName, newName);
-            out(r, gOpts(cmd), (x) => `project "${x.old_name}" renamed to "${x.new_name}" (tickets:${x.tickets} subs:${x.subscriptions} rules:${x.rules + x.automation_rules} consumers:${x.consumers})`);
+            out(r, gOpts(cmd), (x) => `project "${x.old_name}" renamed to "${x.new_name}" (tickets:${x.tickets} subs:${x.subscriptions} rules:${x.automation_rules} consumers:${x.consumers})`);
         });
 
     // #2172 — fold a project INTO another one. `rename` already covers the

@@ -11,8 +11,8 @@
  * (work filters legacy) ont été retirés une fois que #483 a re-wiré les deux
  * call-sites sur `automation_rules` via le moteur unifié : leurs UIs éditaient
  * des rows qui ne sont plus consultées par le moteur — affichage trompeur.
- * Le backend (CLI `aiball rules ls`, API `/api/rules`, `/api/work-filters`)
- * reste en place pour l'instant ; suppression DB + code legacy = #465 reopen.
+ * The legacy moderation backend (`/api/rules`, its table) is gone (#2697);
+ * `aiball rule` now writes automation rules. `/api/work-filters` remains.
  */
 import PanelHeader from "./ui/PanelHeader.vue";
 import AutomationRulesSection from "./AutomationRulesSection.vue";

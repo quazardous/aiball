@@ -62,7 +62,6 @@ import { signalsRouter } from "./api/signals.js";
 import { keyTicketsRouter } from "./api/key-tickets.js";
 import { signalKeysRouter } from "./api/signal-keys.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
-import { rulesRouter } from "./api/rules.js";
 import { automationRouter } from "./api/automation.js";
 import { agentsRouter } from "./api/agents.js";
 import { subscriptionsRouter } from "./api/subscriptions.js";
@@ -690,10 +689,9 @@ api.use(consumersRouter);
 // writes stay on their targeted PATCH endpoints.
 api.use(configRouter);
 
-// -------- rules + agent helpers -------------------------------------------
-// Moderation rule CRUD → ./api/rules.ts; /feed-path → ./api/agent-helpers.ts
-// (#B.213 phase 1.C).
-api.use(rulesRouter);
+// -------- work filters + agent helpers --------------------------------------
+// /feed-path → ./api/agent-helpers.ts (#B.213 phase 1.C). Moderation rules are
+// automation rules (`message_posted` + `decision`) since #2697.
 api.use(workFiltersRouter);
 // #457 — unified automation engine CRUD (separate URL prefix `/automation/*`
 // so the legacy `/rules` + `/work-filters` keep serving their existing UI

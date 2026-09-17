@@ -1229,8 +1229,13 @@ export class AiballClient {
     note(id: number, note: string | null) {
         return this.http("POST", `/api/messages/${id}/note`, { note });
     }
-    listRules() {
-        return this.http("GET", "/api/rules");
+    /** #2697 — moderation rules are automation rules: trigger `message_posted`,
+     *  action `decision`. That is the only table moderation reads. */
+    async listRules() {
+        const rules = await this.http("GET", "/api/automation/rules?trigger=message_posted") as Array<{
+            actions?: Array<{ kind?: string }>;
+        }>;
+        return rules.filter((r) => (r.actions ?? []).some((a) => a.kind === "decision"));
     }
     addRule(rule: {
         decision: "auto" | "review";
@@ -1239,13 +1244,18 @@ export class AiballClient {
         match_by_agent?: string;
         note?: string;
     }) {
-        return this.http("POST", "/api/rules", rule);
+        const { decision, ...match } = rule;
+        return this.http("POST", "/api/automation/rules", {
+            triggers: ["message_posted"],
+            action: { kind: "decision", decision },
+            ...match,
+        });
     }
     deleteRule(id: number) {
-        return this.http("DELETE", `/api/rules/${id}`);
+        return this.http("DELETE", `/api/automation/rules/${id}`);
     }
     toggleRule(id: number, enabled: boolean) {
-        return this.http("PATCH", `/api/rules/${id}`, { enabled });
+        return this.http("PATCH", `/api/automation/rules/${id}`, { enabled });
     }
     /**
      * Bulk mark-read by project. Pass either upToId or all=true.
