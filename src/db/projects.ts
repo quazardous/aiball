@@ -189,7 +189,31 @@ export function isRootActive(root: string): boolean {
     return rows.some((c) => consumerEffectiveRunning(c.consumerId, c.stateUpdatedAt, cutoff));
 }
 
-export function listProjectsDetailed(consumer_id?: string, landscape = false): ProjectMeta[] {
+/**
+ * #2682 — every loop asks for this on each SSE ping, heartbeat and wake
+ * attempt; recomputed each time it kept the daemon busy ~40% of the time
+ * (~100 ms of aggregates over every ticket and message, per call). Memoized per
+ * (consumer, landscape), dropped on every write that invalidates the flags
+ * cache (so counts never lag a write), with the same 5 s ceiling for what no
+ * write signals (snooze reveal, token usage).
+ */
+const DETAILED_TTL_MS = 5_000;
+const detailedCache = new Map<string, { val: ProjectMeta[]; at: number }>();
+
+export function invalidateProjectsDetailed(): void {
+    detailedCache.clear();
+}
+
+export function listProjectsDetailed(consumer_id?: string, landscape = false, nowMs = Date.now()): ProjectMeta[] {
+    const key = `${consumer_id ?? ""}\0${landscape ? 1 : 0}`;
+    const hit = detailedCache.get(key);
+    if (hit && nowMs - hit.at < DETAILED_TTL_MS) return hit.val;
+    const val = listProjectsDetailedUncached(consumer_id, landscape);
+    detailedCache.set(key, { val, at: nowMs });
+    return val;
+}
+
+function listProjectsDetailedUncached(consumer_id?: string, landscape = false): ProjectMeta[] {
     const db = getDb();
     // Aggregates by project across tickets + messages. Two queries merged
     // in JS — small data sizes, simpler than a SQL UNION/GROUP dance.
@@ -2055,6 +2079,8 @@ function flagsRepairScope(ticketIds: readonly number[]): number[] {
  * for a whole thread), and it stays correct — just slower.
  */
 export function invalidateFlagsCache(ticketIds?: readonly number[]): void {
+    // #2682 — the per-project counts derive from the same state.
+    invalidateProjectsDetailed();
     if (!ticketIds || ticketIds.length === 0 || flagsCacheIsCold()) {
         clearFlagsCache();
         return;

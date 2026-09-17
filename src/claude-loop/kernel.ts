@@ -41,6 +41,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
+import { coalesce } from "./coalesce.js";
 import { appendFileSync, existsSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -1341,7 +1342,16 @@ let postBootRemindersSent = false;
 // `o:N b:N e:N` appears as soon as we can talk to the daemon, instead of only
 // at the first heartbeat (~interval into the boot). Best-effort ; `setIpcCounters`
 // is skipped when all 3 fetches fail so the last-known segment is preserved (#835).
-async function refreshCounters(): Promise<void> {
+// #2682 — coalesced: one refresh at a time, at most one per 5 s, a burst of
+// pings collapsing into one trailing refresh (each refresh is three daemon
+// requests, and the daemon serves one request at a time).
+const COUNTERS_MIN_GAP_MS = 5_000;
+let coalescedRefreshCounters: (() => Promise<void>) | null = null;
+function refreshCounters(): Promise<void> {
+    coalescedRefreshCounters ??= coalesce(refreshCountersNow, COUNTERS_MIN_GAP_MS);
+    return coalescedRefreshCounters();
+}
+async function refreshCountersNow(): Promise<void> {
     try {
         const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
         const backlogQuery: Record<string, string | undefined> = {
@@ -1352,7 +1362,7 @@ async function refreshCounters(): Promise<void> {
         if (loopProject) backlogQuery.project = loopProject;
         const [pingsR, projectsR, backlogR] = await Promise.allSettled([
             client().pingsCount() as Promise<{ unread?: number }>,
-            client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number; actionable_count?: number }>>,
+            client().listProjectsDetailed({ project: loopProject }) as Promise<Array<{ name: string; open_count?: number; actionable_count?: number }>>,
             client().listTickets(backlogQuery) as Promise<unknown[]>,
         ]);
         const { open, backlog, events, actionableOpen } = deriveBarCounters(pingsR, projectsR, backlogR, loopProject);

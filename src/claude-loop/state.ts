@@ -1082,7 +1082,7 @@ export async function checkHasWork(
                 c.pingsCount() as Promise<{ unread?: number }>,
                 // #379: ask for the landscape so the actionable dedup is
                 // set-aware (hash) and the drained branch has its primitive.
-                c.listProjectsDetailed({ landscape: true }).catch(() => []) as Promise<Array<{
+                c.listProjectsDetailed({ landscape: true, project }).catch(() => []) as Promise<Array<{
                     name: string;
                     open_count?: number;
                     actionable_count?: number;

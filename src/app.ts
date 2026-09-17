@@ -3,6 +3,7 @@
 // through the business API. daemon.ts wraps this in the HTTP + UDS + WS servers;
 // tests call createApp() + listen on an ephemeral port (or use it directly).
 // No server bind, no side effects on import.
+import { requestStatsMiddleware, requestStatsReport } from "./request-stats.js";
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -58,6 +59,9 @@ export function jsonErrorHandler(
  */
 export function createApp(): express.Express {
     const app = express();
+    // #2682 — per-route request counts and durations (GET /api/debug/requests).
+    app.use(requestStatsMiddleware);
+    app.get("/api/debug/requests", (_req, res) => res.json(requestStatsReport()));
 
     // #394: proxy mode. When a `proxy:` block is configured, this daemon is a
     // transparent relay to the remote — forward /api + /uploads (raw stream, no

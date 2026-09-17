@@ -314,7 +314,10 @@ api.get("/projects", (req, res) => {
         // #379: `&landscape=1` ajoute landscape_hash + landscape_last_activity
         // par projet (calcul O(N) gated → seul le timer claude-loop le demande).
         const landscape = req.query.landscape === "1";
-        return res.json(listProjectsDetailed(consumer, landscape));
+        // #2682 — a loop only reads its own project: `&project=<name>` narrows the answer.
+        const only = typeof req.query.project === "string" && req.query.project ? req.query.project : null;
+        const all = listProjectsDetailed(consumer, landscape);
+        return res.json(only ? all.filter((p) => p.name === only) : all);
     }
     res.json(listProjects());
 });

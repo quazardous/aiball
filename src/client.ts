@@ -748,11 +748,11 @@ export class AiballClient {
      * (ticket_count, open_count, pending_count, last_activity…) instead
      * of bare names. Used by poll() to surface per-project workload.
      */
-    listProjectsDetailed(opts?: { landscape?: boolean }) {
+    listProjectsDetailed(opts?: { landscape?: boolean; /** #2682 — only this project in the answer. */ project?: string | null }) {
         // #379: pass `landscape=1` to also get landscape_hash + landscape_last_activity
         // per project (the drained-strategy reset/dedup primitive). Off by default —
         // only the claude-loop timer asks for it, sidebar polls don't pay the O(N).
-        const ls = opts?.landscape ? "&landscape=1" : "";
+        const ls = (opts?.landscape ? "&landscape=1" : "") + (opts?.project ? `&project=${encodeURIComponent(opts.project)}` : "");
         return this.http<Array<{
             name: string;
             last_activity: string;

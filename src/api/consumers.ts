@@ -3,6 +3,7 @@
  * Carved out of api.ts on 2026-05-19 — behavior-preserving move.
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
+import { invalidateProjectsDetailed } from "../db/projects.js";
 import { type WaitCreditRow, listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
 import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
@@ -296,7 +297,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     // #2216/#2241 — the agent type decides which ticket levels are in this
     // agent's actionable pool, and that pool is cached per consumer. A type
     // change is rare: drop the cache rather than serve a stale queue.
-    if (patch.agent_type !== undefined) clearFlagsCache();
+    if (patch.agent_type !== undefined) { clearFlagsCache(); invalidateProjectsDetailed(); }
     if (!updated) return notFound(res, "consumer not found");
     broadcast({ type: "consumer_changed", data: updated });
     res.json(updated);
