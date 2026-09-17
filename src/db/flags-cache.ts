@@ -49,6 +49,20 @@ export function getCachedDecisionGate<T>(build: () => T, nowMs: number = Date.no
 }
 
 /**
+ * #2682 — the live entries, without building on a miss. A scoped reader (the
+ * backlog asks about one project's tickets) narrows a warm board-wide value
+ * instead of recomputing its scope; on a miss it computes its scope as before,
+ * and never seeds the cache from that partial answer.
+ */
+export function peekDecisionGate<T>(nowMs: number = Date.now()): T | null {
+    return decisionGate && nowMs < decisionGate.until ? decisionGate.val as T : null;
+}
+export function peekActionable<T>(consumerId: string | undefined, nowMs: number = Date.now()): T | null {
+    const hit = actionable.get(consumerId ?? ANON);
+    return hit && nowMs < hit.until ? hit.val as T : null;
+}
+
+/**
  * Per-consumer actionable set, cached. `build` runs on miss. `deadlineOf` names
  * the epoch-ms at which the built value stops being true without any write
  * (null: never).

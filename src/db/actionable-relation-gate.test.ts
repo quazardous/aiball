@@ -97,22 +97,36 @@ const gated = () => computeActionableTicketIds(ME).gatedByBlockerIds;
  */
 function assertScopedMatchesFull(ids: number[], label: string) {
     const full = computeActionableTicketIds(ME);
-    for (const id of ids) {
-        const one = computeActionableTicketIds(ME, [id]);
-        assert.equal(one.actionableIds.has(id), full.actionableIds.has(id), `${label}: actionable #${id}`);
-        assert.equal(one.openIds.has(id), full.openIds.has(id), `${label}: open #${id}`);
-        assert.equal(one.gatedByBlockerIds.has(id), full.gatedByBlockerIds.has(id), `${label}: gated #${id}`);
+    // #2682 — a scoped read narrows the board-wide set when it is cached, and
+    // computes its own scope when it is not. Both paths must give the board's
+    // answer, so each is checked: with the cache dropped before every scoped
+    // read (cold), then with the full set just cached (warm).
+    for (const temperature of ["cold", "warm"] as const) {
+        const read = (scope: number[]) => {
+            if (temperature === "cold") invalidateFlagsCache();
+            else computeActionableTicketIds(ME);
+            return computeActionableTicketIds(ME, scope);
+        };
+        const tag = `${label} (${temperature})`;
+        for (const id of ids) {
+            const one = read([id]);
+            assert.equal(one.actionableIds.has(id), full.actionableIds.has(id), `${tag}: actionable #${id}`);
+            assert.equal(one.openIds.has(id), full.openIds.has(id), `${tag}: open #${id}`);
+            assert.equal(one.gatedByBlockerIds.has(id), full.gatedByBlockerIds.has(id), `${tag}: gated #${id}`);
+        }
+        // And a multi-id bucket must agree with the same board.
+        const many = read(ids);
+        for (const id of ids) {
+            assert.equal(many.actionableIds.has(id), full.actionableIds.has(id), `${tag}: bucket actionable #${id}`);
+        }
+        for (const set of [many.actionableIds, many.openIds, many.gatedByBlockerIds]) {
+            assert.equal(
+                [...set].every((id) => ids.includes(id)),
+                true,
+                `${tag}: a scoped answer must not carry ids nobody asked about`,
+            );
+        }
     }
-    // And a multi-id bucket must agree with the same board.
-    const many = computeActionableTicketIds(ME, ids);
-    for (const id of ids) {
-        assert.equal(many.actionableIds.has(id), full.actionableIds.has(id), `${label}: bucket actionable #${id}`);
-    }
-    assert.equal(
-        [...many.actionableIds].every((id) => ids.includes(id)),
-        true,
-        `${label}: a scoped answer must not carry ids nobody asked about`,
-    );
 }
 
 // 1 depends_on 2 ; 3 blocks 4 ; 5 stands alone.
@@ -146,6 +160,8 @@ test("scoped answer === full answer, while the gates are ON", () => {
     // The hard direction: #1 and #4 are gated by blockers that are NOT in the
     // requested bucket, so the scope has to have pulled them in on its own.
     assertScopedMatchesFull([1, 2, 3, 4, 5], "gated state");
+    // A bucket that leaves gated tickets out: nothing about them may leak in.
+    assertScopedMatchesFull([2, 3, 5], "gated state, partial bucket");
 });
 
 test("closing the blocker frees the dependent — the write-on-X-changes-Y case", () => {

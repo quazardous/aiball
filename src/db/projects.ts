@@ -12,6 +12,8 @@ import {
     repairEntries,
     clearFlagsCache,
     flagsCacheIsCold,
+    peekActionable,
+    peekDecisionGate,
 } from "./flags-cache.js";
 import { clearInboxAgg } from "./inbox-agg-cache.js";
 import { idScope, shouldScope } from "./scope-ids.js";
@@ -1726,7 +1728,19 @@ export function decisionGateByTicket(ticketIds?: readonly number[]): Map<number,
     // map missing every ticket nobody happened to ask about — a ticket silently
     // absent from a gate reads as "not gated", which is the failure that shows
     // up as work appearing in a queue it should have left.
-    if (shouldScope(ticketIds)) return decisionGateByTicketUncached(ticketIds);
+    if (shouldScope(ticketIds)) {
+        // #2682 — narrowing a warm board-wide map is the same answer, cheaper.
+        const warm = peekDecisionGate<Map<number, boolean>>();
+        if (warm) {
+            const out = new Map<number, boolean>();
+            for (const id of ticketIds) {
+                const v = warm.get(id);
+                if (v !== undefined) out.set(id, v);
+            }
+            return out;
+        }
+        return decisionGateByTicketUncached(ticketIds);
+    }
     return getCachedDecisionGate(() => decisionGateByTicketUncached());
 }
 function decisionGateByTicketUncached(ticketIds?: readonly number[]): Map<number, boolean> {
@@ -1829,7 +1843,21 @@ export function computeActionableTicketIds(
     // partial answer would make every later reader see a set missing the
     // tickets nobody asked about — and a ticket absent from `actionableIds`
     // silently leaves somebody's queue.
-    if (shouldScope(ticketIds)) return computeActionableTicketIdsUncached(consumerId, ticketIds);
+    if (shouldScope(ticketIds)) {
+        // #2682 — a warm board-wide set already answers for these ids.
+        const warm = peekActionable<ActionableTicketSet>(consumerId);
+        if (warm) {
+            const wanted = new Set(ticketIds);
+            const keep = (set: Set<number>) => new Set([...set].filter((id) => wanted.has(id)));
+            return {
+                openIds: keep(warm.openIds),
+                actionableIds: keep(warm.actionableIds),
+                gatedByBlockerIds: keep(warm.gatedByBlockerIds),
+                nextChangeMs: warm.nextChangeMs,
+            };
+        }
+        return computeActionableTicketIdsUncached(consumerId, ticketIds);
+    }
     return getCachedActionable(consumerId, () => computeActionableTicketIdsUncached(consumerId), Date.now(), (v) => v.nextChangeMs);
 }
 function computeActionableTicketIdsUncached(
