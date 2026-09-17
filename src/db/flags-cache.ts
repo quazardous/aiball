@@ -18,28 +18,52 @@
  * The public entry point for a write is `invalidateFlagsCache()` in
  * projects.ts, NOT `clearFlagsCache()` below: naming the tickets a write
  * touched lets the owner repair those entries instead of dropping everything.
+ *
+ * #2682 — an entry lives until the NEXT moment its value can change on its own
+ * (a snooze coming due, a claim expiring: the owner names it), capped by
+ * CEILING_MS. The ceiling was 5 s and doubled as the clock for those time
+ * effects; every loop re-asks every ~13 s, so nearly every read rebuilt
+ * (150-300 ms each). With the time effects handled exactly, the ceiling is only
+ * the net for a write that forgot to invalidate, and for the inputs that live
+ * in the YAML config (claim window, automation rules), which no write signals.
  */
-const TTL_MS = 5_000;
+export const CEILING_MS = 60_000;
 
-let decisionGate: { val: unknown; at: number } | null = null;
-const actionable = new Map<string, { val: unknown; at: number }>();
+interface Entry { val: unknown; at: number; until: number }
+
+let decisionGate: Entry | null = null;
+const actionable = new Map<string, Entry>();
 const ANON = "\0anon";
+
+function expiry(nowMs: number, deadline: number | null | undefined): number {
+    const cap = nowMs + CEILING_MS;
+    return deadline != null && deadline < cap ? deadline : cap;
+}
 
 /** Cross-consumer decision-gate map, cached. `build` runs on miss. */
 export function getCachedDecisionGate<T>(build: () => T, nowMs: number = Date.now()): T {
-    if (decisionGate && nowMs - decisionGate.at < TTL_MS) return decisionGate.val as T;
+    if (decisionGate && nowMs < decisionGate.until) return decisionGate.val as T;
     const val = build();
-    decisionGate = { val, at: nowMs };
+    decisionGate = { val, at: nowMs, until: expiry(nowMs, null) };
     return val;
 }
 
-/** Per-consumer actionable set, cached. `build` runs on miss. */
-export function getCachedActionable<T>(consumerId: string | undefined, build: () => T, nowMs: number = Date.now()): T {
+/**
+ * Per-consumer actionable set, cached. `build` runs on miss. `deadlineOf` names
+ * the epoch-ms at which the built value stops being true without any write
+ * (null: never).
+ */
+export function getCachedActionable<T>(
+    consumerId: string | undefined,
+    build: () => T,
+    nowMs: number = Date.now(),
+    deadlineOf: (val: T) => number | null = () => null,
+): T {
     const key = consumerId ?? ANON;
     const hit = actionable.get(key);
-    if (hit && nowMs - hit.at < TTL_MS) return hit.val as T;
+    if (hit && nowMs < hit.until) return hit.val as T;
     const val = build();
-    actionable.set(key, { val, at: nowMs });
+    actionable.set(key, { val, at: nowMs, until: expiry(nowMs, deadlineOf(val)) });
     return val;
 }
 
@@ -49,25 +73,28 @@ export function getCachedActionable<T>(consumerId: string | undefined, build: ()
  * whose OTHER, time-dependent parts (an expired claim window, a snooze that
  * came due) the write says nothing about.
  *
- * A repair does NOT refresh `at`, for the same reason — the TTL is a ceiling
- * on how long a value may live without a full rebuild, and naming one ticket
- * proves nothing about the rest of the board.
+ * A repair does NOT push the expiry back, for the same reason — the ceiling
+ * bounds how long a value may live without a full rebuild, and naming one
+ * ticket proves nothing about the rest of the board. It can only bring it
+ * FORWARD: `repairActionable` returns the repaired tickets' own deadline (a
+ * claim just taken, a snooze just set), and the entry expires at the earlier.
  */
 export function repairEntries<A, D>(
-    repairActionable: (consumerId: string | undefined, val: A) => void,
+    repairActionable: (consumerId: string | undefined, val: A) => number | null,
     repairDecisionGate: (val: D) => void,
     nowMs: number = Date.now(),
 ): void {
     if (decisionGate) {
-        if (nowMs - decisionGate.at >= TTL_MS) decisionGate = null;
+        if (nowMs >= decisionGate.until) decisionGate = null;
         else repairDecisionGate(decisionGate.val as D);
     }
     for (const [key, hit] of [...actionable]) {
-        if (nowMs - hit.at >= TTL_MS) {
+        if (nowMs >= hit.until) {
             actionable.delete(key);
             continue;
         }
-        repairActionable(key === ANON ? undefined : key, hit.val as A);
+        const deadline = repairActionable(key === ANON ? undefined : key, hit.val as A);
+        if (deadline != null && deadline < hit.until) hit.until = deadline;
     }
 }
 

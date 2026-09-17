@@ -18,7 +18,7 @@ import { idScope, shouldScope } from "./scope-ids.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
-import { isHeldByOther } from "./assignment-gate.js";
+import { isAssignmentLive, isHeldByOther } from "./assignment-gate.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { levelsVisibleTo, listHumans } from "./consumers.js";
 import { listSubscriptions } from "./subscriptions.js";
@@ -1559,6 +1559,10 @@ export interface ActionableTicketSet {
      *  backlog (= "bloqué — vérifier la chaîne, le blocker peut être
      *  snoozed ou oublié"). */
     gatedByBlockerIds: Set<number>;
+    /** #2682 — epoch-ms of the next moment these sets change with no write: a
+     *  snooze in scope coming due, or another agent's live claim expiring. Null
+     *  when nothing in scope is pending on the clock. Drives the cache expiry. */
+    nextChangeMs: number | null;
 }
 
 /**
@@ -1826,7 +1830,7 @@ export function computeActionableTicketIds(
     // tickets nobody asked about — and a ticket absent from `actionableIds`
     // silently leaves somebody's queue.
     if (shouldScope(ticketIds)) return computeActionableTicketIdsUncached(consumerId, ticketIds);
-    return getCachedActionable(consumerId, () => computeActionableTicketIdsUncached(consumerId));
+    return getCachedActionable(consumerId, () => computeActionableTicketIdsUncached(consumerId), Date.now(), (v) => v.nextChangeMs);
 }
 function computeActionableTicketIdsUncached(
     consumerId?: string,
@@ -1920,6 +1924,12 @@ function computeActionableTicketIdsUncached(
         level: schema.tickets.level,
     }).from(schema.tickets).where(idScope(schema.tickets.id, scopeIds)).all();
     const openIds = new Set<number>();
+    // #2682 — the clock deadlines, gathered as the sets that read the clock are
+    // built, so a new time-dependent rule has to walk past this to be added.
+    let nextChangeMs: number | null = null;
+    const noteDeadline = (ms: number) => {
+        if (Number.isFinite(ms) && (nextChangeMs === null || ms < nextChangeMs)) nextChangeMs = ms;
+    };
     // #2388 david — what still BLOCKS, which is not the same as what is open: a
     // snoozed blocker is asleep, not done, and its dependent is still waiting on
     // it. So the gate counts it while the backlog does not.
@@ -1928,7 +1938,10 @@ function computeActionableTicketIdsUncached(
         if (t.status !== "approved") continue;
         if (closedByTicket.get(t.id) === true) continue;
         blockerIds.add(t.id);
-        if (t.postponedUntil && t.postponedUntil > nowStr) continue;
+        if (t.postponedUntil && t.postponedUntil > nowStr) {
+            noteDeadline(Date.parse(t.postponedUntil));
+            continue;
+        }
         openIds.add(t.id);
     }
 
@@ -1946,6 +1959,9 @@ function computeActionableTicketIdsUncached(
         for (const t of tickets) {
             if (isHeldByOther(t.assignee, t.claimant, t.claimedAt, consumerId, nowMs, assignWindowMs)) {
                 assignedAwaySet.add(t.id);
+            }
+            if (t.claimant && t.claimant !== consumerId && isAssignmentLive(t.claimedAt, nowMs, assignWindowMs)) {
+                noteDeadline(Date.parse(t.claimedAt as string) + assignWindowMs);
             }
         }
     }
@@ -2052,9 +2068,10 @@ function computeActionableTicketIdsUncached(
             openIds: keep(openIds),
             actionableIds: keep(actionableIds),
             gatedByBlockerIds: keep(gatedByBlocker),
+            nextChangeMs,
         };
     }
-    return { openIds, actionableIds, gatedByBlockerIds: gatedByBlocker };
+    return { openIds, actionableIds, gatedByBlockerIds: gatedByBlocker, nextChangeMs };
 }
 
 // =====================================================================
@@ -2134,6 +2151,7 @@ export function invalidateFlagsCache(ticketIds?: readonly number[]): void {
                 patchSet(val.actionableIds, id, fresh.actionableIds.has(id));
                 patchSet(val.gatedByBlockerIds, id, fresh.gatedByBlockerIds.has(id));
             }
+            return fresh.nextChangeMs;
         },
         (gate) => {
             for (const id of scope) {

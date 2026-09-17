@@ -10,6 +10,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import type { Subscription, SubscriptionRole } from "./connection.js";
+import { clearFlagsCache } from "./flags-cache.js";
 
 // =====================================================================
 //  Project subscriptions
@@ -42,6 +43,9 @@ export function upsertSubscription(
                     eq(schema.subscriptions.project, project),
                 )).run();
             existing.role = role;
+            // #2682 — an owner role puts the project's tickets in the agent's
+            // actionable pool; that cache lives up to a minute now.
+            clearFlagsCache();
         }
         return {
             consumer_id: existing.consumerId,
@@ -58,6 +62,7 @@ export function upsertSubscription(
         lastSeenId: 0, // dormant, kept for column compat
         role: role ?? "follower",
     }).run();
+    clearFlagsCache(); // #2682 — same, for a new subscription
     const fresh = db.select().from(schema.subscriptions)
         .where(and(
             eq(schema.subscriptions.consumerId, consumer_id),
@@ -77,6 +82,7 @@ export function deleteSubscription(consumer_id: string, project: string): void {
         eq(schema.subscriptions.consumerId, consumer_id),
         eq(schema.subscriptions.project, project),
     )).run();
+    clearFlagsCache(); // #2682 — same, for a dropped subscription
 }
 
 export function listSubscriptions(consumer_id?: string): Subscription[] {

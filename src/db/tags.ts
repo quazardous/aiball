@@ -8,6 +8,7 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
+import { clearFlagsCache } from "./flags-cache.js";
 
 export interface Tag {
     id: number;
@@ -108,11 +109,15 @@ export function updateTag(
     if (fields.note !== undefined) patch.note = fields.note;
     if (Object.keys(patch).length === 0) return getTag(id);
     getDb().update(schema.tags).set(patch).where(eq(schema.tags.id, id)).run();
+    // #2682 — agent work filters match tag NAMES inside the actionable gate,
+    // whose cache lives up to a minute now; every tag write below drops it.
+    clearFlagsCache();
     return getTag(id);
 }
 
 export function deleteTag(id: number): void {
     getDb().delete(schema.tags).where(eq(schema.tags.id, id)).run();
+    clearFlagsCache();
 }
 
 /**
@@ -156,6 +161,7 @@ export function addMessageTag(
         setAt: nowIso(),
         setBy,
     }).onConflictDoNothing().run();
+    clearFlagsCache();
 }
 
 export function removeMessageTag(messageId: number, tagId: number): void {
@@ -163,6 +169,7 @@ export function removeMessageTag(messageId: number, tagId: number): void {
         eq(schema.ticketTags.ticketId, messageId),
         eq(schema.ticketTags.tagId, tagId),
     )).run();
+    clearFlagsCache();
 }
 
 export function setMessageTags(
@@ -183,4 +190,5 @@ export function setMessageTags(
             }).run();
         }
     });
+    clearFlagsCache();
 }

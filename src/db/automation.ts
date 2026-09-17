@@ -28,6 +28,7 @@
 import { and, asc, eq, like } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
+import { clearFlagsCache } from "./flags-cache.js";
 
 // ---------------------------------------------------------------------------
 // Trigger vocabulary (open — extensible).
@@ -459,6 +460,10 @@ export function insertAutomationRule(r: NewAutomationRule): AutomationRule {
         expression: JSON.stringify(expressionForCol),
         actions: encodeActions(actionsList),
     }).returning().get();
+    // #2682 — `actionable_eval` rules (agent work filters) run inside the
+    // actionable gate, whose cache lives up to a minute now: every rule write
+    // drops it. Rules from the YAML config have no write path, only the ceiling.
+    clearFlagsCache();
     return rowToRule(inserted);
 }
 
@@ -496,12 +501,14 @@ export function listAutomationRules(opts: ListOpts = {}): AutomationRule[] {
 
 export function deleteAutomationRule(id: number): void {
     getDb().delete(schema.automationRules).where(eq(schema.automationRules.id, id)).run();
+    clearFlagsCache(); // #2682 — see insertAutomationRule
 }
 
 export function setAutomationRuleEnabled(id: number, enabled: boolean): AutomationRule | null {
     const db = getDb();
     db.update(schema.automationRules).set({ enabled: enabled ? 1 : 0 })
         .where(eq(schema.automationRules.id, id)).run();
+    clearFlagsCache(); // #2682 — see insertAutomationRule
     const r = db.select().from(schema.automationRules)
         .where(eq(schema.automationRules.id, id)).get();
     return r ? rowToRule(r) : null;
@@ -563,6 +570,7 @@ export function updateAutomationRule(
     }
     db.update(schema.automationRules).set(upd)
         .where(eq(schema.automationRules.id, id)).run();
+    clearFlagsCache(); // #2682 — see insertAutomationRule
     const r = db.select().from(schema.automationRules)
         .where(eq(schema.automationRules.id, id)).get();
     return r ? rowToRule(r) : null;

@@ -10,6 +10,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { LEVELS_BY_AGENT_TYPE, type TicketLevel } from "../domain.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
+import { clearFlagsCache } from "./flags-cache.js";
 import { isRemoteConsumer, type SeenVia } from "./remote-detect.js";
 
 export type ConsumerKind = "human" | "agent" | "sandbox" | "system";
@@ -363,6 +364,9 @@ export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch):
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
     if (r.changes === 0) return null;
+    // #2682 — the actionable gate reads who is human (kind + enabled) and which
+    // levels an agent works (agent_type); its cache lives up to a minute now.
+    if (patch.kind !== undefined || patch.enabled !== undefined || patch.agent_type !== undefined) clearFlagsCache();
     return getConsumer(consumer_id);
 }
 
@@ -397,6 +401,7 @@ export function upsertConsumer(input: {
         createdAt: now,
         updatedAt: now,
     }).run();
+    if (input.kind === "human") clearFlagsCache(); // #2682 — a new human changes the gate
     return getConsumer(input.consumer_id)!;
 }
 
@@ -404,6 +409,7 @@ export function deleteConsumer(consumer_id: string): boolean {
     const r = getDb().delete(schema.consumers)
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
+    if (r.changes > 0) clearFlagsCache(); // #2682 — it may have been a human
     return r.changes > 0;
 }
 
