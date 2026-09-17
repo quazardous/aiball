@@ -23,11 +23,37 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-09-17
+
+### Added
+
+- `npm run test:docker -- unit|e2e|sim|all` runs the test suites in
+  CPU-capped containers instead of on the machine hosting the daemon. The
+  unit container has no network and reads the source read-only.
+
+### Changed
+
+- `aiball rule` now creates, lists and toggles automation rules — the ones
+  moderation actually reads. Same options as before.
+
 ### Removed
 
+- `/api/rules` and `/api/work-filters`, along with their tables. Moderation
+  and the tag filter had stopped reading them, so anything stored there had
+  no effect. Rules live under `/api/automation/rules`.
 - A comment's last body line `commits: [...]` is no longer read as its
   commits: only the `commits` field counts. A session whose tool schema lacks
   it must restart its loop.
+
+### Fixed
+
+- A loop's bar no longer turns red when its own end-of-turn hook wakes it.
+  Only a real proxy disconnection does. **Restart or reload your loops** for
+  this to take effect.
+- The daemon spends far less time per request (project counters, backlog),
+  which is what made MCP and API calls hang while it was busy.
+- A comment's commits show as a discreet line of SHAs, and nothing at all
+  when there are none.
 
 ## [0.44.0] — 2026-09-16
 
