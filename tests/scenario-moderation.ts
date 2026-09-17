@@ -12,11 +12,12 @@
 // shared-daemon scenario. Distinct project "moderation" + every rule scoped with
 // match_project → the rules can't leak onto the other scenarios' projects, and
 // the assertions don't depend on the ambient default strategy.
-import { provision, provisionHuman, post, createRule, ok, fail } from "./lib.js";
+import { provision, provisionProject, provisionHuman, post, createRule, ok, fail } from "./lib.js";
 
 const project = "moderation";
 
 async function main(): Promise<void> {
+    provisionProject(project);
     const tokHuman = provisionHuman("human-mod"); // moderator: creates rules AND bypasses them
     const tokA = provision("agent-a"); // generic agent → reviewed
     const tokAuto = provision("agent-auto"); // agent allow-listed by a rule
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
     //    the default `auto-reply` strategy would auto-approve a comment.
     const cReview = await post(tokA, {
         project, kind: "comment_added", ticket_id: ticketId, by_agent: "agent-a",
-        body: "agent-a comment (should be reviewed)", summary_until: "agent-a posted; awaiting moderation",
+        body: "agent-a comment (should be reviewed)", summary_until: "agent-a posted; awaiting moderation", handback: true,
     });
     if (cReview.status !== "pending") fail(`review rule should route agent-a's comment to pending, got status=${cReview.status}`);
     ok("review — agent-a's comment → pending (review rule overrode the permissive default)");
@@ -64,7 +65,7 @@ async function main(): Promise<void> {
     //    strategy default).
     const cAuto = await post(tokAuto, {
         project, kind: "comment_added", ticket_id: ticketId, by_agent: "agent-auto",
-        body: "agent-auto comment (allow-listed)", summary_until: "agent-auto posted; auto-approved",
+        body: "agent-auto comment (allow-listed)", summary_until: "agent-auto posted; auto-approved", handback: true,
     });
     if (cAuto.status !== "approved") fail(`auto rule should route agent-auto's comment to approved, got status=${cAuto.status}`);
     if (cAuto.matched_rule_id !== rAutoId) fail(`agent-auto's comment should match rule #${rAutoId} (first-match-wins over the review rule), got matched_rule_id=${cAuto.matched_rule_id}`);

@@ -12,7 +12,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: "Pushed; waiting for the test suite, about 16 minutes.", summary_until: Waiting for the test suite before the next step., then: continue, continue_after_minutes: 0 }
+    args: { target_id: $ticket, body: "Pushed; waiting for the test suite, about 16 minutes.", summary_until: Waiting for the test suite before the next step., then: continue, continue_after_minutes: 0, commits: none }
   - expect:
       alpha-lead: { ticket: $ticket, act: true, wake: triage }
   - wake: alpha-lead

@@ -17,6 +17,7 @@ steps:
       body: Question for the moderator.
       summary_until: Waiting for the moderator to answer.
       handback: true
+      commits: none
   - expect:
       alpha-lead: { ticket: $ticket, backlog: actionable, act: true, last_actor: alpha-lead, wake: triage }
       alpha-helper: { ticket: $ticket, backlog: none, act: false, wake: none }
@@ -34,6 +35,7 @@ steps:
       body: I saw something related on my side.
       summary_until: The lead holds it; the helper added a pointer.
       handback: true
+      commits: none
   - expect:
       alpha-lead: { ticket: $ticket, backlog: hot, act: true, last_actor: alpha-helper }
   - view: [alpha-lead, alpha-helper]

@@ -12,7 +12,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan }
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan, commits: none }
   - expect:
       alpha-lead: { ticket: $ticket, backlog: none, act: false, gated: true, wake: none }
   - sleep: 130

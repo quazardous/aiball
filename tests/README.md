@@ -32,7 +32,8 @@ the host, run only the file you touched: `npx tsx --test src/<file>.test.ts`.
 `npm run test:e2e` (= `bash tests/run-e2e.sh`):
 1. `docker compose -f tests/docker-compose.yml up --build` — the **real daemon**
    (`createApp`) in a container: `NODE_ENV=test`, isolated **ephemeral DB volume**,
-   host port **17777** (≠ the live `7777`), healthcheck on `/api/health`.
+   host port `AIBALL_TEST_PORT` (default **17777**, ≠ the live `7777`; `run-docker.sh`
+   picks a free one), healthcheck on `/api/health`.
 2. runs **every** `tests/scenario-*.ts` **inside** the daemon container
    (`docker compose exec`) — so a scenario shares the DB (to mint tokens) and
    reaches the daemon on `localhost`.
@@ -45,8 +46,13 @@ Exit code = 0 only if all scenarios pass.
 - **Drive the business API only** (`POST /api/messages`, `GET /api/unread`, …).
   If a scenario needs CRUD gymnastics to progress, that's the signal a **business
   operation is missing** — the stack *audits* that the API is business, not CRUD.
-- The **only** non-API touch allowed is **agent provisioning** (`provision()` in
-  `tests/lib.ts`: `ensureConsumer` + `issueToken`), since auth is bearer-token.
+- The **only** non-API touch allowed is **provisioning**: agents (`provision()` in
+  `tests/lib.ts`: `ensureConsumer` + `issueToken`, since auth is bearer-token) and
+  projects (`provisionProject(name, owners)`: a ticket can't be posted into a
+  project that was never created, and an agent's backlog only holds the projects
+  it leads).
+- Post what a real agent must post: a comment carries `then:` or `handback`, a plan
+  goes on an approved ticket (a moderator `approve`s an agent's ticket first).
 - Each scenario uses a **distinct `project`** → no interference on the shared
   daemon. (No per-scenario daemon restart needed.)
 - Native module note: `better-sqlite3` is compiled **in-image** (`tests/Dockerfile`
@@ -55,7 +61,8 @@ Exit code = 0 only if all scenarios pass.
 ### Add a scenario
 
 Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
-(`provision` / `post` / `unread` / `ok` / `fail`). `run-e2e.sh` auto-discovers it.
+(`provision` / `provisionProject` / `post` / `unread` / `ok` / `fail`). `run-e2e.sh`
+auto-discovers it. Run it with `npm run test:docker -- e2e`.
 
 ## Scenarios
 
@@ -67,7 +74,8 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
 
 ### ✅ self-ping (#296) — `scenario-selfping.ts`
 - **Setup**: `agent-a` opens a ticket; `agent-b` comments; `agent-a` comments on its own ticket.
-- **Assert**: A's `unread` contains B's comment but **NOT** A's own → no self-ping.
+- **Assert**: A's `unread` contains B's comment (read before A posts: posting on a
+  thread acknowledges it) but **NOT** A's own → no self-ping.
 
 ### ✅ decision gate (#273) — `scenario-decision-gate.ts`
 - **Setup**: human `david` (`provisionHuman`, bypasses moderation so the ticket is
@@ -116,6 +124,8 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
 - **Setup**: two project-scoped rules — `R_auto` (pos 0, match `by_agent=agent-auto`
   → `auto`) and `R_review` (pos 10, match `kind=comment_added` → `review`). A human
   `human-mod` (`provisionHuman`) opens the parent ticket.
+- The rules are automation rules (`POST /api/automation/rules`, trigger
+  `message_posted`, action `decision`): that is what moderation reads.
 - **Assert** (engine: `src/rules.ts evaluate()`), reading `status` + `matched_rule_id`
   off the `POST /api/messages` response:
   - **human bypass** — human-mod's `ticket_created` is `approved` despite the default.

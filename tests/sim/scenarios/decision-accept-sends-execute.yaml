@@ -7,7 +7,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan }
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan, commits: none }
     save: { plan: id }
   # Clear whatever was queued before the decision, so the event below is the accept's.
   - wake: alpha-lead

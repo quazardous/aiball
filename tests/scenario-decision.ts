@@ -1,17 +1,20 @@
 // #324 e2e — decision-on-comment (#B.129): an agent proposes a plan (a comment
 // tagged decision_kind=plan → pending); the reporter accepts it → the decision
 // goes pending → accepted. Driven through the business API. (#328 checklist)
-import { provision, post, decide, metaDecision, seedCounters, ok, fail } from "./lib.js";
+import { provision, provisionProject, provisionHuman, post, decide, approve, metaDecision, seedCounters, ok, fail } from "./lib.js";
 
 const project = "decision";
 
 async function main(): Promise<void> {
     seedCounters(); // address the comment by id later → avoid the fresh-DB id collision
+    provisionProject(project);
     const tokA = provision("agent-a");
     const tokB = provision("agent-b");
 
     const ticket = await post(tokA, { project, kind: "ticket_created", title: "decision e2e", by_agent: "agent-a" });
     const ticketId = (ticket.ticket_id ?? ticket.id) as number;
+    // A plan is refused on a ticket still waiting for moderation.
+    await approve(provisionHuman("human-mod"), ticketId);
 
     // agent B proposes a plan (decision_kind=plan → a pending decision).
     const plan = await post(tokB, {

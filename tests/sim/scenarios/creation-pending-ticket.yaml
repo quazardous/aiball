@@ -11,7 +11,7 @@ steps:
       alpha-lead: { ticket: $ticket, backlog: none, act: false, rank: 0 }
       alpha-helper: { ticket: $ticket, backlog: none, act: false }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: A plan before the ticket is approved., summary_until: s, then: plan }
+    args: { target_id: $ticket, body: A plan before the ticket is approved., summary_until: s, then: plan, commits: none }
     refused: cannot propose plan on a ticket in status
   - moderator: close $ticket
     may_fail: true

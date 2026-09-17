@@ -9,19 +9,19 @@ steps:
     save: { ticket: id }
   - moderator: approve $ticket
   - alpha-helper: ticket_reply
-    args: { target_id: $ticket, body: A reply with no then and no handback., summary_until: s }
+    args: { target_id: $ticket, body: A reply with no then and no handback., summary_until: s, commits: none }
     refused: needs one, or handback
   - alpha-helper: ticket_reply
-    args: { target_id: $ticket, body: Keeping a ticket it does not hold., summary_until: s, handback: false }
+    args: { target_id: $ticket, body: Keeping a ticket it does not hold., summary_until: s, handback: false, commits: none }
     refused: claim it first
   - alpha-helper: ticket_reply
-    args: { target_id: $ticket, body: A plan that claims to keep the hand., summary_until: s, then: plan, handback: false }
+    args: { target_id: $ticket, body: A plan that claims to keep the hand., summary_until: s, then: plan, handback: false, commits: none }
     refused: "contradicts then: plan"
   - alpha-helper: ticket_reply
-    args: { target_id: $ticket, body: A step on a ticket it does not hold., summary_until: s, then: continue, continue_after_minutes: 0 }
+    args: { target_id: $ticket, body: A step on a ticket it does not hold., summary_until: s, then: continue, continue_after_minutes: 0, commits: none }
     refused: "then: continue"
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: A reply whose summary is over budget., handback: true, summary_until: "The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget." }
+    args: { target_id: $ticket, body: A reply whose summary is over budget., handback: true, summary_until: "The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget. The summary goes on well past its budget.", commits: none }
     refused: the budget is 500
   - expect:
       alpha-lead: { ticket: $ticket, last_actor: alpha-lead }

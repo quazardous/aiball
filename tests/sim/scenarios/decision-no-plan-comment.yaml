@@ -7,7 +7,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Do you want a plan first?, summary_until: Asking the moderator whether a plan is needed., handback: true }
+    args: { target_id: $ticket, body: Do you want a plan first?, summary_until: Asking the moderator whether a plan is needed., handback: true, commits: none }
   - moderator: comment $ticket
     body: No plan, just do it.
   - expect:
@@ -16,10 +16,10 @@ steps:
   - expect:
       alpha-lead: { ticket: $ticket, act: true, wake: triage }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: First part done., summary_until: Fix in progress., then: continue, continue_after_minutes: 0 }
+    args: { target_id: $ticket, body: First part done., summary_until: Fix in progress., then: continue, continue_after_minutes: 0, commits: none }
   - expect:
       alpha-lead: { ticket: $ticket, act: true }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Fixed., summary_until: Fixed; waiting for the moderator's accept., then: resolved }
+    args: { target_id: $ticket, body: Fixed., summary_until: Fixed; waiting for the moderator's accept., then: resolved, commits: none }
   - expect:
       alpha-lead: { ticket: $ticket, act: false, gated: true }

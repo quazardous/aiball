@@ -21,6 +21,7 @@ steps:
       summary_until: First step done; the next one is in progress.
       then: continue
       continue_after_minutes: 0
+      commits: none
   - expect:
       alpha-lead: { ticket: $ticket, act: true, gated: false, last_actor: alpha-lead }
       alpha-helper: { ticket: $ticket, act: false }
@@ -30,6 +31,7 @@ steps:
       body: Here is how I will do the rest.
       summary_until: Plan waiting for the moderator.
       then: plan
+      commits: none
     save: { plan: id }
   - expect:
       alpha-lead: { ticket: $ticket, backlog: none, act: false, gated: true, wake: none }

@@ -14,7 +14,7 @@
 import type { AddressInfo } from "node:net";
 import { createApp } from "../src/app.js";
 import { onLifecycle, type LifecycleEvent } from "../src/event-bus.js";
-import { provision, seedCounters, metaDecision, ok, fail } from "./lib.js";
+import { provision, provisionProject, provisionHuman, seedCounters, metaDecision, ok, fail } from "./lib.js";
 
 const project = "buslifecycle";
 const dstProject = "buslifecycle-dst";
@@ -32,8 +32,11 @@ async function main(): Promise<void> {
     const port = (server.address() as AddressInfo).port;
     const BASE = `http://127.0.0.1:${port}`;
 
+    provisionProject(project);
+    provisionProject(dstProject);
     const tokA = provision("agent-a"); // l'agent qui porte le ticket (reporter)
     const tokB = provision("agent-b"); // l'agent qui propose un plan
+    const tokMod = provisionHuman("human-mod"); // moderates the agent's ticket before anyone plans on it
 
     async function post(token: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
         const r = await fetch(`${BASE}/api/messages`, {
@@ -83,6 +86,17 @@ async function main(): Promise<void> {
         if (created.length !== 1) fail(`ticket_created should emit exactly one 'created' lifecycle event, got ${created.length} [${f.map((e) => `${e.op}:${e.message.kind}`).join(", ")}]`);
         if (created[0].message.kind !== "ticket_created") fail(`'created' should carry kind=ticket_created, got ${created[0].message.kind}`);
         ok(`created — ticket #${ticketId} → exactement un 'created' (pas de double-fire)`);
+        checkpoint();
+    }
+
+    // A plan is refused on a ticket still waiting for moderation: approve it
+    // first, on this same in-process app, and start the next window after it.
+    {
+        const r = await fetch(`${BASE}/api/messages/${ticketId}/approve`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${tokMod}` },
+        });
+        if (!r.ok) fail(`approving ticket #${ticketId} → ${r.status}: ${await r.text()}`);
         checkpoint();
     }
 

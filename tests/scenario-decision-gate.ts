@@ -5,7 +5,7 @@
 // Driven through the business API. La logique pure est déjà couverte en unit
 // (src/db/decision-gate.test.ts, 14 cas) ; ici on audite le scénario business
 // de bout en bout via le daemon réel. (#328 checklist : gate de décision #273)
-import { provision, provisionHuman, post, tickets, ok, fail } from "./lib.js";
+import { provision, provisionProject, provisionHuman, post, tickets, ok, fail } from "./lib.js";
 
 const project = "decisiongate";
 
@@ -16,6 +16,7 @@ async function isActionable(token: string, ticketId: number): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+    provisionProject(project, ["agent-a"]);
     const tokA = provision("agent-a"); // l'agent qui porte le ticket
     const tokDavid = provisionHuman("david"); // l'humain (kind=human → compte pour #358)
 

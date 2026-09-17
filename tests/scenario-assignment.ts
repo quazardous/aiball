@@ -4,7 +4,7 @@
 // (src/db/assignment-flow.test.ts); here we audit the HTTP surface those can't
 // reach: the claim/assign/release endpoints, push authority (an agent pushing
 // onto ANOTHER consumer is moderator-only → 403), and auto-release on close.
-import { provision, provisionHuman, post, tickets, assign, release, ok, fail, BASE } from "./lib.js";
+import { provision, provisionProject, provisionHuman, post, tickets, assign, release, ok, fail, BASE } from "./lib.js";
 
 const project = "assignment";
 
@@ -18,6 +18,7 @@ async function isOpen(token: string, ticketId: number): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
+    provisionProject(project, ["agent-a", "agent-b"]);
     const tokA = provision("agent-a");
     const tokB = provision("agent-b");
     const tokDavid = provisionHuman("david");
@@ -30,7 +31,8 @@ async function main(): Promise<void> {
 
     // agent-a CLAIMS it (no assignee = self-claim) → it leaves agent-b's pool.
     const claimed = await assign(tokA, id);
-    if (claimed.is_claim !== true || claimed.assignee !== "agent-a") fail(`claim should set is_claim=true + assignee=agent-a, got ${JSON.stringify(claimed)}`);
+    // A claim is focus, not responsibility: it names the claimant and leaves the assignee alone.
+    if (claimed.is_claim !== true || claimed.claimant !== "agent-a" || claimed.assignee !== null) fail(`claim should set is_claim=true + claimant=agent-a (no assignee), got ${JSON.stringify(claimed)}`);
     if (!(await isActionable(tokA, id))) fail(`#${id} should stay actionable for the claimer agent-a`);
     if (await isActionable(tokB, id)) fail(`#${id} should leave agent-b's pool after agent-a's claim`);
     if (!(await isOpen(tokB, id))) fail(`#${id} should still be OPEN for agent-b (just not in its court)`);
@@ -57,25 +59,33 @@ async function main(): Promise<void> {
     if (!(await isActionable(tokA, id)) || !(await isActionable(tokB, id))) fail(`released #${id} should be back in BOTH pools`);
     ok(`#${id} released → back in the shared pool`);
 
-    // auto-release on close: push to agent-b, close, reopen → assignment gone
-    // (agent-a sees it again — proves the close cleared the assignment, not just
-    // the last_actor handover).
+    // close keeps the assignment (responsibility) and drops only the claim
+    // (focus): push to agent-b, close, reopen → still agent-b's, not agent-a's.
+    // The last_actor handover alone would put it back in agent-a's pool, so this
+    // proves the assignment survived the close.
     await assign(tokDavid, id, "agent-b");
     if (await isActionable(tokA, id)) fail(`#${id} should be agent-b's alone before close`);
     await post(tokDavid, { project, kind: "ticket_closed", ticket_id: id, by_agent: "david" });
     await post(tokDavid, { project, kind: "ticket_reopened", ticket_id: id, by_agent: "david" });
-    if (!(await isActionable(tokA, id))) fail(`#${id} should be back in agent-a's pool — close should have auto-released the assignment`);
-    ok(`#${id} close auto-released the assignment → shared pool on reopen`);
+    if (await isActionable(tokA, id)) fail(`#${id} should stay out of agent-a's pool — close keeps the assignment to agent-b`);
+    if (!(await isActionable(tokB, id))) fail(`#${id} should be back in agent-b's pool on reopen — the assignee keeps it`);
+    ok(`#${id} close kept the assignment → still agent-b's on reopen`);
 
     // auto-claim (discipline A): an agent's first comment on an unheld ticket
     // claims it for that agent — no explicit ticket_claim needed.
     const t2 = await post(tokDavid, { project, kind: "ticket_created", title: "auto-claim e2e", by_agent: "david" });
     const id2 = (t2.ticket_id ?? t2.id) as number;
     if (!(await isActionable(tokB, id2))) fail(`fresh #${id2} should be in agent-b's pool`);
-    await post(tokA, { project, kind: "comment_added", ticket_id: id2, by_agent: "agent-a", body: "on it", summary_until: "agent-a working it" });
-    if (await isActionable(tokB, id2)) fail(`#${id2} should leave agent-b's pool after agent-a's auto-claim`);
-    if (!(await isActionable(tokA, id2))) fail(`#${id2} should stay actionable for the auto-claimer agent-a`);
-    ok(`#${id2} auto-claimed by agent-a's first comment → out of agent-b's pool (discipline A)`);
+    const claimantOf = async (ticketId: number): Promise<unknown> =>
+        (await tickets(tokB, project, { open: true })).find((t) => (t.id as number) === ticketId)?.claimant ?? null;
+    // Only a comment that takes a position claims: a bare question does not.
+    await post(tokA, { project, kind: "comment_added", ticket_id: id2, by_agent: "agent-a", body: "a question", summary_until: "agent-a asks", handback: true });
+    if ((await claimantOf(id2)) !== null) fail(`#${id2}: a comment without a decision should not claim, got claimant=${await claimantOf(id2)}`);
+    // A plan does. (Its pending decision also gates the ticket out of both
+    // pools, so the claim is read from the ticket itself, not from a pool.)
+    await post(tokA, { project, kind: "comment_added", ticket_id: id2, by_agent: "agent-a", body: "the plan", summary_until: "agent-a proposes how", decision_kind: "plan" });
+    if ((await claimantOf(id2)) !== "agent-a") fail(`#${id2}: agent-a's plan should auto-claim it, got claimant=${await claimantOf(id2)}`);
+    ok(`#${id2} a bare comment does not claim, agent-a's plan does (discipline A)`);
 
     ok("assignment — claim / push authority / release / auto-release-on-close / auto-claim");
 }

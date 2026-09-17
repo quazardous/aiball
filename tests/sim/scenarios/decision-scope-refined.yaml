@@ -7,20 +7,20 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan }
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting for the moderator., then: plan, commits: none }
     save: { plan: id }
   - moderator: accept $plan
   - wake: alpha-lead
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: First part done., summary_until: First part done; the rest is in progress., then: continue, continue_after_minutes: 0 }
+    args: { target_id: $ticket, body: First part done., summary_until: First part done; the rest is in progress., then: continue, continue_after_minutes: 0, commits: none }
   - moderator: comment $ticket
     body: Also cover the empty case.
   - expect:
       alpha-lead: { ticket: $ticket, act: true, last_actor: david, wake: event }
   - wake: alpha-lead
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Empty case covered, as asked., summary_until: Both parts done, empty case included., then: continue, continue_after_minutes: 0 }
+    args: { target_id: $ticket, body: Empty case covered, as asked., summary_until: Both parts done, empty case included., then: continue, continue_after_minutes: 0, commits: none }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Delivered, empty case included., summary_until: Delivered; waiting for the moderator's accept., then: resolved }
+    args: { target_id: $ticket, body: Delivered, empty case included., summary_until: Delivered; waiting for the moderator's accept., then: resolved, commits: none }
   - expect:
       alpha-lead: { ticket: $ticket, act: false, gated: true }

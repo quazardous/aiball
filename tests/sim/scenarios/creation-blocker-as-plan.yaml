@@ -16,7 +16,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $work }
   - alpha-lead: ticket_reply
-    args: { target_id: $work, body: Here is how I will do it., summary_until: Plan waiting for the moderator., then: plan }
+    args: { target_id: $work, body: Here is how I will do it., summary_until: Plan waiting for the moderator., then: plan, commits: none }
   - view: [alpha-lead, alpha-second]
   - expect:
       alpha-lead: { ticket: $blocker, gated: true, act: false }

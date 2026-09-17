@@ -14,7 +14,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: "On it; the first part is done.", summary_until: The lead is on it; first part done., handback: true }
+    args: { target_id: $ticket, body: "On it; the first part is done.", summary_until: The lead is on it; first part done., handback: true, commits: none }
     save: { reply: id }
   - expect:
       alpha-lead: { ticket: $ticket, act: false, last_actor: alpha-lead }

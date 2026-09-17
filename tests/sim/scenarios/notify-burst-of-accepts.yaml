@@ -16,13 +16,13 @@ steps:
   - moderator: approve $t2
   - moderator: approve $t3
   - alpha-lead: ticket_reply
-    args: { target_id: $t1, body: Done., summary_until: Delivered., then: resolved }
+    args: { target_id: $t1, body: Done., summary_until: Delivered., then: resolved, commits: none }
     save: { r1: id }
   - alpha-lead: ticket_reply
-    args: { target_id: $t2, body: Done., summary_until: Delivered., then: resolved }
+    args: { target_id: $t2, body: Done., summary_until: Delivered., then: resolved, commits: none }
     save: { r2: id }
   - alpha-lead: ticket_reply
-    args: { target_id: $t3, body: Done., summary_until: Delivered., then: resolved }
+    args: { target_id: $t3, body: Done., summary_until: Delivered., then: resolved, commits: none }
     save: { r3: id }
   - moderator: accept $r1
   - moderator: accept $r2

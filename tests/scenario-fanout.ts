@@ -1,10 +1,11 @@
 // #324 e2e — fan-out: a comment by agent B on agent A's ticket pings the
 // subscriber (A). Driven through the business API. (#328 checklist: fan-out)
-import { provision, post, unread, ok, fail } from "./lib.js";
+import { provision, provisionProject, post, unread, ok, fail } from "./lib.js";
 
 const project = "fanout";
 
 async function main(): Promise<void> {
+    provisionProject(project);
     const tokA = provision("agent-a");
     const tokB = provision("agent-b");
 
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
         body: "hello A",
         by_agent: "agent-b",
         summary_until: "agent-b acknowledges the fan-out ticket",
+        handback: true,
     });
 
     const u = await unread(tokA, "agent-a", project);

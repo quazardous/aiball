@@ -11,10 +11,10 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Plan one., summary_until: Plan one waiting for the moderator., then: plan }
+    args: { target_id: $ticket, body: Plan one., summary_until: Plan one waiting for the moderator., then: plan, commits: none }
     save: { first: id }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Plan two; it replaces plan one., summary_until: Plan two waiting for the moderator., then: plan }
+    args: { target_id: $ticket, body: Plan two; it replaces plan one., summary_until: Plan two waiting for the moderator., then: plan, commits: none }
     save: { second: id }
   - wake: alpha-lead
   - expect:

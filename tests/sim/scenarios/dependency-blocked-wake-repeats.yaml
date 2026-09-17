@@ -17,7 +17,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $b }
   - alpha-lead: ticket_reply
-    args: { target_id: $b, body: B is done., summary_until: B delivered; waiting for the accept., then: resolved }
+    args: { target_id: $b, body: B is done., summary_until: B delivered; waiting for the accept., then: resolved, commits: none }
   - view: [alpha-lead]
   - expect:
       alpha-lead: { ticket: $a, backlog: blocked, wake: blocked }

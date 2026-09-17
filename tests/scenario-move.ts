@@ -1,12 +1,14 @@
 // #324 e2e — move cross-project (#294): the reporter moves a ticket to another
 // project; the head's project changes. Driven through the business API.
 // (#328 checklist: move cross-projet)
-import { provision, post, move, ok, fail } from "./lib.js";
+import { provision, provisionProject, post, move, ok, fail } from "./lib.js";
 
 const src = "move-src";
 const dst = "move-dst";
 
 async function main(): Promise<void> {
+    provisionProject(src);
+    provisionProject(dst);
     const tokA = provision("agent-a");
 
     const ticket = await post(tokA, { project: src, kind: "ticket_created", title: "move e2e", by_agent: "agent-a" });

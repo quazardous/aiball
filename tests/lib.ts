@@ -7,6 +7,8 @@ import { eq } from "drizzle-orm";
 import { issueToken } from "../src/db/tokens.js";
 import { ensureConsumer, getDb } from "../src/db.js";
 import * as schema from "../src/schema.js";
+import { createProject, getProject } from "../src/db/projects.js";
+import { upsertSubscription } from "../src/db/subscriptions.js";
 
 export const BASE = "http://127.0.0.1:7777";
 
@@ -14,6 +16,20 @@ export const BASE = "http://127.0.0.1:7777";
 export function provision(consumer: string): string {
     ensureConsumer(consumer);
     return issueToken({ kind: "agent", consumer_id: consumer, label: "e2e" }).token;
+}
+
+/**
+ * Register a project and its owners — provisioning, like `provision`: posting
+ * into a project that was never created is refused, and an agent's backlog
+ * only holds the projects it leads. Idempotent across scenarios sharing the
+ * daemon.
+ */
+export function provisionProject(name: string, owners: string[] = []): void {
+    if (!getProject(name)) createProject({ name });
+    for (const owner of owners) {
+        ensureConsumer(owner);
+        upsertSubscription(owner, name, "owner");
+    }
 }
 
 /**
@@ -117,13 +133,16 @@ export async function createRule(
         note?: string;
     },
 ): Promise<Record<string, unknown>> {
-    const r = await fetch(`${BASE}/api/rules`, {
+    // Moderation reads the automation engine's `message_posted` rules; a rule
+    // posted to the older /api/rules table is never consulted.
+    const { decision, ...match } = rule;
+    const r = await fetch(`${BASE}/api/automation/rules`, {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify(rule),
+        body: JSON.stringify({ triggers: ["message_posted"], action: { kind: "decision", decision }, ...match }),
     });
     const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/rules → ${r.status}: ${text}`);
+    if (!r.ok) throw new Error(`POST /api/automation/rules → ${r.status}: ${text}`);
     return JSON.parse(text) as Record<string, unknown>;
 }
 
@@ -164,6 +183,17 @@ export async function release(token: string, ticketId: number): Promise<Record<s
 }
 
 /** Parse a message's `meta` (JSON string or object) to read `.decision`. */
+/** A moderator approves a pending ticket or comment (`POST /api/messages/:id/approve`). */
+export async function approve(token: string, messageId: number): Promise<Record<string, unknown>> {
+    const r = await fetch(`${BASE}/api/messages/${messageId}/approve`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`POST /api/messages/${messageId}/approve → ${r.status}: ${text}`);
+    return JSON.parse(text) as Record<string, unknown>;
+}
+
 export function metaDecision(m: Record<string, unknown>): { kind?: string; status?: string } | null {
     const raw = m.meta;
     if (!raw) return null;

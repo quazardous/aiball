@@ -11,7 +11,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $o }
   - alpha-lead: ticket_reply
-    args: { target_id: $o, body: The plan for O., summary_until: Plan waiting., then: plan }
+    args: { target_id: $o, body: The plan for O., summary_until: Plan waiting., then: plan, commits: none }
     save: { plan: id }
   - moderator: accept $plan
   - wake: alpha-lead
@@ -22,7 +22,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $r }
   - alpha-lead: ticket_reply
-    args: { target_id: $r, body: First step of O's plan, done here., summary_until: R carries O's plan; step one done., then: continue, continue_after_minutes: 0 }
+    args: { target_id: $r, body: First step of O's plan, done here., summary_until: R carries O's plan; step one done., then: continue, continue_after_minutes: 0, commits: none }
   - view: [alpha-lead]
   - expect:
       alpha-lead: { ticket: $o, backlog: actionable, act: true }

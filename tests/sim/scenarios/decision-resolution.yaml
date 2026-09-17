@@ -7,7 +7,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $done }
   - alpha-lead: ticket_reply
-    args: { target_id: $done, body: Done and verified., summary_until: Delivered; waiting for the moderator's accept., then: resolved }
+    args: { target_id: $done, body: Done and verified., summary_until: Delivered; waiting for the moderator's accept., then: resolved, commits: none }
     save: { resolution: id }
   - expect:
       alpha-lead: { ticket: $done, act: false, gated: true }
@@ -25,7 +25,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $redo }
   - alpha-lead: ticket_reply
-    args: { target_id: $redo, body: Done., summary_until: Delivered; waiting for the moderator's accept., then: resolved }
+    args: { target_id: $redo, body: Done., summary_until: Delivered; waiting for the moderator's accept., then: resolved, commits: none }
     save: { resolution2: id }
   - moderator: refuse $resolution2
   - expect:

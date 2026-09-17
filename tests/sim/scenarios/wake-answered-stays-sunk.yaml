@@ -15,7 +15,7 @@ steps:
   - expect:
       alpha-lead: { ticket: $ticket, act: true, wake: none }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Nothing new since the last pass., summary_until: In progress with the lead; nothing to hand back., handback: false }
+    args: { target_id: $ticket, body: Nothing new since the last pass., summary_until: In progress with the lead; nothing to hand back., handback: false, commits: none }
   - expect:
       alpha-lead: { ticket: $ticket, act: true, last_actor: alpha-lead, wake: none }
   - sleep: 70

@@ -11,7 +11,7 @@ steps:
   - alpha-lead: ticket_claim
     args: { ticket_id: $ticket }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting., then: plan }
+    args: { target_id: $ticket, body: The plan., summary_until: Plan waiting., then: plan, commits: none }
     save: { plan: id }
   - moderator: accept $plan
   - expect:

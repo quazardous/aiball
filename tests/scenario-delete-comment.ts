@@ -8,7 +8,7 @@
 // (POST /api/messages/:id/delete), so seedCounters() pushes next_message_id
 // above the ticket-id space (getMessage is tickets-first — a comment id
 // colliding with a ticket id would misresolve). Distinct project "deletecomment".
-import { provision, provisionHuman, post, unread, seedCounters, ok, fail, BASE } from "./lib.js";
+import { provision, provisionProject, provisionHuman, post, unread, seedCounters, ok, fail, BASE } from "./lib.js";
 
 const project = "deletecomment";
 
@@ -40,6 +40,7 @@ function commentIds(thread: Record<string, unknown>): number[] {
 async function main(): Promise<void> {
     seedCounters(); // we address a comment by id (/delete) → dodge the ticket/message id collision
 
+    provisionProject(project);
     const tokHuman = provisionHuman("human-mod"); // the only actor allowed to delete; also opens the ticket (→ subscribed)
     const tokA = provision("agent-a"); // author of the comment that gets deleted
     const tokB = provision("agent-b"); // author of a comment that STAYS (proves the delete is targeted)
@@ -47,8 +48,8 @@ async function main(): Promise<void> {
     const ticket = await post(tokHuman, { project, kind: "ticket_created", title: "delete-comment e2e", by_agent: "human-mod" });
     const ticketId = (ticket.ticket_id ?? ticket.id) as number;
 
-    const cA = await post(tokA, { project, kind: "comment_added", ticket_id: ticketId, by_agent: "agent-a", body: "agent-a comment (to be deleted)", summary_until: "agent-a commented" });
-    const cB = await post(tokB, { project, kind: "comment_added", ticket_id: ticketId, by_agent: "agent-b", body: "agent-b comment (stays)", summary_until: "agent-b commented" });
+    const cA = await post(tokA, { project, kind: "comment_added", ticket_id: ticketId, by_agent: "agent-a", body: "agent-a comment (to be deleted)", summary_until: "agent-a commented", handback: true });
+    const cB = await post(tokB, { project, kind: "comment_added", ticket_id: ticketId, by_agent: "agent-b", body: "agent-b comment (stays)", summary_until: "agent-b commented", handback: true });
     const cAId = cA.id as number;
     const cBId = cB.id as number;
 
