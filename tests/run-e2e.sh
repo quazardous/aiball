@@ -9,7 +9,8 @@ compose() { docker compose -f tests/docker-compose.yml "$@"; }
 # The compose file publishes the daemon on AIBALL_TEST_PORT; wait on that same port.
 PORT="${AIBALL_TEST_PORT:-17777}"
 
-compose up -d --build
+# Only the daemon: the scenarios run inside it and never talk to the agent service.
+compose up -d --build daemon
 
 # wait for the daemon to be healthy (public /api/health)
 ok=0

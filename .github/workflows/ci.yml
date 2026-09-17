@@ -64,6 +64,16 @@ jobs:
       # checkout has no .aiball.yaml, so local mode is the default here.
       - run: npm test
 
+  # The business-API scenarios (tests/scenario-*.ts) against the real daemon in
+  # Docker. Run on every push so a new product rule cannot break them silently
+  # again.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/run-e2e.sh
+
   frontend-build:
     runs-on: ubuntu-latest
     steps:
