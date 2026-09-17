@@ -6,13 +6,15 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 compose() { docker compose -f tests/docker-compose.yml "$@"; }
+# The compose file publishes the daemon on AIBALL_TEST_PORT; wait on that same port.
+PORT="${AIBALL_TEST_PORT:-17777}"
 
 compose up -d --build
 
 # wait for the daemon to be healthy (public /api/health)
 ok=0
 for _ in $(seq 1 30); do
-    if curl -sf -o /dev/null http://127.0.0.1:17777/api/health; then ok=1; break; fi
+    if curl -sf -o /dev/null http://127.0.0.1:${PORT}/api/health; then ok=1; break; fi
     sleep 2
 done
 if [ "$ok" != "1" ]; then

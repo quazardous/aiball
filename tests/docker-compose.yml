@@ -6,11 +6,36 @@
 # API. Everything test-specific is injected via env + volumes — zero changes to
 # production code (#fryynv). The test env (NODE_ENV=test) frames test mode; a
 # fresh ephemeral DB volume keeps it separate from dev.
+#
+# Everything here runs OFF the live host's budget: each service is capped at
+# AIBALL_TEST_CPUS (default 4), so a test run never starves the live daemon and
+# loops sharing the machine. `bash tests/run-docker.sh` is the entry point.
 services:
+  # The unit suite (`npm test`), in the same image as the daemon. No network at
+  # all (loopback only): nothing a test does can reach the live daemon, a remote
+  # or the internet. The source is mounted READ-ONLY; AIBALL_TEST_SRC points it
+  # at another checkout (e.g. a scratch copy of an undeployed change).
+  tests:
+    profiles: ["tests"]
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile
+    cpus: ${AIBALL_TEST_CPUS:-4}
+    network_mode: none
+    environment:
+      NODE_ENV: test
+      AIBALL_HOME: /tmp/aiball-unit
+      AIBALL_SOCK: ""
+    volumes:
+      - ${AIBALL_TEST_SRC:-..}:/app:ro
+      - /app/node_modules
+    command: ["npm", "test"]
+
   daemon:
     build:
       context: ..
       dockerfile: tests/Dockerfile
+    cpus: ${AIBALL_TEST_CPUS:-4}
     environment:
       NODE_ENV: test
       AIBALL_HOME: /data          # isolated, ephemeral DB (volume below)
@@ -44,6 +69,7 @@ services:
     build:
       context: ..
       dockerfile: tests/Dockerfile.agent
+    cpus: ${AIBALL_TEST_CPUS:-4}
     depends_on:
       daemon:
         condition: service_healthy

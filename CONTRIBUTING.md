@@ -382,9 +382,14 @@ aiball uses Node's native test runner (`vitest`-style suites under
   rendering, OS-specific PTY behavior). Note the gap in the PR.
 - Keep tests fast — anything > 100 ms per case warrants a comment
   explaining why.
-- Run `npm test` (root) before pushing a PR. CI (`#527`) covers Rust
-  on Windows; Node tests still run locally and on the upstream when
-  enabled.
+- Run the full suite before pushing a PR — in Docker, not on your
+  machine: `npm run test:docker -- unit` (or `all` for unit, e2e and
+  the board simulator). The dev checkout is usually the live runtime,
+  and a full run on the host starves the daemon and loops sharing it.
+  The containers are capped at `AIBALL_TEST_CPUS` cores (default 4).
+  On the host, run only the files you touched:
+  `npx tsx --test src/<file>.test.ts`. CI (`#527`) covers Rust on
+  Windows; the Linux lane runs the whole Node suite on every push.
 
 Skipping a test (`.skip`, `xfail`) is acceptable as a tracker for a
 known follow-up — but write down the WHY and the condition for

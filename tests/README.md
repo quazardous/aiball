@@ -4,8 +4,28 @@ Two complementary layers, one stack (#dz8sm5):
 
 | Layer | Command | What | Where |
 |---|---|---|---|
-| **Pure logic** | `npm test` | fast `node:test` units, no DB | `src/**/*.test.ts` |
-| **e2e scenarios** | `npm run test:e2e` | real daemon in Docker, business-API cinématiques | `tests/scenario-*.ts` |
+| **Pure logic** | `npm run test:docker -- unit` | fast `node:test` units, no DB | `src/**/*.test.ts` |
+| **e2e scenarios** | `npm run test:docker -- e2e` | real daemon in Docker, business-API cinématiques | `tests/scenario-*.ts` |
+| **Board simulator** | `npm run test:docker -- sim` | real daemon + simulated agents through the MCP handlers | `tests/sim/scenarios/*.yaml` |
+
+## Where tests run
+
+`bash tests/run-docker.sh unit|e2e|sim|all` (= `npm run test:docker -- …`) is
+the one entry point for anything heavier than a single test file:
+
+- **unit** runs `npm test` in the `tests` compose service: same image as the
+  daemon, **no network** (nothing can reach a live daemon, a remote or the
+  internet), source mounted **read-only**. Pass files to run only those:
+  `npm run test:docker -- unit src/db/projects.test.ts`.
+- every service (`tests`, `daemon`, `agent`) is capped at
+  `AIBALL_TEST_CPUS` cores (default 4), and the docker client runs under
+  `nice`: the live daemon and loops on the same machine keep the upper hand.
+- `AIBALL_TEST_SRC=/path/to/checkout` points the unit run at another copy of
+  the code, e.g. a change not deployed to the live checkout yet.
+- `all` runs unit, then e2e, then sim; the exit code is non-zero if any failed.
+
+Do not run the full `npm test` on a host that also runs the live daemon. On
+the host, run only the file you touched: `npx tsx --test src/<file>.test.ts`.
 
 ## e2e — how it works
 

@@ -6,9 +6,11 @@
 FROM node:22-slim
 WORKDIR /app
 
-# build toolchain for the better-sqlite3 native compile
+# build toolchain for the better-sqlite3 native compile, plus tmux: a few unit
+# tests shell out to it, and git: the commit-credit tests build throwaway repos
+# (the `tests` service runs the unit suite in this image)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ \
+    && apt-get install -y --no-install-recommends python3 make g++ tmux procps git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
