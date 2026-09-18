@@ -489,6 +489,26 @@ test("#2722 an umbrella closed over seven open sub-tickets reads as ONE closure"
     assert.equal((res.extraSeenIds ?? []).length, 7);
 });
 
+test("#2759 a reached ticket that waits for moderation says so", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 3 }),
+            unread: async () => ({
+                messages: [
+                    { id: 841, kind: "resolution_accepted", ticket_id: 2730, hashid: "t5undr", by_agent: "david" },
+                    { id: 842, kind: "related_closed", ticket_id: 2745, source_ticket_id: 2730, by_agent: "david", ticket_awaiting_moderation: true },
+                    { id: 843, kind: "related_closed", ticket_id: 2746, source_ticket_id: 2730, by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "retour meta", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /still open, linked to #2730: #2745 \(awaiting moderation\), #2746\n?/);
+    assert.doesNotMatch(res.phrase, /#2746 \(awaiting moderation\)/);
+});
+
 test("#2722 a head that asks for work does not open a closure run", async () => {
     const res = await buildContextPhrase(
         stubClient({

@@ -905,6 +905,8 @@ ticketsRouter.get("/tickets", (req, res) => {
             summary: m.summary ?? null,
             by_agent: m.by_agent,
             status: m.status,
+            // #2759 — spelled out: `status: "pending"` is easy to misread.
+            awaiting_moderation: m.status === "pending",
             created_at: m.created_at,
             closed: closedSet.has(m.id),
             scope: m.scope,

@@ -2006,6 +2006,8 @@ export async function buildContextPhrase(
                     // #2722 — a cascade event's cause (the ticket whose closure
                     // produced it), used to fold it into the cause's wake.
                     source_ticket_id?: number | null;
+                    // #2759 — the event's ticket still waits for moderation.
+                    ticket_awaiting_moderation?: boolean;
                     // #1820 — when the event happened. Already on the wire
                     // (listUnread filters on it); it was simply absent from
                     // this narrowed shape, so the wake could never say how
@@ -2422,14 +2424,17 @@ export async function buildContextPhrase(
             const isCascade = (m: (typeof sameTicket)[number]): boolean =>
                 CASCADE_EVENT_KINDS.has(m?.kind ?? "") && m.source_ticket_id != null;
             const ownTickets = new Set(sameTicket.filter((m) => !isCascade(m)).map(ticketIdOf));
-            const reachedBy = new Map<number, Map<string, number[]>>(); // cause → kind → tickets
+            const reachedBy = new Map<number, Map<string, string[]>>(); // cause → kind → ticket refs
             const orphans: (typeof sameTicket) = [];
             for (const m of sameTicket) {
                 if (!isCascade(m)) continue;
                 const cause = m.source_ticket_id as number;
                 if (!ownTickets.has(cause)) { orphans.push(m); continue; }
-                const byKind = reachedBy.get(cause) ?? new Map<string, number[]>();
-                byKind.set(m.kind as string, [...(byKind.get(m.kind as string) ?? []), ticketIdOf(m)]);
+                const byKind = reachedBy.get(cause) ?? new Map<string, string[]>();
+                // #2759 — a reached ticket that waits for moderation says so:
+                // out of the backlog, it would otherwise look inert or closed.
+                const ref = `#${ticketIdOf(m)}${m.ticket_awaiting_moderation ? " (awaiting moderation)" : ""}`;
+                byKind.set(m.kind as string, [...(byKind.get(m.kind as string) ?? []), ref]);
                 reachedBy.set(cause, byKind);
             }
             const naming = closureRun || ownTickets.size > 1;
@@ -2442,13 +2447,13 @@ export async function buildContextPhrase(
                 const last = !own.slice(i + 1).some((n) => ticketIdOf(n) === t);
                 if (last) {
                     for (const [kind, ids] of reachedBy.get(t) ?? []) {
-                        out.push(`  ${CASCADE_PHRASE[kind]?.(t) ?? kind}: ${ids.map((id) => `#${id}`).join(", ")}`);
+                        out.push(`  ${CASCADE_PHRASE[kind]?.(t) ?? kind}: ${ids.join(", ")}`);
                     }
                 }
             });
             for (const m of orphans) {
                 const cause = m.source_ticket_id as number;
-                out.push(`#${ticketIdOf(m)}: ${CASCADE_PHRASE[m.kind as string]?.(cause) ?? m.kind}`);
+                out.push(`#${ticketIdOf(m)}${m.ticket_awaiting_moderation ? " (awaiting moderation)" : ""}: ${CASCADE_PHRASE[m.kind as string]?.(cause) ?? m.kind}`);
             }
             const lines = out.join("\n");
             const titlePart = head?.title ? `: ${head.title}` : "";

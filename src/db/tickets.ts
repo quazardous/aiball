@@ -257,8 +257,23 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
             status: r.status as "pending" | "approved" | "rejected",
             closed: stage === "closed" || stage === "closed-resolved",
             stage,
+            // #2759 — `status: "pending"` also reads as "a plan is pending";
+            // this says plainly that the ticket itself waits for moderation.
+            awaiting_moderation: r.status === "pending",
         };
     });
+}
+
+/**
+ * #2759 — which of `ids` are tickets still waiting for moderation. Ids that
+ * are not tickets (a comment's own id) are simply absent.
+ */
+export function ticketsAwaitingModeration(ids: readonly number[]): Set<number> {
+    const wanted = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+    if (wanted.length === 0) return new Set();
+    return new Set(getDb().select({ id: schema.tickets.id }).from(schema.tickets)
+        .where(and(inArray(schema.tickets.id, wanted), eq(schema.tickets.status, "pending")))
+        .all().map((r) => r.id));
 }
 
 /**

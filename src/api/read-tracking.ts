@@ -23,6 +23,7 @@ import {
 } from "../db.js";
 import { badRequest, consumerOf, withTags } from "./_helpers.js";
 import { isHuman } from "../db.js";
+import { ticketsAwaitingModeration } from "../db/tickets.js";
 
 export const readTrackingRouter = Router();
 
@@ -45,10 +46,18 @@ readTrackingRouter.get("/unread", (req: Request, res: Response) => {
     // every other field the wake needs: derivable server-side, simply not
     // surfaced. Cached per author because one FIFO page repeats a handful.
     const humanBy = new Map<string, boolean>();
+    // #2759 — and whether the event's ticket still waits for moderation: an
+    // agent's sub-ticket can sit there unseen (out of its backlog and counts),
+    // so a wake that names it says why it looks inert. One read per page.
+    const awaiting = ticketsAwaitingModeration(messages.map((m) => m.ticket_id ?? m.id));
     const stamped = messages.map((m) => {
         const who = m.by_agent ?? "";
         if (!humanBy.has(who)) humanBy.set(who, isHuman(who));
-        return { ...m, author_is_human: humanBy.get(who) === true };
+        return {
+            ...m,
+            author_is_human: humanBy.get(who) === true,
+            ...(awaiting.has(m.ticket_id ?? m.id) ? { ticket_awaiting_moderation: true } : {}),
+        };
     });
     res.json({
         consumer_id,
