@@ -421,6 +421,9 @@ export interface TicketSummary {
      *  exists, never anything about its contents. The UI mounts the payload
      *  panel ONLY on this, so a ticket without one costs no request at all. */
     has_payload?: boolean;
+    /** #2770 — set on the project's critical ticket: the open ticket holding
+     *  back the most open tickets. */
+    critical?: { holds: number; quiet: string } | null;
     /** #1542 — upstream coupling. Set only when the ticket is coupled to an
      *  external issue (manual import/export). All null = a pure aiball ticket. */
     upstream_kind?: string | null;
@@ -557,6 +560,8 @@ export interface InboxRow {
     /** #2112 — the ticket carries a payload zone. Drives a discreet mark in
      *  the list; absent on the overwhelming majority of rows, by design. */
     has_payload?: boolean;
+    /** #2770 — set on the project's critical ticket. */
+    critical?: { holds: number; quiet: string } | null;
     /** #405: in the requesting consumer's hot-zone (focus) — the ticket they're
      *  actively working. Drives the 🔥 flag in the inbox list. */
     hot?: boolean;

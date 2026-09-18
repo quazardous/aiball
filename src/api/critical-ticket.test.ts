@@ -111,3 +111,23 @@ test("the critical ticket is a tier of its own, ahead of the rest, with the back
     assert.equal(after?.backlog_tier, -1, "still critical");
     assert.ok(after?.backlog_cooled_until, "but sunk until the cooldown ends");
 });
+
+// #2770 david — "dans les listes / détail ticket il est possible de flaguer le
+// critique ?": the inbox row and the ticket header say it.
+test("the web inbox row and the ticket header flag the critical ticket", async () => {
+    const R = "p-2770-ui";
+    createProject({ name: R });
+    const root = ticket(R, "the blocker");
+    const w1 = ticket(R, "held one");
+    const w2 = ticket(R, "held two");
+    await relate(w1, root, "depends_on");
+    await relate(w2, root, "depends_on");
+
+    const inbox = (await call("GET", `/api/inbox?project=${R}`)).json;
+    const rows: any[] = Array.isArray(inbox) ? inbox : (inbox.rows ?? inbox.tickets ?? inbox.items ?? []);
+    assert.deepEqual(rows.find((r) => r.id === root)?.critical, { holds: 2, quiet: "" }, JSON.stringify(inbox).slice(0, 300));
+    assert.equal(rows.find((r) => r.id === w1)?.critical, null);
+
+    assert.deepEqual((await call("GET", `/api/tickets/${root}`)).json.ticket.critical, { holds: 2, quiet: "" });
+    assert.equal((await call("GET", `/api/tickets/${w1}`)).json.ticket.critical, null);
+});

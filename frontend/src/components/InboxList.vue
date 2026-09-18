@@ -282,6 +282,13 @@ function onRowClick(r: InboxRow) {
                  every row by construction, so it costs the list nothing; when
                  it IS there, the point is that a payload is never invisible
                  even to someone who cannot read its values. -->
+            <!-- #2770 david — the project's critical ticket: the open one
+                 holding back the most open tickets. -->
+            <span
+                v-if="r.critical"
+                class="list-row__critical"
+                :title="`Critical: holds ${r.critical.holds} open tickets${r.critical.quiet ? ` · quiet ${r.critical.quiet}` : ''}`"
+            ><i class="pi pi-exclamation-triangle" /> {{ r.critical.holds }}</span>
             <span
                 v-if="r.has_payload"
                 class="list-row__payload"
@@ -381,6 +388,13 @@ function onRowClick(r: InboxRow) {
 .list-row__hold .pi {
     font-size: var(--fs-sm);
     opacity: 0.75;
+}
+/* #2770 — the critical ticket: it holds work back, so it should catch the eye. */
+.list-row__critical {
+    color: var(--p-red-500, #ef4444);
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
 }
 /* #2112 — payload mark. Muted on purpose: it says "there is something here",
    not "look at this"; the row's own signals (unread, hot, claim) stay louder. */

@@ -75,6 +75,7 @@ import { parseMeta } from "../questions.js";
 
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
 import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
+import { projectCriticalTicket } from "../db/critical-ticket.js";
 import { DECISION_KINDS } from "../decisions.js";
 import { applyModeration } from "./moderation.js";
 
@@ -1654,6 +1655,11 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // #2765 — the ticket's last word is a step: what it resumes on. Same
         // aggregate as the list row and the UI.
         step: liveStep(getInboxAgg(t.project).get(t.id), !closed && t.status !== "rejected"),
+        // #2770 david — flag the project's critical ticket on its detail too.
+        critical: (() => {
+            const c = !closed && t.status === "approved" ? projectCriticalTicket(t.project) : null;
+            return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet } : null;
+        })(),
         tags: listMessageTags(t.id),
         // #B.104: sidecar metadata (question-answer audit, etc.).
         // Frontend reads this to render the "X/Y open" chip beside

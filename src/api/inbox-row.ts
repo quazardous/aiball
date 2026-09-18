@@ -27,6 +27,7 @@ import { ticketIdsWithPayload } from "../db/payloads.js";
 import { getInboxAgg, emptyAgg, isLiveDecision as liveDecision, liveStep } from "../db/inbox-agg.js";
 import { DECISION_GESTURES, isStepStalled, kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
 import { getConfig } from "../db/config-overrides.js";
+import { projectCriticalTicket, type CriticalTicket } from "../db/critical-ticket.js";
 import { globalConfigPath } from "../autopoll/config.js";
 
 /**
@@ -77,6 +78,9 @@ export interface InboxRowContext {
      *  Optional so a context built by hand in a test still works: absent, no
      *  row is flagged. */
     stepStaleHours?: (project: string) => number;
+    /** #2770 — the project's critical ticket, memoized for the page. Optional
+     *  so a hand-built test context still works: absent, nothing is critical. */
+    criticalOf?: (project: string) => CriticalTicket | null;
 }
 
 /** #2308 — `tickets.step_stale_hours`, read once per project for a whole page of rows. */
@@ -90,6 +94,15 @@ function stepStaleHoursByProject(): (project: string) => number {
             byProject.set(project, hours);
         }
         return hours;
+    };
+}
+
+/** #2770 — the critical ticket of each project, read once per project for a page. */
+function criticalByProject(): (project: string) => CriticalTicket | null {
+    const byProject = new Map<string, CriticalTicket | null>();
+    return (project) => {
+        if (!byProject.has(project)) byProject.set(project, projectCriticalTicket(project));
+        return byProject.get(project)!;
     };
 }
 
@@ -111,6 +124,7 @@ export function buildInboxRowContext(
         tokenUsageMap: getTicketTokenUsage(ids),
         // #2308 — read once per project, not once per row.
         stepStaleHours: stepStaleHoursByProject(),
+        criticalOf: criticalByProject(),
         crossAgentHotFocus: computeHotFocus(
             ticketAgentLastActivity(ids),
             Date.now(),
@@ -224,6 +238,11 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         /** #2456 david — when that step's agent resumes (`resume_on`),
             so the list can show it; null for a step that carries on at once. */
         step_resume_at: liveStep(agg, live)?.resume_at ?? null,
+        /** #2770 david — flag the project's critical ticket in the list. */
+        critical: (() => {
+            const c = live ? ctx.criticalOf?.(t.project) ?? null : null;
+            return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet } : null;
+        })(),
         stalled_step: live && isStepStalled(
             agg.lastStepAt || null,
             agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,

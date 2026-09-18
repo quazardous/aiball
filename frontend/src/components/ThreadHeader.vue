@@ -112,6 +112,15 @@ function claimerTooltip(t: TicketSummary): string {
         >
             <i class="pi pi-envelope" />
         </span>
+        <!-- #2770 david — the project's critical ticket. -->
+        <span
+            v-if="ticket.critical"
+            class="thread-subline__item"
+            style="color: var(--p-red-500, #ef4444); font-weight: 600"
+            title="The open ticket of this project holding back the most open tickets, down its depends_on / blocks chains."
+        >
+            <i class="pi pi-exclamation-triangle" /> critical · holds {{ ticket.critical.holds }}{{ ticket.critical.quiet ? ` · quiet ${ticket.critical.quiet}` : '' }}
+        </span>
         <span
             v-if="ticket.claimant"
             class="thread-subline__item"
