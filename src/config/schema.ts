@@ -277,6 +277,15 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "The cap on what a single commit earns, however large its diff.",
     },
     {
+        key: "tickets.wait_credit_commit_min_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 2,
+        label: "Least wait credit one commit earns (minutes)",
+        description:
+            "What a cited commit with at least one changed line earns, however small its diff: a short fix is work too. 0 = only the per-line rate counts.",
+    },
+    {
         key: "tickets.claim_protect_minutes",
         scope: "global+project",
         type: "number",

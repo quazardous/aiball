@@ -96,9 +96,26 @@ test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async
         null,
         PINGS_YAML,
     );
-    // #2405 — the shipped template now carries the decided ending.
-    assert.match(res.phrase, /check the chain: help on the blocker/i);
+    // #2405 — the shipped template carries the decided ending, for when the
+    // agent acts; #2764 david — and says that with nothing new, nothing is due.
+    assert.match(res.phrase, /If the blocker has not moved, reply nothing: no comment is needed/);
+    assert.match(res.phrase, /help on the blocker, or cut the relation if it is stale, and say which on the thread/);
     assert.doesNotMatch(res.phrase, /Triage it/i);
+});
+
+// #2764 david « si on fait rien on répond rien » — a ticket waiting on someone
+// else comes back by design; the wake no longer asks for a reply when nothing
+// changed, so the thread stops filling with "still waiting".
+test("#2764 tier-3 head (I spoke last) → nothing new means no reply", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listTickets: async () => [{ id: 977, title: "backlog ticket", backlog_tier: 3 }],
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /You spoke last\. Nothing new and nothing to do\? Reply nothing: no comment is needed\./);
+    assert.doesNotMatch(res.phrase, /but say which/);
 });
 
 test("#1470 tier-1 head gets the triage ask — and it names the gesture wanted", async () => {

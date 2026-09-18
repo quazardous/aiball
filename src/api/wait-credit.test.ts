@@ -97,6 +97,12 @@ test("pure: the grant, the floor, the refund, a commit's minutes", () => {
     assert.equal(commitMinutes(45, 20, 30), 2);
     assert.equal(commitMinutes(10_000, 20, 30), 30);
     assert.equal(commitMinutes(19, 20, 30), 0);
+    // #2764 david — a small commit earns a floor; no changed line still earns nothing.
+    assert.equal(commitMinutes(4, 20, 30, 2), 2);
+    assert.equal(commitMinutes(45, 20, 30, 2), 2);
+    assert.equal(commitMinutes(100, 20, 30, 2), 5);
+    assert.equal(commitMinutes(0, 20, 30, 2), 0);
+    assert.equal(commitMinutes(10_000, 20, 30, 2), 30);
 });
 
 test("a step spends what it waits, the cap and the floor hold, and 0 is free", async () => {

@@ -44,9 +44,11 @@ export function refundWait(spent: number, resumeAtMs: number, nowMs: number): nu
 }
 
 /** Pure: the credit a commit earns from its changed lines. */
-export function commitMinutes(changedLines: number, linesPerMinute: number, maxPerCommit: number): number {
+export function commitMinutes(changedLines: number, linesPerMinute: number, maxPerCommit: number, minPerCommit = 0): number {
     if (!(changedLines > 0) || !(linesPerMinute > 0)) return 0;
-    return Math.min(maxPerCommit, Math.floor(changedLines / linesPerMinute));
+    // #2764 david — « ok pour petit commit un plancher » : a four-line fix that
+    // unblocks a red test box is work too, and used to earn nothing.
+    return Math.min(maxPerCommit, Math.max(minPerCommit, Math.floor(changedLines / linesPerMinute)));
 }
 
 function bool(key: string, project: string, fallback: boolean): boolean {
@@ -72,6 +74,7 @@ export function waitCreditConfig(project: string) {
         wontfix: num("tickets.wait_credit_wontfix_minutes", project, 5),
         linesPerMinute: num("tickets.wait_credit_commit_lines_per_minute", project, 20),
         maxPerCommit: num("tickets.wait_credit_commit_max_minutes", project, 30),
+        minPerCommit: num("tickets.wait_credit_commit_min_minutes", project, 2),
     };
 }
 
@@ -217,8 +220,8 @@ export function earnForCommits(
             const [a, d] = row.split("\t");
             if (/^\d+$/.test(a ?? "") && /^\d+$/.test(d ?? "")) lines += Number(a) + Number(d);
         }
-        const minutes = commitMinutes(lines, cfg.linesPerMinute, cfg.maxPerCommit);
-        if (minutes <= 0) return { commit, minutes: 0, reason: `${lines} changed lines: under ${cfg.linesPerMinute}` };
+        const minutes = commitMinutes(lines, cfg.linesPerMinute, cfg.maxPerCommit, cfg.minPerCommit);
+        if (minutes <= 0) return { commit, minutes: 0, reason: lines > 0 ? `${lines} changed lines: under ${cfg.linesPerMinute}` : "no changed line" };
         return record({ consumerId, project, kind: "earn_commit", minutes, ticketId, ref: sha })
             ? { commit, minutes, reason: null }
             : { commit, minutes: 0, reason: "this commit was already counted" };
@@ -243,6 +246,8 @@ export interface WaitCreditRules {
     wontfix: number;
     commit_lines_per_minute: number;
     commit_max: number;
+    /** #2764 — what any commit with a changed line earns at least. */
+    commit_min: number;
     commit_max_age_hours: number;
     max_commits_per_comment: number;
 }
@@ -257,6 +262,7 @@ export function waitCreditRules(project: string): WaitCreditRules {
         wontfix: c.wontfix,
         commit_lines_per_minute: c.linesPerMinute,
         commit_max: c.maxPerCommit,
+        commit_min: c.minPerCommit,
         commit_max_age_hours: c.commitMaxAgeHours,
         max_commits_per_comment: c.maxCommitsPerComment,
     };
