@@ -432,11 +432,14 @@ test("#2722 a run of closures and their cascades is one wake; work stays out", a
         null,
         PINGS_YAML,
     );
-    assert.match(res.phrase, /4 tickets closed — 4 updates:/);
+    // Two tickets were CLOSED; the other two were only reached by #2688's closure.
+    assert.match(res.phrase, /2 tickets closed:/);
     assert.match(res.phrase, /#2688 resolution ACCEPTED/);
-    assert.match(res.phrase, /#2711 linked ticket closed by david/);
-    assert.match(res.phrase, /#2683 dependency closed by david/);
     assert.match(res.phrase, /#2714 wontfix ACCEPTED/);
+    // #2722 david « le wording est pas clair » — a cascade reads under its cause,
+    // never as a line that says the linked ticket itself was closed.
+    assert.match(res.phrase, /#2688 resolution ACCEPTED[^\n]*\n  still open, linked to #2688: #2711\n  waiting on #2688, now unblocked: #2683/);
+    assert.doesNotMatch(res.phrase, /#2711 linked ticket closed/);
     assert.equal(res.headMessageId, 801);
     assert.deepEqual([...(res.extraSeenIds ?? [])].sort((a, b) => a - b), [802, 803, 804]);
     // An accepted plan (execute!), a comment, and a dependency closed by an
@@ -459,9 +462,31 @@ test("#2722 a lone closure and its cascade are one wake", async () => {
         null,
         PINGS_YAML,
     );
-    assert.match(res.phrase, /2 tickets closed — 2 updates:/);
-    assert.match(res.phrase, /#2711 linked ticket closed/);
+    assert.match(res.phrase, /1 ticket closed:/);
+    assert.match(res.phrase, /  still open, linked to #2688: #2711/);
     assert.deepEqual(res.extraSeenIds ?? [], [812]);
+});
+
+test("#2722 an umbrella closed over seven open sub-tickets reads as ONE closure", async () => {
+    const children = [2745, 2746, 2747, 2748, 2749, 2750, 2751];
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 8 }),
+            unread: async () => ({
+                messages: [
+                    { id: 831, kind: "resolution_accepted", ticket_id: 2730, hashid: "t5undr", by_agent: "david" },
+                    ...children.map((t, i) => ({ id: 832 + i, kind: "related_closed", ticket_id: t, source_ticket_id: 2730, by_agent: "david" })),
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "retour meta", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /1 ticket closed:/);
+    assert.match(res.phrase, /still open, linked to #2730: #2745, #2746, #2747, #2748, #2749, #2750, #2751/);
+    assert.doesNotMatch(res.phrase, /linked ticket closed/);
+    assert.equal((res.extraSeenIds ?? []).length, 7);
 });
 
 test("#2722 a head that asks for work does not open a closure run", async () => {

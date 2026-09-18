@@ -2408,18 +2408,54 @@ export async function buildContextPhrase(
         // human reading a thread top-down and the head (messages[0], the oldest)
         // stays the line the agent anchors on.
         if (isBundleMode) {
-            // #2722 — a line from another ticket (a cascade, a closure run) names
-            // its ticket; in a closure run every line does, the head's included.
-            const lines = sameTicket
-                .map((m) => (closureRun && new Set(sameTicket.map(ticketIdOf)).size > 1) || ticketIdOf(m) !== headTicketId
-                    ? `#${ticketIdOf(m)} ${renderEventLine(m)}`
-                    : renderEventLine(m))
-                .join("\n");
+            // #2722 david — « le wording est pas clair » : `#2751 linked ticket
+            // closed` read as if #2751 had been closed, when its parent had. A
+            // cascade event is therefore rendered UNDER the ticket that caused
+            // it, as the list of tickets it reached, instead of as a line of its
+            // own. Only a cascade whose cause is not in this wake keeps a line,
+            // and that line names the cause.
+            const CASCADE_PHRASE: Record<string, (cause: number) => string> = {
+                related_closed: (c) => `still open, linked to #${c}`,
+                dependency_closed: (c) => `waiting on #${c}, now unblocked`,
+                dependency_rejected: (c) => `waited on #${c}, which was rejected`,
+            };
+            const isCascade = (m: (typeof sameTicket)[number]): boolean =>
+                CASCADE_EVENT_KINDS.has(m?.kind ?? "") && m.source_ticket_id != null;
+            const ownTickets = new Set(sameTicket.filter((m) => !isCascade(m)).map(ticketIdOf));
+            const reachedBy = new Map<number, Map<string, number[]>>(); // cause → kind → tickets
+            const orphans: (typeof sameTicket) = [];
+            for (const m of sameTicket) {
+                if (!isCascade(m)) continue;
+                const cause = m.source_ticket_id as number;
+                if (!ownTickets.has(cause)) { orphans.push(m); continue; }
+                const byKind = reachedBy.get(cause) ?? new Map<string, number[]>();
+                byKind.set(m.kind as string, [...(byKind.get(m.kind as string) ?? []), ticketIdOf(m)]);
+                reachedBy.set(cause, byKind);
+            }
+            const naming = closureRun || ownTickets.size > 1;
+            const out: string[] = [];
+            const own = sameTicket.filter((m) => !isCascade(m));
+            own.forEach((m, i) => {
+                const t = ticketIdOf(m);
+                out.push(naming || t !== headTicketId ? `#${t} ${renderEventLine(m)}` : renderEventLine(m));
+                // The cascade goes under the LAST line of its cause.
+                const last = !own.slice(i + 1).some((n) => ticketIdOf(n) === t);
+                if (last) {
+                    for (const [kind, ids] of reachedBy.get(t) ?? []) {
+                        out.push(`  ${CASCADE_PHRASE[kind]?.(t) ?? kind}: ${ids.map((id) => `#${id}`).join(", ")}`);
+                    }
+                }
+            });
+            for (const m of orphans) {
+                const cause = m.source_ticket_id as number;
+                out.push(`#${ticketIdOf(m)}: ${CASCADE_PHRASE[m.kind as string]?.(cause) ?? m.kind}`);
+            }
+            const lines = out.join("\n");
             const titlePart = head?.title ? `: ${head.title}` : "";
-            const tickets = new Set(sameTicket.map(ticketIdOf)).size;
-            headBundle = tickets > 1 && closureRun
-                // #2722 — several tickets closed at once: no single title leads.
-                ? `${tickets} tickets closed — ${sameTicket.length} updates:\n${lines}`
+            // #2722 — count what was CLOSED, not every ticket a closure reached.
+            const closed = new Set(own.filter((m) => PURE_CLOSURE_KINDS.has(m?.kind ?? "")).map(ticketIdOf)).size;
+            headBundle = closureRun
+                ? `${closed} ticket${closed === 1 ? "" : "s"} closed:\n${lines}`
                 : `#${headTicketId}${titlePart} — ${sameTicket.length} updates:\n${lines}`;
         }
         // #999 — event-triggered wake (SSE hint present) : anchor the phrase
