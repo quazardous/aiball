@@ -2927,7 +2927,7 @@ export async function buildContextPhrase(
             // #2458 david — a ticket that keeps coming back is usually a step
             // declared with `resume_on.timer: 0` while the next move waits
             // on a job. Say how to rest it, on whatever tier it came back as.
-            + "{head_rewake_minutes:+ Back after {head_rewake_minutes} min, nobody moved: waiting on a job? set `resume_on.timer`: the soonest a look is worth it.}{head_wait_credit:+ Credit: {head_wait_credit} min.}{head_wait_credit_low:+ Credit low: earn it back by shipping (see skill).}}";
+            + "{head_rewake_minutes:+ Back after {head_rewake_minutes} min, nobody moved: waiting on a job? set `resume_on`: the soonest a look is worth it.}{head_wait_credit:+ Credit: {head_wait_credit} min.}{head_wait_credit_low:+ Credit low: earn it back by shipping (see skill).}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

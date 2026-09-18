@@ -10,7 +10,7 @@ const PINGS_YAML = new URL("../../config/defaults/claude-loop-pings.yaml", impor
 const STATE_TS = new URL("./state.ts", import.meta.url).pathname;
 const NOW = Date.parse("2026-09-14T10:00:00Z");
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
-const HINT = /Back after (\d+) min, nobody moved: waiting on a job\? set `resume_on.timer`: the soonest a look is worth it\./;
+const HINT = /Back after (\d+) min, nobody moved: waiting on a job\? set `resume_on`: the soonest a look is worth it\./;
 
 test("inside the window, nobody else moving: the minutes since the previous wake", () => {
     const base = { lastActor: "me", lastActorAt: ago(8), me: "me", nowMs: NOW, windowSec: 1800 };
