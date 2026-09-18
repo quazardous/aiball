@@ -56,7 +56,7 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 - **`then: "resolved"`** — propose to close. Use when work shipped (commit landed, fix live) and scope is satisfied. Do this **immediately** — don't write "awaiting test" and wait.
 - **`then: "plan"`** — propose **how** you'll tackle. Reporter's accept = greenlight to execute.
 - **`then: "continue"`** — a step is done and you carry on, nothing to validate. Only on a ticket you hold (claim it first). The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
-- **Plain comment** — say whether you hand the ticket back. `handback: true` for a clarifying question or anything you wait an answer on: the ticket leaves your queue. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
+- **Plain comment** — say whether you hand the ticket back. `handback: true` for a clarifying question or anything you wait an answer on: the ticket leaves your actionable pool, and your backlog still reminds you of it (`You spoke last`) until someone moves. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
 - **Waiting on another ticket** — `ticket_relate` your ticket `depends_on` that one, and say so with `handback: false`. The ticket is blocked while the other is open and you get a `dependency_closed` event when it closes. Don't post `then: "continue"` cycle after cycle to keep it alive.
 - **Work that moves to another ticket** — when you carry the work on a recap or follow-up ticket, say it on the OLDER one: close it, or state there what now carries it. Nothing else can tell; left alone it keeps coming back as a triage wake, and a `relates_to` relation does not change that.
 
@@ -287,7 +287,7 @@ belongs to someone else — hand the ticket back.
 
 | Who makes the next move? | Gesture |
 |---|---|
-| **someone else** — answer a question, review, decide | `handback: true` — the ticket leaves your queue until they speak |
+| **someone else** — answer a question, review, decide | `handback: true` — the ticket leaves your actionable pool; the backlog still reminds you until they speak |
 | **you, later** — a build, a job, a measurement, a deploy to finish | `then: "continue"` with `resume_on: { timer: N }` — it stays yours and comes back in N minutes; `resume_on: { ticket: M }` to come back when ticket M moves (both: whichever comes first) |
 
 `handback` is not a way to wait. Handing a ticket back to nobody takes it out of
