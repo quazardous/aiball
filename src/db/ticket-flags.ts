@@ -232,7 +232,10 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         // #2449 david — a fresh step of mine leads my backlog like heat does:
         // the step is the one own word that says "come back to this now". The
         // visible `hot` below keeps its own rule — only the rank moves.
-        const freshOwnStep = ctx.freshOwnStepIds?.has(t.id) ?? false;
+        // #2769 — but not over an open dependency: the gate came after the step
+        // (or the step ignored it), and a blocked ticket keeps its own tier and
+        // wording. Someone else's heat still lifts it — that is news.
+        const freshOwnStep = (ctx.freshOwnStepIds?.has(t.id) ?? false) && !blocked;
         if ((hotForTier || freshOwnStep) && inPool) {
             backlog_tier = 0;
         } else if (actionable) {

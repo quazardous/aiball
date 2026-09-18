@@ -145,7 +145,9 @@ Only the first calls for triage. On the others, doing nothing is often the right
 answer — and then post nothing: a "still waiting" comment is noise.
 
 **Waiting on another ticket? `depends_on` it** instead of `then: continue`: the
-ticket stops waking until that one closes, and costs no wait credit.
+ticket goes to the blocked tier, costs no wait credit, and comes back only now
+and then — with the `Blocked…` ending, so it is not forgotten. Blocker
+unchanged? Reply nothing. A step you posted earlier no longer lifts it.
 
 Whatever the ending, a wake may add **`It is back N min after your last wake on
 it…`**: the ticket returned on its own, nobody else moved. That is almost always

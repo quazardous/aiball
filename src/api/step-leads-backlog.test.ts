@@ -215,3 +215,19 @@ test("#2765 resume_on.ticket must be another ticket", async () => {
     });
     assert.equal(noStep.status, 400);
 });
+
+// #2769 — grampy: a step posted, then the ticket queued `depends_on` another
+// open one. The step still lifted it to the top with the triage ending, twice.
+// An open dependency outranks my own step; someone else's move is still news.
+test("#2769 a step does not lift a ticket gated by an open dependency", async () => {
+    const blocker = ticket("the blocker, still open");
+    const t = ticket("queued behind the blocker");
+    await call("POST", `/api/tickets/${t}/assign`, {});
+    await reply(t, { step: true, step_after_minutes: 0 });
+    assert.equal((await backlog()).find((r) => r.id === t)?.backlog_tier, 0, "before the gate, the step leads");
+
+    const rel = await call("POST", `/api/tickets/${t}/relations`, { target_ticket_id: blocker, kind: "depends_on" });
+    assert.equal(rel.status, 200, JSON.stringify(rel.json));
+    invalidateFlagsCache();
+    assert.equal((await backlog()).find((r) => r.id === t)?.backlog_tier, 4, "gated: the blocked tier, not the lead");
+});
