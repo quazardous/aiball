@@ -74,7 +74,7 @@ import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
-import { getInboxAgg, isLiveDecision } from "../db/inbox-agg.js";
+import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
 import { DECISION_KINDS } from "../decisions.js";
 import { applyModeration } from "./moderation.js";
 
@@ -857,6 +857,8 @@ ticketsRouter.get("/tickets", (req, res) => {
     // #2376 — the tickets carrying a live pending decision, read from the same
     // aggregate the inbox badges use, so a row and a badge cannot disagree.
     const pendingDecisionIds = new Set<number>();
+    // #2765 — and the live step, from the same aggregate as the UI row.
+    const stepByTicket = new Map<number, LiveStep>();
     {
         const aggByProject = new Map<string, ReturnType<typeof getInboxAgg>>();
         for (const m of buildFrom) {
@@ -867,6 +869,8 @@ ticketsRouter.get("/tickets", (req, res) => {
             }
             const agg = byTicket.get(m.id);
             if (!agg) continue;
+            const step = liveStep(agg, m.status !== "rejected");
+            if (step) stepByTicket.set(m.id, step);
             for (const kind of DECISION_KINDS) {
                 if (agg.decisions[kind].pending && isLiveDecision(agg, kind)) {
                     pendingDecisionIds.add(m.id);
@@ -936,6 +940,8 @@ ticketsRouter.get("/tickets", (req, res) => {
             // what is then wanted is to confirm or amend it, not to re-triage.
             // The wake reads this to say so.
             pending_decision: pendingDecisionIds.has(m.id),
+            // #2765 — the ticket's last word is a step: what it resumes on.
+            step: stepByTicket.get(m.id) ?? null,
             last_actor: flags.last_actor,
             last_actor_at: flags.last_actor_at,
             tags: tagsMap.get(m.id) ?? [],
@@ -1643,6 +1649,9 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         claim_until: claimHeldEnd !== null ? new Date(claimHeldEnd).toISOString() : null,
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
+        // #2765 — the ticket's last word is a step: what it resumes on. Same
+        // aggregate as the list row and the UI.
+        step: liveStep(getInboxAgg(t.project).get(t.id), !closed && t.status !== "rejected"),
         tags: listMessageTags(t.id),
         // #B.104: sidecar metadata (question-answer audit, etc.).
         // Frontend reads this to render the "X/Y open" chip beside

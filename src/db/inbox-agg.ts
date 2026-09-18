@@ -67,6 +67,8 @@ export interface InboxAgg {
     lastStepAt: string;
     /** #2456 — when the latest step's author said it resumes (ISO), or "". */
     lastStepResumeAt: string;
+    /** #2765 — the ticket the latest step waits on to move, or 0. */
+    lastStepResumeOnTicket: number;
 }
 
 export function emptyAgg(): InboxAgg {
@@ -86,6 +88,7 @@ export function emptyAgg(): InboxAgg {
         lastStepId: 0,
         lastStepAt: "",
         lastStepResumeAt: "",
+        lastStepResumeOnTicket: 0,
     };
 }
 
@@ -143,6 +146,7 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
             // #2456 — a step that declared a later resume is not quiet before
             // it is due: its staleness counts from the resume.
             cur.lastStepResumeAt = stepMeta.step_resume_at ?? "";
+            cur.lastStepResumeOnTicket = stepMeta.step_resume_on_ticket ?? 0;
             if (cur.lastStepResumeAt && cur.lastStepResumeAt > cur.lastStepAt) cur.lastStepAt = cur.lastStepResumeAt;
         }
         let syntheticResolved: Message | null = null;
@@ -210,6 +214,27 @@ export function getInboxAgg(project: string | undefined, nowMs: number = Date.no
     const agg = buildInboxAgg(project);
     setInboxAgg(key, agg, nowMs);
     return agg;
+}
+
+/** #2765 — the step that is the ticket's last word, and what it resumes on. */
+export interface LiveStep {
+    /** The timer's end (ISO); null for none. */
+    resume_at: string | null;
+    /** The ticket whose move resumes it; null for none. */
+    resume_on_ticket: number | null;
+}
+
+/**
+ * #2765 — the ticket's live step: its latest comment is a step and nothing was
+ * said since. Null otherwise, and on a closed or rejected ticket (`live` false).
+ * The UI row, `ticket_list` and `ticket_get` all read it from here.
+ */
+export function liveStep(agg: InboxAgg | undefined, live: boolean): LiveStep | null {
+    if (!agg || !live || agg.closed || agg.lastStepId === 0 || agg.lastStepId !== agg.lastSpeakerId) return null;
+    return {
+        resume_at: agg.lastStepResumeAt || null,
+        resume_on_ticket: agg.lastStepResumeOnTicket || null,
+    };
 }
 
 /**

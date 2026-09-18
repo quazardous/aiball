@@ -104,7 +104,7 @@ export function registerInboxTools(server: McpServer): void {
         "poll",
         {
             description:
-                "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies. The pending lists are capped (`pending_limit`, default 50); when one is cut, `my_pending_tickets_more` / `my_pending_comments_more` is true, so a cut list never passes for complete.\n\n`unread_pings` and `unread_project` are informational — the wake-injection pipeline owns seen-tracking now (#826 david `74x46c`). Do NOT call `unread({mark_read: true})` to drain : that flag was removed because draining-without-acting was a footgun (agent marked events seen and never acted → events lost). Read `unread({pings: true})` or `unread({...})` if you want to SEE what's queued, but the queue clears via wake-inject (head-FIFO auto-ack) and explicit ticket reads, not via an MCP-side ack call.",
+                "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies. The pending lists are capped (`pending_limit`, default 50); when one is cut, `my_pending_tickets_more` / `my_pending_comments_more` is true, so a cut list never passes for complete. On a project-scoped poll, `critical` names the open ticket holding back the most open tickets (`holds`), or null.\n\n`unread_pings` and `unread_project` are informational — the wake-injection pipeline owns seen-tracking now (#826 david `74x46c`). Do NOT call `unread({mark_read: true})` to drain : that flag was removed because draining-without-acting was a footgun (agent marked events seen and never acted → events lost). Read `unread({pings: true})` or `unread({...})` if you want to SEE what's queued, but the queue clears via wake-inject (head-FIFO auto-ack) and explicit ticket reads, not via an MCP-side ack call.",
             inputSchema: {
                 include_subscriptions: z
                     .boolean()
@@ -219,6 +219,14 @@ export function registerInboxTools(server: McpServer): void {
             try {
                 presence = await client.presence(scopeProject ?? null);
             } catch { /* degrade silently */ }
+            // #2770 / #2765 — the project's critical ticket, the one the backlog
+            // wake names. Scoped polls only; best-effort like presence.
+            let critical: unknown = null;
+            if (scopeProject) {
+                try {
+                    critical = (await client.getProjectCritical(scopeProject)).critical ?? null;
+                } catch { /* degrade silently */ }
+            }
             const pendingComments = cutPending(myPendingComments);
             const myPendingCommentsOut = pendingComments.rows;
             // Build the response object — fields are conditionally included
@@ -266,6 +274,11 @@ export function registerInboxTools(server: McpServer): void {
                  *  pilots from the web UI while deliberately leaving the loop
                  *  AFK, and in that regime the word reads `loop`. */
                 presence,
+                /** #2770 — the open ticket of this project holding back the most
+                 *  open tickets (`holds`), down its depends_on / blocks chains;
+                 *  `quiet` once it has not moved for a day. null when none, or
+                 *  on an unscoped poll. Information, not an order. */
+                critical,
                 my_pending_tickets: myPendingOut,
                 ...(pendingTickets.more ? { my_pending_tickets_more: true } : {}),
                 /** Pending comments authored by this agent (#B.69). Needed

@@ -231,3 +231,24 @@ test("#2769 a step does not lift a ticket gated by an open dependency", async ()
     invalidateFlagsCache();
     assert.equal((await backlog()).find((r) => r.id === t)?.backlog_tier, 4, "gated: the blocked tier, not the lead");
 });
+
+// #2765 david "est-ce que les outils mcp donnent ces infos à l'agent ?" — they
+// did not: only the raw meta of a full read. The list row and the ticket header
+// now say what a live step resumes on, from the aggregate the UI reads.
+test("#2765 ticket_list and ticket_get say what the live step resumes on, until someone speaks", async () => {
+    const other = ticket("the ticket it waits on");
+    const t = ticket("a step waiting on the other");
+    await call("POST", `/api/tickets/${t}/assign`, {});
+    await reply(t, { step: true, step_after_minutes: 30, step_resume_on_ticket: other });
+
+    const row = ((await call("GET", `/api/tickets?project=${P}&limit=500`)).json as Array<{ id: number; step: unknown }>).find((r) => r.id === t)!;
+    const step = row.step as { resume_at: string | null; resume_on_ticket: number | null };
+    assert.equal(step.resume_on_ticket, other, JSON.stringify(row.step));
+    assert.ok(step.resume_at && Date.parse(step.resume_at) > Date.now(), "the timer's end");
+    const header = (await call("GET", `/api/tickets/${t}`)).json as { ticket: { step: unknown } };
+    assert.deepEqual(header.ticket.step, row.step, "the header says the same");
+
+    assert.equal(((await call("GET", `/api/tickets?project=${P}&limit=500`)).json as Array<{ id: number; step: unknown }>).find((r) => r.id === other)?.step, null, "no step, no field value");
+    await reply(t, { handback: false });
+    assert.equal(((await call("GET", `/api/tickets/${t}`)).json as { ticket: { step: unknown } }).ticket.step, null, "a later word ends it");
+});

@@ -24,7 +24,7 @@ import {
 } from "../db.js";
 import { computeHotFocus } from "../db/work-order.js";
 import { ticketIdsWithPayload } from "../db/payloads.js";
-import { getInboxAgg, emptyAgg, isLiveDecision as liveDecision } from "../db/inbox-agg.js";
+import { getInboxAgg, emptyAgg, isLiveDecision as liveDecision, liveStep } from "../db/inbox-agg.js";
 import { DECISION_GESTURES, isStepStalled, kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
 import { getConfig } from "../db/config-overrides.js";
 import { globalConfigPath } from "../autopoll/config.js";
@@ -223,9 +223,7 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         latest_is_step: live && agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,
         /** #2456 david — when that step's agent resumes (`resume_on`),
             so the list can show it; null for a step that carries on at once. */
-        step_resume_at: live && agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId && agg.lastStepResumeAt
-            ? agg.lastStepResumeAt
-            : null,
+        step_resume_at: liveStep(agg, live)?.resume_at ?? null,
         stalled_step: live && isStepStalled(
             agg.lastStepAt || null,
             agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,
