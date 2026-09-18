@@ -2921,7 +2921,7 @@ export async function buildContextPhrase(
             // situation: a `then:`, or a `handback: true` that says what is awaited.
             // "re-check it" sent agents back to read, then post nothing.
             + "{head_tier_confirm:+ Your `then:` awaits an accept: confirm or amend it.}"
-            + "{head_tier_triage:+ Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`.}"
+            + "{head_tier_triage:+ Not triaged until a `then:`: `plan`, `resolved`, `continue` if yours; `handback: true` if it is someone else's.}"
             + "{head_tier_followup:+ Your pending `then:` gates this: amend it, an ack changes nothing.}"
             + "{head_tier_waiting:+ You spoke last: nothing new? Reply nothing — no comment is needed.}"
             + "{head_tier_blocked:+ Blocked by a dependency: unchanged? Reply nothing — no comment is needed.}"

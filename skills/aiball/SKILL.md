@@ -136,7 +136,7 @@ which case you're in**; read it, it's not decoration :
 
 | The wake ends with… | What's true | What's wanted |
 |---|---|---|
-| `Triage: plan, resolved, continue if yours, or handback: true.` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
+| `Not triaged until a then: …` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
 | `Your then: awaits an accept…` | Your proposal is still pending | Confirm it as it stands, or amend it with a fresher `then:` |
 | `Your pending then: gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope and amend it — an ack changes nothing |
 | `You spoke last…` | You spoke last | Nothing new? **Reply nothing.** Otherwise `then: continue` if the next move is yours (with `resume_on` to wait on a job), a `handback: true` comment if someone else must move |

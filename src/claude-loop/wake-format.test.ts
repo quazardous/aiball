@@ -85,7 +85,7 @@ test("#1470 tier-2 head (my pending decision gates it) → asks to amend it, not
     );
     assert.match(res.phrase, /look #977/);
     assert.match(res.phrase, /Your pending `then:` gates this: amend it, an ack changes nothing\./);
-    assert.doesNotMatch(res.phrase, /Triage:/i);
+    assert.doesNotMatch(res.phrase, /Not triaged/i);
 });
 
 test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async () => {
@@ -100,7 +100,7 @@ test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async
     // agent acts; #2764 david — and says that with nothing new, nothing is due.
     // #2767 david — a wake leads, it does not document: one line.
     assert.match(res.phrase, /Blocked by a dependency: unchanged\? Reply nothing — no comment is needed\./);
-    assert.doesNotMatch(res.phrase, /Triage:/i);
+    assert.doesNotMatch(res.phrase, /Not triaged/i);
 });
 
 // #2764 david « si on fait rien on répond rien » — a ticket waiting on someone
@@ -128,13 +128,13 @@ test("#1470 tier-1 head gets the triage ask — and it names the gesture wanted"
     );
     // #2405 — "Triage the ticket." said nothing of what closing the loop takes.
     // #2457 — the ask names who must move: continue for the agent, handback for someone else.
-    assert.match(res.phrase, /Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`\./);
+    assert.match(res.phrase, /Not triaged until a `then:`: `plan`, `resolved`, `continue` if yours; `handback: true` if it is someone else's\./);
 });
 
 test("#1470 unknown tier (older daemon) falls back to Triage — never an empty ask", async () => {
     // stubClient's default row carries no `backlog_tier` at all.
     const res = await buildContextPhrase(stubClient(), null, PINGS_YAML);
-    assert.match(res.phrase, /Triage: /);
+    assert.match(res.phrase, /Not triaged until a `then:`/);
 });
 
 // #1363 david `futbsc` — a backlog head whose last actor isn't me SHOWS that
@@ -863,7 +863,7 @@ test("#2767 every backlog ending is its one line, in every shipped tone and in t
     const { readFileSync } = await import("node:fs");
     const endings = [
         "{head_tier_confirm:+ Your `then:` awaits an accept: confirm or amend it.}",
-        "{head_tier_triage:+ Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`.}",
+        "{head_tier_triage:+ Not triaged until a `then:`: `plan`, `resolved`, `continue` if yours; `handback: true` if it is someone else's.}",
         "{head_tier_followup:+ Your pending `then:` gates this: amend it, an ack changes nothing.}",
         "{head_tier_waiting:+ You spoke last: nothing new? Reply nothing — no comment is needed.}",
         "{head_tier_blocked:+ Blocked by a dependency: unchanged? Reply nothing — no comment is needed.}",

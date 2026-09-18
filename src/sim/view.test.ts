@@ -76,7 +76,7 @@ test("the seat lists the backlog by tier, then the open tickets outside it", () 
     ], 0, row({ id: 2, title: "mine", backlog_tier: 1 }));
     const order = ["mine", "waiting", "outside"].map((t) => out.indexOf(` ${t}`));
     assert.deepEqual([...order].sort((x, y) => x - y), order, out);
-    assert.match(out, /next: look #2: mine\. Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`\./);
+    assert.match(out, /next: look #2: mine\. Not triaged until a `then:`: `plan`, `resolved`, `continue` if yours; `handback: true` if it is someone else's\./);
 });
 
 test("a cohort declares a moderator, projects with leads, and followers of known projects", () => {

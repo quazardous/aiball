@@ -32,7 +32,7 @@ export const TIER_LABEL: Record<0 | 1 | 2 | 3 | 4, string> = {
 /** How a backlog wake ends, by the head's tier — the loop's exact words. */
 export const WAKE_ENDING = {
     confirm: "Your `then:` awaits an accept: confirm or amend it.",
-    triage: "Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`.",
+    triage: "Not triaged until a `then:`: `plan`, `resolved`, `continue` if yours; `handback: true` if it is someone else's.",
     followup: "Your pending `then:` gates this: amend it, an ack changes nothing.",
     waiting: "You spoke last: nothing new? Reply nothing — no comment is needed.",
     blocked: "Blocked by a dependency: unchanged? Reply nothing — no comment is needed.",
