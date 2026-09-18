@@ -138,11 +138,14 @@ which case you're in**; read it, it's not decoration :
 |---|---|---|
 | `Triage it, then close the loop…` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
 | `Your pending decision is what gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope — don't just ack |
-| `You spoke last — chase them or let it ride, but say which…` | You spoke last | Chase **or** deliberately let it ride — and post it: `then: continue` if the next move is yours (with `continue_after_minutes` to wait on a job), a `handback: true` comment if someone else must move |
-| `Blocked by an open dependency…` | A blocker gates it | Help on the **blocker**, not here |
+| `You spoke last…` | You spoke last | Nothing new? **Reply nothing.** Otherwise `then: continue` if the next move is yours (with `continue_after_minutes` to wait on a job), a `handback: true` comment if someone else must move |
+| `Blocked by an open dependency…` | A blocker gates it | Blocker unchanged? **Reply nothing.** Otherwise help on the **blocker**, not here |
 
-Only the first calls for triage. On the others, doing nothing can be the right
-answer — say so in a line rather than re-posting.
+Only the first calls for triage. On the others, doing nothing is often the right
+answer — and then post nothing: a "still waiting" comment is noise.
+
+**Waiting on another ticket? `depends_on` it** instead of `then: continue`: the
+ticket stops waking until that one closes, and costs no wait credit.
 
 Whatever the ending, a wake may add **`It is back N min after your last wake on
 it…`**: the ticket returned on its own, nobody else moved. That is almost always
