@@ -75,7 +75,7 @@ test("#999 heartbeat wake (no hint, empty FIFO) → backlog ticket-centric Triag
 // head, same cadence); only the instruction adapts, so a ticket rotated back for
 // re-examination gets the right question instead of a reflex "Triage" the agent
 // answers with "standby".
-test("#1470 tier-2 head (my pending decision gates it) → asks to re-examine the scope, not to triage", async () => {
+test("#1470 tier-2 head (my pending decision gates it) → asks to amend it, not to triage", async () => {
     const res = await buildContextPhrase(
         stubClient({
             listTickets: async () => [{ id: 977, title: "backlog ticket", backlog_tier: 2 }],
@@ -84,8 +84,8 @@ test("#1470 tier-2 head (my pending decision gates it) → asks to re-examine th
         PINGS_YAML,
     );
     assert.match(res.phrase, /look #977/);
-    assert.match(res.phrase, /re-examine/i);
-    assert.doesNotMatch(res.phrase, /Triage the ticket/i);
+    assert.match(res.phrase, /Your pending `then:` gates this: amend it, an ack changes nothing\./);
+    assert.doesNotMatch(res.phrase, /Triage:/i);
 });
 
 test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async () => {
@@ -98,9 +98,9 @@ test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async
     );
     // #2405 — the shipped template carries the decided ending, for when the
     // agent acts; #2764 david — and says that with nothing new, nothing is due.
-    assert.match(res.phrase, /If the blocker has not moved, reply nothing: no comment is needed/);
-    assert.match(res.phrase, /help on the blocker, or cut the relation if it is stale, and say which on the thread/);
-    assert.doesNotMatch(res.phrase, /Triage it/i);
+    // #2767 david — a wake leads, it does not document: one line.
+    assert.match(res.phrase, /Blocked by a dependency: unchanged\? Reply nothing — no comment is needed\./);
+    assert.doesNotMatch(res.phrase, /Triage:/i);
 });
 
 // #2764 david « si on fait rien on répond rien » — a ticket waiting on someone
@@ -114,7 +114,7 @@ test("#2764 tier-3 head (I spoke last) → nothing new means no reply", async ()
         null,
         PINGS_YAML,
     );
-    assert.match(res.phrase, /You spoke last\. Nothing new and nothing to do\? Reply nothing: no comment is needed\./);
+    assert.match(res.phrase, /You spoke last: nothing new\? Reply nothing — no comment is needed\./);
     assert.doesNotMatch(res.phrase, /but say which/);
 });
 
@@ -128,13 +128,13 @@ test("#1470 tier-1 head gets the triage ask — and it names the gesture wanted"
     );
     // #2405 — "Triage the ticket." said nothing of what closing the loop takes.
     // #2457 — the ask names who must move: continue for the agent, handback for someone else.
-    assert.match(res.phrase, /Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours/i);
+    assert.match(res.phrase, /Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`\./);
 });
 
 test("#1470 unknown tier (older daemon) falls back to Triage — never an empty ask", async () => {
     // stubClient's default row carries no `backlog_tier` at all.
     const res = await buildContextPhrase(stubClient(), null, PINGS_YAML);
-    assert.match(res.phrase, /Triage it, then close the loop/i);
+    assert.match(res.phrase, /Triage: /);
 });
 
 // #1363 david `futbsc` — a backlog head whose last actor isn't me SHOWS that
@@ -855,4 +855,32 @@ test("#2344 a bundle that opens on the ticket's creation renders once, not glued
     assert.match(res.phrase, /#920: shared ticket — 2 updates:/);
     assert.doesNotMatch(res.phrase, /new ticket #920/, res.phrase);
     assert.equal((res.phrase.match(/#920: shared ticket/g) ?? []).length, 1, res.phrase);
+});
+
+// #2767 david « un wake devrait pas être une doc complète, ça doit lead » — each
+// backlog ending is one line that says what to do; the rules live in the skill.
+test("#2767 every backlog ending is its one line, in every shipped tone and in the fallback", async () => {
+    const { readFileSync } = await import("node:fs");
+    const endings = [
+        "{head_tier_confirm:+ Your `then:` awaits an accept: confirm or amend it.}",
+        "{head_tier_triage:+ Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`.}",
+        "{head_tier_followup:+ Your pending `then:` gates this: amend it, an ack changes nothing.}",
+        "{head_tier_waiting:+ You spoke last: nothing new? Reply nothing — no comment is needed.}",
+        "{head_tier_blocked:+ Blocked by a dependency: unchanged? Reply nothing — no comment is needed.}",
+    ];
+    const shipped = readFileSync(PINGS_YAML, "utf8");
+    const fallback = readFileSync(new URL("./state.ts", import.meta.url).pathname, "utf8");
+    const tones = (shipped.match(/\{head_tier_triage:\+ /g) ?? []).length;
+    assert.ok(tones >= 3, "the shipped file has its three tones");
+    for (const e of endings) {
+        assert.equal(shipped.split(e).length - 1, tones, `every tone: ${e}`);
+        assert.ok(fallback.includes(e), `the fallback: ${e}`);
+    }
+
+    const res = await buildContextPhrase(
+        stubClient({ listTickets: async () => [{ id: 977, title: "backlog ticket", backlog_tier: 1, pending_decision: true }] }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /look #977: backlog ticket\. Your `then:` awaits an accept: confirm or amend it\./);
 });

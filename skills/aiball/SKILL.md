@@ -136,10 +136,11 @@ which case you're in**; read it, it's not decoration :
 
 | The wake ends with… | What's true | What's wanted |
 |---|---|---|
-| `Triage it, then close the loop…` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
-| `Your pending decision is what gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope — don't just ack |
+| `Triage: plan, resolved, continue if yours, or handback: true.` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
+| `Your then: awaits an accept…` | Your proposal is still pending | Confirm it as it stands, or amend it with a fresher `then:` |
+| `Your pending then: gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope and amend it — an ack changes nothing |
 | `You spoke last…` | You spoke last | Nothing new? **Reply nothing.** Otherwise `then: continue` if the next move is yours (with `resume_on` to wait on a job), a `handback: true` comment if someone else must move |
-| `Blocked by an open dependency…` | A blocker gates it | Blocker unchanged? **Reply nothing.** Otherwise help on the **blocker**, not here |
+| `Blocked by a dependency…` | A blocker gates it | Blocker unchanged? **Reply nothing.** Otherwise help on the **blocker**, not here |
 
 Only the first calls for triage. On the others, doing nothing is often the right
 answer — and then post nothing: a "still waiting" comment is noise.
@@ -149,8 +150,7 @@ ticket goes to the blocked tier, costs no wait credit, and comes back only now
 and then — with the `Blocked…` ending, so it is not forgotten. Blocker
 unchanged? Reply nothing. A step you posted earlier no longer lifts it.
 
-Whatever the ending, a wake may add **`It is back N min after your last wake on
-it…`**: the ticket returned on its own, nobody else moved. That is almost always
+Whatever the ending, a wake may add **`Back after N min, nobody moved…`**: the ticket returned on its own, nobody else moved. That is almost always
 a `then: continue` with `resume_on: { timer: 0 }` while the next step waits on
 something. Give a delay instead (the soonest a look is worth it), and the ticket
 rests until then.
@@ -267,7 +267,7 @@ your accepted resolution (30 min if you cited a commit on that ticket, 10 withou
 or wontfix (5 min), and the commits you cite
 on a reply with `commits: ["<sha>", …]` (1 min per 20 changed lines, 30 max,
 once per commit, fresh commits only). The reply answers `wait_credit` with your
-balance, and backlog wakes say it.
+balance, and backlog wakes say it (`Credit low` under the floor).
 
 Don't post a step to "keep" a ticket you are not about to work on — the top of
 the backlog is a promise.

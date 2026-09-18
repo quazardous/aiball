@@ -2563,7 +2563,7 @@ export async function buildContextPhrase(
         // came back on its own too soon; "" otherwise.
         let headRewakeMinutes = "";
         let headWaitCredit = "";
-        let headCreditVars: Record<string, string> = {};
+        let headCreditLow = false;
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -2650,18 +2650,9 @@ export async function buildContextPhrase(
                     });
                     if (rewake !== null) headRewakeMinutes = String(rewake);
                     if (typeof top.wait_credit_minutes === "number") headWaitCredit = String(top.wait_credit_minutes);
-                    // #2646 — under the floor, the wake says how to earn it back.
+                    // #2646 — under the floor, the wake says so; how to earn it back is in the skill (#2767).
                     const rules = top.wait_credit_rules;
-                    if (typeof top.wait_credit_minutes === "number" && rules && top.wait_credit_minutes < rules.floor) {
-                        headCreditVars = {
-                            head_wait_credit_low: "1",
-                            head_credit_resolved: String(rules.resolved),
-                            head_credit_resolved_no_commit: String(rules.resolved_no_commit),
-                            head_credit_wontfix: String(rules.wontfix),
-                            head_credit_commit_lines: String(rules.commit_lines_per_minute),
-                            head_credit_commit_max: String(rules.commit_max),
-                        };
-                    }
+                    if (typeof top.wait_credit_minutes === "number" && rules && top.wait_credit_minutes < rules.floor) headCreditLow = true;
                     // #1363 david `futbsc` — when the head's last actor isn't me,
                     // SHOW that last event's content (a bundle-style line) instead
                     // of asserting "<actor> is waiting on your reply". The old
@@ -2842,12 +2833,7 @@ export async function buildContextPhrase(
             // #2458 — the ticket came back too soon after its previous wake.
             head_rewake_minutes: backlogMode ? headRewakeMinutes : "",
             head_wait_credit: backlogMode ? headWaitCredit : "",
-            head_wait_credit_low: backlogMode ? (headCreditVars.head_wait_credit_low ?? "") : "",
-            head_credit_resolved: headCreditVars.head_credit_resolved ?? "",
-            head_credit_resolved_no_commit: headCreditVars.head_credit_resolved_no_commit ?? "",
-            head_credit_wontfix: headCreditVars.head_credit_wontfix ?? "",
-            head_credit_commit_lines: headCreditVars.head_credit_commit_lines ?? "",
-            head_credit_commit_max: headCreditVars.head_credit_commit_max ?? "",
+            head_wait_credit_low: backlogMode && headCreditLow ? "1" : "",
             // #1350 — "1" when the head EVENT wake is for a ticket this consumer
             // isn't responsible for (non-claimable). The template appends
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
@@ -2919,15 +2905,15 @@ export async function buildContextPhrase(
             // #2384 david — each ending names the GESTURE it wants, not just the
             // situation: a `then:`, or a `handback: true` that says what is awaited.
             // "re-check it" sent agents back to read, then post nothing.
-            + "{head_tier_confirm:+ Your `then:` on it is still waiting for an accept — confirm it as it stands, or amend it with a fresher one; say which on the thread.}"
-            + "{head_tier_triage:+ Triage it, then close the loop: `then: plan` or `resolved`; `then: continue` if the next move is yours, with `resume_on` when it waits on a job; or a `handback: true` comment if it is someone else's.}"
-            + "{head_tier_followup:+ Your pending decision gates this — re-examine the scope, then amend it with a fresher `then:`; an ack changes nothing.}"
-            + "{head_tier_waiting:+ You spoke last. Nothing new and nothing to do? Reply nothing: no comment is needed. Otherwise `then: continue` if the ball is yours (with `resume_on` to wait on a job), or a `handback: true` comment if someone else must move.}"
-            + "{head_tier_blocked:+ Blocked by an open dependency. If the blocker has not moved, reply nothing: no comment is needed. Otherwise help on the blocker, or cut the relation if it is stale, and say which on the thread.}"
+            + "{head_tier_confirm:+ Your `then:` awaits an accept: confirm or amend it.}"
+            + "{head_tier_triage:+ Triage: `plan`, `resolved`, `continue` if yours, or `handback: true`.}"
+            + "{head_tier_followup:+ Your pending `then:` gates this: amend it, an ack changes nothing.}"
+            + "{head_tier_waiting:+ You spoke last: nothing new? Reply nothing — no comment is needed.}"
+            + "{head_tier_blocked:+ Blocked by a dependency: unchanged? Reply nothing — no comment is needed.}"
             // #2458 david — a ticket that keeps coming back is usually a step
             // declared with `resume_on.timer: 0` while the next move waits
             // on a job. Say how to rest it, on whatever tier it came back as.
-            + "{head_rewake_minutes:+ It is back {head_rewake_minutes} min after your last wake on it, and nobody else has moved since: if the next step waits on a build, a test box or a deploy, give `then: continue` a `resume_on.timer` (not 0): the soonest a look is worth it, not how long the job takes. It rests until then.}{head_wait_credit:+ Your wait credit on this project: {head_wait_credit} min.}{head_wait_credit_low:+ You are short of it: credit comes back when a ticket closes on your accepted resolution (+{head_credit_resolved} min with a commit cited on that ticket, +{head_credit_resolved_no_commit} without) or wontfix (+{head_credit_wontfix}), and with each commit you cite on a reply as `commits: [<sha>]` (+1 min per {head_credit_commit_lines} changed lines, {head_credit_commit_max} max).}}";
+            + "{head_rewake_minutes:+ Back after {head_rewake_minutes} min, nobody moved: waiting on a job? set `resume_on.timer`: the soonest a look is worth it.}{head_wait_credit:+ Credit: {head_wait_credit} min.}{head_wait_credit_low:+ Credit low: earn it back by shipping (see skill).}}";
         let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
         // #751-followup (urgent fix : david's stale `wake_master` override
         // missed the `head_decision_event` branch added by #830 and produced

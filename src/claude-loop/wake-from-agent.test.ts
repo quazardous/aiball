@@ -13,7 +13,7 @@ import { buildContextPhrase } from "./state.js";
 import type { AiballClient } from "../client.js";
 
 const PINGS_YAML = new URL("../../config/defaults/claude-loop-pings.yaml", import.meta.url).pathname;
-const CLAUSE = /another agent wrote this — reply only if you add something new/;
+const CLAUSE = /another agent wrote this — reply only if you add something new; agreeing needs no turn\./;
 
 /** One unread comment, with whatever the daemon said about its author. */
 function clientWithHead(author: Record<string, unknown>): AiballClient {
