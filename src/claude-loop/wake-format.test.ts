@@ -884,3 +884,48 @@ test("#2767 every backlog ending is its one line, in every shipped tone and in t
     );
     assert.match(res.phrase, /look #977: backlog ticket\. Your `then:` awaits an accept: confirm or amend it\./);
 });
+
+// #2770 david — "parfois un vieux ticket bloque tout le monde : l'annoncer quand
+// on n'a plus d'event et avant le backlog". One line, before the head, no ask.
+test("#2770 a backlog wake names the project's critical ticket before the head", async () => {
+    const critical = { id: 2725, title: "the old blocker", holds: 13, last_moved_at: null, quiet: "3 d" };
+    const res = await buildContextPhrase(
+        stubClient({ getProjectCritical: async () => ({ project: "aiball", critical }) }),
+        "aiball",
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /critical: #2725 holds 13 tickets · quiet 3 d\. look #977/);
+
+    const fresh = await buildContextPhrase(
+        stubClient({ getProjectCritical: async () => ({ project: "aiball", critical: { ...critical, quiet: "" } }) }),
+        "aiball",
+        PINGS_YAML,
+    );
+    assert.match(fresh.phrase, /critical: #2725 holds 13 tickets\. look #977/);
+
+    const none = await buildContextPhrase(stubClient({ getProjectCritical: async () => ({ project: "aiball", critical: null }) }), "aiball", PINGS_YAML);
+    assert.doesNotMatch(none.phrase, /critical:/);
+    assert.match(none.phrase, /look #977/);
+
+    // An older daemon without the route costs the line, never the head.
+    const older = await buildContextPhrase(stubClient({ getProjectCritical: async () => { throw new Error("404"); } }), "aiball", PINGS_YAML);
+    assert.match(older.phrase, /look #977/);
+    assert.doesNotMatch(older.phrase, /critical:/);
+
+    // An event wake never carries it: the line belongs to the backlog.
+    const event = await buildContextPhrase(
+        stubClient({ getProjectCritical: async () => ({ project: "aiball", critical }) }),
+        "aiball",
+        PINGS_YAML,
+        { ticketId: 920, commentHashid: "qctwhw", commentBody: "a fresh comment" },
+    );
+    assert.doesNotMatch(event.phrase, /critical:/);
+});
+
+test("#2770 the critical line is in every shipped tone and in the fallback", async () => {
+    const { readFileSync } = await import("node:fs");
+    const clause = "{critical_id:+ critical: #{critical_id} holds {critical_holds} tickets{critical_quiet:+ · quiet {critical_quiet}}.}";
+    const shipped = readFileSync(PINGS_YAML, "utf8");
+    assert.equal(shipped.split(clause).length - 1, (shipped.match(/\{head_tier_triage:\+ /g) ?? []).length);
+    assert.ok(readFileSync(new URL("./state.ts", import.meta.url).pathname, "utf8").includes(clause));
+});

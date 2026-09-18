@@ -935,6 +935,14 @@ export class AiballClient {
         );
     }
 
+    /** #2770 — the project's critical ticket (holds back the most open tickets), or null. */
+    getProjectCritical(project: string) {
+        return this.http<{ project: string; critical: { id: number; title: string; holds: number; last_moved_at: string | null; quiet: string } | null }>(
+            "GET",
+            `/api/projects/${encodeURIComponent(project)}/critical`,
+        );
+    }
+
     /** #404: push a turn's token-usage delta onto a ticket (additive). Called
      *  best-effort by the Stop-hook's token-capture; failures are swallowed. */
     postTokenUsage(ticketId: number, u: { in: number; out: number; cacheW: number; cacheR: number }) {

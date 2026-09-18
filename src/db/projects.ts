@@ -33,6 +33,7 @@ import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate
 import { isStepMeta, keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
 import { getConfig } from "./config-overrides.js";
 import { parseMeta } from "../questions.js";
+import { gateEdges } from "../critical-ticket.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -2015,26 +2016,10 @@ function computeActionableTicketIdsUncached(
 
     // Relation gating: depends_on / blocks chains to an open blocker
     // suppress the dependent from the actionable set (#B.123 phase B.4).
-    const latestRelations = relationRows;
-    const latestPerPair = new Map<string, { source: number; target: number; kind: string }>();
-    for (const r of latestRelations) {
-        if (!r.meta || !r.targetTicketId) continue;
-        let kind: string | undefined;
-        try {
-            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
-            kind = m.relation?.kind;
-        } catch { continue; }
-        if (!kind) continue;
-        latestPerPair.set(`${r.sourceTicketId}-${r.targetTicketId}`, {
-            source: r.sourceTicketId,
-            target: r.targetTicketId,
-            kind,
-        });
-    }
+    // #2770 — the edges are read by `gateEdges`, shared with the critical ticket.
     const gatedByBlocker = new Set<number>();
-    for (const r of latestPerPair.values()) {
-        if (r.kind === "depends_on" && blockerIds.has(r.target)) gatedByBlocker.add(r.source);
-        else if (r.kind === "blocks" && blockerIds.has(r.source)) gatedByBlocker.add(r.target);
+    for (const e of gateEdges(relationRows)) {
+        if (blockerIds.has(e.blocker)) gatedByBlocker.add(e.waiter);
     }
 
     // #265/#374: per-consumer "I acted last → awaiting someone else" gate,

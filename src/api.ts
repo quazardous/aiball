@@ -38,6 +38,7 @@ import { getProjectWakeFocus, setProjectWakeFocus } from "./db/settings.js";
 import { listTicketIdsInProject } from "./db/tickets.js";
 import { activeFocus, describeFocus, parseFocusTickets } from "./wake-focus.js";
 import { focusRelatives } from "./db/focus-relatives.js";
+import { projectCriticalTicket } from "./db/critical-ticket.js";
 import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -246,6 +247,14 @@ api.get("/projects/:project/standing-prompt", (req: Request, res: Response) => {
     const project = String(req.params.project ?? "");
     if (!project) return badRequest(res, "project required");
     res.json(standingPromptView(project));
+});
+
+// #2770 — the open ticket of the project holding back the most open tickets,
+// for the loop to name before its backlog. An indicator: nothing acts on it.
+api.get("/projects/:project/critical", (req: Request, res: Response) => {
+    const project = String(req.params.project ?? "");
+    if (!project) return badRequest(res, "project required");
+    res.json({ project, critical: projectCriticalTicket(project) });
 });
 
 api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) => {

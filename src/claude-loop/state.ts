@@ -2564,6 +2564,8 @@ export async function buildContextPhrase(
         let headRewakeMinutes = "";
         let headWaitCredit = "";
         let headCreditLow = false;
+        // #2770 — the project's critical ticket, named before the backlog head.
+        let critical: { id: number; holds: number; quiet: string } | null = null;
         if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
@@ -2653,6 +2655,14 @@ export async function buildContextPhrase(
                     // #2646 — under the floor, the wake says so; how to earn it back is in the skill (#2767).
                     const rules = top.wait_credit_rules;
                     if (typeof top.wait_credit_minutes === "number" && rules && top.wait_credit_minutes < rules.floor) headCreditLow = true;
+                    // #2770 — its own try: an older daemon without the route, or
+                    // any failure, costs the line, never the head.
+                    if (project) {
+                        try {
+                            const c = (await client.getProjectCritical(project))?.critical;
+                            if (c && Number.isFinite(c.id) && c.holds > 0) critical = { id: c.id, holds: c.holds, quiet: c.quiet ?? "" };
+                        } catch { /* no line */ }
+                    }
                     // #1363 david `futbsc` — when the head's last actor isn't me,
                     // SHOW that last event's content (a bundle-style line) instead
                     // of asserting "<actor> is waiting on your reply". The old
@@ -2834,6 +2844,9 @@ export async function buildContextPhrase(
             head_rewake_minutes: backlogMode ? headRewakeMinutes : "",
             head_wait_credit: backlogMode ? headWaitCredit : "",
             head_wait_credit_low: backlogMode && headCreditLow ? "1" : "",
+            critical_id: backlogMode && critical ? String(critical.id) : "",
+            critical_holds: backlogMode && critical ? String(critical.holds) : "",
+            critical_quiet: backlogMode && critical ? critical.quiet : "",
             // #1350 — "1" when the head EVENT wake is for a ticket this consumer
             // isn't responsible for (non-claimable). The template appends
             // "(fyi — action is not mandatory)" to the comment/lifecycle/
@@ -2901,7 +2914,9 @@ export async function buildContextPhrase(
             // rotation (and its pressure) is unchanged: same head, same cadence.
             // Only the ask changes, so a re-surfaced ticket gets the re-examination
             // it was rotated back for instead of a reflex "standby".
-            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}.{head_last_comment:+ — {head_last_comment}.}"
+            // #2770 david — "un vieux ticket bloque tout le monde": say which,
+            // before the backlog head. An indicator — no instruction attached.
+            + "{backlog_mode:+{culture}{critical_id:+ critical: #{critical_id} holds {critical_holds} tickets{critical_quiet:+ · quiet {critical_quiet}}.} look #{head_id}{head_title:+: {head_title}}.{head_last_comment:+ — {head_last_comment}.}"
             // #2384 david — each ending names the GESTURE it wants, not just the
             // situation: a `then:`, or a `handback: true` that says what is awaited.
             // "re-check it" sent agents back to read, then post nothing.
