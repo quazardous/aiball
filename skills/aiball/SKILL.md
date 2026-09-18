@@ -155,11 +155,11 @@ a `then: continue` with `resume_on: { timer: 0 }` while the next step waits on
 something. Give a delay instead (the soonest a look is worth it), and the ticket
 rests until then.
 
-A backlog wake may open with **`critical: #N holds K tickets`** (`· quiet 3 d`
-when it has not moved for days): the open ticket of your project that holds
-back the most open tickets, down its `depends_on` / `blocks` chains. It is
-information, not the head: moving it frees the most work — if it is yours, or
-if you can unstick it.
+**`Critical: it holds K open tickets…`** is a wake of its own, before the rest
+of the backlog: the open ticket of your project that holds back the most open
+tickets, down its `depends_on` / `blocks` chains (`· quiet 3 d` when it has not
+moved for days). Moving it frees the most work: do the next step if it is
+yours, or chase whoever it waits on. It then sinks like any backlog head.
 
 **Triage = ONE of three gestures, in order of preference :**
 

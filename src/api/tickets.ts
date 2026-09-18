@@ -929,6 +929,8 @@ ticketsRouter.get("/tickets", (req, res) => {
             actionable: flags.actionable,
             claimable: flags.claimable,
             backlog_tier: flags.backlog_tier,
+            // #2770 — on the project's critical ticket: how many it holds back.
+            critical: flags.critical,
             backlog_cooled_until: flags.backlog_cooled_until,
             backlog_last_wake_at: flags.backlog_last_wake_at,
             wait_credit_minutes: flags.backlog_tier !== null ? waitCreditOf(m.project) : null,

@@ -41,6 +41,7 @@ import {
 } from "./projects.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { ticketUnreadFlags } from "./pings.js";
+import { projectCriticalTicket, type CriticalTicket } from "./critical-ticket.js";
 import {
     buildBacklogRulesCtx,
     defaultBacklogRules,
@@ -81,11 +82,15 @@ export interface TicketFlags {
      *         `actionable` — soft surface)
      *   - 3 = waiting on them (I was the last actor, no decision pending)
      *   - 4 = blocked (#911: gated by an open depends_on blocker)
+     *   - -1 = critical (#2770: the project's open ticket holding back the
+     *         most open tickets — ahead of everything, when it is in the pool)
      *   - null = not in this consumer's backlog
      * Sorts naturally with numeric asc (hot → actionable → follow-up →
      * waiting → blocked); the route filter `?backlog=1` keeps every row
      * whose `backlog_tier !== null`. */
-    backlog_tier: 0 | 1 | 2 | 3 | 4 | null;
+    backlog_tier: BacklogTier | null;
+    /** #2770 — set on the project's critical ticket, whatever its tier. */
+    critical: { holds: number; quiet: string } | null;
     backlog_cooled_until: string | null;
     /** #2458 — when this consumer's backlog wake last named the ticket, cooled
      *  or not; null outside the backlog. Lets the loop see a ticket coming
@@ -95,6 +100,9 @@ export interface TicketFlags {
     last_actor: string | null;
     last_actor_at: string | null;
 }
+
+/** #791 / #2770 — lower = sooner; -1 is the critical tier. */
+export type BacklogTier = -1 | 0 | 1 | 2 | 3 | 4;
 
 /**
  * The precomputed sets/maps a single API request needs. One context per
@@ -162,6 +170,9 @@ export interface TicketFlagsContext {
      *  the consumer's owned-project set. The route handler builds this
      *  closure; we just call it. */
     isClaimable: (id: number, project: string, assignee: string | null) => boolean;
+    /** #2770 — the project's critical ticket, memoized per project for the
+     *  request. Optional: absent, no ticket is critical. */
+    criticalOf?: (project: string) => CriticalTicket | null;
     /** Wall-clock for the request — purity hook for `computeTicketFlags`. */
     nowMs: number;
     /** When > 0, `cooledWakeAt[id] + cooldownSec > nowMs` populates
@@ -204,7 +215,9 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         project: t.project,
     };
     const excludedFromBacklog = defaultBacklogRules.excludes(ctx.rulesCtx, ruleItem, "backlog-tier");
-    let backlog_tier: 0 | 1 | 2 | 3 | 4 | null = null;
+    let backlog_tier: BacklogTier | null = null;
+    const criticalHere = ctx.criticalOf?.(t.project) ?? null;
+    const critical = criticalHere && criticalHere.id === t.id ? { holds: criticalHere.holds, quiet: criticalHere.quiet } : null;
     if (!excludedFromBacklog) {
         // #885 david : ajouter un tier "follow-up" pour les threads où
         // l'autre a répondu en dernier mais une décision pending gate
@@ -236,7 +249,12 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         // (or the step ignored it), and a blocked ticket keeps its own tier and
         // wording. Someone else's heat still lifts it — that is news.
         const freshOwnStep = (ctx.freshOwnStepIds?.has(t.id) ?? false) && !blocked;
-        if ((hotForTier || freshOwnStep) && inPool) {
+        if (critical && inPool) {
+            // #2770 david — "un wake à part après les events et avant le
+            // backlog, avec un sink : c'est un nouveau tier". The sink is the
+            // backlog cooldown, like any head.
+            backlog_tier = -1;
+        } else if ((hotForTier || freshOwnStep) && inPool) {
             backlog_tier = 0;
         } else if (actionable) {
             // Tier 1 — ball in my court (formal).
@@ -278,6 +296,7 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         is_claim,
         hot,
         backlog_tier,
+        critical,
         backlog_cooled_until,
         backlog_last_wake_at: backlog_tier !== null ? (ctx.lastWakeAt?.get(t.id) ?? null) : null,
         gated_by_decision,
@@ -445,6 +464,14 @@ export function buildTicketFlagsContext(args: {
         rulesCtx,
         gatedByBlockerIds,
         isClaimable,
+        // #2770 — asked only for the projects a row actually belongs to.
+        criticalOf: (() => {
+            const memo = new Map<string, CriticalTicket | null>();
+            return (project: string) => {
+                if (!memo.has(project)) memo.set(project, projectCriticalTicket(project, nowMs));
+                return memo.get(project)!;
+            };
+        })(),
         nowMs,
         cooldownSec,
     };

@@ -26,7 +26,9 @@ interface TicketRow {
     id?: number;
     title?: string;
     priority?: string;
-    backlog_tier?: 0 | 1 | 2 | 3 | 4 | null;
+    backlog_tier?: -1 | 0 | 1 | 2 | 3 | 4 | null;
+    /** #2770 — on the project's critical ticket: how many it holds back. */
+    critical?: { holds: number; quiet?: string } | null;
     actionable?: boolean;
     unread?: boolean;
     hot?: boolean;
@@ -216,6 +218,7 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     // David <chat> : tickets en cooldown (`backlog_cooled_until` set) ont
     // un marker ⏳ via fmtTicket. Ils restent dans leur tier d'origine
     // (= tu vois qu'ils existent mais qu'ils sont en pause backlog wake).
+    const critical = tickets.filter((t) => t.backlog_tier === -1);
     const hot = tickets.filter((t) => t.backlog_tier === 0);
     const actionable = tickets.filter((t) => t.backlog_tier === 1);
     const followUp = tickets.filter((t) => t.backlog_tier === 2);
@@ -226,6 +229,12 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     if (tickets.length === 0) {
         process.stdout.write(`(backlog empty — nothing in your court)\n`);
         return;
+    }
+    // #2770 david — a tier of its own, ahead of the rest: the project's open
+    // ticket holding back the most open tickets.
+    for (const t of critical) {
+        const holds = t.critical ? ` — holds ${t.critical.holds} open tickets${t.critical.quiet ? `, quiet ${t.critical.quiet}` : ""}` : "";
+        process.stdout.write(`\n## CRITICAL${holds}\n${fmtTicket(t)}\n`);
     }
     if (hot.length > 0) {
         process.stdout.write(`\n## HOT (${hot.length})\n`);

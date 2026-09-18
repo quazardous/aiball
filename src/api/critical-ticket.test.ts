@@ -18,6 +18,7 @@ const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
 const { submitMessage } = await import("../messages.js");
 const { createProject } = await import("../db/projects.js");
+const { upsertSubscription } = await import("../db/subscriptions.js");
 const schema = await import("../schema.js");
 
 const P = "p-2770";
@@ -27,6 +28,8 @@ getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000
     .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2770-h" }).token;
+upsertConsumer({ consumer_id: "lead", kind: "agent" });
+const LEAD = issueToken({ kind: "agent", consumer_id: "lead", label: "2770-l" }).token;
 createProject({ name: P });
 createProject({ name: OTHER });
 
@@ -38,10 +41,10 @@ after(() => {
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function call(method: string, path: string, body?: unknown, token: string = HUMAN): Promise<{ status: number; json: any }> {
     const r = await fetch(`${BASE}${path}`, {
         method,
-        headers: { authorization: `Bearer ${HUMAN}`, ...(body ? { "content-type": "application/json" } : {}) },
+        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
         body: body ? JSON.stringify(body) : undefined,
     });
     return { status: r.status, json: await r.json() };
@@ -76,4 +79,35 @@ test("the project's critical ticket counts what it holds down the chain, in any 
     submitMessage({ project: OTHER, kind: "ticket_closed", ticket_id: b, by_agent: "boss" });
     submitMessage({ project: P, kind: "ticket_closed", ticket_id: c, by_agent: "boss" });
     assert.equal((await call("GET", `/api/projects/${P}/critical`)).json.critical, null);
+});
+
+// #2770 david — "un wake à part après les events et avant le backlog, avec un
+// sink : c'est un nouveau tier". The critical ticket leads the backlog of an
+// agent whose pool it is in, and sinks like any head once the wake named it.
+test("the critical ticket is a tier of its own, ahead of the rest, with the backlog's sink", async () => {
+    const Q = "p-2770-tier";
+    createProject({ name: Q });
+    upsertSubscription("lead", Q, "owner");
+    const root = ticket(Q, "the blocker nobody moves");
+    const hot = ticket(Q, "an ordinary ticket in my court");
+    const w1 = ticket(Q, "held one");
+    const w2 = ticket(Q, "held two");
+    await relate(w1, root, "depends_on");
+    await relate(w2, root, "depends_on");
+
+    const backlog = async (): Promise<any[]> =>
+        (await call("GET", `/api/tickets?project=${Q}&backlog=1&limit=500&cooldown_sec=3600`, undefined, LEAD)).json;
+    const rows = await backlog();
+    assert.equal(rows[0]?.id, root, `the critical ticket heads the backlog: ${JSON.stringify(rows.map((r) => [r.id, r.backlog_tier]))}`);
+    assert.equal(rows[0].backlog_tier, -1);
+    assert.deepEqual(rows[0].critical, { holds: 2, quiet: "" });
+    assert.equal(rows.find((r) => r.id === hot)?.critical, null, "only the critical ticket carries it");
+    assert.equal(rows.find((r) => r.id === w1)?.backlog_tier, 4, "what it holds stays blocked");
+
+    // The sink: once a wake named it, it cools like any backlog head.
+    const logged = await call("POST", "/api/backlog-wake", { consumer_id: "lead", ticket_id: root }, LEAD);
+    assert.equal(logged.status, 200, JSON.stringify(logged.json));
+    const after = (await backlog()).find((r) => r.id === root);
+    assert.equal(after?.backlog_tier, -1, "still critical");
+    assert.ok(after?.backlog_cooled_until, "but sunk until the cooldown ends");
 });

@@ -55,6 +55,7 @@ test("the wake ending follows the head's tier, as the loop maps it", () => {
     assert.equal(wakeEnding(2), WAKE_ENDING.followup);
     assert.equal(wakeEnding(3), WAKE_ENDING.waiting);
     assert.equal(wakeEnding(4), WAKE_ENDING.blocked);
+    assert.equal(wakeEnding(-1, false, { holds: 3, quiet: "52 d" }), "Critical: it holds 3 open tickets · quiet 52 d. Unstick it, or chase whoever it waits on.");
 });
 
 const row = (over: Partial<ViewRow>): ViewRow => ({

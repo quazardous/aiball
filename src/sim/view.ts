@@ -13,7 +13,9 @@ export interface ViewRow {
     actionable: boolean;
     claimable: boolean;
     unread?: boolean;
-    backlog_tier: 0 | 1 | 2 | 3 | 4 | null;
+    backlog_tier: -1 | 0 | 1 | 2 | 3 | 4 | null;
+    /** #2770 — on the project's critical ticket: how many it holds back. */
+    critical?: { holds: number; quiet?: string } | null;
     gated_by_decision: boolean;
     /** #2376 — a `then:` of this thread still waiting for its accept. */
     pending_decision?: boolean;
@@ -21,7 +23,8 @@ export interface ViewRow {
     claimant?: string | null;
 }
 
-export const TIER_LABEL: Record<0 | 1 | 2 | 3 | 4, string> = {
+export const TIER_LABEL: Record<-1 | 0 | 1 | 2 | 3 | 4, string> = {
+    [-1]: "critical",
     0: "hot",
     1: "actionable",
     2: "follow-up",
@@ -38,12 +41,18 @@ export const WAKE_ENDING = {
     blocked: "Blocked by a dependency: unchanged? Reply nothing — no comment is needed.",
 } as const;
 
+/** #2770 — the critical tier's ending, with what the ticket holds back. */
+export function criticalEnding(holds: number, quiet = ""): string {
+    return `Critical: it holds ${holds} open tickets${quiet ? ` · quiet ${quiet}` : ""}. Unstick it, or chase whoever it waits on.`;
+}
+
 /**
  * Same mapping as the loop: unknown, hot or actionable heads are triaged —
  * unless the thread carries a `then:` still waiting for its accept (#2376),
  * which asks to confirm or amend it rather than to triage afresh.
  */
-export function wakeEnding(tier: ViewRow["backlog_tier"], pendingDecision = false): string {
+export function wakeEnding(tier: ViewRow["backlog_tier"], pendingDecision = false, critical: ViewRow["critical"] = null): string {
+    if (tier === -1 && critical) return criticalEnding(critical.holds, critical.quiet ?? "");
     if (tier === null || tier <= 1) return pendingDecision ? WAKE_ENDING.confirm : WAKE_ENDING.triage;
     if (tier === 2) return WAKE_ENDING.followup;
     if (tier === 3) return WAKE_ENDING.waiting;
@@ -57,7 +66,7 @@ export function wakeEnding(tier: ViewRow["backlog_tier"], pendingDecision = fals
 export function nextWake(unreadPings: number, head: ViewRow | null): string {
     if (unreadPings > 0) return `event wake: ${unreadPings} unread ping${unreadPings > 1 ? "s" : ""} first`;
     if (!head || head.backlog_tier === null) return "no wake: nothing in the backlog";
-    return `look #${head.id}: ${head.title}. ${wakeEnding(head.backlog_tier, head.pending_decision === true)}`;
+    return `look #${head.id}: ${head.title}. ${wakeEnding(head.backlog_tier, head.pending_decision === true, head.critical ?? null)}`;
 }
 
 function cell(v: string, width: number): string {
