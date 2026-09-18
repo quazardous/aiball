@@ -23,6 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-09-18
+
+### Changed
+
+- A burst of closures reaches an agent as one wake instead of one per
+  ticket: accepted resolutions and wontfixes, closed tickets, and the
+  linked-ticket events a closure triggers are listed together. Accepted
+  plans, refusals and comments still wake on their own. **Restart your
+  loops** for this to take effect.
+
 ## [0.45.0] — 2026-09-17
 
 ### Added
