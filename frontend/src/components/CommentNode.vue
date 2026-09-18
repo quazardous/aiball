@@ -194,6 +194,15 @@ const stepMeta = computed((): { summary: boolean; tagged: { by: string } | null;
         return { summary: false, tagged: null, resumeAt: null, resumeOnTicket: null };
     }
 });
+// #2765 david — built here, not in the template: the template compiler trims
+// the space at the start of a text node, which glued "resumes" to the time.
+const stepResumeText = computed((): string => {
+    const { resumeAt, resumeOnTicket } = stepMeta.value;
+    const parts = ["resumes"];
+    if (resumeAt) parts.push(shortResume(resumeAt));
+    if (resumeOnTicket) parts.push(resumeAt ? "or on " : "on ");
+    return parts.join(" ");
+});
 async function stepTag(tag: boolean) {
     classifyBusy.value = true;
     try {
@@ -482,10 +491,11 @@ async function doDelete() {
                     stepMeta.resumeOnTicket ? `${stepMeta.resumeAt ? 'or' : 'the agent resumes'} when #${stepMeta.resumeOnTicket} moves (a reply, a decision, a close)` : '',
                 ].filter(Boolean).join(', ')"
                 style="font-size: var(--fs-2xs); margin-left: 0.3rem; color: var(--p-tag-info-color); font-weight: 600"
-            >resumes<template v-if="stepMeta.resumeAt"> {{ shortResume(stepMeta.resumeAt) }}</template><template v-if="stepMeta.resumeOnTicket">{{ stepMeta.resumeAt ? ' or' : '' }} on <a
+            >{{ stepResumeText }}<a
+                v-if="stepMeta.resumeOnTicket"
                 :href="ticketHref(stepMeta.resumeOnTicket)"
                 style="color: inherit"
-            >{{ formatTicketRef(stepMeta.resumeOnTicket) }}</a></template></span>
+            >{{ formatTicketRef(stepMeta.resumeOnTicket) }}</a></span>
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;
                  accept/reject lives under the composer). -->
             <Tag
