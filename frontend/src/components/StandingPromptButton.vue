@@ -224,15 +224,18 @@ function describeLoopResult(r: LoopHoldResult): string {
                 <p class="standing-prompt-pop__hint">
                     Only these tickets wake the project's owner agents — backlog and
                     events. <code>123, 456</code> keeps just those; <code>!789</code> keeps all
-                    but it. Events outside stay unread until you clear it. Humans and
-                    explicit reads are not filtered.
+                    but it. A ticket brings its relatives with <code>123+</code> (children),
+                    <code>123++</code> (all descendants), <code>+123</code> / <code>++123</code>
+                    (parents), <code>123~</code> (linked tickets) — read at each wake, so a
+                    sub-ticket filed later joins in. Events outside stay unread until you
+                    clear it. Humans and explicit reads are not filtered.
                 </p>
                 <div class="standing-prompt-pop__focus">
                     <input
                         v-model="focusTickets"
                         type="text"
                         class="standing-prompt-pop__input"
-                        placeholder="e.g. 2518, 2523   or   !2180"
+                        placeholder="e.g. 2518, 2523++   or   !2180"
                         :disabled="busy || !project"
                         @keyup.enter="save"
                     >

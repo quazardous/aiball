@@ -37,6 +37,7 @@ import { captureTokenSnapshotIfDue, getTokenTimeseries } from "./db.js";
 import { getProjectWakeFocus, setProjectWakeFocus } from "./db/settings.js";
 import { listTicketIdsInProject } from "./db/tickets.js";
 import { activeFocus, describeFocus, parseFocusTickets } from "./wake-focus.js";
+import { focusRelatives } from "./db/focus-relatives.js";
 import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -228,7 +229,7 @@ api.get("/presence", (req: Request, res: Response) => {
 /** #2525 — the standing prompt, and the wake focus beside it. */
 function standingPromptView(project: string) {
     const focus = getProjectWakeFocus(project);
-    const active = activeFocus(focus, Date.now());
+    const active = activeFocus(focus, Date.now(), focusRelatives);
     return {
         project,
         standing_prompt: getProjectStandingPrompt(project),

@@ -28,6 +28,7 @@ import { mentions } from "../mentions.js";
 import { getDb, nowIso } from "./connection.js";
 import { getConsumer } from "./consumers.js";
 import { activeFocus, focusHides, type WakeFocus } from "../wake-focus.js";
+import { focusRelatives } from "./focus-relatives.js";
 
 export type Target =
     | "unread-list"
@@ -343,7 +344,7 @@ function wakeFocusFor(consumerId: string, nowMs: number): Map<string, WakeFocus>
             const j = JSON.parse(r.focus ?? "") as { tickets?: unknown; until?: unknown };
             if (typeof j.tickets === "string") stored = { tickets: j.tickets, until: typeof j.until === "string" ? j.until : null };
         } catch { /* unreadable: no focus */ }
-        const focus = activeFocus(stored, nowMs);
+        const focus = activeFocus(stored, nowMs, focusRelatives);
         if (focus) out.set(r.project, focus);
     }
     return out;
