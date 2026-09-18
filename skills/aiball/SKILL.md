@@ -251,8 +251,11 @@ when you pick it up again — a step without `resume_on` is refused:
 
 - **carrying on right away** → `resume_on: { timer: 0 }`: the next wake
   brings you straight back to it;
-- **waiting on something** (a build, a test box, a deploy) →
-  `resume_on: { timer: N }`: the ticket stays out of your wakes for N
+- **a job you start in the background** → it wakes you when it ends: your
+  session is notified. Give `resume_on: { timer: N }` only as a fallback, for
+  a job that hangs; coming back early gives the unused minutes back.
+- **waiting on something nothing will wake you for** (a remote build, a test
+  box, a deploy) → `resume_on: { timer: N }`: the ticket stays out of your wakes for N
   minutes, then comes back first. **N is the soonest a look is worth it, not
   how long the job takes.** When in doubt, pick the smaller: looking too early
   costs one look and another step; looking too late leaves finished work
