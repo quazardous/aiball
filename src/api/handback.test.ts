@@ -109,13 +109,17 @@ test("handback: true lets it through and hands the ticket back", async () => {
 
 test("handback: false is for the holder, and keeps the ticket in its author's pool", async () => {
     const t = ticket();
-    const refused = await comment(AGENT, t, { handback: false });
+    // #2781 david — "si on continue on claim aussi": an owner nobody else holds
+    // it for becomes its holder by keeping it.
+    assert.equal((await comment(AGENT, t, { handback: false })).status, 201);
+    assert.equal(getDb().select({ c: schema.tickets.claimant }).from(schema.tickets).where(eq(schema.tickets.id, t)).get()?.c, "worker", "claimed by keeping it");
+    assert.equal(waiting("worker", t), false);
+    // Someone who may not claim here is still told to claim first.
+    const other = ticket();
+    const refused = await comment(OUTSIDER, other, { handback: false });
     assert.equal(refused.status, 409);
     assert.match(refused.json.error ?? "", /handback: false is for the agent holding the ticket: claim it first/);
-    assert.equal(comments(t), 0);
-    setTicketClaim(t, "worker");
-    assert.equal((await comment(AGENT, t, { handback: false })).status, 201);
-    assert.equal(waiting("worker", t), false);
+    assert.equal(comments(other), 0);
 });
 
 test("a then implies the handback, and a contradicting one is refused", async () => {

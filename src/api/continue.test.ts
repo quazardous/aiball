@@ -131,3 +131,30 @@ test("a step may wait up to the project's limit, 120 minutes by default, and not
     const raised = await step(t, { step_after_minutes: 200 });
     assert.equal(raised.status, 201, "the project raised its limit");
 });
+
+// #2781 david — "si on continue on claim aussi": on a project it leads, an agent
+// that continues a ticket nobody else holds becomes its holder; one held by
+// another agent still refuses it.
+test("#2781 an owner's step on a ticket nobody holds claims it; one held by another still refuses", async () => {
+    const { upsertSubscription } = await import("../db/subscriptions.js");
+    createProject({ name: "p-2781" });
+    upsertSubscription("worker", "p-2781", "owner");
+    const mk = () => {
+        const t = submitMessage({ project: "p-2781", kind: "ticket_created", title: "t", body: "x", by_agent: "boss" });
+        if (t.status !== "approved") applyModeration(t as never, "approved", "boss");
+        return t.id;
+    };
+    const claimant = (id: number) => getDb().select({ c: schema.tickets.claimant }).from(schema.tickets).where(eq(schema.tickets.id, id)).get()?.c ?? null;
+
+    const free = mk();
+    const r = await post({ project: "p-2781", kind: "comment_added", ticket_id: free, body: "on it", summary_until: "s", step: true, step_after_minutes: 0 });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(claimant(free), "worker", "the step claimed it");
+
+    const held = mk();
+    setTicketClaim(held, "other");
+    const refused = await post({ project: "p-2781", kind: "comment_added", ticket_id: held, body: "on it", summary_until: "s", step: true, step_after_minutes: 0 });
+    assert.equal(refused.status, 409);
+    assert.match(refused.json.error ?? "", /held by other/);
+    assert.equal(claimant(held), "other");
+});

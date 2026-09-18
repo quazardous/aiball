@@ -88,12 +88,9 @@ test("past both clocks the claim has lapsed everywhere, and claiming again renew
     assert.equal(h.claimant, "worker", "the claim stays on record");
     assert.equal(h.is_claim, false);
 
-    const refused = await step(id);
-    assert.equal(refused.status, 409);
-    assert.match(String(refused.json.error), /your claim has lapsed/);
-
-    assert.equal((await call("POST", `/api/tickets/${id}/assign`, {})).status, 200);
-    assert.equal((await header(id)).is_claim, true);
+    // #2781 david — "si on continue on claim aussi": the step renews the lapsed
+    // claim of the agent it belonged to, instead of refusing it.
     const r = await step(id);
     assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal((await header(id)).is_claim, true, "the step claimed it again");
 });

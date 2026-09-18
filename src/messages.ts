@@ -589,6 +589,7 @@ function assertStepByHolder(input: NewMessage): void {
     if (author && isHuman(author)) return;
     const t = getMessage(input.ticket_id);
     if (!t || t.kind !== "ticket_created") return;
+    const claimLive = (ticketClaimHeldUntil(t) ?? 0) > Date.now();
     const refusal = stepRefusal({
         author,
         ticketStatus: t.status,
@@ -596,9 +597,14 @@ function assertStepByHolder(input: NewMessage): void {
         claimant: t.claimant ?? null,
         // #2460 — held by the same rule a rival's claim meets: the assign window,
         // or the holder still working there.
-        claimLive: (ticketClaimHeldUntil(t) ?? 0) > Date.now(),
+        claimLive,
     }, keeping ? "handback: false" : "then: continue");
     if (!refusal) return;
+    // #2781 david — "si on continue on claim aussi": when nobody else holds the
+    // ticket and the author may claim it, the step goes through and the
+    // auto-claim after the insert makes the author its holder.
+    const heldByOther = (t.assignee && t.assignee !== author) || (claimLive && t.claimant && t.claimant !== author);
+    if (t.status === "approved" && !heldByOther && canAutoClaim(author, t.project)) return;
     const err = new Error(refusal);
     (err as Error & { code?: string }).code = ERROR_CODES.STEP_NOT_HOLDER;
     throw err;
