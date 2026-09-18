@@ -23,6 +23,44 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-09-18
+
+### Added
+
+- A step can wait on another ticket: `then: "continue"` takes
+  `resume_on: { ticket: N }`, `{ timer: M }`, or both — the step resumes on
+  whichever comes first. Waiting on a ticket costs no wait credit. The comment
+  card shows what the step resumes on.
+- The critical ticket: the open ticket of a project that holds back the most
+  open tickets, down its dependency chains. It is a backlog tier of its own,
+  with its own wake ahead of the rest of the backlog, and it is flagged in the
+  ticket list, on its detail, in `ticket_list`, in `poll` and in
+  `claude-loop backlog`.
+- `ticket_list` rows and the `ticket_get` header say what a live step resumes
+  on (`step`).
+- The wake focus accepts relatives: `123+` / `123++` for children,
+  `+123` / `++123` for parents, `123~` for linked tickets.
+- A sub-ticket still waiting for moderation says so in the wake, the parent's
+  sub-ticket list and `ticket_list`.
+
+### Changed
+
+- Wake endings are one line that says what to do; the rules live in the
+  skill. The lines that hold back a reflex stay whole ("reply nothing — no
+  comment is needed", "agreeing needs no turn").
+- A small commit earns a minimum of wait credit, and a wake with nothing new
+  says no reply is due.
+- `continue_after_minutes` is replaced by `resume_on` in the MCP tool; loops
+  started before this release keep working until they restart.
+
+### Fixed
+
+- A step no longer lifts a ticket that waits on an open dependency to the top
+  of the backlog.
+- A closure's follow-up events read under the ticket that caused them.
+
+**Restart your loops** for the new wake texts and MCP parameters.
+
 ## [0.46.0] — 2026-09-18
 
 ### Changed
