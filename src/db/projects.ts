@@ -1211,14 +1211,19 @@ function maxBlockedMultiplier(): number {
  * #2449 david — the tickets whose last action is a step posted by `consumerId`,
  * with the two windows that follow it, in ms since epoch:
  * - `restUntil`: when the agent said it can resume (`then: continue` with
- *   `continue_after_minutes`, stored as `meta.step_resume_at`). Without it the
- *   agent resumes at once: `restUntil` is the step itself. Until then the
- *   ticket stays out of the wake pool — waiting on a build is not a reason to
- *   be named every minute.
+ *   `resume_on`): its `timer` (stored as `meta.step_resume_at`), or the moment
+ *   the ticket it names moves (`meta.step_resume_on_ticket`, #2765), whichever
+ *   comes first. With neither the agent resumes at once: `restUntil` is the
+ *   step itself. With a ticket and no timer that has not moved, the rest has no
+ *   end yet. Until then the ticket stays out of the wake pool — waiting on a
+ *   build is not a reason to be named every minute.
  * - `leadUntil`: from the resume, the ticket leads that agent's backlog
  *   (tier 0, right after the events) for `tickets.step_hot_minutes`.
  * Only steps with a window still open are returned.
  */
+/** #2765 — the longest a step waiting on another ticket rests without a timer. */
+const OPEN_REST_MAX_MS = 7 * 24 * 3_600_000;
+
 export function ownFreshSteps(consumerId: string, ticketIds: readonly number[], nowMs: number = Date.now()): Map<number, { at: string; restUntil: number; leadUntil: number }> {
     const out = new Map<number, { at: string; restUntil: number; leadUntil: number }>();
     if (ticketIds.length === 0) return out;
@@ -1232,6 +1237,17 @@ export function ownFreshSteps(consumerId: string, ticketIds: readonly number[], 
         .all();
     if (rows.length === 0) return out;
     const byId = new Map(rows.map((r) => [r.id, r]));
+    // #2765 — when each awaited ticket last moved, read once for all the steps.
+    let awaitedMovedAt: Map<number, number> | null = null;
+    const movedAt = (awaited: number): number => {
+        if (!awaitedMovedAt) awaitedMovedAt = new Map();
+        if (!awaitedMovedAt.has(awaited)) {
+            const at = getDb().select({ at: schema.tickets.lastActorAt }).from(schema.tickets)
+                .where(eq(schema.tickets.id, awaited)).get()?.at;
+            awaitedMovedAt.set(awaited, at ? Date.parse(at) : NaN);
+        }
+        return awaitedMovedAt.get(awaited)!;
+    };
     // The step comment itself: the one at the ticket's last-action instant.
     for (const m of getDb().select({
         ticketId: schema.messages.ticketId,
@@ -1247,8 +1263,23 @@ export function ownFreshSteps(consumerId: string, ticketIds: readonly number[], 
         if (!r?.lastActorAt || r.lastActorAt !== m.createdAt || !isStepMeta(m.meta)) continue;
         const atMs = Date.parse(r.lastActorAt);
         if (!Number.isFinite(atMs)) continue;
-        const declared = Date.parse(parseMeta(m.meta).step_resume_at ?? "");
-        const restUntil = Number.isFinite(declared) && declared > atMs ? declared : atMs;
+        const meta = parseMeta(m.meta);
+        const declared = Date.parse(meta.step_resume_at ?? "");
+        const timer = Number.isFinite(declared) && declared > atMs ? declared : null;
+        // #2765 — the awaited ticket, once it has moved since the step, ends the
+        // rest; before that, a ticket without a timer rests with no end yet.
+        const awaited = meta.step_resume_on_ticket;
+        let restUntil: number;
+        if (awaited) {
+            const moved = movedAt(awaited);
+            // Not moved yet and no timer: the rest is bounded all the same, so a
+            // ticket waiting on one that never moves comes back rather than
+            // disappearing (and every downstream window stays a real date).
+            const onTicket = Number.isFinite(moved) && moved > atMs ? moved : atMs + OPEN_REST_MAX_MS;
+            restUntil = Math.min(onTicket, timer ?? Number.POSITIVE_INFINITY);
+        } else {
+            restUntil = timer ?? atMs;
+        }
         const raw = Number(getConfig("tickets.step_hot_minutes", r.project) ?? 30);
         const leadMinutes = Math.max(0, Number.isFinite(raw) ? raw : 30);
         const leadUntil = restUntil + leadMinutes * 60_000;

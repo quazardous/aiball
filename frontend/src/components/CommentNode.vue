@@ -179,17 +179,19 @@ async function untag() {
 // tags its comment as a step. Agents' comments always carry a summary_until
 // (humans are exempt), which is how the menu tells them apart; the daemon
 // refuses a human's comment anyway.
-const stepMeta = computed((): { summary: boolean; tagged: { by: string } | null; resumeAt: string | null } => {
+const stepMeta = computed((): { summary: boolean; tagged: { by: string } | null; resumeAt: string | null; resumeOnTicket: number | null } => {
     try {
-        const m = JSON.parse(props.msg.meta ?? "null") as { summary_until?: unknown; step_tagged?: { by: string }; step_resume_at?: string } | null;
+        const m = JSON.parse(props.msg.meta ?? "null") as { summary_until?: unknown; step_tagged?: { by: string }; step_resume_at?: string; step_resume_on_ticket?: number } | null;
         return {
             summary: typeof m?.summary_until === "string",
             tagged: m?.step_tagged ?? null,
-            // #2456 — when the agent said it resumes (continue_after_minutes).
+            // #2456 — when the agent said it resumes (resume_on.timer).
             resumeAt: typeof m?.step_resume_at === "string" ? m.step_resume_at : null,
+            // #2765 — or when this other ticket moves, whichever comes first.
+            resumeOnTicket: typeof m?.step_resume_on_ticket === "number" ? m.step_resume_on_ticket : null,
         };
     } catch {
-        return { summary: false, tagged: null, resumeAt: null };
+        return { summary: false, tagged: null, resumeAt: null, resumeOnTicket: null };
     }
 });
 async function stepTag(tag: boolean) {
@@ -466,17 +468,24 @@ async function doDelete() {
                 severity="info"
                 :title="stepMeta.tagged
                     ? `a step, tagged by ${stepMeta.tagged.by}: the agent carries on — nothing to accept or reject`
-                    : stepMeta.resumeAt
-                        ? `a step: the agent waits on something and resumes at ${new Date(stepMeta.resumeAt).toLocaleString()} — nothing to accept or reject`
+                    : stepMeta.resumeAt || stepMeta.resumeOnTicket
+                        ? 'a step: the agent waits on something before it resumes — nothing to accept or reject'
                         : 'a step: the agent marked this part done and carries on — nothing to accept or reject'"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #2456 david — the resume reads right after the step chip, in the chip's own colour. -->
+            <!-- #2765 david — and the ticket it waits on, whichever comes first. -->
             <span
-                v-if="isStep && stepMeta.resumeAt"
-                :title="`the agent resumes at ${new Date(stepMeta.resumeAt).toLocaleString()}`"
+                v-if="isStep && (stepMeta.resumeAt || stepMeta.resumeOnTicket)"
+                :title="[
+                    stepMeta.resumeAt ? `the agent resumes at ${new Date(stepMeta.resumeAt).toLocaleString()}` : '',
+                    stepMeta.resumeOnTicket ? `${stepMeta.resumeAt ? 'or' : 'the agent resumes'} when #${stepMeta.resumeOnTicket} moves (a reply, a decision, a close)` : '',
+                ].filter(Boolean).join(', ')"
                 style="font-size: var(--fs-2xs); margin-left: 0.3rem; color: var(--p-tag-info-color); font-weight: 600"
-            >resumes {{ shortResume(stepMeta.resumeAt) }}</span>
+            >resumes<template v-if="stepMeta.resumeAt"> {{ shortResume(stepMeta.resumeAt) }}</template><template v-if="stepMeta.resumeOnTicket">{{ stepMeta.resumeAt ? ' or' : '' }} on <a
+                :href="ticketHref(stepMeta.resumeOnTicket)"
+                style="color: inherit"
+            >{{ formatTicketRef(stepMeta.resumeOnTicket) }}</a></template></span>
             <!-- #B.129 phase 4: decision audit chip (read-only on the card;
                  accept/reject lives under the composer). -->
             <Tag

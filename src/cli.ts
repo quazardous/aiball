@@ -186,11 +186,11 @@ program
         );
     });
 
-// #2629 — is continue_after_minutes judged well? Declared delay against when
+// #2629 — is resume_on.timer judged well? Declared delay against when
 // the agent came back on the ticket, by delay bucket.
 program
     .command("steps")
-    .description("How agents judge continue_after_minutes: per delay bucket, how many steps came back early (< half), on time, late (> 1.1×) or not yet. When the job really finished is not known: a trend, not a verdict.")
+    .description("How agents judge their step timers (resume_on.timer): per delay bucket, how many steps came back early (< half), on time, late (> 1.1×) or not yet. When the job really finished is not known: a trend, not a verdict.")
     .option("--project <name>", "One project")
     .option("--since <days>", "Only steps posted in the last N days")
     .action(async (opts: { project?: string; since?: string }, cmd) => {

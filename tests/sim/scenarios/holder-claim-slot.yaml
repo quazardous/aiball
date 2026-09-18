@@ -21,7 +21,7 @@ steps:
     save: { plan_a: id }
   - moderator: accept $plan_a
   - alpha-lead: ticket_reply
-    args: { target_id: $a, body: A's first step done., summary_until: A in progress with the lead., then: continue, continue_after_minutes: 0, commits: none }
+    args: { target_id: $a, body: A's first step done., summary_until: A in progress with the lead., then: continue, resume_on: { timer: 0 }, commits: none }
   - alpha-lead: ticket_reply
     args: { target_id: $b, body: Plan for B., summary_until: Plan for B waiting., then: plan, commits: none }
     save: { plan_b: id }

@@ -345,7 +345,7 @@ when the window runs out. Anyone else's word lifts it at once.
 A ticket whose last action is the agent's own step **leads that agent's
 backlog** (tier 0, right after the events) for `tickets.step_hot_minutes`, 30 by
 default. The agent must say when that starts, with every step:
-`continue_after_minutes: 0` for at once, or N minutes — until then the ticket
+`resume_on: { timer: 0 }` for at once, or N minutes — until then the ticket
 stays out of its wake pool, however the wakes around it went. N is at most
 `tickets.step_after_max_minutes` (120 by default, set per project): a longer
 wait is refused, since it is not one step waiting on a job any more. N asks for
@@ -392,7 +392,7 @@ explicit reads (`ticket_get`, `ticket_list`) are not.
 When the loop names a ticket again within 30 minutes of its previous wake on it
 (`CL_BACKLOG_REWAKE_WINDOW_SEC`, 0 = off) and nobody else has acted on it in
 between, the wake adds a line saying so and pointing at
-`continue_after_minutes`: a ticket that keeps coming back on its own is usually
+`resume_on`: a ticket that keeps coming back on its own is usually
 a step that said "at once" while it was waiting on a job. Each backlog row
 carries `backlog_last_wake_at`, the asking agent's own previous wake on it.
 

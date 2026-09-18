@@ -62,24 +62,31 @@ test("#2331 handback goes out as sent, and comment_only never does", async () =>
     assert.equal("comment_only" in (await reply({ handback: true })), false);
 });
 
-test("#2449 continue_after_minutes goes out as the step's resume delay; absent, nothing is sent", async () => {
-    const later = await reply({ then: "continue", continue_after_minutes: 20 });
+test("#2765 resume_on goes out as the step's resume: its timer and its ticket; absent, nothing is sent", async () => {
+    const later = await reply({ then: "continue", resume_on: { timer: 20 } });
     assert.equal(later.step, true);
-    assert.equal(later.step_after_minutes, 20, "the agent's delay reaches the daemon");
-
-    const atOnce = await reply({ then: "continue" });
-    assert.equal(atOnce.step_after_minutes, undefined, "resuming at once is the default, not a value");
+    assert.equal(later.step_after_minutes, 20, "the timer reaches the daemon");
+    assert.equal(later.step_resume_on_ticket, undefined);
+    const onTicket = await reply({ then: "continue", resume_on: { ticket: 2725 } });
+    assert.equal(onTicket.step_resume_on_ticket, 2725, "the awaited ticket reaches the daemon");
+    assert.equal(onTicket.step_after_minutes, undefined);
+    const both = await reply({ then: "continue", resume_on: { ticket: 2725, timer: 60 } });
+    assert.equal(both.step_resume_on_ticket, 2725);
+    assert.equal(both.step_after_minutes, 60);
+    const none = await reply({ then: "continue" });
+    assert.equal(none.step_after_minutes, undefined);
+    assert.equal(none.step_resume_on_ticket, undefined);
 });
 
 test("#2640 commits go out on a comment, never on close/reopen, and absent they are not sent", async () => {
-    assert.deepEqual((await reply({ then: "continue", continue_after_minutes: 10, commits: ["ef93fbb"] })).commits, ["ef93fbb"]);
-    assert.equal((await reply({ then: "continue", continue_after_minutes: 0 })).commits, undefined);
+    assert.deepEqual((await reply({ then: "continue", resume_on: { timer: 10 }, commits: ["ef93fbb"] })).commits, ["ef93fbb"]);
+    assert.equal((await reply({ then: "continue", resume_on: { timer: 0 } })).commits, undefined);
     assert.equal((await reply({ then: "close", commits: ["ef93fbb"] })).commits, undefined);
 });
 
 test("#2640 the answer starts with the wait credit in words when the daemon sends it", async () => {
     stub.postMessage = async (msg: Record<string, unknown>) => { sent.push(msg); return { id: 43, wait_credit: { project: "p-2308", balance: 40, refunded: 0, step: { requested: 20, granted: 20, spent: 20 } } }; };
-    const out = await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "continue", continue_after_minutes: 20 }) as { content: Array<{ text: string }> };
+    const out = await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "continue", resume_on: { timer: 20 } }) as { content: Array<{ text: string }> };
     const text = out.content[0].text;
     assert.ok(text.indexOf("wait_credit_note") < text.indexOf("\"id\""), "the note comes first");
     assert.match(text, /Wait credit on p-2308: this step waits 20 min\. 40 min left/);

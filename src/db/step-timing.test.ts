@@ -1,5 +1,5 @@
 /**
- * #2629 — the indicator for `continue_after_minutes`: per delay bucket, steps
+ * #2629 — the indicator for `resume_on`: per delay bucket, steps
  * that came back early (< half the delay), on time, late (> 1.1×) or not yet,
  * where "came back" = the same agent next spoke on that ticket.
  */
@@ -60,7 +60,7 @@ test("from the thread: the same agent's next message on the ticket, not someone 
     assert.equal(stepTimingRows({ since: at(5) }).length, 0);
 });
 
-test("every place that asks for continue_after_minutes asks for the soonest a look is worth it", async () => {
+test("every place that asks for a step timer asks for the soonest a look is worth it", async () => {
     const { readFileSync } = await import("node:fs");
     const root = join(import.meta.dirname, "..", "..");
     const places = ["src/mcp/ticket-write.ts", "src/claude-loop/state.ts", "config/defaults/claude-loop-pings.yaml", "skills/aiball/SKILL.md", "MCP-CLIENT.md", "src/messages.ts"];

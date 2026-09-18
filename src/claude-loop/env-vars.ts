@@ -62,7 +62,7 @@ export const CL_ENV = {
     BACKLOG_COOLDOWN_SEC: "CL_BACKLOG_COOLDOWN_SEC",
     // #2458 — a backlog head named again within this window (seconds) of the
     // loop's previous wake on it, with nobody else moving in between, gets a
-    // `continue_after_minutes` hint in the wake. Default 1800 (30 min); 0 = off.
+    // `resume_on` hint in the wake. Default 1800 (30 min); 0 = off.
     BACKLOG_REWAKE_WINDOW_SEC: "CL_BACKLOG_REWAKE_WINDOW_SEC",
 
     // #722 — input-hot probe + pane-probe cadence (2 rates: fast/slow)

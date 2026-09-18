@@ -84,6 +84,8 @@ export interface MessageMeta {
     step?: boolean;
     /** #2449 — when the step's author said it can resume (ISO). Absent: at once. */
     step_resume_at?: string;
+    /** #2765 — the step also resumes when this ticket moves. */
+    step_resume_on_ticket?: number;
     /** #2369 — set when a human tagged this comment as a step after the fact:
      *  who, when, and the handback the comment carried, restored if the tag
      *  is removed. Absent on a step its author posted. */

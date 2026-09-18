@@ -1,5 +1,5 @@
 /**
- * #2456 david — a ticket whose step waits (`continue_after_minutes`) shows when
+ * #2456 david — a ticket whose step waits (`resume_on`) shows when
  * its agent resumes. What must hold, over the real routes:
  * - the list row of a waiting step carries `step_resume_at`;
  * - a step that carries on at once carries none;

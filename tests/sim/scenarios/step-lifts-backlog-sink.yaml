@@ -22,7 +22,7 @@ steps:
       body: A step done, more to come.
       summary_until: One step done; the lead carries on.
       then: continue
-      continue_after_minutes: 0
+      resume_on: { timer: 0 }
       commits: none
   - expect:
       alpha-lead: { ticket: $ticket, act: true, wake: triage }

@@ -220,6 +220,8 @@ export function insertMessage(m: NewMessage): Message {
                 if (m.step_after_minutes && m.step_after_minutes > 0) {
                     meta.step_resume_at = new Date(Date.now() + m.step_after_minutes * 60_000).toISOString();
                 }
+                // #2765 — or when this other ticket moves, whichever comes first.
+                if (m.step_resume_on_ticket) meta.step_resume_on_ticket = m.step_resume_on_ticket;
             }
             // #2331 — an explicit handback (a comment with no `then`).
             if (typeof m.handback === "boolean") {

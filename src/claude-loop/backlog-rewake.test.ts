@@ -1,5 +1,5 @@
 // #2458 david — a backlog head that comes back too soon after its previous wake,
-// with nobody else moving in between, gets a `continue_after_minutes` hint.
+// with nobody else moving in between, gets a `resume_on` hint.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -10,7 +10,7 @@ const PINGS_YAML = new URL("../../config/defaults/claude-loop-pings.yaml", impor
 const STATE_TS = new URL("./state.ts", import.meta.url).pathname;
 const NOW = Date.parse("2026-09-14T10:00:00Z");
 const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
-const HINT = /It is back (\d+) min after your last wake on it, and nobody else has moved since: .*`continue_after_minutes` \(not 0\)/;
+const HINT = /It is back (\d+) min after your last wake on it, and nobody else has moved since: .*`resume_on.timer` \(not 0\)/;
 
 test("inside the window, nobody else moving: the minutes since the previous wake", () => {
     const base = { lastActor: "me", lastActorAt: ago(8), me: "me", nowMs: NOW, windowSec: 1800 };

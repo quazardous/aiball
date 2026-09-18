@@ -174,7 +174,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         default: 120,
         label: "Longest wait a step may declare (minutes)",
         description:
-            "The most an agent may put in continue_after_minutes on a step (then: continue). A longer wait is refused with this limit in the reason — past it the work is not one step waiting on a job any more: hand the ticket back, or propose a plan.",
+            "The most an agent may put in resume_on.timer on a step (then: continue). A longer wait is refused with this limit in the reason — past it the work is not one step waiting on a job any more: hand the ticket back, or propose a plan.",
     },
     // #2640 david — the wait credit: « les minutes qu'on attend sont prises sur un budget temps qu'on doit gagner par preuve de travail ».
     {
@@ -184,7 +184,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         default: true,
         label: "Wait credit",
         description:
-            "true (default) = continue_after_minutes spends an agent's wait credit, earned by proof of work. false = waits are free and uncapped (still at most tickets.step_after_max_minutes), nothing is earned, spent or refunded, and replies and wakes say nothing about credit.",
+            "true (default) = a step's resume_on.timer spends an agent's wait credit, earned by proof of work. false = waits are free and uncapped (still at most tickets.step_after_max_minutes), nothing is earned, spent or refunded, and replies and wakes say nothing about credit.",
     },
     {
         key: "tickets.wait_credit_refund",
@@ -220,7 +220,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         default: 60,
         label: "Wait credit an agent starts with (minutes)",
         description:
-            "Every agent starts each project with this much wait credit, so a new agent can wait on a first build. The credit is spent by continue_after_minutes and earned by proof of work.",
+            "Every agent starts each project with this much wait credit, so a new agent can wait on a first build. The credit is spent by step timers (resume_on.timer) and earned by proof of work.",
     },
     {
         key: "tickets.step_min_wait_minutes",

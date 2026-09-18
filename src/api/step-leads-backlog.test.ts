@@ -159,5 +159,59 @@ test("a step without its resume delay is refused, and the refusal teaches the ge
         project: P, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true,
     });
     assert.equal(r.status, 400, JSON.stringify(r.json));
-    assert.match(String((r.json as { error?: string }).error), /continue_after_minutes — 0 if you carry on at once/);
+    assert.match(String((r.json as { error?: string }).error), /then: continue needs resume_on — \{ timer: 0 \} if you carry on at once/);
+});
+
+// #2765 david — `resume_on: { ticket, timer }`: resume when the awaited ticket
+// moves, or when the timer runs out, whichever comes first.
+test("#2765 a step waiting on another ticket rests until that one moves, and costs no credit", async () => {
+    const awaited = ticket("the ticket this one is queued behind");
+    const t = ticket("queued behind it");
+    await call("POST", `/api/tickets/${t}/assign`, {});
+    const r = await call("POST", "/api/messages", {
+        project: P, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_resume_on_ticket: awaited,
+    });
+    assert.ok(r.status < 300, JSON.stringify(r.json));
+    const credit = (r.json as { wait_credit?: { step?: unknown } }).wait_credit;
+    assert.equal(credit?.step, undefined, "waiting on a ticket spends nothing");
+
+    const resting = (await backlogWithCooldown()).find((x) => x.id === t)!;
+    assert.ok(resting.backlog_cooled_until, "out of the wake pool while the other ticket is still");
+    assert.ok(Date.parse(resting.backlog_cooled_until!) - Date.now() > 24 * 3_600_000, "no timer: the rest lasts until it moves");
+
+    // The awaited ticket moves: a reply on it.
+    submitMessage({ project: P, kind: "comment_added", ticket_id: awaited, body: "news", by_agent: "boss" });
+    invalidateFlagsCache();
+    const due = (await backlogWithCooldown()).find((x) => x.id === t)!;
+    assert.equal(due.backlog_cooled_until, null, "the rest ends when the awaited ticket moves");
+    assert.equal(due.backlog_tier, 0, "and the step leads");
+});
+
+test("#2765 with a timer too, whichever comes first: the timer here", async () => {
+    const awaited = ticket("a ticket that will not move");
+    const t = ticket("queued, with a fallback");
+    await call("POST", `/api/tickets/${t}/assign`, {});
+    await reply(t, { step: true, step_resume_on_ticket: awaited, step_after_minutes: 20 });
+    const resting = (await backlogWithCooldown()).find((x) => x.id === t)!;
+    const heldFor = (Date.parse(resting.backlog_cooled_until!) - Date.now()) / 60_000;
+    assert.ok(heldFor > 19 && heldFor <= 20, `held ${heldFor.toFixed(1)} min: the timer, not the still ticket`);
+});
+
+test("#2765 resume_on.ticket must be another ticket", async () => {
+    const t = ticket("a step that waits on nothing real");
+    await call("POST", `/api/tickets/${t}/assign`, {});
+    const bogus = await call("POST", "/api/messages", {
+        project: P, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_resume_on_ticket: 999999,
+    });
+    assert.equal(bogus.status, 400, JSON.stringify(bogus.json));
+    assert.match(String((bogus.json as { error?: string }).error), /#999999 is not a ticket/);
+    const self = await call("POST", "/api/messages", {
+        project: P, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_resume_on_ticket: t,
+    });
+    assert.equal(self.status, 400, JSON.stringify(self.json));
+    assert.match(String((self.json as { error?: string }).error), /names this very ticket/);
+    const noStep = await call("POST", "/api/messages", {
+        project: P, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", handback: false, step_resume_on_ticket: t,
+    });
+    assert.equal(noStep.status, 400);
 });

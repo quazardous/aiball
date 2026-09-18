@@ -243,8 +243,12 @@ export interface NewMessage {
     summary_until?: string | null;
     /** #2308 — `then: continue`: a step on a ticket the author holds. comment_added only. */
     step?: boolean;
-    /** #2449 — with a step: the agent resumes after this many minutes, not at once. */
+    /** #2449 — with a step: the agent resumes after this many minutes, not at once.
+     *  #2765 — the `timer` of `resume_on`. */
     step_after_minutes?: number;
+    /** #2765 — with a step: the agent resumes when this ticket moves (the `ticket`
+     *  of `resume_on`). With a timer too, whichever comes first. */
+    step_resume_on_ticket?: number;
     /** #2640 — commits the author cites as proof of work (wait credit). comment_added only.
      *  #2652 — `null` = "this comment delivers no commit", said explicitly;
      *  undefined = the field was not sent. */

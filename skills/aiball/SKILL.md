@@ -138,7 +138,7 @@ which case you're in**; read it, it's not decoration :
 |---|---|---|
 | `Triage it, then close the loop…` | Either the ball is yours, **or** the thread just moved and is hot — the two collapse into this one phrase | Check `actionable` first. True → one of the three gestures below. False → treat it as the matching row underneath. Either way the wake asks for a `then:` or a justified `handback` |
 | `Your pending decision is what gates this…` | They replied, but your own pending proposal blocks it | Re-examine the scope — don't just ack |
-| `You spoke last…` | You spoke last | Nothing new? **Reply nothing.** Otherwise `then: continue` if the next move is yours (with `continue_after_minutes` to wait on a job), a `handback: true` comment if someone else must move |
+| `You spoke last…` | You spoke last | Nothing new? **Reply nothing.** Otherwise `then: continue` if the next move is yours (with `resume_on` to wait on a job), a `handback: true` comment if someone else must move |
 | `Blocked by an open dependency…` | A blocker gates it | Blocker unchanged? **Reply nothing.** Otherwise help on the **blocker**, not here |
 
 Only the first calls for triage. On the others, doing nothing is often the right
@@ -149,7 +149,7 @@ ticket stops waking until that one closes, and costs no wait credit.
 
 Whatever the ending, a wake may add **`It is back N min after your last wake on
 it…`**: the ticket returned on its own, nobody else moved. That is almost always
-a `then: continue` with `continue_after_minutes: 0` while the next step waits on
+a `then: continue` with `resume_on: { timer: 0 }` while the next step waits on
 something. Give a delay instead (the soonest a look is worth it), and the ticket
 rests until then.
 
@@ -239,16 +239,19 @@ The shapes for ticket / comment / mention IDs are **provided by the `welcome` MC
 
 A step (`then: "continue"`) keeps the ticket yours and puts it at the **top of
 your backlog**, right after your events, for half an hour. It **always** says
-when you pick it up again — a step without `continue_after_minutes` is refused:
+when you pick it up again — a step without `resume_on` is refused:
 
-- **carrying on right away** → `continue_after_minutes: 0`: the next wake
+- **carrying on right away** → `resume_on: { timer: 0 }`: the next wake
   brings you straight back to it;
 - **waiting on something** (a build, a test box, a deploy) →
-  `continue_after_minutes: N`: the ticket stays out of your wakes for N
+  `resume_on: { timer: N }`: the ticket stays out of your wakes for N
   minutes, then comes back first. **N is the soonest a look is worth it, not
   how long the job takes.** When in doubt, pick the smaller: looking too early
   costs one look and another step; looking too late leaves finished work
   waiting, and nothing wakes you for it. A job of about 20 minutes: 10.
+- **waiting on another ticket** → `resume_on: { ticket: M }`: back when M
+  moves (a reply, a decision, a close), at no credit. Add a `timer` for a
+  fallback: whichever comes first.
 
 **Every comment says its commits.** `commits` is required on a comment: the SHAs
 it delivers (`commits: ["9e32067"]`), or `commits: null` when it delivers none.
@@ -277,7 +280,7 @@ belongs to someone else — hand the ticket back.
 | Who makes the next move? | Gesture |
 |---|---|
 | **someone else** — answer a question, review, decide | `handback: true` — the ticket leaves your queue until they speak |
-| **you, later** — a build, a job, a measurement, a deploy to finish | `then: "continue"` with `continue_after_minutes: N` — it stays yours and comes back in N minutes |
+| **you, later** — a build, a job, a measurement, a deploy to finish | `then: "continue"` with `resume_on: { timer: N }` — it stays yours and comes back in N minutes; `resume_on: { ticket: M }` to come back when ticket M moves (both: whichever comes first) |
 
 `handback` is not a way to wait. Handing a ticket back to nobody takes it out of
 your queue, and nothing will bring it back until someone else writes on it.

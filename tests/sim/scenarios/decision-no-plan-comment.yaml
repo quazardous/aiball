@@ -16,7 +16,7 @@ steps:
   - expect:
       alpha-lead: { ticket: $ticket, act: true, wake: triage }
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: First part done., summary_until: Fix in progress., then: continue, continue_after_minutes: 0, commits: none }
+    args: { target_id: $ticket, body: First part done., summary_until: Fix in progress., then: continue, resume_on: { timer: 0 }, commits: none }
   - expect:
       alpha-lead: { ticket: $ticket, act: true }
   - alpha-lead: ticket_reply

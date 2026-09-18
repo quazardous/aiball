@@ -12,7 +12,7 @@ steps:
   - moderator: accept $measure
   - wake: alpha-lead
   - alpha-lead: ticket_reply
-    args: { target_id: $ticket, body: Measured., summary_until: Measures taken; build plan next., then: continue, continue_after_minutes: 0, commits: none }
+    args: { target_id: $ticket, body: Measured., summary_until: Measures taken; build plan next., then: continue, resume_on: { timer: 0 }, commits: none }
   - alpha-lead: ticket_reply
     args: { target_id: $ticket, body: The results, and the plan to build., summary_until: Build plan waiting for the moderator., then: plan, commits: none }
     save: { build: id }

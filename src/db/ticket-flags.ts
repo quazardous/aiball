@@ -366,7 +366,7 @@ export function buildTicketFlagsContext(args: {
         }
     }
     // #2449 david — a step of mine RESTS its ticket until the resume I declared
-    // (`continue_after_minutes`; none = resume at once), then LEADS my backlog
+    // (`resume_on`; none = resume at once), then LEADS my backlog
     // for `tickets.step_hot_minutes` (tier 0 below). The rest holds whether or
     // not a backlog wake came before it: a step waiting on a build must not be
     // named every minute.

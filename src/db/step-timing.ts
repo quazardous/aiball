@@ -1,5 +1,5 @@
 /**
- * #2629 — how well agents judge `continue_after_minutes`.
+ * #2629 — how well agents judge `resume_on`.
  *
  * david: « les agents ont la main lourde … comment faire pour qu'ils
  * sous-évaluent plutôt que surévaluent ? ». The wording now asks for the
