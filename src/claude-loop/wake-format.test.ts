@@ -409,6 +409,81 @@ test("#1351 david `36phxd`: a long markdown comment body is stripped + truncated
     assert.match(res.phrase, /short one \(#bbb\) by david/);
 });
 
+// #2722 — closures that ask nothing of the agent go out together. When the head
+// is a pure closure, every other pending one (whatever its ticket) and the
+// cascades they caused ride in the same wake; what asks for work stays out.
+test("#2722 a run of closures and their cascades is one wake; work stays out", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 7 }),
+            unread: async () => ({
+                messages: [
+                    { id: 801, kind: "resolution_accepted", ticket_id: 2688, hashid: "acc1", by_agent: "david" },
+                    { id: 802, kind: "related_closed", ticket_id: 2711, source_ticket_id: 2688, by_agent: "david" },
+                    { id: 803, kind: "dependency_closed", ticket_id: 2683, source_ticket_id: 2688, by_agent: "david" },
+                    { id: 804, kind: "wontfix_accepted", ticket_id: 2714, hashid: "wf1", by_agent: "david" },
+                    { id: 805, kind: "plan_accepted", ticket_id: 2716, hashid: "pl1", by_agent: "david" },
+                    { id: 806, kind: "comment_added", ticket_id: 2720, hashid: "cm1", body: "please look", by_agent: "david" },
+                    { id: 807, kind: "dependency_closed", ticket_id: 2719, source_ticket_id: 9999, by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "cause", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /4 tickets closed — 4 updates:/);
+    assert.match(res.phrase, /#2688 resolution ACCEPTED/);
+    assert.match(res.phrase, /#2711 linked ticket closed by david/);
+    assert.match(res.phrase, /#2683 dependency closed by david/);
+    assert.match(res.phrase, /#2714 wontfix ACCEPTED/);
+    assert.equal(res.headMessageId, 801);
+    assert.deepEqual([...(res.extraSeenIds ?? [])].sort((a, b) => a - b), [802, 803, 804]);
+    // An accepted plan (execute!), a comment, and a dependency closed by an
+    // unrelated ticket (it unblocks work) each keep their own wake.
+    assert.doesNotMatch(res.phrase, /2716|2720|2719/);
+});
+
+test("#2722 a lone closure and its cascade are one wake", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 811, kind: "resolution_accepted", ticket_id: 2688, hashid: "acc1", by_agent: "david" },
+                    { id: 812, kind: "related_closed", ticket_id: 2711, source_ticket_id: 2688, by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "cause", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /2 tickets closed — 2 updates:/);
+    assert.match(res.phrase, /#2711 linked ticket closed/);
+    assert.deepEqual(res.extraSeenIds ?? [], [812]);
+});
+
+test("#2722 a head that asks for work does not open a closure run", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 821, kind: "plan_accepted", ticket_id: 2716, hashid: "pl1", by_agent: "david" },
+                    { id: 822, kind: "resolution_accepted", ticket_id: 2688, hashid: "acc1", by_agent: "david" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "the plan", claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.doesNotMatch(res.phrase, /updates:/);
+    assert.doesNotMatch(res.phrase, /2688/);
+    assert.deepEqual(res.extraSeenIds ?? [], []);
+});
+
 test("#1351 events on DIFFERENT tickets → no bundle, head renders single", async () => {
     const res = await buildContextPhrase(
         stubClient({

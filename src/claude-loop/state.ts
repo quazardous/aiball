@@ -1931,6 +1931,16 @@ export function headTextFor(body: string | null | undefined, label: string | und
  * next wake.
  */
 const WAKE_BUNDLE_FETCH_LIMIT = 30;
+/** #2722 — events a closure emits on the tickets linked to it. Each carries
+ *  the closed ticket as `source_ticket_id`; they are delivered in that
+ *  ticket's wake rather than one wake each. */
+const CASCADE_EVENT_KINDS = new Set(["related_closed", "dependency_closed", "dependency_rejected"]);
+/** #2722 — closures that ask nothing of the agent: it learns the ticket is
+ *  closed, and that is all. When the wake's head is one of these, every other
+ *  pending one — whatever its ticket — rides in the same wake. What asks for
+ *  work keeps a wake per ticket: an accepted plan, a refusal, a comment, and a
+ *  dependency closed outside a cascade (it unblocks something). */
+const PURE_CLOSURE_KINDS = new Set(["resolution_accepted", "wontfix_accepted", "ticket_closed", "related_closed"]);
 
 export async function buildContextPhrase(
     client: AiballClient,
@@ -1993,6 +2003,9 @@ export async function buildContextPhrase(
                     // wake must then behave exactly as before.
                     author_is_human?: boolean;
                     parent_message_id?: number | null;
+                    // #2722 — a cascade event's cause (the ticket whose closure
+                    // produced it), used to fold it into the cause's wake.
+                    source_ticket_id?: number | null;
                     // #1820 — when the event happened. Already on the wire
                     // (listUnread filters on it); it was simply absent from
                     // this narrowed shape, so the wake could never say how
@@ -2150,9 +2163,34 @@ export async function buildContextPhrase(
         const headTicketId = unreadHead ? ticketIdOf(unreadHead) : 0;
         // A = all unread events of the head's ticket within the window (david's
         // "concaténer les events d'un même ticket"), not just a contiguous run.
-        const sameTicket = headTicketId
+        const sameTicketOnly = headTicketId
             ? unreadMsgs.filter((m) => ticketIdOf(m) === headTicketId)
             : [];
+        // #2722 david `vrrauf` — « quand des closed sont des cascade on a le
+        // droit de grouper les wake résultant au wake qui a provoqué la
+        // cascade ». Closing a ticket emits an event on every linked ticket
+        // (`related_closed`, `dependency_closed`, `dependency_rejected`), each
+        // carrying the closed ticket as `source_ticket_id`. Those ride along in
+        // the wake of the ticket that caused them instead of costing a wake
+        // each. Only cascades: two independent closures still wake separately.
+        //
+        // #2722 (plan accepted) — and when the head itself is a pure closure,
+        // every other pending pure closure rides along too, whatever its ticket,
+        // with the cascades of all of them.
+        const closureRun = !!unreadHead && PURE_CLOSURE_KINDS.has(unreadHead.kind ?? "");
+        const causes = new Set<number>(headTicketId ? [headTicketId] : []);
+        if (closureRun) {
+            for (const m of unreadMsgs) if (PURE_CLOSURE_KINDS.has(m?.kind ?? "")) causes.add(ticketIdOf(m));
+        }
+        const folded = new Map<number, (typeof unreadMsgs)[number]>();
+        for (const m of sameTicketOnly) folded.set(m.id, m);
+        for (const m of unreadMsgs) {
+            const kind = m?.kind ?? "";
+            if (closureRun && PURE_CLOSURE_KINDS.has(kind)) folded.set(m.id, m);
+            else if (CASCADE_EVENT_KINDS.has(kind) && m.source_ticket_id != null && causes.has(m.source_ticket_id)) folded.set(m.id, m);
+        }
+        // Chronological, like the window (ASC by id).
+        const sameTicket = [...folded.values()].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
         const isBundleMode = sameTicket.length >= 2;
         // Head (oldest) id is returned as headMessageId + marked seen by the
         // inject site; the rest of the same-ticket run are the extras.
@@ -2370,9 +2408,19 @@ export async function buildContextPhrase(
         // human reading a thread top-down and the head (messages[0], the oldest)
         // stays the line the agent anchors on.
         if (isBundleMode) {
-            const lines = sameTicket.map((m) => renderEventLine(m)).join("\n");
+            // #2722 — a line from another ticket (a cascade, a closure run) names
+            // its ticket; in a closure run every line does, the head's included.
+            const lines = sameTicket
+                .map((m) => (closureRun && new Set(sameTicket.map(ticketIdOf)).size > 1) || ticketIdOf(m) !== headTicketId
+                    ? `#${ticketIdOf(m)} ${renderEventLine(m)}`
+                    : renderEventLine(m))
+                .join("\n");
             const titlePart = head?.title ? `: ${head.title}` : "";
-            headBundle = `#${headTicketId}${titlePart} — ${sameTicket.length} updates:\n${lines}`;
+            const tickets = new Set(sameTicket.map(ticketIdOf)).size;
+            headBundle = tickets > 1 && closureRun
+                // #2722 — several tickets closed at once: no single title leads.
+                ? `${tickets} tickets closed — ${sameTicket.length} updates:\n${lines}`
+                : `#${headTicketId}${titlePart} — ${sameTicket.length} updates:\n${lines}`;
         }
         // #999 — event-triggered wake (SSE hint present) : anchor the phrase
         // on the hint's comment so it renders COMMENT-centric (body + ref)

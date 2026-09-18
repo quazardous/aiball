@@ -1150,7 +1150,8 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         const wticket = wakeTicketId != null ? `#${wakeTicketId}` : (backlogTicketId != null ? `#${backlogTicketId}` : "-");
         const bundled = 1 + (extraSeenIds?.length ?? 0);
         // #1554 — distinctTickets is the direct detector for "multiple tickets in
-        // ONE wake": same-ticket bundling → 1; >1 would be the bug.
+        // ONE wake": same-ticket bundling → 1; >1 would be the bug — except a
+        // closure's cascade (#2722), which rides in its cause's wake by design.
         const distinct = bundleTicketCount ?? (headMessageId != null ? 1 : 0);
         // #1569 (david `fdsw2h` — « une glue artificielle ») — `distinctTickets`
         // above CANNOT see this case: it is computed from a set already filtered
