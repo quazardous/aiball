@@ -1,0 +1,34 @@
+name: a step that waits on another ticket rests until that ticket moves, then leads the backlog
+# resume_on: { ticket: N } — the agent's ticket stays out of its wakes while it
+# waits, with no timer, and comes back at the head of its backlog the moment
+# the awaited ticket moves (here, a comment by the other project's agent).
+steps:
+  - beta-lead: ticket_new
+    args: { title: The work alpha waits on, body: beta's own ticket. }
+    save: { awaited: id }
+  - moderator: approve $awaited
+  - alpha-lead: ticket_new
+    args: { title: Waits on beta, body: Cannot move until beta's ticket does. }
+    save: { ticket: id }
+  - moderator: approve $ticket
+  - alpha-lead: ticket_claim
+    args: { ticket_id: $ticket }
+  - alpha-lead: ticket_reply
+    args:
+      target_id: $ticket
+      body: Done what I can; the rest waits on beta.
+      summary_until: Waiting on beta's ticket.
+      then: continue
+      resume_on: { ticket: $awaited }
+      commits: none
+  # Resting: the step is not named while the awaited ticket has not moved.
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, wake: none }
+  - beta-lead: ticket_claim
+    args: { ticket_id: $awaited }
+  - beta-lead: ticket_reply
+    args: { target_id: $awaited, body: Moved on our side., summary_until: beta moved., handback: false, commits: none }
+  # The awaited ticket moved: the step is due, and leads the backlog.
+  - expect:
+      alpha-lead: { ticket: $ticket, act: true, backlog: hot, wake: triage }
+  - view: [alpha-lead]
