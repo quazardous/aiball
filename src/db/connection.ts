@@ -118,6 +118,8 @@ export interface Message {
     priority?: Priority;
     /** #2241 — tickets only: `task`, `milestone` or `roadmap`. */
     level?: TicketLevel;
+    /** #2910 — the milestone ticket this ticket belongs to, if any. */
+    milestone_id?: number | null;
     display_seq: number;
     /**
      * Event scope (#B.245 tristate). One of `internal` / `default` /
@@ -524,6 +526,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         intent: (t.intent as Intent | null) ?? null,
         priority: (t.priority as Priority | undefined) ?? "normal",
         level: (t.level as TicketLevel | undefined) ?? "task",
+        milestone_id: t.milestoneId ?? null,
         display_seq: t.displaySeq,
         scope: ((t.scope as "internal" | "default" | "broadcast" | undefined) ?? "default"),
         hashid: null,

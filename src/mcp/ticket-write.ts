@@ -89,9 +89,17 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "#803 — attach a pending decision DIRECTLY on the ticket_created so the reporter validates the approach in one step (instead of `ticket_new` then `ticket_reply({then:'plan'})`). Today only `plan` is supported : the ticket carries `meta.decision={kind:'plan',status:'pending'}` and is gated out of the actionable backlog until the reporter accepts (go-signal to execute) or rejects (re-plan). Use when you already have a HOW in mind at creation time — typical for feature requests an agent files with a proposed approach. A ticket with no `then` is accepted (#2331): filed on a project you lead, it stays in your queue and the response carries a `warnings` reminder to attach `then: \"plan\"`; filed on someone else's project, it hands the ticket back and leaves your queue.",
                     ),
+                milestone: z
+                    .number()
+                    .int()
+                    .positive()
+                    .optional()
+                    .describe(
+                        "#2910 — the milestone this ticket belongs to (the id of a ticket of level `milestone` in the same project, not yet released). Planning: a human's or a cto agent's gesture; for an agent that works on tasks only, the ticket is created and the answer warns that the milestone was not set.",
+                    ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project, then }) => {
+        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project, then, milestone }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,
@@ -136,6 +144,15 @@ export function registerTicketWriteTools(server: McpServer): void {
             }
             const decorated: Record<string, unknown> = { ...res };
             if (scope) decorated.scope = scope;
+            // #2910 — the ticket exists either way; a refused milestone is said, not thrown.
+            if (milestone !== undefined && typeof res?.id === "number") {
+                try {
+                    decorated.milestone = (await client.setTicketMilestone(res.id, milestone)).milestone;
+                } catch (e) {
+                    const warnings = Array.isArray(decorated.warnings) ? decorated.warnings as string[] : [];
+                    decorated.warnings = [...warnings, `the ticket was created, but not put in milestone #${milestone}: ${(e as Error).message}`];
+                }
+            }
             if (stats) {
                 decorated.target_project = {
                     name: proj,
@@ -506,9 +523,18 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "New urgency hint (#B.222, owner-bypass). low / normal / high / urgent. Pass null to reset to 'normal'.",
                     ),
+                milestone: z
+                    .number()
+                    .int()
+                    .positive()
+                    .nullable()
+                    .optional()
+                    .describe(
+                        "#2910 — put the ticket in this milestone (the id of a ticket of level `milestone` in the same project, not yet released), or null to take it out. A ticket belongs to at most one. Planning: a human's or a cto agent's gesture; refused (403) for an agent that works on tasks only.",
+                    ),
             },
         },
-        async ({ ticket_id, title, summary, body, intent, priority }) => {
+        async ({ ticket_id, title, summary, body, intent, priority, milestone }) => {
             markActiveTicket(ticket_id); // focus = this ticket (token attribution)
             const results: Record<string, unknown> = { ticket_id };
             if (
@@ -520,8 +546,11 @@ export function registerTicketWriteTools(server: McpServer): void {
             ) {
                 results.edit = await client.edit(ticket_id, { title, summary, body, intent, priority });
             }
+            if (milestone !== undefined) {
+                results.milestone = (await client.setTicketMilestone(ticket_id, milestone)).milestone;
+            }
             if (Object.keys(results).length === 1) {
-                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority");
+                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority/milestone");
             }
             return asText(results);
         },

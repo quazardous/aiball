@@ -935,6 +935,23 @@ export class AiballClient {
         );
     }
 
+    /** #2910 — put a ticket in a milestone, move it, or take it out (null). */
+    setTicketMilestone(ticket_id: number, milestone_id: number | null) {
+        return this.http<{ ticket_id: number; milestone: { id: number; title: string; released: boolean } | null }>(
+            "POST",
+            `/api/tickets/${ticket_id}/milestone`,
+            { milestone_id },
+        );
+    }
+
+    /** #2910 — a project's milestones, oldest first, with state and progress. */
+    listMilestones(project: string) {
+        return this.http<{ project: string; milestones: { id: number; title: string; released: boolean; released_at: string | null; created_at: string; done: number; open: number }[] }>(
+            "GET",
+            `/api/projects/${encodeURIComponent(project)}/milestones`,
+        );
+    }
+
     /** #2770 — the project's critical ticket (holds back the most open tickets), or null. */
     getProjectCritical(project: string) {
         return this.http<{ project: string; critical: { id: number; title: string; holds: number; last_moved_at: string | null; quiet: string } | null }>(

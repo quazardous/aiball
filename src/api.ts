@@ -39,6 +39,7 @@ import { listTicketIdsInProject } from "./db/tickets.js";
 import { activeFocus, describeFocus, parseFocusTickets } from "./wake-focus.js";
 import { focusRelatives } from "./db/focus-relatives.js";
 import { projectCriticalTicket } from "./db/critical-ticket.js";
+import { listMilestones } from "./db/milestones.js";
 import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -255,6 +256,14 @@ api.get("/projects/:project/critical", (req: Request, res: Response) => {
     const project = String(req.params.project ?? "");
     if (!project) return badRequest(res, "project required");
     res.json({ project, critical: projectCriticalTicket(project) });
+});
+
+// #2910 — a project's milestones, oldest first: state (open / released) and
+// progress. Readable by every consumer, coders included.
+api.get("/projects/:project/milestones", (req: Request, res: Response) => {
+    const project = String(req.params.project ?? "");
+    if (!project) return badRequest(res, "project required");
+    res.json({ project, milestones: listMilestones(project) });
 });
 
 api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) => {

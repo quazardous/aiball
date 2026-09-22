@@ -135,6 +135,10 @@ export const ERROR_CODES = {
     TICKET_NOT_FOUND: "TICKET_NOT_FOUND",
     /** #2308 — `then: continue` from an agent that does not hold the ticket. */
     STEP_NOT_HOLDER: "STEP_NOT_HOLDER",
+    /** #2910 — releasing (closing) a milestone that still holds open tickets. */
+    MILESTONE_HAS_OPEN: "MILESTONE_HAS_OPEN",
+    /** #2910 — an agent writing on a ticket above the levels it works on. */
+    LEVEL_READ_ONLY: "LEVEL_READ_ONLY",
 } as const;
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 

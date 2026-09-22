@@ -43,6 +43,7 @@ export const TOOL_AUDIENCE: AudienceTable = {
     ticket_get: BOTH,
     search: BOTH,
     ticket_neighbors: BOTH,
+    milestone_list: BOTH,
     graph_audit: BOTH,
     // relations
     ticket_relate: BOTH,

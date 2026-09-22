@@ -110,6 +110,12 @@ export function registerTicketReadTools(server: McpServer): void {
                     .max(500)
                     .optional()
                     .describe("Max rows. Hard cap 500. Default unlimited."),
+                milestone: z
+                    .number()
+                    .int()
+                    .positive()
+                    .optional()
+                    .describe("#2910 — only the tickets of this milestone (a ticket of level `milestone`). Every row carries `milestone: { id, title, released }` or null."),
             },
         },
         async ({
@@ -124,6 +130,7 @@ export function registerTicketReadTools(server: McpServer): void {
             status,
             title_contains,
             limit,
+            milestone,
         }) => {
             const list = await client.listTickets({
                 project,
@@ -139,6 +146,7 @@ export function registerTicketReadTools(server: McpServer): void {
                 status,
                 title_contains,
                 limit: limit !== undefined ? String(limit) : undefined,
+                milestone: milestone !== undefined ? String(milestone) : undefined,
             });
             // #2394 — only when the caller asked for ITS work; a plain listing
             // is a reading, and says nothing about whose court anything is in.
@@ -152,6 +160,19 @@ export function registerTicketReadTools(server: McpServer): void {
             }
             return asText(list);
         },
+    );
+
+    // #2910 — a project's milestones: what each release holds and how far it is.
+    server.registerTool(
+        "milestone_list",
+        {
+            description:
+                "A project's milestones (releases), oldest first: `{ id, title, released, released_at, done, open }`. A milestone is a ticket of level `milestone`; `ticket_get` on it adds `milestone_progress` with its tickets, and `ticket_list({ milestone })` lists them with their flags. Work the tickets of the oldest open milestone first. Setting a ticket's milestone (`ticket_new` / `ticket_update` `milestone`) and releasing one (closing it — refused while it holds open tickets) are the human's or a cto agent's gestures.",
+            inputSchema: {
+                project: z.string().optional().describe("Project name. Defaults to $AIBALL_PROJECT."),
+            },
+        },
+        async ({ project }) => asText(await client.listMilestones(client.resolveProject(project))),
     );
 
     server.registerTool(

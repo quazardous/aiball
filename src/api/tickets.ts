@@ -19,6 +19,7 @@
  * /tickets/:id thread builder uses it.
  */
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
+import { milestoneProgress, milestonesOf, milestoneTargetRefusal, setTicketMilestone } from "../db/milestones.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 import { Router, type Request, type Response } from "express";
 import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
@@ -606,6 +607,11 @@ ticketsRouter.get("/tickets", (req, res) => {
         typeof req.query.limit === "string" && Number.isFinite(Number(req.query.limit))
             ? Math.max(1, Math.min(500, Number(req.query.limit)))
             : undefined;
+    // #2910 — only the tickets of this milestone.
+    const milestoneFilter =
+        typeof req.query.milestone === "string" && Number.isInteger(Number(req.query.milestone)) && Number(req.query.milestone) > 0
+            ? Number(req.query.milestone)
+            : undefined;
     // since (#B.87): filter on ticket created_at >= since. Accepts any
     // string Date.parse() understands (ISO8601 recommended). Cheap
     // alternative to client-side diff when polling for new tickets.
@@ -888,6 +894,8 @@ ticketsRouter.get("/tickets", (req, res) => {
         if (!waitCredits.has(project)) waitCredits.set(project, waitCreditBalance(consumerId, project));
         return waitCredits.get(project)!;
     };
+    // #2910 — the milestone each row belongs to, read once for the page.
+    const milestoneByTicket = milestonesOf(buildFrom.map((m) => m.id));
     const tickets = buildFrom.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
@@ -945,6 +953,9 @@ ticketsRouter.get("/tickets", (req, res) => {
             pending_decision: pendingDecisionIds.has(m.id),
             // #2765 — the ticket's last word is a step: what it resumes on.
             step: stepByTicket.get(m.id) ?? null,
+            // #2910 — the milestone this ticket belongs to.
+            milestone: milestoneByTicket.get(m.id) ?? null,
+            level: m.level ?? "task",
             last_actor: flags.last_actor,
             last_actor_at: flags.last_actor_at,
             tags: tagsMap.get(m.id) ?? [],
@@ -965,6 +976,7 @@ ticketsRouter.get("/tickets", (req, res) => {
     });
 
     let result = tickets;
+    if (milestoneFilter !== undefined) result = result.filter((t) => t.milestone?.id === milestoneFilter);
     if (onlyOpen) {
         result = result.filter((t) => !t.closed && (includePostponed || !t.postponed));
     }
@@ -1324,6 +1336,34 @@ function ticketStepRoute(req: Request, res: Response, tag: boolean) {
     }
 }
 
+/**
+ * #2910 — put a ticket in a milestone, move it to another, or take it out
+ * (`milestone_id: null`). Planning: a human's gesture or a cto agent's (one that
+ * works on the milestone level); a coder reads milestones but does not set them.
+ */
+ticketsRouter.post("/tickets/:id/milestone", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const raw = (req.body ?? {}).milestone_id;
+    if (raw !== null && !(Number.isInteger(raw) && raw > 0)) {
+        return res.status(400).json({ error: "milestone_id must be a milestone ticket id, or null to take the ticket out of its milestone" });
+    }
+    const caller = consumerOf(req);
+    if (!isHuman(caller) && !seesLevel(caller, "milestone")) {
+        return res.status(403).json({
+            error: `setting a ticket's milestone is planning: a human's gesture or a cto agent's; this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets`,
+        });
+    }
+    const refusal = milestoneTargetRefusal({ id: t.id, project: t.project, level: t.level ?? "task" }, raw as number | null);
+    if (refusal) return res.status(400).json({ error: refusal });
+    setTicketMilestone(id, raw as number | null);
+    const updated = getMessage(id);
+    if (updated) broadcast({ type: "message_edited", data: withTagsOne(updated) });
+    res.json({ ticket_id: id, milestone: milestonesOf([id]).get(id) ?? null });
+});
+
 ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
@@ -1652,6 +1692,9 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         claim_until: claimHeldEnd !== null ? new Date(claimHeldEnd).toISOString() : null,
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
+        // #2910 — the milestone this ticket belongs to; on a milestone, its tickets.
+        milestone: milestonesOf([t.id]).get(t.id) ?? null,
+        ...(t.level === "milestone" ? { milestone_progress: milestoneProgress(t.id) } : {}),
         // #2765 — the ticket's last word is a step: what it resumes on. Same
         // aggregate as the list row and the UI.
         step: liveStep(getInboxAgg(t.project).get(t.id), !closed && t.status !== "rejected"),

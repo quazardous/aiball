@@ -18,6 +18,7 @@
  * `decide()` helper is local — shared by approve/reject; not exported.
  */
 import { earnOnClose } from "../db/wait-credit.js";
+import { milestoneOpenRefusal, openTicketsIn } from "../db/milestones.js";
 import { Router, type Request, type Response } from "express";
 import { ERROR_CODES, MESSAGE_SCOPES, TICKET_LEVELS, type TicketLevel } from "../domain.js";
 import { seesLevel } from "../db/consumers.js";
@@ -141,6 +142,14 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
         // #2308 — a step (`then: continue`) from an agent not holding the ticket.
         if (code === ERROR_CODES.STEP_NOT_HOLDER) {
             return res.status(409).json({ error: (err as Error).message });
+        }
+        // #2910 — a milestone still holding open tickets is not released.
+        if (code === ERROR_CODES.MILESTONE_HAS_OPEN) {
+            return res.status(409).json({ error: (err as Error).message });
+        }
+        // #2910 — a ticket above the levels the agent works on is read-only to it.
+        if (code === ERROR_CODES.LEVEL_READ_ONLY) {
+            return res.status(403).json({ error: (err as Error).message });
         }
         // #2215 — the parent ticket does not exist.
         if (code === ERROR_CODES.TICKET_NOT_FOUND) {
@@ -510,6 +519,25 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                 const newer = getMessage(latest);
                 const ref = newer?.hashid ? `#${newer.hashid}` : `message ${latest}`;
                 return conflict(res, `a newer decision replaced this one — decide ${ref} instead`);
+            }
+        }
+    }
+    // #2910 — accepting a resolution or a wontfix closes the ticket: on a
+    // milestone that still holds open tickets, refuse the accept itself rather
+    // than accept and then fail the close.
+    if (body.status === "accepted") {
+        const target = getMessage(id);
+        const ticketId = target?.kind === "ticket_created" ? target.id : target?.ticket_id ?? null;
+        const ticket = ticketId != null ? getMessage(ticketId) : null;
+        if (target && ticket?.level === "milestone") {
+            let k: string | undefined = newKind;
+            if (!k) {
+                try { k = (JSON.parse(target.meta ?? "null") as { decision?: { kind?: string } } | null)?.decision?.kind; } catch { /* no decision */ }
+            }
+            const effect = decisionGesture(k)?.onAccept;
+            if (effect === "close_resolved" || effect === "close_unresolved") {
+                const open = openTicketsIn(ticket.id);
+                if (open.length > 0) return conflict(res, milestoneOpenRefusal(ticket.id, open));
             }
         }
     }

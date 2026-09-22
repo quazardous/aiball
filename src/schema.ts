@@ -111,6 +111,9 @@ export const tickets = sqliteTable("tickets", {
      * agents on milestones and roadmap: backlog, notifications and claim follow.
      */
     level: text("level").notNull().default("task"),
+    /** #2910 — the milestone (a ticket of level `milestone`, same project) this
+     *  ticket belongs to; null for none. At most one by construction. */
+    milestoneId: integer("milestone_id"),
     status: text("status").notNull().default("pending"),
     createdAt: text("created_at").notNull(),
     decidedAt: text("decided_at"),

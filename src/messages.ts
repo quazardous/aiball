@@ -32,7 +32,8 @@ import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
-import { getConsumer } from "./db/consumers.js";
+import { getConsumer, levelsVisibleTo, seesLevel } from "./db/consumers.js";
+import { milestoneOpenRefusal, openTicketsIn } from "./db/milestones.js";
 import { getConfig } from "./db/config-overrides.js";
 import { ticketClaimHeldUntil } from "./db/claim-hold.js";
 import { listSubscriptions } from "./db/subscriptions.js";
@@ -611,6 +612,40 @@ function assertStepByHolder(input: NewMessage): void {
 }
 
 /**
+ * #2910 david — "visible en lecture seule par ceux d'en dessous": an agent reads
+ * a ticket above the levels it works on (a coder and a milestone or roadmap
+ * ticket) but does not write on it — no comment, no decision, no close or
+ * reopen. Those tickets are the human's and the cto's. Throws, mapped to 403.
+ */
+function assertLevelWritable(input: NewMessage): void {
+    if (!["comment_added", "ticket_closed", "ticket_reopened"].includes(input.kind) || !input.ticket_id) return;
+    const author = input.by_agent ?? "";
+    if (!author || isHuman(author)) return;
+    const t = getMessage(input.ticket_id);
+    if (!t || t.kind !== "ticket_created" || (t.level ?? "task") === "task") return;
+    if (seesLevel(author, t.level)) return;
+    const err = new Error(`#${t.id} is a ${t.level} ticket: read-only for this agent, which works on ${(levelsVisibleTo(author) ?? []).join(" and ")} tickets. Nothing was posted.`);
+    (err as Error & { code?: string }).code = ERROR_CODES.LEVEL_READ_ONLY;
+    throw err;
+}
+
+/**
+ * #2910 — releasing a milestone is closing it, refused while a ticket in it is
+ * still open: each is moved to another milestone or closed first, so nothing
+ * drops silently. Humans included. Throws, mapped to 409.
+ */
+function assertMilestoneReleasable(input: NewMessage): void {
+    if (input.kind !== "ticket_closed" || !input.ticket_id) return;
+    const t = getMessage(input.ticket_id);
+    if (!t || t.kind !== "ticket_created" || t.level !== "milestone") return;
+    const open = openTicketsIn(t.id);
+    if (open.length === 0) return;
+    const err = new Error(milestoneOpenRefusal(t.id, open));
+    (err as Error & { code?: string }).code = ERROR_CODES.MILESTONE_HAS_OPEN;
+    throw err;
+}
+
+/**
  * Extract every `#NN` / `#B.NN` / `#BNN` ticket reference from a body,
  * **outside** of code fences and inline-backtick spans (so `#123` inside
  * a code block stays inert, per #B.62). Returns unique numeric refs.
@@ -872,6 +907,8 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
         }
     }
     assertCloseAuthority(input);
+    assertLevelWritable(input);
+    assertMilestoneReleasable(input);
     assertDecisionOnApprovedTicket(input);
     assertStepByHolder(input);
     // #2331 — a new ticket's handback is deduced from who files it.
