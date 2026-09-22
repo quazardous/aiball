@@ -341,6 +341,20 @@ export interface PayloadView {
     access?: "open" | "ticket-closed" | "revoked";
 }
 
+/** #2910 — a milestone as a ticket row names it; closed = released. */
+export interface MilestoneRef {
+    id: number;
+    title: string;
+    released: boolean;
+}
+
+export interface MilestoneRow extends MilestoneRef {
+    released_at: string | null;
+    created_at: string;
+    done: number;
+    open: number;
+}
+
 export interface TicketSummary {
     id: number;
     project: string;
@@ -424,6 +438,10 @@ export interface TicketSummary {
     /** #2770 — set on the project's critical ticket: the open ticket holding
      *  back the most open tickets. */
     critical?: { holds: number; quiet: string } | null;
+    /** #2910 — the milestone (a ticket of level `milestone`) this ticket belongs to. */
+    milestone?: MilestoneRef | null;
+    /** #2910 — on a milestone ticket: its tickets, done and open. */
+    milestone_progress?: { done: number; open: number; tickets: { id: number; title: string; closed: boolean }[] };
     /** #1542 — upstream coupling. Set only when the ticket is coupled to an
      *  external issue (manual import/export). All null = a pure aiball ticket. */
     upstream_kind?: string | null;
@@ -562,6 +580,8 @@ export interface InboxRow {
     has_payload?: boolean;
     /** #2770 — set on the project's critical ticket. */
     critical?: { holds: number; quiet: string } | null;
+    /** #2910 — the milestone this ticket belongs to. */
+    milestone?: MilestoneRef | null;
     /** #405: in the requesting consumer's hot-zone (focus) — the ticket they're
      *  actively working. Drives the 🔥 flag in the inbox list. */
     hot?: boolean;
@@ -1189,6 +1209,12 @@ export const api = {
         req<Message>("POST", `/api/tickets/${id}/unstep`, {}),
     unstepMessage: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/unstep`, {}),
+    /** #2910 — a project's milestones, oldest first. */
+    listMilestones: (project: string) =>
+        req<{ project: string; milestones: MilestoneRow[] }>("GET", `/api/projects/${encodeURIComponent(project)}/milestones`),
+    /** #2910 — put a ticket in a milestone, move it, or take it out (null). */
+    setTicketMilestone: (id: number, milestoneId: number | null) =>
+        req<{ ticket_id: number; milestone: MilestoneRef | null }>("POST", `/api/tickets/${id}/milestone`, { milestone_id: milestoneId }),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null; level?: "task" | "milestone" | "roadmap" }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>

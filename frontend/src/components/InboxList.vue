@@ -282,6 +282,12 @@ function onRowClick(r: InboxRow) {
                  every row by construction, so it costs the list nothing; when
                  it IS there, the point is that a payload is never invisible
                  even to someone who cannot read its values. -->
+            <!-- #2910 — the milestone (release) this ticket belongs to. -->
+            <span
+                v-if="r.milestone"
+                class="list-row__milestone"
+                :title="`Milestone ${r.milestone.title}${r.milestone.released ? ' (released)' : ''}`"
+            ><i class="pi pi-flag" /> {{ r.milestone.title }}</span>
             <!-- #2770 david — the project's critical ticket: the open one
                  holding back the most open tickets. -->
             <span
@@ -388,6 +394,12 @@ function onRowClick(r: InboxRow) {
 .list-row__hold .pi {
     font-size: var(--fs-sm);
     opacity: 0.75;
+}
+/* #2910 — the milestone mark: which release the ticket is in. Muted, like the payload mark. */
+.list-row__milestone {
+    opacity: 0.7;
+    font-size: 0.75rem;
+    white-space: nowrap;
 }
 /* #2770 — the critical ticket: it holds work back, so it should catch the eye. */
 .list-row__critical {

@@ -120,6 +120,35 @@ export function milestoneOpenRefusal(milestoneId: number, open: readonly number[
     return `milestone #${milestoneId} still holds ${open.length} open ticket${open.length > 1 ? "s" : ""} (${shown}${more}): move each to another milestone or close it, then release. Nothing was closed.`;
 }
 
+/**
+ * #2910 — where a ticket's milestone puts it in the work order, lower first: the
+ * project's oldest open milestone (0), then no milestone (1), then the later
+ * open milestones (2, 3…). A released milestone counts as none.
+ */
+export function milestoneRankOf(): (project: string, milestoneId: number | null | undefined) => number {
+    const byProject = new Map<string, Map<number, number>>();
+    const order = (project: string): Map<number, number> => {
+        let m = byProject.get(project);
+        if (!m) {
+            const ms = getDb().select({ id: schema.tickets.id })
+                .from(schema.tickets)
+                .where(and(eq(schema.tickets.project, project), eq(schema.tickets.level, "milestone"), eq(schema.tickets.status, "approved")))
+                .orderBy(asc(schema.tickets.createdAt), asc(schema.tickets.id))
+                .all().map((r) => r.id);
+            const released = closedAmong(ms);
+            m = new Map(ms.filter((id) => !released.has(id)).map((id, i) => [id, i] as const));
+            byProject.set(project, m);
+        }
+        return m;
+    };
+    return (project, milestoneId) => {
+        if (milestoneId == null) return 1;
+        const i = order(project).get(milestoneId);
+        if (i === undefined) return 1;
+        return i === 0 ? 0 : i + 1;
+    };
+}
+
 /** A project's milestones, oldest first, with their state and progress. */
 export function listMilestones(project: string): MilestoneRow[] {
     const ms = getDb().select({ id: schema.tickets.id, title: schema.tickets.title, createdAt: schema.tickets.createdAt })

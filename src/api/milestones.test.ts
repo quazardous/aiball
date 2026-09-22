@@ -174,3 +174,26 @@ test("a coder reads a milestone but does not write on it", async () => {
     });
     assert.equal(byCto.status, 201, JSON.stringify(byCto.json));
 });
+
+// #2910 — the backlog works the current release first: at equal tier, the
+// project's oldest open milestone, then no milestone, then the later ones.
+test("at equal tier the backlog puts the current milestone first and a later one last", async () => {
+    const Q = "p-2910-order";
+    createProject({ name: Q });
+    upsertSubscription("coder", Q, "owner");
+    const mk = (title: string) => ticket(title, Q);
+    const mkM = (title: string) => milestone(title, Q);
+    const later = mkM("1.0");
+    const current = mkM("0.1");
+    // Created after "1.0" but the oldest by date is what counts: make 0.1 the older one.
+    getDb().update(schema.tickets).set({ createdAt: "2020-01-01T00:00:00.000Z" }).where(eq(schema.tickets.id, current)).run();
+    const inLater = mk("for 1.0");
+    const plain = mk("no milestone");
+    const inCurrent = mk("for 0.1");
+    await put(HUMAN, inLater, later);
+    await put(HUMAN, inCurrent, current);
+
+    const rows = (await call(CODER, "GET", `/api/tickets?project=${Q}&backlog=1&limit=500`)).json as any[];
+    const order = rows.filter((r) => [inLater, plain, inCurrent].includes(r.id)).map((r) => r.id);
+    assert.deepEqual(order, [inCurrent, plain, inLater], JSON.stringify(rows.map((r) => [r.id, r.backlog_tier, r.milestone?.title])));
+});

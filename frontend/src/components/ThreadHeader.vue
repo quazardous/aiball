@@ -17,6 +17,7 @@ import { computed } from "vue";
 import type { TicketSummary } from "../lib/api";
 import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
 import { githubProvider } from "../lib/upstream-providers";
+import { ticketHref } from "../lib/base";
 
 const props = defineProps<{
     ticket: TicketSummary;
@@ -111,6 +112,24 @@ function claimerTooltip(t: TicketSummary): string {
             aria-hidden="true"
         >
             <i class="pi pi-envelope" />
+        </span>
+        <!-- #2910 — the milestone (release) this ticket belongs to, or, on a
+             milestone, how far it is. -->
+        <a
+            v-if="ticket.milestone"
+            class="thread-subline__item"
+            :href="ticketHref(ticket.milestone.id)"
+            :title="`This ticket is in milestone ${ticket.milestone.title}${ticket.milestone.released ? ', released' : ''}`"
+            style="color: inherit"
+        >
+            <i class="pi pi-flag" /> {{ ticket.milestone.title }}{{ ticket.milestone.released ? ' · released' : '' }}
+        </a>
+        <span
+            v-if="ticket.milestone_progress"
+            class="thread-subline__item"
+            :title="`A milestone: ${ticket.milestone_progress.done} of its tickets done, ${ticket.milestone_progress.open} open. It is released by closing it, once none is open.`"
+        >
+            <i class="pi pi-flag-fill" /> milestone · {{ ticket.milestone_progress.done }}/{{ ticket.milestone_progress.done + ticket.milestone_progress.open }} done
         </span>
         <!-- #2770 david — the project's critical ticket. -->
         <span

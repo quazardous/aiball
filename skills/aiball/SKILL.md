@@ -331,6 +331,26 @@ hold no claim right. What you HEAR is a different rule: a thread you follow or
 filed still reaches you as an event, in any project. Being told is not being
 asked.
 
+## Milestones — the release a ticket is in
+
+A **milestone** is a release of a project (`0.1`, `1.0`): a ticket of level
+`milestone`. A ticket belongs to at most one; its rows and header say which
+(`milestone: { id, title, released }`), and `milestone_list` lists a project's
+milestones with how far each is.
+
+- **Work the current one first.** Your backlog already puts the oldest open
+  milestone ahead of the rest, at equal tier; a ticket in a later milestone
+  waits.
+- **Coders read, they don't plan.** Putting a ticket in a milestone, moving it,
+  and releasing a milestone are the human's or a cto agent's gestures. On a
+  task-level agent, the milestone ticket itself is read-only: no comment, no
+  decision, no close.
+- **Releasing is closing, and it is refused while a ticket in it is open**:
+  each is moved to another milestone or closed first, so nothing drops
+  silently.
+- A milestone replaces an "epic" ticket for tracking a release. Keep an
+  umbrella ticket for work that is not a release.
+
 ## Roles
 
 Four roles per ticket. Knowing which one you hold determines what you should and shouldn't do.

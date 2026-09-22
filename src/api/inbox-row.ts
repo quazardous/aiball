@@ -28,6 +28,7 @@ import { getInboxAgg, emptyAgg, isLiveDecision as liveDecision, liveStep } from 
 import { DECISION_GESTURES, isStepStalled, kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
 import { getConfig } from "../db/config-overrides.js";
 import { projectCriticalTicket, type CriticalTicket } from "../db/critical-ticket.js";
+import { milestonesOf, type MilestoneRef } from "../db/milestones.js";
 import { globalConfigPath } from "../autopoll/config.js";
 
 /**
@@ -81,6 +82,8 @@ export interface InboxRowContext {
     /** #2770 — the project's critical ticket, memoized for the page. Optional
      *  so a hand-built test context still works: absent, nothing is critical. */
     criticalOf?: (project: string) => CriticalTicket | null;
+    /** #2910 — the milestone each row belongs to. Optional for hand-built contexts. */
+    milestoneByTicket?: Map<number, MilestoneRef>;
 }
 
 /** #2308 — `tickets.step_stale_hours`, read once per project for a whole page of rows. */
@@ -125,6 +128,7 @@ export function buildInboxRowContext(
         // #2308 — read once per project, not once per row.
         stepStaleHours: stepStaleHoursByProject(),
         criticalOf: criticalByProject(),
+        milestoneByTicket: milestonesOf(ids),
         crossAgentHotFocus: computeHotFocus(
             ticketAgentLastActivity(ids),
             Date.now(),
@@ -238,6 +242,9 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         /** #2456 david — when that step's agent resumes (`resume_on`),
             so the list can show it; null for a step that carries on at once. */
         step_resume_at: liveStep(agg, live)?.resume_at ?? null,
+        /** #2910 — the milestone this ticket belongs to, and the ticket's level. */
+        milestone: ctx.milestoneByTicket?.get(t.id) ?? null,
+        level: t.level ?? "task",
         /** #2770 david — flag the project's critical ticket in the list. */
         critical: (() => {
             const c = live ? ctx.criticalOf?.(t.project) ?? null : null;

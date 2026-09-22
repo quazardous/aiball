@@ -9,6 +9,7 @@ import { api, INTENTS, type Intent, type Priority, type Tag as TagType, type Thr
 import { upstreamBindings } from "../lib/upstream-providers";
 import { topDown } from "../lib/prefs";
 import { formatTicketRef } from "../lib/formatting";
+import { ticketHref } from "../lib/base";
 import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
 import ThreadHeader from "./ThreadHeader.vue";
@@ -273,6 +274,34 @@ async function changeLevel(v: "task" | "milestone" | "roadmap") {
         error.value = (e as Error).message;
     } finally {
         levelBusy.value = false;
+    }
+}
+// #2910 — the milestone a ticket belongs to: the project's open milestones are
+// read when the edit panel opens, and a change is one call.
+const milestoneBusy = ref(false);
+const milestoneOptions = ref<{ label: string; value: number | null }[]>([{ label: "none", value: null }]);
+watch(editing, (on) => { if (on) void loadMilestoneOptions(); });
+async function loadMilestoneOptions() {
+    if (!data.value) return;
+    try {
+        const r = await api.listMilestones(data.value.ticket.project);
+        milestoneOptions.value = [
+            { label: "none", value: null },
+            ...r.milestones.filter((m) => !m.released).map((m) => ({ label: m.title, value: m.id })),
+        ];
+    } catch { /* the select keeps "none" */ }
+}
+async function changeMilestone(v: number | null) {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    milestoneBusy.value = true;
+    try {
+        await api.setTicketMilestone(tid, v);
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        milestoneBusy.value = false;
     }
 }
 // #553 david `3r3vjq` — ticket-level scope edit (à côté de priority dans
@@ -548,6 +577,23 @@ async function copyTicketRef() {
                      payload. Not a panel that renders empty: no panel and no
                      request, so a ticket without one is exactly the thread it
                      was before the zone existed. -->
+                <!-- #2910 — a milestone lists its tickets: open ones first, then the done ones. -->
+                <div
+                    v-if="data.ticket.milestone_progress && data.ticket.milestone_progress.tickets.length"
+                    class="milestone-tickets"
+                >
+                    <div class="milestone-tickets__head">
+                        <i class="pi pi-flag-fill" />
+                        {{ data.ticket.milestone_progress.done }} done, {{ data.ticket.milestone_progress.open }} open
+                    </div>
+                    <a
+                        v-for="mt in [...data.ticket.milestone_progress.tickets].sort((x, y) => Number(x.closed) - Number(y.closed))"
+                        :key="mt.id"
+                        :href="ticketHref(mt.id)"
+                        class="milestone-tickets__row"
+                        :class="{ 'milestone-tickets__row--done': mt.closed }"
+                    >#{{ mt.id }} {{ mt.title }}</a>
+                </div>
                 <TicketPayloadPanel
                     v-if="data.ticket.has_payload"
                     :ticket-id="data.ticket.id"
@@ -611,6 +657,9 @@ async function copyTicketRef() {
                     @priority-change="changePriority"
                     :level-busy="levelBusy"
                     @level-change="changeLevel"
+                    :milestone-options="milestoneOptions"
+                    :milestone-busy="milestoneBusy"
+                    @milestone-change="changeMilestone"
                     @tags-changed="onTagsChanged"
                 />
                 <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" :project="data.ticket.project" />

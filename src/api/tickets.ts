@@ -19,7 +19,7 @@
  * /tickets/:id thread builder uses it.
  */
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
-import { milestoneProgress, milestonesOf, milestoneTargetRefusal, setTicketMilestone } from "../db/milestones.js";
+import { milestoneProgress, milestoneRankOf, milestonesOf, milestoneTargetRefusal, setTicketMilestone } from "../db/milestones.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 import { Router, type Request, type Response } from "express";
 import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
@@ -1041,10 +1041,17 @@ ticketsRouter.get("/tickets", (req, res) => {
             // waiting (2). Within each backlog tier, fall back to the
             // standard work-order tiebreaks (priority desc, claim,
             // assignment, intra-tier hot, id asc).
+            // #2910 — at equal tier, the project's current milestone first,
+            // then no milestone, then the later ones: a ticket queued for a
+            // later release no longer comes up ahead of the current one.
+            const rankOf = milestoneRankOf();
             result.sort((a, b) => {
                 const ta = a.backlog_tier ?? 99;
                 const tb = b.backlog_tier ?? 99;
                 if (ta !== tb) return ta - tb;
+                const ma = rankOf(a.project, a.milestone?.id);
+                const mb = rankOf(b.project, b.milestone?.id);
+                if (ma !== mb) return ma - mb;
                 return compareWorkOrder(a, b, ctx);
             });
         } else {

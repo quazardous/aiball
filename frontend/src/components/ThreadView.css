@@ -536,3 +536,24 @@
         border-radius: 0;
     }
 }
+
+/* #2910 — a milestone's tickets. */
+.milestone-tickets {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0.5rem 0;
+    font-size: var(--fs-sm, 0.85rem);
+}
+.milestone-tickets__head {
+    font-weight: 600;
+    opacity: 0.8;
+}
+.milestone-tickets__row {
+    color: inherit;
+    text-decoration: none;
+}
+.milestone-tickets__row--done {
+    opacity: 0.55;
+    text-decoration: line-through;
+}

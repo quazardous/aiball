@@ -35,6 +35,9 @@ defineProps<{
     scopeBusy?: boolean;
     /** #2216 — level busy flag (driven by parent). */
     levelBusy?: boolean;
+    /** #2910 — the project's open milestones a ticket can be put in. */
+    milestoneOptions?: { label: string; value: number | null }[];
+    milestoneBusy?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "update:titleDraft", v: string): void;
@@ -47,6 +50,8 @@ const emit = defineEmits<{
     (e: "scope-change", v: "internal" | "default" | "broadcast"): void;
     /** #2216 — emitted when a moderator changes the ticket level. */
     (e: "level-change", v: "task" | "milestone" | "roadmap"): void;
+    /** #2910 — emitted when a moderator puts the ticket in a milestone, or takes it out (null). */
+    (e: "milestone-change", v: number | null): void;
     (e: "tags-changed", tags: TagType[]): void;
 }>();
 
@@ -151,6 +156,21 @@ defineExpose({ bodyTextareaRef });
                     :disabled="levelBusy"
                     style="min-width: 9rem"
                     @update:model-value="(v: 'task' | 'milestone' | 'roadmap') => emit('level-change', v)"
+                />
+            </div>
+            <!-- #2910 — the milestone (release) this ticket belongs to. Not on a
+                 milestone itself: a milestone does not belong to another. -->
+            <div v-if="(ticket.level ?? 'task') !== 'milestone'" class="thread-edit-row">
+                <span class="thread-edit-label">Milestone</span>
+                <Select
+                    :model-value="ticket.milestone?.id ?? null"
+                    :options="milestoneOptions ?? [{ label: 'none', value: null }]"
+                    option-label="label"
+                    option-value="value"
+                    size="small"
+                    :disabled="milestoneBusy"
+                    style="min-width: 9rem"
+                    @update:model-value="(v: number | null) => emit('milestone-change', v)"
                 />
             </div>
             <!-- #553 david `3r3vjq` : scope éditable depuis l'edit panel (à
