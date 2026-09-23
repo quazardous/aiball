@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- The Windows tray no longer garbles accented text and dashes: it now reads the
+  CLI's UTF-8 output as UTF-8. The message explaining why an install cannot be
+  updated came out as `ÔÇö` where it should have read `—`.
+
 ## [0.47.0] — 2026-09-18
 
 ### Added
