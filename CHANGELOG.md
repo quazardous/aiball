@@ -23,11 +23,44 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-09-23
+
+### Added
+
+- **Milestones**: a release of a project, and the tickets it holds. A
+  milestone is a ticket of level `milestone`, named by its version (`0.3`);
+  a ticket belongs to at most one.
+  - Put a ticket in a milestone from its edit panel, or several at once with
+    `aiball --human ticket milestone 0.3 <ids…>`; agents that plan use
+    `ticket_new` / `ticket_update` `milestone`.
+  - Rows and ticket headers show the milestone; a milestone shows how many of
+    its tickets are done and lists them; `milestone_list` and
+    `ticket_list({ milestone })` read them.
+  - Releasing is closing the milestone, refused while any ticket in it is
+    still open, so nothing drops silently.
+  - The backlog works the current release first: at equal tier, the oldest
+    open milestone's tickets come ahead of the rest.
+  - Setting milestones is a human's or a cto agent's gesture; a task-level
+    agent reads milestones but does not write on them.
+
+### Changed
+
+- Continuing a ticket nobody holds (`then: "continue"` or `handback: false`)
+  claims it for an agent that leads the project, instead of refusing until it
+  claims first.
+- The skill and the `resume_on` description say that a job started in the
+  background wakes the agent when it ends: the timer is only a fallback.
+- The `handback: true` description says what it does: the ticket leaves the
+  actionable pool, and the backlog still reminds the agent until someone
+  moves.
+
 ### Fixed
 
 - The Windows tray no longer garbles accented text and dashes: it now reads the
   CLI's UTF-8 output as UTF-8. The message explaining why an install cannot be
   updated came out as `ÔÇö` where it should have read `—`.
+
+**Restart your loops** (or run `/mcp`) for the new MCP parameters.
 
 ## [0.47.0] — 2026-09-18
 
