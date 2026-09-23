@@ -1683,6 +1683,9 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         postponed_until: t.postponed_until ?? null,
         intent: t.intent,
         priority: t.priority ?? "normal",
+        // #2910 — the edit panel reads the level from here: without it a
+        // milestone reloaded as a task (Level "task", no "Version" label).
+        level: t.level ?? "task",
         // #418/#436: assignment (responsibility) + claim (focus) — distinct
         // fields, surfaced on the thread header so the UI renders "assigned to X"
         // and/or "claimed by Y". `is_claim` kept for back-compat (claimed?).

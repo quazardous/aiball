@@ -127,6 +127,7 @@ test("rows, the filter, the header, the progress and the project's list say it",
     assert.deepEqual(filtered.map((r) => r.id).sort(), [a, b].sort(), "the filter keeps the milestone's tickets, closed ones included");
 
     assert.deepEqual((await call(CODER, "GET", `/api/tickets/${a}`)).json.ticket.milestone, { id: m, title: "0.4", released: false });
+    assert.equal((await call(CODER, "GET", `/api/tickets/${m}`)).json.ticket.level, "milestone", "the header says it is a milestone");
     const progress = (await call(CODER, "GET", `/api/tickets/${m}`)).json.ticket.milestone_progress;
     assert.equal(progress.done, 1);
     assert.equal(progress.open, 1);

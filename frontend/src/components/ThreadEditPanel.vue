@@ -86,14 +86,16 @@ defineExpose({ bodyTextareaRef });
 
 <template>
     <div class="thread-edit-panel">
+        <!-- #2910 david — on a milestone the title IS the version (what the flags,
+             the list and the release show), so it says so. -->
         <div class="thread-edit-row">
-            <span class="thread-edit-label">Title</span>
+            <span class="thread-edit-label">{{ ticket.level === 'milestone' ? 'Version' : 'Title' }}</span>
             <InputText
                 :model-value="titleDraft"
                 :disabled="bodyBusy"
                 size="small"
                 style="flex: 1"
-                placeholder="Ticket title"
+                :placeholder="ticket.level === 'milestone' ? 'e.g. octopod 0.1.0' : 'Ticket title'"
                 @update:model-value="(v) => emit('update:titleDraft', String(v ?? ''))"
                 @keydown.enter.prevent="emit('save')"
             />
@@ -165,6 +167,7 @@ defineExpose({ bodyTextareaRef });
                 <Select
                     :model-value="ticket.milestone?.id ?? null"
                     :options="milestoneOptions ?? [{ label: 'none', value: null }]"
+                    placeholder="none"
                     option-label="label"
                     option-value="value"
                     size="small"

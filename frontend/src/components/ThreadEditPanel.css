@@ -29,8 +29,10 @@
     gap: 0.6rem;
 }
 @media (min-width: 721px) {
-    .thread-edit-pair { flex-direction: row; gap: 1.2rem; }
-    .thread-edit-pair > .thread-edit-row { flex: 1; min-width: 0; }
+    /* #2910 — up to five selects share the line (intent, priority, level,
+     * milestone, scope): they wrap instead of overlapping the next label. */
+    .thread-edit-pair { flex-direction: row; flex-wrap: wrap; gap: 0.6rem 1.2rem; }
+    .thread-edit-pair > .thread-edit-row { flex: 1 1 15rem; min-width: 15rem; }
 }
 .thread-edit-label {
     font-size: var(--fs-md);
