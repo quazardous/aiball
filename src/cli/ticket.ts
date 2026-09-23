@@ -17,6 +17,7 @@ import {
     out,
     withProject,
 } from "./_helpers.js";
+import { parseMilestoneArg, parseTicketIds, resolveMilestone } from "./milestone-args.js";
 
 /**
  * #2180 — what `ticket approve-children` should do, as a pure verdict so a test
@@ -305,6 +306,43 @@ export function registerTicketCommands(program: Command): void {
             const client = buildClient(gOpts(cmd));
             const r = await client.setTicketLevel(Number(opts.id), opts.to as "task" | "milestone" | "roadmap") as { level?: string; warning?: string };
             out(r, gOpts(cmd), (x) => `ticket #${opts.id} level: ${x.level ?? opts.to}${x.warning ? `\n  warning: ${x.warning}` : ""}`);
+        });
+
+    // #2910 david — "comment lier des tickets rapidement à un milestone ?": put
+    // several tickets in one milestone (or out of any) in one command. Planning
+    // is a human's gesture (or a cto agent's): the daemon refuses a coder.
+    ticket
+        .command("milestone <milestone> <ids...>")
+        .description("Put tickets in a milestone, by its version (0.3), its id (#2932), or `none` to take them out — e.g. `aiball --human ticket milestone 0.3 2929 2930 2931` (human or cto agent)")
+        .action(async (milestone: string, idArgs: string[], _opts, cmd) => {
+            const ids = parseTicketIds(idArgs);
+            if (!Array.isArray(ids)) die(ids.error);
+            const client = buildClient(gOpts(cmd));
+            const arg = parseMilestoneArg(milestone);
+            let target: number | null;
+            if (arg.kind === "title") {
+                const first = await client.getTicket(ids[0]) as { ticket?: { project?: string } };
+                const project = first.ticket?.project;
+                if (!project) die(`ticket #${ids[0]} not found`);
+                const resolved = resolveMilestone(arg, (await client.listMilestones(project)).milestones);
+                if (typeof resolved === "object" && resolved !== null) die(resolved.error);
+                target = resolved;
+            } else {
+                target = resolveMilestone(arg, []) as number | null;
+            }
+            const results: { ticket_id: number; milestone?: unknown; error?: string }[] = [];
+            for (const id of ids) {
+                try {
+                    const r = await client.setTicketMilestone(id, target);
+                    results.push({ ticket_id: id, milestone: r.milestone });
+                } catch (e) {
+                    results.push({ ticket_id: id, error: (e as Error).message });
+                }
+            }
+            out(results, gOpts(cmd), (rs) => rs.map((r) => r.error
+                ? `#${r.ticket_id}: ${r.error}`
+                : `#${r.ticket_id} → ${(r.milestone as { title?: string } | null)?.title ?? "no milestone"}`).join("\n"));
+            if (results.some((r) => r.error)) process.exitCode = 1;
         });
 
     ticket
