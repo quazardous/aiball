@@ -80,6 +80,13 @@ function onRowClick(r: InboxRow) {
     emit("open-row", r);
 }
 
+// #2910 david — an open milestone is not an ordinary ticket: a flag instead of
+// the ticket glyph. Every other stage (released = closed, etc.) keeps its own.
+const MILESTONE_ICON = { icon: "pi pi-flag-fill", color: "--p-primary-color", title: "open milestone (a release): close it to release it" };
+function stageIcon(r: InboxRow) {
+    const stage = lifecycleStage(r);
+    return stage === "open" && r.level === "milestone" ? { ...LIFECYCLE_ICONS.open, ...MILESTONE_ICON } : LIFECYCLE_ICONS[stage];
+}
 </script>
 
 <template>
@@ -166,22 +173,22 @@ function onRowClick(r: InboxRow) {
                  catalog stays auditable in one place; the only special case
                  is the snoozed tooltip which interpolates the wake-up date. -->
             <svg
-                v-if="LIFECYCLE_ICONS[lifecycleStage(r)].path"
+                v-if="stageIcon(r).path"
                 viewBox="0 -960 960 960"
                 width="1em"
                 height="1em"
                 fill="currentColor"
-                :style="`color: var(${LIFECYCLE_ICONS[lifecycleStage(r)].color}); vertical-align: -0.125em`"
+                :style="`color: var(${stageIcon(r).color}); vertical-align: -0.125em`"
             >
                 <!-- #2456 david — a waiting step's resume lives in the marker's tooltip only. -->
-                <title>{{ lifecycleStage(r) === 'step' && r.step_resume_at && Date.parse(r.step_resume_at) > Date.now() ? stepResumeTooltip(r.step_resume_at) : LIFECYCLE_ICONS[lifecycleStage(r)].title }}</title>
-                <path :d="LIFECYCLE_ICONS[lifecycleStage(r)].path" />
+                <title>{{ lifecycleStage(r) === 'step' && r.step_resume_at && Date.parse(r.step_resume_at) > Date.now() ? stepResumeTooltip(r.step_resume_at) : stageIcon(r).title }}</title>
+                <path :d="stageIcon(r).path" />
             </svg>
             <i
                 v-else
-                :class="LIFECYCLE_ICONS[lifecycleStage(r)].icon"
-                :title="lifecycleStage(r) === 'snoozed' ? snoozedTooltip(r.postponed_until) : LIFECYCLE_ICONS[lifecycleStage(r)].title"
-                :style="`color: var(${LIFECYCLE_ICONS[lifecycleStage(r)].color})`"
+                :class="stageIcon(r).icon"
+                :title="lifecycleStage(r) === 'snoozed' ? snoozedTooltip(r.postponed_until) : stageIcon(r).title"
+                :style="`color: var(${stageIcon(r).color})`"
             />
 
         </template>
