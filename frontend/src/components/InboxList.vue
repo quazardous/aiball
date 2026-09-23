@@ -408,6 +408,10 @@ function stageIcon(r: InboxRow) {
     font-size: 0.75rem;
     white-space: nowrap;
 }
+/* david — the flag was 16px next to 12px text: half that. */
+.list-row__milestone .pi {
+    font-size: 0.5rem;
+}
 /* #2770 — the critical ticket: it holds work back, so it should catch the eye. */
 .list-row__critical {
     color: var(--p-red-500, #ef4444);
