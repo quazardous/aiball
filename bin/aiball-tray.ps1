@@ -258,6 +258,10 @@ function Start-VersionRead([bool]$check) {
         $psi.Arguments = "/d /s /c `"$exe --json version$(if ($check) { ' --check' } else { '' })`""
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
+        # The CLI writes UTF-8; Windows PowerShell would otherwise decode it in
+        # the console's legacy code page, and the dashes and quotes of a message
+        # the tray shows verbatim come out as mojibake.
+        $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
         $psi.CreateNoWindow = $true
         $script:versionProc = [System.Diagnostics.Process]::Start($psi)
         $script:versionOut = $script:versionProc.StandardOutput.ReadToEndAsync()
@@ -302,6 +306,7 @@ function Invoke-AiballJson([string]$cliArgs, [int]$timeoutMs) {
         $psi.Arguments = "/d /s /c `"$exe --json $cliArgs`""
         $psi.UseShellExecute = $false
         $psi.RedirectStandardOutput = $true
+        $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8   # see Start-VersionRead
         $psi.CreateNoWindow = $true
         $p = [System.Diagnostics.Process]::Start($psi)
         $out = $p.StandardOutput.ReadToEndAsync()
@@ -333,7 +338,7 @@ $updateSeenFile   = Join-Path $aiballHome 'update-status.seen'
 function Show-UpdateResult {
     try {
         if (-not (Test-Path $updateStatusFile)) { return }
-        $status = Get-Content -Raw $updateStatusFile | ConvertFrom-Json
+        $status = Get-Content -Raw -Encoding UTF8 $updateStatusFile | ConvertFrom-Json
         $seen = if (Test-Path $updateSeenFile) { (Get-Content -Raw $updateSeenFile).Trim() } else { $null }
         $text = Get-UpdateResultBalloon $status $seen
         if (-not $text) { return }
