@@ -75,6 +75,7 @@ import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
+import { buildPilotFacts, pilotFields } from "./inbox-pilot.js";
 import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
 import { projectCriticalTicket } from "../db/critical-ticket.js";
 import { DECISION_KINDS } from "../decisions.js";
@@ -492,7 +493,21 @@ ticketsRouter.get("/inbox", (req, res) => {
     // faster each chunk arrived (david `x3k3pr`). The three orders mirror the
     // client's own; `activity` stays the default the API always had.
     const sortBy = typeof req.query.sort === "string" ? req.query.sort : "activity";
-    if (sortBy === "created_desc") {
+    // #3005 — the pilot's fields (turn, band, state glyph), computed only when
+    // asked: `v=tvty` puts them on the rows, `sort=band` orders by them. Read
+    // after filtering, so the gate runs on the rows that are returned.
+    const withPilot = req.query.v === "tvty";
+    const pilot = withPilot || sortBy === "band"
+        ? (() => {
+            const facts = buildPilotFacts(rows, consumerId, project);
+            const human = isHuman(consumerId);
+            return new Map(rows.map((r) => [r.id, pilotFields(r, facts.get(r.id)!, consumerId, human)]));
+        })()
+        : null;
+    if (sortBy === "band" && pilot) {
+        rows.sort((a, b) => pilot.get(a.id)!.band - pilot.get(b.id)!.band
+            || b.last_activity.localeCompare(a.last_activity));
+    } else if (sortBy === "created_desc") {
         rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
     } else if (sortBy === "created_asc") {
         rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -522,7 +537,7 @@ ticketsRouter.get("/inbox", (req, res) => {
         rows = rows.slice(offset, offset + limit);
     }
 
-    res.json(rows);
+    res.json(withPilot && pilot ? rows.map((r) => ({ ...r, ...pilot.get(r.id)! })) : rows);
 });
 
 ticketsRouter.get("/tickets", (req, res) => {

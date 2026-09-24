@@ -23,6 +23,22 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- The inbox API can say, on each row, whose turn it is, which band the row
+  sorts into and the one state mark to show, computed for the reader
+  (`/api/inbox?v=tvty`), and sort by that band (`sort=band`). The web
+  board's list is unchanged.
+- Request stats report how long the event loop was held up, and which
+  requests took over 100 ms.
+
+### Changed
+
+- The live feed (`/ws`) asks for a token over TCP, like the rest of the API,
+  and is also served on the local socket. A client that falls too far behind
+  is disconnected instead of piling up in the daemon's memory.
+- Listing a project's open tickets is several times faster.
+
 ## [0.48.0] — 2026-09-23
 
 ### Added
