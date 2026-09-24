@@ -84,6 +84,9 @@ export interface InboxRowContext {
     criticalOf?: (project: string) => CriticalTicket | null;
     /** #2910 — the milestone each row belongs to. Optional for hand-built contexts. */
     milestoneByTicket?: Map<number, MilestoneRef>;
+    /** #3000 — `hot_window_sec` in ms, read once for the page (it reads a
+     *  YAML file). Optional for hand-built contexts: absent, read per row. */
+    hotWindowMs?: number;
 }
 
 /** #2308 — `tickets.step_stale_hours`, read once per project for a whole page of rows. */
@@ -119,6 +122,7 @@ export function buildInboxRowContext(
     project?: string,
 ): InboxRowContext {
     const ids = tickets.map((m) => m.id);
+    const hotWindowMs = hotWindowSec() * 1000;
     return {
         byTicket: getInboxAgg(project),
         tagsMap: tagsForMessages(ids),
@@ -132,9 +136,32 @@ export function buildInboxRowContext(
         crossAgentHotFocus: computeHotFocus(
             ticketAgentLastActivity(ids),
             Date.now(),
-            hotWindowSec() * 1000,
+            hotWindowMs,
         ),
+        hotWindowMs,
         nowStr: new Date().toISOString(),
+    };
+}
+
+/**
+ * #3000 — the row fields the list filters and sorts on, from the ticket and its
+ * aggregate alone: no per-page map needed. The list applies its filters and its
+ * cheap sorts on these BEFORE building rows, so a page of 25 no longer builds a
+ * row for every ticket of the board; the row builder reads the same function,
+ * so the two cannot disagree.
+ */
+export function inboxRowCheap(t: Message, agg: ReturnType<typeof emptyAgg>, nowStr: string) {
+    const postponedUntil = t.postponed_until ?? null;
+    return {
+        status: t.status,
+        intent: t.intent,
+        priority: t.priority ?? "normal",
+        closed: agg.closed || t.status === "rejected",
+        postponed: !!postponedUntil && postponedUntil > nowStr,
+        postponed_until: postponedUntil,
+        pending_comment_count: agg.pendingCount,
+        created_at: t.created_at,
+        last_activity: agg.lastActivity && agg.lastActivity > t.created_at ? agg.lastActivity : t.created_at,
     };
 }
 
@@ -142,9 +169,9 @@ export function buildInboxRowContext(
 export function buildInboxRow(t: Message, ctx: InboxRowContext) {
     const { byTicket, tagsMap, unreadMap, tokenUsageMap, crossAgentHotFocus, payloadIds, nowStr } = ctx;
     const agg = byTicket.get(t.id) ?? emptyAgg();
-    const postponedUntil = t.postponed_until ?? null;
-    const postponed =
-        !!postponedUntil && postponedUntil > nowStr;
+    const cheap = inboxRowCheap(t, agg, nowStr);
+    const postponedUntil = cheap.postponed_until;
+    const postponed = cheap.postponed;
     // #2308 — the decision flags follow the transition table: one rule for
     // every kind rather than a hand-kept line per kind.
     const live = !(agg.closed || t.status === "rejected");
@@ -174,10 +201,10 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         })(),
         by_agent: t.by_agent,
         created_at: t.created_at,
-        status: t.status,
-        intent: t.intent,
-        priority: t.priority ?? "normal",
-        closed: agg.closed || t.status === "rejected",
+        status: cheap.status,
+        intent: cheap.intent,
+        priority: cheap.priority,
+        closed: cheap.closed,
         // Same rationale as the /tickets/:id handler: resolved stays
         // true after close so the UI can distinguish "closed because
         // resolved" from "closed without explicit resolution".
@@ -274,7 +301,7 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         // QUI claim (info que `hot` seul perd).
         hot: crossAgentHotFocus.has(t.id)
             || (typeof t.claimed_at === "string"
-                && Date.now() - new Date(t.claimed_at).getTime() < hotWindowSec() * 1000),
+                && Date.now() - new Date(t.claimed_at).getTime() < (ctx.hotWindowMs ?? hotWindowSec() * 1000)),
         // Snooze (#B.329). `postponed=true` means the deadline hasn't
         // passed yet — UI hides the row from the open inbox the same
         // way `closed=true` does. `postponed_until` is the deadline
@@ -282,11 +309,8 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         postponed,
         postponed_until: postponedUntil,
         comment_count: agg.commentCount,
-        pending_comment_count: agg.pendingCount,
-        last_activity:
-            agg.lastActivity && agg.lastActivity > t.created_at
-                ? agg.lastActivity
-                : t.created_at,
+        pending_comment_count: cheap.pending_comment_count,
+        last_activity: cheap.last_activity,
         // #B.132: who spoke last on this thread. Fallback to the
         // ticket creator when there are no comments yet — the
         // discrete "you spoke last" cue should still apply to

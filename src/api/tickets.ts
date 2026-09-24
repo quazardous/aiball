@@ -74,9 +74,9 @@ import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, ty
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 
-import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
+import { buildInboxRow, buildInboxRowContext, hotWindowSec, inboxRowCheap } from "./inbox-row.js";
 import { buildPilotFacts, pilotFields } from "./inbox-pilot.js";
-import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
+import { emptyAgg, getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
 import { projectCriticalTicket } from "../db/critical-ticket.js";
 import { DECISION_KINDS } from "../decisions.js";
 import { applyModeration } from "./moderation.js";
@@ -446,6 +446,60 @@ ticketsRouter.get("/inbox", (req, res) => {
         ? new Set(idsParam.split(",").map((n) => Number(n.trim())).filter(Number.isSafeInteger))
         : null;
     if (wantedIds) tickets = tickets.filter((t) => wantedIds.has(t.id));
+    const sortBy = typeof req.query.sort === "string" ? req.query.sort : "activity";
+    // #2071 — sort server-side, in the order the board displays. Paging in any
+    // other order makes rows insert themselves above the one being read, which
+    // is why loading "smallest project first" was the wrong idea however much
+    // faster each chunk arrived (david `x3k3pr`). The three orders mirror the
+    // client's own; `activity` stays the default the API always had. Rows and
+    // the cheap fields below share these keys, so one comparator serves both.
+    type SortKeys = { created_at: string; last_activity: string; priority: string | null };
+    const compare = (a: SortKeys, b: SortKeys): number => {
+        if (sortBy === "created_desc") return b.created_at.localeCompare(a.created_at);
+        if (sortBy === "created_asc") return a.created_at.localeCompare(b.created_at);
+        if (sortBy === "priority") {
+            const w = (p: string | null | undefined) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2;
+            const d = w(b.priority) - w(a.priority);
+            return d !== 0 ? d : b.created_at.localeCompare(a.created_at);
+        }
+        return b.last_activity.localeCompare(a.last_activity);
+    };
+    const limit = wantedIds ? NaN : Number(req.query.limit);
+    const paged = Number.isFinite(limit) && limit > 0;
+    const offset = paged ? Math.max(0, Number(req.query.offset) || 0) : 0;
+
+    // #3000 — filter, and when the order allows it page, on the fields a row
+    // takes from its ticket and aggregate alone, BEFORE building any row:
+    // building one per ticket of the board, closed ones included, to keep 25
+    // was most of the cost of the web board's list. The row filters below
+    // still run, so the answer is the one the list always gave.
+    const cheapNow = new Date().toISOString();
+    const aggs = getInboxAgg(project);
+    const cheapOf = new Map(tickets.map((t) => [t.id, inboxRowCheap(t, aggs.get(t.id) ?? emptyAgg(), cheapNow)]));
+    tickets = tickets.filter((t) => {
+        const c = cheapOf.get(t.id)!;
+        if (status === "pending" && !(c.status === "pending" || c.pending_comment_count > 0)) return false;
+        if ((status === "approved" || status === "rejected") && c.status !== status) return false;
+        if (onlyOpen && c.closed) return false;
+        if (!includePostponed && c.postponed) return false;
+        if (intentFilter && intentFilter !== "all" && c.intent !== intentFilter) return false;
+        if (priorityFilter && priorityFilter !== "all" && c.priority !== priorityFilter) return false;
+        return true;
+    });
+    // Unread is per reader: one bounded read of the flags for the tickets left.
+    if (req.query.unread === "1") {
+        const unread = ticketUnreadFlags(consumerId, tickets.map((t) => t.id));
+        tickets = tickets.filter((t) => unread.get(t.id) === true);
+    }
+    // Band needs the built row: that order pages after it, as before.
+    const pageEarly = paged && sortBy !== "band";
+    let earlyTotal: number | null = null;
+    if (pageEarly) {
+        tickets.sort((a, b) => compare(cheapOf.get(a.id)!, cheapOf.get(b.id)!));
+        earlyTotal = tickets.length;
+        tickets = tickets.slice(offset, offset + limit);
+    }
+
     // #2072 — the row is built by the shared builder, so a mutation that
     // returns "the updated object" returns exactly what the list holds.
     const rowCtx = buildInboxRowContext(tickets, consumerId, project);
@@ -487,12 +541,6 @@ ticketsRouter.get("/inbox", (req, res) => {
         rows = rows.filter((r) => r.unread);
     }
 
-    // #2071 — sort server-side, in the order the board displays. Paging in any
-    // other order makes rows insert themselves above the one being read, which
-    // is why loading "smallest project first" was the wrong idea however much
-    // faster each chunk arrived (david `x3k3pr`). The three orders mirror the
-    // client's own; `activity` stays the default the API always had.
-    const sortBy = typeof req.query.sort === "string" ? req.query.sort : "activity";
     // #3005 — the pilot's fields (turn, band, state glyph), computed only when
     // asked: `v=tvty` puts them on the rows, `sort=band` orders by them. Read
     // after filtering, so the gate runs on the rows that are returned.
@@ -507,18 +555,8 @@ ticketsRouter.get("/inbox", (req, res) => {
     if (sortBy === "band" && pilot) {
         rows.sort((a, b) => pilot.get(a.id)!.band - pilot.get(b.id)!.band
             || b.last_activity.localeCompare(a.last_activity));
-    } else if (sortBy === "created_desc") {
-        rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
-    } else if (sortBy === "created_asc") {
-        rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    } else if (sortBy === "priority") {
-        rows.sort((a, b) => {
-            const w = (p: string | null | undefined) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2;
-            const d = w(b.priority) - w(a.priority);
-            return d !== 0 ? d : b.created_at.localeCompare(a.created_at);
-        });
     } else {
-        rows.sort((a, b) => b.last_activity.localeCompare(a.last_activity));
+        rows.sort(compare);
     }
 
     // #2071 — page AFTER filtering and sorting, never before. The total goes in
@@ -529,13 +567,8 @@ ticketsRouter.get("/inbox", (req, res) => {
     // preference kept in localStorage, so hardcoding 25 here would silently
     // ignore whatever the reader chose. No limit at all = the whole list,
     // which is what every non-UI consumer still asks for.
-    const total = rows.length;
-    res.setHeader("X-Total-Count", String(total));
-    const limit = wantedIds ? NaN : Number(req.query.limit);
-    if (Number.isFinite(limit) && limit > 0) {
-        const offset = Math.max(0, Number(req.query.offset) || 0);
-        rows = rows.slice(offset, offset + limit);
-    }
+    res.setHeader("X-Total-Count", String(earlyTotal ?? rows.length));
+    if (paged && !pageEarly) rows = rows.slice(offset, offset + limit);
 
     res.json(withPilot && pilot ? rows.map((r) => ({ ...r, ...pilot.get(r.id)! })) : rows);
 });
