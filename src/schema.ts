@@ -302,6 +302,8 @@ export const messages = sqliteTable("_messages", {
 }, (t) => [
     uniqueIndex("idx_messages_ticket_display").on(t.ticketId, t.displaySeq),
     index("idx_messages_ticket").on(t.ticketId),
+    // #3000 — "these tickets, this kind": without it SQLite walked the kind index.
+    index("idx_messages_ticket_kind").on(t.ticketId, t.kind),
     index("idx_messages_kind").on(t.kind),
     index("idx_messages_hashid").on(t.hashid),
     index("idx_messages_source").on(t.sourceTicketId),
