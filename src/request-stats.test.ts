@@ -1,7 +1,7 @@
 // #2682 — route keys fold ids so the stats group by route.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { routeKey } from "./request-stats.js";
+import { maskedQuery, routeKey } from "./request-stats.js";
 
 test("ids, hashes, consumers and projects fold into the route", () => {
     assert.equal(routeKey("POST", "/api/tickets/2640/assign?x=1"), "POST /api/tickets/:id/assign");
@@ -33,4 +33,34 @@ test("a blocked loop shows in event_loop, and a slow route in over_100ms", async
     const row = requestStatsReport().routes.find((r) => r.route === "GET /api/slow-3000");
     assert.equal(row?.over_100ms, 1);
     assert.equal(row?.over_1s, 0);
+});
+
+// #3000 — a slow request is kept with its query and its caller, token masked.
+test("a slow request is kept with its query, its caller and its agent, a token masked", async () => {
+    const { requestStatsMiddleware, requestStatsReport } = await import("./request-stats.js");
+    const listeners: Record<string, () => void> = {};
+    const res = { on: (ev: string, fn: () => void) => { listeners[ev] = fn; }, getHeader: () => "application/json" };
+    const headers: Record<string, string> = { "x-aiball-consumer": "david", "user-agent": "tvty/0.1 (linux)" };
+    const req = { method: "GET", originalUrl: "/api/inbox?project=aiball&token=s3cret&open=1", header: (h: string) => headers[h] };
+    requestStatsMiddleware(req as never, res as never, () => {});
+    await new Promise((r) => setTimeout(r, 120));
+    listeners.finish();
+    const hit = requestStatsReport().slow.find((s) => s.route === "GET /api/inbox");
+    assert.ok(hit, "the slow request is kept");
+    assert.equal(hit.query, "project=aiball&token=***&open=1");
+    assert.equal(hit.consumer, "david");
+    assert.equal(hit.agent, "tvty");
+    assert.ok(hit.ms >= 100);
+});
+
+test("a fast request is not kept, and a query without a token is left as is", async () => {
+    assert.equal(maskedQuery("/api/tickets?project=a&open=1"), "project=a&open=1");
+    assert.equal(maskedQuery("/ws?token=abc"), "token=***");
+    assert.equal(maskedQuery("/api/health"), "");
+    const { requestStatsMiddleware, requestStatsReport } = await import("./request-stats.js");
+    const listeners: Record<string, () => void> = {};
+    const res = { on: (ev: string, fn: () => void) => { listeners[ev] = fn; }, getHeader: () => "application/json" };
+    requestStatsMiddleware({ method: "GET", originalUrl: "/api/fast-3000?x=1", header: () => undefined } as never, res as never, () => {});
+    listeners.finish();
+    assert.equal(requestStatsReport().slow.some((s) => s.route === "GET /api/fast-3000"), false);
 });

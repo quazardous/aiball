@@ -17,6 +17,30 @@ interface RouteStat {
 }
 
 const stats = new Map<string, RouteStat>();
+
+/** #3000 — one request over 100 ms: enough to tell WHICH call was slow, and who made it. */
+export interface SlowRequest {
+    at: string;
+    ms: number;
+    route: string;
+    /** The query string, a token in it masked. */
+    query: string;
+    /** The authenticated consumer, else the one the request named, else null. */
+    consumer: string | null;
+    /** The first word of the user agent: tells a browser from tvty or a CLI acting as the same human. */
+    agent: string | null;
+}
+const SLOW_MS = 100;
+const SLOW_KEPT = 100;
+/** The latest slow requests, oldest first; bounded. */
+const slow: SlowRequest[] = [];
+
+/** `project=a&token=xyz` → `project=a&token=***`: the stats are readable by anyone on the socket. */
+export function maskedQuery(url: string): string {
+    const i = url.indexOf("?");
+    if (i < 0) return "";
+    return url.slice(i + 1).replace(/(^|&)(token|access_token)=[^&]*/gi, "$1$2=***");
+}
 const since = new Date().toISOString();
 let inFlight = 0;
 
@@ -57,7 +81,21 @@ export function requestStatsMiddleware(req: Request, res: Response, next: NextFu
             s.totalMs += ms;
             s.maxMs = Math.max(s.maxMs, ms);
             if (ms > 1000) s.over1s++;
-            if (ms > 100) s.over100ms++;
+            if (ms > SLOW_MS) {
+                s.over100ms++;
+                const auth = (req as { consumer_id?: string }).consumer_id;
+                const named = req.header?.("x-aiball-consumer");
+                const ua = req.header?.("user-agent");
+                slow.push({
+                    at: new Date().toISOString(),
+                    ms: Math.round(ms),
+                    route: key,
+                    query: maskedQuery(req.originalUrl),
+                    consumer: auth || (named?.trim() || null),
+                    agent: ua ? ua.split(/[\s/]/)[0]!.slice(0, 40) || null : null,
+                });
+                if (slow.length > SLOW_KEPT) slow.shift();
+            }
         }
         stats.set(key, s);
     };
@@ -86,7 +124,7 @@ function eventLoopDelay(): EventLoopDelay {
     };
 }
 
-export function requestStatsReport(): { since: string; in_flight: number; event_loop: EventLoopDelay; routes: Array<{ route: string; count: number; total_ms: number; avg_ms: number; max_ms: number; over_100ms: number; over_1s: number }> } {
+export function requestStatsReport(): { since: string; in_flight: number; event_loop: EventLoopDelay; slow: SlowRequest[]; routes: Array<{ route: string; count: number; total_ms: number; avg_ms: number; max_ms: number; over_100ms: number; over_1s: number }> } {
     const routes = [...stats.entries()].map(([route, s]) => ({
         route,
         count: s.count,
@@ -96,5 +134,6 @@ export function requestStatsReport(): { since: string; in_flight: number; event_
         over_100ms: s.over100ms,
         over_1s: s.over1s,
     })).sort((a, b) => b.total_ms - a.total_ms);
-    return { since, in_flight: inFlight, event_loop: eventLoopDelay(), routes };
+    // Newest first: the one being chased is usually the last.
+    return { since, in_flight: inFlight, event_loop: eventLoopDelay(), slow: [...slow].reverse(), routes };
 }
