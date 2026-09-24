@@ -816,7 +816,14 @@ ticketsRouter.get("/tickets", (req, res) => {
     // excludes it from `backlog-tier`, against this very `closedSet`), so the
     // backlog path does not pay flags for it. On aiball that is most of the
     // project: the loops ask for this on every wake attempt.
-    const buildFrom = pageCreated ?? (onlyBacklog ? created.filter((m) => !closedSet.has(m.id)) : created);
+    // #3000 — without a page, the cheap filters (open, actionable, title,
+    // since) still run BEFORE the flags are built: they are decidable on the
+    // raw rows and applied again below, so the result is the same. `open=1` on
+    // aiball built flags for ~1200 tickets to keep ~50, at ~0.4 s a call.
+    const buildFrom = pageCreated ?? (() => {
+        const cand = cheapCandidates();
+        return onlyBacklog ? cand.filter((m) => !closedSet.has(m.id)) : cand;
+    })();
     const buildIds = buildFrom.map((m) => m.id);
 
     // #2164 — these two feed the BUILT rows only (the visible flame, and the
@@ -888,11 +895,21 @@ ticketsRouter.get("/tickets", (req, res) => {
     }
     // #2640 — the asking agent's wait credit on each row's project, so a
     // backlog wake can show it where the agent chooses its next wait.
-    const waitCredits = new Map<string, number>();
+    // #3000 — read once per project for the page: the config lookups behind
+    // `waitCreditEnabled` / `waitCreditRules` ran for every row.
+    const waitCredits = new Map<string, number | null>();
     const waitCreditOf = (project: string): number | null => {
-        if (!consumerId || isHuman(consumerId) || !waitCreditEnabled(project)) return null;
-        if (!waitCredits.has(project)) waitCredits.set(project, waitCreditBalance(consumerId, project));
+        if (!waitCredits.has(project)) {
+            waitCredits.set(project, !consumerId || isHuman(consumerId) || !waitCreditEnabled(project)
+                ? null
+                : waitCreditBalance(consumerId, project));
+        }
         return waitCredits.get(project)!;
+    };
+    const waitRules = new Map<string, ReturnType<typeof waitCreditRules>>();
+    const waitRulesOf = (project: string) => {
+        if (!waitRules.has(project)) waitRules.set(project, waitCreditRules(project));
+        return waitRules.get(project)!;
     };
     // #2910 — the milestone each row belongs to, read once for the page.
     const milestoneByTicket = milestonesOf(buildFrom.map((m) => m.id));
@@ -943,7 +960,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             backlog_cooled_until: flags.backlog_cooled_until,
             backlog_last_wake_at: flags.backlog_last_wake_at,
             wait_credit_minutes: flags.backlog_tier !== null ? waitCreditOf(m.project) : null,
-            wait_credit_rules: flags.backlog_tier !== null && waitCreditOf(m.project) !== null ? waitCreditRules(m.project) : null,
+            wait_credit_rules: flags.backlog_tier !== null && waitCreditOf(m.project) !== null ? waitRulesOf(m.project) : null,
             gated_by_decision: flags.gated_by_decision,
             // #2376 david `a6zkyf` — a `then:` still waiting for its accept,
             // whether or not it gates the ticket: a human's comment hands the
