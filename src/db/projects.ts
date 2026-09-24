@@ -708,19 +708,27 @@ function buildProjectsBase(): ProjectsBase {
     // consumer's next heartbeat; over-attribution is confined to these legacy rows.
     const rootedNoProject = sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''
         AND (${schema.consumers.project} IS NULL OR ${schema.consumers.project} = '')`;
-    for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
-        .from(schema.consumers)
-        .innerJoin(schema.messages, eq(schema.messages.byAgent, schema.consumers.consumerId))
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(rootedNoProject)
-        .groupBy(schema.tickets.project, schema.consumers.cwd)
-        .all()) addRoot(r.project, r.cwd);
-    for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
-        .from(schema.consumers)
-        .innerJoin(schema.tickets, eq(schema.tickets.byAgent, schema.consumers.consumerId))
-        .where(rootedNoProject)
-        .groupBy(schema.tickets.project, schema.consumers.cwd)
-        .all()) addRoot(r.project, r.cwd);
+    // #3000 — ask first whether any such consumer exists. The join below starts
+    // from the messages (no index on their author), so it walked every message
+    // of the board to find, most of the time, nothing: ~37 ms of each rebuild,
+    // and every write triggers one.
+    const legacyRooted = db.select({ id: schema.consumers.consumerId })
+        .from(schema.consumers).where(rootedNoProject).all().map((r) => r.id);
+    if (legacyRooted.length > 0) {
+        for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
+            .from(schema.consumers)
+            .innerJoin(schema.messages, eq(schema.messages.byAgent, schema.consumers.consumerId))
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+            .where(rootedNoProject)
+            .groupBy(schema.tickets.project, schema.consumers.cwd)
+            .all()) addRoot(r.project, r.cwd);
+        for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
+            .from(schema.consumers)
+            .innerJoin(schema.tickets, eq(schema.tickets.byAgent, schema.consumers.consumerId))
+            .where(rootedNoProject)
+            .groupBy(schema.tickets.project, schema.consumers.cwd)
+            .all()) addRoot(r.project, r.cwd);
+    }
     // #393 (3c) + #395: which (project, root) pairs have a currently-RUNNING
     // loop. Presence (live SSE) is authoritative per consumer; the 120s
     // heartbeat is only the bridge for consumers never seen via SSE this
