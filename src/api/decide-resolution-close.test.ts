@@ -167,7 +167,7 @@ test("#980: wontfix accept still auto-closes (regression guard)", async () => {
 test("#980 N2: auto-close ticket_closed does NOT broadcast (single toaster/counter)", async () => {
     const { commentId } = seed("resolution");
     const events: Array<{ type: string; kind?: string }> = [];
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${TOKEN_REP}`); // #3000 — /ws takes a token over TCP
     await new Promise<void>((resolve, reject) => {
         ws.on("open", () => resolve());
         ws.on("error", reject);

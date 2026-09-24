@@ -32,7 +32,10 @@ export function useWs(onEvent: (e: WsEvent) => void) {
 
     function connect() {
         const proto = location.protocol === "https:" ? "wss" : "ws";
-        const url = `${proto}://${location.host}${withBase("/ws")}`;
+        // #3000 — the daemon now checks a token on /ws over TCP, like /api. A
+        // browser cannot set headers on a WebSocket, so it rides the query.
+        const token = localStorage.getItem("aiball.token");
+        const url = `${proto}://${location.host}${withBase("/ws")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
         ws = new WebSocket(url);
         ws.onopen = () => {
             connected.value = true;

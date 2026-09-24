@@ -167,6 +167,9 @@ function main(): void {
             // The auth middleware reads this flag on req.socket.
             (sock as unknown as { __aiballUds: boolean }).__aiballUds = true;
         });
+        // #3000 — `/ws` on the local socket too, with the same trust as `/api`
+        // there: same user, no token. Local clients (tvty) no longer need TCP.
+        attachWs(udsServer, "/ws", { trusted: true });
         udsServer.listen(SOCK_PATH, () => {
             try { chmodSync(SOCK_PATH, 0o600); } catch { /* best effort */ }
             console.log(`aiball daemon listening on unix:${SOCK_PATH} (local-trust)`);
