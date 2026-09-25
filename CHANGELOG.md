@@ -38,6 +38,16 @@ dates are YYYY-MM-DD.
   and is also served on the local socket. A client that falls too far behind
   is disconnected instead of piling up in the daemon's memory.
 - Listing a project's open tickets is several times faster.
+- The board's ticket list, the loops' backlog and the projects list answer
+  several times faster: rows are filtered and paged before they are built,
+  and a missing index made some per-ticket reads walk every comment.
+
+### Fixed
+
+- In a thread, a proposal replaced by a newer decision no longer reads
+  "pending": it shows as superseded, since only the latest decision can be
+  accepted or rejected.
+- A thread's header no longer shows a claim that has expired.
 
 ## [0.48.0] — 2026-09-23
 

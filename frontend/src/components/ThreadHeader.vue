@@ -18,6 +18,7 @@ import type { TicketSummary } from "../lib/api";
 import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
 import { githubProvider } from "../lib/upstream-providers";
 import { ticketHref } from "../lib/base";
+import { headerHolds } from "../lib/ticketHolds";
 
 const props = defineProps<{
     ticket: TicketSummary;
@@ -60,6 +61,9 @@ const upstreamUrl = computed<string | null>(() => {
  * indique l'ancienneté de la responsabilité (vs `claimed_at` =
  * dernier engage, transient).
  */
+// #3006 — the claim chip only while the claim holds.
+const holds = computed(() => headerHolds(props.ticket));
+
 function claimerTooltip(t: TicketSummary): string {
     const parts = [`Claimed by ${t.claimant}`];
     if (t.claimed_at) parts.push(new Date(t.claimed_at).toLocaleString());
@@ -140,15 +144,16 @@ function claimerTooltip(t: TicketSummary): string {
         >
             <i class="pi pi-exclamation-triangle" /> critical · holds {{ ticket.critical.holds }}{{ ticket.critical.quiet ? ` · quiet ${ticket.critical.quiet}` : '' }}
         </span>
+        <!-- #3006 — only a claim that still holds (see headerHolds). -->
         <span
-            v-if="ticket.claimant"
+            v-if="holds.claimant"
             class="thread-subline__item"
             :title="claimerTooltip(ticket)"
         >
             <i class="pi pi-bookmark-fill" /> claim by {{ ticket.claimant }}
         </span>
         <span
-            v-if="ticket.assignee && ticket.assignee !== ticket.claimant"
+            v-if="holds.assignee"
             class="thread-subline__item"
             :title="`Assigned to ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
         >

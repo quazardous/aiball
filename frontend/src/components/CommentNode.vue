@@ -17,7 +17,7 @@ import { scopeIcon, scopeTitle } from "../lib/scope";
 import { ticketHref } from "../lib/base";
 import { attachPasteImage } from "../lib/pasteImage";
 import { questionStats as computeQuestionStats } from "../lib/questions";
-import { readDecision } from "../lib/decisions";
+import { readDecision, type DecisionRef } from "../lib/decisions";
 import { formatTicketRef } from "../lib/formatting";
 
 interface DeciderInfo {
@@ -47,6 +47,13 @@ const props = defineProps<{
      * as a plain comment: no step chip, no resume time long past.
      */
     supersededStep?: boolean;
+    /**
+     * #3006 — set when this comment's decision is still pending but a newer
+     * decision is the thread's latest: only that one is live (the gate and
+     * the inbox row read it alone), and the buttons under the composer act on
+     * it, so this chip must not read "pending".
+     */
+    supersededBy?: DecisionRef | null;
 }>();
 /**
  * Refresh fan-out after a state-mutating action on this comment. We
@@ -117,6 +124,7 @@ const isStep = computed(() => isStepComment.value && !props.supersededStep);
 const decisionChipLabel = computed(() => {
     const d = decision.value;
     if (!d) return "";
+    if (props.supersededBy) return `superseded ${d.kind}`;
     if (d.status === "pending") {
         // #737 — pending escalation reads as the standalone "ESCALATED"
         // banner per david's plan : it's not "pending escalation" as if
@@ -132,7 +140,7 @@ const decisionChipLabel = computed(() => {
 });
 const decisionChipSeverity = computed(() => {
     const d = decision.value;
-    if (!d) return "secondary";
+    if (!d || props.supersededBy) return "secondary";
     if (d.status === "accepted") return "success";
     if (d.status === "rejected") return "danger";
     // #737 — pending escalation = visually arresting red ("I need a human
@@ -502,7 +510,9 @@ async function doDelete() {
                 v-if="decision"
                 :value="decisionChipLabel"
                 :severity="decisionChipSeverity"
-                :title="decision.status === 'pending'
+                :title="supersededBy
+                    ? `Superseded by the later ${supersededBy.kind}${supersededBy.hashid ? ' #C.' + supersededBy.hashid : ''}: only the latest decision is live, and the accept/reject pair under the composer acts on it.`
+                    : decision.status === 'pending'
                     ? `${msg.by_agent ?? 'someone'} tagged this comment as a ${decision.kind} — accept/reject pair is under the composer.`
                     : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"

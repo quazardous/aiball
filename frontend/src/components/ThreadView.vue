@@ -401,6 +401,7 @@ const {
     threadItems,
     latestPendingId,
     latestStepId,
+    latestDecision,
 } = useThreadItems(data);
 
 // #271: the standalone parent-ref + sub-ticket accordion are gone —
@@ -678,6 +679,7 @@ async function copyTicketRef() {
                 :is-empty="flatComments.length === 0"
                 :latest-pending-id="latestPendingId"
                 :latest-step-id="latestStepId"
+                :latest-decision="latestDecision"
                 :deciders-by-message="decidersByMessage"
                 :latest-summary-until="latestSummaryUntil"
                 :stage-labels="STAGE_LABELS"

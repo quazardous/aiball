@@ -13,6 +13,7 @@ import { relativeTime as shortTime } from "../lib/format";
 import { ticketHref } from "../lib/base";
 import { relationRowLabel } from "../lib/relationRows";
 import CommentNode from "./CommentNode.vue";
+import { supersedingDecision, type DecisionRef } from "../lib/decisions";
 import MarkdownView from "./MarkdownView.vue";
 
 defineProps<{
@@ -21,6 +22,8 @@ defineProps<{
     latestPendingId: number | null;
     /** #2470 — the only step comment that shows as a step. */
     latestStepId: number | null;
+    /** #3006 — the thread's latest decision; a pending one elsewhere is superseded. */
+    latestDecision: DecisionRef | null;
     decidersByMessage: Map<number, DeciderInfo>;
     latestSummaryUntil: { text: string; by: string | null; ts: string; id: number } | null;
     stageLabels: Record<string, string>;
@@ -60,6 +63,7 @@ function decodeRelationEvent(m: Message): { verb: string; target: number | null 
                     :msg="item.msg"
                     :show-pending-tag="item.msg.id === latestPendingId"
                     :superseded-step="item.msg.id !== latestStepId"
+                    :superseded-by="supersedingDecision(item.msg, latestDecision)"
                     :decider="decidersByMessage.get(item.msg.id) ?? null"
                 />
             </li>

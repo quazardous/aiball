@@ -12,7 +12,7 @@
  */
 import { computed, type Ref } from "vue";
 import { type Message, type ThreadView as ThreadViewData } from "./api";
-import { readDecision } from "./decisions";
+import { latestDecisionRef, readDecision, type DecisionRef } from "./decisions";
 import { topDown } from "./prefs";
 import { isRelationRowKind } from "./relationRows";
 import { latestStepId as findLatestStepId } from "./latestStep";
@@ -202,6 +202,11 @@ export function useThreadItems(data: Ref<ThreadViewData | null>) {
     // #2470 — only the latest step shows as one.
     const latestStepId = computed<number | null>(() => findLatestStepId(flatComments.value));
 
+    // #3006 — the thread's latest decision: a pending one on any other comment
+    // is superseded, as the gate and the inbox row already read it.
+    const latestDecision = computed<DecisionRef | null>(() =>
+        data.value ? latestDecisionRef(data.value.ticket, data.value.comments) : null);
+
     return {
         flatComments,
         decidersByMessage,
@@ -209,5 +214,6 @@ export function useThreadItems(data: Ref<ThreadViewData | null>) {
         threadItems,
         latestPendingId,
         latestStepId,
+        latestDecision,
     };
 }

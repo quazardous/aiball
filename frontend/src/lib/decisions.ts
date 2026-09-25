@@ -56,13 +56,12 @@ export function readDecision(m: DecisionBearing): CommentDecision | null {
  *  pending decision and the composer never cleared (david #zmbyks: "ticket
  *  accepté mais bouton inchangé" — two pending plans on the same ticket,
  *  the latest accepted, the buttons stuck on the older one). */
-export function findActiveDecision(
+/** #3006 — the thread's LATEST decision, whatever its status: the one the
+ *  gate reads. A pending decision on any other comment is superseded by it. */
+function latestDecisionEntry(
     ticket: TicketSummary | null,
     comments: Message[],
-): {
-    message: Message;
-    decision: CommentDecision;
-} | null {
+): { message: Message; decision: CommentDecision } | null {
     let latest: { message: Message; decision: CommentDecision } | null = null;
     // #803 — `ticket_new({then:"plan"})` attaches a decision DIRECTLY on
     // the ticket_created event itself ; the UI must surface it like a
@@ -83,6 +82,32 @@ export function findActiveDecision(
             latest = { message: m, decision: d };
         }
     }
+    return latest;
+}
+
+/** #3006 — the thread's latest decision (any status), named for a tooltip. */
+export interface DecisionRef { id: number; kind: DecisionKind; hashid: string | null }
+export function latestDecisionRef(ticket: TicketSummary | null, comments: Message[]): DecisionRef | null {
+    const latest = latestDecisionEntry(ticket, comments);
+    return latest ? { id: latest.message.id, kind: latest.decision.kind, hashid: latest.message.hashid ?? null } : null;
+}
+
+/** #3006 — what supersedes `m`'s decision: set only when `m` carries a
+ *  decision still pending and a newer decision is the thread's latest. */
+export function supersedingDecision(m: DecisionBearing, latest: DecisionRef | null): DecisionRef | null {
+    const d = readDecision(m);
+    if (!d || d.status !== "pending" || !latest || latest.id === m.id) return null;
+    return latest;
+}
+
+export function findActiveDecision(
+    ticket: TicketSummary | null,
+    comments: Message[],
+): {
+    message: Message;
+    decision: CommentDecision;
+} | null {
+    const latest = latestDecisionEntry(ticket, comments);
     if (!latest) return null;
     return latest.decision.status === "pending" ? latest : null;
 }
