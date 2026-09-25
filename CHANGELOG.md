@@ -48,6 +48,8 @@ dates are YYYY-MM-DD.
   "pending": it shows as superseded, since only the latest decision can be
   accepted or rejected.
 - A thread's header no longer shows a claim that has expired.
+- On a new install, comment ids no longer overlap ticket ids, which made an
+  edit, vote or delete on a comment act on the ticket with the same number.
 
 ## [0.48.0] — 2026-09-23
 
