@@ -1,4 +1,5 @@
 name: my decision is pending and the other side spoke
+critical: true
 # Cases 3 and 11, decided by david: "un commentaire de mon côté doit remettre le
 # ticket du côté agent, à sa charge de confirmer le then du ticket". A HUMAN's
 # comment hands the ticket back — and the wake asks to confirm or amend the

@@ -1,4 +1,5 @@
 name: accepting a plan sends its author an execute event
+critical: true
 steps:
   - alpha-lead: ticket_new
     args: { title: Accept sends execute, body: The lead waits for the go. }

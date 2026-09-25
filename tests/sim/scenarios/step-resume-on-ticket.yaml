@@ -1,4 +1,5 @@
 name: a step that waits on another ticket rests until that ticket moves, then leads the backlog
+critical: true
 # resume_on: { ticket: N } — the agent's ticket stays out of its wakes while it
 # waits, with no timer, and comes back at the head of its backlog the moment
 # the awaited ticket moves (here, a comment by the other project's agent).

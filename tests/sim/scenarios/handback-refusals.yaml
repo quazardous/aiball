@@ -1,4 +1,5 @@
 name: a reply must say whether it hands the ticket back, and cannot keep what it does not hold
+critical: true
 # Every refusal happens before anything is posted: the thread still ends on the
 # lead's ticket, untouched.
 steps:

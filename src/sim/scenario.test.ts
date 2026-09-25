@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchSeat, parseDuration, parseScenario, pick, scenarioCohort, substitute, type Seat } from "./scenario.js";
+import { matchSeat, parseDuration, parseScenario, pick, scenarioCohort, scenarioIsCritical, substitute, type Seat } from "./scenario.js";
 import type { ViewRow } from "./view.js";
 
 const AGENTS = ["alpha-lead", "alpha-helper"];
@@ -131,4 +131,11 @@ test("the wake is about THIS ticket: pings come first, and another head is not t
 
 test("expecting a ticket the agent cannot see says so", () => {
     assert.match(matchSeat({ ticket: 9, act: true }, seat({})).join(" | "), /not among the open tickets/);
+});
+
+// #3016 — only an explicit `critical: true` puts a scenario in the critical profile.
+test("a scenario is critical only when it says so", () => {
+    assert.equal(scenarioIsCritical("name: x\ncritical: true\nsteps: []"), true);
+    assert.equal(scenarioIsCritical("name: x\nsteps: []"), false);
+    assert.equal(scenarioIsCritical("name: x\ncritical: yes please\nsteps: []"), false, "a string is not a yes");
 });

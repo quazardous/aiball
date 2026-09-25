@@ -4,7 +4,13 @@
 #   bash tests/run-docker.sh unit [files...]   the unit suite (`npm test`), or only the given files
 #   bash tests/run-docker.sh e2e               the business-API scenarios (tests/scenario-*.ts)
 #   bash tests/run-docker.sh sim [scenario...] the board simulator's scenarios (tests/sim/scenarios)
-#   bash tests/run-docker.sh all               unit, then e2e, then sim; exit code = worst
+#   bash tests/run-docker.sh critical          before every deploy: unit, e2e, and the simulator's
+#                                              scenarios marked `critical: true`; exit code = worst
+#   bash tests/run-docker.sh full              before a release or after a large change: unit, e2e
+#                                              and every scenario (`all` is the same)
+#
+# The simulator plays its scenarios over AIBALL_SIM_SHARDS boards side by side
+# (default 4), each capped at AIBALL_SIM_CPUS cores (default 2).
 #
 # Each container is capped at AIBALL_TEST_CPUS cores (default 4) and the docker
 # client runs under `nice`: the live daemon and loops on the same machine keep
@@ -49,10 +55,19 @@ run_e2e() {
 }
 
 run_sim() {
-    echo "=== sim ==="
+    local shards="${AIBALL_SIM_SHARDS:-4}"
+    echo "=== sim (shards=$shards, cpus=${AIBALL_SIM_CPUS:-2} each) ==="
     local code=0
-    nice -n 10 npm run --silent sim -- run "$@" || code=$?
+    AIBALL_TEST_CPUS="${AIBALL_SIM_CPUS:-2}" nice -n 10 npm run --silent sim -- run --shards "$shards" "$@" || code=$?
     nice -n 10 npm run --silent sim -- down || true
+    return $code
+}
+
+# Run a phase and say how long it took, so a profile's budget is measured, not guessed.
+timed() {
+    local start=$SECONDS code=0
+    "$@" || code=$?
+    echo "=== $1: $((SECONDS - start)) s ==="
     return $code
 }
 
@@ -62,11 +77,20 @@ case "$what" in
     unit) run_unit "$@" ;;
     e2e) run_e2e ;;
     sim) run_sim "$@" ;;
-    all)
+    critical)
         code=0
-        run_unit || code=1
-        run_e2e || code=1
-        run_sim || code=1
+        timed run_unit || code=1
+        timed run_e2e || code=1
+        timed run_sim --critical || code=1
+        echo "=== critical profile: ${SECONDS} s ==="
+        exit $code
+        ;;
+    full|all)
+        code=0
+        timed run_unit || code=1
+        timed run_e2e || code=1
+        timed run_sim || code=1
+        echo "=== full profile: ${SECONDS} s ==="
         exit $code
         ;;
     *)

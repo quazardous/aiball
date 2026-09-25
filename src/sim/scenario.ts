@@ -90,6 +90,16 @@ export function scenarioCohort(text: string): string | null {
     return typeof raw.cohort === "string" && raw.cohort ? raw.cohort : null;
 }
 
+/**
+ * #3016 — a scenario marked `critical: true` guards the loops' contract (the
+ * actionable rule, decisions, the backlog and wakes, moderation): it runs in the
+ * `critical` test profile, before every deploy. The others run in `full`.
+ */
+export function scenarioIsCritical(text: string): boolean {
+    const raw = (parse(text) ?? {}) as { critical?: unknown };
+    return raw.critical === true;
+}
+
 export function parseScenario(text: string, agents: readonly string[]): Scenario {
     const raw = (parse(text) ?? {}) as { name?: unknown; steps?: unknown };
     const fail = (i: number | null, why: string): never => {

@@ -1,4 +1,5 @@
 name: a rejected plan hands the ticket back to its author
+critical: true
 steps:
   - alpha-lead: ticket_new
     args: { title: Plan rejected, body: The lead proposes a plan the moderator refuses. }

@@ -382,11 +382,24 @@ aiball uses Node's native test runner (`vitest`-style suites under
   rendering, OS-specific PTY behavior). Note the gap in the PR.
 - Keep tests fast — anything > 100 ms per case warrants a comment
   explaining why.
-- Run the full suite before pushing a PR — in Docker, not on your
-  machine: `npm run test:docker -- unit` (or `all` for unit, e2e and
-  the board simulator). The dev checkout is usually the live runtime,
-  and a full run on the host starves the daemon and loops sharing it.
-  The containers are capped at `AIBALL_TEST_CPUS` cores (default 4).
+- Run the suite in Docker, not on your machine — the dev checkout is
+  usually the live runtime, and a full run on the host starves the
+  daemon and loops sharing it. Two profiles:
+  - `npm run test:docker -- critical` **before every deploy**: unit,
+    e2e, and the board simulator's scenarios marked `critical: true`
+    (the ones that guard the loops' contract);
+  - `npm run test:docker -- full` (or `all`) **before a release or
+    after a large change**: everything.
+
+  Measured here: `critical` ~6 min, `full` ~10 min; each phase prints
+  its time.
+
+  A suite that grows past 10 minutes gets split the same way rather
+  than skipped. The containers are capped at `AIBALL_TEST_CPUS` cores
+  (default 4); the simulator plays over `AIBALL_SIM_SHARDS` boards
+  (default 4) of `AIBALL_SIM_CPUS` cores each (default 2).
+  `AIBALL_TEST_SRC=<dir>` tests a scratch copy of an undeployed change,
+  in every service.
   On the host, run only the files you touched:
   `npx tsx --test src/<file>.test.ts`. CI (`#527`) covers Rust on
   Windows; the Linux lane runs the whole Node suite on every push.

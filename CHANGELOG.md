@@ -41,6 +41,11 @@ dates are YYYY-MM-DD.
   and is also served on the local socket. A client that falls too far behind
   is disconnected instead of piling up in the daemon's memory.
 - Listing a project's open tickets is several times faster.
+- The Docker test run has two profiles: `critical` (unit, e2e and the
+  simulator scenarios that guard the loops' contract, ~6 min) before every
+  deploy, and `full` (~10 min) before a release. The board simulator plays
+  its scenarios over several boards at once, each reset in place between
+  scenarios; a full simulator run went from ~45 min to ~6.
 - The board's ticket list, the loops' backlog and the projects list answer
   several times faster (the projects list rebuilds in ~35 ms instead of
   ~110): rows are filtered and paged before they are built,

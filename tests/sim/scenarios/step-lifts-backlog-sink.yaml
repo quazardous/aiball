@@ -1,4 +1,5 @@
 name: a backlog wake sinks its ticket, the agent's own step lifts the sink, and the wake after a step sinks it only briefly
+critical: true
 # The loop names a ticket in a backlog wake: that ticket sinks (it is not named
 # again for the cooldown) while the thread does not move. Any gesture on the
 # thread moves it, including the agent's own `then: continue`: the ticket can

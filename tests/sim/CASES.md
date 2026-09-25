@@ -11,6 +11,12 @@ Cohort of reference: `alpha-lead` (owner of alpha), `alpha-helper` (follower of
 alpha), `beta-lead` (owner of beta), `david` (moderator). Variants live in
 `tests/sim/cohorts/`.
 
+A scenario marked `critical: true` guards the loops' contract (the actionable
+rule, decisions, the backlog and wakes, moderation) and runs before every
+deploy (`npm run test:docker -- critical`); the others run in the `full`
+profile. Mark a new scenario critical when breaking what it checks would stall
+or misdirect a working loop.
+
 ## Covered by a scenario
 
 | Case | Scenario |

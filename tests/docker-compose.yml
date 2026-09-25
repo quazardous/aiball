@@ -43,7 +43,9 @@ services:
       AIBALL_PORT: "7777"
       AIBALL_SOCK: ""             # no UDS in-container → bearer-token auth only
     volumes:
-      - ..:/app                   # live source (createApp, routes, …)
+      # The source under test: this checkout, or AIBALL_TEST_SRC (a scratch copy of
+      # an undeployed change) — the same override the unit service honours.
+      - ${AIBALL_TEST_SRC:-..}:/app
       - /app/node_modules         # preserve the image's native node_modules
       - aiball-test-data:/data    # ephemeral test DB, separate from dev
     ports:

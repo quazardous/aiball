@@ -1,4 +1,5 @@
 name: an accepted resolution closes the ticket, a reopen brings it back, a rejected resolution hands it back
+critical: true
 steps:
   - alpha-lead: ticket_new
     args: { title: Resolution accepted, body: Work the moderator accepts. }

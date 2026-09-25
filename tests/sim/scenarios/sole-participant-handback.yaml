@@ -1,4 +1,5 @@
 name: a sole participant keeps its ticket after a handback
+critical: true
 # A lead files a ticket on its own project, holds it, and asks the moderator a
 # question with `handback: true`. As long as nobody else has spoken on the
 # thread, the ticket stays in the lead's backlog: a sole participant keeps it.

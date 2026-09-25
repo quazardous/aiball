@@ -1,4 +1,5 @@
 name: a ticket waiting on another hears the blocker close; a merely linked one hears it too
+critical: true
 steps:
   - alpha-lead: ticket_new
     args: { title: The blocker, body: Must land first. }

@@ -8,17 +8,24 @@
  *     npm run sim -- wake <agent>                what the loop does when the agent goes idle, now
  *     npm run sim -- mcp <agent> <tool> [json]   call an MCP tool as that agent
  *     npm run sim -- view [agent...]             each agent's seat: backlog, gates, next wake
- *     npm run sim -- run [--keep] [scenario...]  play scenarios (default: tests/sim/scenarios/*.yaml),
- *                                                each on a fresh board with its own cohort unless --keep
+ *     npm run sim -- run [--keep] [--critical] [--shards N] [scenario...]
+ *                                                play scenarios (default: tests/sim/scenarios/*.yaml),
+ *                                                each on a board reset to empty with its own cohort
+ *                                                unless --keep; --critical plays only the scenarios
+ *                                                marked `critical: true`; --shards N splits them over
+ *                                                N boards played side by side
  *     npm run sim -- pending                     what waits for the moderator
  *     npm run sim -- approve|reject <id>         moderate a pending ticket or comment
  *     npm run sim -- down                        stop the container and drop its database
  *
  * The container is `tests/docker-compose.yml`'s daemon under its own compose
  * project (`aiball-sim`) and port (AIBALL_SIM_PORT, default 17780), so it never
- * meets the live board nor `npm run test:e2e`.
+ * meets the live board nor `npm run test:e2e`. A shard (AIBALL_SIM_SHARD=k, set
+ * by `run --shards`) gets its own project, port (17780 + k) and state file.
  */
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
@@ -27,15 +34,23 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { formatView, nextWake, type ViewRow } from "../../src/sim/view.js";
 import { sanitizeCopy } from "../../src/sim/sanitize.js";
-import { DEFAULT_COOLDOWN_SEC, matchSeat, parseDuration, parseScenario, pick, scenarioCohort, substitute, type Seat, type Step, type UnreadEvent } from "../../src/sim/scenario.js";
+import { DEFAULT_COOLDOWN_SEC, matchSeat, parseDuration, parseScenario, pick, scenarioCohort, scenarioIsCritical, substitute, type Seat, type Step, type UnreadEvent } from "../../src/sim/scenario.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
-const PORT = process.env.AIBALL_SIM_PORT ?? "17780";
+const BASE_PORT = 17780;
+// #3016 — a shard plays beside the others: its own compose project, port and state.
+const SHARD = process.env.AIBALL_SIM_SHARD ?? "";
+const PORT = process.env.AIBALL_SIM_PORT ?? String(BASE_PORT + (SHARD ? Number(SHARD) : 0));
 const BASE = `http://127.0.0.1:${PORT}`;
-const STATE_FILE = join(HERE, ".state", "cohort.json");
+const STATE_FILE = join(HERE, ".state", SHARD ? `cohort-${SHARD}.json` : "cohort.json");
 const SCENARIOS = join(HERE, "scenarios");
-const COMPOSE = ["compose", "-p", "aiball-sim", "-f", join(ROOT, "tests/docker-compose.yml")];
+const COMPOSE = ["compose", "-p", SHARD ? `aiball-sim-${SHARD}` : "aiball-sim", "-f", join(ROOT, "tests/docker-compose.yml"), "-f", join(ROOT, "tests/docker-compose.sim.yml")];
+/** #3016 — the shared node_modules volume: named after what fills it, so it is never stale. */
+const NM_VOLUME = `aiball-sim-nm-${createHash("sha256")
+    .update(readFileSync(join(ROOT, "package-lock.json")))
+    .update(readFileSync(join(ROOT, "tests/Dockerfile")))
+    .digest("hex").slice(0, 12)}`;
 
 interface SimState {
     moderator: { id: string; password: string; token: string };
@@ -49,7 +64,7 @@ function die(message: string, code = 1): never {
 }
 
 function docker(args: string[], capture = false): string {
-    const env = { ...process.env, AIBALL_TEST_PORT: PORT };
+    const env = { ...process.env, AIBALL_TEST_PORT: PORT, AIBALL_SIM_NM: NM_VOLUME };
     if (capture) {
         return execFileSync("docker", [...COMPOSE, ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
     }
@@ -63,15 +78,38 @@ function loadState(): SimState {
     return JSON.parse(readFileSync(STATE_FILE, "utf8")) as SimState;
 }
 
-async function api<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
+/**
+ * #3016 — one connection per call, never a pooled one. With boards playing side
+ * by side, a call reused a keep-alive connection the daemon had just closed and
+ * died with `fetch failed (UND_ERR_SOCKET other side closed)` — seen mid-scenario,
+ * the daemon up and well. A request on a connection of its own cannot meet a
+ * closed one, and on loopback a new connection costs nothing.
+ */
+function api<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
+    const payload = body ? JSON.stringify(body) : undefined;
+    return new Promise<T>((resolveCall, rejectCall) => {
+        const req = httpRequest(`${BASE}${path}`, {
+            method,
+            agent: false,
+            headers: {
+                authorization: `Bearer ${token}`,
+                ...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
+            },
+        }, (res) => {
+            let text = "";
+            res.setEncoding("utf8");
+            res.on("data", (c: string) => { text += c; });
+            res.on("end", () => {
+                const status = res.statusCode ?? 0;
+                if (status < 200 || status >= 300) return rejectCall(new Error(`${method} ${path} → ${status}: ${text}`));
+                try { resolveCall(JSON.parse(text) as T); } catch (e) { rejectCall(e as Error); }
+            });
+        });
+        // A network failure says what it was, not a bare "fetch failed".
+        req.on("error", (e: NodeJS.ErrnoException) => rejectCall(new Error(`${method} ${path}: ${e.code ?? "network error"} ${e.message}`)));
+        if (payload) req.write(payload);
+        req.end();
     });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`${method} ${path} → ${r.status}: ${text}`);
-    return JSON.parse(text) as T;
 }
 
 async function waitHealthy(): Promise<void> {
@@ -95,10 +133,57 @@ function provision(args: string[]): void {
     for (const [id, a] of Object.entries(state.agents)) console.log(`  agent ${id}: ${a.role} of ${a.project}`);
 }
 
-async function up(cohortArg: string | undefined): Promise<void> {
+function cohortPath(cohortArg: string | undefined): string {
     const cohort = relative(ROOT, resolve(cohortArg ?? join(HERE, "cohort.yaml")));
     if (cohort.startsWith("..")) throw new Error("the cohort file must live inside the repository (the container mounts it)");
+    return cohort;
+}
+
+/**
+ * #3016 — create and fill the shared node_modules volume once, before any board
+ * mounts it: a volume two boards filled at the same time would be torn. Filling
+ * it is Docker's own copy of the image's node_modules into an empty volume, done
+ * by a throwaway container. Volumes left by an older lockfile are removed.
+ */
+function ensureNodeModulesVolume(): void {
+    const has = spawnSync("docker", ["volume", "inspect", NM_VOLUME], { stdio: "ignore" }).status === 0;
+    if (has) return;
+    docker(["build", "daemon"]);
+    spawnSync("docker", ["volume", "create", NM_VOLUME], { stdio: "ignore" });
+    docker(["run", "--rm", "--no-deps", "daemon", "true"]);
+    const old = spawnSync("docker", ["volume", "ls", "-q", "--filter", "name=aiball-sim-nm-"], { encoding: "utf8" }).stdout
+        .split("\n").map((v) => v.trim()).filter((v) => v && v !== NM_VOLUME);
+    for (const v of old) spawnSync("docker", ["volume", "rm", v], { stdio: "ignore" });
+}
+
+async function up(cohortArg: string | undefined): Promise<void> {
+    const cohort = cohortPath(cohortArg);
+    ensureNodeModulesVolume();
     docker(["up", "-d", "--build", "daemon"]);
+    await waitHealthy();
+    provision([cohort]);
+}
+
+function boardRunning(): boolean {
+    try {
+        return docker(["ps", "-q", "daemon"], true).trim() !== "";
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * #3016 — empty the running board instead of rebuilding its container. A new
+ * container costs ~55 s (created, its node_modules volume refilled, then
+ * removed); emptying the data directory and restarting the daemon in place
+ * costs ~4 s. The next boot finds no database and starts from zero, as a new
+ * container would.
+ */
+async function reset(cohortArg: string | undefined): Promise<void> {
+    const cohort = cohortPath(cohortArg);
+    docker(["exec", "-T", "daemon", "sh", "-c", "rm -rf /data/* /data/.[!.]*"]);
+    docker(["restart", "daemon"]);
+    rmSync(STATE_FILE, { force: true });
     await waitHealthy();
     provision([cohort]);
 }
@@ -350,6 +435,7 @@ async function play(file: string): Promise<number> {
         return 1;
     }
     console.log(`\n▶ ${scenario.name}  (${relative(ROOT, file)})`);
+    const startedAt = Date.now();
     const vars: Record<string, unknown> = {};
     let failed = 0;
     for (const [i, step] of scenario.steps.entries()) {
@@ -414,27 +500,97 @@ async function play(file: string): Promise<number> {
         } catch (e) {
             // A gesture that fails leaves the later steps nothing sound to stand on.
             console.log(`${n} ✗ ${(e as Error).message}`);
+            // #3016 — a lost connection says nothing by itself: show what the daemon last said.
+            if (/fetch failed|ECONNRE|ECONNREFUSED|EPIPE|socket hang up|network error/.test((e as Error).message)) {
+                try {
+                    const logs = docker(["logs", "--tail", "40", "daemon"], true);
+                    console.log(logs.replace(/^/gm, "      | "));
+                } catch { /* the container may be gone */ }
+            }
             console.log("      scenario stopped");
             return failed + 1;
         }
     }
-    console.log(failed === 0 ? "  passed" : `  ${failed} check(s) failed`);
+    // #3016 — each scenario's time, so the shards are balanced on measure, not guess.
+    const took = `${Math.round((Date.now() - startedAt) / 1000)} s`;
+    console.log(failed === 0 ? `  passed in ${took}` : `  ${failed} check(s) failed, in ${took}`);
     return failed;
+}
+
+/** Rough seconds a scenario takes: its sleeps, plus a flat share for the board reset and the gestures. */
+function scenarioWeightSec(text: string): number {
+    let sleeps = 0;
+    for (const m of text.matchAll(/^\s*-\s*sleep:\s*(\S+)/gm)) sleeps += parseDuration(m[1]!) ?? 0;
+    return sleeps + 15;
+}
+
+/**
+ * #3016 — play the scenarios over `n` boards side by side, each a child `run`
+ * with its own shard number (project, port, state). Their output is prefixed
+ * with the shard; the verdict fails when any shard does. Each shard's board is
+ * removed afterwards unless --keep.
+ */
+async function runShards(files: string[], n: number, keep: boolean): Promise<void> {
+    // Longest first, each onto the lightest board: the scenarios' own sleeps
+    // (cooldowns, snoozes running out) are most of the time, and dealt round-robin
+    // they can pile up on one board.
+    const buckets: string[][] = Array.from({ length: n }, () => []);
+    const load = new Array<number>(n).fill(0);
+    const weighed = files.map((f) => ({ f, w: scenarioWeightSec(readFileSync(f, "utf8")) })).sort((a, b) => b.w - a.w);
+    for (const { f, w } of weighed) {
+        const k = load.indexOf(Math.min(...load));
+        buckets[k]!.push(f);
+        load[k]! += w;
+    }
+    const self = fileURLToPath(import.meta.url);
+    const codes = await Promise.all(buckets.map((bucket, k) => new Promise<number>((done) => {
+        const env: NodeJS.ProcessEnv = { ...process.env, AIBALL_SIM_SHARD: String(k + 1) };
+        delete env.AIBALL_SIM_PORT;
+        const child = spawn(process.execPath, [...process.execArgv, self, "run", ...(keep ? ["--keep"] : []), ...bucket], { env, stdio: ["ignore", "pipe", "pipe"] });
+        const prefix = (chunk: Buffer) => chunk.toString().replace(/^(?=.)/gm, `[${k + 1}] `);
+        child.stdout.on("data", (c: Buffer) => process.stdout.write(prefix(c)));
+        child.stderr.on("data", (c: Buffer) => process.stderr.write(prefix(c)));
+        child.on("close", (code) => done(code ?? 1));
+    })));
+    if (!keep) {
+        for (let k = 1; k <= n; k++) {
+            const env: NodeJS.ProcessEnv = { ...process.env, AIBALL_SIM_SHARD: String(k) };
+            delete env.AIBALL_SIM_PORT;
+            spawnSync(process.execPath, [...process.execArgv, self, "down"], { env, stdio: "ignore" });
+        }
+    }
+    const failedShards = codes.filter((c) => c !== 0).length;
+    console.log(`\n${files.length} scenario(s) over ${n} boards, ${failedShards === 0 ? "all passed" : `${failedShards} shard(s) failed`}`);
+    if (failedShards > 0) process.exit(1);
 }
 
 async function run(args: string[]): Promise<void> {
     const keep = args.includes("--keep");
-    const named = args.filter((a) => a !== "--keep");
-    const files = named.length > 0
+    const critical = args.includes("--critical");
+    const shardsAt = args.indexOf("--shards");
+    const shards = shardsAt >= 0 ? Number(args[shardsAt + 1]) : 1;
+    if (!Number.isInteger(shards) || shards < 1) throw new Error("--shards takes a whole number of boards");
+    const named = args.filter((a, i) => !a.startsWith("--") && !(shardsAt >= 0 && i === shardsAt + 1));
+    let files = named.length > 0
         ? named.map((f) => resolve(f))
         : readdirSync(SCENARIOS).filter((f) => f.endsWith(".yaml")).sort().map((f) => join(SCENARIOS, f));
+    if (critical) files = files.filter((f) => scenarioIsCritical(readFileSync(f, "utf8")));
     if (files.length === 0) throw new Error("no scenario to play");
+    if (shards > 1 && !SHARD) {
+        // Once, before the boards start side by side (see ensureNodeModulesVolume).
+        ensureNodeModulesVolume();
+        return runShards(files, Math.min(shards, files.length), keep);
+    }
     let failed = 0;
     for (const file of files) {
         if (!keep) {
             // Every scenario starts from an empty board, so none reads another's leftovers.
-            if (existsSync(STATE_FILE)) down();
-            await up(scenarioCohort(readFileSync(file, "utf8")) ?? undefined);
+            const cohort = scenarioCohort(readFileSync(file, "utf8")) ?? undefined;
+            if (boardRunning()) await reset(cohort);
+            else {
+                if (existsSync(STATE_FILE)) down();
+                await up(cohort);
+            }
         }
         failed += await play(file);
     }
@@ -468,7 +624,7 @@ try {
             break;
         }
         default:
-            die("usage: sim up [cohort.yaml] | up --from-live --as <agent>[,<agent>] | wake <agent> | mcp <agent> <tool> [json] | view [agent...] | run [--keep] [scenario...] | pending | approve <id> | reject <id> | down", 2);
+            die("usage: sim up [cohort.yaml] | up --from-live --as <agent>[,<agent>] | wake <agent> | mcp <agent> <tool> [json] | view [agent...] | run [--keep] [--critical] [--shards N] [scenario...] | pending | approve <id> | reject <id> | down", 2);
     }
 } catch (e) {
     die((e as Error).message);

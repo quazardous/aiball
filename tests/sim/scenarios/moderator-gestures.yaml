@@ -1,4 +1,5 @@
 name: moderator gestures and the work order, with two owners on one project
+critical: true
 cohort: tests/sim/cohorts/two-owners.yaml
 steps:
   - alpha-lead: ticket_new

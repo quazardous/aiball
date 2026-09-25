@@ -1,0 +1,23 @@
+# The board simulator's override of tests/docker-compose.yml (#3016).
+#
+# The daemon's node_modules live in a NAMED volume shared by every simulated
+# board, filled once, instead of an anonymous one per container: an anonymous
+# volume is refilled from the image (~760 MB) each time a container is created
+# and dropped with it, ~48 s + ~18 s per board, most of a sharded run. The name
+# carries a hash of the lockfile and the Dockerfile (AIBALL_SIM_NM, set by
+# tests/sim/sim.ts), so a dependency change gets a fresh volume, never a stale one.
+#
+# The boards also run on Docker's default bridge instead of a network of their
+# own: creating a network took ~50 s here and removing it ~18 s (Docker has the
+# firewall reload its rules each time), on every board, for a daemon that talks
+# to nobody but the host on its published port.
+services:
+  daemon:
+    network_mode: bridge
+    volumes:
+      - sim-node-modules:/app/node_modules
+
+volumes:
+  sim-node-modules:
+    external: true
+    name: ${AIBALL_SIM_NM:-aiball-sim-nm-unset}

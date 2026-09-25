@@ -1,4 +1,5 @@
 name: two accepted plans in flight, and another owner claims the one the lead still holds
+critical: true
 # Case 14, decided: a claim is a weak assign, PROTECTED while its holder works
 # (#2379, david). alpha-lead holds A (plan accepted, a step posted), then claims
 # B to execute B's accepted plan. Claiming B does not release A: the lead holds

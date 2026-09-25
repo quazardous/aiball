@@ -1,4 +1,5 @@
 name: the moderator accepts a plan the agent has already replaced
+critical: true
 # Case 4, decided: only the latest decision of a thread can be accepted or
 # rejected. Accepting the superseded plan is refused (409, with its reason), so
 # the agent never receives an execute for a plan nobody works on any more; the

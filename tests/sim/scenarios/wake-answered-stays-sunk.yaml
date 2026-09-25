@@ -1,4 +1,5 @@
 name: answering a backlog wake does not bring the ticket straight back
+critical: true
 # The wake asks the agent for a gesture, and a comment is one. Its own answer
 # is not news: the ticket stays sunk for the cooldown, and comes back only when
 # that cooldown has run out. Anyone else's word still lifts the sink at once,

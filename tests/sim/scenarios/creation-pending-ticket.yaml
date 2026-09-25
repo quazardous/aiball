@@ -1,4 +1,5 @@
 name: an agent's ticket waiting for moderation is in no backlog, and a decision on it is refused at once
+critical: true
 # Case 21. alpha-lead files a ticket: it waits for the moderator. It is in no
 # agent's backlog, and a plan on it is refused with a 409 that says why (not a
 # timeout). Closed while it waits, it stays out. That it also leaves `poll`'s
