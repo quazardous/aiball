@@ -304,6 +304,11 @@ export const messages = sqliteTable("_messages", {
     index("idx_messages_ticket").on(t.ticketId),
     // #3000 — "these tickets, this kind": without it SQLite walked the kind index.
     index("idx_messages_ticket_kind").on(t.ticketId, t.kind),
+    // #3008 — the projects list: a covering index for its per-project message
+    // aggregate, and a partial one for the pending resolutions (its WHERE is the
+    // query's own, written as literals — see pendingResolutionQuery).
+    index("idx_messages_ticket_kind_status_at").on(t.ticketId, t.kind, t.status, t.createdAt),
+    index("idx_messages_pending_resolution").on(t.kind, t.status).where(sql`${t.kind} = 'comment_added' AND ${t.status} = 'approved' AND ${t.meta} LIKE '%"resolution"%' AND ${t.meta} LIKE '%"pending"%'`),
     index("idx_messages_kind").on(t.kind),
     index("idx_messages_hashid").on(t.hashid),
     index("idx_messages_source").on(t.sourceTicketId),

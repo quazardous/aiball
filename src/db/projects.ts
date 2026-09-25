@@ -5,7 +5,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, gt, inArray, isNull, like, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
     getCachedDecisionGate,
     getCachedActionable,
@@ -331,6 +331,54 @@ function overlayConsumer(base: ProjectsBase, consumer_id: string | undefined, la
     return projects;
 }
 
+/**
+ * #3008 — per project, the comment count, last activity and pending comments.
+ * Answered from the covering index `idx_messages_ticket_kind_status_at`
+ * (migration 0079) instead of walking the table; `project-list-indexes.test.ts`
+ * holds the plan to it.
+ */
+export function messageAggQuery(nowIsoStr: string) {
+    return getDb().select({
+        project: schema.tickets.project,
+        last_activity: sql<string>`MAX(${schema.messages.createdAt})`,
+        comment_count: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' THEN 1 ELSE 0 END)`,
+        message_pending: sql<number>`SUM(CASE
+            WHEN ${schema.messages.kind} = 'comment_added'
+             AND ${schema.messages.status} = 'pending'
+             AND (${schema.tickets.postponedUntil} IS NULL
+                  OR ${schema.tickets.postponedUntil} <= ${nowIsoStr})
+            THEN 1 ELSE 0 END)`,
+    })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .groupBy(schema.tickets.project);
+}
+
+/**
+ * Pending resolution proposals on comments (#B.129 phase 2): approved comments
+ * whose `meta.decision` is a pending resolution. The WHERE is a PREFILTER, not
+ * the decision (#2171): it stays a superset — a pending resolution cannot fail
+ * to contain both words — and the JSON parse in the caller decides.
+ *
+ * #3008 — its four terms are written as LITERALS, on purpose: they are exactly
+ * the WHERE of the partial index `idx_messages_pending_resolution` (migration
+ * 0079), and SQLite only uses a partial index when it can see the query implies
+ * it. Bound parameters (`kind = ?`) hide that, and the query fell back to the
+ * `kind` index, walking every comment (~44 → ~7 ms measured on a live copy).
+ * The constants are fixed; nothing from outside reaches this SQL.
+ */
+export function pendingResolutionQuery() {
+    return getDb().select({
+        project: schema.tickets.project,
+        ticket_id: schema.messages.ticketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(sql`${schema.messages.kind} = 'comment_added' AND ${schema.messages.status} = 'approved'
+            AND ${schema.messages.meta} LIKE '%"resolution"%' AND ${schema.messages.meta} LIKE '%"pending"%'`);
+}
+
 function buildProjectsBase(): ProjectsBase {
     const db = getDb();
     // Aggregates by project across tickets + messages. Two queries merged
@@ -362,21 +410,7 @@ function buildProjectsBase(): ProjectsBase {
     // backfill-rejected as a one-shot.
     // Snoozed parent tickets exclude their pending comments from the count
     // for the same reason as above.
-    const messageAgg = db.select({
-        project: schema.tickets.project,
-        last_activity: sql<string>`MAX(${schema.messages.createdAt})`,
-        comment_count: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' THEN 1 ELSE 0 END)`,
-        message_pending: sql<number>`SUM(CASE
-            WHEN ${schema.messages.kind} = 'comment_added'
-             AND ${schema.messages.status} = 'pending'
-             AND (${schema.tickets.postponedUntil} IS NULL
-                  OR ${schema.tickets.postponedUntil} <= ${nowIsoStr})
-            THEN 1 ELSE 0 END)`,
-    })
-        .from(schema.messages)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .groupBy(schema.tickets.project)
-        .all();
+    const messageAgg = messageAggQuery(nowIsoStr).all();
 
     const byProject = new Map<string, ProjectMeta>();
     // #B.227: seed from the projects registry first so a freshly-
@@ -562,31 +596,7 @@ function buildProjectsBase(): ProjectsBase {
             eq(schema.messages.status, "pending"),
         ))
         .all();
-    const decisionPendingResolveds = db.select({
-        project: schema.tickets.project,
-        ticket_id: schema.messages.ticketId,
-        meta: schema.messages.meta,
-    })
-        .from(schema.messages)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(and(
-            eq(schema.messages.kind, "comment_added"),
-            eq(schema.messages.status, "approved"),
-            // #2171 — a PREFILTER, not the decision. Without it this loaded
-            // every approved comment of every project — 12029 rows, each
-            // carrying its whole `meta` blob (which holds `summary_until`, so
-            // kilobytes apiece) — and JSON-parsed all of them to find the 65
-            // that matter. 12029 rows -> 70, and 64 ms -> 29.
-            //
-            // It stays a superset on purpose: a decision of kind "resolution"
-            // with status "pending" cannot fail to contain both words, so the
-            // narrowing cannot hide a match, and the JSON parse below remains
-            // the only thing that DECIDES. Verified on the live corpus: the
-            // retained set is identical, 65 either way.
-            like(schema.messages.meta, '%"resolution"%'),
-            like(schema.messages.meta, '%"pending"%'),
-        ))
-        .all();
+    const decisionPendingResolveds = pendingResolutionQuery().all();
     const pendingResolutionTickets = new Map<string, Set<number>>();
     function bumpPending(project: string, ticketId: number): void {
         let s = pendingResolutionTickets.get(project);
