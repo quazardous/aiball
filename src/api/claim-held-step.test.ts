@@ -31,8 +31,6 @@ const { and, eq } = await import("drizzle-orm");
 
 const P = "p-2460";
 getDb();
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2460-w" }).token;

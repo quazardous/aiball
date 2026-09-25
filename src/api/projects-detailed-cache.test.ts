@@ -22,8 +22,6 @@ const { updateMessageStatus } = await import("../db/messages.js");
 const schema = await import("../schema.js");
 
 getDb();
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 createProject({ name: "pa" });
 createProject({ name: "pb" });

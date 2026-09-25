@@ -28,8 +28,6 @@ const { and, eq } = await import("drizzle-orm");
 const COOLDOWN = 3600;
 const P = "p-2458";
 getDb();
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 // Sorts after "worker": with the unscoped read, its row came last and won.

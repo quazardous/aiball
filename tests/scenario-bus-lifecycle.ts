@@ -14,13 +14,12 @@
 import type { AddressInfo } from "node:net";
 import { createApp } from "../src/app.js";
 import { onLifecycle, type LifecycleEvent } from "../src/event-bus.js";
-import { provision, provisionProject, provisionHuman, seedCounters, metaDecision, ok, fail } from "./lib.js";
+import { provision, provisionProject, provisionHuman, metaDecision, ok, fail } from "./lib.js";
 
 const project = "buslifecycle";
 const dstProject = "buslifecycle-dst";
 
 async function main(): Promise<void> {
-    seedCounters(); // on décide un commentaire PAR id → on évite la collision d'id de DB fraîche
 
     // S'abonner au bus lifecycle in-process AVANT toute mutation.
     const events: LifecycleEvent[] = [];

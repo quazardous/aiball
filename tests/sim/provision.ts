@@ -22,7 +22,6 @@ import { issueToken } from "../../src/db/tokens.js";
 import { getConsumer, setPasswordHash, updateConsumer, upsertConsumer } from "../../src/db.js";
 import { createProject } from "../../src/db/projects.js";
 import { listSubscriptions, upsertSubscription } from "../../src/db/subscriptions.js";
-import { seedCounters } from "../lib.js";
 
 const MODERATOR_PASSWORD = "simulator";
 const args = process.argv.slice(2);
@@ -40,10 +39,6 @@ type Cohort = {
 
 async function fromCohortFile(file: string): Promise<Cohort> {
     const cohort = parseCohort(readFileSync(file, "utf8"));
-
-    // A fresh database numbers comments from 1, like tickets, and a comment id that
-    // equals a ticket id misresolves when a gesture addresses it (approve, decide).
-    seedCounters();
 
     for (const name of cohort.projects) {
         try {

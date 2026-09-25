@@ -13,7 +13,6 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2757-"));
 process.env.AIBALL_SOCK = "";
 
 const { getDb } = await import("./connection.js");
-const schema = await import("../schema.js");
 const { submitMessage } = await import("../messages.js");
 const { createProject } = await import("./projects.js");
 const { upsertConsumer } = await import("./consumers.js");
@@ -24,8 +23,6 @@ const { wakeFocusHidesTicket } = await import("./backlog-rules.js");
 
 const P = "p2757";
 getDb();
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 createProject({ name: P });
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "lead", kind: "agent" });

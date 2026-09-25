@@ -27,8 +27,6 @@ const schema = await import("../schema.js");
 
 const P = "p-2456";
 getDb();
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2456-h" }).token;

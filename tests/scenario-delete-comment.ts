@@ -5,10 +5,8 @@
 // can't delete (403); non-comments can't be deleted (400).
 //
 // Driven over HTTP against the shared daemon. Addresses a comment BY ID
-// (POST /api/messages/:id/delete), so seedCounters() pushes next_message_id
-// above the ticket-id space (getMessage is tickets-first — a comment id
-// colliding with a ticket id would misresolve). Distinct project "deletecomment".
-import { provision, provisionProject, provisionHuman, post, unread, seedCounters, ok, fail, BASE } from "./lib.js";
+// (POST /api/messages/:id/delete). Distinct project "deletecomment".
+import { provision, provisionProject, provisionHuman, post, unread, ok, fail, BASE } from "./lib.js";
 
 const project = "deletecomment";
 
@@ -38,8 +36,6 @@ function commentIds(thread: Record<string, unknown>): number[] {
 }
 
 async function main(): Promise<void> {
-    seedCounters(); // we address a comment by id (/delete) → dodge the ticket/message id collision
-
     provisionProject(project);
     const tokHuman = provisionHuman("human-mod"); // the only actor allowed to delete; also opens the ticket (→ subscribed)
     const tokA = provision("agent-a"); // author of the comment that gets deleted

@@ -27,13 +27,9 @@ const { submitMessage } = await import("../messages.js");
 const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
 const { BANDS } = await import("./inbox-pilot.js");
-const schema = await import("../schema.js");
 
 const P = "p-3005";
 getDb();
-// Comment ids must not collide with ticket ids (as tests/lib.ts seedCounters says).
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "3005-h" }).token;

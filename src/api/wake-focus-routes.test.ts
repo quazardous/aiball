@@ -24,12 +24,9 @@ const { submitMessage } = await import("../messages.js");
 const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
 const { wakeFocusHidesTicket } = await import("../db/backlog-rules.js");
-const schema = await import("../schema.js");
 
 const P = "p-2525";
 getDb();
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "lead", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2525-h" }).token;

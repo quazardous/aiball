@@ -16,7 +16,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { getDb } from "../src/db.js";
 import { createProject, listProjects } from "../src/db/projects.js";
 import * as schema from "../src/schema.js";
-import { provision, provisionHuman, post, decide, seedCounters } from "./lib.js";
+import { provision, provisionHuman, post, decide } from "./lib.js";
 
 const PROJECT = "bidon";
 
@@ -32,7 +32,6 @@ async function seed(name: string): Promise<Record<string, unknown>> {
     if (name === "resolution-pending") {
         // A ticket reported by the HUMAN (so the human can accept-and-close),
         // with a resolution decision proposed by an AGENT (pending).
-        seedCounters();
         ensureProject(PROJECT);
         const human = provisionHuman("fixture-human");
         const agent = provision("fixture-agent");
@@ -54,7 +53,6 @@ async function seed(name: string): Promise<Record<string, unknown>> {
         // loop's consumer (test-agent) → forces an unread ping to it. The loop
         // then wakes on that unread and, on wake delivery, marks it seen — so a
         // post-wake `unread.test-agent` query drops to 0 (full stack exercised).
-        seedCounters();
         ensureProject(PROJECT);
         provision("test-agent");           // ensure the loop's consumer exists so the @mention resolves
         const reporter = provision("reporter");

@@ -44,25 +44,6 @@ export function provisionHuman(consumer: string): string {
     return issueToken({ kind: "auth", consumer_id: consumer, label: "e2e" }).token;
 }
 
-/**
- * Push `next_message_id` far above the ticket-id space so a fresh container DB
- * doesn't hit the next_ticket_id/next_message_id collision (getMessage is
- * tickets-first → a comment id colliding with a ticket id misresolves). Only
- * needed by scenarios that address a comment BY ID (e.g. /decide/:id). Never
- * regresses the counter (idempotent across scenarios sharing the daemon).
- */
-export function seedCounters(): void {
-    const db = getDb();
-    const row = db.select().from(schema.settings).where(eq(schema.settings.key, "next_message_id")).get();
-    const cur = row ? Number(row.value) : 1;
-    if (cur < 1_000_000) {
-        db.insert(schema.settings)
-            .values({ key: "next_message_id", value: "1000000" })
-            .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } })
-            .run();
-    }
-}
-
 export async function post(token: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const r = await fetch(`${BASE}/api/messages`, {
         method: "POST",

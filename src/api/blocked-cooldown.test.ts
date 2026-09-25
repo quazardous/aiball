@@ -33,9 +33,6 @@ const COOLDOWN = 600;
 const P = "p-2377";
 const ONE = "p-2377-one";
 getDb();
-// Comment ids must not collide with ticket ids (as tests/lib.ts seedCounters says).
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2377-h" }).token;

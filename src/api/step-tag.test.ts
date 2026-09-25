@@ -33,10 +33,6 @@ const { eq } = await import("drizzle-orm");
 
 const P = "p-2369";
 getDb();
-// A fresh database numbers comments from 1, like tickets, and a comment id that
-// equals a ticket id resolves to the ticket (as tests/lib.ts seedCounters says).
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2369-h" }).token;

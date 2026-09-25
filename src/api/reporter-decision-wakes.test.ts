@@ -28,13 +28,9 @@ const { getDb } = await import("../db/connection.js");
 const { submitMessage } = await import("../messages.js");
 const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
-const schema = await import("../schema.js");
 
 const P = "p-2380";
 getDb();
-// Comment ids must not collide with ticket ids (as tests/lib.ts seedCounters says).
-getDb().insert(schema.settings).values({ key: "next_message_id", value: "1000000" })
-    .onConflictDoUpdate({ target: schema.settings.key, set: { value: "1000000" } }).run();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 upsertConsumer({ consumer_id: "reporter", kind: "agent" });
