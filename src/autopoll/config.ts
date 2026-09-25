@@ -19,6 +19,7 @@
  *   project: skybot
  * ```
  */
+import { parseMouse } from "../claude-loop/mouse-setup.js";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
@@ -265,6 +266,11 @@ export interface AiballConfig {
         /** #345: treat a bare ESC in the pane as a human takeover (arms the
          *  user-grace so the loop yields). PTY-proxy only. CL_ESC_TAKEOVER. */
         esc_takeover: boolean;
+        /** #3017: whether the loop turns tmux's mouse mode on for its session
+         *  (scroll wheel + drag-copy to the clipboard). false = leave the
+         *  terminal's native selection and right-click alone. Global
+         *  `claude_loop.mouse`, overridden per project; `start --mouse` wins. */
+        mouse: boolean;
         /** #351: key/combo that flags the human AFK (→ immediate redirect).
          *  VS Code notation: `+` joins modifiers, a space = a 2-combo
          *  sequence (e.g. "esc esc", "ctrl+a"). CL_AFK_KEY. */
@@ -458,6 +464,7 @@ const DEFAULTS: AiballConfig = {
         pane_probe_fast_ms: 200,
         pane_probe_slow_ms: 1000,
         esc_takeover: true,
+        mouse: true,
         // #351 / #381: AFK = a single ATOMIC combo that TOGGLES away/back —
         // #381 (david s4r9n8) dropped the 2-press timing sequence. Default
         // `f9` (david 9garjb) — the previous `alt+esc` was confirmed
@@ -555,6 +562,18 @@ function pickColors(block: unknown): Partial<AiballConfig["colors"]> {
 }
 
 /** Read a `colors:` block from a YAML file (the global config). Missing/malformed → {}. */
+/** #3017 — `claude_loop.mouse` from the global config file; undefined when unset. */
+function readGlobalLoopMouse(path: string): boolean | undefined {
+    if (!existsSync(path)) return undefined;
+    try {
+        const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;
+        const cl = raw.claude_loop;
+        return cl && typeof cl === "object" ? parseMouse((cl as Record<string, unknown>).mouse) : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 function readColorsBlock(path: string): Partial<AiballConfig["colors"]> {
     if (!existsSync(path)) return {};
     try {
@@ -723,6 +742,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     // per-project block below (which Object.assigns over this), so precedence is
     // defaults → global → project. Missing global file → {} (no-op).
     Object.assign(cfg.colors, readColorsBlock(globalConfigPath()));
+    // #3017 — `claude_loop.mouse`, GLOBAL layer: a per-user taste (how the
+    // terminal behaves), set once; a project's `.aiball.yaml` can still override.
+    const globalMouse = readGlobalLoopMouse(globalConfigPath());
+    if (globalMouse !== undefined) cfg.claude_loop.mouse = globalMouse;
 
     // #160 Phase 1 — upstream bindings GLOBAL layer. Read AVANT le per-project
     // pour que celui-ci puisse override. Format YAML attendu (per-project map) :
@@ -808,6 +831,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.esc_takeover === "boolean") {
                 cfg.claude_loop.esc_takeover = cl.esc_takeover;
             }
+            // #3017 — on/off (or a boolean); anything else keeps the global value.
+            const mouse = parseMouse(cl.mouse);
+            if (mouse !== undefined) cfg.claude_loop.mouse = mouse;
             // #351: AFK combo.
             if (typeof cl.afk_key === "string" && cl.afk_key.trim()) {
                 cfg.claude_loop.afk_key = cl.afk_key.trim();

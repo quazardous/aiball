@@ -53,6 +53,8 @@ export interface ProjectContext {
         boot_min_seconds: number;
         wake_in_flight_ttl_ms: number;
         esc_takeover: boolean;
+        /** #3017 — turn tmux's mouse mode on for the session (default true). */
+        mouse: boolean;
         afk_key: string;
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */

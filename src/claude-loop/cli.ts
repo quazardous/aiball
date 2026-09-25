@@ -26,6 +26,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { mouseSetupCommands } from "./mouse-setup.js";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
@@ -222,6 +223,8 @@ interface StartOpts {
     wait?: boolean;
     /** Bypass the live-loop conflict check (#B.154). */
     force?: boolean;
+    /** #3017: `--mouse on|off`, over `claude_loop.mouse`. Undefined = the config. */
+    mouse?: boolean;
     /** Resume-picker auto-dismiss (#B.154): summary | as-is | abort. */
     resumeMode?: string;
     /**
@@ -1326,29 +1329,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // n'existe plus. Le PTY proxy + le pane-diff fallback (timer.detectHumanTyping)
     // restent les deux sources de signalement. Cette option psmux est désactivée
     // pour ne pas inviter une écriture fichier orpheline. Voir docs/PTY-PROXY-WINDOWS.md.
-    // #B.176 (david): mouse mode ON for the session so the scroll
-    // wheel actually scrolls the pane buffer instead of being
-    // translated to Up/Down arrow keys. Scoped per-session — we
-    // don't touch the user's global `.tmux.conf`.
-    spawnSync(MUX_CMD, ["set-option", "-t", tname, "mouse", "on"], { stdio: "ignore" });
-    // #B.181 (david): with mouse-on, drag-select goes to tmux's paste
-    // buffer instead of the terminal clipboard. Strategy: bind
-    // MouseDragEnd1Pane to copy-pipe-no-clear piping into a real
-    // local clipboard tool (wl-copy / xclip / pbcopy) when available —
-    // robust across terminals including Ptyxis (VTE blocks OSC 52 by
-    // default). `set-clipboard on` stays enabled as an SSH/remote
-    // fallback path via OSC 52. `-no-clear` (vs `-and-cancel`) keeps
-    // the visual selection on screen after mouse release so the user
-    // can see what was copied.
-    spawnSync(MUX_CMD, ["set-option", "-t", tname, "set-clipboard", "on"], { stdio: "ignore" });
-    const clipboardCmd = resolveClipboardCmd();
-    const pipeArgs = clipboardCmd
-        ? ["send-keys", "-X", "copy-pipe-no-clear", clipboardCmd]
-        : ["send-keys", "-X", "copy-pipe-no-clear"];
-    spawnSync(MUX_CMD, [
-        "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
-        ...pipeArgs,
-    ], { stdio: "ignore" });
+    // #B.176 / #B.181 / #3017 — the mouse: on by default (wheel scrolls the
+    // pane, drag-select copies to the system clipboard), off when the user wants
+    // the terminal's own selection and right-click (`claude_loop.mouse`, or
+    // `start --mouse`). Scoped to the session; the user's `.tmux.conf` is untouched.
+    const mouse = opts.mouse !== undefined ? opts.mouse : ctx.claude_loop.mouse;
+    for (const args of mouseSetupCommands(tname, mouse, mouse ? resolveClipboardCmd() : null)) {
+        spawnSync(MUX_CMD, args, { stdio: "ignore" });
+    }
     // #862 Slice 5 + david `<fix>` — seed BOOT inline (status-bg + @cl_*)
     // pour couvrir la fenêtre cmdStart→BarRenderer.start (~1s : fork
     // bash→tsx→node + boot timer). Sans seed, tmux affiche ses defaults
@@ -1835,6 +1823,8 @@ async function cmdStatus(name: string | undefined): Promise<void> {
     // boot-grace honored + post-boot armed NOT AFK 10m. `wait: false`
     // (--no-wait, default per project yaml) = eager drain at boot end.
     process.stdout.write(`  wait           : ${ctx.claude_loop.wait ? "true (--wait — boot-grace honored, post-boot arms NOT AFK 10m)" : "false (--no-wait — eager drain at boot end, post-boot bar `loop`)"}\n`);
+    // #3017 — the mouse setting a new loop here would get (`start --mouse` overrides it).
+    process.stdout.write(`  mouse (config) : ${ctx.claude_loop.mouse ? "on (wheel scrolls the pane, drag copies; Shift for the terminal's own selection)" : "off (the terminal keeps its native selection and right-click)"}\n`);
     // #591 qef8m6 — surface project_type so it's visible from the CLI without
     // calling the welcome MCP. Null = welcome falls back to `public`.
     process.stdout.write(`  project_type   : ${ctx.project_type ?? "(unset — welcome defaults to 'public')"}\n`);
@@ -2212,6 +2202,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--resume", "#639: force resume mode for this invocation — overrides `claude.always_resume` to true, regardless of yaml config. Mirror of `--no-resume` for the positive case.")
         .option("--force", "Spawn even if another live loop already runs in this cwd")
         .addOption(new Option(
+            "--mouse <on|off>",
+            "#3017: tmux mouse mode for this loop — `on` (wheel scrolls the pane, drag copies to the clipboard) or `off` (the terminal keeps its native selection and right-click). Overrides `claude_loop.mouse`.",
+        ).choices(["on", "off"]))
+        .addOption(new Option(
             "--resume-mode <mode>",
             "How to auto-dismiss the claude --resume picker (summary | as-is | abort)",
         ).default("as-is").choices(["summary", "as-is", "abort"]))
@@ -2264,7 +2258,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             type?: string; denyCode?: boolean;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
-            once?: boolean; zen?: boolean;
+            once?: boolean; zen?: boolean; mouse?: string;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -2279,6 +2273,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 noStartupPing: opts.startupPing === false,
                 runOnce: opts.once === true,
                 force: opts.force === true,
+                mouse: opts.mouse === "on" ? true : opts.mouse === "off" ? false : undefined,
                 resumeMode: opts.resumeMode,
                 wait: waitExplicit ? opts.wait : undefined,
                 aiballUrl: opts.aiballUrl,

@@ -110,6 +110,14 @@ claude_loop:
   # PTY proxy (the default launch path).
   esc_takeover: true
 
+  # Mouse mode for the loop's tmux session. `on`: the wheel scrolls the pane
+  # and a drag-select is copied to the clipboard (hold Shift for the terminal's
+  # own selection and right-click menu). `off`: the loop leaves the mouse
+  # alone, so the terminal keeps its native selection and right-click, and the
+  # wheel no longer scrolls the pane. Also settable in the global
+  # ~/.config/aiball/config.yaml; `claude-loop start --mouse on|off` wins.
+  mouse: on
+
   # AFK key — F9 cycles 3 states: `AFK` (autonomous loop, dim) →
   # `NOT AFK 10m` (jaune countdown) → `NOT AFK ∞` (rouge indefinite)
   # → back to `AFK`. Typing also arms / refreshes the 10m hold

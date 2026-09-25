@@ -962,6 +962,29 @@ prompt history instead of entering copy-mode. psmux has fixed this upstream
 (the wheel follows the pane's own terminal state, as in tmux); until a release
 carries it, use `prefix + [`. Once in copy-mode, the wheel scrolls.
 
+### The mouse: wheel or native selection
+
+By default the loop turns the multiplexer's mouse mode on for its session: the
+wheel scrolls the pane instead of reaching Claude Code as arrow keys, and a
+drag-select is copied to the system clipboard (`wl-copy`, `xclip` or `pbcopy`
+when found, OSC 52 otherwise). The price: the terminal's own selection and its
+right-click menu go to the multiplexer. Hold **Shift** to get them back — in
+most terminals (Ptyxis and every VTE terminal among them), Shift+drag is the
+native selection (then Ctrl+Shift+C) and Shift+right-click the terminal's menu.
+
+To keep the terminal's behaviour without Shift, turn it off:
+
+```yaml
+claude_loop:
+  mouse: off      # default: on
+```
+
+in the global `~/.config/aiball/config.yaml` (a taste of yours, set once) or in
+a project's `.aiball.yaml` (which wins), or for one launch with
+`claude-loop start --mouse off`. The loop then leaves the session's mouse and
+copy bindings alone; the wheel no longer scrolls the pane (use `prefix + [`).
+It applies when a loop starts — `reload` keeps the running session as it is.
+
 ---
 
 ## Files

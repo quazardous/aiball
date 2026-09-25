@@ -1,0 +1,36 @@
+// #3017 — `claude_loop.mouse`: on by default, set globally, overridden per project.
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const root = mkdtempSync(join(tmpdir(), "aiball-3017-"));
+process.env.XDG_CONFIG_HOME = join(root, "xdg");
+mkdirSync(join(root, "xdg", "aiball"), { recursive: true });
+const { loadConfig } = await import("./config.js");
+after(() => rmSync(root, { recursive: true, force: true }));
+
+function project(name: string, yaml: string | null): string {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    if (yaml !== null) writeFileSync(join(dir, ".aiball.yaml"), yaml);
+    return dir;
+}
+const global = (yaml: string) => writeFileSync(join(root, "xdg", "aiball", "config.yaml"), yaml);
+
+test("on by default, when nothing sets it", () => {
+    global("");
+    assert.equal(loadConfig(project("p-default", null)).claude_loop.mouse, true);
+});
+
+test("the global setting applies, and a project can override it", () => {
+    global("claude_loop:\n  mouse: off\n");
+    assert.equal(loadConfig(project("p-global", "consumer:\n  project: p-global\n")).claude_loop.mouse, false);
+    assert.equal(loadConfig(project("p-override", "claude_loop:\n  mouse: on\n")).claude_loop.mouse, true);
+});
+
+test("a value that is neither on nor off is ignored", () => {
+    global("claude_loop:\n  mouse: sometimes\n");
+    assert.equal(loadConfig(project("p-junk", null)).claude_loop.mouse, true);
+});

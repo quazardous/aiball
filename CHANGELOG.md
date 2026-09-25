@@ -31,6 +31,9 @@ dates are YYYY-MM-DD.
   board's list is unchanged.
 - Request stats report how long the event loop was held up, and which
   requests took over 100 ms.
+- `claude_loop.mouse: off` (global config or a project's `.aiball.yaml`,
+  or `claude-loop start --mouse off`) leaves the terminal's own selection
+  and right-click menu to a loop, instead of tmux's mouse mode.
 
 ### Changed
 

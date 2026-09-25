@@ -47,9 +47,13 @@ Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
 child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
 `boot_grace_seconds`, `boot_min_seconds`, `presence_hold_seconds`,
 `wake_in_flight_ttl_ms`, `input_hot_ttl_ms`, `pane_probe_fast_ms`,
-`pane_probe_slow_ms`, `esc_takeover`, `afk_key`, `afk_window_ms`, `wait`,
+`pane_probe_slow_ms`, `esc_takeover`, `mouse`, `afk_key`, `afk_window_ms`, `wait`,
 `drained_strategy`, `log_level`, `permission_mode`, `gates`. See
 [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
+
+`mouse` (`on` | `off`) is also read from the **global** config, since it is
+a per-user taste rather than a project's: defaults → global → project →
+`start --mouse`.
 
 **AskUserQuestion gate + AFK.** In a loop, `AskUserQuestion` is allowed
 while the **presence hold** is live (typing arms a hold of
