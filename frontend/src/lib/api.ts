@@ -1,6 +1,7 @@
 import type { DecisionKind } from "@shared/ticket-transitions";
 import type { WaitCreditMove, WaitCreditRow } from "./waitCredit";
 import { withBase } from "./base";
+import { Rpc } from "./rpc";
 
 export interface Tag {
     id: number;
@@ -271,6 +272,23 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     const res = await rawReq(method, path, body);
     if (res.status === 204) return undefined as T;
     return res.json() as Promise<T>;
+}
+
+/**
+ * #3068 — the bus connection the calls below go through (docs/API-BUS.md). Its
+ * identity is the token's; the `x-aiball-consumer` header HTTP sends is the
+ * same consumer (`aiball.human_id` is set from it at setup).
+ */
+const rpc = new Rpc({ onUnauthorized: () => onUnauthorized() });
+if (typeof document !== "undefined") {
+    // A tab back in view reconnects at once rather than after its backoff.
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") rpc.wake();
+    });
+}
+
+function call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    return rpc.call<T>(method, params);
 }
 
 /** #2074 — state of the enrolment switch. */
@@ -796,7 +814,7 @@ export interface StandingPromptView {
 }
 
 export const api = {
-    listProjects: () => req<string[]>("GET", "/api/projects"),
+    listProjects: () => call<string[]>("project.list"),
     /** #1200 — token-usage-over-time series (per project snapshots). */
     tokenTimeseries: (opts: { project?: string; days?: number } = {}) => {
         const qs = new URLSearchParams();
@@ -813,24 +831,17 @@ export const api = {
         name: string,
         opts: { display_name?: string; description?: string; created_by?: string } = {},
     ) =>
-        req<{
+        call<{
             name: string;
             display_name: string | null;
             description: string | null;
             created_at: string;
             created_by: string | null;
-        }>("POST", "/api/projects", { name, ...opts }),
-    listProjectsDetailed: (consumer_id?: string) => {
-        const qs = consumer_id
-            ? `?detailed=1&consumer_id=${encodeURIComponent(consumer_id)}`
-            : "?detailed=1";
-        return req<ProjectMeta[]>("GET", `/api/projects${qs}`);
-    },
+        }>("project.create", { name, ...opts }),
+    listProjectsDetailed: (consumer_id?: string) =>
+        call<ProjectMeta[]>("project.list", { detailed: true, consumer_id }),
     deleteProject: (name: string) =>
-        req<{ project: string; deleted_messages: number; ok: boolean }>(
-            "DELETE",
-            `/api/projects/${encodeURIComponent(name)}`,
-        ),
+        call<{ project: string; deleted_messages: number; ok: boolean }>("project.delete", { name }),
     purgeOldClosed: (name: string, older_than_days = 365) =>
         req<{
             project: string;
@@ -895,10 +906,7 @@ export const api = {
             { strategy },
         ),
     getProjectStandingPrompt: (name: string) =>
-        req<StandingPromptView>(
-            "GET",
-            `/api/projects/${encodeURIComponent(name)}/standing-prompt`,
-        ),
+        call<StandingPromptView>("project.standing_prompt", { project: name }),
     /** #2525 — the wake focus, beside the standing instruction. */
     setProjectWakeFocus: (name: string, focus_tickets: string | null, focus_until: string | null) =>
         req<StandingPromptView>(
@@ -913,30 +921,18 @@ export const api = {
             { standing_prompt },
         ),
     mentionSuggestions: () =>
-        req<{ projects: string[]; agents: string[] }>(
-            "GET",
-            "/api/mention-suggestions",
-        ),
+        call<{ projects: string[]; agents: string[] }>("mention.suggestions"),
     listMessages: (params: {
         status?: string;
         project?: string;
         kind?: string;
         limit?: number;
-    } = {}) => {
-        const qs = new URLSearchParams();
-        for (const [k, v] of Object.entries(params)) {
-            if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
-        }
-        const q = qs.toString();
-        return req<Message[]>("GET", `/api/messages${q ? "?" + q : ""}`);
-    },
-    listTickets: (params: { project?: string; open?: boolean } = {}) => {
-        const qs = new URLSearchParams();
-        if (params.project) qs.set("project", params.project);
-        if (params.open) qs.set("open", "1");
-        const q = qs.toString();
-        return req<TicketSummary[]>("GET", `/api/tickets${q ? "?" + q : ""}`);
-    },
+    } = {}) => call<Message[]>("message.list", { ...params, status: params.status || undefined, project: params.project || undefined, kind: params.kind || undefined }),
+    listTickets: (params: { project?: string; open?: boolean } = {}) =>
+        call<TicketSummary[]>("ticket.list", {
+            ...(params.project ? { project: params.project } : {}),
+            ...(params.open ? { open: true } : {}),
+        }),
     /**
      * #2071 — one page of the inbox, filtered and sorted BY THE SERVER.
      *
@@ -966,31 +962,27 @@ export const api = {
             ids?: number[];
         } = {},
     ): Promise<{ rows: InboxRow[]; total: number }> => {
-        const qs = new URLSearchParams();
-        if (params.project) qs.set("project", params.project);
-        if (params.status) qs.set("status", params.status);
-        if (params.open) qs.set("open", "1");
-        if (params.intent) qs.set("intent", params.intent);
-        if (params.priority) qs.set("priority", params.priority);
-        if (params.include_postponed) qs.set("include_postponed", "1");
-        if (params.unread) qs.set("unread", "1");
-        if (params.sort) qs.set("sort", params.sort);
         // The page size is the reader's own preference, not a constant — so it
         // travels with the request rather than living in the endpoint.
-        if (params.limit) qs.set("limit", String(params.limit));
-        if (params.offset) qs.set("offset", String(params.offset));
-        if (params.ids?.length) qs.set("ids", params.ids.join(","));
-        const q = qs.toString();
-        const res = await rawReq("GET", `/api/inbox${q ? "?" + q : ""}`);
-        const rows = (await res.json()) as InboxRow[];
-        const header = Number(res.headers.get("X-Total-Count"));
-        return { rows, total: Number.isFinite(header) ? header : rows.length };
+        const out = await call<{ rows: InboxRow[]; total: number }>("inbox.list", {
+            project: params.project || undefined,
+            status: params.status || undefined,
+            open: params.open || undefined,
+            intent: params.intent || undefined,
+            priority: params.priority || undefined,
+            include_postponed: params.include_postponed || undefined,
+            unread: params.unread || undefined,
+            sort: params.sort || undefined,
+            limit: params.limit || undefined,
+            offset: params.offset || undefined,
+            ids: params.ids?.length ? params.ids : undefined,
+        });
+        return { rows: out.rows, total: Number.isFinite(out.total) ? out.total : out.rows.length };
     },
     markTicketRead: (id: number, upToId?: number) =>
-        req<{ ticket_id: number; updated: number; up_to_id?: number }>(
-            "POST",
-            `/api/tickets/${id}/mark-read`,
-            typeof upToId === "number" ? { up_to_id: upToId } : {},
+        call<{ ticket_id: number; updated: number; up_to_id?: number }>(
+            "ticket.mark_read",
+            typeof upToId === "number" ? { id, up_to_id: upToId } : { id },
         ),
     markTicketUnread: (id: number) =>
         req<{ ticket_id: number; updated: number }>(
@@ -1003,94 +995,84 @@ export const api = {
     // the moderator browser. Force full=1.
     // #309: include_deleted=1 surfaces user-deleted comments as tombstones in
     // the moderator UI (agents/MCP never pass it, so they don't see them).
-    getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}?full=1&include_deleted=1`),
+    getTicket: (id: number) => call<ThreadView>("ticket.get", { id, full: true, include_deleted: true }),
+    /** A ticket's header alone (by id or hashid): where it lives, for jumping to it. */
+    getTicketHeader: (id: number | string) => call<{ ticket: { id: number; project: string } }>("ticket.get", { id }),
+    /** #235 — the board's configuration: formatting patterns and upstream bindings. */
+    getConfig: () => call<{ formatting?: unknown; upstream?: unknown }>("config.get"),
     /**
      * #2112 — the payload zone, FILTERED: keys always, values only where the
      * schema declares them public, secrets reduced to a short prefix. There is
      * deliberately no "reveal" call here: the values are reached with
      * `aiball payload dump`, a command someone runs, never a click.
      */
-    getTicketPayload: (id: number) => req<PayloadView>("GET", `/api/tickets/${id}/payload`),
+    getTicketPayload: (id: number) => call<PayloadView>("ticket.payload", { id }),
     revokeTicketPayload: (id: number) =>
-        req<PayloadView>("DELETE", `/api/tickets/${id}/payload`),
+        call<PayloadView>("ticket.revoke_payload", { id }),
     search: (params: {
         q: string;
         project?: string;
         open?: boolean;
         intent?: string;
         limit?: number;
-    }) => {
-        const qs = new URLSearchParams({ q: params.q });
-        if (params.project) qs.set("project", params.project);
-        if (params.open) qs.set("open", "1");
-        if (params.intent) qs.set("intent", params.intent);
-        if (params.limit !== undefined) qs.set("limit", String(params.limit));
-        return req<SearchHit[]>("GET", `/api/search?${qs.toString()}`);
-    },
+    }) =>
+        call<SearchHit[]>("message.search", {
+            q: params.q,
+            project: params.project || undefined,
+            open: params.open || undefined,
+            intent: params.intent || undefined,
+            limit: params.limit,
+        }),
     postponeTicket: (id: number, until: string) =>
-        req<{ ticket_id: number; postponed_until: string }>(
-            "POST",
-            `/api/tickets/${id}/postpone`,
-            { until },
-        ),
+        call<{ ticket_id: number; postponed_until: string }>("ticket.postpone", { id, until }),
     unsnoozeTicket: (id: number) =>
-        req<{ ticket_id: number; postponed_until: null }>(
-            "POST",
-            `/api/tickets/${id}/unsnooze`,
-            {},
-        ),
+        call<{ ticket_id: number; postponed_until: null }>("ticket.unsnooze", { id }),
     /** Move a ticket (whole thread) to another project (#294). Reporter-or-
      *  human only. Returns the moved ticket header (with its new project). */
     moveTicket: (id: number, project: string) =>
-        req<Message>("POST", `/api/tickets/${id}/move`, { project }),
+        call<Message>("ticket.move", { id, project }),
     /** #2180 — a ticket's pending children, one level, each with who attached it
      *  and when. */
     pendingChildren: (id: number) =>
-        req<{ ticket_id: number; children: PendingChild[] }>("GET", `/api/tickets/${id}/pending-children`),
+        call<{ ticket_id: number; children: PendingChild[] }>("ticket.pending_children", { id }),
     /** #2180 — approve exactly these children (human only). Ids that are not,
      *  or no longer, pending children come back in `skipped`, untouched. */
     approvePendingChildren: (id: number, ticketIds: number[]) =>
-        req<{ ticket_id: number; approved: number[]; skipped: { ticket_id: number; reason: string }[] }>(
-            "POST",
-            `/api/tickets/${id}/approve-pending-children`,
-            { ticket_ids: ticketIds },
+        call<{ ticket_id: number; approved: number[]; skipped: { ticket_id: number; reason: string }[] }>(
+            "ticket.approve_pending_children",
+            { id, ticket_ids: ticketIds },
         ),
     /** #514 — push (or self-claim if assignee = caller) the responsibility for
      *  a ticket. `assignee` empty/omitted = self-claim, else pushes to that
      *  consumer (human/moderator only for cross-assign). Returns the ticket head
      *  with new `assignee` + `assigned_by` + `assigned_at`. */
     assignTicket: (id: number, assignee: string) =>
-        req<Message>("POST", `/api/tickets/${id}/assign`, { assignee }),
+        call<Message>("ticket.assign", { id, assignee }),
     /** #514 follow-up — release the current assignment/claim. Used by the
      *  ManagePanel to UNASSIGN a ticket (show-clear on the assignee Select). */
     releaseTicket: (id: number) =>
-        req<Message>("POST", `/api/tickets/${id}/release`, {}),
+        call<Message>("ticket.release", { id }),
     /** #518 — vote +1 / -1 / 0 (retract) sur un commentaire, per-author.
      *  Le serveur stocke par consumer_id dans meta.votes. Renvoie le message
      *  décoré avec `votes_summary` recalculé pour le caller. */
     voteOnMessage: (id: number, value: 1 | -1 | 0) =>
-        req<Message>("POST", `/api/messages/${id}/vote`, { value }),
+        call<Message>("message.vote", { id, value }),
     // ---- ticket subscription / mute + owner (#352) -----------------------
     /** Current consumer's relationship to a ticket: "followed" | "muted" | null. */
     ticketSubState: (ticketId: number) =>
-        req<{ consumer_id: string; ticket_id: number; state: "followed" | "muted" | null }>(
-            "GET",
-            `/api/ticket-subscriptions/${ticketId}?consumer_id=${encodeURIComponent(currentConsumer())}`,
+        call<{ consumer_id: string; ticket_id: number; state: "followed" | "muted" | null }>(
+            "ticket.subscription",
+            { ticket_id: ticketId, consumer_id: currentConsumer() },
         ),
     /** Follow (muted=false) or mute (muted=true) a ticket for the current consumer. */
     setTicketSub: (ticketId: number, muted: boolean) =>
-        req<{ consumer_id: string; ticket_id: number; muted: boolean }>(
-            "POST",
-            "/api/ticket-subscriptions",
+        call<{ consumer_id: string; ticket_id: number; muted: boolean }>(
+            "ticket.subscribe",
             { consumer_id: currentConsumer(), ticket_id: ticketId, muted },
         ),
     /** Reassign a ticket's owner (= by_agent). Moderator-only server-side (#352). */
     changeTicketOwner: (ticketId: number, owner: string) =>
-        req<{ ticket_id: number; owner: string }>(
-            "POST",
-            `/api/tickets/${ticketId}/owner`,
-            { owner },
-        ),
+        call<{ ticket_id: number; owner: string }>("ticket.set_owner", { id: ticketId, owner }),
     /** #352: a ticket's explicit subscriptions (follows + mutes). Moderator-only. */
     ticketSubscriptions: (ticketId: number) =>
         req<{ ticket_id: number; subscriptions: { consumer_id: string; muted: boolean; subscribed_at: string }[] }>(
@@ -1101,40 +1083,40 @@ export const api = {
     /** Import an external issue (`gh#123` or `gh:owner/repo#123`) as a new
      *  coupled ticket. 409 if already coupled (with `existing_ticket_id`). */
     importUpstream: (ref: string, project: string) =>
-        req<{
+        call<{
             ticket: { id: number; title: string | null };
             external: { num: number; title: string; state: string; url: string; labels: string[] };
             provider: string;
-        }>("POST", "/api/tickets/import", { ref, project }),
+        }>("ticket.import", { ref, project }),
     /** Export a ticket UP as a new GitHub issue and couple it. Writes to the
      *  remote — call only from a confirmed action. `repo` overrides the
      *  project's default binding. */
     exportUpstream: (ticketId: number, repo?: string) =>
-        req<{
+        call<{
             ticket: { id: number };
             external: { num: number; url: string };
             provider: string;
-        }>("POST", `/api/tickets/${ticketId}/export`, {
+        }>("ticket.export", {
+            id: ticketId,
             ...(repo ? { repo } : {}),
         }),
     /** #352: mute/unmute one SPECIFIC subscriber's subscription on a ticket. */
     muteSubscription: (ticketId: number, consumerId: string, muted: boolean) =>
-        req<{ consumer_id: string; ticket_id: number; muted: boolean }>(
-            "POST",
-            "/api/ticket-subscriptions",
+        call<{ consumer_id: string; ticket_id: number; muted: boolean }>(
+            "ticket.subscribe",
             { consumer_id: consumerId, ticket_id: ticketId, muted },
         ),
     /** Delete a comment (#309) — human moderator only. Soft-delete (the
      *  comment becomes a tombstone in the UI, invisible to agents/MCP). */
     deleteComment: (id: number) =>
-        req<Message>("POST", `/api/messages/${id}/delete`, {}),
+        call<Message>("message.delete", { id }),
     /** Resurface a message (#827) — clear `seen_at` on every ping row
      *  pointing at it, so recipients re-see it at their next wake.
      *  Human-only. Returns `{ resurfaced: N }` (count flipped). */
     resurface: (id: number) =>
-        req<{ resurfaced: number }>("POST", `/api/messages/${id}/resurface`, {}),
+        call<{ resurfaced: number }>("message.resurface", { id }),
     postMessage: (body: PostMessageInput) =>
-        req<Message>("POST", "/api/messages", body),
+        call<Message>("message.post", { ...body }),
     /** Add (or supersede) a typed inter-ticket relation (#B.123 phase B).
      *  Append-only: posting with the same target replaces; posting with
      *  kind="ignored" tombstones the relation. */
@@ -1143,15 +1125,14 @@ export const api = {
         target: number,
         kind: import("./relations").RelationKind,
     ) =>
-        req<{ ticket_id: number; event_id: number; relations: TicketRelation[] }>(
-            "POST",
-            `/api/tickets/${ticketId}/relations`,
-            { target_ticket_id: target, kind },
+        call<{ ticket_id: number; event_id: number; relations: TicketRelation[] }>(
+            "ticket.relate",
+            { id: ticketId, target_ticket_id: target, kind },
         ),
     approve: (id: number) =>
-        req<Message>("POST", `/api/messages/${id}/approve`),
+        call<Message>("message.approve", { id }),
     reject: (id: number) =>
-        req<Message>("POST", `/api/messages/${id}/reject`),
+        call<Message>("message.reject", { id }),
     /** #618 — atomic accept-and-close. Replaces the 2-step
      *  `approve(id)` + `postMessage({kind:"ticket_closed"})` flow with
      *  a single round-trip ; the server enchaîne synchroniquement les
@@ -1160,10 +1141,9 @@ export const api = {
      *  the reporter's note is part of the same audit row. Returns the
      *  approved decision + the close event as separate Messages. */
     acceptAndClose: (id: number, body?: string) =>
-        req<{ approved: Message; closed: Message }>(
-            "POST",
-            `/api/messages/${id}/accept-and-close`,
-            body ? { body } : {},
+        call<{ approved: Message; closed: Message }>(
+            "message.accept_and_close",
+            body ? { id, body } : { id },
         ),
     /** Accept or reject a comment's decision (#B.129). The comment must
      *  carry `meta.decision={kind, status:"pending"}` set by the
@@ -1179,7 +1159,8 @@ export const api = {
         // for resolution/wontfix accepts (one call does decide + close).
         closeBody?: string,
     ) =>
-        req<Message>("POST", `/api/messages/${id}/decide`, {
+        call<Message>("message.decide", {
+            id,
             status,
             new_kind,
             ...(closeBody ? { body: closeBody } : {}),
@@ -1188,7 +1169,7 @@ export const api = {
      *  status (#B.129 follow-up). 409 when the decision is missing
      *  or already terminal. */
     reclassify: (id: number, new_kind: DecisionKind) =>
-        req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
+        call<Message>("message.reclassify", { id, new_kind }),
     /** Promote an undecorated comment to a decision (#B.256).
      *  `status` omitted → tag as pending. `status` set → tag +
      *  decide in one gesture. Works whether the comment had a
@@ -1198,31 +1179,31 @@ export const api = {
         kind: "plan" | "resolution",
         status?: "accepted" | "rejected",
     ) =>
-        req<Message>("POST", `/api/messages/${id}/promote`, { kind, status }),
+        call<Message>("message.promote", { id, kind, status }),
     /** Untag a comment — drops `meta.decision` (#B.256 dzm3ef).
      *  409 when the decision is already terminal. */
     untagMessage: (id: number) =>
-        req<Message>("POST", `/api/messages/${id}/untag`, {}),
+        call<Message>("message.untag", { id }),
     /** #2369 — tag an agent's comment as a step after the fact, or remove that tag. */
     stepMessage: (id: number) =>
-        req<Message>("POST", `/api/messages/${id}/step`, {}),
+        call<Message>("message.step", { id }),
     /** #2383 — mark the ticket as a step (its latest agent comment), or remove that tag. */
     stepTicket: (id: number) =>
         req<Message>("POST", `/api/tickets/${id}/step`, {}),
     unstepTicket: (id: number) =>
         req<Message>("POST", `/api/tickets/${id}/unstep`, {}),
     unstepMessage: (id: number) =>
-        req<Message>("POST", `/api/messages/${id}/unstep`, {}),
+        call<Message>("message.unstep", { id }),
     /** #2910 — a project's milestones, oldest first. */
     listMilestones: (project: string) =>
-        req<{ project: string; milestones: MilestoneRow[] }>("GET", `/api/projects/${encodeURIComponent(project)}/milestones`),
+        call<{ project: string; milestones: MilestoneRow[] }>("project.milestones", { project }),
     /** #2910 — put a ticket in a milestone, move it, or take it out (null). */
     setTicketMilestone: (id: number, milestoneId: number | null) =>
-        req<{ ticket_id: number; milestone: MilestoneRef | null }>("POST", `/api/tickets/${id}/milestone`, { milestone_id: milestoneId }),
+        call<{ ticket_id: number; milestone: MilestoneRef | null }>("ticket.set_milestone", { id, milestone_id: milestoneId }),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null; level?: "task" | "milestone" | "roadmap" }) =>
-        req<Message>("POST", `/api/messages/${id}/edit`, body),
+        call<Message>("message.edit", { ...body, id }),
     note: (id: number, note: string | null) =>
-        req<Message>("POST", `/api/messages/${id}/note`, { note }),
+        call<Message>("message.note", { id, note }),
 
     /**
      * Mark a question (GFM `- [ ]` item with a `<!-- q:<id> -->` marker
@@ -1234,24 +1215,16 @@ export const api = {
         questionId: string,
         body: { answered_in: number },
     ) =>
-        req<Message>(
-            "POST",
-            `/api/messages/${messageId}/questions/${encodeURIComponent(questionId)}/answer`,
-            body,
-        ),
+        call<Message>("message.answer_question", { ...body, id: messageId, qid: questionId }),
 
     // #447: per-agent work filters.
 
     // #457 slice 4: unified automation rules CRUD.
-    listAutomationRules: (filters?: { trigger?: AutomationTrigger; enabledOnly?: boolean }) => {
-        const q: string[] = [];
-        if (filters?.trigger) q.push(`trigger=${encodeURIComponent(filters.trigger)}`);
-        if (filters?.enabledOnly) q.push("enabled_only=1");
-        return req<AutomationRule[]>(
-            "GET",
-            `/api/automation/rules${q.length ? `?${q.join("&")}` : ""}`,
-        );
-    },
+    listAutomationRules: (filters?: { trigger?: AutomationTrigger; enabledOnly?: boolean }) =>
+        call<AutomationRule[]>("automation.rules", {
+            trigger: filters?.trigger,
+            enabled_only: filters?.enabledOnly || undefined,
+        }),
     addAutomationRule: (body: {
         triggers: AutomationTrigger[] | AutomationTrigger;
         scope_consumer?: string | null;
@@ -1273,10 +1246,10 @@ export const api = {
         action?: AutomationAction;
         position?: number;
         note?: string | null;
-    }) => req<AutomationRule>("POST", "/api/automation/rules", body),
-    delAutomationRule: (id: number) => req<void>("DELETE", `/api/automation/rules/${id}`),
+    }) => call<AutomationRule>("automation.create_rule", { ...body }),
+    delAutomationRule: (id: number) => call<{ id: number; deleted: boolean }>("automation.delete_rule", { id }),
     toggleAutomationRule: (id: number, enabled: boolean) =>
-        req<AutomationRule>("PATCH", `/api/automation/rules/${id}`, { enabled }),
+        call<AutomationRule>("automation.update_rule", { id, enabled }),
     /** Slice 5.3b — full partial-update : any subset of triggers / expression /
      *  actions / match_* / note / position / enabled. Backend validates per-field. */
     patchAutomationRule: (
@@ -1298,7 +1271,7 @@ export const api = {
             position?: number;
             note?: string | null;
         },
-    ) => req<AutomationRule>("PATCH", `/api/automation/rules/${id}`, body),
+    ) => call<AutomationRule>("automation.update_rule", { ...body, id }),
 
     // #449: unified config manager. Pass a project for the per-project view
     // (overrides + effective); omit it for the global view.
@@ -1319,11 +1292,11 @@ export const api = {
             `/api/managed-config/${encodeURIComponent(key)}${project ? `?project=${encodeURIComponent(project)}` : ""}`,
         ),
 
-    listTags: () => req<Tag[]>("GET", "/api/tags"),
+    listTags: () => call<Tag[]>("tag.list"),
     // Merged config+DB catalog for the Tags admin panel (#223). Pass a
     // project name to scope, or "_global" for the cross-project view.
     listTagCatalog: (project: string) =>
-        req<CatalogTag[]>("GET", `/api/tags?project=${encodeURIComponent(project)}`),
+        call<CatalogTag[]>("tag.list", { project }),
     // Config-tag override (#223 zcjqgp): color/order are editable even for
     // config tags; the override is keyed by name. `color: null` resets to
     // the config default.
@@ -1337,7 +1310,7 @@ export const api = {
     ) => req<Tag>("PATCH", `/api/tags/${id}`, body),
     delTag: (id: number) => req<void>("DELETE", `/api/tags/${id}`),
     setMessageTags: (id: number, tag_ids: number[]) =>
-        req<Tag[]>("PUT", `/api/messages/${id}/tags`, { tag_ids }),
+        call<Tag[]>("message.set_tags", { id, tag_ids }),
 
     getStrategy: () => req<{ strategy: Strategy }>("GET", "/api/strategy"),
     setStrategy: (s: Strategy) =>
@@ -1361,7 +1334,7 @@ export const api = {
     authLogout: () => req<{ ok: boolean }>("POST", "/api/auth/logout"),
     me: () => req<Consumer>("GET", "/api/me"),
 
-    listConsumers: () => req<Consumer[]>("GET", "/api/consumers"),
+    listConsumers: () => call<Consumer[]>("consumer.list"),
     /** #393: launch a claude-loop for a known local root of this project
      *  (human-only, server validates the root). */
     launchLoop: (project: string, root: string) =>
@@ -1376,11 +1349,11 @@ export const api = {
         display_name?: string | null;
         enabled?: boolean;
         note?: string | null;
-    }) => req<Consumer>("POST", "/api/consumers", body),
+    }) => call<Consumer>("consumer.upsert", { ...body }),
     updateConsumer: (
         consumer_id: string,
         patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null; micro_prompt: string | null; can_claim: boolean; can_create_agent: boolean; agent_type: "coder" | "cto"; notify_project_broadcasts: boolean | null }>,
-    ) => req<Consumer>("PATCH", `/api/consumers/${encodeURIComponent(consumer_id)}`, patch),
+    ) => call<Consumer>("consumer.update", { ...patch, consumer_id }),
     deleteConsumer: (consumer_id: string) =>
         req<{ consumer_id: string; deleted: boolean }>(
             "DELETE",
@@ -1403,9 +1376,8 @@ export const api = {
      *  projects. `del` hard-deletes the rows; default marks them seen.
      *  Gated server-side to the human moderator (this UI). */
     markReadProject: (opts: { consumer: string; allProjects: boolean; del?: boolean }) =>
-        req<{ consumer_id: string; affected: number; deleted: boolean }>(
-            "POST",
-            "/api/mark-read",
+        call<{ consumer_id: string; affected: number; deleted: boolean }>(
+            "unread.mark_read",
             {
                 consumer_id: opts.consumer,
                 ...(opts.allProjects ? { all_projects: true } : {}),

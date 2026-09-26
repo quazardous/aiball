@@ -3,7 +3,9 @@ import { ref, watch } from "vue";
 import Button from "primevue/button";
 import IdentityPicker from "./IdentityPicker.vue";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
-import { pushRoute, withBase } from "../lib/base";
+import { pushRoute } from "../lib/base";
+import { api } from "../lib/api";
+import { RpcError } from "../lib/rpc";
 import StandingPromptButton from "./StandingPromptButton.vue";
 
 // #540 / #570 — goto ticket : input compact qui accepte
@@ -101,16 +103,12 @@ function navigateToTicket(id: number, project: string | null): void {
 async function gotoTicket(id: number): Promise<string | null> {
     let project: string | null = null;
     try {
-        const tok = localStorage.getItem("aiball.token");
-        const headers: Record<string, string> = {};
-        if (tok) headers["authorization"] = `Bearer ${tok}`;
-        const res = await fetch(withBase(`/api/tickets/${id}`), { headers });
-        if (res.status === 404) return `no ticket #${id}`;
-        if (res.ok) {
-            const data = await res.json();
-            if (typeof data?.ticket?.project === "string") project = data.ticket.project;
-        }
-    } catch { /* fall through — navigate without the switch */ }
+        const data = await api.getTicketHeader(id);
+        if (typeof data?.ticket?.project === "string") project = data.ticket.project;
+    } catch (e) {
+        if (e instanceof RpcError && e.status === 404) return `no ticket #${id}`;
+        /* otherwise fall through — navigate without the switch */
+    }
     navigateToTicket(id, project);
     return null;
 }
@@ -149,15 +147,16 @@ async function submitGoto() {
     const hashid = m[1];
     gotoBusy.value = true;
     try {
-        const tok = localStorage.getItem("aiball.token");
-        const headers: Record<string, string> = {};
-        if (tok) headers["authorization"] = `Bearer ${tok}`;
-        const res = await fetch(withBase(`/api/tickets/${encodeURIComponent(hashid)}`), { headers });
-        if (!res.ok) {
-            gotoError.value = `not found : ${hashid}`;
-            return;
+        let data: { ticket?: { id?: number; project?: string } } | null = null;
+        try {
+            data = await api.getTicketHeader(hashid);
+        } catch (e) {
+            if (e instanceof RpcError) {
+                gotoError.value = `not found : ${hashid}`;
+                return;
+            }
+            throw e;
         }
-        const data = await res.json();
         if (!data?.ticket?.id) {
             gotoError.value = `not found : ${hashid}`;
             return;

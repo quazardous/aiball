@@ -20,7 +20,7 @@
 import { Marked, type Tokens } from "marked";
 import { ref } from "vue";
 import { highlightCode, resolveLang } from "./highlight";
-import { withBase } from "./base";
+import { api } from "./api";
 
 export interface FormattingPattern {
     id: string;
@@ -206,12 +206,7 @@ export function formatTicketRef(id: number | string): string {
  */
 export async function loadFormatting(): Promise<void> {
     try {
-        const tok = localStorage.getItem("aiball.token");
-        const headers: Record<string, string> = {};
-        if (tok) headers["authorization"] = `Bearer ${tok}`;
-        const res = await fetch(withBase("/api/config"), { headers });
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await api.getConfig();
         const next = data?.formatting;
         if (Array.isArray(next) && next.length > 0) {
             patterns.value = next as FormattingPattern[];
