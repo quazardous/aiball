@@ -17,7 +17,7 @@ whose meaning changes bumps it, and is listed under [Changes](#changes).
 | `open=1`, `unread=1` | Only open tickets; only tickets with something unread for the caller. |
 | `intent`, `priority` | Only tickets with this intent, this priority. |
 | `include_postponed=1` | Also snoozed tickets, hidden otherwise. |
-| `view=turn` | Adds `turn`, `band` and `state_glyph` to each row ([below](#the-turn-view)). |
+| `view=turn` | Adds `turn`, `band`, `band_name` and `state_glyph` to each row ([below](#the-turn-view)). |
 | `sort` | `activity` (default, latest first), `created_desc`, `created_asc`, `priority`, or `band` (by band, then latest activity). |
 | `limit`, `offset` | A page; the total is in the `X-Total-Count` header. |
 
@@ -91,6 +91,7 @@ computed by the same rule, next to `is_claim` and `claim_until`.
 |---|---|---|
 | `turn` | `you` \| `them` \| `none` | Whose move it is. `them`: the caller acted last and someone else is involved, or the last word is someone else's step. `none`: closed. It follows the actionable rule (see `TICKET_LIFECYCLE.md`), not only the last comment: a decision taken or a close without a word hands the ball over. |
 | `band` | number | Index into the bands below; `sort=band` orders by it. |
+| `band_name` | string | The band's name, one of the bands below. Read this one: a band added or removed shifts the indexes, not the names. |
 | `state_glyph` | see below \| null | The one state mark the row shows. |
 
 **Bands**, in order:
@@ -119,6 +120,7 @@ the band its work is in, and the row says it is unread (`unread`).
 ## Changes
 
 - **Version 2.** The `unread` band is gone: an unread ticket keeps its
-  workflow band, and `working`, `open` and `closed` move up one index.
+  workflow band, and `working`, `open` and `closed` move up one index. Adds
+  `band_name`, the band's name next to its index.
 - **Version 1.** First written version. Adds `holder` and `held_as`; the turn
   view is `view=turn` (it was `v=tvty`, which no longer adds anything).

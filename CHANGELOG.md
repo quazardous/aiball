@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- Each row of the inbox turn view names its band (`band_name`), so a client need not rely on the band's position.
 - The bus: one permanent connection per client, JSON-RPC 2.0 over a
   WebSocket at `/bus`, on the local socket and over TCP. The caller is
   authenticated once when it connects, calls and batches go straight to the

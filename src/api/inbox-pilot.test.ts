@@ -66,11 +66,13 @@ async function decide(messageId: number, status: "accepted" | "rejected"): Promi
     const r = await call(HUMAN, "POST", `/api/messages/${messageId}/decide`, { status });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
-type Row = { id: number; last_speaker: string; turn?: string; band?: number; state_glyph?: string | null; unread?: boolean };
+type Row = { id: number; last_speaker: string; turn?: string; band?: number; band_name?: string; state_glyph?: string | null; unread?: boolean };
 async function row(ticketId: number, token = HUMAN): Promise<Row> {
     const r = await call(token, "GET", `/api/inbox?view=turn&ids=${ticketId}&project=${P}`);
     const rows = r.json as Row[];
     assert.equal(rows.length, 1, JSON.stringify(r.json));
+    // Every turn row names its band: a client reads the name, not the index.
+    assert.equal(rows[0]!.band_name, BANDS[rows[0]!.band!], "band_name is BANDS[band]");
     return rows[0]!;
 }
 const band = (name: (typeof BANDS)[number]) => BANDS.indexOf(name);

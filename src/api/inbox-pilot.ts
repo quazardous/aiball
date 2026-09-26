@@ -29,8 +29,10 @@ export type StateGlyph =
 
 export interface PilotFields {
     turn: Turn;
-    /** Index into `BANDS`. */
+    /** Index into `BANDS`: `sort=band` orders by it. */
     band: number;
+    /** The band's name, `BANDS[band]`: what a client reads, so a band added or removed shifts nothing for it. */
+    band_name: (typeof BANDS)[number];
     state_glyph: StateGlyph | null;
 }
 
@@ -79,7 +81,7 @@ export function pilotFields(row: InboxRow, facts: PilotFacts, viewer: string, vi
     else if (row.latest_is_step || (row.claimant && row.hot)) band = "working";
     else band = "open";
 
-    return { turn, band: BANDS.indexOf(band), state_glyph: glyph };
+    return { turn, band: BANDS.indexOf(band), band_name: band, state_glyph: glyph };
 }
 
 /**
