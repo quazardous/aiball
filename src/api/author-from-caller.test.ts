@@ -73,6 +73,17 @@ test("signed by the caller, or not signed: the caller is the author", async () =
     }
 });
 
+test("a human leaving by_agent out is judged as the human it is: no summary_until needed", async () => {
+    // The regression: validation judged "human or agent" on the body's by_agent,
+    // so a human following the rule (no author in the body) was taken for an agent.
+    const t = ticket("human, unsigned");
+    const r = await call(HUMAN, "POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: t, body: "plain" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(getMessage(r.json.id as number)?.by_agent, "boss");
+    const agent = await call(WORKER, "POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: t, body: "plain", handback: true, commits: null });
+    assert.equal(agent.status, 400, "an agent still owes its summary_until");
+});
+
 test("the other author fields: set_by, answered_by, decided_by", async () => {
     const t = ticket("fields");
     const tags = await call(WORKER, "PUT", `/api/messages/${t}/tags`, { tag_ids: ["t-3036"], set_by: "boss" });

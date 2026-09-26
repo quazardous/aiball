@@ -166,7 +166,12 @@ export function creationHandbackFor(msg: NewMessage): { handback: boolean; warni
     const leads = !human && listSubscriptions(author).some((s) => s.project === msg.project && s.role === "owner");
     return creationHandback({ creatorIsHuman: human, creatorLeadsProject: leads, hasPlan: msg.decision_kind === "plan" });
 }
-export function validateNewMessage(input: unknown): ValidationError | NewMessage {
+/**
+ * `author` (#3036): the authenticated caller, when the caller is known (the
+ * HTTP route). It decides "human or agent" and becomes `by_agent`; the body's
+ * `by_agent` is then never read here. Absent (the spool, a key), the body's.
+ */
+export function validateNewMessage(input: unknown, author?: string): ValidationError | NewMessage {
     if (!input || typeof input !== "object") return { error: "body must be object" };
     const o = input as Record<string, unknown>;
     if (typeof o.project !== "string" || !o.project) {
@@ -237,7 +242,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     // summary est pas obligatoire") — human consumers skip the
     // requirement; only agents must summarize what they post.
     let summaryUntil: string | null = null;
-    const byAgent = typeof o.by_agent === "string" ? o.by_agent : null;
+    const byAgent = author ?? (typeof o.by_agent === "string" ? o.by_agent : null);
     const authorIsHuman = byAgent ? isHuman(byAgent) : false;
     if (kind === "comment_added") {
         // #B.130 follow-up: cap removed entirely. Treat summary_until
@@ -386,7 +391,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         // kinds ignore it. Empty string maps to null so an explicit
         // clear works.
         summary: typeof o.summary === "string" && o.summary !== "" ? o.summary : null,
-        by_agent: typeof o.by_agent === "string" ? o.by_agent : null,
+        by_agent: byAgent,
         intent: kind === "ticket_created" ? intent : null,
         priority: kind === "ticket_created" ? priority : null,
         decision_kind: decisionKind,

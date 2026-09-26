@@ -115,7 +115,13 @@ const SUBMIT_REFUSAL_STATUS: Partial<Record<string, number>> = {
 };
 
 messagesRouter.post("/messages", (req: Request, res: Response) => {
-    const v = validateNewMessage(req.body);
+    // #3036 — the author IS the caller: a body naming someone else is refused.
+    // Settled BEFORE validation, which judges "human or agent" (summary_until…)
+    // on the author: judged on the body, a human leaving by_agent out was
+    // taken for an agent.
+    const author = authorFor(req, res, (req.body as { by_agent?: unknown } | undefined)?.by_agent);
+    if (author === null) return;
+    const v = validateNewMessage(req.body, author);
     if ("error" in v) return badRequest(res, v.error);
     // #830 — decision-event kinds (plan_accepted / plan_rejected / …) are
     // emitted server-side by the /decide handler ONLY. External callers
@@ -131,9 +137,6 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     // (no consumer to compare to the ticket reporter, no isHuman bypass) —
     // every close on a ticket the moderator didn't open returned 403. Same
     // pattern as api/tickets.ts:assign which has always done `consumerOf(req)`.
-    // #3036 — and the author IS the caller: a body naming someone else is refused.
-    const author = authorFor(req, res, v.by_agent);
-    if (author === null) return;
     v.by_agent = author;
     // #2275 / #2331 — an agent's comment carries a then, or says whether it hands the ticket back.
     const noDecision = withoutDecisionRefusal(v, consumerOf(req));
