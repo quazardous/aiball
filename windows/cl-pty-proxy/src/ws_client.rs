@@ -38,6 +38,9 @@ const WATCHDOG_MS: u128 = 30_000;
 pub struct Callbacks {
     pub on_inject: Box<dyn Fn(&str) + Send>,
     pub on_view: Box<dyn Fn(&Value) + Send>,
+    /// #3048 — `{kind:"getScreen", data:{id}}`: the kernel asks for the screen
+    /// model; the callback answers with a `screen` proxyEvent carrying `id`.
+    pub on_get_screen: Box<dyn Fn(&Value) + Send>,
 }
 
 /// Handle other threads use to emit `proxyEvent`s. Clone freely.
@@ -127,6 +130,11 @@ fn dispatch(text: &str, cb: &Callbacks) {
                 if data.is_object() {
                     (cb.on_view)(data);
                 }
+            }
+        }
+        Some("getScreen") => {
+            if let Some(data) = frame.get("data") {
+                (cb.on_get_screen)(data);
             }
         }
         Some("inject") => {
@@ -339,6 +347,7 @@ mod tests {
         let cb = Callbacks {
             on_view: Box::new(move |_v| *v2.lock().unwrap() += 1),
             on_inject: Box::new(move |t| i2.lock().unwrap().push(t.to_string())),
+            on_get_screen: Box::new(|_d| {}),
         };
         dispatch(r#"{"kind":"view","data":{"barWord":"loop"}}"#, &cb);
         dispatch(r#"{"kind":"inject","data":{"text":"wake!"}}"#, &cb);
@@ -347,5 +356,18 @@ mod tests {
         dispatch("garbage", &cb); // malformed → ignored
         assert_eq!(*views.lock().unwrap(), 1);
         assert_eq!(*injects.lock().unwrap(), vec!["wake!".to_string()]);
+    }
+
+    #[test]
+    fn dispatch_routes_get_screen_with_its_id() {
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        let cb = Callbacks {
+            on_view: Box::new(|_v| {}),
+            on_inject: Box::new(|_t| {}),
+            on_get_screen: Box::new(move |d| a2.lock().unwrap().push(d.clone())),
+        };
+        dispatch(r#"{"kind":"getScreen","data":{"id":7}}"#, &cb);
+        assert_eq!(asked.lock().unwrap().as_slice(), &[serde_json::json!({"id": 7})]);
     }
 }

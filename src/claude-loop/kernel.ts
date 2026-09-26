@@ -99,7 +99,9 @@ import {
     type WakeHint,
     type WakeEventHint,
     writeBarHost,
+    type LoopServer,
 } from "./state.js";
+import { compareScreens, recordScreenComparison, type ScreenReading } from "./screen-compare.js";
 import { isBarHost } from "../agent-bar.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { loopConfig } from "./loop-config.js";
@@ -492,6 +494,48 @@ if (sd) {
 // refreshPaneMarkers for the watcher tick (avoids a 2nd display-message call)
 // and recorded into the capture by logPaneCapture.
 let lastCursor: { x: number; y: number } | null = null;
+
+// #3048 — the proxy's screen, asked over loop.sock and matched by id.
+const SCREEN_COMPARE_EVERY_MS = 30_000;
+const SCREEN_REPLY_TIMEOUT_MS = 1_000;
+const screenWaiters = new Map<number, (reply: Record<string, unknown>) => void>();
+let screenRequestId = 0;
+
+function askProxyScreen(server: LoopServer): Promise<ScreenReading | null> {
+    const id = ++screenRequestId;
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => { screenWaiters.delete(id); resolve(null); }, SCREEN_REPLY_TIMEOUT_MS);
+        timer.unref?.();
+        screenWaiters.set(id, (reply) => {
+            clearTimeout(timer);
+            const cursor = reply.cursor as { x?: unknown; y?: unknown } | undefined;
+            resolve(typeof reply.text === "string"
+                ? { text: reply.text, cursor: cursor && typeof cursor.x === "number" && typeof cursor.y === "number" ? { x: cursor.x, y: cursor.y } : null }
+                : null);
+        });
+        server.requestScreen(id);
+    });
+}
+
+/** #3048 — one comparison: tmux, the proxy, tmux again; counted only if tmux held still. */
+async function compareProxyScreen(server: LoopServer): Promise<void> {
+    if (!sd) return;
+    const before = capturePane();
+    const cursorBefore = lastCursor;
+    const proxy = await askProxyScreen(server);
+    if (!proxy) return; // no proxy, or one without a screen model (Windows, older build)
+    const after = capturePane();
+    if (after !== before || JSON.stringify(lastCursor) !== JSON.stringify(cursorBefore)) {
+        recordScreenComparison(sd, null);
+        return;
+    }
+    const result = compareScreens({ text: before, cursor: cursorBefore }, proxy);
+    const score = recordScreenComparison(sd, result);
+    // One line per comparison, as the plan said: the log is where the gap is read.
+    log(result.match
+        ? `screen-compare: match (${score.comparisons} compared, ${score.mismatches} differ)`
+        : `screen-compare: MISMATCH ${JSON.stringify({ diffLines: result.diffLines, cursorMatch: result.cursorMatch, first: result.first, score: { comparisons: score.comparisons, mismatches: score.mismatches } })}`);
+}
 
 function capturePane(): string {
     try {
@@ -1894,6 +1938,13 @@ async function mainSse(): Promise<void> {
             // already fired at the IPC layer (markAsProxy → onProxyConnect) ; here
             // we just no-op it instead of letting it fall through to "unknown".
             if (event.event === "hello") return;
+            // #3048 — the proxy's answer to a getScreen: hand it to the waiting comparison.
+            if (event.event === "screen") {
+                const id = Number((event as { id?: unknown }).id);
+                const waiter = screenWaiters.get(id);
+                if (waiter) { screenWaiters.delete(id); waiter(event); }
+                return;
+            }
             // #3044 — who draws the bar (`claude-loop bar`, or the API relaying a
             // host's switch): the state file is the one truth, and the bar
             // renderer applies it on its next tick (≤ 1 s).
@@ -1971,6 +2022,11 @@ async function mainSse(): Promise<void> {
         // \n by createLogger (cf. `src/log.ts:83`).
         onLogLine: (line) => process.stdout.write(line),
     });
+    // #3048 — is the proxy's screen model the screen tmux shows? Now and then,
+    // on a screen that holds still, compare the two and keep the score. An
+    // indicator only: nothing reads the screen from the proxy yet.
+    const screenCompareTimer = setInterval(() => { void compareProxyScreen(loopServer); }, SCREEN_COMPARE_EVERY_MS);
+    screenCompareTimer.unref?.();
     process.on("exit", () => loopServer.close());
     // #1053 S2 — bridge every XState actor emit onto the kernel bus. ADDITIVE :
     // runs ALONGSIDE the business `actor.on(...)` consumers below (the kernel

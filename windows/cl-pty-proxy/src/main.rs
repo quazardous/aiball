@@ -69,6 +69,7 @@ use windows_sys::Win32::System::Pipes::{
 };
 
 mod core;
+mod screen;
 mod ws_client;
 
 // #941 Slice 2B — Linux entry point. Compiled only on Unix targets.
@@ -556,6 +557,9 @@ fn real_main() -> i32 {
                     }
                 }),
                 on_view: Box::new(|_v: &serde_json::Value| { /* cached only; BarRenderer paints */ }),
+                // #3048 — no screen model on Windows yet: getScreen goes unanswered,
+                // and the kernel simply skips its comparison.
+                on_get_screen: Box::new(|_d: &serde_json::Value| {}),
             },
         )
     });

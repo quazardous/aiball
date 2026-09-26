@@ -3115,6 +3115,9 @@ export const LOOP_SOCK_KIND = {
     VIEW: "view",
     PROXY_EVENT: "proxyEvent",
     INJECT: "inject",
+    /** #3048 — ask the proxy for its screen model; it answers with a
+     *  `screen` proxyEvent carrying the same `id`. */
+    GET_SCREEN: "getScreen",
     QUERY_LOOP_STATE: "queryLoopState",
     QUERY_LOOP_STATE_REPLY: "queryLoopStateReply",
     SHUTDOWN: "shutdown",
@@ -3150,6 +3153,8 @@ export interface LoopServer {
     /** Broadcast a wake-inject text frame. The proxy writes the bytes
      *  straight to claude's PTY (bypasses tmux send-keys). */
     injectText(text: string): void;
+    /** #3048 — ask the proxy for its screen model (answered as a `screen` proxyEvent). */
+    requestScreen(id: number): void;
     /** Stop accepting connections + unlink the socket file. Idempotent. */
     close(): void;
 }
@@ -3365,6 +3370,9 @@ export function createLoopServer(
         },
         injectText(text) {
             server.broadcast({ kind: LOOP_SOCK_KIND.INJECT, data: { text } });
+        },
+        requestScreen(id) {
+            server.broadcast({ kind: LOOP_SOCK_KIND.GET_SCREEN, data: { id } });
         },
         close() {
             server.close();

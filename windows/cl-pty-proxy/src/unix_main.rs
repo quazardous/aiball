@@ -220,6 +220,14 @@ pub fn run() -> i32 {
     drop_proxy_alive();
 
     let writer = Arc::new(Mutex::new(writer));
+    // #3048 — the screen model, fed with claude's output below. It answers the
+    // kernel's `getScreen` through the ws connection, whose handle only exists
+    // once the client is started: hence the cell.
+    // Opt-in (CL_SCREEN_MODEL=1): built with panic = "abort", a parser panic
+    // would end the session, and the model is only an indicator so far.
+    let screen = (env::var("CL_SCREEN_MODEL").as_deref() == Ok("1"))
+        .then(|| crate::screen::Screen::new(rows, cols));
+    let ws_cell: Arc<Mutex<Option<ws_client::WsHandle>>> = Arc::new(Mutex::new(None));
     // #768 — ws client over UDS : emit proxyEvents + receive inject. None
     // when CL_STATE_DIR is unset (degraded : events dropped, bytes still forward).
     let ws = loop_sock_path().map(|sock| {
@@ -234,9 +242,24 @@ pub fn run() -> i32 {
                     }
                 }),
                 on_view: Box::new(|_v: &serde_json::Value| { /* cached only ; BarRenderer paints */ }),
+                on_get_screen: {
+                    let screen = screen.clone();
+                    let cell = ws_cell.clone();
+                    Box::new(move |data: &serde_json::Value| {
+                        let Some(mut reply) = screen.as_ref().and_then(|s| s.snapshot()) else { return };
+                        reply["event"] = serde_json::json!("screen");
+                        reply["id"] = data.get("id").cloned().unwrap_or(serde_json::Value::Null);
+                        if let Some(h) = cell.lock().ok().and_then(|c| c.clone()) {
+                            h.emit(reply);
+                        }
+                    })
+                },
             },
         )
     });
+    if let (Some(h), Ok(mut c)) = (ws.clone(), ws_cell.lock()) {
+        *c = Some(h);
+    }
 
     let master: Arc<Mutex<Box<dyn MasterPty + Send>>> = Arc::new(Mutex::new(pair.master));
     let running = Arc::new(AtomicBool::new(true));
@@ -245,6 +268,7 @@ pub fn run() -> i32 {
     {
         let running = running.clone();
         let mut reader = reader;
+        let screen = screen.clone();
         thread::spawn(move || {
             let mut buf = [0u8; 16384];
             let mut out = std::io::stdout();
@@ -254,6 +278,9 @@ pub fn run() -> i32 {
                     Ok(n) => {
                         if out.write_all(&buf[..n]).is_err() || out.flush().is_err() {
                             break;
+                        }
+                        if let Some(s) = &screen {
+                            s.feed(&buf[..n]);
                         }
                     }
                 }
@@ -324,6 +351,7 @@ pub fn run() -> i32 {
     {
         let master = master.clone();
         let running = running.clone();
+        let screen = screen.clone();
         thread::spawn(move || {
             let mut last_size = (rows, cols);
             while running.load(Ordering::Relaxed) {
@@ -331,6 +359,9 @@ pub fn run() -> i32 {
                 if let Some((r, c)) = window_size() {
                     if (r, c) != last_size {
                         last_size = (r, c);
+                        if let Some(s) = &screen {
+                            s.resize(r, c);
+                        }
                         if let Ok(m) = master.lock() {
                             let _ = m.resize(PtySize {
                                 rows: r,

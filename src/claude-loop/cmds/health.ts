@@ -10,6 +10,7 @@
  * Pure read-only ; aucun side-effect. Réutilise les helpers existants
  * de `state.ts` + le UDS `queryLoopState` du #774.
  */
+import { readScreenCompareScore } from "../screen-compare.js";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -181,6 +182,20 @@ export function checkProxy(sd: string): HealthCheck {
         };
     }
     return { name: "proxy", status: "ok", detail: `pid ${p.pid} running (cl-pty-proxy)` };
+}
+
+/**
+ * #3048 — how the proxy's screen model compares with what tmux shows, from
+ * the kernel's running score. An indicator: always `ok`, the numbers are the
+ * point — mismatches are read, not alarmed on, until the model is trusted.
+ */
+export function checkProxyScreen(sd: string): HealthCheck {
+    const s = readScreenCompareScore(sd);
+    if (s.comparisons === 0) {
+        return { name: "proxy screen", status: "ok", detail: s.unstable > 0 ? `no still screen compared yet (${s.unstable} skipped: moving)` : "not compared yet" };
+    }
+    const last = s.last_mismatch ? `; last mismatch ${s.last_mismatch.at}, ${s.last_mismatch.diffLines} row(s)` : "";
+    return { name: "proxy screen", status: "ok", detail: `${s.comparisons} compared with tmux, ${s.mismatches} differ (${s.unstable} skipped: moving)${last}` };
 }
 
 export function checkTmuxSession(name: string): HealthCheck {
@@ -405,6 +420,7 @@ export async function runHealthChecks(name: string): Promise<HealthReport> {
     const { live, latencyMs, sockMissing } = await queryUdsLoopState(sd);
     checks.push(checkLoopSock(latencyMs, sockMissing, live));
     checks.push(checkProxy(sd));
+    checks.push(checkProxyScreen(sd));
     checks.push(checkTmuxSession(name));
     checks.push(checkOrphanLauncher(name));
     checks.push(checkIpcFreshness(live));

@@ -26,6 +26,9 @@ which = "6"
 # ws:// only (loopback transport #739) → no TLS feature, just the handshake.
 tungstenite = { version = "0.21", default-features = false, features = ["handshake"] }
 serde_json = "1"
+# #3048 — a screen model of what claude draws (text, cursor, geometry), to
+# answer `getScreen` on loop.sock; compared to tmux's capture-pane first.
+vt100 = "0.16.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

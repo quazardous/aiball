@@ -94,6 +94,11 @@ export const CL_ENV = {
     // `<state_dir>/capture/` (the kernel → `panes.ndjson`),
     // sharing one epoch clock so a real session can be merged + replayed.
     CAPTURE: "CL_CAPTURE",
+    // #3048 — `1` turns on the proxy's screen model (compared to tmux's
+    // capture-pane, an indicator). Off by default: the proxy is built with
+    // `panic = "abort"`, so a parser panic would end the loop's session —
+    // opt in per loop (`CL_SCREEN_MODEL=1 claude-loop start`).
+    SCREEN_MODEL: "CL_SCREEN_MODEL",
 } as const;
 
 export type ClEnvName = typeof CL_ENV[keyof typeof CL_ENV];

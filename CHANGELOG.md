@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- With `CL_SCREEN_MODEL=1`, a loop's PTY proxy keeps a model of claude's
+  screen and answers `getScreen`; the kernel compares it with tmux's capture
+  every 30 s and keeps the score (`claude-loop health`: `proxy screen`).
 - `docs/API.md` indexes the API contract; tvty's calls are tested on aiball's
   side, with every field it reads. The route inventory tells a certain call
   (●) from a possible one (◐, a segment built at run time).

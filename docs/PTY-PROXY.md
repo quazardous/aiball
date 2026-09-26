@@ -139,6 +139,23 @@ pressing Escape and armed NOT-AFK for ten minutes.
   who paints the bar's human segment; `claude-loop health <loop>` reports
   whether the proxy is running.
 
+## The screen model (opt-in)
+
+With `CL_SCREEN_MODEL=1` in the loop's environment (`CL_SCREEN_MODEL=1
+claude-loop start`), the proxy keeps a model of the screen claude draws (the
+`vt100` crate, fed with the bytes it already forwards, resized with the PTY)
+and answers `{kind:"getScreen", data:{id}}` on `loop.sock` with a `screen`
+proxy event: the visible rows as text (visual rows, like `capture-pane -p`),
+the cursor and the geometry.
+
+The kernel asks every 30 s and compares the answer with `tmux capture-pane`,
+counting only a screen that held still between two tmux reads. The score is
+in `<state_dir>/screen-compare.json`, one `screen-compare:` line per
+comparison goes to the loop log, and `claude-loop health` shows a `proxy
+screen` line. It is an indicator: nothing reads the screen from the proxy yet.
+It is off by default because the proxy is built with `panic = "abort"`: a
+parser panic would end the session. Unix only for now.
+
 ## Diagnostic
 
 - `CL_PROXY_DEBUG=1` prints every byte run the proxy reads, in hex, to its
