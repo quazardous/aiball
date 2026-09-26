@@ -228,6 +228,19 @@ as the same OS user can read it) — the uid frontier, as always.
 
 ---
 
+## Uploads — capability URLs
+
+A file pasted or attached in a thread is stored under its SHA-256 and cited in
+texts as `/uploads/<sha>.<ext>`. That web path is served **outside the API's
+authentication**, on purpose: a browser's `<img>` sends no token. Anyone who can
+reach the daemon's TCP port and knows a file's 64-hex-digit hash can read it —
+the hash is the capability, and it cannot be guessed, but it travels with every
+text that cites the file.
+
+Clients that are not a browser read the same file under the API, behind its
+authentication: `/api/uploads/<sha>` (the extension is optional). Over the local
+socket both are equally trusted.
+
 ## Summary
 
 | mode | proof | strength | ergonomics |

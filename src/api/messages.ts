@@ -47,6 +47,7 @@ import {
     type MessageKind,
     type MessageStatus,
     type Priority,
+    resolveAttachments,
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
@@ -188,7 +189,9 @@ messagesRouter.get("/messages", (req: Request, res: Response) => {
 messagesRouter.get("/messages/:id", (req, res) => {
     const m = getMessage(Number(req.params.id));
     if (!m) return notFound(res);
-    res.json(withTagsOne(m));
+    // #3040 — the uploads its text cites, resolved as on a thread read.
+    const localTrust = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
+    res.json({ ...withTagsOne(m), attachments: resolveAttachments([m.body], localTrust) });
 });
 
 /**

@@ -197,10 +197,55 @@ function buildContentDisposition(kind: "inline" | "attachment", name: string): s
 }
 
 /**
+ * Send one upload: `ext` null = any (the API route may omit it), else it must
+ * match the stored one. The content is addressed by its hash, so the hash is a
+ * perfect ETag and a repeated request gets a 304. `cache` is the Cache-Control:
+ * `public` on the web path, `private` on the authenticated API one (#3040).
+ */
+function sendUpload(sha: string, ext: string | null, req: Request, res: Response, cache: "public" | "private"): void {
+    const row = getUploadBySha(sha);
+    if (!row || (ext !== null && row.ext !== ext)) {
+        res.status(404).type("text/plain").send("not found");
+        return;
+    }
+    const path = joinPath(UPLOADS_DIR, `${sha}.${row.ext}`);
+    if (!existsSync(path)) {
+        res.status(404).type("text/plain").send("not found");
+        return;
+    }
+    const etag = `"${sha}"`;
+    res.setHeader("ETag", etag);
+    res.setHeader("Cache-Control", `${cache}, max-age=86400, immutable`);
+    const ifNoneMatch = req.header("if-none-match");
+    if (ifNoneMatch && ifNoneMatch.split(",").map((t) => t.trim()).includes(etag)) {
+        res.status(304).end();
+        return;
+    }
+    const stat = statSync(path);
+    const disposition = pickDisposition(row.content_type, req.query);
+    const fallbackName = `${sha}.${row.ext}`;
+    const displayName = row.original_name
+        ? sanitizeFilename(row.original_name, fallbackName)
+        : fallbackName;
+    res.setHeader("Content-Type", row.content_type);
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Content-Disposition", buildContentDisposition(disposition, displayName));
+    if (req.method === "HEAD") {
+        res.end();
+        return;
+    }
+    createReadStream(path).pipe(res);
+}
+
+/**
  * GET handler for `/uploads/<sha>.<ext>` — mounted by `createApp()` at the
  * root path (the frontend writes `/uploads/<sha>.<ext>` URLs directly,
  * unprefixed by `/api`). Pure function so it can be tested against an
  * in-process express app without the surrounding daemon.
+ *
+ * Served outside `/api`, so without the API's authentication: a file is
+ * readable by whoever knows its hash (a capability URL — what lets a browser
+ * `<img>` load it). See docs/SECURITY.md.
  */
 export function serveUpload(req: Request, res: Response): void {
     const m = /^\/uploads\/([0-9a-f]{64})\.([A-Za-z0-9]+)$/.exec(req.path);
@@ -208,34 +253,21 @@ export function serveUpload(req: Request, res: Response): void {
         res.status(404).type("text/plain").send("not found");
         return;
     }
-    const sha = m[1];
-    const ext = m[2];
-    const row = getUploadBySha(sha);
-    if (!row || row.ext !== ext) {
-        res.status(404).type("text/plain").send("not found");
-        return;
-    }
-    const path = joinPath(UPLOADS_DIR, `${sha}.${ext}`);
-    if (!existsSync(path)) {
-        res.status(404).type("text/plain").send("not found");
-        return;
-    }
-    const stat = statSync(path);
-    const disposition = pickDisposition(row.content_type, req.query);
-    const fallbackName = `${sha}.${ext}`;
-    const displayName = row.original_name
-        ? sanitizeFilename(row.original_name, fallbackName)
-        : fallbackName;
-    res.setHeader("Content-Type", row.content_type);
-    res.setHeader("Content-Length", String(stat.size));
-    res.setHeader("Content-Disposition", buildContentDisposition(disposition, displayName));
-    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
-    if (req.method === "HEAD") {
-        res.end();
-        return;
-    }
-    createReadStream(path).pipe(res);
+    sendUpload(m[1]!, m[2]!, req, res, "public");
 }
+
+/**
+ * #3040 — the same file under the API, behind its authentication, for clients
+ * that are not a browser on this server: `/api/uploads/<sha>` (the extension
+ * is optional; given, it must match).
+ */
+const API_UPLOAD_PATH = /^\/uploads\/([0-9a-f]{64})(?:\.([A-Za-z0-9]+))?$/;
+const serveApiUpload = (req: Request, res: Response): void => {
+    const m = API_UPLOAD_PATH.exec(req.path)!;
+    sendUpload(m[1]!, m[2] ?? null, req, res, "private");
+};
+uploadsRouter.get(API_UPLOAD_PATH, serveApiUpload);
+uploadsRouter.head(API_UPLOAD_PATH, serveApiUpload);
 
 uploadsRouter.get("/uploads/stats", (_req, res) => {
     res.json(uploadStats());

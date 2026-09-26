@@ -31,6 +31,9 @@ dates are YYYY-MM-DD.
   board's list is unchanged.
 - Request stats report how long the event loop was held up, and which
   requests took over 100 ms.
+- Uploads are served under the API as well, behind its authentication
+  (`/api/uploads/<sha>`), with the hash as ETag; a single message and each
+  thread comment list the uploads their text cites, with both paths.
 - A moderator can read a given agent's backlog, as that agent sees it,
   without sending its identity: `GET /api/consumers/<agent>/backlog`, with the
   agent's unread events and wait credit.

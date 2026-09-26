@@ -45,9 +45,10 @@ open.
   core cannot yet start without knowing the UI exists.
 - **Some response shapes are cut for the web list** (`/api/inbox`), and one view is
   named after a client (`/api/inbox?v=tvty`).
-- **Uploads are served outside `/api`** (`/uploads/<sha>.<ext>`), without the API's
-  authentication: a file is readable by whoever knows its 64-hex-digit hash (a
-  capability URL, which is what lets a browser `<img>` load it).
+- **Uploads are also served outside `/api`** (`/uploads/<sha>.<ext>`), without the
+  API's authentication: a file is readable by whoever knows its 64-hex-digit hash (a
+  capability URL, which is what lets a browser `<img>` load it — see
+  [`SECURITY.md`](./SECURITY.md)). The authenticated route is `/api/uploads/<sha>`.
 - **The MCP server borrows two helpers from claude-loop** (token capture, the install
   root): a coupling between two clients, not with the core.
 - **`src/client.ts` imports a type from `src/event-bus.ts`**, which types itself on
@@ -55,6 +56,17 @@ open.
   still depend on the core's.
 - **The API has no written contract.** Clients rely on routes and fields that exist
   only in the code; tvty calls part of the API by hand, outside the shared client.
+
+## Uploads in texts
+
+A text cites an upload as `/uploads/<sha>.<ext>` — `<sha>` the file's SHA-256 in
+lowercase hex (64 digits), `<ext>` 1 to 8 letters or digits. That is the stable
+reference form: a client may rewrite it (for instance to `/api/uploads/<sha>`, or
+to a local file) by matching `/uploads/([a-f0-9]{64})\.([A-Za-z0-9]{1,8})`.
+Wherever a text is returned — a thread (and each of its comments), a single
+message — its uploads come resolved in `attachments`: `sha`, `ext`,
+`content_type`, `bytes`, `ref` (the web path), `api_ref` (the API path), and
+`uri`, a `file://` path when the caller is on the same host.
 
 ## The routes and who calls them
 

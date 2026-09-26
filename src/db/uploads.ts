@@ -222,6 +222,8 @@ export interface ResolvedAttachment {
     bytes: number | null;
     /** The literal `/uploads/<sha>.<ext>` reference as it appears in the body. */
     ref: string;
+    /** #3040 — the same file under the API, behind its authentication. */
+    api_ref: string;
     /** `file://<abs>` when `local`, else the HTTP `ref`. */
     uri: string;
     /** True ⇒ `uri` is a local filesystem path readable directly. */
@@ -265,6 +267,7 @@ export function resolveAttachments(
             content_type: meta?.content_type ?? null,
             bytes: meta?.bytes ?? null,
             ref,
+            api_ref: `/api/uploads/${sha}`,
             uri: local ? pathToFileURL(abs).href : ref,
             local,
         });

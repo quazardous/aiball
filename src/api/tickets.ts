@@ -2035,6 +2035,12 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         [ticketBody, ...outComments.map((c) => c.body)],
         localTrust,
     );
+    // #3040 — each comment also lists its own uploads, when it has any, so a
+    // client rendering one comment need not scan the thread-wide list.
+    outComments = outComments.map((c) => {
+        const own = resolveAttachments([c.body], localTrust);
+        return own.length > 0 ? { ...c, attachments: own } : c;
+    });
     res.json({
         ticket: {
             ...headerBase,
