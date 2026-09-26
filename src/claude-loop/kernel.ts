@@ -47,7 +47,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
-import { captureCursorSync } from "../pane.js";
+import { tmuxPort, type TerminalPort } from "./terminal-port.js";
 import { drainOffload, listOffloadComponents } from "./offload.js";
 import { getKernelBus, bridgeActorToKernel } from "./kernel-bus.js";
 import {
@@ -67,7 +67,6 @@ import {
     setResuming,
     MUX_CMD,
     buildContextPhrase,
-    injectWakePhrase,
     checkHasWork,
     readIdleSinceMs,
     humanPresentHold,
@@ -86,7 +85,6 @@ import {
     writeDrainedState,
     tmuxName,
     humanPresence,
-    injectRawBytes,
     logBarPaint,
     logPaneCapture,
     zenPath,
@@ -242,7 +240,7 @@ const tname = tmuxName(name);
  */
 function cleanShutdown(reason: string): void {
     log(`clean shutdown (${reason}) — stopping loop '${name}' (transient state swept; rm to delete)`);
-    try { spawnSync(MUX_CMD, ["kill-session", "-t", tname], { stdio: "ignore" }); } catch { /* tmux already gone */ }
+    term.end();
     // #442 sweep — drop the transient RUNTIME markers (stale `loop.pid`,
     // `idle-since`, `wake-*`, `human-typing`, `busy-defer-until`,
     // `inject.sock`, …) so the dead loop reads cleanly in `claude-loop list` and a
@@ -331,6 +329,9 @@ const logger = createLogger({ tag: `claude-loop:${name}#${process.pid}` });
 function log(msg: string): void {
     logger.info(msg);
 }
+
+// #3066 3a — the terminal Claude runs in: tmux today, the session host next.
+const term: TerminalPort = tmuxPort({ session: tname, stateDir: sd, log });
 // #1032 S2 — drain every component's offload buffer into the central log,
 // each entry replayed with its ORIGINAL ts (→ unified timeline), then cleared.
 // Called at boot : the timer has just (re)started, so anything the hooks/proxy
@@ -370,22 +371,7 @@ log(`kernel.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
  * loop's claude were still very much alive. Portable across platforms
  * (the spawnSync.error mechanism is identical on Linux + Windows).
  */
-const SPAWN_RETRY_LIMIT = 5;
-let consecutiveSpawnErr = 0;
-function tmuxAlive(): boolean {
-    const r = spawnSync(MUX_CMD, ["has-session", "-t", tname], { stdio: "ignore" });
-    if (r.error) {
-        consecutiveSpawnErr++;
-        if (consecutiveSpawnErr <= SPAWN_RETRY_LIMIT) {
-            log(`tmux probe spawn error (${r.error.message}, streak ${consecutiveSpawnErr}/${SPAWN_RETRY_LIMIT}) — treating session as alive`);
-            return true;
-        }
-        log(`tmux probe spawn error persisting (${SPAWN_RETRY_LIMIT}× in a row) — declaring session gone`);
-        return false;
-    }
-    consecutiveSpawnErr = 0;
-    return r.status === 0;
-}
+// The probe itself lives in the terminal port (`terminal-port.ts`).
 
 // #859 plan B — early parent-liveness probe. Couvre la race
 // `selfReloadIfStale` : OLD timer spawn un NEW detached child + exit,
@@ -539,30 +525,14 @@ async function compareProxyScreen(server: LoopServer): Promise<void> {
         : `screen-compare: MISMATCH ${JSON.stringify({ diffLines: result.diffLines, cursorMatch: result.cursorMatch, first: result.first, score: { comparisons: score.comparisons, mismatches: score.mismatches } })}`);
 }
 
+// #993 — the cursor comes with the text: it tells real typed input apart from
+// Claude's greyed ghost-suggestions in the prompt box (typed text is left of
+// the cursor, suggestion right); null → watchers fall back to text-only.
 function capturePane(): string {
-    try {
-        const r = spawnSync(MUX_CMD, [
-            "capture-pane", "-t", `${tname}.0`, "-p",
-        ], { encoding: "utf8" });
-        const text = r.stdout ?? "";
-        lastCursor = captureCursor();
-        logPaneCapture(sd, text, lastCursor);
-        return text;
-    } catch {
-        return "";
-    }
-}
-
-// #993 — tmux pane cursor (0-based, visible-screen relative). Needed to tell
-// real typed input apart from Claude's greyed ghost-suggestions in the prompt
-// box (typed text is left of the cursor, suggestion right). null on any error
-// → watchers fall back to text-only detection, which CANNOT tell the two
-// apart. Le lecteur vit dans `pane.ts` (#531) : ce module en avait une copie
-// qui avait dérivé vers `-F`, forme que psmux ne comprend pas — donc `null` en
-// permanence sur Windows, et le repli aveugle pris à chaque poll. Une seule
-// implémentation, pas deux.
-function captureCursor(): { x: number; y: number } | null {
-    return captureCursorSync(`${tname}.0`);
+    const { text, cursor } = term.screen();
+    lastCursor = cursor;
+    logPaneCapture(sd, text, lastCursor);
+    return text;
 }
 
 function shQuote(s: string): string {
@@ -868,12 +838,12 @@ if (sd) {
         // Pas de fallback send-keys (cf. resume_picker plus haut).
         void (async () => {
             if (mode === "as-is") {
-                if (!(await injectRawBytes(sd!, "\x1b[B"))) {
+                if (!(await term.injectRaw("\x1b[B"))) {
                     log("watcher: resume_mode — inject FAILED for Down (proxy bug ?). Stuck — investiguer.");
                     return;
                 }
             }
-            if (!(await injectRawBytes(sd!, "\r"))) {
+            if (!(await term.injectRaw("\r"))) {
                 log("watcher: resume_mode — inject FAILED for Enter (proxy bug ?). Stuck — investiguer.");
             }
         })();
@@ -1024,7 +994,7 @@ function crossResumePicker(): void {
     if ((process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort") return;
     lastPickerCrossAtMs = Date.now();
     void (async () => {
-        if (!(await injectRawBytes(sd!, "\r"))) {
+        if (!(await term.injectRaw("\r"))) {
             log("auto-cross: inject FAILED (proxy bug ?) — retry on next heartbeat while the picker stays visible.");
         }
     })();
@@ -1181,12 +1151,12 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         // #974 — PAS de fallback send-keys : un inject raté = bug proxy à
         // investiguer, pas à contourner via tmux (qui ré-armerait NOT AFK
         // 10m via le détecteur de frappe). Fail loud, interrupt skippé.
-        if (!(await injectRawBytes(sd!, "\x1b\x1b"))) {
+        if (!(await term.injectRaw("\x1b\x1b"))) {
             log("self-interrupt: inject ÉCHOUÉ (proxy bug ?) — NO send-keys fallback, interrupt skippé. Investiguer.");
         }
         await sleep(500);
     }
-    const wakeDelivered = await injectWakePhrase(`${tname}.0`, phrase, () => {
+    const wakeDelivered = await term.inject(phrase, () => {
         const nowMs = Date.now();
         // #879 — fire WAKE_DELIVERED on the WakeMachine actor. Le
         // subscriber bridge synchronise `ipc.wakeInFlightAtMs` +
@@ -1900,7 +1870,7 @@ async function mainSse(): Promise<void> {
     //     cadence forces a full process respawn within 2s of any
     //     install-root SHA change, regardless of claude state.
     const watchdog = setInterval(() => {
-        if (!tmuxAlive()) {
+        if (!term.alive()) {
             clearInterval(watchdog);
             cleanShutdown("watchdog:tmux-gone");
             return;
@@ -2842,7 +2812,7 @@ async function mainSse(): Promise<void> {
     // machine, fed by `pushViewIfChanged` every second + on every marker
     // change). Before, two parallel signals could diverge during /compact
     // (settledStatus said busy, computePhase said idle — bug A on #712).
-    while (tmuxAlive()) {
+    while (term.alive()) {
         // #B.205: when busy-defer is armed, cap the heartbeat sleep at
         // the defer deadline so the post-defer work-check happens
         // promptly. Without this, an `idle:wait` armed for 5s could
@@ -2969,7 +2939,7 @@ async function mainPoll(): Promise<void> {
     // Same startup safety net as SSE mode (#B.148): drain any
     // pre-existing work right away instead of waiting `interval`s.
     await tryWake("startup");
-    while (tmuxAlive()) {
+    while (term.alive()) {
         // #B.205: cap sleep at busy-defer deadline (see mainSse note).
         const defer = readBusyDefer(sd!);
         const sleepMs = defer ? Math.min(interval * 1000, defer.activeMs) : interval * 1000;
