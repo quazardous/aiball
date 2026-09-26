@@ -17,109 +17,16 @@
  *
  * `--check` exits 1 when the generated file differs from the committed one.
  */
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { CONSUMERS, callsIn, isSource, pathMatches, readServerRoutes, routeKey, tvtyCalls, walk, type Call, type Consumer, type Verb } from "../src/devtools/route-inventory-lib.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
 const tvtyAt = args.indexOf("--tvty");
 const TVTY = resolve(ROOT, tvtyAt >= 0 ? args[tvtyAt + 1]! : "../tvty");
 const OUT = join(ROOT, "docs/API-ROUTES.md");
-
-type Verb = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "*";
-interface Route { verb: Verb; path: string; file: string }
-interface Call { verb: Verb; path: string }
-const CONSUMERS = ["loop", "mcp", "cli", "sim", "web", "tvty"] as const;
-type Consumer = typeof CONSUMERS[number];
-
-function walk(dir: string, keep: (f: string) => boolean): string[] {
-    if (!existsSync(dir)) return [];
-    const out: string[] = [];
-    for (const name of readdirSync(dir)) {
-        if (name === "node_modules" || name === "target" || name === "dist" || name.startsWith(".")) continue;
-        const p = join(dir, name);
-        if (statSync(p).isDirectory()) out.push(...walk(p, keep));
-        else if (keep(p)) out.push(p);
-    }
-    return out;
-}
-const isSource = (f: string) => /\.(ts|vue)$/.test(f) && !/\.test\.ts$/.test(f);
-
-// --- server routes ------------------------------------------------------------
-const routes: Route[] = [];
-for (const file of [join(ROOT, "src/api.ts"), join(ROOT, "src/app.ts"), ...walk(join(ROOT, "src/api"), isSource)]) {
-    const text = readFileSync(file, "utf8");
-    const appLevel = file.endsWith("src/app.ts");
-    for (const m of text.matchAll(/\b[A-Za-z]+\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g)) {
-        const path = m[2]!;
-        if (!path.startsWith("/")) continue;
-        routes.push({ verb: m[1]!.toUpperCase() as Verb, path: appLevel || path.startsWith("/api/") ? path : `/api${path}`, file: relative(ROOT, file) });
-    }
-}
-const routeKey = (r: { verb: Verb; path: string }) => `${r.verb} ${r.path}`;
-const uniqueRoutes = [...new Map(routes.map((r) => [routeKey(r), r])).values()]
-    .sort((a, b) => a.path.localeCompare(b.path) || a.verb.localeCompare(b.verb));
-
-// --- calls --------------------------------------------------------------------
-/** Every `${…}` of a template literal, nested braces included, becomes `{}`. */
-function flattenTemplates(text: string): string {
-    let out = "";
-    for (let i = 0; i < text.length; i++) {
-        if (text[i] === "$" && text[i + 1] === "{") {
-            let depth = 1;
-            let j = i + 2;
-            for (; j < text.length && depth > 0; j++) {
-                if (text[j] === "{") depth++;
-                else if (text[j] === "}") depth--;
-            }
-            out += "{}";
-            i = j - 1;
-        } else {
-            out += text[i];
-        }
-    }
-    return out;
-}
-
-/** `/api/tickets/{}/assign?x=1` → `/api/tickets/{}/assign`; a `{}` glued to a
- *  segment's end is a query string built at run time, and is dropped. */
-function normalizeCall(raw: string): string {
-    return raw.split("?")[0]!
-        .replace(/\{[^}/]*\}/g, "{}")
-        .replace(/([^/])\{\}$/, "$1")
-        .replace(/\/+$/, "") || "/";
-}
-/** The (verb, path) pairs a piece of source requests. */
-/** Comments name paths without calling them: drop them (`//` only when it
- *  starts a line or follows a space, so `http://` in a string survives). */
-function stripComments(text: string): string {
-    return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
-}
-
-function callsIn(source: string): Call[] {
-    const text = flattenTemplates(stripComments(source));
-    const calls: Call[] = [];
-    const seen = new Set<string>();
-    const add = (verb: Verb, raw: string) => {
-        const path = normalizeCall(raw);
-        const k = `${verb} ${path}`;
-        if (!seen.has(k)) { seen.add(k); calls.push({ verb, path }); }
-    };
-    // A verb literal shortly before the path: ("GET", "/api/…") or method: "POST", url: `/api/…`.
-    for (const m of text.matchAll(/["'`](GET|POST|PUT|PATCH|DELETE)["'`][^;]{0,200}?[`"'](\/api\/[^`"'\s)]+)/g)) {
-        add(m[1] as Verb, m[2]!);
-    }
-    // #3052 — a Rust client's verb is its method: `self.get("/api/…")`,
-    // `self.post(&format!("/api/…"), …)`.
-    for (const m of text.matchAll(/\.(get|post|put|patch|delete)\(\s*&?(?:format!\(\s*)?"(\/api\/[^"\s)]+)"/g)) {
-        add(m[1]!.toUpperCase() as Verb, m[2]!);
-    }
-    for (const m of text.matchAll(/[`"'](\/api\/[^`"'\s)]+)/g)) {
-        const path = normalizeCall(m[1]!);
-        if (![...seen].some((k) => k.endsWith(` ${path}`))) add("*", m[1]!);
-    }
-    return calls;
-}
+const uniqueRoutes = readServerRoutes(ROOT);
 
 /** src/client.ts: method name → the calls in its body. */
 function clientMethods(): Map<string, Call[]> {
@@ -161,22 +68,8 @@ for (const [consumer, files] of clientUsers) {
     byConsumer.get(consumer)!.push(...callsIn(text));
 }
 byConsumer.get("web")!.push(...callsIn(walk(join(ROOT, "frontend/src"), isSource).map((f) => readFileSync(f, "utf8")).join("\n")));
-const tvtyFiles = walk(join(TVTY, "src"), (f) => f.endsWith(".rs"));
-byConsumer.get("tvty")!.push(...callsIn(tvtyFiles.map((f) => readFileSync(f, "utf8")).join("\n")));
+byConsumer.get("tvty")!.push(...tvtyCalls(TVTY));
 
-// --- matching -----------------------------------------------------------------
-/**
- * `strict`: a segment the caller builds at run time (`{}`) stands for a route
- * parameter only. Loose, it may also stand for a literal segment — the only
- * way to read `/api/messages/{id}/{verb}`, and never a certainty (#3052: read
- * loosely, `/api/tickets/{id}` also "called" `/api/tickets/purge`).
- */
-function pathMatches(route: string, call: string, strict: boolean): boolean {
-    const r = route.split("/");
-    const c = call.split("/");
-    if (r.length !== c.length) return false;
-    return r.every((seg, i) => seg === c[i] || seg.startsWith(":") || (!strict && c[i] === "{}"));
-}
 const users = new Map<string, Set<Consumer>>(uniqueRoutes.map((r) => [routeKey(r), new Set()]));
 /** Routes a consumer may call through a segment built at run time: a possible call, not a certain one. */
 const maybe = new Map<string, Set<Consumer>>(uniqueRoutes.map((r) => [routeKey(r), new Set()]));
@@ -248,5 +141,6 @@ if (args.includes("--check")) {
 } else {
     writeFileSync(OUT, out);
     console.log(`${counts.total} routes, ${counts.core} core, ${counts.webOnly} web-only, ${counts.none} uncalled → ${relative(ROOT, OUT)}`);
-    console.log(`tvty sources: ${tvtyFiles.length ? `${tvtyFiles.length} files` : "not found"}`);
+    const tvtyFileCount = walk(join(TVTY, "src"), (f) => f.endsWith(".rs")).length;
+    console.log(`tvty sources: ${tvtyFileCount ? `${tvtyFileCount} files` : "not found"}`);
 }

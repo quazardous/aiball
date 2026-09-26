@@ -13,13 +13,15 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import { matchCalls, readServerRoutes, tvtyCalls } from "../devtools/route-inventory-lib.js";
 import WebSocket from "ws";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3052-"));
@@ -309,15 +311,33 @@ const COVERED = new Set([
     "POST /api/tickets/:id/move", "POST /api/uploads", "POST /api/consumers/:consumer_id/bar-host",
 ]);
 
-test("every route the inventory says tvty calls (●) is covered here", () => {
-    const table = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../docs/API-ROUTES.md"), "utf8");
+/**
+ * #3061 — tvty's calls, read live from its checkout when it sits next to this
+ * one (or at AIBALL_TVTY_DIR), with the very reader the route inventory uses:
+ * a call tvty adds fails here at once, naming tvty's commit. Without the
+ * checkout (Docker, CI), the committed inventory's tvty column stands in.
+ */
+function tvtyCertainRoutes(): { routes: string[]; source: string } {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
+    const dir = process.env.AIBALL_TVTY_DIR ?? join(root, "../tvty");
+    if (existsSync(join(dir, "src"))) {
+        const commit = spawnSync("git", ["-C", dir, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).stdout?.trim() || "?";
+        const { certain } = matchCalls(readServerRoutes(root), tvtyCalls(dir));
+        return { routes: [...certain], source: `tvty's checkout at ${commit}` };
+    }
+    const table = readFileSync(join(root, "docs/API-ROUTES.md"), "utf8");
     const header = table.split("\n").find((l) => l.startsWith("| Route |"))!.split("|").map((c) => c.trim());
     const col = header.indexOf("tvty");
-    const tvty = table.split("\n")
+    const routes = table.split("\n")
         .filter((l) => l.startsWith("| `"))
         .map((l) => l.split("|"))
         .filter((cells) => cells[col]!.trim() === "●")
         .map((cells) => cells[1]!.trim().replace(/`/g, ""));
-    assert.ok(tvty.length > 20, "the tvty column was read");
-    assert.deepEqual(tvty.filter((r) => !COVERED.has(r)), [], "tvty calls these and no test here covers them");
+    return { routes, source: "docs/API-ROUTES.md (tvty's checkout not found)" };
+}
+
+test("every route tvty calls (●) is covered here", () => {
+    const { routes, source } = tvtyCertainRoutes();
+    assert.ok(routes.length > 20, `tvty's calls were read (${source})`);
+    assert.deepEqual(routes.filter((r) => !COVERED.has(r)).sort(), [], `tvty calls these (${source}) and no test here covers them`);
 });

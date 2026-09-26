@@ -36,8 +36,11 @@ tvty's calls as it sends them — over the socket, with its exact bodies — and
 checks that every field it reads is there, with its type. Most of those fields
 are optional on tvty's side, so a field dropped by aiball would not break tvty,
 it would silently lose a feature; here it fails the test. The test also checks
-that every route `API-ROUTES.md` says tvty calls is covered. When tvty changes
-what it calls or reads, the test changes with it.
+that every route tvty calls is covered: when tvty's checkout sits next to this
+one (or at `AIBALL_TVTY_DIR`), it reads tvty's sources live, with the route
+inventory's own reader, so a call tvty adds fails the test at once, naming
+tvty's commit; without the checkout (Docker, CI), it reads `API-ROUTES.md`.
+When tvty changes what it reads, the field table in the test changes with it.
 
 There is no formal schema (OpenAPI, JSON Schema) published yet: the documents
 above and that test stand for it.
