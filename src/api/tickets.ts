@@ -67,7 +67,7 @@ import { ticketHasPayload } from "../db/payloads.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
 import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
-import { claimProtectedUntil, ticketClaimHeldUntil } from "../db/claim-hold.js";
+import { claimProtectedUntil, holding, ticketClaimHeldUntil } from "../db/claim-hold.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, type RelationKind } from "../relations.js";
@@ -534,9 +534,11 @@ ticketsRouter.get("/inbox", (req, res) => {
     }
 
     // #3005 — the pilot's fields (turn, band, state glyph), computed only when
-    // asked: `v=tvty` puts them on the rows, `sort=band` orders by them. Read
+    // asked: `view=turn` puts them on the rows, `sort=band` orders by them. Read
     // after filtering, so the gate runs on the rows that are returned.
-    const withPilot = req.query.v === "tvty";
+    // #3038 — the view is named for what it adds, not for a client (it was
+    // `v=tvty`); the row is documented in docs/API-INBOX.md.
+    const withPilot = req.query.view === "turn";
     const pilot = withPilot || sortBy === "band"
         ? (() => {
             const facts = buildPilotFacts(rows, consumerId, project);
@@ -1748,6 +1750,8 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // It was `claimant != null`, and showed a claim the step gate refused.
         is_claim: claimHeldEnd !== null && claimHeldEnd > Date.now(),
         claim_until: claimHeldEnd !== null ? new Date(claimHeldEnd).toISOString() : null,
+        // #3038 — who holds it now, and how: the same rule as the list row.
+        ...holding(t, claimHeldEnd, Date.now()),
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
         // #2910 — the milestone this ticket belongs to; on a milestone, its tickets.

@@ -43,8 +43,9 @@ open.
 
 - **The daemon serves the web UI's files** (`frontend/dist`) from `src/app.ts`: the
   core cannot yet start without knowing the UI exists.
-- **Some response shapes are cut for the web list** (`/api/inbox`), and one view is
-  named after a client (`/api/inbox?v=tvty`).
+- **Some response shapes are cut for the web list** (`/api/inbox`, whose row is
+  documented in [`API-INBOX.md`](./API-INBOX.md)), and the web UI still computes its
+  own turn and bands instead of reading the server's (`view=turn`).
 - **Uploads are also served outside `/api`** (`/uploads/<sha>.<ext>`), without the
   API's authentication: a file is readable by whoever knows its 64-hex-digit hash (a
   capability URL, which is what lets a browser `<img>` load it — see

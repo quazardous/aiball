@@ -2,7 +2,7 @@
 // server so every client shares one definition: whose turn it is, which band
 // the row sorts into, and the one state glyph it shows.
 //
-// Opt-in (`/api/inbox?v=tvty`, and `sort=band` for the order): the web UI's
+// Opt-in (`/api/inbox?view=turn`, and `sort=band` for the order): the web UI's
 // list is untouched until it adopts the same row. `turn` is the actionable
 // gate's own rule (`lastActorExclusions`, docs/TICKET_LIFECYCLE.md §4), read
 // for the viewer, not a client-side guess from `last_speaker`: that one sees

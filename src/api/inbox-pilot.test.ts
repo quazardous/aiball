@@ -1,5 +1,5 @@
 /**
- * #3005 — `/api/inbox?v=tvty` gives each row whose turn it is, its band and its
+ * #3005 — `/api/inbox?view=turn` (#3038; it was `v=tvty`) gives each row whose turn it is, its band and its
  * state glyph, computed by the server for the viewer. What must hold, over the
  * real routes:
  * - `turn` follows the actionable gate, not the last comment: a decision taken
@@ -7,7 +7,8 @@
  *   a thread keeps it; a step keeps it with its author;
  * - a pending decision proposed by someone else puts the row in the decision
  *   band, and outranks a later step for the glyph;
- * - without `v`, the rows are exactly what they were; `sort=band` orders by band.
+ * - without `view`, the rows are exactly what they were, and `v=tvty` no longer
+ *   adds anything; `sort=band` orders by band.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -67,7 +68,7 @@ async function decide(messageId: number, status: "accepted" | "rejected"): Promi
 }
 type Row = { id: number; last_speaker: string; turn?: string; band?: number; state_glyph?: string | null };
 async function row(ticketId: number, token = HUMAN): Promise<Row> {
-    const r = await call(token, "GET", `/api/inbox?v=tvty&ids=${ticketId}&project=${P}`);
+    const r = await call(token, "GET", `/api/inbox?view=turn&ids=${ticketId}&project=${P}`);
     const rows = r.json as Row[];
     assert.equal(rows.length, 1, JSON.stringify(r.json));
     return rows[0]!;
@@ -132,10 +133,12 @@ test("the decision band is the viewer's to decide, not the proposer's", async ()
     assert.notEqual(r.band, band("decision"), "the proposer does not decide its own plan");
 });
 
-test("without v the rows are unchanged, and sort=band orders by band", async () => {
-    const plain = await call(HUMAN, "GET", `/api/inbox?project=${P}`);
-    for (const r of plain.json as Row[]) assert.ok(!("turn" in r) && !("band" in r) && !("state_glyph" in r));
-    const sorted = (await call(HUMAN, "GET", `/api/inbox?v=tvty&sort=band&project=${P}`)).json as Row[];
+test("without the view the rows are unchanged, the old name adds nothing, and sort=band orders by band", async () => {
+    for (const q of [`project=${P}`, `v=tvty&project=${P}`]) {
+        const plain = await call(HUMAN, "GET", `/api/inbox?${q}`);
+        for (const r of plain.json as Row[]) assert.ok(!("turn" in r) && !("band" in r) && !("state_glyph" in r), q);
+    }
+    const sorted = (await call(HUMAN, "GET", `/api/inbox?view=turn&sort=band&project=${P}`)).json as Row[];
     const bands = sorted.map((r) => r.band!);
     assert.deepEqual(bands, [...bands].sort((a, b) => a - b));
     assert.ok(new Set(bands).size > 2, "several bands are exercised");

@@ -26,3 +26,47 @@ export function ticketClaimHeldUntil(t: { id: number; project: string; claimant?
     const lastAction = ticketSelfLastActivity(t.claimant, [t.id]).get(t.id) ?? null;
     return claimHeldUntil(t.claimed_at ?? null, lastAction, assignWindowSec() * 1000, protectMinutes(t.project));
 }
+
+/**
+ * #3038 — `ticketClaimHeldUntil` for a page of tickets: one query per claimant
+ * rather than one per ticket. Tickets without a claimant map to null.
+ */
+export function ticketsClaimHeldUntil(tickets: readonly { id: number; project: string; claimant?: string | null; claimed_at?: string | null }[]): Map<number, number | null> {
+    const out = new Map<number, number | null>();
+    const byClaimant = new Map<string, typeof tickets[number][]>();
+    for (const t of tickets) {
+        if (!t.claimant) { out.set(t.id, null); continue; }
+        const list = byClaimant.get(t.claimant) ?? [];
+        list.push(t);
+        byClaimant.set(t.claimant, list);
+    }
+    const windowMs = assignWindowSec() * 1000;
+    for (const [claimant, list] of byClaimant) {
+        const lastActions = ticketSelfLastActivity(claimant, list.map((t) => t.id));
+        for (const t of list) {
+            out.set(t.id, claimHeldUntil(t.claimed_at ?? null, lastActions.get(t.id) ?? null, windowMs, protectMinutes(t.project)));
+        }
+    }
+    return out;
+}
+
+/** #3038 — how a ticket is held: by its assignee, by a live claim, or a claim that lapsed. */
+export type HeldAs = "assigned" | "claim" | "lapsed_claim";
+
+/**
+ * #3038 — who holds a ticket now, and how, so a client does not have to guess
+ * from `assignee` and `claimant`. An assignment outranks a claim. A lapsed
+ * claim stays on record (`claimant`) but holds nothing: its `holder` is null.
+ * Pure: `heldUntilMs` comes from `ticketClaimHeldUntil`.
+ */
+export function holding(
+    t: { assignee?: string | null; claimant?: string | null },
+    heldUntilMs: number | null,
+    nowMs: number,
+): { holder: string | null; held_as: HeldAs | null } {
+    if (t.assignee) return { holder: t.assignee, held_as: "assigned" };
+    if (!t.claimant) return { holder: null, held_as: null };
+    return heldUntilMs !== null && heldUntilMs > nowMs
+        ? { holder: t.claimant, held_as: "claim" }
+        : { holder: null, held_as: "lapsed_claim" };
+}

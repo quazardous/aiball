@@ -27,8 +27,10 @@ dates are YYYY-MM-DD.
 
 - The inbox API can say, on each row, whose turn it is, which band the row
   sorts into and the one state mark to show, computed for the reader
-  (`/api/inbox?v=tvty`), and sort by that band (`sort=band`). The web
-  board's list is unchanged.
+  (`/api/inbox?view=turn`), and sort by that band (`sort=band`). The web
+  board's list is unchanged. The row is documented in `docs/API-INBOX.md`.
+- Every inbox row and ticket header says who holds the ticket now and how
+  (`holder`, `held_as`: assigned, a live claim, or a claim that lapsed).
 - Request stats report how long the event loop was held up, and which
   requests took over 100 ms.
 - Uploads are served under the API as well, behind its authentication

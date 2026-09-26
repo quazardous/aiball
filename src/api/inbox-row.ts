@@ -30,6 +30,7 @@ import { getConfig } from "../db/config-overrides.js";
 import { projectCriticalTicket, type CriticalTicket } from "../db/critical-ticket.js";
 import { milestonesOf, type MilestoneRef } from "../db/milestones.js";
 import { globalConfigPath } from "../autopoll/config.js";
+import { holding, ticketClaimHeldUntil, ticketsClaimHeldUntil } from "../db/claim-hold.js";
 
 /**
  * True when the TICKET ITSELF carries a pending decision — `ticket_new({then})`
@@ -87,6 +88,9 @@ export interface InboxRowContext {
     /** #3000 — `hot_window_sec` in ms, read once for the page (it reads a
      *  YAML file). Optional for hand-built contexts: absent, read per row. */
     hotWindowMs?: number;
+    /** #3038 — until when each ticket's claimant holds it (ms), for `holder` /
+     *  `held_as`. Optional for hand-built contexts: absent, read per row. */
+    claimHeldUntil?: Map<number, number | null>;
 }
 
 /** #2308 — `tickets.step_stale_hours`, read once per project for a whole page of rows. */
@@ -139,6 +143,7 @@ export function buildInboxRowContext(
             hotWindowMs,
         ),
         hotWindowMs,
+        claimHeldUntil: ticketsClaimHeldUntil(tickets),
         nowStr: new Date().toISOString(),
     };
 }
@@ -329,6 +334,14 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         claimed_at: t.claimed_at ?? null,
         assignee: t.assignee ?? null,
         assigned_at: t.assigned_at ?? null,
+        // #3038 — who holds it now, and how (`assigned` / `claim` /
+        // `lapsed_claim`): the header's rule, so a client need not guess a
+        // live claim from `claimant` alone.
+        ...holding(
+            t,
+            ctx.claimHeldUntil?.has(t.id) ? ctx.claimHeldUntil.get(t.id)! : ticketClaimHeldUntil(t),
+            Date.parse(nowStr),
+        ),
     };
 }
 
