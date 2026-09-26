@@ -52,6 +52,11 @@ body,
        its content and the BODY scrolled instead of .aiball-main, which
        dragged the sidebar along for the ride. */
     height: 100vh;
+    /* On a phone, 100vh is the viewport with the browser's toolbar hidden:
+       while the toolbar shows, the shell overflows the screen by its height
+       and the bottom bar's last row of buttons sits under it. dvh follows
+       the visible height. */
+    height: 100dvh;
     overflow: hidden;
 }
 
