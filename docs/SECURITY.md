@@ -238,6 +238,17 @@ token on a direct remote, but on the local socket and through a proxy node the
 identity is the `x-aiball-consumer` header the caller declares — there it keeps
 authorship consistent, it does not prove it.
 
+## The bus — authenticated once per connection
+
+The bus ([`API-BUS.md`](./API-BUS.md)) decides who a caller is with the same
+function as `/api`, once, on the request that opens the connection; every call
+on it runs as that caller. The boundaries above hold unchanged: the local
+socket trusts the same user, a token binds the identity over TCP, and a proxy
+node is a `node` caller, which a method must admit by name. What differs is
+time: a token revoked in the daemon closes the connections that rest on it at
+once; one deleted by another process (the CLI) is caught within the keepalive
+period, 25 seconds.
+
 ## Attaching to a loop (planned)
 
 The protocol in [`LOOP-HOST.md`](./LOOP-HOST.md) will listen on

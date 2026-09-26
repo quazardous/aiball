@@ -11,7 +11,7 @@ import { dirname, join, relative, resolve } from "node:path";
 const SRC = resolve(import.meta.dirname);
 
 /** The core's own modules: what a client must not import, even indirectly. */
-const CORE = [/^db\.ts$/, /^db\//, /^schema\.ts$/, /^messages\.ts$/, /^api\.ts$/, /^api\//, /^app\.ts$/, /^daemon\.ts$/];
+const CORE = [/^db\.ts$/, /^db\//, /^bus\//, /^schema\.ts$/, /^messages\.ts$/, /^api\.ts$/, /^api\//, /^app\.ts$/, /^daemon\.ts$/];
 const isCore = (rel: string) => CORE.some((re) => re.test(rel));
 
 /** Known crossings, named so they stay visible; each is a decision to revisit. */

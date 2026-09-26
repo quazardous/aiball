@@ -1,7 +1,8 @@
 # The API contract
 
 aiball's core is its HTTP API (on TCP, and on the local Unix socket) and its live
-feed, `/ws`. The web UI, claude-loop, the MCP server, the `aiball` CLI and tvty
+feed, `/ws` — and, taking their place client by client, the bus
+([`API-BUS.md`](./API-BUS.md)). The web UI, claude-loop, the MCP server, the `aiball` CLI and tvty
 are its clients. This page says where the contract is written, and what a client
 may rely on.
 
@@ -9,6 +10,7 @@ may rely on.
 
 | Page | What it fixes |
 |---|---|
+| [`API-BUS.md`](./API-BUS.md) | The bus: one connection per client, JSON-RPC 2.0, who may call a method, errors, batches, revocation. Where every client is moving. |
 | [`API-INBOX.md`](./API-INBOX.md) | The inbox row, **versioned**: every field, the query, `holder` / `held_as`, the `view=turn` fields and their values. |
 | [`API-FILING.md`](./API-FILING.md) | Filing a ticket in one call, with its tags, assignee, milestone, level and parent; who may set what. |
 | [`API-ERRORS.md`](./API-ERRORS.md) | Refusals: `{ error, code }`, the generic code per status, the precise codes and the routes that answer them. |

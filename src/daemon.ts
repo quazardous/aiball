@@ -6,6 +6,7 @@ import { createApp, frontendDistDir } from "./app.js";
 import { DAEMON_PID_PATH } from "./paths.js";
 import { reloadConfig } from "./config-reload.js";
 import { attachWs } from "./ws.js";
+import { attachBus } from "./bus/server.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
 import { drainSpool, watchSpool } from "./spool.js";
@@ -120,6 +121,10 @@ function main(): void {
     // n'est pas upstream (un node proxy n'a pas de nodes qui se connectent à
     // lui), mais c'est juste un listener supplémentaire — coût zéro à attacher.
     attachProxyWs(server);
+    // #3063 — the bus, where this daemon is the core. A proxy node relays
+    // `/api` to its upstream and serves no bus of its own.
+    const core = !loadProxy();
+    if (core) attachBus(server);
 
     server.listen(PORT, HOST, () => {
         console.log(`aiball daemon listening on http://${HOST}:${PORT}`);
@@ -170,6 +175,7 @@ function main(): void {
         // #3000 — `/ws` on the local socket too, with the same trust as `/api`
         // there: same user, no token. Local clients (tvty) no longer need TCP.
         attachWs(udsServer, "/ws", { trusted: true });
+        if (core) attachBus(udsServer, { trusted: true });
         udsServer.listen(SOCK_PATH, () => {
             try { chmodSync(SOCK_PATH, 0o600); } catch { /* best effort */ }
             console.log(`aiball daemon listening on unix:${SOCK_PATH} (local-trust)`);

@@ -7,7 +7,7 @@
 import { eq } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
-import { tokenHandle } from "./tokens.js";
+import { notifyTokenRevoked, tokenHandle } from "./tokens.js";
 
 export interface RelayedConsumer {
     consumer_id: string;
@@ -136,6 +136,7 @@ export function revokeNode(node_id: string, by?: string | null): boolean {
     if (!match) return false;
     const r = db.delete(schema.tokens).where(eq(schema.tokens.token, match.token)).run();
     if (r.changes === 0) return false;
+    notifyTokenRevoked(match.token);
     // After the delete, and best-effort: a tombstone that fails to be written
     // must never leave a credential alive. `onConflictDoUpdate` so re-minting
     // and revoking the same node twice overwrites rather than throws.

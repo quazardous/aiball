@@ -111,6 +111,26 @@ export function issueToken(input: IssueTokenInput): Token {
  * Resolve a bearer-token to its row. Bumps `last_used_at` on success.
  * Returns null when the token doesn't exist OR has expired.
  */
+/**
+ * #3063 — what holds a token open between two lookups (the bus keeps a
+ * connection on the identity it settled once) learns here that the token is
+ * gone: revoked, logged out, or found expired. In this process only; a token
+ * deleted by another process (the CLI) is caught by the holder's own
+ * periodic check.
+ */
+const revokedListeners = new Set<(token: string) => void>();
+
+export function onTokenRevoked(fn: (token: string) => void): () => void {
+    revokedListeners.add(fn);
+    return () => { revokedListeners.delete(fn); };
+}
+
+export function notifyTokenRevoked(token: string): void {
+    for (const fn of revokedListeners) {
+        try { fn(token); } catch { /* a listener never blocks a revocation */ }
+    }
+}
+
 export function getTokenAndTouch(token: string): Token | null {
     if (!token) return null;
     const r = getDb().select().from(schema.tokens)
@@ -121,6 +141,7 @@ export function getTokenAndTouch(token: string): Token | null {
     if (r.expiresAt && r.expiresAt <= now) {
         // Expired; clean up lazily.
         getDb().delete(schema.tokens).where(eq(schema.tokens.token, token)).run();
+        notifyTokenRevoked(token);
         return null;
     }
     getDb().update(schema.tokens)
@@ -147,6 +168,7 @@ export function deleteToken(token: string): boolean {
     const r = getDb().delete(schema.tokens)
         .where(eq(schema.tokens.token, token))
         .run();
+    if (r.changes > 0) notifyTokenRevoked(token);
     return r.changes > 0;
 }
 

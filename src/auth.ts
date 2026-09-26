@@ -23,7 +23,7 @@ import {
 import { getConsumer, updateConsumer } from "./db/consumers.js";
 import { keyProjects, keyScopes } from "./db/signal-keys.js";
 import { refuse } from "./api/_helpers.js";
-import { ERROR_CODES } from "./domain.js";
+import { ERROR_CODES, type ErrorCode } from "./domain.js";
 
 // The options overload of `crypto.scrypt` doesn't survive `promisify`'s
 // type inference, so we keep the callback form behind a typed helper.
@@ -147,11 +147,20 @@ function isPublicPath(path: string): boolean {
 }
 
 export function readBearerToken(req: Request): string | null {
-    const auth = req.header("authorization");
+    const q = req.query?.token;
+    return bearerFrom((name) => req.header(name), typeof q === "string" ? q : null);
+}
+
+/**
+ * The credential a caller sent: `Authorization: Bearer`, else `x-aiball-token`,
+ * else the `?token=` query value. Shared by HTTP and the bus's opening request.
+ */
+export function bearerFrom(header: (name: string) => string | undefined, query: string | null): string | null {
+    const auth = header("authorization");
     if (auth && /^bearer\s+/i.test(auth)) {
         return auth.replace(/^bearer\s+/i, "").trim();
     }
-    const fallback = req.header("x-aiball-token");
+    const fallback = header("x-aiball-token");
     if (typeof fallback === "string" && fallback) return fallback.trim();
     // #464 — EventSource (SSE in the browser) can't set custom headers,
     // so we accept the bearer via `?token=` query as a last resort. This
@@ -159,25 +168,54 @@ export function readBearerToken(req: Request): string | null {
     // in practice ; other browser fetches send the Authorization header
     // and never hit this path. Tokens-in-URL has known downsides (logs,
     // Referer, history) — that's why this is the LAST fallback, only
-    // honored when no header was provided.
-    const fromQuery = req.query?.token;
-    if (typeof fromQuery === "string" && fromQuery) return fromQuery.trim();
+    // honored when no header was provided. A browser's WebSocket cannot set
+    // headers either, so the bus's opening request uses it too.
+    if (query && query.trim()) return query.trim();
     return null;
 }
 
-export function bearerAuth(req: Request, res: Response, next: NextFunction): void {
-    if (isPublicPath(req.path)) {
-        next();
-        return;
-    }
+/**
+ * #3063 — who a caller is, decided once from what its request carries. HTTP
+ * runs it on every request (`bearerAuth`); the bus runs it once, on the
+ * request that opens the connection, and keeps the result for the whole
+ * connection. One function, so the two can never disagree on an identity.
+ */
+export interface AuthInput {
+    /** The local socket (same-user trust) or TCP. */
+    transport: "uds" | "tcp";
+    header(name: string): string | undefined;
+    /** The credential sent (`bearerFrom`), or null. */
+    token: string | null;
+    /** The TCP peer address; null on the local socket. */
+    ip: string | null;
+}
+
+/** The caller, as `authenticate` settled it. */
+export interface CallerContext {
+    consumer_id?: string;
+    token_kind: Token["kind"];
+    transport: "uds" | "tcp";
+    /** The credential the identity rests on: null on the local socket. */
+    token: string | null;
+    no_claim_hint?: boolean;
+    signal_source?: string;
+    signal_scopes?: string[];
+    signal_projects?: string[];
+}
+
+export type AuthOutcome =
+    | { ok: true; ctx: CallerContext }
+    | { ok: false; status: number; error: string; code: ErrorCode; hint?: string };
+
+export function authenticate(input: AuthInput): AuthOutcome {
     // Unix-socket local-trust bypass (per #B.94 follow-up). The daemon
     // tags every UDS-borne socket with __aiballUds at connection time;
     // those requests inherit OS-level same-uid trust (chmod 600 on the
     // socket file) so no bearer is needed. Identity is read from the
     // X-Aiball-Consumer header — defaults to "human" if omitted, since
     // a same-uid caller is the local owner of this aiball instance.
-    if ((req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true) {
-        const override = req.header("x-aiball-consumer");
+    if (input.transport === "uds") {
+        const override = input.header("x-aiball-consumer");
         const explicit = typeof override === "string" && override.trim() ? override.trim() : null;
         // #386: an anonymous local call (no X-Aiball-Consumer header) still
         // RESOLVES to the local owner ("human") for authorization, but must NOT
@@ -185,63 +223,45 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         // consumer keeps "resurfacing" as active on the consumers page even when
         // the human only ever uses a named identity. Only an EXPLICIT identity
         // (header present) touches last_seen.
-        const cid = explicit ?? "human";
-        const ar = req as AuthenticatedRequest;
-        ar.consumer_id = cid;
-        ar.token_kind = "agent";
-        if (explicit) touchLastSeen(cid, "uds"); // #B.177 / #386 / #422 (local same-uid)
-        readNoClaimHint(req, ar);
-        readRoleHint(req, ar);
-        next();
-        return;
+        const ctx: CallerContext = { consumer_id: explicit ?? "human", token_kind: "agent", transport: "uds", token: null };
+        if (explicit) touchLastSeen(ctx.consumer_id!, "uds"); // #B.177 / #386 / #422 (local same-uid)
+        readHints(input, ctx);
+        return { ok: true, ctx };
     }
-    const token = readBearerToken(req);
+    const token = input.token;
     if (!token) {
-        res.status(401).set("www-authenticate", "Bearer").json({
+        return {
+            ok: false,
+            status: 401,
             error: "authentication required",
             code: ERROR_CODES.AUTH_REQUIRED,
             hint: anyHumanCredentials()
                 ? "log in at /login or pass Authorization: Bearer <agent token>"
                 : "no humans yet — run `aiball auth init` in a terminal, then open the printed setup URL",
-        });
-        return;
+        };
     }
     const row = getTokenAndTouch(token);
     if (!row) {
-        res.status(401).set("www-authenticate", "Bearer").json({
-            error: "invalid or expired token",
-            code: ERROR_CODES.TOKEN_INVALID,
-        });
-        return;
+        return { ok: false, status: 401, error: "invalid or expired token", code: ERROR_CODES.TOKEN_INVALID };
     }
     if (row.kind === "install") {
-        refuse(res, 403, "install tokens cannot access /api/* — use POST /api/auth/setup first");
-        return;
+        return { ok: false, status: 403, error: "install tokens cannot access /api/* — use POST /api/auth/setup first", code: ERROR_CODES.FORBIDDEN };
     }
-    // #2255 — a signal key opens exactly one door. It is bound to no consumer
-    // and its label is the source of what it posts.
+    // #2255 — a signal key is bound to no consumer and its label is the source
+    // of what it posts. Which door it may open is the transport's check.
     if (row.kind === "signal") {
-        // #2526 — each door needs its scope. A key minted before scopes existed
-        // holds `signals` only, so it keeps exactly the one door it had.
-        const scopes = keyScopes(row);
-        const door = req.method === "POST" && req.path === "/signals" ? "signals"
-            : req.method === "POST" && req.path === "/tickets" ? "tickets:create"
-            : null;
-        if (!door) {
-            refuse(res, 403, `an API key can only POST /api/signals (scope signals) or POST /api/tickets (scope tickets:create)`);
-            return;
-        }
-        if (!scopes.includes(door)) {
-            refuse(res, 403, `this key lacks the scope ${door}`, ERROR_CODES.KEY_SCOPE_MISSING);
-            return;
-        }
-        const ar = req as AuthenticatedRequest;
-        ar.token_kind = "signal";
-        ar.signal_source = row.label ?? "unnamed";
-        ar.signal_scopes = scopes;
-        ar.signal_projects = keyProjects(row);
-        next();
-        return;
+        return {
+            ok: true,
+            ctx: {
+                token_kind: "signal",
+                transport: "tcp",
+                token,
+                signal_source: row.label ?? "unnamed",
+                // #2526 — a key minted before scopes existed holds `signals` only.
+                signal_scopes: keyScopes(row),
+                signal_projects: keyProjects(row),
+            },
+        };
     }
     // #394 volet C: a "node" token authenticates a trusted proxy NODE, not a
     // consumer. Like a reverse-proxy whitelisted to set X-Forwarded-For, it may
@@ -251,53 +271,91 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
     // ("human"), mirroring the UDS local-trust default. Node tokens are service
     // tokens with no bound consumer.
     if (row.kind === "node") {
-        const override = req.header("x-aiball-consumer");
+        const override = input.header("x-aiball-consumer");
         const explicit = typeof override === "string" && override.trim() ? override.trim() : null;
-        const cid = explicit ?? "human";
-        const ar = req as AuthenticatedRequest;
-        ar.consumer_id = cid;
-        ar.token_kind = "node";
+        const ctx: CallerContext = { consumer_id: explicit ?? "human", token_kind: "node", transport: "tcp", token };
         // Auto-register a relayed agent we haven't seen yet (the loop on B has
         // no token of its own — the node vouches for it). Never touches humans.
-        if (explicit && !isHuman(cid)) ensureConsumer(cid);
-        const nodeIp = clientIp(req);
-        touchLastSeen(cid, "node", nodeIp); // #422: proxy-relayed → remote
-        setTokenLastSeenIp(token, nodeIp); // #424: stamp the node's address for the Nodes panel
+        if (explicit && !isHuman(ctx.consumer_id!)) ensureConsumer(ctx.consumer_id!);
+        touchLastSeen(ctx.consumer_id!, "node", input.ip); // #422: proxy-relayed → remote
+        setTokenLastSeenIp(token, input.ip); // #424: stamp the node's address for the Nodes panel
         // #463 — proxy node advertises its current label on every request.
         // Sync the token's label when it changed (renaming the node in its
         // own config is reflected in the Nodes panel without re-minting).
         // Skip when header absent (older proxy, direct curl, …) or empty.
         // Trim + cap length defensively — the label hits the UI directly.
-        const advertised = req.header("x-aiball-node-label");
+        const advertised = input.header("x-aiball-node-label");
         if (typeof advertised === "string") {
             const labelRaw = advertised.trim().slice(0, 200);
             if (labelRaw && labelRaw !== row.label) updateTokenLabel(token, labelRaw);
         }
-        readNoClaimHint(req, ar);
-        readRoleHint(req, ar);
-        next();
-        return;
+        readHints(input, ctx);
+        return { ok: true, ctx };
     }
     if (!row.consumer_id) {
-        refuse(res, 403, "token is not bound to a consumer");
-        return;
+        return { ok: false, status: 403, error: "token is not bound to a consumer", code: ERROR_CODES.FORBIDDEN };
     }
-    const ar = req as AuthenticatedRequest;
-    ar.consumer_id = row.consumer_id;
-    ar.token_kind = row.kind;
-
+    const ctx: CallerContext = { consumer_id: row.consumer_id, token_kind: row.kind, transport: "tcp", token };
     // Human-only impersonation via the legacy X-Aiball-Consumer header.
-    const override = req.header("x-aiball-consumer");
+    const override = input.header("x-aiball-consumer");
     if (typeof override === "string" && override && override !== row.consumer_id) {
         if (isHuman(row.consumer_id)) {
-            ar.consumer_id = override;
+            ctx.consumer_id = override;
         }
         // Non-humans: silently ignore the override.
     }
-    touchLastSeen(ar.consumer_id, "tcp", clientIp(req)); // #B.177 / #422 (direct bearer over TCP)
-    readNoClaimHint(req, ar);
-    readRoleHint(req, ar);
+    touchLastSeen(ctx.consumer_id!, "tcp", input.ip); // #B.177 / #422 (direct bearer over TCP)
+    readHints(input, ctx);
+    return { ok: true, ctx };
+}
+
+export function bearerAuth(req: Request, res: Response, next: NextFunction): void {
+    if (isPublicPath(req.path)) {
+        next();
+        return;
+    }
+    const uds = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
+    const out = authenticate({
+        transport: uds ? "uds" : "tcp",
+        header: (name) => req.header(name),
+        token: uds ? null : readBearerToken(req),
+        ip: uds ? null : clientIp(req),
+    });
+    if (!out.ok) {
+        if (out.status === 401) res.set("www-authenticate", "Bearer");
+        res.status(out.status).json({ error: out.error, code: out.code, ...(out.hint ? { hint: out.hint } : {}) });
+        return;
+    }
+    const ctx = out.ctx;
+    // #2255 / #2526 — a signal key opens exactly one door per scope.
+    if (ctx.token_kind === "signal") {
+        const door = req.method === "POST" && req.path === "/signals" ? "signals"
+            : req.method === "POST" && req.path === "/tickets" ? "tickets:create"
+            : null;
+        if (!door) {
+            refuse(res, 403, `an API key can only POST /api/signals (scope signals) or POST /api/tickets (scope tickets:create)`);
+            return;
+        }
+        if (!ctx.signal_scopes!.includes(door)) {
+            refuse(res, 403, `this key lacks the scope ${door}`, ERROR_CODES.KEY_SCOPE_MISSING);
+            return;
+        }
+    }
+    const ar = req as AuthenticatedRequest;
+    ar.consumer_id = ctx.consumer_id;
+    ar.token_kind = ctx.token_kind;
+    if (ctx.no_claim_hint) ar.no_claim_hint = true;
+    if (ctx.token_kind === "signal") {
+        ar.signal_source = ctx.signal_source;
+        ar.signal_scopes = ctx.signal_scopes;
+        ar.signal_projects = ctx.signal_projects;
+    }
     next();
+}
+
+function readHints(input: AuthInput, ctx: CallerContext): void {
+    readNoClaimHint(input, ctx);
+    readRoleHint(input, ctx);
 }
 
 /**
@@ -323,8 +381,8 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
  *  project dir). Trust the agent's own declaration (it gates the agent OUT of the
  *  claim pool, never IN). Diff-guarded: write only on the true→false flip, so there's
  *  no DB write per request. Also stashed on `ar.no_claim_hint` for the claimable lens. */
-function readNoClaimHint(req: Request, ar: AuthenticatedRequest): void {
-    const v = req.header("x-aiball-no-claim");
+function readNoClaimHint(input: AuthInput, ar: CallerContext): void {
+    const v = input.header("x-aiball-no-claim");
     if (typeof v === "string" && (v === "1" || v.toLowerCase() === "true")) {
         ar.no_claim_hint = true;
         if (ar.consumer_id) {
@@ -343,8 +401,8 @@ function readNoClaimHint(req: Request, ar: AuthenticatedRequest): void {
  *  clears it). Only `lead`/`crew` are accepted; anything else is ignored. Role is
  *  self-declared (how the loop launched), NOT a gated capability, so it's set here
  *  and deliberately kept out of the #1477 PATCH capability guard. */
-function readRoleHint(req: Request, ar: AuthenticatedRequest): void {
-    const v = req.header("x-aiball-role");
+function readRoleHint(input: AuthInput, ar: CallerContext): void {
+    const v = input.header("x-aiball-role");
     if (v !== "lead" && v !== "crew") return;
     if (!ar.consumer_id) return;
     const c = getConsumer(ar.consumer_id);

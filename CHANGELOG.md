@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The bus: one permanent connection per client, JSON-RPC 2.0 over a
+  WebSocket at `/bus`, on the local socket and over TCP. The caller is
+  authenticated once when it connects, calls and batches go straight to the
+  core, and revoking a token closes its connections. The first step of
+  moving every client onto it; see `docs/API-BUS.md`.
+
 - `claude-loop debug-proxy`: the real PTY proxy in front of a byte logger, in
   your terminal: every key and what the proxy decided about it. With
   `CL_CAPTURE=1`, the proxy's keys and decisions join the session capture.
