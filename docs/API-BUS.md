@@ -114,11 +114,14 @@ ping is cut. WebSocket libraries answer pings on their own.
 ## Methods
 
 Parameters are the fields the HTTP route took — its path, query and body
-fields, under the same names — as one object. Results are the route's body.
+fields, under the same names — as one object; a query's yes/no flag is a
+boolean, and its "1" is accepted too. Results are the route's body.
 
 | Method | Callers | Replaces |
 |---|---|---|
 | `bus.whoami` | human, agent | — who the connection runs as: `{ consumer, kind, relayed, transport }` |
+| `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
+| `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |
 | `tag.list` | human, agent | `GET /api/tags` |
 | `project.milestones` | human, agent | `GET /api/projects/:project/milestones` |
 | `mention.suggestions` | human, agent | `GET /api/mention-suggestions` |

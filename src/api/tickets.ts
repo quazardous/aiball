@@ -20,25 +20,18 @@
  */
 import { serveMethod } from "../bus/http.js";
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
-import { milestoneProgress, milestoneRankOf, milestonesOf } from "../db/milestones.js";
-import { resolvesTicket } from "../ticket-transitions.js";
+import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
 import { Router, type Request, type Response } from "express";
 import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
 import { ERROR_CODES } from "../domain.js";
 import {
     listMessages,
-    listMessageTags,
     tagsForMessages,
-    resolveAttachments,
-    type Message,
-    type MessageStatus,
-    listSubTickets,
     subTicketCounts,
     getTicketStages,
     getTicketTitles,
     getTicketBookends,
     getMessage,
-    getMessageByHashid,
     markTicketUnseen,
     ticketUnreadFlags,
     ticketAgentLastActivity,
@@ -60,21 +53,17 @@ import {
     getConsumer,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
-import { ticketHasPayload } from "../db/payloads.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
 import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
-import { claimProtectedUntil, holding, ticketClaimHeldUntil } from "../db/claim-hold.js";
+import { claimProtectedUntil } from "../db/claim-hold.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
-import { RELATION_KINDS, isRelationKind, isLineageRelationKind, relationAxis, type RelationKind } from "../relations.js";
+import { RELATION_KINDS, isRelationKind, relationAxis, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
-import { parseMeta } from "../questions.js";
 
-import { buildInboxRow, buildInboxRowContext, hotWindowSec, inboxRowCheap } from "./inbox-row.js";
-import { buildPilotFacts, pilotFields } from "./inbox-pilot.js";
-import { emptyAgg, getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
-import { projectCriticalTicket } from "../db/critical-ticket.js";
+import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
+import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
 import { DECISION_KINDS } from "../decisions.js";
 import { applyModeration } from "./moderation.js";
 
@@ -96,13 +85,12 @@ export function ticketStateAfter(id: number, consumerId: string) {
     if (!t || t.kind !== "ticket_created") return null;
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
-import { authorFor, badRequest, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotes } from "./_helpers.js";
+import { authorFor, badRequest, consumerOf, notFound, refuse, refuseError, withTagsOne } from "./_helpers.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
 import type { AuthenticatedRequest } from "../auth.js";
 import { submitMessage } from "../messages.js";
-import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
 
 export const ticketsRouter = Router();
 
@@ -371,167 +359,16 @@ ticketsRouter.get("/tickets/bookends", (req, res) => {
  * One table: two copies would be a place for the two orderings to disagree
  * without anyone noticing.
  */
-const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
+export const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
 
-ticketsRouter.get("/inbox", (req, res) => {
-    const project = req.query.project as string | undefined;
-    const status = req.query.status as MessageStatus | undefined;
-    const onlyOpen = req.query.open === "1";
-    const intentFilter = req.query.intent as string | undefined;
-    // #B.222: optional priority filter — accepts a single value (low /
-    // normal / high / urgent) and narrows the list to tickets whose
-    // priority matches. "all" or absent = no filter.
-    const priorityFilter = req.query.priority as string | undefined;
-    // Include snoozed tickets in the open-inbox view (per #B.329). The
-    // toggle in the header flips this on so a moderator can see what's
-    // currently set aside. Default off — snoozed rows are hidden the
-    // same way closed ones are.
-    const includePostponed = req.query.include_postponed === "1";
-    // Read state is per-consumer — resolved from the X-Aiball-Consumer
-    // header (UI sets this once globally) with AIBALL_HUMAN fallback.
-    // Each row gets an `unread` boolean computed from the pings table
-    // (≥1 unseen ping on the thread for that consumer).
-    const consumerId = consumerOf(req);
-
-    let tickets = listMessages({ kind: "ticket_created", project });
-    // #2072 — `ids` narrows to specific tickets so a client can refresh ONE row
-    // instead of a page. Every other filter still applies, and that is the
-    // useful part: an empty answer means "this ticket no longer belongs in this
-    // view", which is exactly what a cache needs to hear to drop the row.
-    // Paging is skipped for an id query — the caller already named the set.
-    const idsParam = typeof req.query.ids === "string" ? req.query.ids : "";
-    const wantedIds = idsParam
-        ? new Set(idsParam.split(",").map((n) => Number(n.trim())).filter(Number.isSafeInteger))
-        : null;
-    if (wantedIds) tickets = tickets.filter((t) => wantedIds.has(t.id));
-    const sortBy = typeof req.query.sort === "string" ? req.query.sort : "activity";
-    // #2071 — sort server-side, in the order the board displays. Paging in any
-    // other order makes rows insert themselves above the one being read, which
-    // is why loading "smallest project first" was the wrong idea however much
-    // faster each chunk arrived (david `x3k3pr`). The three orders mirror the
-    // client's own; `activity` stays the default the API always had. Rows and
-    // the cheap fields below share these keys, so one comparator serves both.
-    type SortKeys = { created_at: string; last_activity: string; priority: string | null };
-    const compare = (a: SortKeys, b: SortKeys): number => {
-        if (sortBy === "created_desc") return b.created_at.localeCompare(a.created_at);
-        if (sortBy === "created_asc") return a.created_at.localeCompare(b.created_at);
-        if (sortBy === "priority") {
-            const w = (p: string | null | undefined) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2;
-            const d = w(b.priority) - w(a.priority);
-            return d !== 0 ? d : b.created_at.localeCompare(a.created_at);
-        }
-        return b.last_activity.localeCompare(a.last_activity);
-    };
-    const limit = wantedIds ? NaN : Number(req.query.limit);
-    const paged = Number.isFinite(limit) && limit > 0;
-    const offset = paged ? Math.max(0, Number(req.query.offset) || 0) : 0;
-
-    // #3000 — filter, and when the order allows it page, on the fields a row
-    // takes from its ticket and aggregate alone, BEFORE building any row:
-    // building one per ticket of the board, closed ones included, to keep 25
-    // was most of the cost of the web board's list. The row filters below
-    // still run, so the answer is the one the list always gave.
-    const cheapNow = new Date().toISOString();
-    const aggs = getInboxAgg(project);
-    const cheapOf = new Map(tickets.map((t) => [t.id, inboxRowCheap(t, aggs.get(t.id) ?? emptyAgg(), cheapNow)]));
-    tickets = tickets.filter((t) => {
-        const c = cheapOf.get(t.id)!;
-        if (status === "pending" && !(c.status === "pending" || c.pending_comment_count > 0)) return false;
-        if ((status === "approved" || status === "rejected") && c.status !== status) return false;
-        if (onlyOpen && c.closed) return false;
-        if (!includePostponed && c.postponed) return false;
-        if (intentFilter && intentFilter !== "all" && c.intent !== intentFilter) return false;
-        if (priorityFilter && priorityFilter !== "all" && c.priority !== priorityFilter) return false;
-        return true;
-    });
-    // Unread is per reader: one bounded read of the flags for the tickets left.
-    if (req.query.unread === "1") {
-        const unread = ticketUnreadFlags(consumerId, tickets.map((t) => t.id));
-        tickets = tickets.filter((t) => unread.get(t.id) === true);
-    }
-    // Band needs the built row: that order pages after it, as before.
-    const pageEarly = paged && sortBy !== "band";
-    let earlyTotal: number | null = null;
-    if (pageEarly) {
-        tickets.sort((a, b) => compare(cheapOf.get(a.id)!, cheapOf.get(b.id)!));
-        earlyTotal = tickets.length;
-        tickets = tickets.slice(offset, offset + limit);
-    }
-
-    // #2072 — the row is built by the shared builder, so a mutation that
-    // returns "the updated object" returns exactly what the list holds.
-    const rowCtx = buildInboxRowContext(tickets, consumerId, project);
-    let rows = tickets.map((t) => buildInboxRow(t, rowCtx));
-
-    if (status === "pending") {
-        rows = rows.filter((r) => r.status === "pending" || r.pending_comment_count > 0);
-    } else if (status === "approved" || status === "rejected") {
-        rows = rows.filter((r) => r.status === status);
-    }
-    // #479 david : "dans la liste de tickets avec all on voit pas les pending".
-    // Renverse la décision #450 (qui excluait les tickets pending du default
-    // pour qu'ils ne pollutent pas le backlog). Avec "all" l'utilisateur
-    // s'attend à voir EVERY ticket — pending inclus. "pending" reste le
-    // sous-ensemble focalisé (pending tickets + approved tickets with
-    // pending comments). "approved" / "rejected" inchangés.
-    if (onlyOpen) {
-        rows = rows.filter((r) => !r.closed);
-    }
-    // Snooze filter applies on every status combination — not just when
-    // `open=1`. Otherwise pending+snoozed tickets slip through (regression
-    // surfaced after #B.78 enabled snoozing on pending tickets).
-    if (!includePostponed) {
-        rows = rows.filter((r) => !r.postponed);
-    }
-    if (intentFilter && intentFilter !== "all") {
-        rows = rows.filter((r) => r.intent === intentFilter);
-    }
-    if (priorityFilter && priorityFilter !== "all") {
-        rows = rows.filter((r) => (r.priority ?? "normal") === priorityFilter);
-    }
-
-    // #2071 — the UNREAD filter, server-side. This is the one that unblocks
-    // everything else: the client computed it from the per-row flag, and the
-    // code said so where it paginated ("paginating before that filter would
-    // yield ragged pages"), so the endpoint had to return the whole board.
-    // The flag was already computed here; only the filter was missing.
-    if (req.query.unread === "1") {
-        rows = rows.filter((r) => r.unread);
-    }
-
-    // #3005 — the pilot's fields (turn, band, state glyph), computed only when
-    // asked: `view=turn` puts them on the rows, `sort=band` orders by them. Read
-    // after filtering, so the gate runs on the rows that are returned.
-    // #3038 — the view is named for what it adds, not for a client (it was
-    // `v=tvty`); the row is documented in docs/API-INBOX.md.
-    const withPilot = req.query.view === "turn";
-    const pilot = withPilot || sortBy === "band"
-        ? (() => {
-            const facts = buildPilotFacts(rows, consumerId, project);
-            const human = isHuman(consumerId);
-            return new Map(rows.map((r) => [r.id, pilotFields(r, facts.get(r.id)!, consumerId, human)]));
-        })()
-        : null;
-    if (sortBy === "band" && pilot) {
-        rows.sort((a, b) => pilot.get(a.id)!.band - pilot.get(b.id)!.band
-            || b.last_activity.localeCompare(a.last_activity));
-    } else {
-        rows.sort(compare);
-    }
-
-    // #2071 — page AFTER filtering and sorting, never before. The total goes in
-    // a header rather than wrapping the body in an envelope: every existing
-    // consumer keeps receiving a plain array, and the pager gets its count.
-    //
-    // The page SIZE comes from the caller (david `x3k3pr`): it is a user
-    // preference kept in localStorage, so hardcoding 25 here would silently
-    // ignore whatever the reader chose. No limit at all = the whole list,
-    // which is what every non-UI consumer still asks for.
-    res.setHeader("X-Total-Count", String(earlyTotal ?? rows.length));
-    if (paged && !pageEarly) rows = rows.slice(offset, offset + limit);
-
-    res.json(withPilot && pilot ? rows.map((r) => ({ ...r, ...pilot.get(r.id)! })) : rows);
-});
+ticketsRouter.get("/inbox", serveMethod("inbox.list", undefined, {
+    // #2071 — the total in a header, the body a plain array: what HTTP clients read.
+    respond: (res, out) => {
+        const { total, rows } = out as { total: number; rows: unknown[] };
+        res.setHeader("X-Total-Count", String(total));
+        res.json(rows);
+    },
+}));
 
 /**
  * #3031 — the ticket list as `agentId` sees it: the whole computation of
@@ -1416,499 +1253,7 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     });
 });
 
-ticketsRouter.get("/tickets/:id", (req, res) => {
-    // The :id param accepts either:
-    //   - an integer ticket id (#B<id>) → resolved directly,
-    //   - an integer comment id (legacy #C<id>) → resolved to parent thread
-    //     with focus_message_id set,
-    //   - a 6-char hashid string (canonical #C<hashid>) → looked up by
-    //     hashid then resolved like an integer comment.
-    const raw = req.params.id;
-    const numeric = /^\d+$/.test(raw) ? Number(raw) : null;
-    let requested: Message | null = null;
-    if (numeric !== null) {
-        requested = getMessage(numeric);
-    }
-    if (!requested) {
-        requested = getMessageByHashid(raw);
-    }
-    if (!requested) return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    // If the id is a comment (or close/reopen event), resolve up to its
-    // parent ticket and attach `focus_message_id` so the UI can scroll to
-    // the right place. Lets `#N` references in markdown be opened blindly.
-    let t = requested;
-    let focusMessageId: number | null = null;
-    if (t.kind !== "ticket_created") {
-        if (!t.ticket_id) return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-        const parent = getMessage(t.ticket_id);
-        if (!parent || parent.kind !== "ticket_created") {
-            return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-        }
-        focusMessageId = requested.id;
-        t = parent;
-    }
-    const id = t.id;
-    // Return tickets in any status so the moderator can open pending or
-    // rejected ones from the inbox and act on them inline.
-    // #2171 — narrow to THIS thread. Without the ticket id this loaded every
-    // message of the project (6014 on aiball) and filtered in JS down to the
-    // handful below, so the header-only probe — the mode documented as the
-    // CHEAP one — cost exactly what the full thread cost: 144 ms either way.
-    // The filter already existed; #2159 added it so the inbox aggregate could
-    // rebuild one entry, and this route never picked it up. 144 ms -> 11 ms.
-    const all = listMessages({ project: t.project, ticket_id: id });
-    // Thread feed = comments + lifecycle events, inline. Lifecycle events
-    // (close / reopen / resolved) are rendered as system rows in the UI so
-    // the reader can see who flipped the state and when. Order: ASC by id.
-    // #309: the UI opts into seeing user-deleted comments (as tombstones)
-    // via ?include_deleted=1; default (and every MCP read) never sees them.
-    const includeDeleted = req.query.include_deleted === "1";
-    const threadMessages = all
-        .filter(
-            (m) =>
-                m.ticket_id === id &&
-                (m.kind === "comment_added" ||
-                    m.kind === "ticket_closed" ||
-                    m.kind === "ticket_reopened" ||
-                    m.kind === "ticket_resolved" ||
-                    m.kind === "ticket_blocked" ||
-                    m.kind === "claim_taken_over" ||
-                    m.kind === "ticket_sub_added" ||
-                    m.kind === "ticket_referenced" ||
-                    m.kind === "dependency_closed" ||
-                    m.kind === "related_closed" ||
-                    m.kind === "dependency_rejected" ||
-                    m.kind === "ticket_relation") &&
-                // rejected rows are hidden — EXCEPT user-deletions (#309): a
-                // comment with meta.deleted is re-surfaced as a tombstone, but
-                // only when the UI explicitly asks (include_deleted).
-                (m.status !== "rejected" ||
-                    (includeDeleted &&
-                        m.kind === "comment_added" &&
-                        !!parseMeta(m.meta ?? null).deleted)) &&
-                // #271: lineage relations (child_of/parent_of) are surfaced
-                // as chips in the relations cartouche; the ticket_sub_added
-                // pseudo already logs the link in the timeline, so drop the
-                // parallel relation event here to avoid a redundant row.
-                !(m.kind === "ticket_relation" &&
-                    isLineageRelationKind(parseMeta(m.meta ?? null).relation?.kind ?? "")),
-        )
-        .sort((a, b) => a.id - b.id);
-    // Lifecycle replay restricted to approved events for the header
-    // flags. Since #B.129 phase 2, a comment_added with `meta.decision
-    // .kind=="resolution"` and decision.status=="accepted" is replayed
-    // as a synthetic ticket_resolved event at the comment's id, so
-    // historical (legacy ticket_resolved kind) AND new (comment+decision)
-    // shapes converge in the same replay.
-    const lifecycle: Message[] = [];
-    for (const m of threadMessages) {
-        if (m.status !== "approved") continue;
-        if (m.kind === "comment_added") {
-            const d = parseMeta(m.meta ?? null).decision;
-            if (d && resolvesTicket(d.kind, d.status)) {
-                lifecycle.push({
-                    ...m,
-                    kind: "ticket_resolved",
-                    by_agent: d.decided_by ?? m.by_agent,
-                    created_at: d.decided_at ?? m.created_at,
-                });
-            }
-            continue;
-        }
-        lifecycle.push(m);
-    }
-    lifecycle.sort((a, b) => a.id - b.id);
-    let closedFlag = false;
-    let resolvedFlag = false;
-    let resolvedBy: string | null = null;
-    let resolvedAt: string | null = null;
-    let blockedFlag = false;
-    let blockedBy: string | null = null;
-    let blockedAt: string | null = null;
-    for (const ev of lifecycle) {
-        if (ev.kind === "ticket_closed") closedFlag = true;
-        else if (ev.kind === "ticket_reopened") {
-            closedFlag = false;
-            resolvedFlag = false;
-            resolvedBy = null;
-            resolvedAt = null;
-            blockedFlag = false;
-            blockedBy = null;
-            blockedAt = null;
-        } else if (ev.kind === "ticket_resolved") {
-            resolvedFlag = true;
-            resolvedBy = ev.by_agent;
-            resolvedAt = ev.created_at;
-        } else if (ev.kind === "ticket_blocked") {
-            blockedFlag = true;
-            blockedBy = ev.by_agent;
-            blockedAt = ev.created_at;
-        }
-    }
-    const closed = closedFlag || t.status === "rejected";
-    // resolved stays true even after the ticket is closed — the UI uses the
-    // pair (closed, resolved) to distinguish "closed because resolved" from
-    // "closed without explicit resolution" (wontfix / abandoned / dup).
-    // Reopen still zeroes resolvedFlag inside the replay loop.
-    const resolved = resolvedFlag;
-    // Same idea for blocked (#B.119): persists past close so the UI can
-    // still tell "closed after agent escalation" from a normal resolve.
-    const blocked = blockedFlag;
-    // Verbosity (#B.87 palier 2): default is summary now — header only,
-    // no body, no comments array. Pass `full=1` to opt back into the
-    // full thread. Old `summary=0` accepted as the explicit override
-    // for symmetry with /api/tickets. `brief=1` and `digest=1` both
-    // imply the thread shape too — opting into one of them means the
-    // caller wants the reshaped read, not the bare header.
-    const fullThread =
-        req.query.full === "1" ||
-        req.query.summary === "0" ||
-        req.query.brief === "1" ||
-        req.query.digest === "1";
-    const summary = !fullThread;
-    // #1350 — per-consumer `actionable`/`claimable` on the single-ticket
-    // header, mirroring the list-row flags (see ~644-673). The wake renderer
-    // reads `claimable` on the head event's ticket to decide the
-    // "(fyi — action is not mandatory)" suffix: a subscriber who is not the
-    // responsible maintainer (non-claimable) gets an info wake, not a triage
-    // push. Same helper + same owned-projects/can-claim gate as the list, so
-    // the two views can never disagree.
-    const flagConsumer = consumerOf(req);
-    // #2102 — one ticket's header asks about one ticket.
-    const { actionableIds: hdrActionableIds } = computeActionableTicketIds(flagConsumer, [t.id]);
-    const hdrOwnedProjects = new Set(
-        listSubscriptions(flagConsumer)
-            .filter((s) => s.role === "owner")
-            .map((s) => s.project),
-    );
-    const hdrConsumerRow = getConsumer(flagConsumer);
-    const hdrCanClaim =
-        (!hdrConsumerRow || hdrConsumerRow.can_claim !== false) &&
-        (req as AuthenticatedRequest).no_claim_hint !== true;
-    const hdrActionable = hdrActionableIds.has(t.id);
-    const hdrClaimable = hdrCanClaim
-        ? hdrActionable && hdrOwnedProjects.has(t.project)
-        : t.assignee === flagConsumer && hdrActionable;
-    const claimHeldEnd = ticketClaimHeldUntil(t);
-    const headerBase = {
-        id: t.id,
-        project: t.project,
-        title: t.title,
-        summary: t.summary ?? null,
-        by_agent: t.by_agent,
-        created_at: t.created_at,
-        status: t.status,
-        closed,
-        resolved,
-        resolved_by: resolved ? resolvedBy : null,
-        resolved_at: resolved ? resolvedAt : null,
-        blocked,
-        blocked_by: blocked ? blockedBy : null,
-        blocked_at: blocked ? blockedAt : null,
-        scope: t.scope,
-        postponed_until: t.postponed_until ?? null,
-        intent: t.intent,
-        priority: t.priority ?? "normal",
-        // #2910 — the edit panel reads the level from here: without it a
-        // milestone reloaded as a task (Level "task", no "Version" label).
-        level: t.level ?? "task",
-        // #418/#436: assignment (responsibility) + claim (focus) — distinct
-        // fields, surfaced on the thread header so the UI renders "assigned to X"
-        // and/or "claimed by Y". `is_claim` kept for back-compat (claimed?).
-        assignee: t.assignee ?? null,
-        assigned_by: t.assigned_by ?? null,
-        assigned_at: t.assigned_at ?? null,
-        claimant: t.claimant ?? null,
-        claimed_at: t.claimed_at ?? null,
-        // #2460 — a lapsed claim stays on record (claimant, claimed_at) but is
-        // no longer held: `is_claim` says whether it is, `claim_until` until when
-        // (the later of the assign window and the holder's working protection).
-        // It was `claimant != null`, and showed a claim the step gate refused.
-        is_claim: claimHeldEnd !== null && claimHeldEnd > Date.now(),
-        claim_until: claimHeldEnd !== null ? new Date(claimHeldEnd).toISOString() : null,
-        // #3038 — who holds it now, and how: the same rule as the list row.
-        ...holding(t, claimHeldEnd, Date.now()),
-        parent_ticket_id: t.parent_ticket_id ?? null,
-        sub_tickets: listSubTickets(t.id),
-        // #2910 — the milestone this ticket belongs to; on a milestone, its tickets.
-        milestone: milestonesOf([t.id]).get(t.id) ?? null,
-        ...(t.level === "milestone" ? { milestone_progress: milestoneProgress(t.id) } : {}),
-        // #2765 — the ticket's last word is a step: what it resumes on. Same
-        // aggregate as the list row and the UI.
-        step: liveStep(getInboxAgg(t.project).get(t.id), !closed && t.status !== "rejected"),
-        // #2770 david — flag the project's critical ticket on its detail too.
-        critical: (() => {
-            const c = !closed && t.status === "approved" ? projectCriticalTicket(t.project) : null;
-            return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet } : null;
-        })(),
-        tags: listMessageTags(t.id),
-        // #B.104: sidecar metadata (question-answer audit, etc.).
-        // Frontend reads this to render the "X/Y open" chip beside
-        // questions without round-tripping to the server.
-        meta: t.meta ?? null,
-        // #406 (david 7mybeg "dans le détail ticket on a pas l'info du cumul
-        // d'effort"): expose the per-ticket token tally on the GET header too,
-        // not just list rows — the thread badge (ThreadHeader) reads it, and the
-        // detail view fetches via ticket_get, so without this the badge had no
-        // data when a ticket was opened directly. null until any usage captured.
-        token_usage: getTicketTokenUsage([t.id]).get(t.id) ?? null,
-        // #569 david `j8t4qa` A+C : flag explicite que l'agent peut tester
-        // AVANT de poster un `ticket_reply then:"resolved"` / `then:"plan"`.
-        // True ssi le ticket est `status: "approved"`. Faux sur pending /
-        // rejected — l'API renverra de toute façon HTTP 409
-        // (PARENT_PENDING_MODERATION) si l'agent tente, mais le flag
-        // est plus pédagogique : l'agent lit le ticket → voit le flag →
-        // décide d'attendre / d'asker un plain comment.
-        decision_proposable: t.status === "approved",
-        // #2112 david: "si pas de payload doit être complètement invisible".
-        // Invisible means the UI must not even ASK — a `GET …/payload` on every
-        // thread open, answered 404 for all but a handful of tickets, is a
-        // round-trip and a log line for nothing. This flag lets the panel stay
-        // unmounted rather than merely render empty. It says a payload EXISTS,
-        // never anything about what is in it.
-        has_payload: ticketHasPayload(t.id),
-        // #596 david `sa44wy` : ≥1 unseen ping on this thread for the
-        // requesting consumer. Frontend uses it to skip the
-        // "marking-as-read" pulse when landing on an already-read ticket.
-        unread: ticketUnreadFlags(consumerOf(req), [t.id]).get(t.id) ?? false,
-        // #1350 — per-consumer work-landscape flags, same semantics as the
-        // list rows. `claimable` is the wake renderer's discriminator for the
-        // info-vs-triage suffix on event wakes.
-        actionable: hdrActionable,
-        claimable: hdrClaimable,
-        // #928 david `2uxj45` (Slice 1) : ta dernière décision postée sur
-        // ce ticket (then:plan / then:resolved / then:wontfix /
-        // then:escalate) — surface l'état pending/accepted/rejected en
-        // header. Évite à l'agent de drill dans comments[].meta.decision
-        // pour savoir "où en est ma décision" (cf. bug #951 où j'avais
-        // claim "pending" alors qu'accepted). null = aucune décision
-        // posée par ce consumer sur ce ticket.
-        your_latest_decision: (() => {
-            const consumer = consumerOf(req);
-            let latest: { kind: string; status: string; hashid: string | null; decided_at: string | null } | null = null;
-            let latestId = -1;
-            for (const m of threadMessages) {
-                if (m.kind !== "comment_added") continue;
-                if (m.by_agent !== consumer) continue;
-                if (m.status === "rejected") continue;
-                const dec = parseMeta(m.meta ?? null).decision;
-                if (!dec || !dec.kind || !dec.status) continue;
-                if (m.id > latestId) {
-                    latestId = m.id;
-                    latest = {
-                        kind: dec.kind,
-                        status: dec.status,
-                        hashid: m.hashid ?? null,
-                        decided_at: dec.decided_at ?? null,
-                    };
-                }
-            }
-            return latest;
-        })(),
-    };
-    if (summary) {
-        const commentCount = threadMessages.filter(
-            (m) => m.kind === "comment_added" && m.status !== "rejected",
-        ).length;
-        return res.json({
-            ticket: headerBase,
-            comment_count: commentCount,
-            focus_message_id: focusMessageId,
-        });
-    }
-    // #B.130 phase 2: brief mode. Reshapes the thread to drop the
-    // already-summarized prefix and ship only the canonical pivot
-    // line + everything after it.
-    //
-    // #B.21X (this change): pivot-cut. Scan approved comment_added
-    // from newest → oldest, find the first one carrying
-    // meta.summary_until — that's the pivot. The pivot's contract
-    // ("ticket state AFTER this comment") makes it strictly lossless
-    // to drop every earlier comment_added: they're all captured in
-    // that one line. The pivot ships with body stripped (summary_until
-    // IS its body); every comment_added AFTER the pivot keeps its
-    // full body (that's the active "now" the reader needs).
-    //
-    // Lifecycle events (closed / reopened / resolved / blocked /
-    // sub-added / referenced / relation) are always kept regardless
-    // of position — they're small, semantically distinct, and not
-    // covered by summary_until.
-    //
-    // Fallback: if no comment in the thread carries summary_until
-    // (legacy threads, pure-human threads), revert to the legacy
-    // tail-based brief — keep the last `tail` bodies intact, collapse
-    // older comments with summary_until-when-present, keep bodies
-    // otherwise. So brief is never lossy-by-absence.
-    //
-    // #B.21X (this change): digest mode. `digest: true` returns the
-    // header plus an ordered `digest[]` of the thread's summary_until
-    // snapshots — bird's-eye progression for cross-ticket scans.
-    // Optional `digest_limit=N` trims to the last N snapshots. Ignored
-    // when full or brief is set.
-    const brief = req.query.brief === "1";
-    const digest = req.query.digest === "1";
-    if (digest && !brief) {
-        const limitRaw = req.query.digest_limit;
-        const limitParsed = typeof limitRaw === "string" ? Number.parseInt(limitRaw, 10) : NaN;
-        const limit = Number.isFinite(limitParsed) && limitParsed > 0 ? limitParsed : null;
-        const snapshots = threadMessages
-            .filter((m) => m.kind === "comment_added" && m.status === "approved")
-            .map((m) => {
-                const su = parseMeta(m.meta ?? null).summary_until;
-                if (!su) return null;
-                return {
-                    id: m.id,
-                    hashid: m.hashid,
-                    by_agent: m.by_agent,
-                    created_at: m.created_at,
-                    summary_until: su,
-                };
-            })
-            .filter((x): x is { id: number; hashid: string | null; by_agent: string; created_at: string; summary_until: string } => x !== null);
-        const trimmed = limit !== null ? snapshots.slice(-limit) : snapshots;
-        const commentCount = threadMessages.filter(
-            (m) => m.kind === "comment_added" && m.status !== "rejected",
-        ).length;
-        return res.json({
-            ticket: headerBase,
-            digest: trimmed,
-            digest_limit: limit ?? undefined,
-            comment_count: commentCount,
-            focus_message_id: focusMessageId,
-        });
-    }
-    // #B.202: `tail=N` survives for the no-pivot fallback path. When
-    // a pivot is found, tail is a no-op (the cut is semantic, not
-    // positional).
-    const tailRaw = req.query.tail;
-    const tailParsed = typeof tailRaw === "string" ? Number.parseInt(tailRaw, 10) : NaN;
-    const tail = Number.isFinite(tailParsed) && tailParsed > 0 ? tailParsed : 1;
-    // #518 — décorer avec votes_summary (up/down + viewer's mine). Le viewer
-    // est consumerOf(req) : chaque user voit son `mine` calculé pour lui.
-    let outComments = enrichRelationStages(withVotes(withTags(threadMessages), consumerOf(req)));
-    let pivotCommentId: number | null = null;
-    let pivotApplied = false;
-    if (brief) {
-        for (const m of [...threadMessages].reverse()) {
-            if (m.kind !== "comment_added" || m.status !== "approved") continue;
-            const su = parseMeta(m.meta ?? null).summary_until;
-            if (su) {
-                pivotCommentId = m.id;
-                break;
-            }
-        }
-        if (pivotCommentId !== null) {
-            pivotApplied = true;
-            const cutId = pivotCommentId;
-            outComments = outComments
-                .filter((m) => m.kind !== "comment_added" || m.id >= cutId)
-                .map((m) => {
-                    if (m.kind !== "comment_added") return m;
-                    const su = parseMeta(m.meta ?? null).summary_until ?? null;
-                    if (m.id === cutId) {
-                        return { ...m, body: null, summary_until: su } as typeof m;
-                    }
-                    return { ...m, summary_until: su } as typeof m;
-                });
-        } else {
-            const keepIds = new Set<number>();
-            const approvedIds = threadMessages
-                .filter((m) => m.kind === "comment_added" && m.status === "approved")
-                .map((m) => m.id)
-                .sort((a, b) => b - a)
-                .slice(0, tail);
-            for (const id of approvedIds) keepIds.add(id);
-            outComments = outComments.map((m) => {
-                if (m.kind !== "comment_added" || keepIds.has(m.id)) return m;
-                const meta = parseMeta(m.meta ?? null);
-                const summaryUntil = meta.summary_until ?? null;
-                if (!summaryUntil) {
-                    return { ...m, summary_until: null } as typeof m;
-                }
-                return { ...m, body: null, summary_until: summaryUntil } as typeof m;
-            });
-        }
-    }
-    // #309: user-deleted comments (only present when include_deleted=1) ship
-    // as tombstones — strip the body so the UI shows a placeholder, never the
-    // original text. `meta.deleted` stays so the frontend renders the marker.
-    outComments = outComments.map((m) =>
-        m.kind === "comment_added" && parseMeta(m.meta ?? null).deleted
-            ? ({ ...m, body: null } as typeof m)
-            : m,
-    );
-    // #396 (david h4gp5z): paginate + order the full thread feed. Lets a reader
-    // page through a big thread — or grab the last N entries WITH full bodies —
-    // instead of pulling the whole 80 KB at once. Only in pure full mode (brief
-    // and digest have their own shapes). Pure logic in feed-paginate.ts.
-    let pagination: FeedPagination | undefined;
-    if (!brief) {
-        const paged = paginateFeed(outComments, {
-            offset: req.query.offset,
-            limit: req.query.limit,
-            order: req.query.order,
-        });
-        outComments = paged.feed;
-        pagination = paged.pagination;
-    }
-    // #B.123 phase B: surface the active typed relations alongside the
-    // existing parent/sub-ticket lineage. Each relation is enriched
-    // with the target ticket's lifecycle stage (open / closed /
-    // closed-resolved / rejected) so the chip can render a state
-    // badge — david: "dans la nouvelle présentation on voit plus
-    // l'état du ticket en relation".
-    const typedRelations = listTypedRelationsForTicket(id);
-    const targetStages = typedRelations.length > 0
-        ? getTicketStages(typedRelations.map((r) => r.target_ticket_id))
-        : new Map<number, string>();
-    // #2432 — and with its title, for the chip's tooltip.
-    const targetTitles = typedRelations.length > 0
-        ? getTicketTitles(typedRelations.map((r) => r.target_ticket_id))
-        : new Map<number, string>();
-    const typedRelationsWithStage = typedRelations.map((r) => ({
-        ...r,
-        target_stage: targetStages.get(r.target_ticket_id) ?? "open",
-        target_title: targetTitles.get(r.target_ticket_id) ?? null,
-    }));
-    // #283: resolve `/uploads/<sha>.<ext>` refs in the bodies we're about to
-    // ship into ready-to-open attachments, so a cold-start agent doesn't have
-    // to reverse-engineer where the file lives on disk. `local` is true only
-    // for same-host (UDS / local-trust) callers — then `uri` is a `file://`
-    // path; remote/browser callers get the HTTP ref. Only scan the bodies
-    // actually present in the response (brief mode collapses pre-pivot ones).
-    const ticketBody = t.body;
-    const localTrust =
-        (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
-    const attachments = resolveAttachments(
-        [ticketBody, ...outComments.map((c) => c.body)],
-        localTrust,
-    );
-    // #3040 — each comment also lists its own uploads, when it has any, so a
-    // client rendering one comment need not scan the thread-wide list.
-    outComments = outComments.map((c) => {
-        const own = resolveAttachments([c.body], localTrust);
-        return own.length > 0 ? { ...c, attachments: own } : c;
-    });
-    res.json({
-        ticket: {
-            ...headerBase,
-            body: ticketBody,
-            relations: typedRelationsWithStage,
-        },
-        comments: outComments,
-        attachments,
-        focus_message_id: focusMessageId,
-        brief,
-        // `pivot_comment_id` surfaces the cut point when brief mode
-        // applied the pivot-cut. Null when brief fell back to the
-        // legacy tail-keep (no summary_until in thread). `tail` is
-        // only relevant in that fallback path.
-        pivot_comment_id: brief ? pivotCommentId : undefined,
-        tail: brief && !pivotApplied ? tail : undefined,
-        // #396: present only when the full feed was paginated/reordered.
-        pagination,
-    });
-});
+ticketsRouter.get("/tickets/:id", serveMethod("ticket.get"));
 
 /**
  * Decorate ticket_referenced / ticket_sub_added pseudo-comments with the
@@ -1921,7 +1266,7 @@ const RELATION_CHIP_KINDS = new Set([
 ]);
 const isRelationChipKind = (kind: string): boolean => RELATION_CHIP_KINDS.has(kind);
 
-function enrichRelationStages<T extends { id: number; kind: string; source_ticket_id?: number | null }>(comments: T[]): (T & { source_ticket_stage?: string; source_ticket_title?: string | null })[] {
+export function enrichRelationStages<T extends { id: number; kind: string; source_ticket_id?: number | null }>(comments: T[]): (T & { source_ticket_stage?: string; source_ticket_title?: string | null })[] {
     const sourceIds = new Set<number>();
     for (const c of comments) {
         if (isRelationChipKind(c.kind) && typeof c.source_ticket_id === "number") {

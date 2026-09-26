@@ -54,14 +54,24 @@ export function servedMethods(): Set<string> {
  * request comes: a route module and the method module may import each other,
  * and neither needs the other while it loads.
  */
-export function serveMethod(name: string, from: ParamsFrom = fromRequest, opts: { status?: number } = {}): RequestHandler {
+export function serveMethod(
+    name: string,
+    from: ParamsFrom = fromRequest,
+    opts: {
+        status?: number;
+        /** How the result goes out, when HTTP carries part of it outside the body. */
+        respond?: (res: Response, result: unknown) => void;
+    } = {},
+): RequestHandler {
     servedMethods().add(name);
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
             const m = getMethod(name);
             if (!m) throw new Error(`no bus method ${name}`);
             const result = await runOverHttp(m, req, from(req));
-            res.status(opts.status ?? 200).json(result === undefined ? null : result);
+            res.status(opts.status ?? 200);
+            if (opts.respond) opts.respond(res, result);
+            else res.json(result === undefined ? null : result);
         } catch (e) {
             if (e instanceof Refusal) {
                 refuse(res, e.status, e.message, e.code, e.details);

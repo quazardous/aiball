@@ -49,13 +49,18 @@ test("every method a route serves exists", () => {
     assert.deepEqual(names.filter((n) => !getMethod(n)), []);
 });
 
-async function http(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+/** Fields that move between two reads a few ms apart. */
+function stripVolatile(v: unknown): unknown {
+    return JSON.parse(JSON.stringify(v, (k, x) => (k === "ts" || k === "hot_until" ? undefined : x)));
+}
+
+async function http(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown>; total: string | null }> {
     const r = await fetch(`${url}${path}`, {
         method,
         headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
         body: body ? JSON.stringify(body) : undefined,
     });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+    return { status: r.status, json: await r.json() as Record<string, unknown>, total: r.headers.get("x-total-count") };
 }
 
 async function bus(token: string, method: string, params: unknown): Promise<{ ok: true; result: unknown } | { ok: false; status: number; code: string; message: string }> {
@@ -78,6 +83,11 @@ const cases: { name: string; token: string; http: [string, string, unknown?]; bu
     { name: "another agent's backlog", token: AGENT, http: ["GET", "/api/consumers/boss/backlog"], bus: ["consumer.backlog", { consumer_id: "boss" }] },
     { name: "an agent snoozing", token: AGENT, http: ["POST", `/api/tickets/${T}/postpone`, { until: "2099-01-01T00:00:00Z" }], bus: ["ticket.postpone", { id: T, until: "2099-01-01T00:00:00Z" }] },
     { name: "a loop control by an agent", token: AGENT, http: ["POST", "/api/agents/worker/afk", { action: "off" }], bus: ["consumer.afk", { name: "worker", action: "off" }] },
+    { name: "the inbox, turn view", token: AGENT, http: ["GET", "/api/inbox?project=p-served&view=turn"], bus: ["inbox.list", { project: "p-served", view: "turn" }] },
+    { name: "a ticket header", token: AGENT, http: ["GET", `/api/tickets/${T}`], bus: ["ticket.get", { id: T }] },
+    { name: "a ticket, full", token: HUMAN, http: ["GET", `/api/tickets/${T}?full=1`], bus: ["ticket.get", { id: T, full: true }] },
+    { name: "a ticket, digest", token: HUMAN, http: ["GET", `/api/tickets/${T}?digest=1&digest_limit=2`], bus: ["ticket.get", { id: T, digest: true, digest_limit: 2 }] },
+    { name: "no such ticket", token: AGENT, http: ["GET", "/api/tickets/999999"], bus: ["ticket.get", { id: 999999 }] },
     { name: "a move to the same project", token: HUMAN, http: ["POST", `/api/tickets/${T}/move`, { project: "p-served" }], bus: ["ticket.move", { id: T, project: "p-served" }] },
 ];
 
@@ -87,7 +97,13 @@ for (const k of cases) {
         const b = await bus(k.token, k.bus[0], k.bus[1]);
         if (h.status < 300) {
             assert.ok(b.ok, `the bus refused what HTTP accepted: ${JSON.stringify(b)}`);
-            assert.deepEqual(JSON.parse(JSON.stringify((b as { result: unknown }).result)), h.json);
+            let result = JSON.parse(JSON.stringify((b as { result: unknown }).result));
+            // The inbox: HTTP sends the rows as the body and the total as X-Total-Count.
+            if (k.bus[0] === "inbox.list") {
+                assert.equal(result.total, Number(h.total));
+                result = result.rows;
+            }
+            assert.deepEqual(stripVolatile(result), stripVolatile(h.json));
         } else {
             assert.ok(!b.ok, "the bus accepted what HTTP refused");
             const r = b as { status: number; code: string; message: string };

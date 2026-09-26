@@ -8,3 +8,5 @@ import "./methods/catalog.js";
 import "./methods/consumer.js";
 import "./methods/message.js";
 import "./methods/ticket.js";
+import "./methods/inbox.js";
+import "./methods/ticket-get.js";
