@@ -696,18 +696,16 @@ Server side (`src/claude-loop/ipc-events.ts:listenEvents`):
   server calls `ws.terminate()` and clears the interval.
 - `isAlive` resets on ANY inbound frame — `pong`, `ping`, or
   `message`. The "any frame" leniency keeps connections
-  alive for write-only clients (e.g. the legacy `_ProxyEventEmitter`
-  that didn't read pongs); a client actively sending events is
+  alive for write-only clients; a client actively sending events is
   demonstrably alive even when its read buffer is empty.
 
-Client side (Python proxy):
-- `_ViewPushClient` runs a recv loop in a background thread. The
-  `websocket-client` lib auto-pongs incoming pings as part of
-  `recv()` processing, so the reader handles liveness for free.
-- `_ProxyEventEmitter` no longer holds its own socket. It calls
-  `_view_push_client.send(payload)` on the shared connection
-  (`9052280`). When the recv loop detects close + reconnects, the
-  emitter's next send goes through the new socket.
+Client side (the proxy, `ws_client.rs`):
+- One thread owns the connection. A read timeout interleaves: drain
+  the outbound proxy events, read one inbound frame, flush the queued
+  pongs — the websocket library answers the server's pings on read.
+- With no frame at all for too long, the connection is taken as dead
+  and reopened; every reconnect re-reads `loop.sock.addr`, so a server
+  that rebound (new port and token) is picked up transparently.
 
 Constants live in `src/claude-loop/ipc-events.ts`:
 `HEARTBEAT_PING_MS = 15_000`. A dead client is reaped within 30s
@@ -1016,15 +1014,14 @@ src/claude-loop/
   pretooluse-hook.ts                    # gate AskUserQuestion in a headless loop
   kernel.ts                             # detached ticker; SM composition root; AiballClient fastpath
   error-backoff.ts                      # exponential retry on pane crash (rate-limit/api-error)
-  pty-proxy.py                          # Python PTY proxy, Unix fallback (see PTY-PROXY.md)
 config/defaults/claude-loop-pings.yaml  # default wake phrases + prompt templates
-windows/cl-pty-proxy/                   # Rust PTY proxy — the default on Unix and Windows
+windows/cl-pty-proxy/                   # the PTY proxy (Rust), on Unix and Windows
 docs/CLAUDE-LOOP.md                     # this file
 ```
 
-Which proxy runs is `claude_loop.proxy_impl` (`rust` by default, falling back
-to Python, then REFUSING to start); the `proxy` line of `health` names the one it
-found. Diagnosing a loop that reports failures: see
+The proxy is `windows/cl-pty-proxy/target/release/cl-pty-proxy`, or the binary
+`CL_PROXY_BIN` names; without it a loop REFUSES to start, and the `proxy` line of
+`health` says whether it is running. Diagnosing a loop that reports failures: see
 [Troubleshooting](#troubleshooting--reading-claude-loop-health) above.
 
 Install symlinks `~/.local/bin/claude-loop` alongside `aiball` and

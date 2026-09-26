@@ -1,5 +1,4 @@
-//! Windows fake-claude byte logger — sibling of pty-proxy.py --fake-claude
-//! (Unix). Used as the child of cl-pty-proxy in autonomous diagnostic runs:
+//! Windows fake-claude byte logger. Used as the child of cl-pty-proxy in autonomous diagnostic runs:
 //! captures EXACTLY what the inner ConPTY delivers when a key arrives at the
 //! "claude" position in the chain.
 //!
@@ -10,7 +9,7 @@
 //!   - On Ctrl-C (0x03) byte, exit cleanly. Same on EOF.
 //!   - Do NOT echo anything back (we don't want to confuse upstream parsers).
 //!
-//! Compared to the Python one this is dumber: no tty raw-mode work — it inherits
+//! No tty raw-mode work — it inherits
 //! the ConPTY-managed stdin from cl-pty-proxy and just logs whatever comes.
 
 use std::env;

@@ -303,7 +303,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     // sources the new value. Multiple `--set` allowed (last wins per KEY).
     // VAL="" drops the export line entirely (cohérent avec `unset`). The
     // intended target is the debug-only flags (CL_PANE_CAPTURE_LOG,
-    // CL_BAR_PAINT_LOG, CL_PROXY_LOG) that have no yaml backing — pas de
+    // CL_BAR_PAINT_LOG) that have no yaml backing — pas de
     // restriction sur KEY, mais on valide la grammaire d'un nom d'env var.
     if (opts?.set && opts.set.length > 0) {
         patchEnvSet(envPath(sd), opts.set);

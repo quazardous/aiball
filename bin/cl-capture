@@ -12,7 +12,7 @@ shared epoch clock `t` and exposes context-frugal views : a one-line-per-event
 timeline, content grep that returns only matching lines, consecutive pane
 diffs (panes barely change), footer-scoped pane fetch, and summary stats.
 
-Zero dependencies (stdlib only), mirroring pty-proxy.py.
+Zero dependencies (stdlib only).
 
 Usage:
   cl-capture timeline DIR [--kind K[,K]] [--since S] [--until S] [--grep RE]

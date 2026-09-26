@@ -12,7 +12,7 @@
  * The cwd source : `AIBALL_PROJECT_CWD` is exported into the env file by
  * `claude-loop start` (cli.ts) and sourced by every hook + timer ; the
  * bare `process.cwd()` fallback exists for stand-alone invocations
- * (tests, debug-proxy-tty, etc.) that haven't been spawned from a loop.
+ * (tests, debug commands, etc.) that haven't been spawned from a loop.
  */
 import { loadConfig, type AiballConfig } from "../autopoll/config.js";
 import { CL_ENV } from "./env-vars.js";

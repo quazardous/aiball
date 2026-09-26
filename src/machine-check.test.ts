@@ -121,21 +121,18 @@ test("a missing tool is an error carrying the package manager's install command"
     assert.equal(line(lines, "claude").fix, "npm install -g @anthropic-ai/claude-code");
 });
 
-test("PTY proxy: the Python fallback says WHY — unbuilt, or no cargo to build it", () => {
-    const python = { kind: "python", script: "/x/pty-proxy.py", notice: "" } as const;
-    const unbuilt = line(assembleMachineReport(healthy({ proxy: python })), "pty_proxy");
-    assert.equal(unbuilt.status, "warn");
+test("PTY proxy missing: an error that says WHY — unbuilt, or no cargo to build it", () => {
+    const refuse = { kind: "refuse", reason: "x" } as const;
+    const unbuilt = line(assembleMachineReport(healthy({ proxy: refuse })), "pty_proxy");
+    assert.equal(unbuilt.status, "error");
     assert.match(unbuilt.detail, /not built/);
     assert.equal(unbuilt.fix, BUILD_CMD);
 
     const noCargo = line(assembleMachineReport(healthy({
-        proxy: python, cargo: { present: false, install: "sudo dnf install cargo" },
+        proxy: refuse, cargo: { present: false, install: "sudo dnf install cargo" },
     })), "pty_proxy");
     assert.match(noCargo.detail, /cargo is not installed/);
     assert.equal(noCargo.fix, `sudo dnf install cargo, then ${BUILD_CMD}`);
-
-    const refuse = line(assembleMachineReport(healthy({ proxy: { kind: "refuse", reason: "x" } })), "pty_proxy");
-    assert.equal(refuse.status, "error");
 });
 
 test("PTY proxy: a built binary that does not match this install is stale, not ok", () => {

@@ -8,18 +8,13 @@
 
 ---
 
-## Why a separate implementation
+## Why Rust, and why ConPTY
 
-The Unix proxy (`src/claude-loop/pty-proxy.py`) is Python stdlib only:
-`pty.fork()`, `termios`, `select`, `AF_UNIX`. **None of those exist on
-Windows** — `import pty` itself fails (it pulls in `termios`). So on
-Windows the launch path can't reuse it, and a clean room implementation is
-needed. Two facts shaped the design:
+POSIX `pty`, `termios` and `AF_UNIX` don't exist on Windows. Two facts shaped
+the design:
 
-1. **Python stdlib has no ConPTY.** Replicating the "zero dependency"
-   elegance of the Unix proxy in Python on Windows is impossible —
-   you'd need `pywinpty` (a native wheel) or hand-rolled `ctypes`. So the
-   language advantage is gone; we pick the tool that fits the platform.
+1. **Windows' pseudo-terminal is ConPTY**, and reaching it from a script
+   runtime would need a native wheel or hand-rolled FFI.
 2. **psmux is already built on ConPTY** (via the `portable-pty` crate).
    Writing the proxy in Rust on the same `portable-pty` layer means we
    inherit a battle-tested ConPTY abstraction instead of re-deriving it.
@@ -27,15 +22,12 @@ needed. Two facts shaped the design:
 Result: `windows/cl-pty-proxy/` — a small Rust binary, **strategy B** (see
 "Strategy A" at the bottom for the cleaner long-term plan).
 
-> **It is not Windows-only.** The crate is a single cross-platform binary:
-> its pure core (keystroke classification, AFK detection, the marker/inject
-> contract) is shared, with thin per-OS I/O glue — `main.rs` for the
-> Windows ConPTY path, `unix_main.rs` for a Linux `openpty` path. It builds
-> and passes CI on both `windows-latest` and `ubuntu-latest`. The
-> long-term intent is for this one binary to replace **both** the old
-> Windows path **and** the Unix `pty-proxy.py`. The Linux entry point is
-> built and tested but not yet wired into the loop's launch flow, so on
-> Unix the Python proxy is still what runs today (the cutover is pending).
+> **It is not Windows-only.** The crate is a single cross-platform binary,
+> and the only proxy claude-loop has: its pure core (keystroke
+> classification, AFK detection, the marker/inject contract) is shared, with
+> thin per-OS I/O glue — `main.rs` for the Windows ConPTY path,
+> `unix_main.rs` for the Linux `openpty` path. It builds and passes CI on both
+> `windows-latest` and `ubuntu-latest`.
 
 ## Where it sits
 
@@ -114,14 +106,13 @@ unit tests (`cargo test`) built from real captured sequences.
 
 If ConPTY allocation or the claude spawn fails, the proxy runs claude
 directly with inherited stdio and propagates its exit code — the live pane
-is never bricked (the analogue of the Unix proxy's `os.execvp` fallback).
+is never bricked (on Unix, the same fallback `exec`s claude).
 
 ## How it's wired into claude-loop
 
 - `cli.ts` launch — on `win32`, if `windows/cl-pty-proxy/target/release/
   cl-pty-proxy.exe` exists, the pane runs `exec <proxy.exe> -- <claudeCmd>`;
-  otherwise it falls back to launching claude directly. The Python proxy
-  branch is gated to non-Windows (its POSIX APIs would crash the pane).
+  otherwise it falls back to launching claude directly.
 - `state.ts::injectWakePhrase` — on `win32`, gate on `proxyIsAlive(sd)`
   (a named pipe can't be `stat`-ed) and write the wake to
   `injectPipeName(sd)` = `\\.\pipe\cl-inject-<name>` via Node `net`
@@ -172,20 +163,13 @@ The "picks it up automatically on next launch" note above describes the
 first install — for a steady-state redeploy you have to free the binary
 first.
 
-## Parity with the Unix proxy
+## Feature level
 
-On Windows, the **proxy is the prioritized path** (project decision): it keeps
-accumulating capabilities the bare psmux-native marker (strategy A) can't
-cover — notably AFK-combo detection. So the Rust proxy tracks the Unix Python
-proxy's feature level.
+The decision logic is a **pure core** (`src/core.rs`: win32 decode + keystroke
+split + `AfkDetector` + `Decider` + bar-word), shared with the Unix path. It
+unit-tests without a PTY (`cargo test`). `main.rs` is the Windows I/O glue.
 
-The decision logic is mirrored as a **pure core** (`src/core.rs`: win32
-decode + keystroke split + `AfkDetector` + `Decider` + bar-word), the Rust
-analogue of the Python proxy's `_Decider` / `split_keystrokes` / `_AfkDetector`.
-It unit-tests without a PTY (`cargo test`), like the Python
-`--replay` path. `main.rs` is the I/O glue.
-
-**At parity:** PTY/ConPTY bridge, `proxy-alive` (PID-stamped), `human-typing`
+**Covered:** PTY/ConPTY bridge, `proxy-alive` (PID-stamped), `human-typing`
 marker, wake injection (named pipe ↔ UDS), resize, exit-code propagation,
 fail-safe direct launch, and:
 

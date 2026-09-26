@@ -1,8 +1,6 @@
-//! Pure decision core for the Windows ConPTY proxy — the Rust mirror of the
-//! Python proxy's `_Decider` + `split_keystrokes` + `_AfkDetector`
-//! (`src/claude-loop/pty-proxy.py`, #360/#381). NO I/O here: everything is
-//! pure so it unit-tests without a PTY (`cargo test`), exactly like the
-//! Python side is tested via `--replay`.
+//! Pure decision core of the PTY proxy, on both platforms: the keystroke
+//! decider, `split_keystrokes` and the AFK detector (#360/#381). NO I/O here:
+//! everything is pure so it unit-tests without a PTY (`cargo test`).
 //!
 //! The one Windows-specific twist: under psmux/ConPTY, keystrokes arrive as
 //! **win32-input-mode** sequences (`ESC[Vk;Sc;Uc;Kd;Cs;Rc_`), not raw VT. So
@@ -14,7 +12,7 @@
 //! win32 sequence (passthrough), so claude's own ConPTY decodes them.
 
 /// A side effect the live loop must perform (the Decider only NAMES them).
-/// Order within a verdict is significant — mirrors the Python marker order.
+/// Order within a verdict is significant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Marker {
     SetAfk,
@@ -417,9 +415,9 @@ fn split_units_with_consumed(data: &[u8]) -> (Vec<Unit>, usize) {
 
 /// Parse `CL_AFK_SPEC` (`[[27,97],[7]]` — JSON list of byte lists, from the TS
 /// `parseAfkKey`) into combos. Tolerant hand-parser (no serde dep): anything
-/// malformed yields no combos (AFK disabled), like the Python `except`.
-/// Parse `CL_RELOAD_KEY` — a hex byte sequence (e.g. "0e" = Ctrl+N), mirror of
-/// the Python `bytes.fromhex`. Empty / odd-length / non-hex → empty (disabled).
+/// malformed yields no combos (AFK disabled).
+/// Parse `CL_RELOAD_KEY` — a hex byte sequence (e.g. "0e" = Ctrl+N).
+/// Empty / odd-length / non-hex → empty (disabled).
 pub fn parse_reload_key(hex: &str) -> Vec<u8> {
     let h = hex.trim();
     if h.is_empty() || h.len() % 2 != 0 {
@@ -489,7 +487,7 @@ pub fn parse_afk_spec(json: &str) -> Vec<Vec<u8>> {
 /// only: a held chord key-repeats the same bytes, so for `window_ms` after a
 /// fire any keystroke made solely of combo bytes is swallowed (one net toggle
 /// per physical press). Anything else ends the debounce. Mirror of
-/// afk-key.ts AfkDetector + the Python _AfkDetector.
+/// afk-key.ts AfkDetector.
 pub struct AfkDetector {
     combos: Vec<Vec<u8>>,
     window_ms: f64,
@@ -583,11 +581,11 @@ impl Decider {
         }
     }
 
-    /// Decide on one keystroke unit. Mirrors `_Decider.on_stdin`, adapted so
-    /// `forward` carries the unit's RAW (win32) bytes for passthrough.
+    /// Decide on one keystroke unit. `forward` carries the unit's RAW (win32)
+    /// bytes for passthrough.
     pub fn on_unit(&mut self, unit: &Unit, now_ms: f64) -> Verdict {
         // #1040 — reload hotkey (Ctrl+N by default) : exact match, checked
-        // FIRST (mirrors pty-proxy.py precedence). Swallowed on both down and
+        // FIRST. Swallowed on both down and
         // up so nothing reaches claude ; the caller emits {event:"reload"} on
         // the down. Ctrl+N decodes to vt=[0x0e] on both platforms (raw on
         // Unix, win32 uc=0x0e on Windows), so we match on vt.

@@ -9,7 +9,7 @@
  * is delivered to the kernel BEFORE the destructive action so the timeline reads
  *
  * Naming (#1036) : "kernel" = the long-lived worker process (kernel.ts) ; "timer"
- * is reserved for genuine setTimeout/setInterval. "proxy" = pty-proxy.py.
+ * is reserved for genuine setTimeout/setInterval. "proxy" = cl-pty-proxy.
  * `debug kill-proxy` → `proxy link lost` → `bar RED` in order.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -56,7 +56,7 @@ export async function cmdDebug(action: string, name: string): Promise<void> {
     });
 
     const target = action === "kill-proxy"
-        ? { pid: readPid(proxyAlivePath(sd)), label: "proxy", what: "pty-proxy.py" }
+        ? { pid: readPid(proxyAlivePath(sd)), label: "proxy", what: "cl-pty-proxy" }
         : { pid: readPid(loopPidPath(sd)), label: "kernel", what: "kernel.ts" };
 
     if (target.pid === null) {

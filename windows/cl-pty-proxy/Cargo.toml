@@ -1,8 +1,7 @@
 [package]
 name = "cl-pty-proxy"
-# #768 Phase 2 — cross-platform proxy (Windows + Linux). The Windows path
-# remains ConPTY/named-pipe legacy ; Linux uses openpty + UDS. Long-term
-# this replaces both pty-proxy.py (Linux) and the old Windows path.
+# #768 Phase 2 — cross-platform proxy (Windows + Linux): ConPTY + loopback
+# ws on Windows, openpty + UDS on Linux. The only claude-loop proxy (#3043).
 version = "0.1.0"
 edition = "2021"
 description = "claude-loop unified PTY proxy — live human-typing detection + ws-over-loopback/UDS wake injection (Windows ConPTY + Linux openpty)"

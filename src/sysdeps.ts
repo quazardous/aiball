@@ -179,9 +179,8 @@ export interface Prereq {
 
 /**
  * The prerequisites differ per platform because the runtime does (#1571). On
- * Windows the multiplexer is psmux, the PTY proxy is the Rust ConPTY one, and
- * there is no Python proxy at all — reporting `python3: missing` there would
- * name a degradation that cannot happen. The Windows list mirrors what
+ * Windows the multiplexer is psmux and the PTY proxy is the ConPTY build of the
+ * same Rust proxy. The Windows list mirrors what
  * `install.ps1` already provisions, so `check` and the installer agree.
  */
 const POSIX_PREREQS: readonly Prereq[] = [
@@ -192,21 +191,14 @@ const POSIX_PREREQS: readonly Prereq[] = [
         required: true,
     },
     {
-        cmd: "python3",
-        powers: "the DEPRECATED Python PTY proxy — the fallback when cl-pty-proxy is not built",
-        // The two proxy prerequisites are alternatives, and the list
-        // has no "one of" axis, so each stays optional and names the other.
-        // What is NOT optional is having one: with neither, `claude-loop start`
-        // refuses rather than launching claude bare.
-        degraded: "nothing on its own (the Rust proxy is preferred) — but with cargo missing too, `claude-loop start` refuses",
-        required: false,
-        packages: { apk: "python3", brew: "python", pacman: "python" },
-    },
-    {
         cmd: "cargo",
-        powers: "building cl-pty-proxy, the reference PTY proxy",
-        degraded: "the loop uses the deprecated Python proxy instead — and with python3 missing too, `claude-loop start` refuses",
-        required: false,
+        powers: "building cl-pty-proxy, the ONLY PTY proxy — `claude-loop start` refuses without it",
+        // #3043 — the same as on Windows now that the Python proxy is gone: an
+        // unbuilt proxy is not a degraded mode, it is no loop at all (david:
+        // "pas de proxy pas de loop"). A binary built elsewhere (CL_PROXY_BIN)
+        // also does; `claude-loop check` reports the artifact itself.
+        degraded: "",
+        required: true,
         packages: { apt: "cargo", dnf: "cargo", pacman: "rust", zypper: "cargo", apk: "cargo", brew: "rust" },
     },
 ];
@@ -236,8 +228,8 @@ const WIN32_PREREQS: readonly Prereq[] = [
     {
         cmd: "cargo",
         powers: "building cl-pty-proxy.exe, the ONLY PTY proxy on Windows — `claude-loop start` refuses without it",
-        // There is no Python proxy on Windows and no direct launch any
-        // more, so an unbuilt proxy is not a degraded mode: it is no loop at
+        // There is no direct launch any more, so an unbuilt proxy is not a
+        // degraded mode: it is no loop at
         // all. `required` is what the check renders as a hard miss, and this
         // one has to read that way (david: "pas de proxy pas de loop").
         // Note this probes the TOOLCHAIN, not the artifact — `claude-loop check`

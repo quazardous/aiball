@@ -361,8 +361,8 @@ curl --unix-socket ~/.local/share/aiball/sock http://_/api/health
 identity, then a **machine** section: the daemon's version against the
 CLI's, the socket, whether the caller's token is accepted, the web login
 and any install token still open (with its expiry), the `tmux` and
-`claude` versions, which PTY proxy a loop would get (Rust, or the
-deprecated Python fallback and why), and — when a tailscale provider is
+`claude` versions, whether the PTY proxy a loop needs is built
+(and how to build it), and — when a tailscale provider is
 configured — the URL it serves. Every warning or error line carries the
 command that fixes it (`aiball restart`, `aiball auth reinit`,
 `aiball providers up --all`, …); `aiball check --json` returns the same

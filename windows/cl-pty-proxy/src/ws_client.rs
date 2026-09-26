@@ -1,6 +1,6 @@
 #![allow(dead_code)] // wired into main.rs incrementally (Phase 1).
 //! #768 — unified Rust proxy: ws client of `loop.sock` (Phase 1, Windows
-//! loopback transport #739). Mirrors the thin `pty-proxy.py` contract
+//! loopback transport #739). The proxy's side of the loop.sock contract
 //! (post-#924):
 //!   - emits `{kind:"proxyEvent", data:{...}}` frames (afk_key / typing /
 //!     marker) — replaces the old marker FILE writes ;

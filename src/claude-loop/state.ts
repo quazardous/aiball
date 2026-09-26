@@ -435,8 +435,9 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
 export function paneCaptureDir(sd: string): string { return join(sd, "pane-captures"); }
 
 // #990 — unified capture dir. `CL_CAPTURE=1` records a replayable session :
-// each writer-process appends its own NDJSON timeline here (timer →
-// `panes.ndjson`, proxy → `proxy.ndjson`), all stamped with an epoch-seconds
+// each writer-process appends its own NDJSON timeline here (the kernel →
+// `panes.ndjson`; #3043 — the proxy writes none since the Python one is gone),
+// all stamped with an epoch-seconds
 // `t` so the streams merge into one timeline at replay. One file per process
 // (not one shared file) keeps O_APPEND atomic between the two processes.
 // Pane frames are NOT inlined : each frame is dumped as `panes/<ms>.txt` and
@@ -1339,7 +1340,8 @@ export const API_UNREACHABLE_TTL_MS =
     Math.max(0, Number(process.env[CL_ENV.API_UNREACHABLE_TTL_MS] ?? 120_000));
 
 /** Is the pane really running under the PTY proxy right now? (#269)
- *  The proxy drops the marker (stamped with its PID, see pty-proxy.py) after
+ *  The proxy drops the marker (stamped with its PID, see cl-pty-proxy's
+ *  `drop_proxy_alive`) after
  *  a successful fork and unlinks it at cleanup. Existence alone was the fact
  *  — but a proxy killed with -9 (or OOM'd) never runs cleanup, so the stale
  *  marker pinned `proxyIsAlive` true forever: TS kept abdicating `@cl_human`
@@ -1505,15 +1507,13 @@ function loopStartMs(sd: string | undefined): number {
  *                                 at launch (#305) or an AFK hold (NOT AFK
  *                                 10m / ∞) where the human asked to hold
  *   - `loop` (green colour40)   — autonomous, gate open (managed mode)
- * fg-only (the bg comes from status-bg / the loop state). Mirrored in
- * pty-proxy.py, which OWNS this segment while the proxy is alive — keep the
- * two in sync.
+ * fg-only (the bg comes from status-bg / the loop state).
  */
 /**
  * #310/#426: the bare presence WORD (`stop` / `wait` / `boot` / `loop`), decoupled
  * from the tmux colour formatting so the SAME logic feeds both the bar
  * (humanBarWord below) and the heartbeat push to the consumers page
- * (timer.ts → pushState). Keep in sync with pty-proxy.py's _rest_word.
+ * (timer.ts → pushState).
  *   - `stop` — a human is typing NOW (human-typing < 5s)
  *   - `boot` — launch window (#305 boot-grace) ; claude still loading,
  *              auto-pings frozen
@@ -3427,7 +3427,7 @@ async function injectViaLoopSocket(sockPath: string, phrase: string): Promise<{ 
  * `injectWakePhrase`, n'ajoute PAS d'Enter implicite — utilisé par les
  * call-sites qui veulent passer des keystrokes synthétiques (Enter,
  * Down, Escape, …) sans que le proxy les voie comme une frappe humaine
- * via son stdin (cf. pty-proxy.py:14-24 — séparation physique des canaux).
+ * via its stdin (see docs/PTY-PROXY.md, "The three channels").
  *
  * Returns true si l'inject a réussi, false sinon (loop.sock absent, proxy
  * pas subscribed, timeout). Le caller décide du fallback (typiquement

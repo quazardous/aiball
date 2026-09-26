@@ -2,7 +2,7 @@
  * #627 — central state-machine for claude-loop's visual + behavioural surface.
  *
  * Replaces the scattered if/else trees in state.ts, timer.ts,
- * session-start-hook.ts, pty-proxy.py with a single pure function. Inputs
+ * session-start-hook.ts, the PTY proxy with a single pure function. Inputs
  * are explicit (timestamps + file-derived booleans), output is a fully
  * computed view that every consumer paints / gates against.
  *

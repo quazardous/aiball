@@ -84,6 +84,13 @@ dates are YYYY-MM-DD.
 - On a new install, comment ids no longer overlap ticket ids, which made an
   edit, vote or delete on a comment act on the ticket with the same number.
 
+### Removed
+
+- The Python PTY proxy and its fallback: the Rust `cl-pty-proxy` is the only
+  proxy, on every platform, and a loop refuses to start without it. The
+  `claude_loop.proxy_impl` option is gone; `CL_PROXY_BIN` names a proxy binary
+  built elsewhere.
+
 ## [0.48.0] — 2026-09-23
 
 ### Added

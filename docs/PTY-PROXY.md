@@ -97,111 +97,69 @@ MIT.)
 
 ## Implementation
 
-> **⚠️ Deprecated.** The reference proxy is the Rust `cl-pty-proxy`, on Unix
-> and Windows alike. `pty-proxy.py` is now only a fallback — it runs when the
-> Rust binary isn't built, or when `claude_loop.proxy_impl: python` asks for
-> it, and both cases print a notice at launch. **No new behaviour lands here.**
-> Change `windows/cl-pty-proxy/src/core.rs` first, then mirror it into the
-> Python file for as long as the fallback lives.
->
-> Two live implementations of the same keystroke classifier drift, and the
-> drift is expensive: a terminal reply (tmux's `ESC P >|tmux …` answer to
-> claude's version probe) was classified as a bare ESC keypress in *both*, so
-> every loop start looked like a human pressing Escape and armed NOT-AFK for
-> ten minutes. Only one of the two was actually running.
+The proxy is `cl-pty-proxy`, one Rust binary for Unix and Windows, built from
+`windows/cl-pty-proxy/` with `cargo build --release` (the installer does it).
+A loop runs `windows/cl-pty-proxy/target/release/cl-pty-proxy`, or the binary
+`CL_PROXY_BIN` names; without one, `claude-loop start` refuses and says how to
+build it. The Windows specifics (ConPTY, win32-input-mode) are in
+[`PTY-PROXY-WINDOWS.md`](./PTY-PROXY-WINDOWS.md).
 
-`src/claude-loop/pty-proxy.py`, Python standard library only:
+On Unix (`src/unix_main.rs`):
 
-- `pty.fork()` — allocate a PTY and fork; the child gets the slave as
-  its controlling terminal and `exec`s claude.
-- `select()` loop bridging proxy-stdin ↔ claude-PTY-master ↔ inject
-  socket.
-- `termios` raw mode on the proxy's stdin (best-effort) so keystrokes
+- `openpty` + spawn claude on the inner PTY (the `portable-pty` crate).
+- `termios` raw mode on the proxy's stdin, restored on exit, so keystrokes
   pass through byte-for-byte.
-- `SIGWINCH` → re-read the window size and `TIOCSWINSZ` it onto claude's
+- The window size is read with `TIOCGWINSZ` and kept in sync onto claude's
   PTY (resize propagation).
-- `AF_UNIX` `SOCK_STREAM` listener for wake injection.
-- Child exit code is propagated as the proxy's exit code.
+- `loop.sock` (`src/ws_client.rs`): proxy events out, `inject` frames in.
+- Claude's exit code is the proxy's exit code.
+- **Fail-safe**: if PTY allocation or the spawn fails, the proxy `exec`s
+  claude directly — the live pane is never bricked.
 
-### Why Python stdlib (historical)
+The keystroke logic — AFK-combo detection, the first-combo buffering,
+presence, ESC-takeover, the reload hotkey — lives in a **pure decider**
+(`src/core.rs`) with no I/O: it takes a keystroke (or an idle tick) and a
+clock and **returns the actions**; the I/O glue executes them. That seam is
+what makes it testable without a PTY: `cargo test`.
 
-The original rationale, kept because it still explains the fallback's shape:
-
-- **No native dependency, no compiler.** node-pty would need a C++
-  toolchain (node-gyp); this box has `gcc` but not `g++`, and we don't
-  want the first native dep in the project.
-- **Unix-only by nature.** Python's `pty` is Unix-only, so this proxy could
-  never serve Windows — which is what forced a second implementation.
-- **Fail-safe.** If PTY allocation/setup fails, the proxy `exec`s claude
-  directly — the live terminal is never bricked.
-
-That last point is the one the Rust proxy inherited; the first two are why
-the split happened, and the split is what we're now closing. A checkout with
-no Rust toolchain still gets a working loop through this file.
+A single implementation is deliberate. The Python proxy that ran on Unix
+before it kept a second copy of the same classifier, and the two drifted: a
+terminal reply (tmux's `ESC P >|tmux …` answer to claude's version probe) was
+classified as a bare ESC keypress, so every loop start looked like a human
+pressing Escape and armed NOT-AFK for ten minutes.
 
 ## How it's wired
 
-- `cli.ts` launches the pane as `exec <pty-proxy> -- claude …` instead of
-  `exec claude …` (with a strict fallback to plain claude). Only affects
-  **newly started** loops.
-- `state.ts::injectWakePhrase` writes to `$CL_STATE_DIR/inject.sock`
-  instead of `tmux send-keys`, with a `send-keys` fallback for loops not
-  started via the proxy.
+- `cli.ts` launches the pane as `<cl-pty-proxy> -- claude …` instead of
+  `claude …`. Only affects **newly started** loops.
+- Wake injection rides `loop.sock` (an `inject` frame), not `tmux send-keys`.
 - The fragile `lastSendAt` / `recentlySentKeys` send-time heuristics are
-  gone — the proxy feeds the marker on real keystrokes, busy included.
-  The timer's `detectHumanTyping` pane-diff poll stays as a **degraded
-  fallback** for loops not started under the proxy (idle-only, ~1.5s).
+  gone — the proxy reports real keystrokes, busy included.
+- `proxyIsAlive` (a PID-stamped `proxy-alive` marker) is the ground truth for
+  who paints the bar's human segment; `claude-loop health <loop>` reports
+  whether the proxy is running.
 
-> **Status:** shipped and wired. `cli.ts` launches the pane through the
-> proxy with a strict fallback to plain `claude`. Backend selection: Unix
-> → the Rust `cl-pty-proxy` when built (default), else this `pty-proxy.py`;
-> Windows → the Rust ConPTY proxy (see `PTY-PROXY-WINDOWS.md`).
-> `claude_loop.proxy_impl` (or `CL_PROXY_IMPL`) forces a backend on Unix,
-> and `claude-loop check <loop>` reports the one actually running. Wake
-> injection rides `loop.sock`, and `proxyIsAlive` (a PID-stamped
-> `proxy-alive` marker) is the ground truth for who paints the bar's
-> human segment.
+## Diagnostic
 
-## Diagnostic & replay
-
-The proxy's keystroke→action logic — AFK-combo detection, the
-first-combo buffering, presence (`stop`/`wait`/`loop`), ESC-takeover —
-lives in a **pure decider** (`_Decider`) decoupled from all I/O: it
-takes a keystroke (or idle tick) + a clock and **returns the actions**
-(bytes to forward, AFK/user-grace marker ops, bar-word intent); the
-live loop is the only thing that executes them. Two surfaces fall out
-of that seam:
-
-- **Live logger** — set `CL_PROXY_LOG=<file>` and the running proxy
-  appends one **NDJSON** record per event (raw bytes hex, what it
-  forwarded, marker ops, the verdict flags `afk_fired` / `typing` /
-  `lone_esc` / `buffered_first`). Observation-only; absent ⇒ zero cost.
-- **Headless replay** — `pty-proxy.py --replay [file]` drives the *same*
-  decider from a timed sequence (no `pty.fork`, no tmux, no claude) and
-  prints the NDJSON verdicts (plus reconstructed `afk_active` /
-  `word_resolved`). The AFK spec comes from the env exactly as live
-  (`CL_AFK_SPEC` / `CL_AFK_WINDOW_MS` / `CL_ESC_TAKEOVER` /
-  `CL_USER_GRACE_SEC`).
+- `CL_PROXY_DEBUG=1` prints every byte run the proxy reads, in hex, to its
+  stderr; `CL_PROXY_DEBUG_FILE=<file>` appends the same lines to a file.
+- The proxy does not write to a session capture (below): a capture holds the
+  pane timeline only.
 
 ### Unified session capture — `CL_CAPTURE=1`
 
-`CL_CAPTURE=1` is the single switch that records a whole session into
-`<state_dir>/capture/` so it can be replayed later. It supersedes the
-scattered debug logs (`CL_PROXY_LOG`, `CL_BAR_PAINT_LOG`), which keep working
-as deprecated aliases. Each
-writer-process appends its own NDJSON timeline (one file per process keeps
-appends atomic), all stamped with the same epoch-seconds `t` so the streams
-merge into one timeline:
+`CL_CAPTURE=1` records a session into `<state_dir>/capture/` so it can be
+replayed later. It supersedes the scattered debug logs (`CL_BAR_PAINT_LOG`),
+which keep working as deprecated aliases. The timeline is NDJSON, stamped with
+an epoch-seconds `t`:
 
 ```
 <state_dir>/capture/
-  proxy.ndjson     # proxy: human keystroke decisions + synthetic injects (event:"inject")
   panes.ndjson     # timer: one row per distinct pane frame → {t, kind:"pane", file}
   panes/<ms>.txt   # the pane frames themselves (referenced by `file`, not inlined)
 ```
 
-`CL_PROXY_LOG=<file>` still takes priority over the capture dir for the
-proxy stream (explicit legacy path). Enable it on a running loop with
+Enable it on a running loop with
 `claude-loop reload <name> --set CL_CAPTURE=1` (the env is patched before the
 respawn). The capture is append-only — it's scoped to the session you want
 to record, so delete the dir when done.
@@ -214,9 +172,8 @@ the background with a bounded window so there is always a recent corpus for a
 detector that started lying, whether or not anyone saw it coming.
 
 **Inspecting a capture — `bin/cl-capture`.** A whole capture dir is far too
-large to read raw (every keystroke + full-screen pane dumps). `cl-capture`
-(zero-dep Python) merges `proxy.ndjson` + `panes.ndjson` by `t` and exposes
-context-frugal views:
+large to read raw (full-screen pane dumps). `cl-capture` (a zero-dependency
+Python script) reads it by `t` and exposes context-frugal views:
 
 ```bash
 cl-capture timeline DIR              # one line per event (panes shown by ref + footer preview)
@@ -239,32 +196,9 @@ cl-replay-boot <capture-dir> --json   # machine-readable result
 #   lingers in the footer and its module never ends.
 ```
 
-Sequence format, one event per line:
-
-```
-<delay_ms> <token>
-```
-
-`delay_ms` advances a virtual clock from the previous event; `token` is
-a named key (`esc`, `tab`, …), raw hex (`1b`, `1b1b`), a literal
-(`a`, `qq`), or `-` / `tick` for an idle tick (fires the buffered
-flush). `#`-comments and blank lines are ignored. Example:
-
-```bash
-printf '0 esc\n100 esc\n' | python3 src/claude-loop/pty-proxy.py --replay
-# → 1st ESC buffered; 2nd within the window fires the AFK combo (set_afk)
-```
-
-This is what makes the detection layer testable outside tmux —
-`pty-proxy.test.ts` shells real sequences through `--replay` and
-asserts the verdicts (the Python equivalent of `afk-key.test.ts`,
-without a TS mirror to drift).
-
 ## Limitations
 
-- Linux/Unix only (Windows runs the Rust `cl-pty-proxy`). The Rust proxy
-  is the intended cross-platform successor on Unix too — see the Direction
-  note above.
-- Requires `python3` at runtime on the loop host.
+- Needs the built binary: a Rust toolchain (`cargo`) on the loop host, or
+  `CL_PROXY_BIN` pointing at a binary built elsewhere.
 - Only printable-text keystrokes flip the badge; navigation/control keys
   are intentionally ignored.

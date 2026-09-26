@@ -223,6 +223,12 @@ export interface AiballConfig {
      */
     mcp_json_deprecated: boolean;
     /**
+     * #3043 — keys of `.aiball.yaml` that no longer mean anything (dotted,
+     * e.g. `claude_loop.proxy_impl`). They are ignored — an orphan key must
+     * not stop a loop from starting — and `claude-loop` warns about them.
+     */
+    retired_keys: string[];
+    /**
      * #B.180 david: all claude-loop timeouts are yaml-configurable.
      * CLI flags (`--interval`, `--user-grace`) still win when passed;
      * env vars (`CL_*`) override yaml on the timer/hook child
@@ -321,12 +327,6 @@ export interface AiballConfig {
          *  against real captures, and a project doing that work wants the
          *  corpus permanently while every other project wants nothing. */
         pane_cache_frames: number;
-        /** Which PTY-proxy implementation to launch. "rust" (the DEFAULT
-         *  since the Unix cutover) = the Rust `cl-pty-proxy` when it is built,
-         *  else it falls back to Python, then to direct. "python" forces the
-         *  Python `pty-proxy.py` on Unix. Windows always uses the Rust proxy
-         *  regardless of this value. */
-        proxy_impl: string;
         /** #428: custom wake gates — raw config list, parsed at use via
          *  `parseGates` (each entry needs a built-in `type` or a custom `cmd`).
          *  When a gate triggers, its message is surfaced in the wake CTA. */
@@ -447,6 +447,7 @@ const DEFAULTS: AiballConfig = {
         role: null,
     },
     mcp_json_deprecated: false,
+    retired_keys: [],
     claude_loop: {
         // Heartbeat 30s, grace windows 60s — coherent order of
         // magnitude, all yaml-overridable (#B.180, #B.185).
@@ -498,10 +499,6 @@ const DEFAULTS: AiballConfig = {
         // costs disk on every project that isn't using it; opting in is the
         // point.
         pane_cache_frames: 0,
-        // "rust" = the Rust proxy on Unix (default since the cutover) when
-        // built, else it transparently falls back to the Python proxy. Set
-        // "python" per-project to force pty-proxy.py. Windows is always Rust.
-        proxy_impl: "rust",
         // #428: no custom gates by default (opt-in per project).
         gates: [],
     },
@@ -733,6 +730,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         // another tree's session.
         claude: { ...DEFAULTS.claude },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
+        retired_keys: [],
         project_type: DEFAULTS.project_type,
         configPath,
         prompts: {},
@@ -841,6 +839,8 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.afk_window_ms === "number" && cl.afk_window_ms > 0) {
                 cfg.claude_loop.afk_window_ms = cl.afk_window_ms;
             }
+            // #3043 — the Python proxy is gone, and with it the choice.
+            if ("proxy_impl" in cl) cfg.retired_keys.push("claude_loop.proxy_impl");
             // `--permission-mode` flag for claude (empty = omit → no sandbox).
             if (typeof cl.permission_mode === "string") {
                 cfg.claude_loop.permission_mode = cl.permission_mode.trim();
@@ -857,10 +857,6 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
                 if (Number.isFinite(n) && n >= 0) {
                     cfg.claude_loop.pane_cache_frames = Math.floor(n);
                 }
-            }
-            // Which PTY proxy on Unix ("rust" default, "python" to force).
-            if (typeof cl.proxy_impl === "string") {
-                cfg.claude_loop.proxy_impl = cl.proxy_impl.trim().toLowerCase();
             }
             // #305 (option a): per-project wait default (no-flag behaviour).
             if (typeof cl.wait === "boolean") {

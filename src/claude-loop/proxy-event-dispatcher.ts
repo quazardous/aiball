@@ -57,8 +57,7 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             // transiter par `inject.sock` (canal séparé du stdin proxy
             // donc invisible au typing detector), pas par `tmux send-keys`
             // qui rentre dans le stdin du proxy = indistinguable d'un
-            // humain. Le `recentlySentKeys` legacy est obsolète (cf.
-            // pty-proxy.py:24).
+            // humain. Le `recentlySentKeys` legacy est obsolète.
             // #834 david — NOT AFK ∞ is an explicit human commitment ("je
             // suis là sur la durée"). Typing within that mode is expected,
             // NOT a fresh signal to re-bound the window. Pre-fix, every

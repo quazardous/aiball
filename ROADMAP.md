@@ -80,14 +80,9 @@ Remaining is parity hardening, not a from-scratch port:
 
 ### One proxy for both platforms
 
-Live keystroke detection uses the Rust `cl-pty-proxy` — a single
-cross-platform binary — on both platforms now. The Unix cutover has landed:
-the docs were reconciled, the Rust/Python parity gaps closed (including the
-reload hotkey), the Unix launch verified on a live loop, and the Rust proxy
-made the Unix default (the installer builds it; the Python `pty-proxy.py`
-stays as the automatic fallback and an explicit `proxy_impl: python`
-opt-out). Retiring the Python proxy is the last step, once the Rust proxy
-has soaked.
+Done. Live keystroke detection uses the Rust `cl-pty-proxy` — a single
+cross-platform binary — on both platforms, and it is the only proxy: the
+former Python proxy and its fallback are gone.
 
 ### Upstream coupling (GitHub / GitLab)
 

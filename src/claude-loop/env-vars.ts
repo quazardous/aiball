@@ -24,7 +24,9 @@ export const CL_ENV = {
     RESUME_MODE: "CL_RESUME_MODE",
     RESUME_PICK: "CL_RESUME_PICK",
     CLAUDE_CMD: "CL_CLAUDE_CMD",
-    PROXY_IMPL: "CL_PROXY_IMPL",
+    /** #3043 — a built `cl-pty-proxy` to run instead of this checkout's build
+     *  (a packaged install, a container). Picks WHICH proxy, never none. */
+    PROXY_BIN: "CL_PROXY_BIN",
     /** `<rows>,<cols>` measured in the user's terminal at `start`,
      *  so the proxy opens claude's PTY at the size it will end up with. */
     INIT_SIZE: "CL_INIT_SIZE",
@@ -34,9 +36,6 @@ export const CL_ENV = {
     // AFK detection (PTY proxy driven)
     AFK_SPEC: "CL_AFK_SPEC",
     AFK_WINDOW_MS: "CL_AFK_WINDOW_MS",
-    AFK_KEY_DISP: "CL_AFK_KEY_DISP",
-    AFK_LABEL_FG_DIM: "CL_AFK_LABEL_FG_DIM",
-    AFK_LABEL_FG_LIT: "CL_AFK_LABEL_FG_LIT",
 
     // Grace periods (seconds)
     BOOT_GRACE_SEC: "CL_BOOT_GRACE_SEC",
@@ -83,8 +82,6 @@ export const CL_ENV = {
 
     // Debug-only opt-in logs (no yaml backing — set via shell env at start
     // or `claude-loop reload --set …`). Reads are gated on `=== "1"`.
-    PROXY_LOG: "CL_PROXY_LOG",
-    PROXY_DEBUG_TTY: "CL_PROXY_DEBUG_TTY",
     BAR_PAINT_LOG: "CL_BAR_PAINT_LOG",
     PANE_CAPTURE_LOG: "CL_PANE_CAPTURE_LOG",
     // #1588 — the cache size, in FRAMES. Overrides `claude_loop.pane_cache_frames`
@@ -94,7 +91,7 @@ export const CL_ENV = {
     PANE_CAPTURE_FRAMES: "CL_PANE_CAPTURE_FRAMES",
     // Unified record/replay capture (supersedes the scattered debug logs
     // above). `CL_CAPTURE=1` writes one NDJSON file per writer-process into
-    // `<state_dir>/capture/` (timer → `panes.ndjson`, proxy → `proxy.ndjson`),
+    // `<state_dir>/capture/` (the kernel → `panes.ndjson`),
     // sharing one epoch clock so a real session can be merged + replayed.
     CAPTURE: "CL_CAPTURE",
 } as const;

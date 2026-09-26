@@ -366,7 +366,6 @@ program
         const machine = assembleMachineReport(await probeMachine({
             client,
             cliVersion: AIBALL_VERSION,
-            proxyImpl: cfg.claude_loop.proxy_impl,
             dependencies,
         }));
 

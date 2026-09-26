@@ -138,9 +138,8 @@ command -v tmux >/dev/null 2>&1 \
     || warn "tmux not found — the daemon is fine, but 'claude-loop' needs tmux to run a session. Install it before looping."
 command -v git >/dev/null 2>&1 \
     || warn "git not found — needed for wiring projects and cutting releases (scripts/release.sh)."
-if ! command -v cargo >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
-    warn "no PTY-proxy runtime — the loop needs cargo (builds the fast Rust proxy) OR python3 (the fallback). Install one before looping."
-fi
+command -v cargo >/dev/null 2>&1 \
+    || warn "cargo not found — every loop runs behind cl-pty-proxy, which cargo builds. Install it (or point CL_PROXY_BIN at a built cl-pty-proxy) before looping."
 
 # --- deploy source ---------------------------------------------------------
 # Preserve the existing layout when the user didn't ask for a change:
@@ -186,18 +185,17 @@ fi
 $SYMLINK || log "Installing: $INSTALL_WHAT"
 
 # Live human-typing detection uses the Rust PTY proxy (cl-pty-proxy) — the
-# default on Unix since the cutover. Build the release binary best-effort : if
-# cargo is absent or the build fails, the loop transparently falls back to the
-# Python proxy (pty-proxy.py). Built in the source tree so symlink mode shares
-# it and rsync mode ships it.
+# only proxy, on Unix and Windows alike. A loop refuses to start without it, so
+# a missing cargo or a failed build is warned about loudly here. Built in the
+# source tree so symlink mode shares it and rsync mode ships it.
 PROXY_DIR="$INSTALL_SRC/windows/cl-pty-proxy"
 if [[ -f "$PROXY_DIR/Cargo.toml" && ! -x "$PROXY_DIR/target/release/cl-pty-proxy" ]]; then
     if command -v cargo >/dev/null 2>&1; then
         log "Building the Rust PTY proxy in $PROXY_DIR (one-time, ~30s)"
         ( cd "$PROXY_DIR" && cargo build --release --quiet ) \
-            || warn "Rust proxy build failed — the loop will use the Python proxy (pty-proxy.py) instead"
+            || warn "Rust proxy build failed — claude-loop will refuse to start until it is built (cd $PROXY_DIR && cargo build --release)"
     else
-        warn "cargo not found — the loop will use the Python proxy (pty-proxy.py); install Rust (https://rustup.rs) then re-run to enable the Rust proxy"
+        warn "cargo not found — claude-loop will refuse to start without the PTY proxy; install Rust (https://rustup.rs) and re-run, or point CL_PROXY_BIN at a built cl-pty-proxy"
     fi
 fi
 

@@ -239,7 +239,7 @@ One word per concept — don't mix them:
 - **timer** — reserved strictly for genuine `setTimeout` / `setInterval`
   (grace windows, the wake tempo, heartbeat, the turn-machine settle
   delay). Never use "timer" for the worker process.
-- **proxy** (`pty-proxy.py`), **bar**, **hooks** — unchanged.
+- **proxy** (`cl-pty-proxy`), **bar**, **hooks** — unchanged.
 
 Legacy "timer"-as-process references disappear as files are revisited
 (same rule as the French→English migration above): anything you *write*
@@ -549,7 +549,7 @@ editing. Skim the headers first if the doc is large.
 | Config files / `.aiball.yaml` / per-project    | [`docs/CONFIGS.md`](docs/CONFIGS.md) — the russian-doll layering |
 | claude-loop, timer, wake logic                 | [`docs/CLAUDE-LOOP.md`](docs/CLAUDE-LOOP.md)          |
 | `windows/cl-pty-proxy/`                        | [`docs/PTY-PROXY-WINDOWS.md`](docs/PTY-PROXY-WINDOWS.md) |
-| Unix PTY proxy (`pty-proxy.py`)                | [`docs/PTY-PROXY.md`](docs/PTY-PROXY.md)              |
+| PTY proxy (`cl-pty-proxy`)                     | [`docs/PTY-PROXY.md`](docs/PTY-PROXY.md)              |
 | Tickets, comments, automation, lifecycle       | [`docs/TICKET_LIFECYCLE.md`](docs/TICKET_LIFECYCLE.md) |
 | Remote nodes / proxy mode / tailnet            | [`docs/REMOTE.md`](docs/REMOTE.md) + [`docs/SECURITY.md`](docs/SECURITY.md) |
 | Tailscale specifics                            | [`docs/TAILSCALE.md`](docs/TAILSCALE.md)              |

@@ -11,8 +11,8 @@
  * remanence window — there's no begin/end pairing to get wrong (the #994
  * resume_mode leak class is structurally impossible).
  *
- * The proxy event stream (`proxy.ndjson`) is not replayed here (the keystroke
- * decider has its own `pty-proxy.py --replay-log`); only pane frames drive boot.
+ * The proxy event stream (`proxy.ndjson`) is not replayed here; only pane
+ * frames drive boot.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

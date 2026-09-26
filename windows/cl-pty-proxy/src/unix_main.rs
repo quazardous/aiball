@@ -61,7 +61,7 @@ fn proxy_alive_path() -> Option<String> {
 
 fn drop_proxy_alive() {
     if let Some(p) = proxy_alive_path() {
-        // PID-stamped, matching the Windows path and pty-proxy.py : the
+        // PID-stamped, matching the Windows path : the
         // TS `proxyIsAlive` probes PID liveness, and the claude-loop
         // shutdown trap (`cli.ts`) does `kill "$(cat proxy-alive)"`. An
         // empty file would leave the proxy unkillable on shutdown.

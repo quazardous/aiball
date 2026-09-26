@@ -44,8 +44,15 @@ test("every Windows prerequisite names a winget package, or the miss has no fix"
 });
 
 test("POSIX keeps its own list, unchanged by the split", () => {
-    assert.deepEqual(names("linux"), ["tmux", "python3", "cargo"]);
-    assert.deepEqual(names("darwin"), ["tmux", "python3", "cargo"]);
+    assert.deepEqual(names("linux"), ["tmux", "cargo"]);
+    assert.deepEqual(names("darwin"), ["tmux", "cargo"]);
+});
+
+test("cargo is required on every platform: the Rust proxy is the only one (no proxy, no loop)", () => {
+    for (const platform of ["win32", "linux", "darwin"] as const) {
+        const cargo = prereqsFor(platform).find((p) => p.cmd === "cargo");
+        assert.equal(cargo?.required, true, platform);
+    }
 });
 
 test("a required prerequisite states what breaks; an optional one states what degrades", () => {

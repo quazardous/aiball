@@ -40,6 +40,8 @@ export interface ProjectContext {
     role: ConsumerRole | null;
     /** True when `.mcp.json` carries the deprecated identity env block. */
     mcp_json_deprecated: boolean;
+    /** #3043 — `.aiball.yaml` keys that are ignored now (see loadConfig). */
+    retired_keys: string[];
     /** Absolute path to the loaded `.aiball.yaml`, if any. */
     config_path: string | null;
     /** #565 — declared `project_type:` (welcome MCP kit selector). Null when
@@ -67,8 +69,6 @@ export interface ProjectContext {
          *  → interactive `default` mode (prompts, no bash sandbox). `auto` = the
          *  unattended/AFK mode (auto-approve + sandbox). */
         permission_mode: string;
-        /** PTY-proxy backend on Unix: empty/"python" (default) or "rust". */
-        proxy_impl: string;
     };
     /** #538 david `hwxbkk` : claude-binary spawn-time options namespacé séparé. */
     claude: {
@@ -125,6 +125,7 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         no_claim: cfg.consumer.no_claim || cfg.consumer.role === "crew",
         role: cfg.consumer.role,
         mcp_json_deprecated: cfg.mcp_json_deprecated,
+        retired_keys: [...cfg.retired_keys],
         config_path: cfg.configPath,
         project_type: cfg.project_type,
         claude_loop: { ...cfg.claude_loop },
@@ -165,8 +166,12 @@ export function applyToProcessEnv(ctx: ProjectContext): void {
 let warnedOnce = false;
 export function warnIfDeprecated(ctx: ProjectContext): void {
     if (warnedOnce) return;
-    if (!ctx.mcp_json_deprecated) return;
+    if (!ctx.mcp_json_deprecated && ctx.retired_keys.length === 0) return;
     warnedOnce = true;
+    for (const key of ctx.retired_keys) {
+        process.stderr.write(`[claude-loop] ${ctx.config_path ?? ".aiball.yaml"}: \`${key}\` no longer does anything and is ignored; remove it.\n`);
+    }
+    if (!ctx.mcp_json_deprecated) return;
     process.stderr.write(
         `[claude-loop] deprecation: .mcp.json has an mcpServers.aiball.env block (legacy identity source).\n` +
         `  Migrate to .aiball.yaml at the project root:\n\n` +

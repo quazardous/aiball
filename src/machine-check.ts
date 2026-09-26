@@ -235,19 +235,12 @@ export function assembleMachineReport(p: MachineProbes): MachineLine[] {
                 fix: BUILD_CMD,
             });
         }
-    } else if (p.proxy.kind === "python") {
+    } else {
         const why = p.cargo.present ? "cl-pty-proxy is not built" : "cargo is not installed, so cl-pty-proxy cannot be built";
         lines.push({
             id: "pty_proxy",
-            status: "warn",
-            detail: `deprecated Python fallback — ${why}`,
-            fix: p.cargo.present ? BUILD_CMD : `${p.cargo.install ?? "install cargo"}, then ${BUILD_CMD}`,
-        });
-    } else {
-        lines.push({
-            id: "pty_proxy",
             status: "error",
-            detail: "no PTY proxy — `claude-loop start` refuses",
+            detail: `no PTY proxy — ${why}; \`claude-loop start\` refuses`,
             fix: p.cargo.present ? BUILD_CMD : `${p.cargo.install ?? "install cargo"}, then ${BUILD_CMD}`,
         });
     }
@@ -361,8 +354,6 @@ function isSocket(path: string): boolean {
 export interface ProbeMachineInput {
     client: AiballClient;
     cliVersion: string;
-    /** `claude_loop.proxy_impl` from the resolved config. */
-    proxyImpl: string;
     /** Already probed by the dependencies section — reused, not re-run. */
     dependencies: PrereqStatus[];
 }
@@ -417,14 +408,12 @@ export async function probeMachine(input: ProbeMachineInput): Promise<MachinePro
     const root = join(dirname(fileURLToPath(import.meta.url)), "..");
     const proxy = resolveProxyLaunch({
         platform: process.platform,
-        proxyImpl: (process.env.CL_PROXY_IMPL ?? input.proxyImpl ?? "").trim().toLowerCase(),
         rustProxyBin: join(
             root, "windows", "cl-pty-proxy", "target", "release",
             process.platform === "win32" ? "cl-pty-proxy.exe" : "cl-pty-proxy",
         ),
-        pyProxy: join(root, "src/claude-loop/pty-proxy.py"),
+        overrideBin: process.env.CL_PROXY_BIN,
         exists: existsSync,
-        hasPython3: dep("python3")?.present ?? false,
     });
 
     return {

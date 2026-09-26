@@ -4,8 +4,7 @@
  * Pulled out of `cli.ts` as a pure function for the reason #1612/#1613 made
  * explicit: the branch that decides how claude is launched changes what the
  * whole loop can perceive, and it was reachable by no test at all. Here it
- * takes its inputs as data (platform, what exists on disk, whether python3
- * resolves) so every outcome — including the refusal — is asserted without a
+ * takes its inputs as data (platform, what exists on disk) so every outcome — including the refusal — is asserted without a
  * PTY, a mux, or a claude.
  *
  * The refusal is the point of this module. Until now a missing proxy fell
@@ -26,7 +25,7 @@
  *
  * Each of those is silent when it breaks, which is what makes the fallback
  * worse than a failure: the loop keeps running and lies about what it can see.
- * So there is no opt-out. Not `proxy_impl: none`, not an env var — david was
+ * So there is no opt-out. Not a config key, not an env var — david was
  * asked and answered "inconditionnel, pas de proxy pas de loop". A config key
  * that turns the guarantee off would be found by exactly the person who most
  * needs it on.
@@ -34,25 +33,24 @@
 
 /** What `cli.ts` should put in front of `claudeCmd`, or why it must not. */
 export type ProxyLaunch =
-    /** The Rust proxy — the reference implementation on both platforms. */
+    /** The Rust proxy, `cl-pty-proxy` — the only one, on every platform. */
     | { kind: "rust"; bin: string }
-    /** The deprecated Python fallback (POSIX only). `notice` is printed. */
-    | { kind: "python"; script: string; notice: string }
     /** No proxy is available: `claude-loop start` must die with `reason`. */
     | { kind: "refuse"; reason: string };
 
 export interface ProxyLaunchInput {
     platform: NodeJS.Platform;
-    /** `claude_loop.proxy_impl` / `CL_PROXY_IMPL`, already trimmed + lowercased. */
-    proxyImpl: string;
-    /** Absolute path the Rust proxy WOULD have if it were built. */
+    /** Absolute path the Rust proxy has in this checkout once built. */
     rustProxyBin: string;
-    /** Absolute path of `pty-proxy.py` in this checkout. */
-    pyProxy: string;
+    /**
+     * `CL_PROXY_BIN`: another built `cl-pty-proxy` to run instead — a packaged
+     * install, or a container whose checkout is mounted from a host whose
+     * binary it cannot run. It chooses WHICH proxy binary, never none: a path
+     * that does not exist refuses like a missing build.
+     */
+    overrideBin?: string;
     /** Injected so the decision is testable without touching a filesystem. */
     exists: (path: string) => boolean;
-    /** Whether `python3` resolves on PATH. */
-    hasPython3: boolean;
 }
 
 /** The one-line build command, quoted verbatim in every refusal that a build
@@ -69,52 +67,26 @@ const WHY = [
 ].join("\n  ");
 
 export function resolveProxyLaunch(input: ProxyLaunchInput): ProxyLaunch {
-    const { platform, proxyImpl, rustProxyBin, pyProxy, exists, hasPython3 } = input;
+    const { platform, rustProxyBin, overrideBin, exists } = input;
+    const bin = overrideBin?.trim() ? overrideBin.trim() : rustProxyBin;
+    if (exists(bin)) return { kind: "rust", bin };
     const isWin = platform === "win32";
-    const wantsPython = proxyImpl === "python";
-    const rustBuilt = exists(rustProxyBin);
-
-    // Windows is always Rust: there is no Python proxy there (pty.fork() is
-    // POSIX), so `proxy_impl: python` can only be a config left over from a
-    // Unix checkout. Say that rather than reporting a generic miss.
-    if (isWin) {
-        if (rustBuilt) return { kind: "rust", bin: rustProxyBin };
+    if (overrideBin?.trim()) {
         return {
             kind: "refuse",
-            reason:
-                `no ConPTY proxy — refusing to start.\n  ${WHY}\n`
-                + `\n  cl-pty-proxy.exe is not built. Build it with:\n`
-                + `    ${BUILD_CMD}\n`
-                + `\n  If that fails on 'dlltool' or 'CreateProcess', rustup's bundled GNU\n`
-                + `  toolchain is linker-only — see docs/WIN-INSTALL.md for the prerequisite.\n`,
+            reason: `no PTY proxy at CL_PROXY_BIN=${bin} — refusing to start.\n  ${WHY}\n`
+                + `\n  Point CL_PROXY_BIN at a built cl-pty-proxy${isWin ? ".exe" : ""}, or unset it to use this checkout's build.\n`,
         };
     }
-
-    if (!wantsPython && rustBuilt) return { kind: "rust", bin: rustProxyBin };
-
-    if (hasPython3 && exists(pyProxy)) {
-        return {
-            kind: "python",
-            script: pyProxy,
-            // Deprecated path. Say so out loud — a silent fallback is how the two
-            // implementations drifted apart in the first place (#1294).
-            notice: wantsPython
-                ? "claude-loop: using the DEPRECATED Python PTY proxy (proxy_impl: python).\n"
-                : "claude-loop: Rust PTY proxy not built — falling back to the DEPRECATED Python proxy.\n"
-                  + `  Build it with: ${BUILD_CMD}\n`,
-        };
-    }
-
-    // Unix with neither engine. Name both fixes: the Rust build is the one we
-    // want taken, python3 is what unblocks a machine that can't build Rust.
     return {
         kind: "refuse",
         reason:
-            `no PTY proxy — refusing to start.\n  ${WHY}\n`
-            + (wantsPython
-                ? "\n  proxy_impl: python was asked for, but python3 does not resolve on PATH.\n"
-                : "\n  cl-pty-proxy is not built and python3 does not resolve on PATH.\n")
-            + `\n  Build the Rust proxy (preferred):\n    ${BUILD_CMD}\n`
-            + `  Or install python3 for the deprecated fallback.\n`,
+            `no ${isWin ? "ConPTY" : "PTY"} proxy — refusing to start.\n  ${WHY}\n`
+            + `\n  cl-pty-proxy${isWin ? ".exe" : ""} is not built. Build it with:\n`
+            + `    ${BUILD_CMD}\n`
+            + (isWin
+                ? `\n  If that fails on 'dlltool' or 'CreateProcess', rustup's bundled GNU\n`
+                  + `  toolchain is linker-only — see docs/WIN-INSTALL.md for the prerequisite.\n`
+                : ""),
     };
 }

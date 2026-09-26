@@ -1,5 +1,5 @@
-//! claude-loop ConPTY proxy for Windows (#281, strategy B — port of
-//! `src/claude-loop/pty-proxy.py`).
+//! claude-loop PTY proxy (#281, strategy B — first written for Windows'
+//! ConPTY, the Unix path is `unix_main.rs`).
 //!
 //! Interposed between psmux and claude:
 //!
@@ -8,8 +8,7 @@
 //! Goal: tell HUMAN typing apart from claude's output AND from our own
 //! wake injection — busy included — which the pane-diff heuristic could
 //! not (it only runs at idle and confuses human typing vs streaming
-//! output). See docs/PTY-PROXY.md for the full rationale; this is the
-//! Windows sibling of the Unix Python proxy.
+//! output). See docs/PTY-PROXY.md for the full rationale.
 //!
 //! How:
 //! - Our stdin (the bytes psmux forwards into the pane's ConPTY) = the
@@ -24,9 +23,8 @@
 //!   claude's PTY WITHOUT touching the marker. Physical channel
 //!   separation -> no timestamp heuristic.
 //!
-//! Why ConPTY/Rust (not Python stdlib like the Unix side): Python has no
-//! stdlib ConPTY on Windows; portable-pty gives it without a C toolchain,
-//! and Rust matches psmux's own PTY layer.
+//! Why Rust: portable-pty gives ConPTY without a C toolchain, and Rust
+//! matches psmux's own PTY layer.
 //!
 //! Fail-safe: if ConPTY init/spawn fails we run claude directly with
 //! inherited stdio so the live pane is NEVER bricked.
@@ -545,7 +543,7 @@ fn real_main() -> i32 {
     // #768 — loop.sock ws client: emit proxyEvents (replacing marker file
     // writes) + receive `inject` (→ PTY master). No painting — the TS
     // BarRenderer (#633) owns the bar. None when CL_STATE_DIR is unset
-    // (degraded, like the Python side: events drop, bytes still forward).
+    // (degraded: events drop, bytes still forward).
     let ws = loop_sock_path().map(|sock| {
         let inj_writer = writer.clone();
         ws_client::start(

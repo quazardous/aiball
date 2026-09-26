@@ -15,14 +15,13 @@ import { commandExists } from "../sysdeps.js";
 import {
     copyFileSync,
     existsSync,
-    mkdtempSync,
     openSync,
     readFileSync,
     readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -87,7 +86,7 @@ import { isKnownSubcommand } from "./subcommands.js";
 import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
-import { resolveProxyLaunch } from "./proxy-launch.js";
+import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 
 function die(msg: string): never {
@@ -573,17 +572,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // few lines of distance and buys a refusal with no debris.
     const proxy = resolveProxyLaunch({
         platform: process.platform,
-        proxyImpl: (process.env[CL_ENV.PROXY_IMPL] ?? ctx.claude_loop.proxy_impl ?? "")
-            .trim().toLowerCase(),
         // Platform-aware Rust binary name — `cl-pty-proxy` on Unix, `.exe` on
         // Windows (a Unix `cargo build` never produces the `.exe`).
         rustProxyBin: join(
             selfRoot(), "windows", "cl-pty-proxy", "target", "release",
             process.platform === "win32" ? "cl-pty-proxy.exe" : "cl-pty-proxy",
         ),
-        pyProxy: join(selfRoot(), "src/claude-loop/pty-proxy.py"),
+        overrideBin: process.env[CL_ENV.PROXY_BIN],
         exists: existsSync,
-        hasPython3: has("python3"),
     });
     if (proxy.kind === "refuse") die(proxy.reason);
     const sd = stateDirFor(name);
@@ -839,10 +835,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // SessionStart hook when source=resume.
         `export ${CL_ENV.RESUME_MODE}=${shQuote(opts.resumeMode ?? "as-is")}`,
         `export ${CL_ENV.CHECK_CMD}=${shQuote(opts.checkCmd)}`,
-        // PTY-proxy bridge : pty-proxy.py is Python, can't call `loopConfig()` ;
-        // these stay in the env file as a python-side mirror of the yaml. The
-        // TS callers all read via `loopConfig().claude_loop.X` directly.
-        // #302/#343: WAIT — Python proxy reads CL_WAIT for boot-grace gate.
+        // Process bridge: the PTY proxy (Rust, its own process) and the hooks
+        // can't call `loopConfig()`, so these stay in the env file as a mirror
+        // of the yaml. The TS callers all read via `loopConfig().claude_loop.X`.
+        // #302/#343: WAIT — the boot-grace gate.
         `export ${CL_ENV.WAIT}=${shQuote(wait ? "1" : "0")}`,
         // #B.180 boot-grace : the proxy needs it to count remaining grace.
         `export ${CL_ENV.BOOT_GRACE_SEC}=${shQuote(String(bootGraceSec))}`,
@@ -854,12 +850,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // proxy's AFK detection → `afk` marker.
         `export ${CL_ENV.AFK_SPEC}=${shQuote(afkSpecJson)}`,
         `export ${CL_ENV.AFK_WINDOW_MS}=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
-        // #619 jjfdea : passed to the proxy so it can render the full
-        // `<prefix> AFK:<key>` label with on/off colour toggling.
-        `export ${CL_ENV.AFK_KEY_DISP}=${shQuote(ctx.claude_loop.afk_key.trim().toUpperCase())}`,
-        `export ${CL_ENV.AFK_LABEL_FG_DIM}=${shQuote(ctx.colors.afk_label_fg)}`,
-        `export ${CL_ENV.AFK_LABEL_FG_LIT}=${shQuote(ctx.colors.bar_fg)}`,
-        // #381c CL_PROXY_LOG, #629 CL_BAR_PAINT_LOG, #678 CL_PANE_CAPTURE_LOG,
+        // #629 CL_BAR_PAINT_LOG, #678 CL_PANE_CAPTURE_LOG,
         // #990 CL_CAPTURE : opt-in debug logs are picked up generically by
         // `collectShellOverrideLines` (→ volatile env.local, #991) when set in
         // the invoker's shell — no per-var conditional needed.
@@ -1110,28 +1101,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         (passthrough ? ` ${passthrough}` : "");
     // #269/#281: front claude with the PTY proxy so claude-loop detects
     // human typing live (busy included) and injects wakes through the
-    // proxy's control channel instead of tmux/psmux stdin. One engine, one
-    // fallback:
-    //   - windows/cl-pty-proxy (Rust) is THE proxy, on Unix and Windows
-    //     alike, whenever the binary is built (`cargo build --release`).
-    //     Not committed — see WIN-INSTALL.md.
-    //   - src/claude-loop/pty-proxy.py (Python stdlib, POSIX-only) is a
-    //     DEPRECATED fallback: used when the Rust binary is absent, or when
-    //     `claude_loop.proxy_impl: python` (CL_PROXY_IMPL=python) asks for it.
-    //     Requires python3; `-B` so no __pycache__ next to the proxy.
-    // #1294 — the default flipped to Rust. Keeping two live implementations of
-    // the same keystroke classifier let them drift: the "NOT AFK 10m on every
-    // loop start" bug (a DCS terminal reply read as a bare ESC) sat in BOTH,
-    // and only the Rust one was actually running. One engine, one place to fix.
-    // Either proxy ALSO self-falls-back to exec-claude if PTY init fails —
-    // the pane is never bricked. A MISSING proxy, on the other hand,
-    // is now fatal: the decision (and its refusal) lives in `resolveProxyLaunch`.
-    // Which proxy backend on Unix. Env `CL_PROXY_IMPL` overrides the config
-    // (`claude_loop.proxy_impl`); empty/"rust" = the Rust proxy when it's built
-    // (default), "python" = force the deprecated Python fallback. Windows is
-    // always Rust. The choice itself was made at the top of `start` (`proxy`),
-    // before anything on disk was touched — all that is left here is to turn it
-    // into a command line.
+    // proxy's control channel instead of tmux/psmux stdin. One engine:
+    // windows/cl-pty-proxy (Rust), on Unix and Windows alike, built with
+    // `cargo build --release` (not committed — see WIN-INSTALL.md), or the
+    // binary `CL_PROXY_BIN` names. #3043 — the Python proxy it replaced is
+    // gone: two implementations of one keystroke classifier had drifted (#1294).
+    // The proxy self-falls-back to exec-claude if PTY init fails — the pane is
+    // never bricked. A MISSING proxy, on the other hand, is fatal: the decision
+    // (and its refusal) lives in `resolveProxyLaunch`, made at the top of
+    // `start` before anything on disk was touched — all that is left here is
+    // to turn it into a command line.
     // #783 — kill-on-exit. Drop the `exec` prefix so bash stays alive as the
     // parent of the proxy/claude chain, then run a trap on bash EXIT that
     // SIGKILLs the timer + proxy and sweeps the transient state markers.
@@ -1139,12 +1118,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // hits EXIT and tears the satellites down before tmux reaps the session.
     // No `exec` means one extra bash process per pane (cheap; same model the
     // shell uses for any login session).
-    if (proxy.kind === "python") process.stdout.write(proxy.notice);
-    // Same control contract either way (loop.sock, proxy-alive), so nothing
-    // downstream of here needs to know which engine won.
-    const launch = proxy.kind === "rust"
-        ? `${hookPath(proxy.bin)} -- ${claudeCmd}`
-        : `python3 -B ${shQuote(proxy.script)} -- ${claudeCmd}`;
+    const launch = `${hookPath(proxy.bin)} -- ${claudeCmd}`;
     // Trap stored in a file under the state-dir, sourced from innerCmd —
     // keeps the tmux command line short and dodges multi-line quoting.
     const trapPath = join(sd, "kill-on-exit.sh");
@@ -1229,7 +1203,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // dynamique (mode + countdown / ∞) migre dans le glyph `웃` à la fin
     // de la zone claude (`@cl_afk_glyph`, peint par BarRenderer). Plus de
     // user-option `@cl_afk_state` ; plus d'export `CL_AFK_*` consommé
-    // côté proxy (déjà retiré côté proxy, cf. pty-proxy.py #862 Slice 4).
+    // on the proxy side (already removed there, #862 Slice 4).
     const afkStatic = afkSpecJson
         ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
         : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
@@ -1588,10 +1562,8 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     process.stdout.write(`  project cwd    : ${formatProjectCwd(target, plate)}\n`);
     // #269/#281 (david ftprf7): surface the PTY-proxy dependency. The proxy
     // gives live human-typing detection (busy included) + control-channel
-    // wake injection. When inactive, `start` falls back to launching claude
-    // directly (pane-diff detection, idle-only) — flag it here, same probe
-    // the launch uses. Windows = Rust ConPTY proxy (#281 strategy B); Unix =
-    // Python proxy (needs python3 + the shipped script).
+    // wake injection. Without it `start` refuses — flag it here, same probe
+    // the launch uses. The Rust proxy on both platforms (#281, #3043).
     if (process.platform === "win32") {
         const winProxyExe = join(selfRoot(), "windows", "cl-pty-proxy", "target", "release", "cl-pty-proxy.exe");
         const hasWinProxy = existsSync(winProxyExe);
@@ -1611,55 +1583,15 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 : "✗ NOT built → `claude-loop start` will REFUSE (run `cargo build --release` in windows/cl-pty-proxy; see docs/WIN-INSTALL.md if dlltool fails)"
         }\n`);
     } else {
-        // The impl a FRESH start would pick (env override → config → default).
-        const configuredImpl =
-            (process.env[CL_ENV.PROXY_IMPL] ?? ctx.claude_loop.proxy_impl ?? "")
-                .trim().toLowerCase() || "python";
-        // Ground truth for a NAMED, running loop : read proxy-alive's PID and
-        // inspect its argv — `cl-pty-proxy` = rust, `pty-proxy.py` = python.
-        // Beats the ambient config (a running loop baked its impl into
-        // env.local at start time, which `check` from another shell can't see).
-        let runningImpl: string | null = null;
-        if (target) {
-            const pidRaw = (() => {
-                try { return readFileSync(proxyAlivePath(stateDirFor(target)), "utf8").trim(); }
-                catch { return ""; }
-            })();
-            const pid = Number(pidRaw);
-            if (Number.isFinite(pid) && pid > 0) {
-                const argv = (() => {
-                    try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " "); }
-                    catch { return ""; }
-                })();
-                if (argv.includes("cl-pty-proxy")) runningImpl = "rust";
-                else if (argv.includes("pty-proxy.py")) runningImpl = "python";
-            }
-        }
-        const rustBin = join(selfRoot(), "windows", "cl-pty-proxy", "target", "release", "cl-pty-proxy");
-        const hasRust = existsSync(rustBin);
-        const hasPython = commandExists("python3");
-        // Always name the impl : the running one for a live loop, else the
-        // one a fresh start would use.
-        process.stdout.write(`  proxy impl     : ${
-            runningImpl
-                ? `${runningImpl} (running)`
-                : `${configuredImpl} (configured; no running loop probed)`
+        // #3043 — one proxy: the Rust one, from this checkout's build or the
+        // binary CL_PROXY_BIN names — the same resolution as `start`.
+        const override = process.env[CL_ENV.PROXY_BIN]?.trim();
+        const rustBin = override || join(selfRoot(), "windows", "cl-pty-proxy", "target", "release", "cl-pty-proxy");
+        process.stdout.write(`  PTY proxy      : ${
+            existsSync(rustBin)
+                ? `✓ built${override ? ` (CL_PROXY_BIN=${override})` : ""} (live human-typing detection + socket wake injection)`
+                : `✗ NOT found at ${rustBin} → \`claude-loop start\` will REFUSE (build it: ${BUILD_CMD})`
         }\n`);
-        if ((runningImpl ?? configuredImpl) === "rust") {
-            process.stdout.write(`  Rust proxy     : ${
-                hasRust
-                    ? "✓ built (live human-typing detection + socket wake injection)"
-                    : "— NOT built → run `cargo build --release` in windows/cl-pty-proxy (a fresh start falls back to python, or REFUSES if python3 is missing too)"
-            }\n`);
-        } else {
-            process.stdout.write(`  python3        : ${hasPython ? "✓ available" : "— MISSING"}\n`);
-            process.stdout.write(`  PTY proxy      : ${
-                hasPython
-                    ? "✓ active (live human-typing detection + socket wake injection)"
-                    // With the Rust proxy unbuilt too, `start` refuses.
-                    : "✗ inactive (python3 missing) → `claude-loop start` REFUSES unless the Rust proxy is built"
-            }\n`);
-        }
     }
     process.stdout.write(`\n`);
 
@@ -2015,114 +1947,6 @@ function cmdDebugKeys(): void {
     });
 }
 
-/**
- * Debug subcommand (#381, david "--debug-proxy-tty"). Runs the REAL PTY proxy
- * attached to the current terminal, but with a FAKE claude (a byte logger)
- * behind it instead of claude. Lets you mash keys and see, LIVE:
- *   - each physical os.read (byte count + hex),
- *   - how `split_keystrokes` splits it into keystrokes (coalescing flagged),
- *   - the per-keystroke AFK decision (fired? afk away/back? forwarded bytes?),
- *   - what actually reaches "claude" (the fake logger's output).
- * The AFK spec/window/esc_takeover come from the resolved config, identical to
- * `start`, so the detector behaves exactly as in production. Captures a raw
- * NDJSON to a temp file (replayable via `pty-proxy.py --replay-log`) and prints
- * a summary on exit. Answers david's #381 question directly: does a single ESC
- * press read as `1b` or `1b1b` (key-repeat coalescing)?
- */
-async function cmdDebugProxyTty(): Promise<void> {
-    if (process.platform === "win32") {
-        die("debug-proxy-tty: Unix only (Python PTY proxy). Windows uses the ConPTY proxy.");
-    }
-    need("python3");
-    const root = selfRoot();
-    const pyProxy = join(root, "src/claude-loop/pty-proxy.py");
-    if (!existsSync(pyProxy)) die(`pty-proxy.py not found at ${pyProxy}`);
-    const ctx = resolveProjectContext();
-    // Same afk_key → byte-combo resolution as `start` (#351) so the detector
-    // under test is byte-for-byte the production one.
-    let afkSpecJson = "";
-    try {
-        afkSpecJson = JSON.stringify(
-            parseAfkKey(ctx.claude_loop.afk_key, ctx.claude_loop.afk_window_ms).combos,
-        );
-    } catch (e) {
-        process.stderr.write(`claude-loop: invalid afk_key "${ctx.claude_loop.afk_key}" — AFK disabled (${(e as Error).message})\n`);
-    }
-    // Isolated temp state dir + raw capture — never collides with a live loop.
-    const tmp = mkdtempSync(join(tmpdir(), "cl-debug-proxy-"));
-    const capture = join(tmp, "capture.ndjson");
-    const env = {
-        ...process.env,
-        [CL_ENV.STATE_DIR]: tmp,
-        [CL_ENV.AFK_SPEC]: afkSpecJson,
-        [CL_ENV.AFK_WINDOW_MS]: String(ctx.claude_loop.afk_window_ms),
-        [CL_ENV.ESC_TAKEOVER]: ctx.claude_loop.esc_takeover ? "1" : "0",
-        [CL_ENV.WAIT]: "0",
-        [CL_ENV.PROXY_LOG]: capture,
-        [CL_ENV.PROXY_DEBUG_TTY]: "1",
-        // No CL_TMUX → the proxy's bar painting is a silent no-op here.
-    };
-    process.stdout.write([
-        `claude-loop debug-proxy-tty`,
-        `  afk_key : "${ctx.claude_loop.afk_key}"  (window ${ctx.claude_loop.afk_window_ms}ms, esc_takeover ${ctx.claude_loop.esc_takeover})`,
-        `  spec    : ${afkSpecJson || "(AFK disabled — empty/invalid afk_key)"}`,
-        ``,
-        `Real PTY proxy in front of a FAKE claude (byte logger). Type/mash keys and`,
-        `watch, live: each physical read, how it splits, and the AFK decision.`,
-        `Things worth trying: your AFK combo; a lone ESC; mash ESC twice; HOLD ESC`,
-        `(key-repeat). The combo is SWALLOWED (won't reach the logger) — expected.`,
-        `Quit with Ctrl-C.`,
-        ``,
-    ].join("\n"));
-    const r = spawnSync("python3", ["-B", pyProxy, "--", "python3", "-B", pyProxy, "--fake-claude"], {
-        stdio: "inherit",
-        env,
-    });
-    printDebugProxySummary(capture);
-    process.stdout.write(
-        `\nraw capture : ${capture}\n` +
-        `  replay it : python3 ${pyProxy} --replay-log ${capture}\n`,
-    );
-    process.exit(r.status ?? 0);
-}
-
-/**
- * Post-session summary for `debug-proxy-tty`. Reads the raw NDJSON capture and
- * counts physical reads (consecutive `stdin` events share a timestamp when they
- * came from one os.read), how many carried >1 keystroke (coalescing — the #381
- * ambiguity), and how many AFK toggles fired. Flags the smoking gun when a
- * single read produced multiple keystrokes.
- */
-function printDebugProxySummary(capture: string): void {
-    if (!existsSync(capture)) { process.stdout.write(`\n(no keystrokes captured)\n`); return; }
-    let lines: Array<{ t: number; event: string; afk_fired: boolean }>;
-    try {
-        lines = readFileSync(capture, "utf8").trim().split("\n").filter(Boolean)
-            .map((l) => JSON.parse(l));
-    } catch { return; }
-    const stdin = lines.filter((l) => l.event === "stdin");
-    if (stdin.length === 0) { process.stdout.write(`\n(no keystrokes captured)\n`); return; }
-    let reads = 0, coalesced = 0, toggles = 0, inRead = 0;
-    let prevT: number | null = null;
-    for (const l of stdin) {
-        if (l.afk_fired) toggles++;
-        if (l.t !== prevT) { if (inRead > 1) coalesced++; reads++; inRead = 1; prevT = l.t; }
-        else inRead++;
-    }
-    if (inRead > 1) coalesced++;
-    process.stdout.write(`\n=== session summary ===\n`);
-    process.stdout.write(`  physical reads : ${reads}\n`);
-    process.stdout.write(`  coalesced reads: ${coalesced}  (one read carrying >1 keystroke)\n`);
-    process.stdout.write(`  AFK toggles    : ${toggles}\n`);
-    if (coalesced > 0) {
-        process.stdout.write(
-            `  ⚠ a single physical read carried multiple keystrokes — that key-repeat/\n` +
-            `    coalescing is exactly the #381 ambiguity (a held/repeated ESC reads as\n` +
-            `    1b1b → splits into two ESC → completes the esc-esc combo → toggles).\n`,
-        );
-    }
-}
-
 // Commander wiring. `start` is the default — bare `claude-loop` (or
 // `claude-loop --name foo -- --model opus`) runs start. Anything
 // after `--` is captured as claude_args.
@@ -2318,8 +2142,6 @@ async function main(): Promise<void> {
     // `claude-loop --reload` respawns the timer of the current-cwd
     // loop without touching claude.
     else if (wrapper[0] === "--reload") wrapper[0] = "reload";
-    // #381 (david): bare top-level alias for the proxy-tty debug session.
-    else if (wrapper[0] === "--debug-proxy-tty") wrapper[0] = "debug-proxy-tty";
     // #381 (david yf8wht): bare alias for the direct key-grammar reader.
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
@@ -2456,7 +2278,7 @@ async function main(): Promise<void> {
             return cmdHealth(names, opts);
         });
     program.command("debug <action> [name]")
-        .description("#1032 — fault injection to TEST the reload/resync chantier. Actions: `kill-proxy` (SIGKILL pty-proxy.py → bar RED then reconnect+resync), `kill-kernel` (SIGKILL the kernel.ts kernel → bar freezes, recover via reload). Logs the kill into the central loop.log. Name optional — defaults to the current cwd's loop.")
+        .description("#1032 — fault injection to TEST the reload/resync chantier. Actions: `kill-proxy` (SIGKILL cl-pty-proxy → bar RED then reconnect+resync), `kill-kernel` (SIGKILL the kernel.ts kernel → bar freezes, recover via reload). Logs the kill into the central loop.log. Name optional — defaults to the current cwd's loop.")
         .action((action: string, name: string | undefined) => cmdDebug(action, name ?? resolveCurrentLoopName()));
     program.command("capture [name]")
         .description("Print the loop's pane as plain text. Default = capture it live through the multiplexer (works the same on tmux and psmux). `--last <n>` reads the last n frames of the rotating cache instead — see `claude_loop.pane_cache_frames`. Read-only.")
@@ -2488,12 +2310,6 @@ async function main(): Promise<void> {
         .option("--limit <n>", "Max rows (1-500, default 50)", "50")
         .option("--json", "Raw JSON output")
         .action((opts: { events?: boolean; counterOnly?: boolean; cooled?: boolean; limit?: string; json?: boolean }) => cmdBacklog(opts));
-    // #381 (david): "--debug-proxy-tty pour piper des choses et avoir un faux claude
-    // logger derriere". Real PTY proxy + fake-claude byte logger, attached to this
-    // terminal — see/capture EXACTLY what your keyboard emits + the AFK decision.
-    program.command("debug-proxy-tty")
-        .description("Run the real PTY proxy in front of a fake-claude byte logger to capture/diagnose what your keyboard actually emits + AFK toggling (#381)")
-        .action(() => cmdDebugProxyTty());
     // #381 (david yf8wht): direct raw-stdin key reader — no PTY/tmux/claude. Shows
     // each keystroke's bytes + afk grammar decode, to tell if GNOME ate alt+esc.
     program.command("debug-keys")

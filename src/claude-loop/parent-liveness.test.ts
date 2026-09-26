@@ -211,7 +211,7 @@ test("sweepSiblingTimers: #1059 — CL_STATE_DIR match but NON-kernel cmdline (p
         () => ["1234"],
         () => `CL_STATE_DIR=${sd}\0PATH=/bin\0`,
         (pid) => { killed.push(pid); },
-        () => "python3 -B /r/src/claude-loop/pty-proxy.py -- claude", // proxy → must NOT be killed
+        () => "/r/windows/cl-pty-proxy/target/release/cl-pty-proxy -- claude", // proxy → must NOT be killed
     );
     assert.deepEqual(killed, []);
 });
