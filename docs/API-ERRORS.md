@@ -43,6 +43,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `AUTH_REQUIRED` | 401 | No token was sent (over TCP; on the socket too for `POST /api/signals`). Carries a `hint`. |
 | `TOKEN_INVALID` | 401 | The token or key is unknown, revoked or expired. |
 | `KEY_SCOPE_MISSING` | 403 | An API key without the scope of the door it knocks on (`signals`, `tickets:create`). |
+| `AUTHOR_MISMATCH` | 403 | A body names an author (`by_agent`, `set_by`, `answered_by`, `decided_by`) other than the caller. The author of a write is who is authenticated: leave the field out. |
 | `MODERATOR_ONLY` | 403 | A gesture reserved to a registered human moderator: snoozing, changing a ticket's owner or level, assigning someone else, managing subscribers, marking a step, deleting or resurfacing a comment, controlling a loop (stop, prompt, AFK, message or release all loops), nodes and pairing, signal keys, protected config keys, launching a loop. |
 
 **Things that do not exist:**

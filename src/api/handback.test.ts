@@ -139,7 +139,8 @@ test("a then implies the handback, and a contradicting one is refused", async ()
 test("a human is exempt, and naming a human in by_agent does not exempt an agent", async () => {
     const t = ticket();
     assert.equal((await comment(HUMAN, t)).status, 201);
-    assert.equal((await comment(AGENT, t, { by_agent: "boss" })).status, 400);
+    // #3036 — refused before the rule is even read: an agent may not sign as anyone else.
+    assert.equal((await comment(AGENT, t, { by_agent: "boss" })).status, 403);
     assert.equal(comments(t), 1);
 });
 

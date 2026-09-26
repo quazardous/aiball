@@ -288,7 +288,14 @@ export function fmtProjectList(v: unknown): string {
 }
 
 /** Resolve the active consumer id, honouring --human and AIBALL_AGENT. */
-export function buildClient(globalOpts: { human?: boolean }): AiballClient {
+/**
+ * The client a command talks through. `as` (a command's `--by`) sets the
+ * identity it sends (#3036: the daemon takes the author from the caller, never
+ * from a body) — honoured on the local socket, where the caller declares who it
+ * is; over TCP the token decides.
+ */
+export function buildClient(globalOpts: { human?: boolean }, as?: string): AiballClient {
+    if (as) return new AiballClient({ agentId: as });
     if (globalOpts.human) {
         const human = process.env.AIBALL_HUMAN ?? "human";
         return new AiballClient({ agentId: human });

@@ -51,6 +51,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- The author of a write is the caller the request authenticates as: a body
+  that names someone else (`by_agent`, `set_by`, `answered_by`,
+  `decided_by`) is refused, and the MCP write tools no longer offer
+  `by_agent`. `aiball ticket … --by <agent>` now sets the identity sent.
 - The live feed (`/ws`) asks for a token over TCP, like the rest of the API,
   and is also served on the local socket. A client that falls too far behind
   is disconnected instead of piling up in the daemon's memory.

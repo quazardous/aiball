@@ -99,7 +99,7 @@ function ticketStateAfter(id: number, consumerId: string) {
     if (!t || t.kind !== "ticket_created") return null;
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
-import { badRequest, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotes } from "./_helpers.js";
+import { authorFor, badRequest, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotes } from "./_helpers.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
@@ -1319,7 +1319,8 @@ ticketsRouter.post("/tickets/import", async (req: Request, res: Response) => {
     if (!ref) return badRequest(res, "ref required (e.g. gh#123 or gh:owner/repo#123)");
     const project = typeof body.project === "string" && body.project ? body.project : undefined;
     if (!project) return badRequest(res, "project required");
-    const by_agent = body.by_agent || consumerOf(req);
+    const by_agent = authorFor(req, res, body.by_agent);
+    if (by_agent === null) return;
     try {
         const { ticket, external, provider } = await importUpstream({ project, ref, by_agent });
         return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
@@ -1340,7 +1341,8 @@ ticketsRouter.post("/tickets/:id/export", async (req: Request, res: Response) =>
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return badRequest(res, "ticket id required");
     const body = (req.body ?? {}) as { kind?: string; repo?: string; by_agent?: string };
-    const by_agent = body.by_agent || consumerOf(req);
+    const by_agent = authorFor(req, res, body.by_agent);
+    if (by_agent === null) return;
     try {
         const { ticket, external, provider } = await exportUpstream({
             ticket_id: id,

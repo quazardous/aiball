@@ -57,7 +57,7 @@ import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
 import { emitLifecycle } from "../event-bus.js";
-import { badRequest, conflict, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
+import { authorFor, badRequest, conflict, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
 import { getInboxAgg } from "../db/inbox-agg.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
@@ -131,7 +131,10 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     // (no consumer to compare to the ticket reporter, no isHuman bypass) —
     // every close on a ticket the moderator didn't open returned 403. Same
     // pattern as api/tickets.ts:assign which has always done `consumerOf(req)`.
-    if (!v.by_agent) v.by_agent = consumerOf(req);
+    // #3036 — and the author IS the caller: a body naming someone else is refused.
+    const author = authorFor(req, res, v.by_agent);
+    if (author === null) return;
+    v.by_agent = author;
     // #2275 / #2331 — an agent's comment carries a then, or says whether it hands the ticket back.
     const noDecision = withoutDecisionRefusal(v, consumerOf(req));
     if (noDecision) return badRequest(res, noDecision.error, noDecision.code);
@@ -438,14 +441,14 @@ messagesRouter.post("/messages/:id/questions/:qid/answer", (req, res) => {
         answered_by?: unknown;
         answered_in?: unknown;
     };
-    if (typeof answered_by !== "string" || !answered_by) {
-        return badRequest(res, "answered_by required");
-    }
+    // #3036 — who answers is who is authenticated; `answered_by` may be left out.
+    const answeredBy = authorFor(req, res, answered_by, "answered_by");
+    if (answeredBy === null) return;
     if (typeof answered_in !== "number" || !Number.isFinite(answered_in)) {
         return badRequest(res, "answered_in (number) required");
     }
     const updated = markQuestionAnswered(id, qid, {
-        answered_by,
+        answered_by: answeredBy,
         answered_at: new Date().toISOString(),
         answered_in,
     });
@@ -482,9 +485,9 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
     if (body.status !== "accepted" && body.status !== "rejected") {
         return badRequest(res, "status must be 'accepted' or 'rejected'");
     }
-    const by = typeof body.decided_by === "string" && body.decided_by
-        ? body.decided_by
-        : consumerOf(req);
+    // #3036 — who decides is who is authenticated.
+    const by = authorFor(req, res, body.decided_by, "decided_by");
+    if (by === null) return;
     let newKind: DecisionKind | undefined;
     if (body.new_kind !== undefined && body.new_kind !== null) {
         if (typeof body.new_kind !== "string") {

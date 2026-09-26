@@ -22,7 +22,7 @@ import {
 import { broadcast } from "../ws.js";
 import { emitLifecycle } from "../event-bus.js";
 import { configTagNames, resolveConfigTags } from "../config-tags.js";
-import { badRequest, conflict, notFound } from "./_helpers.js";
+import { authorFor, badRequest, conflict, notFound } from "./_helpers.js";
 
 export const tagsRouter = Router();
 
@@ -242,7 +242,10 @@ tagsRouter.put("/messages/:id/tags", (req: Request, res: Response) => {
     // `ticket_tagged` event per NEW tag (PUT is a bulk replace, but the
     // engine's lever `match_tag_added` operates per-add).
     const before = new Set(listMessageTags(id).map((t) => t.name));
-    setMessageTags(id, ids, typeof set_by === "string" ? set_by : null);
+    // #3036 — who tags is who is authenticated.
+    const setBy = authorFor(req, res, set_by, "set_by");
+    if (setBy === null) return;
+    setMessageTags(id, ids, setBy);
     const tags = listMessageTags(id);
     broadcast({ type: "message_tagged", data: { message_id: id, tags } });
     if (m.kind === "ticket_created") {
@@ -265,7 +268,9 @@ tagsRouter.post("/messages/:id/tags", (req: Request, res: Response) => {
     // #457 slice 2 : detect if the tag was actually NEW (POST is idempotent on
     // a same-tag re-add — only emit the trigger when something actually moved).
     const wasPresent = listMessageTags(id).some((x) => x.id === t.id);
-    addMessageTag(id, t.id, typeof set_by === "string" ? set_by : null);
+    const setBy = authorFor(req, res, set_by, "set_by");
+    if (setBy === null) return;
+    addMessageTag(id, t.id, setBy);
     const tags = listMessageTags(id);
     broadcast({ type: "message_tagged", data: { message_id: id, tags } });
     if (m.kind === "ticket_created" && !wasPresent) {

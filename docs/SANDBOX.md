@@ -113,10 +113,7 @@ Tear-down: `aiball sandbox rm <name>` runs `git worktree remove <dir>` for workt
 
 Sandbox sessions boot the aiball MCP server with `AIBALL_MCP_MODE=sandbox` exported. In that mode:
 
-- The `by_agent` parameter is **dropped from the schemas** of every tool that accepts it (`ticket_new`, `ticket_reply`, `ticket_close`, `ticket_update`, `ticket_decide`, …).
-- The server always forces `by_agent = $AIBALL_AGENT` regardless of what the agent passes.
-
-This stops a sandbox from impersonating another agent (e.g. posting `by_agent: "human"` to bypass moderation). Mode-off (interactive Claude Code sessions) behaves identically to before — `by_agent` stays optional.
+Authorship needs no sandbox-specific hardening any more: for every session, the write tools take no `by_agent`, and the daemon takes the author of every write from the caller's identity, refusing a body that names someone else. A sandbox cannot post as another agent (e.g. as `human`, to bypass moderation).
 
 ## Troubleshooting
 

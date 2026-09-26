@@ -1100,7 +1100,7 @@ export const api = {
             ticket: { id: number; title: string | null };
             external: { num: number; title: string; state: string; url: string; labels: string[] };
             provider: string;
-        }>("POST", "/api/tickets/import", { ref, project, by_agent: currentConsumer() }),
+        }>("POST", "/api/tickets/import", { ref, project }),
     /** Export a ticket UP as a new GitHub issue and couple it. Writes to the
      *  remote — call only from a confirmed action. `repo` overrides the
      *  project's default binding. */
@@ -1111,7 +1111,6 @@ export const api = {
             provider: string;
         }>("POST", `/api/tickets/${ticketId}/export`, {
             ...(repo ? { repo } : {}),
-            by_agent: currentConsumer(),
         }),
     /** #352: mute/unmute one SPECIFIC subscriber's subscription on a ticket. */
     muteSubscription: (ticketId: number, consumerId: string, muted: boolean) =>
@@ -1228,7 +1227,7 @@ export const api = {
     markQuestionAnswered: (
         messageId: number,
         questionId: string,
-        body: { answered_by: string; answered_in: number },
+        body: { answered_in: number },
     ) =>
         req<Message>(
             "POST",
@@ -1332,8 +1331,8 @@ export const api = {
         body: Partial<{ name: string; color: string | null; note: string | null; position: number }>,
     ) => req<Tag>("PATCH", `/api/tags/${id}`, body),
     delTag: (id: number) => req<void>("DELETE", `/api/tags/${id}`),
-    setMessageTags: (id: number, tag_ids: number[], set_by?: string) =>
-        req<Tag[]>("PUT", `/api/messages/${id}/tags`, { tag_ids, set_by }),
+    setMessageTags: (id: number, tag_ids: number[]) =>
+        req<Tag[]>("PUT", `/api/messages/${id}/tags`, { tag_ids }),
 
     getStrategy: () => req<{ strategy: Strategy }>("GET", "/api/strategy"),
     setStrategy: (s: Strategy) =>

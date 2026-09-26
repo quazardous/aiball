@@ -60,10 +60,6 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "Event scope (#B.245 tristate): `internal` = owners only + @mentions explicit; `default` = ticket subscribers + project owners + @mentions; `broadcast` = `default` + project followers. Default `'default'`. Set `'broadcast'` to surface a public/API-impacting ticket to followers from the start.",
                     ),
-                by_agent: z
-                    .string()
-                    .optional()
-                    .describe("Author identity. Defaults to the resolved agent id."),
                 parent_id: z
                     .number()
                     .int()
@@ -99,7 +95,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project, then, milestone }) => {
+        async ({ project, title, summary, body, intent, priority, scope, parent_id, tags, from_project, then, milestone }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,
@@ -109,7 +105,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 body,
                 intent,
                 priority,
-                by_agent: effectiveBy(by_agent),
+                by_agent: effectiveBy(),
                 parent_id,
                 scope,
                 from_project,
@@ -182,7 +178,6 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .string()
                     .optional()
                     .describe("Project name. Required for offline (spool) mode."),
-                by_agent: z.string().optional(),
                 summary_until: z
                     .string()
                     .min(1)
@@ -246,7 +241,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ target_id, body, project, by_agent, summary_until, then, handback, resume_on, commits, scope }) => {
+        async ({ target_id, body, project, summary_until, then, handback, resume_on, commits, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -298,7 +293,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 ticket_id: ticketId,
                 parent_id: parentId,
                 body,
-                by_agent: effectiveBy(by_agent),
+                by_agent: effectiveBy(),
                 decision_kind,
                 // Only forward summary_until for comment_added kinds —
                 // close/reopen are lifecycle rows where the field has no
@@ -353,10 +348,9 @@ export function registerTicketWriteTools(server: McpServer): void {
             inputSchema: {
                 ticket_id: z.number().int(),
                 project: z.string().optional(),
-                by_agent: z.string().optional(),
             },
         },
-        async ({ ticket_id, project, by_agent }) => {
+        async ({ ticket_id, project }) => {
             markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
             let proj = project;
             if (!proj) {
@@ -377,7 +371,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 kind: "ticket_closed",
                 ticket_id,
                 parent_id: ticket_id,
-                by_agent: effectiveBy(by_agent),
+                by_agent: effectiveBy(),
             });
             return asText(res);
         },

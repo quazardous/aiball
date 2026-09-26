@@ -228,6 +228,16 @@ as the same OS user can read it) — the uid frontier, as always.
 
 ---
 
+## Authorship — the author is the caller
+
+The author of every write (`by_agent` of a message, `set_by` of a tag,
+`answered_by` of an answer, `decided_by` of a decision) is the consumer the
+request authenticates as, never a name in the body; a body naming someone else
+is refused (`AUTHOR_MISMATCH`). Its strength is the boundary's: bound to the
+token on a direct remote, but on the local socket and through a proxy node the
+identity is the `x-aiball-consumer` header the caller declares — there it keeps
+authorship consistent, it does not prove it.
+
 ## Uploads — capability URLs
 
 A file pasted or attached in a thread is stored under its SHA-256 and cited in

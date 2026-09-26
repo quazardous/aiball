@@ -54,7 +54,9 @@ export function markActiveTicket(ticketId: number | null | undefined): void {
 /**
  * Resolve the author identity for every MCP write. The stored `by_agent`
  * is always the resolved agent id (`client.agentId`, from AIBALL_AGENT /
- * cwd hash); a caller-supplied `by_agent` is ignored.
+ * cwd hash). #3036 — the write tools no longer take a `by_agent` at all (it
+ * was shown and silently ignored), and the daemon refuses an author other
+ * than the caller.
  *
  * Why ignore it (#240): the self-ping filter in `fanOutPings`
  * (`src/messages.ts`) skips the author by strict `recipient === by_agent`
@@ -64,7 +66,7 @@ export function markActiveTicket(ticketId: number | null | undefined): void {
  * id closes the drift. Previously this lock was opt-in via
  * AIBALL_MCP_MODE=sandbox (#B.63); #240 made it the only behavior.
  */
-export function effectiveBy(_provided?: string): string {
+export function effectiveBy(): string {
     return client.agentId;
 }
 

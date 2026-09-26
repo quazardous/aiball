@@ -113,7 +113,6 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
         const t = data.value.ticket;
         const trimmed = composerBody.value.trim();
         if (!trimmed && kind === "comment_added" && !decisionKind) return; // no-op
-        const byAgent = localStorage.getItem("aiball.human_id") || "human";
         // Goes through api.postMessage → req() so the bearer token + the
         // X-Aiball-Consumer header are attached. Hitting fetch() directly
         // bypassed both and returned 401 once auth became mandatory.
@@ -123,7 +122,6 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
             ticket_id: t.id,
             parent_id: t.id,
             body: trimmed || undefined,
-            by_agent: byAgent,
             decision_kind: decisionKind,
         });
     }
@@ -155,18 +153,16 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
                     // "✓ accepted plan by david" chip. Without it the
                     // marker shows as bare text, no visual feedback.
                     const t = data.value.ticket;
-                    const byAgent = localStorage.getItem("aiball.human_id") || "human";
                     const posted = await api.postMessage({
                         project: t.project,
                         kind: "comment_added",
                         ticket_id: t.id,
                         parent_id: t.id,
                         body: `(accepted as plan — ticket stays open)`,
-                        by_agent: byAgent,
                         decision_kind: "plan",
                     });
                     // Flip it to accepted immediately so the chip reads
-                    // "✓ accepted plan by <byAgent>" rather than "pending".
+                    // "✓ accepted plan by <you>" rather than "pending".
                     if (posted?.id) {
                         try {
                             await api.decide(posted.id, "accepted");

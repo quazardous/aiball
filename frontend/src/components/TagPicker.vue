@@ -13,7 +13,6 @@ import TagBadge from "./TagBadge.vue";
 const props = defineProps<{
     messageId?: number;
     tags?: Tag[];
-    setBy?: string;
 }>();
 const emit = defineEmits<{ (e: "changed", tags: Tag[]): void }>();
 const selectedIds = defineModel<number[]>("selectedIds", { default: () => [] });
@@ -67,7 +66,6 @@ async function save() {
         const result = await api.setMessageTags(
             props.messageId!,
             [...selected.value],
-            props.setBy,
         );
         emit("changed", result);
         error.value = null;

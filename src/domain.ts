@@ -187,6 +187,8 @@ export const ERROR_CODES = {
     RELATION_CYCLE: "RELATION_CYCLE",
     /** #3039 — importing an upstream issue a ticket already mirrors (`existing_ticket_id`). */
     ALREADY_IMPORTED: "ALREADY_IMPORTED",
+    /** #3036 — a body names an author other than the authenticated caller. */
+    AUTHOR_MISMATCH: "AUTHOR_MISMATCH",
     FORBIDDEN_CLOSE: "FORBIDDEN_CLOSE",
     PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
     PARENT_PENDING_MODERATION: "PARENT_PENDING_MODERATION",

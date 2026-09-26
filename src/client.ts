@@ -715,7 +715,7 @@ export class AiballClient {
      * ticket from it. The daemon does the fetch (it holds the host-level
      * token) and applies labels→tags + the per-ticket coupling columns.
      */
-    importUpstream(ref: string, project?: string, by_agent?: string) {
+    importUpstream(ref: string, project?: string) {
         return this.http<{
             ticket: { id: number; title: string | null; tags: unknown[] };
             external: { num: number; title: string; state: string; url: string; labels: string[] };
@@ -723,7 +723,6 @@ export class AiballClient {
         }>("POST", "/api/tickets/import", {
             ref,
             ...(project ? { project } : {}),
-            ...(by_agent ? { by_agent } : {}),
         });
     }
     /**
@@ -1255,11 +1254,9 @@ export class AiballClient {
      * tag NAMES — the daemon resolves to ids via getTagByName.
      * Unknown names bubble up as 400.
      */
-    setMessageTags(id: number, tag_names: string[], set_by?: string) {
-        return this.http("PUT", `/api/messages/${id}/tags`, {
-            tag_ids: tag_names,
-            set_by: set_by ?? null,
-        });
+    setMessageTags(id: number, tag_names: string[]) {
+        // #3036 — who tags is the caller; the daemon takes it from the identity sent.
+        return this.http("PUT", `/api/messages/${id}/tags`, { tag_ids: tag_names });
     }
     note(id: number, note: string | null) {
         return this.http("POST", `/api/messages/${id}/note`, { note });

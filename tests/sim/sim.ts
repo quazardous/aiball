@@ -360,8 +360,8 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
         case "comment": {
             const ticket = await api<{ project: string }>(token, "GET", `/api/messages/${id}`);
             const m = await api<{ id: number }>(token, "POST", "/api/messages", {
-                // `by_agent` is what the route reads to exempt a human from summary_until.
-                project: ticket.project, kind: "comment_added", ticket_id: id, body, by_agent: state.moderator.id,
+                // The author is the moderator the token names (a human: no summary_until needed).
+                project: ticket.project, kind: "comment_added", ticket_id: id, body,
             });
             return `comment ${m.id} on #${id}`;
         }
@@ -369,7 +369,7 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
         case "reopen": {
             const ticket = await api<{ project: string }>(token, "GET", `/api/messages/${id}`);
             await api(token, "POST", "/api/messages", {
-                project: ticket.project, kind: action === "close" ? "ticket_closed" : "ticket_reopened", ticket_id: id, by_agent: state.moderator.id,
+                project: ticket.project, kind: action === "close" ? "ticket_closed" : "ticket_reopened", ticket_id: id,
             });
             return `#${id} ${action === "close" ? "closed" : "reopened"}`;
         }

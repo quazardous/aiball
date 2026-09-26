@@ -63,19 +63,19 @@ export function registerTicketCommands(program: Command): void {
         .requiredOption("--title <title>", "Ticket title")
         .option("--project <project>", "Project (default $AIBALL_PROJECT)")
         .option("--body <body>", "Ticket body")
-        .option("--by <agent>", "Author override (default: resolved consumer id)")
+        .option("--by <agent>", "Post as this consumer (the identity sent; default: resolved consumer id)")
         .option("--plan", "The body proposes how the work should go: the ticket carries a pending plan")
 
         .action(async (opts, cmd) => {
             const globalOpts = gOpts(cmd);
-            const client = buildClient(globalOpts);
+            const client = buildClient(globalOpts, opts.by);
             const project = withProject(client, opts.project);
             const res = await client.postMessage({
                 project,
                 kind: "ticket_created",
                 title: opts.title,
                 ...(opts.body ? { body: opts.body } : {}),
-                by_agent: opts.by ?? client.agentId,
+                by_agent: client.agentId,
                 ...(opts.plan ? { decision_kind: "plan" } : {}),
             });
             out(res, globalOpts, (v) => fmtPostReceipt(v, "ticket"));
@@ -88,12 +88,12 @@ export function registerTicketCommands(program: Command): void {
         .requiredOption("--body <body>", "Comment body")
         .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
         .option("--parent <id>", "Parent message id (default: ticket id)")
-        .option("--by <agent>", "Author override")
+        .option("--by <agent>", "Post as this consumer (the identity sent)")
         .option("--handback", "Hand the ticket back: a question, you wait for an answer (an agent's comment needs --handback or --keep)")
         .option("--keep", "Keep the ticket and carry on (only on a ticket you hold)")
         .option("--commits <shas>", "Commits this comment delivers, comma-separated, or \"none\" (an agent's comment needs it)")
         .action(async (opts, cmd) => {
-            const client = buildClient(gOpts(cmd));
+            const client = buildClient(gOpts(cmd), opts.by);
             const ticketId = Number(opts.id);
             let project = opts.project as string | undefined;
             if (!project) {
@@ -115,7 +115,7 @@ export function registerTicketCommands(program: Command): void {
                 project,
                 kind: "comment_added",
                 body: opts.body,
-                by_agent: opts.by ?? client.agentId,
+                by_agent: client.agentId,
                 ticket_id: ticketId,
                 parent_id: parent,
                 ...(opts.keep ? { handback: false } : opts.handback ? { handback: true } : {}),
@@ -132,9 +132,9 @@ export function registerTicketCommands(program: Command): void {
         .description("Close a ticket")
         .requiredOption("--id <id>", "Ticket id")
         .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
-        .option("--by <agent>", "Author override")
+        .option("--by <agent>", "Post as this consumer (the identity sent)")
         .action(async (opts, cmd) => {
-            const client = buildClient(gOpts(cmd));
+            const client = buildClient(gOpts(cmd), opts.by);
             const ticketId = Number(opts.id);
             let project = opts.project as string | undefined;
             if (!project) {
@@ -154,7 +154,7 @@ export function registerTicketCommands(program: Command): void {
             const res = await client.postMessage({
                 project,
                 kind: "ticket_closed",
-                by_agent: opts.by ?? client.agentId,
+                by_agent: client.agentId,
                 ticket_id: ticketId,
                 parent_id: ticketId,
             });

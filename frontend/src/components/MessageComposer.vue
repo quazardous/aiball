@@ -190,9 +190,9 @@ async function submit(scopeOverride?: Scope) {
         // Identity flows from localStorage (set by Setup/Login) →
         // X-Aiball-Consumer header on every api request. The composer
         // no longer edits it (#B.245 retired the "replying as"
-        // InputText); we still echo it as `by_agent` on the payload so
-        // the validator sees the same value the API helper would have
-        // resolved.
+        // InputText). #3036 — the daemon takes the author from that
+        // identity, so no payload carries it; `author` only names the
+        // reader in the local read-state event below.
         const author = localStorage.getItem("aiball.human_id") ?? "human";
         let createdId: number | null = null;
         if (isTicket.value) {
@@ -205,7 +205,6 @@ async function submit(scopeOverride?: Scope) {
                 // Omit priority when it equals the default so the payload
                 // stays clean for the typical case.
                 ...(priority.value !== "normal" ? { priority: priority.value } : {}),
-                by_agent: author,
                 // #B.245 tristate. Forward only when non-default so the
                 // payload stays clean for the typical case.
                 ...(scope.value !== "default" ? { scope: scope.value } : {}),
@@ -227,7 +226,7 @@ async function submit(scopeOverride?: Scope) {
             // the ticket is already posted, so a tag failure only warns.
             if (createdId !== null && ticketTagIds.value.length > 0) {
                 try {
-                    await api.setMessageTags(createdId, ticketTagIds.value, author);
+                    await api.setMessageTags(createdId, ticketTagIds.value);
                 } catch (e) {
                     console.warn("[composer] failed to apply tags to new ticket:", e);
                 }
@@ -241,7 +240,6 @@ async function submit(scopeOverride?: Scope) {
                 ticket_id: props.ticketId,
                 parent_id: props.parentId ?? props.ticketId,
                 body: body.value,
-                by_agent: author,
                 // #B.245 tristate. Forward only when non-default. `scopeOverride`
                 // (#1561) is the one-shot "post without notifying" path — it
                 // deliberately does not touch the persisted `scope`.
@@ -273,11 +271,9 @@ async function submit(scopeOverride?: Scope) {
             pendingAnswers.value.length > 0 &&
             !isTicket.value
         ) {
-            const answeredBy = author;
             for (const pa of pendingAnswers.value) {
                 try {
                     await api.markQuestionAnswered(pa.messageId, pa.questionId, {
-                        answered_by: answeredBy,
                         answered_in: createdId,
                     });
                 } catch (e) {
