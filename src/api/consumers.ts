@@ -3,9 +3,11 @@
  * Carved out of api.ts on 2026-05-19 — behavior-preserving move.
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
+import { listTicketsFor } from "./tickets.js";
 import { parseAgentBar } from "../agent-bar.js";
 import { getAgentBar, setAgentBar } from "../agent-bar-store.js";
-import { type WaitCreditRow, listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
+import { type WaitCreditRow, listWaitCreditMoves, listWaitCredits, waitCreditBalance, waitCreditEnabled } from "../db/wait-credit.js";
+import { unreadPingCount } from "../db/pings.js";
 import { Router, type Request, type Response } from "express";
 import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
 import {
@@ -365,6 +367,40 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
         broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
     }
     res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord, cwd, project });
+});
+
+/**
+ * #3031 — a given agent's backlog, for a moderator watching it: the rows that
+ * agent's own `GET /api/tickets?backlog=1` would get (tiers, cooldowns, steps,
+ * claimability), computed for the agent rather than for the caller, so a human
+ * no longer has to send the agent's identity. Plus its unread events and its
+ * wait credit on the project, to save two calls. Read-only: nothing is marked
+ * read and no wake is recorded. A human reads any agent's; an agent, its own.
+ */
+consumersRouter.get("/consumers/:consumer_id/backlog", (req: Request, res: Response) => {
+    const target = String(req.params.consumer_id);
+    const caller = consumerOf(req);
+    if (target !== caller && !isHuman(caller)) {
+        return res.status(403).json({ error: "an agent's backlog is readable by a human or by the agent itself" });
+    }
+    const c = getConsumer(target);
+    if (!c) return notFound(res, "consumer not found");
+    const project = typeof req.query.project === "string" && req.query.project ? req.query.project : undefined;
+    const query: Record<string, string> = { backlog: "1" };
+    for (const key of ["project", "cooldown_sec", "limit"] as const) {
+        const v = req.query[key];
+        if (typeof v === "string" && v) query[key] = v;
+    }
+    // The proxy's no-claim hint is a header of the agent's own requests: absent
+    // here, the agent's claimability is its database flag, as its loops see it
+    // off the proxy.
+    const rows = listTicketsFor(target, query, { noClaimHint: false });
+    res.json({
+        consumer_id: target,
+        rows,
+        unread: unreadPingCount(target),
+        wait_credit: project && c.kind !== "human" && waitCreditEnabled(project) ? waitCreditBalance(target, project) : null,
+    });
 });
 
 /**

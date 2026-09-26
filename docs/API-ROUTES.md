@@ -9,7 +9,7 @@ Consumers: **loop** (claude-loop), **mcp** (the MCP server), **cli** (the `aibal
 **sim** (the board simulator), **web** (the web UI), **tvty** (the tvty terminal, from
 its checkout when present).
 
-**163 routes** · 100 called by loop, mcp, cli or tvty · 47 by the web UI alone · 16 by no consumer in the code.
+**164 routes** · 100 called by loop, mcp, cli or tvty · 47 by the web UI alone · 17 by no consumer in the code.
 
 | Route | loop | mcp | cli | sim | web | tvty |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
@@ -32,6 +32,7 @@ its checkout when present).
 | `DELETE /api/consumers/:consumer_id` |  |  |  |  | ● |  |
 | `GET /api/consumers/:consumer_id` | ● | ● |  |  |  |  |
 | `PATCH /api/consumers/:consumer_id` | ● |  | ● |  | ● |  |
+| `GET /api/consumers/:consumer_id/backlog` |  |  |  |  |  |  |
 | `GET /api/consumers/:consumer_id/bar` |  |  |  |  |  |  |
 | `PUT /api/consumers/:consumer_id/bar` | ● |  |  |  |  |  |
 | `POST /api/consumers/:consumer_id/loop-stop` |  |  |  |  | ● |  |

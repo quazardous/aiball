@@ -31,6 +31,9 @@ dates are YYYY-MM-DD.
   board's list is unchanged.
 - Request stats report how long the event loop was held up, and which
   requests took over 100 ms.
+- A moderator can read a given agent's backlog, as that agent sees it,
+  without sending its identity: `GET /api/consumers/<agent>/backlog`, with the
+  agent's unread events and wait credit.
 - A loop's bar is also available as data for other hosts:
   `GET /api/consumers/<agent>/bar`, and an `agent_bar` event on `/ws` when it
   changes or its loop stops.

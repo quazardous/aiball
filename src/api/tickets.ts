@@ -573,9 +573,18 @@ ticketsRouter.get("/inbox", (req, res) => {
     res.json(withPilot && pilot ? rows.map((r) => ({ ...r, ...pilot.get(r.id)! })) : rows);
 });
 
-ticketsRouter.get("/tickets", (req, res) => {
-    const project = req.query.project as string | undefined;
-    const onlyOpen = req.query.open === "1";
+/**
+ * #3031 — the ticket list as `agentId` sees it: the whole computation of
+ * `GET /api/tickets`, with the agent a parameter instead of the caller. The
+ * route passes the caller; `GET /api/consumers/:id/backlog` passes the agent a
+ * moderator is watching, so reading another agent's view no longer means
+ * sending its identity. `noClaimHint` is the proxy node's no-claim header
+ * (`x-aiball-no-claim`), which only a caller's own request carries.
+ * Read-only: it marks nothing read and records no wake.
+ */
+export function listTicketsFor(agentId: string, query: Request["query"], opts: { noClaimHint: boolean }): unknown {
+    const project = query.project as string | undefined;
+    const onlyOpen = query.open === "1";
     // #B.232 #234 david: actionable=1 is a stricter form of open=1
     // that ALSO excludes resolved-pending, blocked, and gated tickets
     // (mirrors actionable_count semantics on the sidebar). Used by the
@@ -583,20 +592,20 @@ ticketsRouter.get("/tickets", (req, res) => {
     // in awaiting-validation state. Frontend keeps open=1 for the
     // broader "everything not lifecycle-closed" view (david still needs
     // to see resolution proposals to act on them).
-    const onlyActionable = req.query.actionable === "1";
+    const onlyActionable = query.actionable === "1";
     // #432 david: `claimable` is a DIFFERENT, narrower lens than `actionable`.
     // actionable stays inclusive (a follower-broadcast from another project is
     // still actionable/visible); claimable = actionable ∩ {projects where THIS
     // consumer is an `owner`}. Claiming commits you to the work, which belongs
     // to that project's owners — so a project you only `follow` is actionable
     // but not claimable. `ticket_claim` + the wake-CTA head use this set.
-    const onlyClaimable = req.query.claimable === "1";
+    const onlyClaimable = query.claimable === "1";
     // The backlog wake set: actionable tickets (ball in my court) UNION
     // open tickets where I was the last actor (ball in their court). Tier
     // 1 sorts first via the existing work-order tiering — actionable
     // collapses into its tier, the others land in "other open".
     // See docs/TICKET_LIFECYCLE.md §5.0.
-    const onlyBacklog = req.query.backlog === "1";
+    const onlyBacklog = query.backlog === "1";
     // #461 — predict the POST-DRAIN work-order head. With `assume_drained=1`,
     // the work-order sort treats every currently-unread ticket as if its ping
     // had already been ack'd: the `unread` tier is suppressed, all rows
@@ -607,23 +616,23 @@ ticketsRouter.get("/tickets", (req, res) => {
     // unread-tier head and the agent's drain demotes it before engage runs,
     // surfacing a different ticket — the friction david pointed at). Affects
     // ORDER only; the per-row `unread` boolean still reflects real state.
-    const assumeDrained = req.query.assume_drained === "1";
+    const assumeDrained = query.assume_drained === "1";
     // Default: when `open=1`, snoozed tickets are hidden (same rule as
     // the inbox). Pass `include_postponed=1` to surface them anyway.
-    const includePostponed = req.query.include_postponed === "1";
+    const includePostponed = query.include_postponed === "1";
     // Tag filter — comma-separated names. AND semantics: a ticket must
     // carry EVERY listed tag to match. Unknown tag names are ignored
     // silently rather than 400'ing — keeps the URL lenient.
-    const tagsFilter = typeof req.query.tags === "string"
-        ? req.query.tags.split(",").map((s) => s.trim()).filter(Boolean)
+    const tagsFilter = typeof query.tags === "string"
+        ? query.tags.split(",").map((s) => s.trim()).filter(Boolean)
         : null;
     // Verbosity (#B.83 then #B.87 palier 2): default is summary now —
     // header-only payload, no body. Pass `full=1` to
     // re-include bodies. `summary=1` kept as an accepted alias for
     // explicit-summary requests; `summary=0` forces full. The plain
     // default (neither flag) is summary.
-    const fullParam = req.query.full;
-    const summaryParam = req.query.summary;
+    const fullParam = query.full;
+    const summaryParam = query.summary;
     const summary =
         fullParam === "1"
             ? false
@@ -632,12 +641,12 @@ ticketsRouter.get("/tickets", (req, res) => {
               : true;
     // Author filter (#B.84): scope to tickets posted by a specific
     // consumer_id. Useful for "my tickets" without scanning the full list.
-    const byAgent = typeof req.query.by_agent === "string" && req.query.by_agent
-        ? req.query.by_agent
+    const byAgent = typeof query.by_agent === "string" && query.by_agent
+        ? query.by_agent
         : undefined;
     // Status filter (#B.84): default "approved" preserves prior behavior;
     // pass "pending" / "rejected" / "any" to widen.
-    const statusParam = (req.query.status as string | undefined) ?? "approved";
+    const statusParam = (query.status as string | undefined) ?? "approved";
     const statusFilter: "pending" | "approved" | "rejected" | undefined =
         statusParam === "pending" || statusParam === "approved" || statusParam === "rejected"
             ? statusParam
@@ -648,22 +657,22 @@ ticketsRouter.get("/tickets", (req, res) => {
     // (edited_)title. Cheap alternative to FTS when looking up a ticket
     // by name.
     const titleContains =
-        typeof req.query.title_contains === "string" && req.query.title_contains
-            ? req.query.title_contains.toLowerCase()
+        typeof query.title_contains === "string" && query.title_contains
+            ? query.title_contains.toLowerCase()
             : undefined;
     const limit =
-        typeof req.query.limit === "string" && Number.isFinite(Number(req.query.limit))
-            ? Math.max(1, Math.min(500, Number(req.query.limit)))
+        typeof query.limit === "string" && Number.isFinite(Number(query.limit))
+            ? Math.max(1, Math.min(500, Number(query.limit)))
             : undefined;
     // #2910 — only the tickets of this milestone.
     const milestoneFilter =
-        typeof req.query.milestone === "string" && Number.isInteger(Number(req.query.milestone)) && Number(req.query.milestone) > 0
-            ? Number(req.query.milestone)
+        typeof query.milestone === "string" && Number.isInteger(Number(query.milestone)) && Number(query.milestone) > 0
+            ? Number(query.milestone)
             : undefined;
     // since (#B.87): filter on ticket created_at >= since. Accepts any
     // string Date.parse() understands (ISO8601 recommended). Cheap
     // alternative to client-side diff when polling for new tickets.
-    const sinceParam = typeof req.query.since === "string" ? req.query.since : undefined;
+    const sinceParam = typeof query.since === "string" ? query.since : undefined;
     const sinceIso = sinceParam && Number.isFinite(Date.parse(sinceParam))
         ? new Date(Date.parse(sinceParam)).toISOString()
         : undefined;
@@ -704,7 +713,7 @@ ticketsRouter.get("/tickets", (req, res) => {
     // `unread` (≥1 unseen ping for this consumer) and `actionable` (in this
     // consumer's actionable pool). Computed once; the ordering below tiers
     // the list by them (unread → actionable → other-open → rest).
-    const consumerId = consumerOf(req);
+    const consumerId = agentId;
     const unreadMap = ticketUnreadFlags(consumerId, created.map((m) => m.id));
     const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
     // #432: projects this consumer owns (role=owner). A claimable ticket must
@@ -727,7 +736,7 @@ ticketsRouter.get("/tickets", (req, res) => {
     // même si l'admin upstream n'a pas posé le flag DB).
     const consumerRow = getConsumer(consumerId);
     const dbCanClaim = !consumerRow || consumerRow.can_claim !== false;
-    const proxyHint = (req as AuthenticatedRequest).no_claim_hint === true;
+    const proxyHint = opts.noClaimHint;
     const consumerCanClaim = dbCanClaim && !proxyHint;
     const isClaimable = (id: number, proj: string, assignee: string | null): boolean => {
         if (!consumerCanClaim) {
@@ -897,9 +906,9 @@ ticketsRouter.get("/tickets", (req, res) => {
     // 5-6 independent Sets and combine them inline; the route now
     // delegates to `computeTicketFlags(row, ctx)`. Adding a new
     // condition means editing the pure fn, not the route.
-    const cooldownSec = typeof req.query.cooldown_sec === "string"
-        && Number.isFinite(Number(req.query.cooldown_sec))
-        ? Math.max(0, Number(req.query.cooldown_sec))
+    const cooldownSec = typeof query.cooldown_sec === "string"
+        && Number.isFinite(Number(query.cooldown_sec))
+        ? Math.max(0, Number(query.cooldown_sec))
         : 0;
     const flagsCtx = buildTicketFlagsContext({
         consumerId,
@@ -1124,7 +1133,13 @@ ticketsRouter.get("/tickets", (req, res) => {
         }
     }
     if (limit !== undefined) result = result.slice(0, limit);
-    res.json(result);
+    return result;
+}
+
+ticketsRouter.get("/tickets", (req, res) => {
+    res.json(listTicketsFor(consumerOf(req), req.query, {
+        noClaimHint: (req as AuthenticatedRequest).no_claim_hint === true,
+    }));
 });
 
 ticketsRouter.post("/tickets/:id/mark-read", (req: Request, res: Response) => {
