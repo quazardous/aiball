@@ -1,7 +1,9 @@
 # Session host: Claude's sessions without tmux or claude-loop
 
-> **Status: the host is built (`cl-session-host`); the daemon's side is not
-> yet.** This page fixes the host's side and what clients will call. Clients attach to it with the protocol of
+> **Status: the host is built (`cl-session-host`), and the daemon runs sessions
+> without an agent (`session.start {name, argv}`). An agent's session comes
+> with the loop kernel in the daemon.** This page fixes the host's side and
+> what clients call. Clients attach to it with the protocol of
 > [`LOOP-HOST.md`](./LOOP-HOST.md); the daemon drives it with the control
 > channel described here.
 

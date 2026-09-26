@@ -50,7 +50,7 @@ export interface SubjectSpec {
     value(sub: Subscription): unknown;
     /** Which published subjects this subscription hears; by default its own. */
     hears?(sub: Subscription, subject: string): boolean;
-    /** What the subscriber receives of an event, or null for nothing. */
+    /** What the subscriber receives of an event, or `SKIP` for nothing (`null` is data). */
     deliver?(sub: Subscription, subject: string, data: unknown): unknown;
     /** Called once the subscription is gone (a source to let go of). */
     release?(sub: Subscription): void;
@@ -59,6 +59,9 @@ export interface SubjectSpec {
 }
 
 const specs: SubjectSpec[] = [];
+
+/** What `deliver` returns when this subscriber gets nothing of an event. */
+export const SKIP: unique symbol = Symbol("skip");
 
 export function defineSubject(spec: SubjectSpec): void {
     specs.push(spec);
@@ -77,12 +80,12 @@ function globMatch(pattern: string[], subject: string[]): boolean {
     return pattern.length === subject.length && pattern.every((p, i) => p === "*" || p === subject[i]);
 }
 
-/** What `sub` gets of one published event, or null. */
+/** What `sub` gets of one published event, or `SKIP`. */
 function outFor(sub: Subscription, ev: Published): unknown {
     const hears = sub.spec.hears ? sub.spec.hears(sub, ev.subject) : globMatch(sub.parts, ev.subject.split("."));
-    if (!hears) return null;
+    if (!hears) return SKIP;
     const data = sub.spec.deliver ? sub.spec.deliver(sub, ev.subject, ev.data) : ev.data;
-    return data === null || data === undefined ? null : data;
+    return data === undefined ? SKIP : data;
 }
 
 /**
@@ -101,7 +104,7 @@ export function publish(subject: string, data: unknown): void {
             console.error(`[bus] delivering ${subject} to ${sub.subject} failed:`, e);
             continue;
         }
-        if (out === null) continue;
+        if (out === SKIP) continue;
         sub.session.notify("bus.event", { subscription: sub.id, subject: eventSubjectFor(sub, subject, out), seq: ev.seq, data: out });
     }
 }
@@ -176,7 +179,7 @@ export function subscribe(
         for (const ev of ring) {
             if (ev.seq <= since!.seq!) continue;
             const out = outFor(sub, ev);
-            if (out !== null) events.push({ subject: eventSubjectFor(sub, ev.subject, out), seq: ev.seq, data: out });
+            if (out !== SKIP) events.push({ subject: eventSubjectFor(sub, ev.subject, out), seq: ev.seq, data: out });
         }
         result.events = events;
     } else {

@@ -102,10 +102,11 @@ events, and the same epoch), the answer is `replayed: true` with the missed
 | Subject | `value` | an event's `data` | Who |
 |---|---|---|---|
 | `agent.<id>.bar` | the bar, as `consumer.bar` returns it, or `null` | the bar | a human, or the agent itself |
-| `agent.<id>.state` | the entry `consumer.list` gives | what changed: presence (`running`), loop state, the whole entry | humans and agents |
+| `agent.<id>.state` | the entry `consumer.list` gives | the whole entry again, built by the same code, whenever it changed (presence, loop state, pings, credit, `session`); `null` once the consumer is deleted | humans and agents |
 | `project.<p>.tickets` | the rows `inbox.list` gives with `view: "turn"`; options `open`, `include_postponed` | `{ op: "upsert", row }` or `{ op: "remove", id, project }` | humans and agents; the rows are the subscriber's |
 | `ticket.<id>` | what `ticket.get` gives with `full: true` | `{ type, message }`: `message_created`, `_edited`, `_decided`, `_noted`, `_tagged` | humans and agents |
 | `user.<id>.pings` | `{ unread }` | a ping, as the event stream carries it, and `message`: what it points at (`id`, `hashid`, `kind`, `status`, `by_agent`, `created_at`, `project`, `ticket_id`, `title`, `decision`) | oneself |
+| `session.<name>.state` | a session without an agent, as `session.list` gives it, or `null` | `{ name, session }`: started, clients, exited, and `session: null` once stopped | humans and agents |
 
 `*` stands for one level: `agent.*.bar`, `agent.*.state` and
 `project.*.tickets` give every agent's or project's, including the ones
@@ -165,6 +166,9 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `bus.whoami` | human, agent | — who the connection runs as: `{ consumer, kind, relayed, transport }` |
 | `bus.subscribe` | human, agent | — see *Subscriptions* |
 | `bus.unsubscribe` | human, agent | — see *Subscriptions* |
+| `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY` |
+| `session.stop` | human, not relayed | — ends a session and its host |
+| `session.list` | human, agent | — every session this daemon hosts |
 | `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
 | `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |
 | `tag.list` | human, agent | `GET /api/tags` |

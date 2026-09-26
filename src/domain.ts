@@ -187,6 +187,10 @@ export const ERROR_CODES = {
     RELATION_CYCLE: "RELATION_CYCLE",
     /** #3039 — importing an upstream issue a ticket already mirrors (`existing_ticket_id`). */
     ALREADY_IMPORTED: "ALREADY_IMPORTED",
+    /** #3066 — the agent's (or the name's) session runs elsewhere: claude-loop, or another host. */
+    HOST_BUSY: "HOST_BUSY",
+    /** #3066 — a handover waited for Claude to be idle, and it did not become so. */
+    NOT_IDLE: "NOT_IDLE",
     /** #3036 — a body names an author other than the authenticated caller. */
     AUTHOR_MISMATCH: "AUTHOR_MISMATCH",
     /** #3037 — a tag named (or given by id) that does not exist. */

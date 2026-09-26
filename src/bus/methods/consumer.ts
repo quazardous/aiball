@@ -2,7 +2,8 @@
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { ERROR_CODES } from "../../domain.js";
-import { getConsumer, listConsumers, pingCountsByConsumer } from "../../db.js";
+import { getConsumer, listConsumers, pingCountsByConsumer, type Consumer } from "../../db.js";
+import { sessionFor, viewOf } from "../../sessions/registry.js";
 import { presenceRunning } from "../../live-presence.js";
 import { listWaitCredits, waitCreditBalance, waitCreditEnabled, type WaitCreditRow } from "../../db/wait-credit.js";
 import { unreadPingCount } from "../../db/pings.js";
@@ -27,27 +28,51 @@ const LOOP_CONTROL = {
     denied: { message: "loop control is moderator-only", code: ERROR_CODES.MODERATOR_ONLY },
 };
 
+/** What every entry of one read shares: the ping tallies and the wait credits of everyone. */
+function entryContext() {
+    const pings = pingCountsByConsumer();
+    const credits = new Map<string, WaitCreditRow[]>();
+    for (const row of listWaitCredits()) credits.set(row.consumer_id, [...(credits.get(row.consumer_id) ?? []), row]);
+    return { pings, credits };
+}
+
 /**
- * Every consumer, with its live presence (#443: true live, false seen-then-gone,
- * null never seen this session), its ping tally (#1185) and each agent's wait
- * credit per project (#2645).
+ * One consumer as `consumer.list` gives it, and as `agent.<id>.state` pushes
+ * it (#3070: the same builder, so the two cannot name a field differently):
+ * its live presence (#443), its ping tally (#1185), each agent's wait credit
+ * per project (#2645), and the session a host runs for it (#3066), or null.
  */
+function consumerEntry(c: Consumer, ctx: ReturnType<typeof entryContext>) {
+    const session = sessionFor({ agent: c.consumer_id });
+    return {
+        ...c,
+        present: presenceRunning(c.consumer_id),
+        ping_count: ctx.pings.get(c.consumer_id)?.total ?? 0,
+        ping_unseen: ctx.pings.get(c.consumer_id)?.unseen ?? 0,
+        wait_credit: c.kind === "human" ? null : (ctx.credits.get(c.consumer_id) ?? []),
+        session: session ? viewOf(session) : null,
+    };
+}
+
+export type ConsumerEntry = ReturnType<typeof consumerEntry>;
+
+/** One consumer's entry, or null when it does not exist (any more). */
+export function consumerEntryFor(id: string): ConsumerEntry | null {
+    const c = getConsumer(id);
+    return c ? consumerEntry(c, entryContext()) : null;
+}
+
+/** Every consumer's entry. */
+export function consumerEntries(): ConsumerEntry[] {
+    const ctx = entryContext();
+    return listConsumers().map((c) => consumerEntry(c, ctx));
+}
+
 defineMethod({
     name: "consumer.list",
     who: ["human", "agent"],
     params: z.object({}),
-    run: () => {
-        const pings = pingCountsByConsumer();
-        const credits = new Map<string, WaitCreditRow[]>();
-        for (const row of listWaitCredits()) credits.set(row.consumer_id, [...(credits.get(row.consumer_id) ?? []), row]);
-        return listConsumers().map((c) => ({
-            ...c,
-            present: presenceRunning(c.consumer_id),
-            ping_count: pings.get(c.consumer_id)?.total ?? 0,
-            ping_unseen: pings.get(c.consumer_id)?.unseen ?? 0,
-            wait_credit: c.kind === "human" ? null : (credits.get(c.consumer_id) ?? []),
-        }));
-    },
+    run: () => consumerEntries(),
 });
 
 /**

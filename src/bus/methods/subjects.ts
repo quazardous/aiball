@@ -5,7 +5,8 @@
  */
 import { z } from "zod";
 import { consumerIdOf, defineMethod, getMethod, Refusal, type Caller } from "../methods.js";
-import { defineSubject, publish, sendTo, subscribe, subscriptionsOf, unsubscribe, type SubjectSpec, type Subscription } from "../subscriptions.js";
+import { consumerEntries, consumerEntryFor } from "./consumer.js";
+import { defineSubject, publish, sendTo, SKIP, subscribe, subscriptionsOf, unsubscribe, type SubjectSpec, type Subscription } from "../subscriptions.js";
 import { onBroadcast, type WsEvent } from "../../ws.js";
 import { getMessage, ticketUnreadFlags, unreadPingCount, type Message } from "../../db.js";
 import { getAgentBar, listAgentBars } from "../../agent-bar-store.js";
@@ -42,19 +43,31 @@ defineSubject({
 
 // ---- agent.<id>.state ---------------------------------------------------------
 
-function consumerEntries(caller: Caller): { consumer_id: string }[] {
-    return getMethod("consumer.list")!.run(caller, {}) as { consumer_id: string }[];
-}
-
+/**
+ * #3070 — each event is the consumer's whole entry as `consumer.list` builds
+ * it, pushed only when it changed; `null` once the consumer is deleted.
+ */
 defineSubject({
     pattern: "agent.*.state",
     wildcard: true,
     access: (caller) => consumers(caller),
     value: (sub) => {
         const id = idOf(sub);
-        const all = consumerEntries(sub.caller);
-        if (id !== "*") return all.find((c) => c.consumer_id === id) ?? null;
+        const all = consumerEntries();
+        const mine = id === "*" ? all : all.filter((c) => c.consumer_id === id);
+        sub.state.sent = new Map(mine.map((c) => [c.consumer_id, JSON.stringify(c)]));
+        if (id !== "*") return mine[0] ?? null;
         return Object.fromEntries(all.map((c) => [c.consumer_id, c]));
+    },
+    deliver: (sub, subject) => {
+        const id = subject.split(".")[1];
+        const sent = sub.state.sent as Map<string, string>;
+        const entry = consumerEntryFor(id);
+        const json = JSON.stringify(entry);
+        if (sent.get(id) === json) return SKIP;
+        sent.set(id, json);
+        // A deleted consumer: `null`, sent as such.
+        return entry;
     },
 });
 
@@ -120,9 +133,9 @@ function diffRow(sub: Subscription, ticketId: number, fresh: { row: TurnRow; dea
         const json = JSON.stringify(fresh.row);
         sent.set(ticketId, { project: fresh.row.project, json, deadline: fresh.deadline });
         armDeadline(fresh.deadline);
-        return before?.json === json ? null : { op: "upsert", row: fresh.row };
+        return before?.json === json ? SKIP : { op: "upsert", row: fresh.row };
     }
-    if (!before) return null;
+    if (!before) return SKIP;
     sent.delete(ticketId);
     return { op: "remove", id: ticketId, project: before.project };
 }
@@ -208,7 +221,7 @@ export function sweepDeadlines(now = Date.now()): void {
         const fresh = new Map(turnRows(sub, tickets).map((r) => [r.row.id, r]));
         for (const id of due) {
             const out = diffRow(sub, id, fresh.get(id));
-            if (out) sendTo(sub, out);
+            if (out !== SKIP) sendTo(sub, out);
         }
     }
     let next = Infinity;

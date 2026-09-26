@@ -7,6 +7,7 @@ import { DAEMON_PID_PATH } from "./paths.js";
 import { reloadConfig } from "./config-reload.js";
 import { attachWs } from "./ws.js";
 import { attachBus } from "./bus/server.js";
+import { initSessions } from "./sessions/registry.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
 import { drainSpool, watchSpool } from "./spool.js";
@@ -125,6 +126,12 @@ function main(): void {
     // `/api` to its upstream and serves no bus of its own.
     const core = !loadProxy();
     if (core) attachBus(server);
+    // #3066 — the session hosts still running from before this start.
+    if (core) {
+        void initSessions()
+            .then((n) => { if (n > 0) console.log(`took back ${n} session host(s)`); })
+            .catch((e) => console.error("session hosts:", e));
+    }
 
     server.listen(PORT, HOST, () => {
         console.log(`aiball daemon listening on http://${HOST}:${PORT}`);

@@ -96,6 +96,13 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `RELATION_CYCLE` | 409 | `POST /api/tickets/:id/relations`: a lineage that would close a cycle. |
 | `ALREADY_IMPORTED` | 409 | `POST /api/tickets/import`: a ticket already mirrors this upstream issue; `existing_ticket_id` names it. |
 
+**Sessions** (the bus's `session.*`, [`SESSION-HOST.md`](./SESSION-HOST.md)):
+
+| Code | Status | When |
+|---|---|---|
+| `HOST_BUSY` | 409 | `session.start`: the agent's session already runs elsewhere (claude-loop, or a host), or a session of that name already runs; `details.host` says where. |
+| `NOT_IDLE` | 409 | `session.handover`: Claude did not become idle within the delay; nothing was stopped. |
+
 ## Writing a refusal
 
 In a route, `refuse(res, status, sentence, ERROR_CODES.X)` (`src/api/_helpers.ts`),

@@ -235,3 +235,27 @@ test("an event that leaves a row as it was pushes nothing on the view", async ()
     await c.settle();
     assert.equal(c.events.filter((e) => e.subject === "project.p-subs.tickets").length, 0);
 });
+
+test("#3070 an agent's state: each event is its whole consumer.list entry, only when it changed, null once deleted", async () => {
+    upsertConsumer({ consumer_id: "watched", kind: "agent" });
+    const c = await open("boss");
+    await c.call<Sub>("bus.subscribe", { subject: "agent.*.state" });
+    const { presenceConnect, presenceDisconnect } = await import("../live-presence.js");
+    const { consumerEntryFor } = await import("./methods/consumer.js");
+    presenceConnect("watched", "terminal");
+    await c.settle();
+    const mine = () => c.events.filter((e) => e.subject === "agent.watched.state");
+    assert.equal(mine().length, 1);
+    assert.deepEqual(mine()[0].data, JSON.parse(JSON.stringify(consumerEntryFor("watched"))), "the entry, under consumer.list's names");
+    assert.equal((mine()[0].data as { present: boolean }).present, true);
+    const { broadcast } = await import("../ws.js");
+    broadcast({ type: "consumer_changed", data: { consumer_id: "watched", running: true } });
+    await c.settle();
+    assert.equal(mine().length, 1, "an event that changes nothing pushes nothing");
+    presenceDisconnect("watched");
+    const { deleteConsumer } = await import("../db.js");
+    deleteConsumer("watched");
+    broadcast({ type: "consumer_changed", data: { consumer_id: "watched", deleted: true } });
+    await c.settle();
+    assert.equal(mine().at(-1)!.data, null, "a deleted consumer is null");
+});
