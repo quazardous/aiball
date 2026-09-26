@@ -88,6 +88,7 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- The MCP server, the CLI and claude-loop call the daemon over the bus, one connection per process, for every operation that is a method; the rest still goes over HTTP.
 - The inbox turn view has no `unread` band any more: an unread ticket stays in the band its work is in, and its row still says it is unread (inbox row schema version 2).
 - An agent's wait credit is capped, at 120 minutes by default
   (`tickets.wait_credit_max_minutes`): past it, work earns nothing more,

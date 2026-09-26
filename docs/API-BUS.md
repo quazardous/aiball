@@ -2,7 +2,9 @@
 
 > **Status: clients are moving onto it.** Calls, batches, subscriptions and
 > revocation are in place, and the operations tvty uses are methods (see
-> *Methods*). Until a client has moved, it keeps using the HTTP API
+> *Methods*). aiball's own clients (the MCP server, the CLI, claude-loop)
+> call every operation that is a method over the bus, and the rest over HTTP
+> until it becomes one. Until a client has moved, it keeps using the HTTP API
 > ([`API.md`](./API.md)); a route that has become a method answers exactly as
 > the method does.
 

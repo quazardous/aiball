@@ -3,6 +3,7 @@
  * server, the CLI) and the tests: one connection, calls and batches over it.
  * Loads nothing of the core. See docs/API-BUS.md.
  */
+import type { Socket } from "node:net";
 import { WebSocket } from "ws";
 import { BUS_PATH, type RpcErrorData, type RpcResponse } from "./bus-protocol.js";
 
@@ -31,6 +32,12 @@ export interface BusConnectOptions {
     /** Who this client is on the local socket (`x-aiball-consumer`). */
     consumer?: string;
     headers?: Record<string, string>;
+    /**
+     * Let the process exit while no call is in flight: a short-lived client
+     * (the CLI, a hook) then needs no explicit close. The connection holds the
+     * process only while a call waits for its answer.
+     */
+    unrefWhenIdle?: boolean;
 }
 
 export interface BusHello {
@@ -54,7 +61,13 @@ export class BusClient {
     private nextId = 1;
     private readonly pending = new Map<number, (r: RpcResponse) => void>();
 
-    private constructor(private readonly ws: WebSocket, readonly hello: BusHello) {
+    private constructor(
+        private readonly ws: WebSocket,
+        readonly hello: BusHello,
+        /** Set with `unrefWhenIdle`: the socket to hold the process by, while calls wait. */
+        private readonly idleSocket: Socket | null = null,
+    ) {
+        idleSocket?.unref();
         ws.on("message", (data) => this.receive(data.toString()));
         ws.on("close", (code, reason) => {
             const err = new BusError("UNAVAILABLE", 503, `bus closed (${code}${reason.length ? ` ${reason}` : ""})`, code);
@@ -74,6 +87,8 @@ export class BusClient {
             ? `ws+unix:${opts.socket}:${BUS_PATH}`
             : `${(opts.url ?? "").replace(/^http/, "ws").replace(/\/$/, "")}${BUS_PATH}`;
         const ws = new WebSocket(target, { headers });
+        let socket: Socket | null = null;
+        if (opts.unrefWhenIdle) ws.once("upgrade", (res) => { socket = res.socket as Socket; });
         return new Promise((resolve, reject) => {
             const failOpen = (e: Error) => reject(e);
             ws.once("error", failOpen);
@@ -94,7 +109,7 @@ export class BusClient {
                     reject(new Error("the bus did not say hello"));
                     return;
                 }
-                resolve(new BusClient(ws, m.params));
+                resolve(new BusClient(ws, m.params, socket));
             });
         });
     }
@@ -108,16 +123,19 @@ export class BusClient {
             this.pending.delete(r.id);
             resolve(r);
         }
+        if (this.pending.size === 0) this.idleSocket?.unref();
     }
 
     private request(method: string, params: unknown): { frame: object; done: Promise<RpcResponse> } {
         const id = this.nextId++;
         if (this.ws.readyState !== WebSocket.OPEN) {
-            // Nothing would ever answer: settle at once, as a closed connection does.
-            const error = { code: 1006, message: "bus closed", data: { code: "UNAVAILABLE", status: 503 } };
+            // Nothing would ever answer: settle at once. Never sent, so the
+            // daemon ran nothing: `UNSENT` tells a caller it may safely retry.
+            const error = { code: 1006, message: "bus closed before the call was sent", data: { code: "UNSENT", status: 503 } };
             return { frame: {}, done: Promise.resolve({ jsonrpc: "2.0", id, error }) };
         }
         const done = new Promise<RpcResponse>((resolve) => this.pending.set(id, resolve));
+        this.idleSocket?.ref();
         return { frame: { jsonrpc: "2.0", id, method, params }, done };
     }
 

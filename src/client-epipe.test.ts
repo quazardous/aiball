@@ -8,6 +8,7 @@
  *   request then runs exactly once;
  * - when it never gets through, the error keeps its code and names the call
  *   and the transport.
+ * #3067 — the client calls the core over the bus: the server below is a bus.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -15,24 +16,29 @@ import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WebSocketServer } from "ws";
 import { AiballClient } from "./client.js";
 
 const DIR = mkdtempSync(join(tmpdir(), "aiball-2462-"));
 after(() => rmSync(DIR, { recursive: true, force: true }));
 
-/** A server that drops the first `dropFirst` connections on accept, then serves. */
+/** A bus that drops the first `dropFirst` connections on accept, then serves. */
 async function flakyServer(name: string, dropFirst: number): Promise<{ sock: string; server: Server; handled: string[] }> {
     const sock = join(DIR, `${name}.sock`);
     const handled: string[] = [];
-    const server = createServer((req, res) => {
-        let body = "";
-        req.on("data", (c) => (body += c));
-        req.on("end", () => {
-            handled.push(`${req.method} ${req.url}`);
-            res.setHeader("content-type", "application/json");
-            res.end(JSON.stringify({ ticket_id: 7, claimant: "me", is_claim: true }));
+    const server = createServer();
+    const bus = new WebSocketServer({ server, path: "/bus" });
+    bus.on("connection", (ws) => {
+        ws.send(JSON.stringify({ jsonrpc: "2.0", method: "bus.hello", params: { version: 1, epoch: "e", consumer: "me", kind: "agent", relayed: false } }));
+        ws.on("message", (d) => {
+            const call = JSON.parse(String(d)) as { id: number; method: string };
+            handled.push(call.method);
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: call.id, result: { ticket_id: 7, claimant: "me", is_claim: true } }));
         });
     });
+    // Closing the server waits for its connections: the bus's go first.
+    const close = server.close.bind(server);
+    server.close = ((cb?: (e?: Error) => void) => { for (const ws of bus.clients) ws.terminate(); return close(cb); }) as typeof server.close;
     let seen = 0;
     server.on("connection", (s) => {
         if (seen++ < dropFirst) s.destroy();
@@ -46,7 +52,7 @@ test("a connection dropped before the request is read is retried, and the claim 
     try {
         const r = await new AiballClient({ socketPath: sock, agentId: "me" }).assignTicket(7);
         assert.equal(r.claimant, "me");
-        assert.deepEqual(handled, ["POST /api/tickets/7/assign"], "handled exactly once");
+        assert.deepEqual(handled, ["ticket.assign"], "handled exactly once");
     } finally {
         server.close();
     }
@@ -59,7 +65,7 @@ test("when it never gets through, the error keeps EPIPE and names the call and t
             new AiballClient({ socketPath: sock, agentId: "me" }).assignTicket(7),
             (e: Error & { code?: string }) => {
                 assert.equal(e.code, "EPIPE");
-                assert.match(e.message, new RegExp(`^POST /api/tickets/7/assign via unix:${sock.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: write EPIPE$`));
+                assert.match(e.message, new RegExp(`^bus ticket.assign via unix:${sock.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: write EPIPE$`));
                 return true;
             },
         );

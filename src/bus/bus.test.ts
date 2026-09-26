@@ -261,7 +261,7 @@ test("revoking a token closes the connections that rest on it, and only those", 
     deleteToken(t);
     assert.equal(await closed, BUS_CLOSE.TOKEN_REVOKED);
     assert.equal(await other.call<{ consumer: string }>("bus.whoami").then((w) => w.consumer), "agent-a");
-    assert.equal((await refused(doomed.call("bus.whoami"))).code, "UNAVAILABLE");
+    assert.equal((await refused(doomed.call("bus.whoami"))).code, "UNSENT", "a call on a closed connection is never sent");
 });
 
 test("a token deleted behind the daemon's back (another process) is caught by the sweep", async () => {

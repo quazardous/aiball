@@ -1,5 +1,8 @@
 /**
- * Thin HTTP client to talk to the aiball daemon, with the same spool-fallback
+ * The client of the aiball daemon the MCP server, the CLI and claude-loop
+ * share. #3067 — it calls the core's methods over the bus (one connection per
+ * process, `call`); the routes that are not methods yet still go over HTTP.
+ * Same spool-fallback
  * semantics as the bash CLI: if POST /messages can't reach the daemon, drop a
  * JSON file in the spool directory so the daemon picks it up later.
  *
@@ -19,6 +22,7 @@ import { loadConfig } from "./autopoll/config.js";
 import { createHash } from "node:crypto";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import type { ControlEvent } from "./event-bus.js"; // #451: typed control payload
+import { BusClient, BusError } from "./bus-client.js";
 
 /** #2586 — `GET /api/version`; see src/update-check.ts. */
 export interface VersionInfo {
@@ -110,18 +114,13 @@ export class AiballClient {
         return p;
     }
 
-    private async http<T = unknown>(
-        method: string,
-        path: string,
-        body?: unknown,
-    ): Promise<T> {
+    /**
+     * What this client says of itself, on every HTTP request and when the bus
+     * connection opens: who, and the hints below. No auth, no content type.
+     */
+    private identityHeaders(): Record<string, string> {
         const headers: Record<string, string> = {};
-        if (body) headers["content-type"] = "application/json";
         if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
-        // Bearer is irrelevant over UDS (server bypasses auth there).
-        if (!this.socketPath && this.token) {
-            headers["authorization"] = `Bearer ${this.token}`;
-        }
         // #508 phase A2 — claude-loop exports AIBALL_NO_CLAIM=1 when the
         // project's `.aiball.yaml` sets `consumer.no_claim: true`. Forward as
         // a header so the upstream's claimable lens picks it up.
@@ -142,6 +141,82 @@ export class AiballClient {
         // #2652 — what this client knows of the protocol (the daemon only
         // enforces a newly required field on a client that declares it).
         if (this.features.length) headers["x-aiball-client"] = this.features.join(",");
+        return headers;
+    }
+
+    private busConnection: Promise<BusClient> | null = null;
+
+    /**
+     * #3067 — the bus connection, opened on the first call and opened again
+     * after the daemon closed it (a restart). It holds the process only while
+     * a call waits: a CLI command or a hook exits without closing it.
+     */
+    private bus(): Promise<BusClient> {
+        if (this.busConnection) return this.busConnection;
+        const headers = this.identityHeaders();
+        const opening = BusClient.connect(this.socketPath
+            ? { socket: this.socketPath, headers, unrefWhenIdle: true }
+            // Bearer is irrelevant over UDS (server bypasses auth there).
+            : { url: this.url, token: this.token ?? undefined, headers, unrefWhenIdle: true });
+        this.busConnection = opening;
+        const forget = () => { if (this.busConnection === opening) this.busConnection = null; };
+        opening.then((c) => { void c.closed().then(forget); }, forget);
+        return opening;
+    }
+
+    /**
+     * #3067 — call one of the core's methods over the bus. Errors keep the
+     * shape HTTP gave them (`status`, the refusal body in the message), so a
+     * caller cannot tell the transports apart:
+     * - the daemon refused: `status` and `{ error, code, details }`;
+     * - it could not be reached, or the call was never sent: retried, as #855
+     *   retries a daemon being restarted (nothing ran, a replay is safe);
+     * - the connection dropped while the call was in flight: not retried (it
+     *   may have run), no `status`, so `postMessage` spools it as it spools a
+     *   request cut after its bytes left.
+     */
+    protected call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+        return withRetry(async () => {
+            const bus = await this.bus().catch((e: Error & { code?: string }) => {
+                // The daemon answered the opening, and refused it (a token it does not know…).
+                if (e instanceof BusError) throw httpError("bus", method, e.status, JSON.stringify({ error: e.message, code: e.code }));
+                throw transportError(e, "bus", method, this.socketPath ? `unix:${this.socketPath}` : this.url);
+            });
+            let timer: NodeJS.Timeout | undefined;
+            const timeout = new Promise<never>((_r, reject) => {
+                timer = setTimeout(() => reject(new Error(`bus ${method} → timeout after ${this.timeoutMs}ms`)), this.timeoutMs);
+                timer.unref();
+            });
+            try {
+                return await Promise.race([bus.call<T>(method, params), timeout]);
+            } catch (e) {
+                if (!(e instanceof BusError)) throw e;
+                if (e.code === "UNSENT") {
+                    this.busConnection = null;
+                    throw Object.assign(new Error(`bus ${method}: ${e.message}`), { code: "ECONNRESET" });
+                }
+                if (e.code === "UNAVAILABLE" && e.rpcCode >= 1000) {
+                    throw Object.assign(new Error(`bus ${method}: ${e.message}, while the call was in flight`), { code: "EBUSCLOSED" });
+                }
+                const body = { error: e.message, code: e.code, ...(e.details ? { details: e.details } : {}) };
+                throw httpError("bus", method, e.status, JSON.stringify(body));
+            } finally {
+                clearTimeout(timer);
+            }
+        });
+    }
+
+    private async http<T = unknown>(
+        method: string,
+        path: string,
+        body?: unknown,
+    ): Promise<T> {
+        const headers = this.identityHeaders();
+        if (body) headers["content-type"] = "application/json";
+        // Bearer is irrelevant over UDS (server bypasses auth there).
+        if (!this.socketPath && this.token) {
+            headers["authorization"] = `Bearer ${this.token}`;
+        }
         const payload = body ? JSON.stringify(body) : undefined;
         // #855 — retry-with-backoff on transient daemon-down errors so
         // an `aiball restart` (or tsx-watch reload) doesn't kill in-flight
@@ -247,7 +322,7 @@ export class AiballClient {
         msg: Record<string, unknown>,
     ): Promise<unknown | SpoolResult> {
         try {
-            return await this.http("POST", "/api/messages", msg);
+            return await this.call("message.post", msg);
         } catch (e) {
             const status = (e as { status?: number }).status;
             if (typeof status === "number" && status >= 400 && status < 500) {
@@ -503,7 +578,7 @@ export class AiballClient {
         return this.http("GET", `/api/messages${query(q)}`);
     }
     getMessage(id: number) {
-        return this.http("GET", `/api/messages/${id}`);
+        return this.call("message.get", { id });
     }
     listTickets(q: Record<string, string | undefined> = {}) {
         return this.http("GET", `/api/tickets${query(q)}`);
@@ -556,7 +631,7 @@ export class AiballClient {
                 q.digest_limit = String(Math.floor(opts.digest_limit));
             }
         }
-        return this.http("GET", `/api/tickets/${id}${query(q)}`);
+        return this.call("ticket.get", { id, ...q });
     }
     listProjects() {
         return this.http("GET", "/api/projects");
@@ -599,25 +674,17 @@ export class AiballClient {
      * daemon's reveal cron clears the field at that point.
      */
     postponeTicket(ticket_id: number, until: string) {
-        return this.http<{ ticket_id: number; postponed_until: string }>(
-            "POST",
-            `/api/tickets/${ticket_id}/postpone`,
-            { until },
-        );
+        return this.call<{ ticket_id: number; postponed_until: string }>("ticket.postpone", { id: ticket_id, until });
     }
     unsnoozeTicket(ticket_id: number) {
-        return this.http<{ ticket_id: number; postponed_until: null }>(
-            "POST",
-            `/api/tickets/${ticket_id}/unsnooze`,
-            {},
-        );
+        return this.call<{ ticket_id: number; postponed_until: null }>("ticket.unsnooze", { id: ticket_id });
     }
     /**
      * Move a ticket (whole thread) to another project (#294). Reporter-or-
      * human only (enforced daemon-side via the x-aiball-consumer identity).
      */
     moveTicket(ticket_id: number, project: string) {
-        return this.http("POST", `/api/tickets/${ticket_id}/move`, { project });
+        return this.call("ticket.move", { id: ticket_id, project });
     }
     /** #2180 — a ticket's pending `child_of` children, one level, each with who
      *  attached it and when. A read. */
@@ -646,7 +713,7 @@ export class AiballClient {
     /** #2216/#2241 — set a ticket's level (human only). The response may carry a
      *  `warning` when the ticket's holder does not work on the new level. */
     setTicketLevel(ticket_id: number, level: "task" | "milestone" | "roadmap") {
-        return this.http("POST", `/api/messages/${ticket_id}/edit`, { level });
+        return this.call("message.edit", { id: ticket_id, level });
     }
     /**
      * #418: assign / claim a ticket. Pass `assignee` to PUSH it onto another
@@ -656,19 +723,14 @@ export class AiballClient {
      * ticket closes — multi-agent anti-collision.
      */
     assignTicket(ticket_id: number, assignee?: string) {
-        return this.http<{ ticket_id: number; assignee: string | null; claimant: string | null; assigned_by: string; is_claim: boolean }>(
-            "POST",
-            `/api/tickets/${ticket_id}/assign`,
-            assignee ? { assignee } : {},
+        return this.call<{ ticket_id: number; assignee: string | null; claimant: string | null; assigned_by: string; is_claim: boolean }>(
+            "ticket.assign",
+            { id: ticket_id, ...(assignee ? { assignee } : {}) },
         );
     }
     /** #418: release a ticket's assignment / claim — back to the shared pool. */
     releaseTicket(ticket_id: number) {
-        return this.http<{ ticket_id: number; released: boolean }>(
-            "POST",
-            `/api/tickets/${ticket_id}/release`,
-            {},
-        );
+        return this.call<{ ticket_id: number; released: boolean }>("ticket.release", { id: ticket_id });
     }
     /**
      * #749 Phase A — mark every unread ping the consumer has on `ticket_id`
@@ -682,11 +744,7 @@ export class AiballClient {
     markTicketRead(ticket_id: number, opts?: { upToId?: number }) {
         const body: { up_to_id?: number } = {};
         if (opts?.upToId) body.up_to_id = opts.upToId;
-        return this.http<{ ticket_id: number; up_to_id?: number; updated: number }>(
-            "POST",
-            `/api/tickets/${ticket_id}/mark-read`,
-            body,
-        );
+        return this.call<{ ticket_id: number; up_to_id?: number; updated: number }>("ticket.mark_read", { id: ticket_id, ...body });
     }
     /**
      * Create or change a typed relation (#275) from `ticket_id` → `target`.
@@ -697,12 +755,13 @@ export class AiballClient {
      * lineage cycle guard, and idempotency.
      */
     relate(ticket_id: number, target_ticket_id: number, kind: string, axis_kind?: string) {
-        return this.http<{
+        return this.call<{
             ticket_id: number;
             event_id: number | null;
             noop?: boolean;
             relations: unknown[];
-        }>("POST", `/api/tickets/${ticket_id}/relations`, {
+        }>("ticket.relate", {
+            id: ticket_id,
             target_ticket_id,
             kind,
             // #1468 — scopes an `ignored` tombstone to a single axis.
@@ -901,7 +960,7 @@ export class AiballClient {
      *  builder to inject `{consumer_prompt}` into the relance prompt. */
     /** #2588 — every consumer, with `present` = its loop is connected now. */
     listConsumers() {
-        return this.http<Array<{ consumer_id: string; kind: string; present: boolean | null }>>("GET", "/api/consumers");
+        return this.call<Array<{ consumer_id: string; kind: string; present: boolean | null }>>("consumer.list");
     }
 
     getConsumer(id: string) {
@@ -937,10 +996,9 @@ export class AiballClient {
 
     /** #2910 — put a ticket in a milestone, move it, or take it out (null). */
     setTicketMilestone(ticket_id: number, milestone_id: number | null) {
-        return this.http<{ ticket_id: number; milestone: { id: number; title: string; released: boolean } | null }>(
-            "POST",
-            `/api/tickets/${ticket_id}/milestone`,
-            { milestone_id },
+        return this.call<{ ticket_id: number; milestone: { id: number; title: string; released: boolean } | null }>(
+            "ticket.set_milestone",
+            { id: ticket_id, milestone_id },
         );
     }
 
@@ -1232,10 +1290,10 @@ export class AiballClient {
     // ---- admin / decisions ------------------------------------------------
 
     approve(id: number) {
-        return this.http("POST", `/api/messages/${id}/approve`);
+        return this.call("message.approve", { id });
     }
     reject(id: number) {
-        return this.http("POST", `/api/messages/${id}/reject`);
+        return this.call("message.reject", { id });
     }
     edit(
         id: number,
@@ -1247,7 +1305,7 @@ export class AiballClient {
             priority?: string | null;
         },
     ) {
-        return this.http("POST", `/api/messages/${id}/edit`, fields);
+        return this.call("message.edit", { id, ...fields });
     }
     /**
      * Overwrite the tag set on a message (ticket or comment). Pass
@@ -1259,7 +1317,7 @@ export class AiballClient {
         return this.http("PUT", `/api/messages/${id}/tags`, { tag_ids: tag_names });
     }
     note(id: number, note: string | null) {
-        return this.http("POST", `/api/messages/${id}/note`, { note });
+        return this.call("message.note", { id, note });
     }
     /** #2697 — moderation rules are automation rules: trigger `message_posted`,
      *  action `decision`. That is the only table moderation reads. */
