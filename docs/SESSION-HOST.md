@@ -76,9 +76,10 @@ agent (`agent.<id>.state`: `host: "claude-loop" | "daemon"`), and a host's
 ## The control channel
 
 `control.sock` speaks **JSON-RPC 2.0, one message per line** (newline-delimited
-JSON), like the bus. One daemon connection at a time: a new one replaces the
-old (the daemon restarted). Nothing on this channel carries Claude's raw
-output.
+JSON), like the bus. Several controllers at once, the daemon and the loop
+kernel: each gets its own answers, and every one hears the notifications. A
+daemon that restarts connects again; its old connection died with it.
+Nothing on this channel carries Claude's raw output.
 
 ### The daemon calls
 

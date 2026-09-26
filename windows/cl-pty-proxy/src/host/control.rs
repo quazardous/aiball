@@ -1,6 +1,8 @@
 //! #3066 — `control.sock`: the daemon drives the session (docs/SESSION-HOST.md).
-//! JSON-RPC 2.0, one message per line. One controller at a time: a new
-//! connection replaces the old one (the daemon restarted).
+//! JSON-RPC 2.0, one message per line. Several controllers at once, the daemon
+//! and the loop kernel: each gets its own answers, and every one hears the
+//! notifications. A daemon that restarts simply connects again; its old
+//! connection died with it.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -15,49 +17,50 @@ use crate::session::{parse_size, Session};
 /// What the host does when asked to go away: its caller exits the process.
 pub type Shutdown = Arc<dyn Fn() + Send + Sync>;
 
+/// One controller's connection: its answers and the notifications share it.
+type Conn = Arc<Mutex<UnixStream>>;
+
 pub struct Control {
     session: Arc<Session>,
-    /// The controller's connection, shared by the answers and the notifications.
-    out: Arc<Mutex<Option<UnixStream>>>,
+    controllers: Arc<Mutex<Vec<Conn>>>,
     shutdown: Shutdown,
     hello: Value,
 }
 
-fn line(out: &Mutex<Option<UnixStream>>, v: &Value) {
-    let mut guard = out.lock().unwrap();
-    if let Some(s) = guard.as_mut() {
-        let mut text = v.to_string();
-        text.push('\n');
-        if s.write_all(text.as_bytes()).is_err() {
-            *guard = None;
-        }
-    }
+/// One line to one controller; false once its connection is gone.
+fn send(conn: &Conn, v: &Value) -> bool {
+    let mut text = v.to_string();
+    text.push('\n');
+    conn.lock().unwrap().write_all(text.as_bytes()).is_ok()
+}
+
+/// One line to every controller; one whose connection is gone is dropped.
+fn broadcast(controllers: &Mutex<Vec<Conn>>, v: &Value) {
+    controllers.lock().unwrap().retain(|c| send(c, v));
 }
 
 impl Control {
     pub fn new(session: Arc<Session>, hello: Value, shutdown: Shutdown) -> Arc<Self> {
-        let out: Arc<Mutex<Option<UnixStream>>> = Arc::new(Mutex::new(None));
-        let o = out.clone();
+        let controllers: Arc<Mutex<Vec<Conn>>> = Arc::new(Mutex::new(Vec::new()));
+        let c = controllers.clone();
         session.set_notify(Some(Arc::new(move |method: &str, params: Value| {
-            line(&o, &json!({ "jsonrpc": "2.0", "method": method, "params": params }));
+            broadcast(&c, &json!({ "jsonrpc": "2.0", "method": method, "params": params }));
         })));
-        Arc::new(Control { session, out, shutdown, hello })
+        Arc::new(Control { session, controllers, shutdown, hello })
     }
 
     pub fn serve(self: Arc<Self>, listener: UnixListener) {
         for conn in listener.incoming() {
             let Ok(sock) = conn else { continue };
             let Ok(writer) = sock.try_clone() else { continue };
-            // A new controller replaces the old one.
-            if let Some(old) = self.out.lock().unwrap().replace(writer) {
-                let _ = old.shutdown(std::net::Shutdown::Both);
-            }
+            let conn: Conn = Arc::new(Mutex::new(writer));
+            self.controllers.lock().unwrap().push(conn.clone());
             let me = self.clone();
-            thread::spawn(move || me.read(sock));
+            thread::spawn(move || me.read(sock, conn));
         }
     }
 
-    fn read(&self, sock: UnixStream) {
+    fn read(&self, sock: UnixStream, conn: Conn) {
         for text in BufReader::new(sock).lines() {
             let Ok(text) = text else { break };
             if text.trim().is_empty() {
@@ -68,9 +71,10 @@ impl Control {
                 Err(_) => Some(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "not JSON" } })),
             };
             if let Some(r) = reply {
-                line(&self.out, &r);
+                send(&conn, &r);
             }
         }
+        self.controllers.lock().unwrap().retain(|c| !Arc::ptr_eq(c, &conn));
     }
 
     /// One call; None for a notification (no id).
@@ -153,8 +157,8 @@ impl Control {
                 self.session.push_previews(previews);
                 previews = rev;
             }
-            if rev != sent && last_ctrl.elapsed() >= every && self.out.lock().unwrap().is_some() {
-                line(&self.out, &json!({ "jsonrpc": "2.0", "method": "host.screen_changed", "params": self.session.screen() }));
+            if rev != sent && last_ctrl.elapsed() >= every && !self.controllers.lock().unwrap().is_empty() {
+                broadcast(&self.controllers, &json!({ "jsonrpc": "2.0", "method": "host.screen_changed", "params": self.session.screen() }));
                 sent = rev;
                 last_ctrl = std::time::Instant::now();
             }

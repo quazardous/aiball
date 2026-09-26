@@ -192,6 +192,25 @@ fn the_controller_injects_reads_the_screen_and_hears_it_change() {
 }
 
 #[test]
+fn two_controllers_at_once_each_get_their_answers_and_both_hear_the_screen() {
+    // The daemon and the loop kernel both hold control.sock.
+    let h = start("two-ctl", &["cat"]);
+    let mut daemon = Ctl::open(&h.dir);
+    let mut kernel = Ctl::open(&h.dir);
+    assert!(daemon.call("host.hello", json!({}))["result"]["pid"].is_number());
+    assert!(kernel.call("host.inject", json!({ "text": "from the kernel\r" }))["result"].is_object());
+    for c in [&mut daemon, &mut kernel] {
+        let changed = c.note("host.screen_changed");
+        assert!(changed["params"]["text"].as_str().unwrap().contains("from the kernel"));
+    }
+    // One leaving does not take the other with it.
+    drop(daemon);
+    assert!(kernel.call("host.inject", json!({ "text": "still here\r" }))["result"].is_object());
+    let screen = kernel.call("host.screen", json!({}))["result"].clone();
+    assert!(screen["text"].as_str().unwrap().contains("still here"));
+}
+
+#[test]
 fn a_readonly_client_may_not_type_and_a_preview_gets_screen_frames() {
     let h = start("readonly", &["sh", "-c", "printf preview; cat"]);
     std::thread::sleep(Duration::from_millis(300));
