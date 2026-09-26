@@ -3,6 +3,8 @@
  * Carved out of api.ts on 2026-05-19 — behavior-preserving move.
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
+import { parseAgentBar } from "../agent-bar.js";
+import { getAgentBar, setAgentBar } from "../agent-bar-store.js";
 import { type WaitCreditRow, listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
 import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
@@ -363,6 +365,38 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
         broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
     }
     res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord, cwd, project });
+});
+
+/**
+ * #3030 — an agent's loop bar as data, for hosts other than tmux. The loop pushes
+ * its own on change (throttled); a human, or the agent itself, reads it.
+ * Own-bar only, and agents only — the same rule as the state push above.
+ */
+consumersRouter.put("/consumers/:consumer_id/bar", (req: Request, res: Response) => {
+    const target = String(req.params.consumer_id);
+    const caller = consumerOf(req);
+    if (target !== caller) {
+        return res.status(403).json({ error: "can only push the bar of your own consumer_id" });
+    }
+    const c = getConsumer(caller);
+    if (c?.kind === "human") {
+        return res.status(403).json({ error: "the bar is a loop agent's, not a human's" });
+    }
+    const bar = parseAgentBar(req.body);
+    if ("error" in bar) return badRequest(res, bar.error);
+    const changed = setAgentBar(caller, bar);
+    res.json({ consumer_id: caller, changed });
+});
+
+consumersRouter.get("/consumers/:consumer_id/bar", (req: Request, res: Response) => {
+    const target = String(req.params.consumer_id);
+    const caller = consumerOf(req);
+    if (target !== caller && !isHuman(caller)) {
+        return res.status(403).json({ error: "an agent's bar is readable by a human or by the agent itself" });
+    }
+    const view = getAgentBar(target);
+    if (!view) return notFound(res, "no bar pushed by this consumer yet");
+    res.json(view);
 });
 
 /**

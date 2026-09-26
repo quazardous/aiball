@@ -9,7 +9,7 @@ Consumers: **loop** (claude-loop), **mcp** (the MCP server), **cli** (the `aibal
 **sim** (the board simulator), **web** (the web UI), **tvty** (the tvty terminal, from
 its checkout when present).
 
-**161 routes** · 102 called by loop, mcp, cli or tvty · 44 by the web UI alone · 15 by no consumer in the code.
+**163 routes** · 100 called by loop, mcp, cli or tvty · 47 by the web UI alone · 16 by no consumer in the code.
 
 | Route | loop | mcp | cli | sim | web | tvty |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
@@ -21,7 +21,7 @@ its checkout when present).
 | `POST /api/auth/logout` |  |  |  |  | ● |  |
 | `POST /api/auth/setup` |  |  |  |  | ● |  |
 | `GET /api/auth/status` |  |  |  |  | ● |  |
-| `GET /api/automation/rules` |  |  | ● |  |  |  |
+| `GET /api/automation/rules` |  |  | ● |  | ● |  |
 | `POST /api/automation/rules` |  |  | ● |  | ● |  |
 | `DELETE /api/automation/rules/:id` |  |  | ● |  | ● |  |
 | `PATCH /api/automation/rules/:id` |  |  | ● |  | ● |  |
@@ -29,9 +29,11 @@ its checkout when present).
 | `GET /api/config` |  | ● |  |  | ● |  |
 | `GET /api/consumers` |  |  | ● |  | ● | ● |
 | `POST /api/consumers` | ● |  |  |  | ● | ● |
-| `DELETE /api/consumers/:consumer_id` | ● | ● |  |  |  |  |
+| `DELETE /api/consumers/:consumer_id` |  |  |  |  | ● |  |
 | `GET /api/consumers/:consumer_id` | ● | ● |  |  |  |  |
-| `PATCH /api/consumers/:consumer_id` | ● | ● | ● |  | ● |  |
+| `PATCH /api/consumers/:consumer_id` | ● |  | ● |  | ● |  |
+| `GET /api/consumers/:consumer_id/bar` |  |  |  |  |  |  |
+| `PUT /api/consumers/:consumer_id/bar` | ● |  |  |  |  |  |
 | `POST /api/consumers/:consumer_id/loop-stop` |  |  |  |  | ● |  |
 | `POST /api/consumers/:consumer_id/prompt` |  |  |  |  | ● |  |
 | `PUT /api/consumers/:consumer_id/state` | ● |  |  |  |  |  |
@@ -57,7 +59,7 @@ its checkout when present).
 | `POST /api/mark-read` | ● |  | ● | ● | ● |  |
 | `GET /api/me` |  |  |  |  | ● |  |
 | `GET /api/mention-suggestions` |  |  |  |  | ● | ● |
-| `GET /api/messages` |  | ● | ● | ● | ● | ● |
+| `GET /api/messages` |  | ● | ● | ● | ● |  |
 | `POST /api/messages` |  | ● | ● | ● | ● | ● |
 | `GET /api/messages/:id` | ● | ● | ● | ● |  |  |
 | `POST /api/messages/:id/accept-and-close` |  |  |  | ● | ● | ● |
@@ -108,7 +110,7 @@ its checkout when present).
 | `GET /api/projects/:project/critical` |  | ● |  |  |  |  |
 | `GET /api/projects/:project/milestones` |  | ● | ● |  | ● | ● |
 | `GET /api/projects/:project/standing-prompt` | ● |  |  |  | ● |  |
-| `PATCH /api/projects/:project/standing-prompt` | ● |  |  |  | ● |  |
+| `PATCH /api/projects/:project/standing-prompt` |  |  |  |  | ● |  |
 | `GET /api/projects/:project/strategy` |  |  |  |  | ● |  |
 | `PATCH /api/projects/:project/strategy` |  |  |  |  | ● |  |
 | `POST /api/projects/:project/token-usage` | ● |  |  |  |  |  |
@@ -134,10 +136,10 @@ its checkout when present).
 | `DELETE /api/tags/:id` |  |  |  |  | ● |  |
 | `PATCH /api/tags/:id` |  |  |  |  | ● |  |
 | `PUT /api/tags/override` |  |  |  |  | ● |  |
-| `GET /api/ticket-subscriptions` |  | ● |  |  | ● |  |
+| `GET /api/ticket-subscriptions` |  | ● |  |  |  |  |
 | `POST /api/ticket-subscriptions` |  | ● |  |  | ● |  |
-| `DELETE /api/ticket-subscriptions/:ticket_id` |  | ● |  |  | ● |  |
-| `GET /api/ticket-subscriptions/:ticket_id` |  | ● |  |  | ● |  |
+| `DELETE /api/ticket-subscriptions/:ticket_id` |  | ● |  |  |  |  |
+| `GET /api/ticket-subscriptions/:ticket_id` |  |  |  |  | ● |  |
 | `GET /api/tickets` | ● | ● | ● | ● | ● |  |
 | `POST /api/tickets` |  |  |  |  |  |  |
 | `GET /api/tickets/:id` | ● | ● | ● |  | ● | ● |
@@ -155,7 +157,7 @@ its checkout when present).
 | `POST /api/tickets/:id/payload/dump` |  | ● | ● |  |  |  |
 | `GET /api/tickets/:id/pending-children` |  |  | ● |  | ● |  |
 | `POST /api/tickets/:id/postpone` |  |  |  | ● | ● | ● |
-| `GET /api/tickets/:id/relations` |  |  |  |  | ● | ● |
+| `GET /api/tickets/:id/relations` |  |  |  |  |  | ● |
 | `POST /api/tickets/:id/relations` |  | ● |  |  | ● | ● |
 | `POST /api/tickets/:id/release` |  | ● |  |  | ● | ● |
 | `POST /api/tickets/:id/step` |  |  |  |  | ● |  |

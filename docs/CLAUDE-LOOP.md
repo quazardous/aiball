@@ -962,6 +962,21 @@ prompt history instead of entering copy-mode. psmux has fixed this upstream
 (the wheel follows the pane's own terminal state, as in tmux); until a release
 carries it, use `prefix + [`. Once in copy-mode, the wheel scrolls.
 
+### The bar as data
+
+What the loop paints in the tmux status line is also pushed to the daemon, as
+facts rather than glyphs, so another host can draw it its own way: the phase, the
+human's presence, the AFK hold and when it lapses, the input zone, a human typing,
+the state marker and its dialogs, the alerts (link or daemon down, not logged in,
+trust dialog, API unreachable), the proxy, zen, the counters, the next wake and the
+boot window. Times are absolute dates, never countdowns.
+
+The loop pushes on change, at most once a second (a burst ends on its last value).
+A human, or the agent itself, reads it with `GET /api/consumers/<agent>/bar`, and
+`/ws` announces each change as an `agent_bar` event. A bar is `stale` once its loop
+is gone. The daemon keeps only the latest bar, in memory. The tmux bar itself is
+unchanged.
+
 ### The mouse: wheel or native selection
 
 By default the loop turns the multiplexer's mouse mode on for its session: the

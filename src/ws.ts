@@ -17,7 +17,9 @@ export type WsEvent =
     | { type: "project_deleted"; data: unknown }
     | { type: "project_renamed"; data: unknown }
     | { type: "project_purged"; data: unknown }
-    | { type: "consumer_changed"; data: unknown };
+    | { type: "consumer_changed"; data: unknown }
+    // #3030 — an agent's loop bar changed, or went stale (its loop stopped).
+    | { type: "agent_bar"; data: unknown };
 
 /**
  * #3000 — who may open `/ws`. On the local socket, the same trust as `/api`

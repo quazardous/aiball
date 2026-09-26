@@ -22,6 +22,7 @@ import {
     afkGlyphChunk,
     barColors,
     humanPresenceChunk,
+    humanIsTyping,
     typingGlyphChunk,
     logBarPaint,
     proxyIsAlive,
@@ -33,6 +34,8 @@ import {
     type LoopStatus,
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
+import { afkState } from "./bar-render.js";
+import type { AgentBar } from "../agent-bar.js";
 
 /** Snapshot canonical de la barre tmux. Chaque champ correspond à une
  *  tmux user-option / propriété peinte par les writers actuels. Pur
@@ -255,6 +258,49 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     };
 }
 
+/**
+ * #3030 — the same bar as DATA, for hosts other than tmux: read from the same
+ * inputs as `computeBarSnapshot`, but facts instead of glyphs, and absolute
+ * times instead of countdowns (see `agent-bar.ts`). `nowMs` is injectable for
+ * tests.
+ */
+export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBar {
+    const input = { ...readLoopStateInput(sd), nowMs };
+    const view = computeLoopView(input);
+    const ipc = getIpcState();
+    const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
+    const afk = afkState(input);
+    const phase = view.phase;
+    return {
+        phase,
+        presence: view.presence,
+        afk: { mode: afk.mode, expires_at: iso(afk.expiryMs) },
+        prompt: { visible: ipc.promptZoneVisible === true, has_input: ipc.promptHasInput === true },
+        human_typing: humanIsTyping(sd),
+        marker: {
+            info: ipc.stateTagInfo ?? null,
+            health_prompt: ipc.healthPromptVisible === true,
+            resume_picker: ipc.resumeSessionPickerActive === true,
+            resume_mode_picker: ipc.resumeModePickerActive === true,
+        },
+        alerts: {
+            link_down: ipc.linkDown === true,
+            daemon_down: ipc.daemonDown === true,
+            not_logged_in: ipc.notLoggedIn === true,
+            trust_dialog: ipc.trustDialog === true,
+            api_unreachable: ipc.apiUnreachable === true,
+        },
+        proxy_alive: proxyIsAlive(sd),
+        zen: existsSync(zenPath(sd)),
+        counters: ipc.counters ?? null,
+        // Only while idle, as the tmux countdown: busy, the next wake is not due.
+        next_wake_at: phase === "idle" && ipc.nextWakeAtMs !== null && ipc.nextWakeAtMs > nowMs ? iso(ipc.nextWakeAtMs) : null,
+        boot: phase === "boot"
+            ? { started_at: new Date(input.loopStartMs).toISOString(), deadline_at: iso(ipc.bootDeadlineMs ?? null) }
+            : null,
+    };
+}
+
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
@@ -312,16 +358,34 @@ export class BarRenderer {
     private safetyTimer: NodeJS.Timeout | null = null;
     private unsubIpc: (() => void) | null = null;
     private spawn: SpawnFn;
+    /** #3030 — where the bar as data goes (the daemon), or null for none. */
+    private publish: ((bar: AgentBar) => void) | null;
+    private computeBar: () => AgentBar;
+    private lastPublishedJson: string | null = null;
+    private lastPublishedAt = 0;
+    private pendingBar: AgentBar | null = null;
+    private publishTimer: NodeJS.Timeout | null = null;
+    /** At most one push per this window; the last change of a burst is sent
+     *  when it closes, so the daemon always ends on the loop's true state. */
+    static readonly PUBLISH_MIN_GAP_MS = 1000;
     /** Debounce window (ms) — aligné sur `schedulePush` du timer. */
     private static readonly DEBOUNCE_MS = 50;
     /** Safety tick — catch time-driven changes invisibles à onIpcChanged
      *  (TTL expiry de `humanTypingAtMs`, countdown wait_10m de l'AFK chip). */
     private static readonly SAFETY_TICK_MS = 1000;
 
-    constructor(sd: string, name: string, spawn: SpawnFn = spawnSync as SpawnFn) {
+    constructor(
+        sd: string,
+        name: string,
+        spawn: SpawnFn = spawnSync as SpawnFn,
+        publish: ((bar: AgentBar) => void) | null = null,
+        computeBar: () => AgentBar = () => computeAgentBar(sd),
+    ) {
         this.sd = sd;
         this.name = name;
         this.spawn = spawn;
+        this.publish = publish;
+        this.computeBar = computeBar;
     }
 
     /** Démarre l'observer : initial paint + subscribe à onIpcChanged
@@ -346,6 +410,53 @@ export class BarRenderer {
             this.unsubIpc();
             this.unsubIpc = null;
         }
+        if (this.publishTimer) {
+            clearTimeout(this.publishTimer);
+            this.publishTimer = null;
+        }
+    }
+
+    /**
+     * #3030 — push the bar as data when it changed: at once if the last push is
+     * older than `PUBLISH_MIN_GAP_MS`, else once that window closes (the latest
+     * value then, not the one that opened it). Exposed for tests.
+     */
+    publishBar(nowMs: number = Date.now()): void {
+        if (!this.publish) return;
+        let bar: AgentBar;
+        try {
+            bar = this.computeBar();
+        } catch {
+            return;
+        }
+        const json = JSON.stringify(bar);
+        if (json === this.lastPublishedJson && this.pendingBar === null) return;
+        const wait = this.lastPublishedAt + BarRenderer.PUBLISH_MIN_GAP_MS - nowMs;
+        if (wait <= 0 && this.publishTimer === null) {
+            this.send(bar, json, nowMs);
+            return;
+        }
+        this.pendingBar = bar;
+        if (this.publishTimer) return;
+        this.publishTimer = setTimeout(() => {
+            this.publishTimer = null;
+            const next = this.pendingBar;
+            this.pendingBar = null;
+            if (!next) return;
+            const nextJson = JSON.stringify(next);
+            if (nextJson !== this.lastPublishedJson) this.send(next, nextJson, Date.now());
+        }, Math.max(0, wait));
+        this.publishTimer.unref?.();
+    }
+
+    private send(bar: AgentBar, json: string, nowMs: number): void {
+        this.lastPublishedJson = json;
+        this.lastPublishedAt = nowMs;
+        try {
+            this.publish!(bar);
+        } catch {
+            // A failed push is retried on the next change; the tmux bar is unaffected.
+        }
     }
 
     /** Schedule un tick debouncé. Idempotent : un burst de mutations
@@ -360,6 +471,7 @@ export class BarRenderer {
 
     /** Compute le snapshot, diff, paint les changes. Exposé pour test. */
     tick(): void {
+        this.publishBar();
         try {
             const next = computeBarSnapshot(this.sd);
             const changed = diffSnapshots(this.lastSnapshot, next);

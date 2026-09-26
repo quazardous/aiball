@@ -76,9 +76,17 @@ export function presenceDisconnect(consumer: string): void {
     e.graceTimer = setTimeout(() => {
         live.delete(consumer);
         emit(consumer, false);
+        for (const fn of stopListeners) fn(consumer);
     }, graceMs());
     // Don't keep the event loop alive just for a presence grace timer.
     e.graceTimer.unref?.();
+}
+
+/** Called when a consumer's presence really ends (past the grace), after the
+ *  `running:false` broadcast. Other live state keyed by consumer hooks here. */
+const stopListeners: Array<(consumer: string) => void> = [];
+export function onPresenceStop(fn: (consumer: string) => void): void {
+    stopListeners.push(fn);
 }
 
 /** True while a consumer holds (or is within the grace of) a live SSE. */

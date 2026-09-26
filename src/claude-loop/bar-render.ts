@@ -64,12 +64,10 @@ export function derivePresence(input: LoopStateInput): Presence {
     return "loop";
 }
 
-/** Status-right AFK chunk. #751 htwguc — reads `dispAfk` if a toggle
- *  is pending (= visual feedback instant for the F9 cycle), else
- *  converges on the committed `afkMode`. Gating code (bar word, AFK
- *  SM, wake gate, countdown) keeps reading the committed value via
- *  `effectiveAfkMode` so a cycle under AFK_DEBOUNCE_MS is a noop. */
-export function renderAfkChunk(input: LoopStateInput): AfkChunk {
+/** The AFK mode the bar shows, and when a timed hold lapses — the one decision
+ *  behind both the tmux chunk and the bar as data (#3030), so they cannot drift.
+ *  Reads the pending display toggle when there is one (see renderAfkChunk). */
+export function afkState(input: LoopStateInput): { mode: AfkMode; expiryMs: number | null } {
     const hasDisp = input.dispAfkMode !== null && input.dispAfkMode !== undefined;
     const rawMode = hasDisp ? (input.dispAfkMode as AfkMode) : effectiveAfkMode(input);
     const expiryMs = hasDisp ? (input.dispAfkExpiryMs ?? null) : input.afkExpiryMs;
@@ -78,6 +76,16 @@ export function renderAfkChunk(input: LoopStateInput): AfkChunk {
     const mode = (rawMode === "wait_10m" && expiryMs !== null && expiryMs <= input.nowMs)
         ? "off"
         : rawMode;
+    return { mode, expiryMs: mode === "wait_10m" ? expiryMs : null };
+}
+
+/** Status-right AFK chunk. #751 htwguc — reads `dispAfk` if a toggle
+ *  is pending (= visual feedback instant for the F9 cycle), else
+ *  converges on the committed `afkMode`. Gating code (bar word, AFK
+ *  SM, wake gate, countdown) keeps reading the committed value via
+ *  `effectiveAfkMode` so a cycle under AFK_DEBOUNCE_MS is a noop. */
+export function renderAfkChunk(input: LoopStateInput): AfkChunk {
+    const { mode, expiryMs } = afkState(input);
     if (mode === "wait_inf") {
         return { label: "NOT AFK", prefix: "∞", color: "red" };
     }

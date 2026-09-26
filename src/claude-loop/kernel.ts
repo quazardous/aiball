@@ -188,7 +188,7 @@ import {
     PROOF_COMPACTING,
     type BusyProofs,
 } from "./busy-stack.js";
-import { BarRenderer } from "./bar-renderer.js";
+import { BarRenderer, type SpawnFn } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
@@ -2080,7 +2080,12 @@ async function mainSse(): Promise<void> {
     // pour valider que le snapshot computed matche les paints actuels.
     // Slice 3 flippera en writer effectif (= les setTmuxStatus legacy
     // deviennent no-op à ce moment).
-    const barRenderer = new BarRenderer(sd!, name!);
+    // #3030 — the same bar, as data, pushed to the daemon on change (throttled
+    // in BarRenderer) so hosts other than tmux can draw it. Best effort: a
+    // failed push is retried on the next change, and never touches tmux.
+    const barRenderer = new BarRenderer(sd!, name!, spawnSync as SpawnFn, (bar) => {
+        client().pushAgentBar(bar).catch(() => { /* daemon unreachable: next change retries */ });
+    });
     barRenderer.start();
     process.on("exit", () => barRenderer.stop());
     // #629 — fast probe 1s pendant boot. Le BootMachine acteur drive

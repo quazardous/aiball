@@ -106,7 +106,7 @@ function callsIn(source: string): Call[] {
         if (!seen.has(k)) { seen.add(k); calls.push({ verb, path }); }
     };
     // A verb literal shortly before the path: ("GET", "/api/…") or method: "POST", url: `/api/…`.
-    for (const m of text.matchAll(/["'`](GET|POST|PUT|PATCH|DELETE)["'`][^;\n]{0,120}?[`"'](\/api\/[^`"'\s)]+)/g)) {
+    for (const m of text.matchAll(/["'`](GET|POST|PUT|PATCH|DELETE)["'`][^;]{0,200}?[`"'](\/api\/[^`"'\s)]+)/g)) {
         add(m[1] as Verb, m[2]!);
     }
     for (const m of text.matchAll(/[`"'](\/api\/[^`"'\s)]+)/g)) {

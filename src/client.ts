@@ -10,6 +10,7 @@
  * token is needed. Token + URL remain the only path for remote clients
  * if the architecture ever grows beyond local.
  */
+import type { AgentBar } from "./agent-bar.js";
 import type { DecisionKind } from "./ticket-transitions.js";
 import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
@@ -1004,6 +1005,15 @@ export class AiballClient {
             "PUT",
             `/api/consumers/${encodeURIComponent(this.agentId)}/state`,
             body,
+        );
+    }
+
+    /** #3030 — push this loop's bar as data (see `agent-bar.ts`), on change. */
+    pushAgentBar(bar: AgentBar) {
+        return this.http<{ consumer_id: string; changed: boolean }>(
+            "PUT",
+            `/api/consumers/${encodeURIComponent(this.agentId)}/bar`,
+            bar,
         );
     }
 
