@@ -4,7 +4,7 @@
 computed **for the caller** (unread, turn and band depend on who asks). This page
 is the row's contract.
 
-**Row schema: version 1.** A field added keeps the version; a field removed or
+**Row schema: version 2.** A field added keeps the version; a field removed or
 whose meaning changes bumps it, and is listed under [Changes](#changes).
 
 ## Query
@@ -99,12 +99,12 @@ computed by the same rule, next to `is_claim` and `claim_until`.
 |---|---|---|
 | 0 | `moderate` | The caller is a moderator and the ticket, or a comment on it, awaits moderation. |
 | 1 | `decision` | A proposal awaits a decision, and the caller did not make it. |
-| 2 | `unread` | Something is unread for the caller. |
-| 3 | `working` | The last word is a step, or the ticket is claimed and hot. |
-| 4 | `open` | Any other open ticket. |
-| 5 | `closed` | Closed. |
+| 2 | `working` | The last word is a step, or the ticket is claimed and hot. |
+| 3 | `open` | Any other open ticket. |
+| 4 | `closed` | Closed. |
 
-The first matching band wins.
+The first matching band wins. Unread is not a band: an unread ticket stays in
+the band its work is in, and the row says it is unread (`unread`).
 
 **`state_glyph`**, first matching:
 
@@ -118,5 +118,7 @@ The first matching band wins.
 
 ## Changes
 
+- **Version 2.** The `unread` band is gone: an unread ticket keeps its
+  workflow band, and `working`, `open` and `closed` move up one index.
 - **Version 1.** First written version. Adds `holder` and `held_as`; the turn
   view is `view=turn` (it was `v=tvty`, which no longer adds anything).

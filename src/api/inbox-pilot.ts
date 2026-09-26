@@ -20,7 +20,7 @@ import type { InboxRow } from "./inbox-row.js";
 export type Turn = "you" | "them" | "none";
 
 /** The bands, in the order `sort=band` shows them. */
-export const BANDS = ["moderate", "decision", "unread", "working", "open", "closed"] as const;
+export const BANDS = ["moderate", "decision", "working", "open", "closed"] as const;
 
 export type StateGlyph =
     | "plan" | "resolution" | "wontfix" | "escalation"
@@ -76,7 +76,6 @@ export function pilotFields(row: InboxRow, facts: PilotFacts, viewer: string, vi
     if (row.closed) band = "closed";
     else if (viewerIsHuman && (row.status === "pending" || row.pending_comment_count > 0)) band = "moderate";
     else if (pending && facts.proposer !== viewer) band = "decision";
-    else if (row.unread) band = "unread";
     else if (row.latest_is_step || (row.claimant && row.hot)) band = "working";
     else band = "open";
 

@@ -66,7 +66,7 @@ async function decide(messageId: number, status: "accepted" | "rejected"): Promi
     const r = await call(HUMAN, "POST", `/api/messages/${messageId}/decide`, { status });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
-type Row = { id: number; last_speaker: string; turn?: string; band?: number; state_glyph?: string | null };
+type Row = { id: number; last_speaker: string; turn?: string; band?: number; state_glyph?: string | null; unread?: boolean };
 async function row(ticketId: number, token = HUMAN): Promise<Row> {
     const r = await call(token, "GET", `/api/inbox?view=turn&ids=${ticketId}&project=${P}`);
     const rows = r.json as Row[];
@@ -110,7 +110,7 @@ test("a step keeps the ball with its author, and a pending decision outranks it"
     const t = ticket("step");
     await comment(WORKER, t, { step: true, step_after_minutes: 0, handback: undefined });
     let r = await row(t);
-    assert.deepEqual([r.turn, r.band, r.state_glyph], ["them", band("unread"), "step"], "unread comes before working");
+    assert.deepEqual([r.turn, r.band, r.state_glyph, r.unread], ["them", band("working"), "step", true], "unread is a flag on the row, not a band: it stays where its work is");
     assert.ok((await call(HUMAN, "POST", `/api/tickets/${t}/mark-read`)).status < 300);
     r = await row(t);
     assert.equal(r.band, band("working"));
