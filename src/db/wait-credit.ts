@@ -13,6 +13,11 @@
  * never below `tickets.step_min_wait_minutes` (david: « on peut mettre 5
  * minutes pour éviter le flood »), and that floor never takes the balance
  * below zero. `0` — carry on at once — is always granted and costs nothing.
+ *
+ * #3065 david — « le crédit en minutes max ne doit pas dépasser un seuil » :
+ * the balance never exceeds `tickets.wait_credit_max_minutes` (0 = no cap).
+ * What would take it over is not credited, and a balance already over (the cap
+ * lowered, or credit earned before it existed) is cut back by a `cap` move.
  */
 import { and, eq, sql } from "drizzle-orm";
 import { spawnSync } from "node:child_process";
@@ -68,6 +73,7 @@ export function waitCreditConfig(project: string) {
         commitMaxAgeHours: num("tickets.wait_credit_commit_max_age_hours", project, 48),
         maxCommitsPerComment: num("tickets.wait_credit_max_commits_per_comment", project, 20),
         start: num("tickets.wait_credit_start_minutes", project, 60),
+        max: num("tickets.wait_credit_max_minutes", project, 120),
         floor: num("tickets.step_min_wait_minutes", project, 5),
         resolved: num("tickets.wait_credit_resolved_minutes", project, 30),
         resolvedNoCommit: num("tickets.wait_credit_resolved_no_commit_minutes", project, 10),
@@ -78,12 +84,39 @@ export function waitCreditConfig(project: string) {
     };
 }
 
-export function waitCreditBalance(consumerId: string, project: string): number {
+function ledgerBalance(consumerId: string, project: string): number {
     const row = getDb().select({ total: sql<number>`COALESCE(SUM(${schema.waitCreditMoves.minutes}), 0)` })
         .from(schema.waitCreditMoves)
         .where(and(eq(schema.waitCreditMoves.consumerId, consumerId), eq(schema.waitCreditMoves.project, project)))
         .get();
     return waitCreditConfig(project).start + (row?.total ?? 0);
+}
+
+/** Pure: what may still be credited under the cap (0 = no cap). */
+export function roomUnderCap(balance: number, max: number): number {
+    return max > 0 ? Math.max(0, max - balance) : Infinity;
+}
+
+/**
+ * #3065 — the balance, never over the cap: an excess (the cap lowered, credit
+ * earned before it existed) is cut back here, once, by a `cap` move.
+ */
+export function waitCreditBalance(consumerId: string, project: string): number {
+    const balance = ledgerBalance(consumerId, project);
+    const max = waitCreditConfig(project).max;
+    if (max > 0 && balance > max) {
+        record({ consumerId, project, kind: "cap", minutes: max - balance });
+        return max;
+    }
+    return balance;
+}
+
+/** #3065 — a gain, cut to what fits under the cap. */
+function credit(move: Omit<schema.NewWaitCreditMove, "createdAt">): number {
+    const room = roomUnderCap(waitCreditBalance(move.consumerId, move.project), waitCreditConfig(move.project).max);
+    const minutes = Math.min(move.minutes, room);
+    // Recorded even at 0: the once-only guards (a ticket, a commit, a step) hold either way.
+    return record({ ...move, minutes }) ? minutes : 0;
 }
 
 /** Insert a movement; a once-only guard turns a repeat into a no-op. Returns whether it landed. */
@@ -111,7 +144,7 @@ export function refundOnReturn(consumerId: string, project: string, ticketId: nu
     if (!step?.resume_at || step.spent <= 0) return 0;
     const minutes = refundWait(step.spent, Date.parse(step.resume_at), nowMs);
     if (minutes <= 0) return 0;
-    return record({ consumerId, project, kind: "refund", minutes, ticketId, messageId: step.message_id }) ? minutes : 0;
+    return credit({ consumerId, project, kind: "refund", minutes, ticketId, messageId: step.message_id });
 }
 
 /** What a step may wait, from the current balance. Nothing is recorded yet. */
@@ -141,7 +174,7 @@ export function earnOnClose(consumerId: string, project: string, ticketId: numbe
     `)[0]?.n > 0;
     const minutes = how === "wontfix" ? cfg.wontfix : withCommit ? cfg.resolved : cfg.resolvedNoCommit;
     if (minutes <= 0) return 0;
-    return record({ consumerId, project, kind: how === "resolved" ? "earn_resolved" : "earn_wontfix", minutes, ticketId }) ? minutes : 0;
+    return credit({ consumerId, project, kind: how === "resolved" ? "earn_resolved" : "earn_wontfix", minutes, ticketId });
 }
 
 /**
@@ -222,8 +255,12 @@ export function earnForCommits(
         }
         const minutes = commitMinutes(lines, cfg.linesPerMinute, cfg.maxPerCommit, cfg.minPerCommit);
         if (minutes <= 0) return { commit, minutes: 0, reason: lines > 0 ? `${lines} changed lines: under ${cfg.linesPerMinute}` : "no changed line" };
-        return record({ consumerId, project, kind: "earn_commit", minutes, ticketId, ref: sha })
-            ? { commit, minutes, reason: null }
+        if (roomUnderCap(waitCreditBalance(consumerId, project), cfg.max) <= 0) {
+            return { commit, minutes: 0, reason: `your wait credit is at its cap, ${cfg.max} min` };
+        }
+        const got = credit({ consumerId, project, kind: "earn_commit", minutes, ticketId, ref: sha });
+        return got > 0
+            ? { commit, minutes: got, reason: null }
             : { commit, minutes: 0, reason: "this commit was already counted" };
     });
 }
@@ -240,6 +277,8 @@ export interface WaitCreditRow {
 /** #2646 — the project's rules, sent with a balance so an agent is told how to earn, in the configured amounts. */
 export interface WaitCreditRules {
     floor: number;
+    /** #3065 — the most a balance holds; 0 = no cap. */
+    max: number;
     refund: boolean;
     resolved: number;
     resolved_no_commit: number;
@@ -256,6 +295,7 @@ export function waitCreditRules(project: string): WaitCreditRules {
     const c = waitCreditConfig(project);
     return {
         floor: c.floor,
+        max: c.max,
         refund: c.refund,
         resolved: c.resolved,
         resolved_no_commit: c.resolvedNoCommit,
@@ -289,7 +329,7 @@ export function listWaitCredits(project: string | null = null): WaitCreditRow[] 
     return rows.map((r) => ({
         consumer_id: r.consumer_id,
         project: r.project,
-        balance: waitCreditConfig(r.project).start + r.total,
+        balance: waitCreditBalance(r.consumer_id, r.project),
         earned: r.earned,
         spent: r.spent,
         refunded: r.refunded,
@@ -352,8 +392,8 @@ export function trimStepWaits(maxMinutes: number, nowMs = Date.now()): TrimmedSt
         if (spend && r.by_agent) {
             const cut = Math.round((Date.parse(r.resume_at) - Date.parse(limit)) / 60_000);
             const minutes = Math.min(spend.spent, cut);
-            if (minutes > 0 && record({ consumerId: r.by_agent, project: r.project, kind: "refund", minutes, ticketId: r.ticket_id, messageId: r.id })) {
-                refunded = minutes;
+            if (minutes > 0) {
+                refunded = credit({ consumerId: r.by_agent, project: r.project, kind: "refund", minutes, ticketId: r.ticket_id, messageId: r.id });
             }
         }
         return { message_id: r.id, ticket_id: r.ticket_id, project: r.project, by_agent: r.by_agent, from: r.resume_at, to: limit, refunded };

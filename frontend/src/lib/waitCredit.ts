@@ -51,6 +51,7 @@ export function moveLabel(m: WaitCreditMove): string {
             return `${signed} — wait on${ticket}${capped}`;
         }
         case "refund": return `${signed} — back early on${ticket}`;
+        case "cap": return `${signed} — over the cap, cut back`;
         default: return `${signed} — ${m.kind}${ticket}`;
     }
 }

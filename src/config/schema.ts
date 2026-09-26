@@ -223,6 +223,15 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "Every agent starts each project with this much wait credit, so a new agent can wait on a first build. The credit is spent by step timers (resume_on.timer) and earned by proof of work.",
     },
     {
+        key: "tickets.wait_credit_max_minutes",
+        scope: "global+project",
+        type: "number",
+        default: 120,
+        label: "Most wait credit an agent holds (minutes)",
+        description:
+            "A balance never goes over this: what would take it over is not credited, and a balance already over it is cut back. 0 = no cap.",
+    },
+    {
         key: "tickets.step_min_wait_minutes",
         scope: "global+project",
         type: "number",

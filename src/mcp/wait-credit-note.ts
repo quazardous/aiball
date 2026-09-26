@@ -12,6 +12,8 @@
  */
 export interface WaitCreditRules {
     floor: number;
+    /** #3065 — the most a balance holds; 0 or absent = no cap. */
+    max?: number;
     refund: boolean;
     resolved: number;
     resolved_no_commit: number;
@@ -36,7 +38,7 @@ export interface WaitCreditAnswer {
 export function earnSentence(r: WaitCreditRules | undefined): string {
     if (!r) return "Earn more by getting tickets closed on your accepted resolutions and by citing your commits (`commits: [\"<sha>\"]` on a reply).";
     return `Credit comes back when a ticket closes on your accepted resolution (+${r.resolved} min with a commit cited on that ticket, +${r.resolved_no_commit} without) or wontfix (+${r.wontfix}), `
-        + `and with each commit you cite on a reply as \`commits: ["<sha>"]\` (+1 min per ${r.commit_lines_per_minute} changed lines${r.commit_min ? `, at least ${r.commit_min}` : ""}, ${r.commit_max} max, at most ${r.commit_max_age_hours} h old, ${r.max_commits_per_comment} per comment).`;
+        + `and with each commit you cite on a reply as \`commits: ["<sha>"]\` (+1 min per ${r.commit_lines_per_minute} changed lines${r.commit_min ? `, at least ${r.commit_min}` : ""}, ${r.commit_max} max, at most ${r.commit_max_age_hours} h old, ${r.max_commits_per_comment} per comment)${r.max ? `; a balance holds at most ${r.max} min` : ""}.`;
 }
 
 export function waitCreditNote(c: WaitCreditAnswer | null | undefined): string | null {

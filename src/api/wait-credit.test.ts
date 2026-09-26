@@ -41,6 +41,8 @@ upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2640-w" }).token;
 const BOSS = issueToken({ kind: "agent", consumer_id: "boss", label: "2640-b" }).token;
 createProject({ name: P });
+// #3065 — the cap has its own test (db/wait-credit-cap.test.ts); here, on every project, the amounts are summed free of it.
+(await import("../db/config-overrides.js")).setConfigOverride("", "tickets.wait_credit_max_minutes", 0);
 upsertSubscription("worker", P, "owner");
 upsertSubscription("boss", P, "owner");
 

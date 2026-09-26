@@ -368,7 +368,10 @@ minus what it waited:
 
 Short of credit the wait is capped to the balance, never under
 `tickets.step_min_wait_minutes` (5), and that floor costs nothing past zero; a
-step asking 0 is always granted. Humans have no credit. The whole scheme is
+step asking 0 is always granted. The balance never goes over
+`tickets.wait_credit_max_minutes` (120, 0 for no cap): a gain that would take
+it over is cut to what fits, and a balance already over it (the cap lowered)
+is cut back. Humans have no credit. The whole scheme is
 per-project settings: `tickets.wait_credit_enabled` (off = free, uncapped
 waits and nothing said), `tickets.wait_credit_refund`, every amount
 (`tickets.wait_credit_*_minutes`, `tickets.step_min_wait_minutes`), and for

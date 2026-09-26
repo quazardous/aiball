@@ -74,6 +74,9 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- An agent's wait credit is capped, at 120 minutes by default
+  (`tickets.wait_credit_max_minutes`): past it, work earns nothing more,
+  and a larger balance is cut back.
 - `POST /api/tickets/:id/owner` takes the new owner as `owner`; `by_agent`
   there is the author, as everywhere else, and never names the new owner.
 - The author of a write is the caller the request authenticates as: a body

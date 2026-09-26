@@ -1039,7 +1039,7 @@ export const waitCreditMoves = sqliteTable("wait_credit_moves", {
     id: integer("id").primaryKey({ autoIncrement: true }),
     consumerId: text("consumer_id").notNull(),
     project: text("project").notNull(),
-    /** earn_resolved | earn_wontfix | earn_commit | spend | refund */
+    /** earn_resolved | earn_wontfix | earn_commit | spend | refund | cap (#3065: an excess cut back) */
     kind: text("kind").notNull(),
     /** Signed: a spend is negative. */
     minutes: integer("minutes").notNull(),
