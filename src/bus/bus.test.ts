@@ -145,9 +145,14 @@ test("the identity the bus settles is the one HTTP settles, for every kind of ca
 });
 
 test("the hello says who the connection runs as, and its kind", async () => {
-    assert.deepEqual((await connect({ url, token: HUMAN })).hello, { version: 1, consumer: "boss", kind: "human", relayed: false });
-    assert.deepEqual((await connect({ url, token: NODE, consumer: "agent-b" })).hello, { version: 1, consumer: "agent-b", kind: "agent", relayed: true });
-    assert.deepEqual((await connect({ socket: sockPath, consumer: "agent-a" })).hello, { version: 1, consumer: "agent-a", kind: "agent", relayed: false });
+    const hello = async (o: Parameters<typeof BusClient.connect>[0]) => {
+        const { epoch, ...rest } = (await connect(o)).hello as unknown as { epoch: string } & Record<string, unknown>;
+        assert.equal(typeof epoch, "string", "the daemon's epoch, for since");
+        return rest;
+    };
+    assert.deepEqual(await hello({ url, token: HUMAN }), { version: 1, consumer: "boss", kind: "human", relayed: false });
+    assert.deepEqual(await hello({ url, token: NODE, consumer: "agent-b" }), { version: 1, consumer: "agent-b", kind: "agent", relayed: true });
+    assert.deepEqual(await hello({ socket: sockPath, consumer: "agent-a" }), { version: 1, consumer: "agent-a", kind: "agent", relayed: false });
 });
 
 // --- Who may call what: declared per method ---

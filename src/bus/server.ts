@@ -13,6 +13,7 @@ import { touchLastSeen } from "../db/consumers.js";
 import { BUS_PATH, BUS_VERSION } from "../bus-protocol.js";
 import { callerOf, type Caller } from "./methods.js";
 import { handleFrame } from "./rpc.js";
+import { BUS_EPOCH, dropSession, type BusSession } from "./subscriptions.js";
 import "./register.js";
 
 /** A frame larger than this closes the connection (1009). */
@@ -132,11 +133,26 @@ export function sweepConnections(wss: WebSocketServer): void {
     }
 }
 
-function open(ws: WebSocket, caller: Caller, seen: boolean): void {
+function open(ws: WebSocket, connCaller: Caller, seen: boolean): void {
+    const session: BusSession = {
+        subscriptions: new Map(),
+        notify(method, params) {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            if (ws.bufferedAmount > BUS_MAX_BUFFERED) {
+                ws.close(BUS_CLOSE.TOO_SLOW, "too slow");
+                return;
+            }
+            ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+        },
+    };
+    const caller: Caller = { ...connCaller, session };
     const c: Conn = { ws, caller, queue: Promise.resolve(), active: false, seen, alive: true };
     conns.add(c);
     ws.on("pong", () => { c.alive = true; });
-    ws.on("close", () => { conns.delete(c); });
+    ws.on("close", () => {
+        conns.delete(c);
+        dropSession(session);
+    });
     ws.on("message", (data, isBinary) => {
         if (isBinary) {
             ws.close(1003, "text frames only");
@@ -158,7 +174,7 @@ function open(ws: WebSocket, caller: Caller, seen: boolean): void {
     ws.send(JSON.stringify({
         jsonrpc: "2.0",
         method: "bus.hello",
-        params: { version: BUS_VERSION, consumer: caller.consumer_id ?? null, kind: caller.kind, relayed: caller.relayed },
+        params: { version: BUS_VERSION, epoch: BUS_EPOCH, consumer: caller.consumer_id ?? null, kind: caller.kind, relayed: caller.relayed },
     }));
 }
 

@@ -35,6 +35,8 @@ export interface BusConnectOptions {
 
 export interface BusHello {
     version: number;
+    /** Changes when the daemon restarts: a subscription's `since` needs it. */
+    epoch: string;
     consumer: string | null;
     /** human, agent or key. */
     kind: string;

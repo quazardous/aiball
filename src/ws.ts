@@ -101,7 +101,21 @@ export function attachWs(server: Server, path = "/ws", opts: { trusted?: boolean
     wss.on("close", () => { clearInterval(interval); servers.delete(wss); });
 }
 
+/**
+ * #3063 — what else hears every event: the bus, which turns them into its
+ * subjects. A listener never stops the broadcast.
+ */
+const listeners = new Set<(event: WsEvent) => void>();
+
+export function onBroadcast(fn: (event: WsEvent) => void): () => void {
+    listeners.add(fn);
+    return () => { listeners.delete(fn); };
+}
+
 export function broadcast(event: WsEvent): void {
+    for (const fn of listeners) {
+        try { fn(event); } catch (e) { console.error("[ws] a broadcast listener failed:", e); }
+    }
     if (servers.size === 0) return;
     const payload = JSON.stringify(event);
     for (const wss of servers) {

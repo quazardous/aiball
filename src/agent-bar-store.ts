@@ -49,6 +49,11 @@ onPresenceStop((consumer) => {
     if (e) broadcast({ type: "agent_bar", data: view(consumer, e) });
 });
 
+/** #3063 — every agent's latest bar. */
+export function listAgentBars(): AgentBarView[] {
+    return [...bars.entries()].map(([consumer, e]) => view(consumer, e));
+}
+
 /** Tests only. */
 export function __resetAgentBars(): void {
     bars.clear();

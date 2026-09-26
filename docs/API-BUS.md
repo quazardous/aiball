@@ -1,10 +1,10 @@
 # The bus
 
-> **Status: clients are moving onto it.** The transport, identity, calls,
-> batches and revocation are in place, and the operations tvty uses are
-> becoming methods (see *Methods*). Subscriptions come next. Until a client
-> has moved, it keeps using the HTTP API ([`API.md`](./API.md)); a route that
-> has become a method answers exactly as the method does.
+> **Status: clients are moving onto it.** Calls, batches, subscriptions and
+> revocation are in place, and the operations tvty uses are methods (see
+> *Methods*). Until a client has moved, it keeps using the HTTP API
+> ([`API.md`](./API.md)); a route that has become a method answers exactly as
+> the method does.
 
 The bus is how a client talks to aiball: **one permanent connection** per
 client, JSON-RPC 2.0 over a WebSocket. The core is a table of **methods**,
@@ -31,8 +31,10 @@ The daemon's first message is a notification:
 
 ```json
 { "jsonrpc": "2.0", "method": "bus.hello",
-  "params": { "version": 1, "consumer": "claude-aiball-dev", "kind": "agent", "relayed": false } }
+  "params": { "version": 1, "epoch": "…", "consumer": "claude-aiball-dev", "kind": "agent", "relayed": false } }
 ```
+
+`epoch` changes when the daemon restarts (see *Subscriptions*).
 
 `kind` and `relayed` say what kind of caller the connection is (see *Who may
 call a method*).
@@ -79,6 +81,47 @@ A message the bus could not run gets JSON-RPC's own code, and `data.code` too:
 | -32602 | invalid params; `data.details.issues` says which | `BAD_REQUEST` |
 | -32603 | the method failed; the details stay in the daemon's journal | `INTERNAL` |
 
+## Subscriptions
+
+A client subscribes to a **subject** and gets its current value, then every
+change **as data** — never a signal to go and read it again.
+
+- **`bus.subscribe {subject, since?, …}`** answers
+  `{ id, subject, seq, epoch, replayed, value | events }`.
+- Then **`bus.event`** notifications: `{ subscription, subject, seq, data }`.
+- **`bus.unsubscribe {id}`**. Closing the connection ends its subscriptions.
+
+**Order and catching up.** `seq` is one counter for the whole daemon, always
+increasing: events reach a client in `seq` order. A client that reconnects
+passes `since: {epoch, seq}` — the daemon's epoch and the last `seq` it
+received. If the daemon still holds everything after it (the latest 4096
+events, and the same epoch), the answer is `replayed: true` with the missed
+`events`, in order, and no `value`; otherwise `replayed: false` and the
+`value`, whole.
+
+| Subject | `value` | an event's `data` | Who |
+|---|---|---|---|
+| `agent.<id>.bar` | the bar, as `consumer.bar` returns it, or `null` | the bar | a human, or the agent itself |
+| `agent.<id>.state` | the entry `consumer.list` gives | what changed: presence (`running`), loop state, the whole entry | humans and agents |
+| `project.<p>.tickets` | the rows `inbox.list` gives with `view: "turn"`; options `open`, `include_postponed` | `{ op: "upsert", row }` or `{ op: "remove", id, project }` | humans and agents; the rows are the subscriber's |
+| `ticket.<id>` | what `ticket.get` gives with `full: true` | `{ type, message }`: `message_created`, `_edited`, `_decided`, `_noted`, `_tagged` | humans and agents |
+| `user.<id>.pings` | `{ unread }` | a ping, as the event stream carries it, and `message`: what it points at (`id`, `hashid`, `kind`, `status`, `by_agent`, `created_at`, `project`, `ticket_id`, `title`, `decision`) | oneself |
+
+`*` stands for one level: `agent.*.bar`, `agent.*.state` and
+`project.*.tickets` give every agent's or project's, including the ones
+created after the subscription, with a `value` keyed by agent or project
+(every bar is a human's view). Each event names its own subject:
+`agent.worker.bar`, `project.aiball.tickets`.
+
+**A view's rows.** A `project.<p>.tickets` row is built by the same code as
+`inbox.list`'s, for the subscriber, and pushed only when it changed. Some of
+its fields change with time alone — `hot` cooling, a step going stale, a claim's
+hold or a snooze ending — and the daemon pushes the row at that moment: a
+client never has to read the list again. A ticket that leaves the view (closed
+in an `open` view, moved to another project) comes as a `remove`. The view is
+always sent whole again on `since`: the rows it held could have left it while
+the client was away.
+
 ## Who may call a method
 
 Every method declares the kinds of caller it admits, and the bus checks it
@@ -120,6 +163,8 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | Method | Callers | Replaces |
 |---|---|---|
 | `bus.whoami` | human, agent | — who the connection runs as: `{ consumer, kind, relayed, transport }` |
+| `bus.subscribe` | human, agent | — see *Subscriptions* |
+| `bus.unsubscribe` | human, agent | — see *Subscriptions* |
 | `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
 | `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |
 | `tag.list` | human, agent | `GET /api/tags` |

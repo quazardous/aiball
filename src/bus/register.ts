@@ -10,3 +10,4 @@ import "./methods/message.js";
 import "./methods/ticket.js";
 import "./methods/inbox.js";
 import "./methods/ticket-get.js";
+import "./methods/subjects.js";

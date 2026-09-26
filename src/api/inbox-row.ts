@@ -72,6 +72,9 @@ export interface InboxRowContext {
     unreadMap: ReturnType<typeof ticketUnreadFlags>;
     tokenUsageMap: ReturnType<typeof getTicketTokenUsage>;
     crossAgentHotFocus: ReturnType<typeof computeHotFocus>;
+    /** #3063 — when each ticket last saw an agent's own activity: what `hot`
+     *  was computed from. Optional for hand-built contexts. */
+    agentActivity?: Map<number, string>;
     /** #2112 — the tickets carrying a payload. One tiny query for the whole
      *  set, so a row can show the mark without asking per ticket. */
     payloadIds: Set<number>;
@@ -137,11 +140,10 @@ export function buildInboxRowContext(
         stepStaleHours: stepStaleHoursByProject(),
         criticalOf: criticalByProject(),
         milestoneByTicket: milestonesOf(ids),
-        crossAgentHotFocus: computeHotFocus(
-            ticketAgentLastActivity(ids),
-            Date.now(),
-            hotWindowMs,
-        ),
+        ...(() => {
+            const agentActivity = ticketAgentLastActivity(ids);
+            return { agentActivity, crossAgentHotFocus: computeHotFocus(agentActivity, Date.now(), hotWindowMs) };
+        })(),
         hotWindowMs,
         claimHeldUntil: ticketsClaimHeldUntil(tickets),
         nowStr: new Date().toISOString(),
@@ -346,3 +348,26 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
 }
 
 export type InboxRow = ReturnType<typeof buildInboxRow>;
+
+/**
+ * #3063 — the next moment a field of `t`'s row changes with time alone, or
+ * null: `hot` going cold (an agent's activity or claim past the hot window),
+ * a step going stale, a claim's hold ending, a snooze ending. From the same
+ * inputs as `buildInboxRow`: a subscriber's row is rebuilt then, and only then.
+ */
+export function inboxRowDeadline(t: Message, ctx: InboxRowContext): number | null {
+    const now = Date.parse(ctx.nowStr);
+    const agg = ctx.byTicket.get(t.id) ?? emptyAgg();
+    const windowMs = ctx.hotWindowMs ?? hotWindowSec() * 1000;
+    const at: number[] = [];
+    const activity = ctx.agentActivity?.get(t.id);
+    if (activity) at.push(Date.parse(activity) + windowMs);
+    if (typeof t.claimed_at === "string") at.push(Date.parse(t.claimed_at) + windowMs);
+    const staleHours = ctx.stepStaleHours?.(t.project) ?? 0;
+    if (agg.lastStepAt && staleHours > 0) at.push(Date.parse(agg.lastStepAt) + staleHours * 3_600_000);
+    const held = ctx.claimHeldUntil?.has(t.id) ? ctx.claimHeldUntil.get(t.id)! : ticketClaimHeldUntil(t);
+    if (held !== null) at.push(held);
+    if (t.postponed_until) at.push(Date.parse(t.postponed_until));
+    const next = at.filter((x) => Number.isFinite(x) && x > now);
+    return next.length ? Math.min(...next) : null;
+}

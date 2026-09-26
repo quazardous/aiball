@@ -6,6 +6,7 @@
  */
 import type { z } from "zod";
 import type { CallerContext } from "../auth.js";
+import type { BusSession } from "./subscriptions.js";
 import { isHuman } from "../db.js";
 import { ERROR_CODES, errorCodeForStatus, isErrorCode, type ErrorCode } from "../domain.js";
 
@@ -28,6 +29,8 @@ export interface Caller extends CallerContext {
     relayed: boolean;
     /** The consumer, for the kinds that have one (human, agent). */
     consumer_id?: string;
+    /** On the bus: the connection, where subscriptions live. Absent over HTTP. */
+    session?: BusSession;
 }
 
 /** `kind` is fixed with the identity: a connection computes it once. */
