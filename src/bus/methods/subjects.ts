@@ -61,7 +61,8 @@ defineSubject({
     },
     deliver: (sub, subject) => {
         const id = subject.split(".")[1];
-        const sent = sub.state.sent as Map<string, string>;
+        // Absent on a subscription resumed with `since`: its value was not rebuilt.
+        const sent = (sub.state.sent ??= new Map<string, string>()) as Map<string, string>;
         const entry = consumerEntryFor(id);
         const json = JSON.stringify(entry);
         if (sent.get(id) === json) return SKIP;

@@ -259,3 +259,18 @@ test("#3070 an agent's state: each event is its whole consumer.list entry, only 
     await c.settle();
     assert.equal(mine().at(-1)!.data, null, "a deleted consumer is null");
 });
+
+test("#3070 a state subscription resumed with since gets the events it missed, entries whole", async () => {
+    upsertConsumer({ consumer_id: "resumed", kind: "agent" });
+    const c = await open("boss");
+    const first = await c.call<Sub>("bus.subscribe", { subject: "agent.*.state" });
+    await c.call("bus.unsubscribe", { id: first.id });
+    const { presenceConnect, presenceDisconnect } = await import("../live-presence.js");
+    presenceConnect("resumed", "terminal");
+    const back = await c.call<Sub>("bus.subscribe", { subject: "agent.*.state", since: { epoch: first.epoch, seq: first.seq } });
+    assert.equal(back.replayed, true);
+    const missed = back.events!.filter((e) => e.subject === "agent.resumed.state");
+    assert.equal(missed.length, 1, "the missed change, replayed");
+    assert.equal((missed[0].data as { present: boolean }).present, true);
+    presenceDisconnect("resumed");
+});
