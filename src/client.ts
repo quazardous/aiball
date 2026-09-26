@@ -369,10 +369,9 @@ export class AiballClient {
      * every MCP tool response, almost all of it queueing.
      */
     microStatusCounts(project: string | null) {
-        const proj = project ? `&project=${encodeURIComponent(project)}` : "";
-        return this.http<{ unread_project: number; unread_pings: number; my_pending: number }>(
-            "GET",
-            `/api/micro-status?consumer_id=${encodeURIComponent(this.agentId)}${proj}`,
+        return this.call<{ unread_project: number; unread_pings: number; my_pending: number }>(
+            "consumer.micro_status",
+            { consumer_id: this.agentId, ...(project ? { project } : {}) },
         );
     }
 
@@ -885,27 +884,21 @@ export class AiballClient {
      *  #798 — `since` is an ISO 8601 cutoff. Filters messages whose
      *  `created_at` is >= since. */
     unread(project: string | null | undefined, limit = 100, since?: string) {
-        const projParam = project ? `&project=${encodeURIComponent(project)}` : "";
-        const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
-        return this.http(
-            "GET",
-            `/api/unread?consumer_id=${encodeURIComponent(this.agentId)}${projParam}&limit=${limit}${sinceParam}`,
-        );
+        return this.call("unread.list", {
+            consumer_id: this.agentId,
+            ...(project ? { project } : {}),
+            limit,
+            ...(since ? { since } : {}),
+        });
     }
     markMessageSeen(message_id: number) {
-        return this.http("POST", "/api/mark-read", {
-            consumer_id: this.agentId,
-            message_id,
-        });
+        return this.call("unread.mark_read", { consumer_id: this.agentId, message_id });
     }
 
     /** #786 — record that the loop just named this ticket in a backlog
      *  wake. Drives the per-consumer cooldown filter on `?backlog=1`. */
     recordBacklogWake(ticket_id: number) {
-        return this.http("POST", "/api/backlog-wake", {
-            consumer_id: this.agentId,
-            ticket_id,
-        });
+        return this.call("backlog.record_wake", { consumer_id: this.agentId, ticket_id });
     }
     /** #2255 — external signals still waiting for this agent. */
     listSignals() {
@@ -937,23 +930,21 @@ export class AiballClient {
         );
     }
     listPings(opts: { unreadOnly?: boolean; limit?: number } = {}) {
-        const qs = new URLSearchParams({ consumer_id: this.agentId });
-        if (opts.unreadOnly) qs.set("unread", "1");
-        if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
-        return this.http("GET", `/api/pings?${qs.toString()}`);
+        return this.call("ping.list", {
+            consumer_id: this.agentId,
+            ...(opts.unreadOnly ? { unread: true } : {}),
+            ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+        });
     }
     markPingsRead(opts: { upToId?: number; all?: boolean }) {
-        return this.http("POST", "/api/pings/mark-read", {
+        return this.call("ping.mark_read", {
             consumer_id: this.agentId,
-            up_to_id: opts.upToId,
-            all: opts.all === true ? true : undefined,
+            ...(opts.upToId !== undefined ? { up_to_id: opts.upToId } : {}),
+            ...(opts.all === true ? { all: true } : {}),
         });
     }
     pingsCount() {
-        return this.http<{ unread: number }>(
-            "GET",
-            `/api/pings/count?consumer_id=${encodeURIComponent(this.agentId)}`,
-        );
+        return this.call<{ unread: number }>("ping.count", { consumer_id: this.agentId });
     }
 
     /** #397: fetch a single consumer (incl. `micro_prompt`). Used by the wake
@@ -1173,11 +1164,7 @@ export class AiballClient {
     }
     /** #800 — project optional. Omitted = cross-project consumer-scoped count. */
     unreadCount(project: string | null | undefined) {
-        const projParam = project ? `&project=${encodeURIComponent(project)}` : "";
-        return this.http<{ count: number }>(
-            "GET",
-            `/api/unread/count?consumer_id=${encodeURIComponent(this.agentId)}${projParam}`,
-        );
+        return this.call<{ count: number }>("unread.count", { consumer_id: this.agentId, ...(project ? { project } : {}) });
     }
     /** #2198 — `project`, `summary` (no bodies) and `limit` are applied by the
      *  daemon, so nothing crosses the socket only to be thrown away. */
@@ -1219,10 +1206,7 @@ export class AiballClient {
         );
     }
     myPendingCount() {
-        return this.http<{ count: number }>(
-            "GET",
-            `/api/my-pending/count?by_agent=${encodeURIComponent(this.agentId)}`,
-        );
+        return this.call<{ count: number }>("message.pending_count", { by_agent: this.agentId });
     }
     /**
      * #697 F5 — pending plan / resolution decisions on tickets THIS agent
@@ -1369,7 +1353,7 @@ export class AiballClient {
         else if (opts.all === true) body.all = true;
         else if (opts.upToId !== undefined) body.up_to_id = opts.upToId;
         if (opts.del === true) body.delete = true;
-        return this.http("POST", "/api/mark-read", body);
+        return this.call("unread.mark_read", body);
     }
 
     /**

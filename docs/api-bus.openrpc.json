@@ -7,6 +7,37 @@
   },
   "methods": [
     {
+      "name": "backlog.record_wake",
+      "description": "A backlog wake just named this ticket for the consumer: the per-consumer cooldown starts again.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ticket_id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "bus.subjects",
       "description": "The subjects of this bus, as an AsyncAPI document, generated from the code.",
       "paramStructure": "by-name",
@@ -216,6 +247,42 @@
       "description": "Every consumer, each as `consumerEntry` builds it: presence, pings, wait credit, session.",
       "paramStructure": "by-name",
       "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.micro_status",
+      "description": "The three counters the MCP server stamps on every tool answer, in one call: unread in the project, unread pings, own tickets awaiting moderation.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "by_agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {}
@@ -688,6 +755,28 @@
       ]
     },
     {
+      "name": "message.pending_count",
+      "description": "How many of an author's tickets still wait for moderation.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "by_agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "message.post",
       "description": "Post a message: a ticket (with its extras, #3037), a comment, a decision or a lifecycle event. the author is the caller. the decision events (plan_accepted…) are the daemon's own: `message.decide` makes them. The params are the message itself, as HTTP's body.",
       "paramStructure": "by-name",
@@ -965,6 +1054,104 @@
           "name": "value",
           "required": false,
           "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ping.count",
+      "description": "How many unseen pings the consumer has.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ping.list",
+      "description": "The consumer's pings, newest first; `unread` keeps only the unseen.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "unread",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ping.mark_read",
+      "description": "Mark the consumer's pings read: up to an id, or all.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "all",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "up_to_id",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
         }
       ],
       "result": {
@@ -1520,6 +1707,148 @@
       },
       "x-callers": [
         "human"
+      ]
+    },
+    {
+      "name": "unread.count",
+      "description": "How many unread events the consumer has, in one project or all.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "unread.list",
+      "description": "The consumer's unread events, oldest first (#800: across projects when `project` is left out), each stamped with whether a human wrote it and whether its ticket still awaits moderation .",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "unread.mark_read",
+      "description": "Mark read: one event (`message_id`), a project up to an id (`up_to_id`), a whole project (`all`), or every project (`all_projects`, #1185). Another consumer's backlog, or `delete` (drop instead of mark), is a human moderator's gesture (local socket or the web UI).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "all",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "all_projects",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "delete",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "message_id",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "up_to_id",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
       ]
     }
   ],

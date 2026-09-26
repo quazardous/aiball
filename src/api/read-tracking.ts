@@ -2,168 +2,29 @@
  * Per-consumer read-state routes (#B.213 phase 1.D).
  * Carved out of api.ts on 2026-05-19 — behavior-preserving move.
  *
- * Endpoints: /unread, /unread/count (project-scoped inbox view +
- * counter), /my-pending/count (author-side moderation-queue counter),
- * /mark-read (single / up-to / project-wide ack). In the legacy
- * api.ts these lived under the "subscriptions" header, but they're
- * about read-state tracking, not subscription rows.
+ * #3067 — the routes are the HTTP face of the read-state methods
+ * (src/bus/methods/read-state.ts), kept while a client still calls them.
  */
 import { Router, type Request, type Response } from "express";
+import { serveMethod } from "../bus/http.js";
 import {
-    listUnread,
-    markAllSeenForProject,
-    prunePings,
     purgeSeenPingsForClosedTickets,
-    markMessageSeen,
-    markSeenUpToForProject,
-    pendingTicketsByAuthor,
-    recordBacklogWake,
-    unreadCount,
-    unreadPingCount,
 } from "../db.js";
-import { badRequest, consumerOf, refuse, withTags } from "./_helpers.js";
+import { consumerOf, refuse } from "./_helpers.js";
 import { isHuman } from "../db.js";
-import { ticketsAwaitingModeration } from "../db/tickets.js";
 import { ERROR_CODES } from "../domain.js";
 
 export const readTrackingRouter = Router();
 
-readTrackingRouter.get("/unread", (req: Request, res: Response) => {
-    const consumer_id = req.query.consumer_id as string | undefined;
-    const project = (req.query.project as string | undefined) || null;
-    const limit = req.query.limit ? Number(req.query.limit) : 100;
-    const since = typeof req.query.since === "string" ? req.query.since : undefined;
-    if (!consumer_id) {
-        return badRequest(res, "consumer_id required");
-    }
-    // #800 david `unyzvx` : project is optional. Omitted = cross-project
-    // consumer-scoped FIFO (the design truth — a fan-out from another
-    // project must reach this consumer's queue).
-    const messages = listUnread(consumer_id, project, limit, since);
-    // #2042 — stamp WHO wrote each event: a human, or another agent. The wake
-    // uses it to add a restraint clause on agent-to-agent traffic ("reply only
-    // if you add something new"), and only the daemon can answer it — `isHuman`
-    // is consumer authority, and the loop has no access to it. Same shape as
-    // every other field the wake needs: derivable server-side, simply not
-    // surfaced. Cached per author because one FIFO page repeats a handful.
-    const humanBy = new Map<string, boolean>();
-    // #2759 — and whether the event's ticket still waits for moderation: an
-    // agent's sub-ticket can sit there unseen (out of its backlog and counts),
-    // so a wake that names it says why it looks inert. One read per page.
-    const awaiting = ticketsAwaitingModeration(messages.map((m) => m.ticket_id ?? m.id));
-    const stamped = messages.map((m) => {
-        const who = m.by_agent ?? "";
-        if (!humanBy.has(who)) humanBy.set(who, isHuman(who));
-        return {
-            ...m,
-            author_is_human: humanBy.get(who) === true,
-            ...(awaiting.has(m.ticket_id ?? m.id) ? { ticket_awaiting_moderation: true } : {}),
-        };
-    });
-    res.json({
-        consumer_id,
-        project,
-        count: unreadCount(consumer_id, project),
-        messages: withTags(stamped),
-    });
-});
+readTrackingRouter.get("/unread", serveMethod("unread.list"));
 
-readTrackingRouter.get("/unread/count", (req, res) => {
-    const consumer_id = req.query.consumer_id as string | undefined;
-    const project = (req.query.project as string | undefined) || null;
-    if (!consumer_id) {
-        return badRequest(res, "consumer_id required");
-    }
-    res.json({
-        consumer_id,
-        project,
-        count: unreadCount(consumer_id, project),
-    });
-});
+readTrackingRouter.get("/unread/count", serveMethod("unread.count"));
 
-readTrackingRouter.get("/my-pending/count", (req, res) => {
-    const by_agent = req.query.by_agent as string | undefined;
-    if (!by_agent) return badRequest(res, "by_agent required");
-    res.json({ by_agent, count: pendingTicketsByAuthor(by_agent) });
-});
+readTrackingRouter.get("/my-pending/count", serveMethod("message.pending_count"));
 
-/**
- * #2164 — the three counters the MCP layer stamps onto EVERY tool response,
- * in one round-trip.
- *
- * `microStatus()` asked for them separately. Benchmarked, that is ~30 ms added
- * to every single MCP call: three requests a single-threaded daemon serves one
- * after another, so the `Promise.all` around them parallelised nothing. The
- * numbers themselves cost 13 + 13 + 3 ms — the waste was the queueing, not the
- * work.
- *
- * Same values, same names, so the agent-facing `_status` block is unchanged.
- */
-readTrackingRouter.get("/micro-status", (req, res) => {
-    const consumer_id = req.query.consumer_id as string | undefined;
-    const project = (req.query.project as string | undefined) || null;
-    if (!consumer_id) return badRequest(res, "consumer_id required");
-    const by_agent = (req.query.by_agent as string | undefined) ?? consumer_id;
-    res.json({
-        consumer_id,
-        project,
-        unread_project: project ? unreadCount(consumer_id, project) : 0,
-        unread_pings: unreadPingCount(consumer_id),
-        my_pending: pendingTicketsByAuthor(by_agent),
-    });
-});
+readTrackingRouter.get("/micro-status", serveMethod("consumer.micro_status"));
 
-readTrackingRouter.post("/mark-read", (req: Request, res: Response) => {
-    const { consumer_id, project, message_id, up_to_id, all, all_projects, delete: del } = req.body ?? {};
-    if (typeof consumer_id !== "string") {
-        return badRequest(res, "consumer_id required");
-    }
-    // #1185 — targeting ANOTHER consumer's backlog (operator drain), or a
-    // hard-delete, is a privileged operator action → local (UDS) trust only.
-    // Self mark-seen stays open (the agent acking its own thread reads).
-    // A prune that targets ANOTHER consumer, or a hard --delete, is a
-    // moderator action → allow the HUMAN moderator (local UDS CLI *or* the
-    // authenticated web UI, both resolve via isHuman), never an agent token.
-    const localTrust =
-        (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
-    const human = localTrust || isHuman(consumerOf(req));
-    const crossConsumer = consumer_id !== consumerOf(req);
-    if ((crossConsumer || del === true) && !human) {
-        return refuse(res, 403, "targeting another consumer or delete requires a human moderator (local CLI or the web UI)", ERROR_CODES.MODERATOR_ONLY);
-    }
-    // #1185 — bulk prune across ALL projects (mark-seen or delete).
-    if (all_projects === true) {
-        const r = prunePings(consumer_id, { del: del === true });
-        return res.json({ consumer_id, all_projects: true, deleted: del === true, ...r });
-    }
-    // #1185 — project-scoped delete (the mark-seen `all:true` path stays below).
-    if (del === true && typeof project === "string") {
-        const r = prunePings(consumer_id, { project, del: true });
-        return res.json({ consumer_id, project, deleted: true, ...r });
-    }
-    if (typeof message_id === "number") {
-        const r = markMessageSeen(consumer_id, message_id);
-        return res.json({ consumer_id, message_id, ...r });
-    }
-    if (typeof up_to_id === "number") {
-        if (typeof project !== "string") {
-            return badRequest(res, "project required when up_to_id is set");
-        }
-        const r = markSeenUpToForProject(consumer_id, project, up_to_id);
-        return res.json({ consumer_id, project, up_to_id, ...r });
-    }
-    if (all === true) {
-        if (typeof project !== "string") {
-            return badRequest(res, "project required when all:true");
-        }
-        const r = markAllSeenForProject(consumer_id, project);
-        return res.json({ consumer_id, project, ...r });
-    }
-    return badRequest(
-        res,
-        "provide message_id (single ack), up_to_id with project (bulk ack up to id), or all:true with project (ack everything delivered)",
-    );
-});
+readTrackingRouter.post("/mark-read", serveMethod("unread.mark_read"));
 
 // #1185 (david) — one-shot operator sweep: drop already-seen pings for every
 // closed ticket (the backfill for the pre-close-purge backlog). Human moderator
@@ -177,20 +38,4 @@ readTrackingRouter.post("/pings/purge-seen-closed", (req: Request, res: Response
     return res.json(purgeSeenPingsForClosedTickets());
 });
 
-/**
- * #786 — record that a backlog wake just named the given ticket for this
- * consumer. Upsert; a fresh wake on the same (consumer, ticket) resets
- * the cooldown clock. Called from the loop's inject site only when the
- * fired branch was backlog_mode (= FIFO empty, ticket pulled from open).
- */
-readTrackingRouter.post("/backlog-wake", (req: Request, res: Response) => {
-    const { consumer_id, ticket_id } = req.body ?? {};
-    if (typeof consumer_id !== "string") {
-        return badRequest(res, "consumer_id required");
-    }
-    if (typeof ticket_id !== "number") {
-        return badRequest(res, "ticket_id required");
-    }
-    recordBacklogWake(consumer_id, ticket_id);
-    return res.json({ consumer_id, ticket_id, recorded: true });
-});
+readTrackingRouter.post("/backlog-wake", serveMethod("backlog.record_wake"));

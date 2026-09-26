@@ -8,11 +8,10 @@
  *   GET  /events             — Server-Sent Events stream of live pings
  *   POST /pings/mark-read    — ack pings (up-to-id or all)
  */
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
+import { serveMethod } from "../bus/http.js";
 import { listPendingSignals } from "../db/signals.js";
 import {
-    listPings,
-    markPingsRead,
     unreadPingCount,
 } from "../db.js";
 import { onPing, onControl, onSignal } from "../event-bus.js";
@@ -23,20 +22,9 @@ import { wakeFocusHidesTicket } from "../db/backlog-rules.js";
 
 export const pingsRouter = Router();
 
-pingsRouter.get("/pings", (req, res) => {
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    const unreadOnly = req.query.unread === "1" || req.query.unread === "true";
-    const limit = req.query.limit ? Number(req.query.limit) : 100;
-    const pings = listPings({ recipient: consumer, unreadOnly, limit });
-    res.json({ consumer_id: consumer, count: pings.length, pings });
-});
+pingsRouter.get("/pings", serveMethod("ping.list"));
 
-pingsRouter.get("/pings/count", (req, res) => {
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    res.json({ consumer_id: consumer, unread: unreadPingCount(consumer) });
-});
+pingsRouter.get("/pings/count", serveMethod("ping.count"));
 
 /**
  * Server-Sent Events stream for live ping notifications (#B.148
@@ -128,14 +116,4 @@ pingsRouter.get("/events", (req, res) => {
     req.on("error", cleanup);
 });
 
-pingsRouter.post("/pings/mark-read", (req: Request, res: Response) => {
-    const consumer = req.body?.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    const all = req.body?.all === true;
-    const upToId = typeof req.body?.up_to_id === "number" ? req.body.up_to_id : undefined;
-    if (!all && upToId === undefined) {
-        return badRequest(res, "provide up_to_id or all=true");
-    }
-    const r = markPingsRead({ recipient: consumer, all, upToId });
-    res.json({ consumer_id: consumer, ...r });
-});
+pingsRouter.post("/pings/mark-read", serveMethod("ping.mark_read"));

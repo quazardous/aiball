@@ -231,3 +231,12 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `ticket.unsnooze` | human | `POST /api/tickets/:id/unsnooze` |
 | `ticket.move` | human, or the reporter | `POST /api/tickets/:id/move` |
 | `ticket.set_milestone` | human, or a cto agent | `POST /api/tickets/:id/milestone` |
+| `unread.list` | human, agent | `GET /api/unread` — `consumer_id` left out is the caller |
+| `unread.count` | human, agent | `GET /api/unread/count` |
+| `unread.mark_read` | human, agent; another consumer's backlog or `delete`, human | `POST /api/mark-read` |
+| `message.pending_count` | human, agent | `GET /api/my-pending/count` — `by_agent` left out is the caller |
+| `consumer.micro_status` | human, agent | `GET /api/micro-status` |
+| `ping.list` | human, agent | `GET /api/pings` |
+| `ping.count` | human, agent | `GET /api/pings/count` |
+| `ping.mark_read` | human, agent | `POST /api/pings/mark-read` |
+| `backlog.record_wake` | human, agent | `POST /api/backlog-wake` |
