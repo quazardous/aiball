@@ -36,7 +36,8 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { afkState } from "./bar-render.js";
-import type { AgentBar, BarHost } from "../agent-bar.js";
+import { attachFor, type AgentBar, type BarHost } from "../agent-bar.js";
+import { CL_ENV } from "./env-vars.js";
 
 /** Snapshot canonical de la barre tmux. Chaque champ correspond à une
  *  tmux user-option / propriété peinte par les writers actuels. Pur
@@ -305,6 +306,11 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
             ? { started_at: new Date(input.loopStartMs).toISOString(), deadline_at: iso(ipc.bootDeadlineMs ?? null) }
             : null,
         host: readBarHost(sd),
+        // #3066 — where a client attaches, from where this kernel runs.
+        attach: attachFor({
+            hostControl: process.env[CL_ENV.HOST_CONTROL] || null,
+            remoteUrl: process.env.AIBALL_SOCK ? null : process.env.AIBALL_URL || null,
+        }),
     };
 }
 

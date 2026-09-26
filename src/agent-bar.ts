@@ -22,6 +22,25 @@ export function isBarHost(v: unknown): v is BarHost {
     return typeof v === "string" && (BAR_HOSTS as readonly string[]).includes(v);
 }
 
+/**
+ * #3066 — where a client attaches to the loop's Claude (docs/TVTY-BIND.md): its
+ * socket when the loop runs on this machine's session host; otherwise why not —
+ * `no_socket` for a loop in claude-loop's tmux (attach through tmux), `remote`
+ * for one talking to a daemon on another machine (not attachable from here).
+ */
+export type BarAttach = { socket: string } | { socket: null; reason: "no_socket" | "remote" };
+
+/** The attach a loop reports, from where it runs. Pure: its inputs are the kernel's environment. */
+export function attachFor(o: { hostControl?: string | null; remoteUrl?: string | null }): BarAttach {
+    if (o.hostControl) {
+        const dir = o.hostControl.replace(/\/[^/]*$/, "");
+        return { socket: `${dir}/attach.sock` };
+    }
+    // A daemon on this machine, reached over TCP, is not another machine.
+    if (o.remoteUrl && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(o.remoteUrl)) return { socket: null, reason: "remote" };
+    return { socket: null, reason: "no_socket" };
+}
+
 export interface AgentBar {
     /** What claude is doing. */
     phase: BarPhase;
@@ -53,6 +72,8 @@ export interface AgentBar {
     boot: { started_at: string; deadline_at: string | null } | null;
     /** #3044 — who draws the bar: `tmux` (its status line) or `external` (tmux's line is off). */
     host: BarHost;
+    /** #3066 — where a client attaches (see `BarAttach`); a loop older than the field reports none: `no_socket`. */
+    attach: BarAttach;
 }
 
 const PHASES: readonly string[] = ["boot", "idle", "busy"];
@@ -97,6 +118,14 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     }
     // #3044 — absent from loops started before the field: they draw in tmux.
     if (b.host !== undefined && !isBarHost(b.host)) return { error: `host must be one of ${BAR_HOSTS.join(", ")}` };
+    // #3066 — absent from loops started before the field.
+    let attach: BarAttach | undefined;
+    if (b.attach !== undefined) {
+        const at = b.attach;
+        if (isObj(at) && typeof at.socket === "string" && at.socket) attach = { socket: at.socket };
+        else if (isObj(at) && at.socket === null && (at.reason === "no_socket" || at.reason === "remote")) attach = { socket: null, reason: at.reason };
+        else return { error: 'attach must be { socket: path } or { socket: null, reason: "no_socket" | "remote" }' };
+    }
     return {
         phase: b.phase as BarPhase,
         presence: b.presence as BarPresence,
@@ -111,5 +140,6 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         next_wake_at: b.next_wake_at as string | null,
         boot: boot === null ? null : { started_at: (boot as Record<string, string>).started_at!, deadline_at: (boot as Record<string, string | null>).deadline_at ?? null },
         host: b.host === undefined ? "tmux" : b.host as BarHost,
+        attach: attach ?? { socket: null, reason: "no_socket" },
     };
 }

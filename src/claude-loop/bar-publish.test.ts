@@ -22,6 +22,7 @@ const base = (): AgentBar => ({
     next_wake_at: null,
     boot: null,
     host: "tmux",
+    attach: { socket: null, reason: "no_socket" },
 });
 
 function renderer(current: { bar: AgentBar }) {
@@ -88,4 +89,22 @@ test("the loop's own bar is one the daemon accepts, with dates, not countdowns",
     for (const d of [bar.afk.expires_at, bar.next_wake_at, bar.boot?.started_at, bar.boot?.deadline_at]) {
         if (d != null) assert.ok(Number.isFinite(Date.parse(d)), `${d} is a date`);
     }
+});
+
+test("#3066 attach: the host's socket, no_socket in tmux, remote for another machine's daemon", async () => {
+    const { attachFor } = await import("../agent-bar.js");
+    assert.deepEqual(attachFor({ hostControl: "/h/hosts/worker/control.sock" }), { socket: "/h/hosts/worker/attach.sock" });
+    assert.deepEqual(attachFor({}), { socket: null, reason: "no_socket" });
+    assert.deepEqual(attachFor({ remoteUrl: "http://box.tail:7777" }), { socket: null, reason: "remote" });
+    assert.deepEqual(attachFor({ remoteUrl: "http://127.0.0.1:7777" }), { socket: null, reason: "no_socket" }, "this machine's daemon over TCP");
+    assert.deepEqual(attachFor({ hostControl: "/h/c.sock", remoteUrl: "http://box:1" }), { socket: "/h/attach.sock" }, "on a host, its socket");
+});
+
+test("#3066 attach is checked, and a loop older than the field reports no_socket", () => {
+    const { attach: _drop, ...old } = base();
+    const parsed = parseAgentBar(old) as AgentBar;
+    assert.deepEqual(parsed.attach, { socket: null, reason: "no_socket" });
+    assert.deepEqual((parseAgentBar({ ...base(), attach: { socket: "/s" } }) as AgentBar).attach, { socket: "/s" });
+    assert.ok("error" in parseAgentBar({ ...base(), attach: { socket: null, reason: "elsewhere" } }));
+    assert.ok("error" in parseAgentBar({ ...base(), attach: { socket: "" } }));
 });

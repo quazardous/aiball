@@ -29,7 +29,7 @@ const bar = (phase: string) => ({
     phase, presence: "loop", afk: { mode: "off", expires_at: null }, prompt: { visible: true, has_input: false }, human_typing: false,
     marker: { info: null, health_prompt: false, resume_picker: false, resume_mode_picker: false },
     alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: true },
-    proxy_alive: true, zen: false, counters: null, next_wake_at: null, boot: null, host: "tmux",
+    proxy_alive: true, zen: false, counters: null, next_wake_at: null, boot: null, host: "tmux", attach: { socket: null, reason: "no_socket" },
 }) as never;
 
 function refusal(fn: () => unknown): { status: number; code: string } {

@@ -61,6 +61,7 @@ const bar = (over: Record<string, unknown> = {}) => ({
     next_wake_at: "2026-09-26T09:30:00.000Z",
     boot: null,
     host: "tmux",
+    attach: { socket: null, reason: "no_socket" },
     ...over,
 });
 
