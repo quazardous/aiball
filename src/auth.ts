@@ -203,6 +203,18 @@ export interface CallerContext {
     signal_projects?: string[];
 }
 
+/**
+ * #3063 — where `bearerAuth` leaves the settled context on a request, for the
+ * routes that serve a bus method (`bus/http.ts`). A symbol: no header, query
+ * or body can set it.
+ */
+export const CALLER_CONTEXT = Symbol("aiball.caller");
+
+/** The context `bearerAuth` settled for this request, or null on a public path. */
+export function callerContextOf(req: Request): CallerContext | null {
+    return (req as unknown as { [CALLER_CONTEXT]?: CallerContext })[CALLER_CONTEXT] ?? null;
+}
+
 export type AuthOutcome =
     | { ok: true; ctx: CallerContext }
     | { ok: false; status: number; error: string; code: ErrorCode; hint?: string };
@@ -341,6 +353,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
             return;
         }
     }
+    (req as unknown as { [CALLER_CONTEXT]: CallerContext })[CALLER_CONTEXT] = ctx;
     const ar = req as AuthenticatedRequest;
     ar.consumer_id = ctx.consumer_id;
     ar.token_kind = ctx.token_kind;

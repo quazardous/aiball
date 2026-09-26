@@ -243,8 +243,9 @@ authorship consistent, it does not prove it.
 The bus ([`API-BUS.md`](./API-BUS.md)) decides who a caller is with the same
 function as `/api`, once, on the request that opens the connection; every call
 on it runs as that caller. The boundaries above hold unchanged: the local
-socket trusts the same user, a token binds the identity over TCP, and a proxy
-node is a `node` caller, which a method must admit by name. What differs is
+socket trusts the same user, a token binds the identity over TCP, and a caller
+relayed by a proxy node is marked so: a method closed to relayed callers (the
+loop controls) refuses it, whoever it names. What differs is
 time: a token revoked in the daemon closes the connections that rest on it at
 once; one deleted by another process (the CLI) is caught within the keepalive
 period, 25 seconds.

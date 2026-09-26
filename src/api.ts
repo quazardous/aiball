@@ -1,4 +1,5 @@
 import { projectTicketStates } from "./db/inbox-agg.js";
+import { serveMethod } from "./bus/http.js";
 import { trimStepWaits } from "./db/wait-credit.js";
 import { invalidateInboxAgg } from "./db/inbox-agg.js";
 import { invalidateFlagsCache } from "./db/projects.js";
@@ -8,7 +9,6 @@ import { Router, type Request, type Response } from "express";
 import {
     getMessage,
     listProjects,
-    listKnownAgents,
     getStrategy,
     setStrategy,
     getProjectStrategy,
@@ -39,7 +39,6 @@ import { listTicketIdsInProject } from "./db/tickets.js";
 import { activeFocus, describeFocus, parseFocusTickets } from "./wake-focus.js";
 import { focusRelatives } from "./db/focus-relatives.js";
 import { projectCriticalTicket } from "./db/critical-ticket.js";
-import { listMilestones } from "./db/milestones.js";
 import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -262,11 +261,7 @@ api.get("/projects/:project/critical", (req: Request, res: Response) => {
 
 // #2910 — a project's milestones, oldest first: state (open / released) and
 // progress. Readable by every consumer, coders included.
-api.get("/projects/:project/milestones", (req: Request, res: Response) => {
-    const project = String(req.params.project ?? "");
-    if (!project) return badRequest(res, "project required");
-    res.json({ project, milestones: listMilestones(project) });
-});
+api.get("/projects/:project/milestones", serveMethod("project.milestones"));
 
 api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) => {
     const project = String(req.params.project ?? "");
@@ -417,12 +412,7 @@ api.get("/projects/:name/stats-rich", (req, res) => {
  * so the composer can offer relevant completions when the user types @.
  * Lightweight read — called once at composer mount, cached client-side.
  */
-api.get("/mention-suggestions", (_req, res) => {
-    res.json({
-        projects: listProjects(),
-        agents: listKnownAgents(),
-    });
-});
+api.get("/mention-suggestions", serveMethod("mention.suggestions"));
 
 api.post("/projects/:name/purge", (req, res) => {
     const name = req.params.name;

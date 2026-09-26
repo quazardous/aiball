@@ -36,7 +36,10 @@ export interface BusConnectOptions {
 export interface BusHello {
     version: number;
     consumer: string | null;
+    /** human, agent or key. */
     kind: string;
+    /** Relayed by a proxy node. */
+    relayed: boolean;
 }
 
 type Settled = { ok: true; result: unknown } | { ok: false; error: BusError };

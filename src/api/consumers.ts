@@ -3,11 +3,10 @@
  * Carved out of api.ts on 2026-05-19 — behavior-preserving move.
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
-import { listTicketsFor } from "./tickets.js";
-import { isBarHost, parseAgentBar } from "../agent-bar.js";
-import { getAgentBar, setAgentBar } from "../agent-bar-store.js";
-import { type WaitCreditRow, listWaitCreditMoves, listWaitCredits, waitCreditBalance, waitCreditEnabled } from "../db/wait-credit.js";
-import { unreadPingCount } from "../db/pings.js";
+import { serveMethod } from "../bus/http.js";
+import { parseAgentBar } from "../agent-bar.js";
+import { setAgentBar } from "../agent-bar-store.js";
+import { listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
 import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
 import {
@@ -15,7 +14,6 @@ import {
     ensureConsumer,
     getConsumer,
     listConsumers,
-    pingCountsByConsumer,
     setConsumerState,
     updateConsumer,
     upsertConsumer,
@@ -46,35 +44,13 @@ import { isPresent, presenceRunning } from "../live-presence.js";
 import { canControlLoop } from "../loop-control.js";
 import { spoolPrompt, drainPrompts } from "../loop-prompts.js";
 import { pickHoldTargets, type LoopHoldResult } from "../loop-hold.js";
-import { localLoopDir, sendAfkToLoop } from "./agents.js";
-import { loopSockPath } from "../claude-loop/state.js";
-import { sendEventOnce } from "../claude-loop/ipc-events.js";
+import { sendAfkToLoop } from "./agents.js";
 import { badRequest, consumerOf, notFound, tokenKindOf, refuse } from "./_helpers.js";
 import { ERROR_CODES } from "../domain.js";
 
 export const consumersRouter = Router();
 
-consumersRouter.get("/consumers", (_req, res) => {
-    // #443: surface the live-presence verdict (#395) per consumer so the UI can
-    // render online/offline AUTHORITATIVELY — a killed loop reads offline within
-    // the SSE grace (~6s) instead of lingering the full 120s heartbeat window
-    // (the bug david saw: "running" traîne après kill). Tri-state, mirroring
-    // `consumerEffectiveRunning` server-side: true = live (or in grace), false =
-    // seen-then-gone this session (authoritative STOP), null = never seen via SSE
-    // this session → client falls back to the `state_updated_at` freshness bridge.
-    // #1185 — per-consumer raw ping tally (total + unseen) for the list.
-    const pings = pingCountsByConsumer();
-    // #2645 — each agent's wait credit, per project (see db/wait-credit.ts).
-    const credits = new Map<string, WaitCreditRow[]>();
-    for (const row of listWaitCredits()) credits.set(row.consumer_id, [...(credits.get(row.consumer_id) ?? []), row]);
-    res.json(listConsumers().map((c) => ({
-        ...c,
-        present: presenceRunning(c.consumer_id),
-        ping_count: pings.get(c.consumer_id)?.total ?? 0,
-        ping_unseen: pings.get(c.consumer_id)?.unseen ?? 0,
-        wait_credit: c.kind === "human" ? null : (credits.get(c.consumer_id) ?? []),
-    })));
-});
+consumersRouter.get("/consumers", serveMethod("consumer.list"));
 
 // #2645 — one agent's wait credit: per project, and its latest movements.
 consumersRouter.get("/consumers/:consumer_id/wait-credit", (req: Request, res: Response) => {
@@ -378,31 +354,7 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
  * wait credit on the project, to save two calls. Read-only: nothing is marked
  * read and no wake is recorded. A human reads any agent's; an agent, its own.
  */
-consumersRouter.get("/consumers/:consumer_id/backlog", (req: Request, res: Response) => {
-    const target = String(req.params.consumer_id);
-    const caller = consumerOf(req);
-    if (target !== caller && !isHuman(caller)) {
-        return refuse(res, 403, "an agent's backlog is readable by a human or by the agent itself");
-    }
-    const c = getConsumer(target);
-    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
-    const project = typeof req.query.project === "string" && req.query.project ? req.query.project : undefined;
-    const query: Record<string, string> = { backlog: "1" };
-    for (const key of ["project", "cooldown_sec", "limit"] as const) {
-        const v = req.query[key];
-        if (typeof v === "string" && v) query[key] = v;
-    }
-    // The proxy's no-claim hint is a header of the agent's own requests: absent
-    // here, the agent's claimability is its database flag, as its loops see it
-    // off the proxy.
-    const rows = listTicketsFor(target, query, { noClaimHint: false });
-    res.json({
-        consumer_id: target,
-        rows,
-        unread: unreadPingCount(target),
-        wait_credit: project && c.kind !== "human" && waitCreditEnabled(project) ? waitCreditBalance(target, project) : null,
-    });
-});
+consumersRouter.get("/consumers/:consumer_id/backlog", serveMethod("consumer.backlog"));
 
 /**
  * #3030 — an agent's loop bar as data, for hosts other than tmux. The loop pushes
@@ -425,16 +377,7 @@ consumersRouter.put("/consumers/:consumer_id/bar", (req: Request, res: Response)
     res.json({ consumer_id: caller, changed });
 });
 
-consumersRouter.get("/consumers/:consumer_id/bar", (req: Request, res: Response) => {
-    const target = String(req.params.consumer_id);
-    const caller = consumerOf(req);
-    if (target !== caller && !isHuman(caller)) {
-        return refuse(res, 403, "an agent's bar is readable by a human or by the agent itself");
-    }
-    const view = getAgentBar(target);
-    if (!view) return notFound(res, "no bar pushed by this consumer yet");
-    res.json(view);
-});
+consumersRouter.get("/consumers/:consumer_id/bar", serveMethod("consumer.bar"));
 
 /**
  * #3044 — who draws an agent's bar: `tmux` (its status line) or `external`
@@ -442,20 +385,7 @@ consumersRouter.get("/consumers/:consumer_id/bar", (req: Request, res: Response)
  * control, like AFK: a moderator's, never a proxy node's. Relayed to the loop,
  * whose kernel records it; the next bar pushed carries the new `host`.
  */
-consumersRouter.post("/consumers/:consumer_id/bar-host", async (req: Request, res: Response) => {
-    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
-    const host = (req.body ?? {}).host;
-    if (!isBarHost(host)) return badRequest(res, "host must be tmux or external");
-    const where = localLoopDir(String(req.params.consumer_id));
-    if (!where.ok) return refuse(res, where.status, where.error, where.code);
-    try {
-        await sendEventOnce(loopSockPath(where.sd), { kind: "proxyEvent", data: { event: "bar_host", host } }, { timeoutMs: 1000, throwOnError: true });
-    } catch (e) {
-        return refuse(res, 502, `the loop did not take it: ${(e as Error).message}`, ERROR_CODES.BAD_GATEWAY);
-    }
-    res.status(202).json({ consumer_id: req.params.consumer_id, loop: where.loop, host });
-});
+consumersRouter.post("/consumers/:consumer_id/bar-host", serveMethod("consumer.set_bar_host", undefined, { status: 202 }));
 
 /**
  * #424: the Nodes panel feed — proxy-node tokens (kind='node') with label,

@@ -24,6 +24,7 @@
  * session cookie, agent callers with a bearer — both work without any
  * additional path.
  */
+import { serveMethod } from "../bus/http.js";
 import { Router, type Request, type Response } from "express";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -32,9 +33,8 @@ import { homedir } from "node:os";
 import { MUX_CMD, tmuxName, loopSockPath } from "../claude-loop/state.js";
 import { sendEventOnce } from "../claude-loop/ipc-events.js";
 import { captureCursor, captureGeometry } from "../pane.js";
-import { getConsumer, isHuman } from "../db.js";
-import { canControlLoop } from "../loop-control.js";
-import { consumerOf, tokenKindOf, refuse } from "./_helpers.js";
+import { getConsumer } from "../db.js";
+import { refuse } from "./_helpers.js";
 import {
     getNodeSocketForConsumerIp,
     listConnectedNodeIds,
@@ -514,30 +514,4 @@ export function sendAfkToLoop(
     return { ok: true, loop: loopName };
 }
 
-agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
-    // #2333 — holding or releasing someone's loop is a loop control like kill and
-    // prompt: moderator only, proxy nodes denied. It checked nothing before.
-    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
-    const rawName = req.params.name;
-    const consumerId = typeof rawName === "string" ? rawName : "";
-    if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
-        return refuse(res, 400, "bad consumer id");
-    }
-    const body = (req.body ?? {}) as { action?: unknown; durationSec?: unknown };
-    const action = body.action;
-    if (action !== "toggle" && action !== "off" && action !== "arm_10m" && action !== "arm_inf") {
-        return refuse(res, 400, "action must be one of toggle / off / arm_10m / arm_inf");
-    }
-    const durationSec = typeof body.durationSec === "number" && Number.isFinite(body.durationSec)
-        ? Math.max(1, Math.floor(body.durationSec))
-        : 600;
-    const sent = sendAfkToLoop(consumerId, action, durationSec);
-    if (!sent.ok) return refuse(res, sent.status, sent.error, sent.code);
-    res.status(202).json({
-        consumer_id: consumerId,
-        loop: sent.loop,
-        action,
-        queued: true,
-    });
-});
+agentsRouter.post("/agents/:name/afk", serveMethod("consumer.afk", undefined, { status: 202 }));

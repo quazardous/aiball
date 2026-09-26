@@ -4,9 +4,9 @@
  * helper `resolveTagRef` moved verbatim, mounted as a sub-router from
  * the top-level api router.
  */
+import { serveMethod } from "../bus/http.js";
 import { Router, type Request, type Response } from "express";
 import {
-    addMessageTag,
     deleteTag,
     getMessage,
     getTag,
@@ -14,7 +14,6 @@ import {
     insertTag,
     listMessageTags,
     listTags,
-    removeMessageTag,
     setMessageTags,
     updateTag,
     type Tag,
@@ -26,7 +25,7 @@ import { authorFor, badRequest, conflict, notFound } from "./_helpers.js";
 
 export const tagsRouter = Router();
 
-function resolveTagRef(ref: unknown): Tag | null {
+export function resolveTagRef(ref: unknown): Tag | null {
     if (typeof ref === "number") return getTag(ref);
     if (typeof ref === "string") {
         return getTagByName(ref) ?? null;
@@ -101,14 +100,7 @@ export function tagCatalog(project: string | null): CatalogTag[] {
 // numeric id and would choke on config tags' null id. The merged catalog
 // (config ⊕ DB, each annotated with `source`) is opt-in via `?project=`,
 // where `_global` / empty selects the cross-project view (project=null).
-tagsRouter.get("/tags", (req: Request, res: Response) => {
-    const raw = req.query.project;
-    if (typeof raw !== "string") {
-        return res.json(listTags());
-    }
-    const project = raw === "_global" || raw === "" ? null : raw;
-    res.json(tagCatalog(project));
-});
+tagsRouter.get("/tags", serveMethod("tag.list"));
 
 tagsRouter.post("/tags", (req: Request, res: Response) => {
     const { name, color, note, position, project } = req.body ?? {};
@@ -258,42 +250,6 @@ tagsRouter.put("/messages/:id/tags", (req: Request, res: Response) => {
     res.json(tags);
 });
 
-tagsRouter.post("/messages/:id/tags", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const m = getMessage(id);
-    if (!m) return notFound(res);
-    const { tag, set_by } = req.body ?? {};
-    const t = resolveTagRef(tag);
-    if (!t) return badRequest(res, `unknown tag: ${tag}`);
-    // #457 slice 2 : detect if the tag was actually NEW (POST is idempotent on
-    // a same-tag re-add — only emit the trigger when something actually moved).
-    const wasPresent = listMessageTags(id).some((x) => x.id === t.id);
-    const setBy = authorFor(req, res, set_by, "set_by");
-    if (setBy === null) return;
-    addMessageTag(id, t.id, setBy);
-    const tags = listMessageTags(id);
-    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
-    if (m.kind === "ticket_created" && !wasPresent) {
-        emitLifecycle({
-            op: "tagged",
-            message: m,
-            added_tag: t.name,
-            all_tags: tags.map((x) => x.name),
-        });
-    }
-    res.status(201).json(tags);
-});
+tagsRouter.post("/messages/:id/tags", serveMethod("message.add_tag", undefined, { status: 201 }));
 
-tagsRouter.delete("/messages/:id/tags/:tag", (req, res) => {
-    const id = Number(req.params.id);
-    const m = getMessage(id);
-    if (!m) return notFound(res);
-    const tagRef = req.params.tag;
-    const t =
-        /^\d+$/.test(tagRef) ? getTag(Number(tagRef)) : getTagByName(tagRef);
-    if (!t) return notFound(res, `unknown tag: ${tagRef}`);
-    removeMessageTag(id, t.id);
-    const tags = listMessageTags(id);
-    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
-    res.json(tags);
-});
+tagsRouter.delete("/messages/:id/tags/:tag", serveMethod("message.remove_tag"));

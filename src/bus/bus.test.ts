@@ -40,25 +40,26 @@ const NODE = issueToken({ kind: "node", label: "node-3063" }).token;
 const KEY = issueToken({ kind: "signal", label: "ci", scopes: JSON.stringify(["signals"]) }).token;
 
 // Methods for these tests only, so that phase 1 is proven on its own rules.
-const TEST_METHODS = ["test.humans", "test.signal", "test.refuse", "test.crash", "test.slow", "test.store", "test.read"];
+const TEST_METHODS = ["test.humans", "test.local", "test.signal", "test.refuse", "test.crash", "test.slow", "test.store", "test.read"];
 let stored: unknown = null;
 defineMethod({ name: "test.humans", who: ["human"], params: z.object({}), run: () => "ok" });
+defineMethod({ name: "test.local", who: ["human"], relayed: false, params: z.object({}), run: () => "ok" });
 defineMethod({ name: "test.signal", who: ["key"], scope: "signals", params: z.object({}), run: (c) => c.signal_source });
 defineMethod({
     name: "test.refuse",
-    who: ["human", "agent", "node"],
+    who: ["human", "agent"],
     params: z.object({}),
     run: () => { throw new Refusal(409, "held by someone else", ERROR_CODES.TICKET_HELD, { holder: "x" }); },
 });
-defineMethod({ name: "test.crash", who: ["human", "agent", "node"], params: z.object({}), run: () => { throw new Error("secret detail"); } });
+defineMethod({ name: "test.crash", who: ["human", "agent"], params: z.object({}), run: () => { throw new Error("secret detail"); } });
 defineMethod({
     name: "test.slow",
-    who: ["human", "agent", "node"],
+    who: ["human", "agent"],
     params: z.object({ ms: z.number() }),
     run: async ({}, p) => { await new Promise((r) => setTimeout(r, p.ms)); return "slow"; },
 });
-defineMethod({ name: "test.store", who: ["human", "agent", "node"], params: z.object({ v: z.unknown() }), run: (_c, p) => { stored = p.v; return null; } });
-defineMethod({ name: "test.read", who: ["human", "agent", "node"], params: z.object({}), run: () => stored });
+defineMethod({ name: "test.store", who: ["human", "agent"], params: z.object({ v: z.unknown() }), run: (_c, p) => { stored = p.v; return null; } });
+defineMethod({ name: "test.read", who: ["human", "agent"], params: z.object({}), run: () => stored });
 
 const app = createApp();
 const tcp = createServer(app);
@@ -144,19 +145,26 @@ test("the identity the bus settles is the one HTTP settles, for every kind of ca
 });
 
 test("the hello says who the connection runs as, and its kind", async () => {
-    assert.deepEqual((await connect({ url, token: HUMAN })).hello, { version: 1, consumer: "boss", kind: "human" });
-    assert.deepEqual((await connect({ url, token: NODE, consumer: "agent-b" })).hello, { version: 1, consumer: "agent-b", kind: "node" });
-    assert.deepEqual((await connect({ socket: sockPath, consumer: "agent-a" })).hello, { version: 1, consumer: "agent-a", kind: "agent" });
+    assert.deepEqual((await connect({ url, token: HUMAN })).hello, { version: 1, consumer: "boss", kind: "human", relayed: false });
+    assert.deepEqual((await connect({ url, token: NODE, consumer: "agent-b" })).hello, { version: 1, consumer: "agent-b", kind: "agent", relayed: true });
+    assert.deepEqual((await connect({ socket: sockPath, consumer: "agent-a" })).hello, { version: 1, consumer: "agent-a", kind: "agent", relayed: false });
 });
 
 // --- Who may call what: declared per method ---
 
-test("a method open to humans refuses an agent and a node, with the code a route would give", async () => {
+test("a method open to humans refuses an agent, with the code a route would give", async () => {
     assert.equal(await (await connect({ url, token: HUMAN })).call("test.humans"), "ok");
     const agent = await refused((await connect({ url, token: AGENT })).call("test.humans"));
     assert.deepEqual([agent.status, agent.code, agent.rpcCode], [403, ERROR_CODES.FORBIDDEN, 403]);
-    const node = await refused((await connect({ url, token: NODE, consumer: "boss" })).call("test.humans"));
-    assert.equal(node.code, ERROR_CODES.FORBIDDEN, "a node relaying a human is still a node");
+});
+
+test("a node relaying a human is that human, except where nodes may not reach", async () => {
+    const node = await connect({ url, token: NODE, consumer: "boss" });
+    assert.equal(await node.call("test.humans"), "ok", "as over HTTP: the relayed identity");
+    const local = await refused(node.call("test.local"));
+    assert.equal(local.code, ERROR_CODES.FORBIDDEN);
+    assert.match(local.message, /proxy node/);
+    assert.equal(await (await connect({ url, token: HUMAN })).call("test.local"), "ok");
 });
 
 test("an API key reaches only the methods open to keys, with the scope they need", async () => {

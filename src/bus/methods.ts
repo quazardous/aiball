@@ -2,35 +2,46 @@
  * #3063 — the core as a table of methods. A method is a function of the
  * caller and its parameters, and declares in one place who may call it and
  * what it takes; it sees no HTTP request. The bus calls it directly; while
- * clients move over, an HTTP route may call the same function.
+ * clients move over, an HTTP route calls the same function (`bus/http.ts`).
  */
 import type { z } from "zod";
 import type { CallerContext } from "../auth.js";
 import { isHuman } from "../db.js";
-import { ERROR_CODES, errorCodeForStatus, type ErrorCode } from "../domain.js";
+import { ERROR_CODES, errorCodeForStatus, isErrorCode, type ErrorCode } from "../domain.js";
 
 /**
- * The kinds of caller a method may admit:
- * - `human`: a human consumer, on the local socket or with its own token;
- * - `agent`: an agent, on the local socket or with its own token;
- * - `node`: anyone relayed by a proxy node, whose token is the weak point
- *   (docs/SECURITY.md);
+ * Who the caller is:
+ * - `human`: a human consumer;
+ * - `agent`: an agent;
  * - `key`: an API key, which also needs the method's `scope`.
  */
-export type CallerKind = "human" | "agent" | "node" | "key";
+export type CallerKind = "human" | "agent" | "key";
 
-/** The caller of a method: the identity settled once, and its kind. */
+/** The caller of a method: the identity settled once, its kind, and how it came. */
 export interface Caller extends CallerContext {
     kind: CallerKind;
+    /**
+     * Relayed by a proxy node, whose token vouches for whoever it names: the
+     * weak point (docs/SECURITY.md). A method that must not be reached that
+     * way says `relayed: false`.
+     */
+    relayed: boolean;
+    /** The consumer, for the kinds that have one (human, agent). */
+    consumer_id?: string;
 }
 
 /** `kind` is fixed with the identity: a connection computes it once. */
 export function callerOf(ctx: CallerContext): Caller {
     const kind: CallerKind = ctx.token_kind === "signal" ? "key"
-        : ctx.token_kind === "node" ? "node"
         : ctx.consumer_id && isHuman(ctx.consumer_id) ? "human"
         : "agent";
-    return { ...ctx, kind };
+    return { ...ctx, kind, relayed: ctx.token_kind === "node" };
+}
+
+/** The caller's consumer id; a method open to humans and agents only always has one. */
+export function consumerIdOf(caller: Caller): string {
+    if (!caller.consumer_id) throw new Refusal(403, "this caller is not a consumer", ERROR_CODES.FORBIDDEN);
+    return caller.consumer_id;
 }
 
 /** A method's refusal: the same `{ error, code }` an HTTP route answers. */
@@ -52,12 +63,16 @@ export interface MethodSpec<S extends z.ZodType, R> {
     who: readonly CallerKind[];
     /** With `who` holding `key`: the scope a key needs. */
     scope?: string;
+    /** false: refused to a caller relayed by a proxy node. Default true. */
+    relayed?: boolean;
+    /** The refusal a caller outside `who` gets, when a precise one exists. */
+    denied?: { message: string; code: ErrorCode };
     params: S;
     run(caller: Caller, params: z.infer<S>): R | Promise<R>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyMethod = MethodSpec<z.ZodType, any>;
+export type AnyMethod = MethodSpec<z.ZodType, any>;
 
 const registry = new Map<string, AnyMethod>();
 
@@ -86,13 +101,38 @@ export function getMethod(name: string): AnyMethod | undefined {
 
 /** Why `caller` may not call `m`, or null when it may. */
 export function accessRefusal(m: AnyMethod, caller: Caller): Refusal | null {
+    // Before the kind: a node may name a human, and must not reach what nodes may not.
+    if (caller.relayed && m.relayed === false) {
+        return new Refusal(403, `${m.name} is not open through a proxy node`, ERROR_CODES.FORBIDDEN);
+    }
     if (!m.who.includes(caller.kind)) {
-        return new Refusal(403, `${m.name} is not open to a ${caller.kind === "key" ? "API key" : caller.kind}`, ERROR_CODES.FORBIDDEN);
+        if (m.denied) return new Refusal(403, m.denied.message, m.denied.code);
+        return new Refusal(403, `${m.name} is not open to ${caller.kind === "key" ? "an API key" : `a ${caller.kind}`}`, ERROR_CODES.FORBIDDEN);
     }
     if (caller.kind === "key" && !(caller.signal_scopes ?? []).includes(m.scope!)) {
         return new Refusal(403, `this key lacks the scope ${m.scope}`, ERROR_CODES.KEY_SCOPE_MISSING);
     }
     return null;
+}
+
+/**
+ * #3036 — the author of a write is the caller: a params field naming someone
+ * else is refused (403 `AUTHOR_MISMATCH`), as over HTTP.
+ */
+export function authorOf(caller: Caller, given: unknown, field = "by_agent"): string {
+    const me = consumerIdOf(caller);
+    if (given === undefined || given === null || given === "" || given === me) return me;
+    throw new Refusal(
+        403,
+        `${field} "${String(given)}" is not the caller (${me}): the author of a write is who is authenticated — leave ${field} out`,
+        ERROR_CODES.AUTHOR_MISMATCH,
+    );
+}
+
+/** A caught error as a refusal: its own code when it carries one, else the generic code of `status`. */
+export function refusalFrom(status: number, err: unknown): Refusal {
+    const code = (err as { code?: unknown } | null)?.code;
+    return new Refusal(status, err instanceof Error ? err.message : String(err), isErrorCode(code) ? code : undefined);
 }
 
 /** Test hook: forget a method defined by a test. */

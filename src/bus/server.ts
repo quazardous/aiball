@@ -158,7 +158,7 @@ function open(ws: WebSocket, caller: Caller, seen: boolean): void {
     ws.send(JSON.stringify({
         jsonrpc: "2.0",
         method: "bus.hello",
-        params: { version: BUS_VERSION, consumer: caller.consumer_id ?? null, kind: caller.kind },
+        params: { version: BUS_VERSION, consumer: caller.consumer_id ?? null, kind: caller.kind, relayed: caller.relayed },
     }));
 }
 

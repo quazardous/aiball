@@ -17,37 +17,27 @@
  *
  * `decide()` helper is local — shared by approve/reject; not exported.
  */
+import { serveMethod } from "../bus/http.js";
 import { earnOnClose } from "../db/wait-credit.js";
 import { milestoneOpenRefusal, openTicketsIn } from "../db/milestones.js";
 import { Router, type Request, type Response } from "express";
 import { ERROR_CODES, MESSAGE_SCOPES, TICKET_LEVELS, type TicketLevel } from "../domain.js";
 import { seesLevel } from "../db/consumers.js";
-import { clearSeenForMessage, insertPing } from "../db/pings.js";
 import {
     INTENTS,
     PRIORITIES,
     applyMessageDecision,
-    deleteComment,
-    deletePingsForMessage,
     editMessage,
     getMessage,
     isHuman,
     listMessages,
     listPendingDecisionsForReporter,
     listPlansToExecute,
-    markQuestionAnswered,
-    noteMessage,
-    promoteMessageToDecision,
-    reclassifyMessageDecision,
-    removeMessageDecision,
-    setMessageSummary,
-    setMessageVote,
     updateMessageStatus,
     type Intent,
     type MessageKind,
     type MessageStatus,
     type Priority,
-    resolveAttachments,
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
@@ -58,7 +48,7 @@ import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
 import { emitLifecycle } from "../event-bus.js";
-import { authorFor, badRequest, conflict, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
+import { authorFor, badRequest, conflict, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne } from "./_helpers.js";
 import { getInboxAgg } from "../db/inbox-agg.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
@@ -189,13 +179,7 @@ messagesRouter.get("/messages", (req: Request, res: Response) => {
     res.json(withTags(rows));
 });
 
-messagesRouter.get("/messages/:id", (req, res) => {
-    const m = getMessage(Number(req.params.id));
-    if (!m) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    // #3040 — the uploads its text cites, resolved as on a thread read.
-    const localTrust = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
-    res.json({ ...withTagsOne(m), attachments: resolveAttachments([m.body], localTrust) });
-});
+messagesRouter.get("/messages/:id", serveMethod("message.get"));
 
 /**
  * #697 F5 (pisynth-claude #692) — "ball in MY court" lens. Lists every
@@ -405,29 +389,7 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
  *
  *   POST /api/messages/:id/delete   (no body)
  */
-messagesRouter.post("/messages/:id/delete", (req, res) => {
-    const id = Number(req.params.id);
-    const existing = getMessage(id);
-    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    if (existing.kind !== "comment_added") {
-        return badRequest(res, "only comments can be deleted");
-    }
-    const caller = consumerOf(req);
-    if (!isHuman(caller)) {
-        return refuse(res, 403, "only a registered human moderator can delete a comment", ERROR_CODES.MODERATOR_ONLY);
-    }
-    let updated;
-    try {
-        updated = deleteComment(id, caller);
-    } catch (e) {
-        return badRequest(res, (e as Error).message);
-    }
-    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    deletePingsForMessage(id);
-    const decorated = withTagsOne(updated);
-    broadcast({ type: "message_edited", data: decorated });
-    res.json(decorated);
-});
+messagesRouter.post("/messages/:id/delete", serveMethod("message.delete"));
 
 /**
  * Mark a question on a message as answered (#B.104). Flips
@@ -440,31 +402,7 @@ messagesRouter.post("/messages/:id/delete", (req, res) => {
  * Idempotent — re-answering is a no-op. Broadcasts `message_edited`
  * on success so live clients see the toggle and the chip update.
  */
-messagesRouter.post("/messages/:id/questions/:qid/answer", (req, res) => {
-    const id = Number(req.params.id);
-    const qid = String(req.params.qid);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    if (!/^[a-zA-Z0-9_-]+$/.test(qid)) return badRequest(res, "invalid question id");
-    const { answered_by, answered_in } = (req.body ?? {}) as {
-        answered_by?: unknown;
-        answered_in?: unknown;
-    };
-    // #3036 — who answers is who is authenticated; `answered_by` may be left out.
-    const answeredBy = authorFor(req, res, answered_by, "answered_by");
-    if (answeredBy === null) return;
-    if (typeof answered_in !== "number" || !Number.isFinite(answered_in)) {
-        return badRequest(res, "answered_in (number) required");
-    }
-    const updated = markQuestionAnswered(id, qid, {
-        answered_by: answeredBy,
-        answered_at: new Date().toISOString(),
-        answered_in,
-    });
-    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    const decorated = withTagsOne(updated);
-    broadcast({ type: "message_edited", data: decorated });
-    res.json(decorated);
-});
+messagesRouter.post("/messages/:id/questions/:qid/answer", serveMethod("message.answer_question"));
 
 /**
  * Decision-on-comment accept/reject (#B.129).
@@ -688,20 +626,7 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
  *   POST /api/messages/:id/resurface
  *   → { resurfaced: N }   (count of pings that flipped from seen → unseen)
  */
-messagesRouter.post("/messages/:id/resurface", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const existing = getMessage(id);
-    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    const caller = consumerOf(req);
-    if (!isHuman(caller)) {
-        return refuse(res, 403, "only a registered human moderator can resurface a message", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const { resurfaced } = clearSeenForMessage(id);
-    // Broadcast so subscribers (UI list rows) refresh their unread chip.
-    broadcast({ type: "message_edited", data: withTagsOne(existing) });
-    res.json({ resurfaced });
-});
+messagesRouter.post("/messages/:id/resurface", serveMethod("message.resurface"));
 
 /**
  * Set or clear a comment's one-line summary (#B.130 phase 1).
@@ -713,23 +638,7 @@ messagesRouter.post("/messages/:id/resurface", (req: Request, res: Response) => 
  * can summarize an existing comment (the audit is in updated_at, not
  * meta). Broadcasts `message_edited`.
  */
-messagesRouter.post("/messages/:id/summarize", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const body = (req.body ?? {}) as { summary?: unknown };
-    if (typeof body.summary !== "string") {
-        return badRequest(res, "summary (string) required");
-    }
-    try {
-        const updated = setMessageSummary(id, body.summary);
-        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        const decorated = withTagsOne(updated);
-        broadcast({ type: "message_edited", data: decorated });
-        res.json(decorated);
-    } catch (e) {
-        return refuseError(res, 409, e);
-    }
-});
+messagesRouter.post("/messages/:id/summarize", serveMethod("message.summarize"));
 
 /**
  * #518 (david `uzwfc3` MVP option A) — vote +1/-1 sur un commentaire,
@@ -743,35 +652,7 @@ messagesRouter.post("/messages/:id/summarize", (req: Request, res: Response) => 
  *
  * 409 si la cible n'est pas un commentaire (votes comment-only).
  */
-messagesRouter.post("/messages/:id/vote", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const body = (req.body ?? {}) as { value?: unknown };
-    if (body.value !== 1 && body.value !== -1 && body.value !== 0) {
-        return badRequest(res, "value must be 1, -1, or 0");
-    }
-    const voter = consumerOf(req);
-    try {
-        const updated = setMessageVote(id, voter, body.value);
-        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        const decorated = withVotesOne(withTagsOne(updated), voter);
-        // Broadcast pour live update — chaque viewer recompute son `mine` côté
-        // client à partir de meta.votes (qui IS dans le payload broadcasté).
-        broadcast({ type: "message_edited", data: decorated });
-        // #749 david `wfhw74` — un thumb-up landé sur un commentaire pingue
-        // son author (= surface dans la wake-FIFO via la voie standard). Pas
-        // de ping sur -1 (thumb down) ni 0 (retract) — david a explicitement
-        // dit "thumb up". `insertPing` dedup via son unique (recipient,
-        // ticket, comment), donc multi-voters sur le même commentaire ne
-        // spamment pas l'author (un seul ping consolidé).
-        if (body.value === 1 && updated.by_agent && updated.by_agent !== voter) {
-            insertPing(updated.by_agent, updated, voter);
-        }
-        res.json(decorated);
-    } catch (e) {
-        return refuseError(res, 409, e);
-    }
-});
+messagesRouter.post("/messages/:id/vote", serveMethod("message.vote"));
 
 /**
  * Reclassify a comment's decision kind without flipping its status
@@ -784,23 +665,7 @@ messagesRouter.post("/messages/:id/vote", (req: Request, res: Response) => {
  *
  * HTTP 409 when the decision doesn't exist OR is already terminal.
  */
-messagesRouter.post("/messages/:id/reclassify", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const body = (req.body ?? {}) as { new_kind?: unknown };
-    if (typeof body.new_kind !== "string" || !isDecisionKind(body.new_kind)) {
-        return badRequest(res, "new_kind must be a valid decision kind");
-    }
-    try {
-        const updated = reclassifyMessageDecision(id, body.new_kind);
-        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        const decorated = withTagsOne(updated);
-        broadcast({ type: "message_edited", data: decorated });
-        res.json(decorated);
-    } catch (e) {
-        return refuseError(res, 409, e);
-    }
-});
+messagesRouter.post("/messages/:id/reclassify", serveMethod("message.reclassify"));
 
 /**
  * Promote an existing comment to a decision (#B.256). Two flows:
@@ -812,50 +677,14 @@ messagesRouter.post("/messages/:id/reclassify", (req: Request, res: Response) =>
  * Reporter-only by convention (the frontend gates the affordance);
  * the daemon doesn't second-guess that here.
  */
-messagesRouter.post("/messages/:id/promote", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const body = (req.body ?? {}) as { kind?: unknown; status?: unknown };
-    if (typeof body.kind !== "string" || !isDecisionKind(body.kind)) {
-        return badRequest(res, "kind must be a valid decision kind");
-    }
-    let status: "accepted" | "rejected" | undefined;
-    if (body.status !== undefined && body.status !== null) {
-        if (body.status !== "accepted" && body.status !== "rejected") {
-            return badRequest(res, "status must be accepted or rejected (omit for pending)");
-        }
-        status = body.status;
-    }
-    try {
-        const by = consumerOf(req);
-        const updated = promoteMessageToDecision(id, body.kind, status, by);
-        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        const decorated = withTagsOne(updated);
-        broadcast({ type: "message_edited", data: decorated });
-        res.json(decorated);
-    } catch (e) {
-        return refuseError(res, 409, e);
-    }
-});
+messagesRouter.post("/messages/:id/promote", serveMethod("message.promote"));
 
 /**
  * Untag a comment — clear its `meta.decision` (#B.256 dzm3ef). Only
  * pending decisions can be untagged; terminal ones (accepted /
  * rejected) keep the audit row.
  */
-messagesRouter.post("/messages/:id/untag", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    try {
-        const updated = removeMessageDecision(id);
-        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        const decorated = withTagsOne(updated);
-        broadcast({ type: "message_edited", data: decorated });
-        res.json(decorated);
-    } catch (e) {
-        return refuseError(res, 409, e);
-    }
-});
+messagesRouter.post("/messages/:id/untag", serveMethod("message.untag"));
 
 /**
  * #2369 — tag an agent's comment as a step (`then: continue`) the agent did not
@@ -888,12 +717,4 @@ function stepTagRoute(req: Request, res: Response, tag: boolean) {
     }
 }
 
-messagesRouter.post("/messages/:id/note", (req, res) => {
-    const id = Number(req.params.id);
-    const { note } = req.body ?? {};
-    const updated = noteMessage(id, typeof note === "string" ? note : null);
-    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    const decorated = withTagsOne(updated);
-    broadcast({ type: "message_noted", data: decorated });
-    res.json(decorated);
-});
+messagesRouter.post("/messages/:id/note", serveMethod("message.note"));
