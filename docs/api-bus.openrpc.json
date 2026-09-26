@@ -342,6 +342,99 @@
       "x-relayed": false
     },
     {
+      "name": "decision.mine",
+      "description": "Pending plans and resolutions on open tickets the caller reports: its arbitrage queue.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "decision.plans_to_execute",
+      "description": "The caller's plans that were accepted and not acted on since.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "graph.audit",
+      "description": "The graph's audit: dangling and suspicious references, as the caller may see them.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "graph.neighbors",
+      "description": "A ticket's neighbours in the reference graph, as the caller may see them: its own projects in full, elsewhere only that a link crosses.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ticket_id",
+          "required": true,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "min_weight",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "inbox.list",
       "description": "The board's ticket rows for the caller (docs/API-INBOX.md), with `total` before paging. `view: \"turn\"` adds the pilot's fields (#3005 / #3038); `ids` narrows to named tickets : an empty answer means they no longer belong in this view. Read state, unread and the pilot's fields are the caller's.",
       "paramStructure": "by-name",
@@ -938,6 +1031,70 @@
       ]
     },
     {
+      "name": "message.search",
+      "description": "Full-text search over titles, bodies and comments; hits on a snoozed ticket are left out unless `include_postponed`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "include_postponed",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "intent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "open",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "q",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "message.step",
       "description": "Tag an agent's comment as a step (`then: continue`) the agent did not post, or remove that tag. A human's gesture. Silent: no ping — the agent finds the ticket back in its pool at its next wake.",
       "paramStructure": "by-name",
@@ -1171,6 +1328,106 @@
         {
           "name": "project",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.subscribe",
+      "description": "Subscribe a consumer to a project, as `owner` or `follower`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "role",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "follower"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.subscriptions",
+      "description": "Project subscriptions: one consumer's, or everyone's when `consumer_id` is left out.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.unsubscribe",
+      "description": "Remove a consumer's subscription to a project.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
           "schema": {
             "type": "string"
           }
@@ -1491,6 +1748,20 @@
       ]
     },
     {
+      "name": "ticket.list",
+      "description": "The ticket list an agent works from (`ticket_list`): its filters are the query the route took (`project`, `open`, `actionable`, `claimable`, `tag`, `since`…), each a string or a yes/no.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.mark_read",
       "description": "Mark a ticket's events read for the caller, up to `up_to_id` when given (#B.191).",
       "paramStructure": "by-name",
@@ -1687,6 +1958,97 @@
       ]
     },
     {
+      "name": "ticket.subscribe",
+      "description": "Follow a ticket, or mute it (`muted`: no pings, even by role).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ticket_id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "muted",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.subscription",
+      "description": "A consumer's relation to one ticket: \"followed\", \"muted\", or null (its role decides).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ticket_id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.subscriptions",
+      "description": "The tickets a consumer follows or muted, beyond its projects' roles.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.unsnooze",
       "description": "Bring a snoozed ticket back now.",
       "paramStructure": "by-name",
@@ -1707,6 +2069,37 @@
       },
       "x-callers": [
         "human"
+      ]
+    },
+    {
+      "name": "ticket.unsubscribe",
+      "description": "Stop following (or unmute) a ticket: back to what the consumer's role says.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ticket_id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
       ]
     },
     {

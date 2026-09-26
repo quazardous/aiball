@@ -7,15 +7,12 @@ import { listWaitCredits } from "./db/wait-credit.js";
 import { stepTimingReport, stepTimingRows } from "./db/step-timing.js";
 import { Router, type Request, type Response } from "express";
 import {
-    getMessage,
     listProjects,
     getStrategy,
     setStrategy,
     getProjectStrategy,
     setProjectStrategy,
     STRATEGIES,
-    INTENTS,
-    type Intent,
     listProjectsDetailed,
     isRootActive,
     createProject,
@@ -46,8 +43,6 @@ import { installRoot } from "./claude-loop/state.js";
 import { broadcast } from "./ws.js";
 import { outboxPath, AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "./paths.js";
 import { loadLaunchers, getLauncher } from "./launchers.js";
-import { searchMessages } from "./search.js";
-import { graphAudit, ticketNeighbors } from "./db/graph-query.js";
 import { bearerAuth } from "./auth.js";
 import { reloadConfig } from "./config-reload.js";
 import { badRequest, consumerOf, refuse } from "./api/_helpers.js";
@@ -622,61 +617,11 @@ api.post("/projects/:name/rename", (req, res) => {
 // projection of it: their own projects in full, and past that only the fact
 // that a link crosses. Hence `consumerId` on both calls — without it these
 // routes returned another project's ticket titles to anyone who asked.
-api.get("/graph/neighbors", (req: Request, res: Response) => {
-    const ticketId = Number(req.query.ticket_id);
-    if (!Number.isSafeInteger(ticketId) || ticketId <= 0) {
-        return refuse(res, 400, "ticket_id required");
-    }
-    const minWeight = typeof req.query.min_weight === "string"
-        ? Number(req.query.min_weight) || undefined
-        : undefined;
-    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) || undefined : undefined;
-    return res.json(ticketNeighbors(ticketId, { minWeight, limit, consumerId: consumerOf(req) }));
-});
+api.get("/graph/neighbors", serveMethod("graph.neighbors"));
 
-api.get("/graph/audit", (req: Request, res: Response) => {
-    const project = typeof req.query.project === "string" ? req.query.project : undefined;
-    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) || undefined : undefined;
-    return res.json(graphAudit({ project, limit, consumerId: consumerOf(req) }));
-});
+api.get("/graph/audit", serveMethod("graph.audit"));
 
-api.get("/search", (req: Request, res: Response) => {
-    const q = typeof req.query.q === "string" ? req.query.q : "";
-    if (!q.trim()) {
-        return res.json([]);
-    }
-    const project = typeof req.query.project === "string" ? req.query.project : undefined;
-    const open = req.query.open === "1";
-    const includePostponed = req.query.include_postponed === "1";
-    const intentRaw = typeof req.query.intent === "string" ? req.query.intent : undefined;
-    const intent = intentRaw && INTENTS.includes(intentRaw as Intent)
-        ? (intentRaw as Intent)
-        : undefined;
-    const limit = typeof req.query.limit === "string"
-        ? Number(req.query.limit) || undefined
-        : undefined;
-    const since = typeof req.query.since === "string" ? req.query.since : undefined;
-    const hits = searchMessages(q, { project, open, intent, limit, since });
-    // Filter out hits whose parent ticket is currently snoozed, unless
-    // the caller explicitly asked to see them. Cheap secondary pass.
-    if (!includePostponed) {
-        const nowStr = new Date().toISOString();
-        const postponedTicketIds = new Set<number>();
-        for (const h of hits) {
-            const t = getMessage(h.ticket_id);
-            if (
-                t?.kind === "ticket_created" &&
-                t.postponed_until &&
-                t.postponed_until > nowStr
-            ) {
-                postponedTicketIds.add(h.ticket_id);
-            }
-        }
-        res.json(hits.filter((h) => !postponedTicketIds.has(h.ticket_id)));
-    } else {
-        res.json(hits);
-    }
-});
+api.get("/search", serveMethod("message.search"));
 
 // -------- tickets ----------------------------------------------------------
 // /tickets/bookends + /inbox + /tickets list + /tickets/:id and its

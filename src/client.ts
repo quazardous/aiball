@@ -557,21 +557,21 @@ export class AiballClient {
         if (opts.limit !== undefined) q.limit = String(opts.limit);
         if (opts.include_postponed) q.include_postponed = "1";
         if (opts.since) q.since = opts.since;
-        return this.http("GET", `/api/search${query(q)}`);
+        return this.call("message.search", params(q));
     }
     /** #1992 — what to read before touching a ticket, from the compiled graph. */
     graphNeighbors(opts: { ticket_id: number; min_weight?: number; limit?: number }) {
         const q: Record<string, string | undefined> = { ticket_id: String(opts.ticket_id) };
         if (opts.min_weight !== undefined) q.min_weight = String(opts.min_weight);
         if (opts.limit !== undefined) q.limit = String(opts.limit);
-        return this.http("GET", `/api/graph/neighbors${query(q)}`);
+        return this.call("graph.neighbors", params(q));
     }
     /** #1992 — the hygiene report. Candidates only; it never acts. */
     graphAudit(opts: { project?: string; limit?: number } = {}) {
         const q: Record<string, string | undefined> = {};
         if (opts.project) q.project = opts.project;
         if (opts.limit !== undefined) q.limit = String(opts.limit);
-        return this.http("GET", `/api/graph/audit${query(q)}`);
+        return this.call("graph.audit", params(q));
     }
     listMessages(q: Record<string, string | number | undefined> = {}) {
         return this.http("GET", `/api/messages${query(q)}`);
@@ -580,7 +580,7 @@ export class AiballClient {
         return this.call("message.get", { id });
     }
     listTickets(q: Record<string, string | undefined> = {}) {
-        return this.http("GET", `/api/tickets${query(q)}`);
+        return this.call("ticket.list", params(q));
     }
     getTicket(
         id: number,
@@ -853,24 +853,13 @@ export class AiballClient {
     // ---- subscriptions ----------------------------------------------------
 
     subscribe(project: string, catchup = false, role?: "owner" | "follower") {
-        return this.http("POST", "/api/subscriptions", {
-            consumer_id: this.agentId,
-            project,
-            catchup,
-            role,
-        });
+        return this.call("project.subscribe", { consumer_id: this.agentId, project, catchup, ...(role ? { role } : {}) });
     }
     unsubscribe(project: string) {
-        return this.http(
-            "DELETE",
-            `/api/subscriptions?consumer_id=${encodeURIComponent(this.agentId)}&project=${encodeURIComponent(project)}`,
-        );
+        return this.call("project.unsubscribe", { consumer_id: this.agentId, project });
     }
     mySubs() {
-        return this.http(
-            "GET",
-            `/api/subscriptions?consumer_id=${encodeURIComponent(this.agentId)}`,
-        );
+        return this.call("project.subscriptions", { consumer_id: this.agentId });
     }
     /** #1542 — the daemon's resolved config surface. Today used to read the
      *  `upstream` binding map (which projects have a coupling target) so the
@@ -912,22 +901,13 @@ export class AiballClient {
     // ---- ticket subscriptions + pings ------------------------------------
 
     subscribeTicket(ticket_id: number) {
-        return this.http("POST", "/api/ticket-subscriptions", {
-            consumer_id: this.agentId,
-            ticket_id,
-        });
+        return this.call("ticket.subscribe", { consumer_id: this.agentId, ticket_id });
     }
     unsubscribeTicket(ticket_id: number) {
-        return this.http(
-            "DELETE",
-            `/api/ticket-subscriptions/${ticket_id}?consumer_id=${encodeURIComponent(this.agentId)}`,
-        );
+        return this.call("ticket.unsubscribe", { consumer_id: this.agentId, ticket_id });
     }
     myTicketSubs() {
-        return this.http(
-            "GET",
-            `/api/ticket-subscriptions?consumer_id=${encodeURIComponent(this.agentId)}`,
-        );
+        return this.call("ticket.subscriptions", { consumer_id: this.agentId });
     }
     listPings(opts: { unreadOnly?: boolean; limit?: number } = {}) {
         return this.call("ping.list", {
@@ -1250,10 +1230,10 @@ export class AiballClient {
     /** #1164 S1 — plans of MINE that were accepted and I haven't acted on
      *  since ("what should I go execute now"). */
     plansToExecute() {
-        return this.http("GET", "/api/decisions/plans-to-execute");
+        return this.call("decision.plans_to_execute");
     }
     myArbitrage() {
-        return this.http<{
+        return this.call<{
             decisions: Array<{
                 comment_id: number;
                 comment_hashid: string | null;
@@ -1268,7 +1248,7 @@ export class AiballClient {
                 superseded?: boolean;
                 superseded_by?: string | null;
             }>;
-        }>("GET", `/api/decisions/mine`);
+        }>("decision.mine");
     }
 
     // ---- admin / decisions ------------------------------------------------
@@ -1514,6 +1494,13 @@ function httpError(
     };
     err.status = status;
     return err;
+}
+
+/** A query's fields as a method's params: what `query()` leaves out (unset, empty) is left out. */
+function params(q: Record<string, string | number | undefined>): Record<string, string | number> {
+    const out: Record<string, string | number> = {};
+    for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") out[k] = v;
+    return out;
 }
 
 function query(q: Record<string, string | number | undefined>): string {

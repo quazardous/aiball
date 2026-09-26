@@ -23,12 +23,10 @@ import { Router, type Request, type Response } from "express";
 import { ERROR_CODES } from "../domain.js";
 import {
     listMessages,
-    listPendingDecisionsForReporter,
-    listPlansToExecute,
     type MessageKind,
     type MessageStatus,
 } from "../db.js";
-import { consumerOf, withTags } from "./_helpers.js";
+import { withTags } from "./_helpers.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
 
@@ -119,20 +117,13 @@ messagesRouter.get("/messages/:id", serveMethod("message.get"));
  * so the agent can see the arbitrage queue at a glance instead of
  * walking each thread.
  */
-messagesRouter.get("/decisions/mine", (req: Request, res: Response) => {
-    const consumer = consumerOf(req);
-    const decisions = listPendingDecisionsForReporter(consumer);
-    res.json({ decisions });
-});
+messagesRouter.get("/decisions/mine", serveMethod("decision.mine"));
 
 /**
  * #1164 S1 — the other direction : plans of MINE that were ACCEPTED and I
  * haven't acted on since ("what should I go execute now"). Feeds poll().
  */
-messagesRouter.get("/decisions/plans-to-execute", (req: Request, res: Response) => {
-    const consumer = consumerOf(req);
-    res.json({ plans: listPlansToExecute(consumer) });
-});
+messagesRouter.get("/decisions/plans-to-execute", serveMethod("decision.plans_to_execute"));
 
 messagesRouter.post("/messages/:id/approve", serveMethod("message.approve"));
 messagesRouter.post("/messages/:id/reject", serveMethod("message.reject"));

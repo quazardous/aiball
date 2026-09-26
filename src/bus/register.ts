@@ -13,3 +13,4 @@ import "./methods/ticket-get.js";
 import "./methods/subjects.js";
 import "./methods/session.js";
 import "./methods/read-state.js";
+import "./methods/lookup.js";

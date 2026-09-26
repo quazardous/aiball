@@ -80,7 +80,6 @@ import { authorFor, badRequest, consumerOf, notFound, refuse, refuseError, withT
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
-import type { AuthenticatedRequest } from "../auth.js";
 
 export const ticketsRouter = Router();
 
@@ -787,11 +786,7 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
     return result;
 }
 
-ticketsRouter.get("/tickets", (req, res) => {
-    res.json(listTicketsFor(consumerOf(req), req.query, {
-        noClaimHint: (req as AuthenticatedRequest).no_claim_hint === true,
-    }));
-});
+ticketsRouter.get("/tickets", serveMethod("ticket.list"));
 
 ticketsRouter.post("/tickets/:id/mark-read", serveMethod("ticket.mark_read"));
 

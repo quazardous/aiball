@@ -240,3 +240,16 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `ping.count` | human, agent | `GET /api/pings/count` |
 | `ping.mark_read` | human, agent | `POST /api/pings/mark-read` |
 | `backlog.record_wake` | human, agent | `POST /api/backlog-wake` |
+| `ticket.list` | human, agent | `GET /api/tickets` — the filters are the query's fields; a yes/no may be a boolean |
+| `message.search` | human, agent | `GET /api/search` |
+| `graph.neighbors` | human, agent | `GET /api/graph/neighbors` |
+| `graph.audit` | human, agent | `GET /api/graph/audit` |
+| `decision.mine` | human, agent | `GET /api/decisions/mine` |
+| `decision.plans_to_execute` | human, agent | `GET /api/decisions/plans-to-execute` |
+| `project.subscribe` | human, agent | `POST /api/subscriptions` — `consumer_id` left out is the caller |
+| `project.subscriptions` | human, agent | `GET /api/subscriptions` |
+| `project.unsubscribe` | human, agent | `DELETE /api/subscriptions` |
+| `ticket.subscriptions` | human, agent | `GET /api/ticket-subscriptions` |
+| `ticket.subscribe` | human, agent | `POST /api/ticket-subscriptions` |
+| `ticket.subscription` | human, agent | `GET /api/ticket-subscriptions/:ticket_id` |
+| `ticket.unsubscribe` | human, agent | `DELETE /api/ticket-subscriptions/:ticket_id` |
