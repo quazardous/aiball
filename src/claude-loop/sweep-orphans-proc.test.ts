@@ -69,9 +69,11 @@ async function spawnVictim(
     const pid = c.pid as number;
 
     // `/proc/<pid>/environ` only becomes readable once the exec has happened;
-    // wait for the witness rather than guessing a delay.
+    // wait for the witness rather than guessing a delay. Up to 5 s: on a
+    // CPU-limited test box running files in parallel, 1 s was not always
+    // enough for the exec (a failure seen once, #3071's profile).
     let environ = "", cmdline = "";
-    for (let i = 0; i < 50 && environ === ""; i++) {
+    for (let i = 0; i < 250 && environ === ""; i++) {
         try {
             environ = readFileSync(`/proc/${pid}/environ`, "utf8");
             cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
