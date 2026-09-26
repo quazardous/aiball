@@ -42,6 +42,7 @@ from pathlib import Path
 import yaml
 from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.widgets import Input, RichLog, Static
 
@@ -207,8 +208,10 @@ class FakeClaudeApp(App):
     # Ctrl+D fires `confirm_quit` ; un 2e Ctrl+D dans les 2s quitte.
     # Premier appui : hint dans le header. Ctrl+Q reste le shortcut
     # direct (textual standard).
+    # #3056 — `priority=True`: the prompt's Input has the focus and binds
+    # ctrl+d itself (delete right), so an ordinary App binding never fired.
     BINDINGS = [
-        ("ctrl+d", "confirm_quit", "Quit (×2)"),
+        Binding("ctrl+d", "confirm_quit", "Quit (×2)", priority=True),
         ("ctrl+q", "quit", "Quit"),
     ]
 
