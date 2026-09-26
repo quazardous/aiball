@@ -38,6 +38,9 @@ dates are YYYY-MM-DD.
 - A proxy node relays the bus to its upstream, as it relays the HTTP API.
 - The bus's contract is published, generated from the code: OpenRPC for the
   methods, AsyncAPI for the subjects.
+- A loop notices when Claude Code has installed an update and says so in its
+  bar; a host can then restart Claude, once idle, resuming the conversation,
+  and the agent is told the session restarted.
 - `cl-session-host`: a session held in a PTY that clients attach to and the
   daemon drives, outliving both; the daemon runs named sessions on it. The
   first step of replacing tmux and claude-loop.

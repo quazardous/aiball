@@ -226,6 +226,28 @@
       ]
     },
     {
+      "name": "consumer.restart_claude",
+      "description": "Restart an agent's Claude after it installed an update of itself (the bar says `alerts.restart_needed`). A loop control. Refused while Claude works (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts Claude resuming its conversation, and tells the agent once it is back.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "consumer.set_bar_host",
       "description": "Who draws an agent's bar: `tmux` (its status line) or `external` (another host draws it from the bar data). Relayed to the loop, whose kernel records it; the next bar pushed carries the new `host`.",
       "paramStructure": "by-name",

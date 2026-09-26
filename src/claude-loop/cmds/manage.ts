@@ -477,7 +477,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
  * (`plate.pings_path` points into the state dir we're about to rm), so the
  * relaunch falls back to the default ping phrases.
  */
-export function restartStartArgs(name: string, plate: Plate): string[] {
+export function restartStartArgs(name: string, plate: Plate, opts: { resume?: boolean } = {}): string[] {
     // #1576 — the launch identity, top-level, independent of `remote`. Falls
     // back to the remote block for plates written before the top-level fields
     // existed, so an older remote loop keeps replaying what it used to.
@@ -501,18 +501,20 @@ export function restartStartArgs(name: string, plate: Plate): string[] {
         ...(project ? ["--project", project] : []),
         "--force",
         "--no-attach",
+        // #3074 — a restart for an update resumes the conversation.
+        ...(opts.resume ? ["--resume"] : []),
         ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),
     ];
 }
 
-export function cmdRestart(name: string): void {
+export function cmdRestart(name: string, opts: { resume?: boolean } = {}): void {
     const sd = stateDirFor(name);
     if (!existsSync(platePath(sd))) {
         die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);
     }
     const plate = readPlate(sd);
     const bin = join(installRoot(), "bin", "claude-loop");
-    const startArgs = restartStartArgs(name, plate);
+    const startArgs = restartStartArgs(name, plate, opts);
     // Delegate the teardown+relaunch to a DETACHED, new-session helper (setsid
     // via detached:true). This is what lets a HARD restart survive being fired
     // from INSIDE the very session it kills — by the SIGHUP'd timer, OR by the

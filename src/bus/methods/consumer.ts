@@ -4,7 +4,8 @@ import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js"
 import { ERROR_CODES } from "../../domain.js";
 import { getConsumer, listConsumers, pingCountsByConsumer, type Consumer } from "../../db.js";
 import { sessionFor, viewOf } from "../../sessions/registry.js";
-import { presenceRunning } from "../../live-presence.js";
+import { isPresent, presenceRunning } from "../../live-presence.js";
+import { emitControl } from "../../event-bus.js";
 import { listWaitCredits, waitCreditBalance, waitCreditEnabled, type WaitCreditRow } from "../../db/wait-credit.js";
 import { unreadPingCount } from "../../db/pings.js";
 import { listTicketsFor } from "../../api/tickets.js";
@@ -146,6 +147,28 @@ defineMethod({
 });
 
 const MAX_NAME_LEN = 64;
+
+/**
+ * Restart an agent's Claude after it installed an update of itself (the bar
+ * says `alerts.restart_needed`). A loop control. Refused while Claude works
+ * (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts
+ * Claude resuming its conversation, and tells the agent once it is back.
+ */
+defineMethod({
+    name: "consumer.restart_claude",
+    ...LOOP_CONTROL,
+    params: z.object({ name: z.string() }),
+    run: (_c, p) => {
+        if (!p.name || p.name.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(p.name)) throw new Refusal(400, "bad consumer id");
+        if (!isPresent(p.name)) throw new Refusal(404, `no running claude-loop answers for ${p.name}`, ERROR_CODES.LOOP_NOT_FOUND);
+        const phase = getAgentBar(p.name)?.bar.phase;
+        if (phase !== "idle") {
+            throw new Refusal(409, `Claude is ${phase ?? "in an unknown state"}: a restart waits until it is idle`, ERROR_CODES.NOT_IDLE);
+        }
+        emitControl(p.name, { action: "restart_claude" });
+        return { consumer_id: p.name, queued: true };
+    },
+});
 
 /** #2333 — hold or release an agent's loop (AFK), as its own keys would. */
 defineMethod({

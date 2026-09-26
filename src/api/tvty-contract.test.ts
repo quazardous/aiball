@@ -179,7 +179,7 @@ test("reads: every field tvty reads is there, with its type", async () => {
     const bar = {
         phase: "idle", presence: "loop", afk: { mode: "off", expires_at: null }, prompt: { visible: true, has_input: false },
         human_typing: false, marker: { info: null, health_prompt: false, resume_picker: false, resume_mode_picker: false },
-        alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false },
+        alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false },
         proxy_alive: true, zen: false, counters: { open: 1, backlog: 0, events: 0 }, next_wake_at: null, boot: null,
     };
     const pushed = await fetch(`${TCP}/api/consumers/worker/bar`, { method: "PUT", headers: { authorization: `Bearer ${WORKER}`, "content-type": "application/json" }, body: JSON.stringify(bar) });

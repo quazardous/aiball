@@ -55,6 +55,23 @@ import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templat
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
     ?? join(homedir(), ".claude-loop");
 
+/**
+ * #3074 — the note a restart for an update leaves for the next loop: BESIDE
+ * the state dir, which the restart deletes. The new loop takes it (reads and
+ * removes it) once Claude is live, and tells the agent the session restarted.
+ */
+export function afterRestartNotePath(name: string): string {
+    return join(STATE_ROOT, `${name}.after-restart`);
+}
+
+/** Take the note if there is one: true once, then it is gone. */
+export function takeAfterRestartNote(name: string): boolean {
+    const p = afterRestartNotePath(name);
+    if (!existsSync(p)) return false;
+    try { unlinkSync(p); } catch { /* raced: still counts once */ }
+    return true;
+}
+
 export const MUX_CMD = process.env.MUX_CMD ?? "tmux";
 
 export function stateDirFor(name: string): string {

@@ -200,6 +200,10 @@ export interface IpcState {
      *  the RED link-down overlay) and the wake gate blocks ALL wakes (a wake is
      *  useless until login). Default false. */
     notLoggedIn: boolean;
+    /** #3074 — Claude Code installed an update and asks for a restart. Set by
+     *  the UpdateInstalledWatcher; a fresh process (the restart) starts false.
+     *  Published in the bar for a host to offer the restart. Default false. */
+    restartNeeded: boolean;
     /** #2230 — Claude Code's folder trust dialog is on screen. Set and cleared
      *  by the TrustDialogWatcher (the dialog gone IS the answer). While true the
      *  bar paints ORANGE and the wake gate blocks ALL wakes: a wake typed into
@@ -279,6 +283,7 @@ const state: IpcState = {
     linkDown: false,
     daemonDown: false,
     notLoggedIn: false,
+    restartNeeded: false,
     trustDialog: false,
     apiUnreachable: false,
     apiUnreachableSeenMs: null,
@@ -469,6 +474,13 @@ export function setIpcDaemonDown(down: boolean): void {
 export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
     if (state.notLoggedIn === notLoggedIn) return;
     state.notLoggedIn = notLoggedIn;
+    notifyIpcChanged();
+}
+
+/** #3074 — Claude Code asks for a restart (an update installed). */
+export function setIpcRestartNeeded(needed: boolean): void {
+    if (state.restartNeeded === needed) return;
+    state.restartNeeded = needed;
     notifyIpcChanged();
 }
 
@@ -701,6 +713,7 @@ export function resetIpcStateForTests(): void {
     state.linkDown = false;
     state.daemonDown = false;
     state.notLoggedIn = false;
+    state.restartNeeded = false;
     state.trustDialog = false;
     state.apiUnreachable = false;
     state.apiUnreachableSinceMs = null;

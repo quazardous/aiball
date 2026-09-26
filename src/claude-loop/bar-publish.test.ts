@@ -15,7 +15,7 @@ const base = (): AgentBar => ({
     prompt: { visible: true, has_input: false },
     human_typing: false,
     marker: { info: null, health_prompt: false, resume_picker: false, resume_mode_picker: false },
-    alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false },
+    alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false },
     proxy_alive: true,
     zen: false,
     counters: null,

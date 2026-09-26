@@ -69,6 +69,19 @@ export class NotLoggedInWatcher extends BoolWatcher {
     }
 }
 
+/** #3074 — Claude Code installed an update of itself and says so in its
+ *  footer: `✓ Update installed · Restart to update`. The loop publishes it in
+ *  the bar (`alerts.restart_needed`) for a host to offer the restart; it never
+ *  restarts on its own. Footer only, as the other banners: a conversation
+ *  quoting the words cannot latch it. */
+export class UpdateInstalledWatcher extends BoolWatcher {
+    readonly name = "update_installed";
+    private static readonly BANNER = /Update installed\s*·\s*Restart to update/;
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        return UpdateInstalledWatcher.BANNER.test(footerOf(paneText, 8));
+    }
+}
+
 /** #1116 Slice 1 — Claude Code can't reach the API : the pane shows a retry
  *  banner like "Unable to connect to API (ConnectionRefused) · Retrying in 0s ·
  *  attempt 6/10". Claude auto-retries on its own, so waking it is pointless.

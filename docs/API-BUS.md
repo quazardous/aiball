@@ -199,6 +199,7 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `consumer.bar` | human, or the agent itself | `GET /api/consumers/:consumer_id/bar` |
 | `consumer.set_bar_host` | human, not relayed | `POST /api/consumers/:consumer_id/bar-host` |
 | `consumer.afk` | human, not relayed | `POST /api/agents/:name/afk` |
+| `consumer.restart_claude` | human, not relayed | — restarts an agent's Claude after it installed an update (its bar's `alerts.restart_needed`): refused `NOT_IDLE` while Claude works; the loop resumes the conversation and tells the agent once it is back |
 | `message.get` | human, agent | `GET /api/messages/:id` |
 | `message.post` | human, agent | `POST /api/messages` — the params are the message |
 | `message.decide` | human, agent | `POST /api/messages/:id/decide` |

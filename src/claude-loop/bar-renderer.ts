@@ -96,6 +96,8 @@ export interface BarSnapshot {
     /** #2230 — Claude Code's folder trust dialog on screen ? Same ORANGE
      *  overlay + an `attach to answer` hint. Cleared when the dialog goes. */
     trustDialog: boolean;
+    /** #3074 — Claude Code installed an update ? A `restart` hint in the state tag. */
+    restartNeeded: boolean;
     /** #1116 — Claude Code can't reach the API (retry banner) ? Same ORANGE
      *  overlay + a `retrying` hint in the state tag. Cleared on busy-begin /
      *  Stop. */
@@ -255,6 +257,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         daemonDown: ipc.daemonDown,
         notLoggedIn: ipc.notLoggedIn,
         trustDialog: ipc.trustDialog,
+        restartNeeded: ipc.restartNeeded === true,
         apiUnreachable: ipc.apiUnreachable,
     };
 }
@@ -290,6 +293,8 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
             not_logged_in: ipc.notLoggedIn === true,
             trust_dialog: ipc.trustDialog === true,
             api_unreachable: ipc.apiUnreachable === true,
+            // #3074 — Claude Code installed an update: a host offers the restart.
+            restart_needed: ipc.restartNeeded === true,
         },
         proxy_alive: proxyIsAlive(sd),
         zen: existsSync(zenPath(sd)),
@@ -331,6 +336,7 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.notLoggedIn !== next.notLoggedIn) changed.push("loopStatus");
     // #2230 — the trust dialog flips the bar ORANGE + the state-tag hint too.
     if (prev.trustDialog !== next.trustDialog) changed.push("loopStatus");
+    if (prev.restartNeeded !== next.restartNeeded) changed.push("loopStatus");
     // #1116 — api-unreachable flips the bar bg ORANGE + the state-tag hint too.
     if (prev.apiUnreachable !== next.apiUnreachable) changed.push("loopStatus");
     if (prev.stateTag !== next.stateTag) changed.push("stateTag");
@@ -575,7 +581,8 @@ export class BarRenderer {
                 ? "⚠ trust this folder? · attach to answer"
                 : next.notLoggedIn
                 ? "⚠ not logged in · /login"
-                : next.apiUnreachable ? "⚠ API unreachable · retrying" : next.stateTag;
+                : next.apiUnreachable ? "⚠ API unreachable · retrying"
+                : next.restartNeeded ? `${next.stateTag} · ⟳ update installed, restart` : next.stateTag;
             setOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] ${stateTagStr}`);
             // status-left : @cl_state collé à `claude-loop`, AVANT la
             // fade-out glyph. Les counters restent sur le status-bg

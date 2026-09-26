@@ -65,7 +65,9 @@ export function onPing(
  */
 export type ControlEvent =
     | { action: "kill" }
-    | { action: "prompt"; text: string };
+    | { action: "prompt"; text: string }
+    /** #3074 — restart Claude for an update it installed, once idle, resuming the conversation. */
+    | { action: "restart_claude" };
 
 /** #2255 — an external signal pushed to a recipient's live SSE stream. */
 export interface SignalEvent {

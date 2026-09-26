@@ -2311,7 +2311,8 @@ async function main(): Promise<void> {
         .action(async (name: string | undefined, opts: { set?: string[] }) => { await cmdReload(name ?? resolveCurrentLoopName(), opts); });
     program.command("restart [name]")
         .description("HARD restart (#388): kill claude + the loop entirely, then relaunch fresh with the same start config (from the plate). Unlike `reload` (timer-only), this stops + starts. Detached + no-attach — reconnect with `attach`. Also the SIGHUP action: `kill -HUP <timer.pid>` self-restarts. Name optional — defaults to the current-cwd loop.")
-        .action((name: string | undefined) => cmdRestart(name ?? resolveCurrentLoopName()));
+        .option("--resume", "#3074: resume Claude's conversation on the relaunch, whatever the loop's start config says (a restart for an update).")
+        .action((name: string | undefined, opts: { resume?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true }));
     program.command("stop [name]")
         .description("Clean-STOP a loop: kill claude/tmux + exit the timer, but KEEP the state dir (loop shows dead, stays restart/prune-able — `rm` is the halt+delete). Also the SIGTERM action: `kill -TERM <timer.pid>` (#442 — convention HUP=restart, USR2=reload, TERM=stop). Remotely via the daemon: the Consumers-page stop button. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdStop(name ?? resolveCurrentLoopName()));

@@ -342,6 +342,7 @@ claude-loop tail <name> --timer        # detached timer's stdout log
 claude-loop attach <name>              # tmux attach
 claude-loop wake <name>                # force the next tick (bypass check-cmd)
 claude-loop reload [name]              # respawn the timer in place (keeps claude)
+claude-loop restart [name] --resume    # hard restart, resuming Claude's conversation whatever the start config says
 claude-loop restart [name]            # hard restart: kill + relaunch from the plate
 claude-loop stop [name]               # clean stop: kill claude/tmux + exit, KEEP state
 claude-loop rm <name> [--force]        # stop + DELETE the state dir
@@ -1082,3 +1083,16 @@ Install symlinks `~/.local/bin/claude-loop` alongside `aiball` and
 - `MCP-CLIENT.md` — agent-facing docs on aiball MCP usage; the
   default in-process check ties claude-loop to the flows described
   there.
+
+
+## A restart after Claude Code updates itself
+
+When Claude Code installs an update it says so in its footer (`✓ Update installed
+· Restart to update`). The loop sees it and publishes it in its bar as
+`alerts.restart_needed`, plus a `⟳ update installed, restart` word on the tmux
+line; it never restarts on its own. A host (tvty) offers the restart, which calls
+`consumer.restart_claude` on the bus: the loop waits until Claude is idle (never
+mid-turn, up to 5 minutes), hard-restarts resuming the conversation, and once
+Claude is live again tells the agent so — the `post_restart_reminder` entry of the
+pings template. The note that carries this across the restart sits beside the
+state dir (`<state root>/<name>.after-restart`), since a restart deletes the dir.

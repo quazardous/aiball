@@ -312,6 +312,10 @@ export function wakeCountdownArmable(opts: {
  * main loop's boot reminder sends it to triage its queue; a crew agent has no
  * queue to triage and must not go looking for one.
  */
+/** #3074 — what the agent is told after a restart for an update, unless the pings template says otherwise. */
+export const POST_RESTART_REMINDER =
+    "Session restarted: Claude Code installed an update. Carry on where you left off.";
+
 export const CREW_BOOT_REMINDER =
     "You are the crew agent {agent}. You wait for explicit requests: a ticket assigned to you, or a message addressed to you. "
     + "Nothing else is yours to pick up — when nothing is asked, do nothing; the loop wakes you when something is.";

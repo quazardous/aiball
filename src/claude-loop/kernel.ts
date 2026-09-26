@@ -75,6 +75,8 @@ import {
     installRoot,
     installRootSha,
     STATE_ROOT,
+    afterRestartNotePath,
+    takeAfterRestartNote,
     isLoopStale,
     pingsPath,
     readBusyDefer,
@@ -120,7 +122,7 @@ import {
     CompactConfirmWatcher,
     TrustDialogWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, UpdateInstalledWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
@@ -169,7 +171,7 @@ import {
     setIpcSseConnected,
     setIpcLinkDown,
     setIpcDaemonDown,
-    setIpcNotLoggedIn, setIpcTrustDialog,
+    setIpcNotLoggedIn, setIpcRestartNeeded, setIpcTrustDialog,
     setIpcApiUnreachable,
     refreshIpcApiUnreachableSeen,
     setIpcLastWakeAtMs,
@@ -180,7 +182,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { bootReminderFor, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
+import { bootReminderFor, POST_RESTART_REMINDER, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -784,6 +786,7 @@ const activityW = new ActivityWatcher();
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
+const updateInstalledW = new UpdateInstalledWatcher();
 const apiUnreachableW = new ApiUnreachableWatcher();
 const errorW = new ErrorWatcher();
 const healthCheckW = new HealthCheckWatcher();
@@ -795,7 +798,7 @@ const trustDialogW = new TrustDialogWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
+    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, updateInstalledW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -949,6 +952,12 @@ if (sd) {
     notLoggedInW.on("begin", () => {
         log("watcher: not_logged_in begin → setIpcNotLoggedIn(true)");
         setIpcNotLoggedIn(true);
+    });
+    // #3074 — Claude Code updated itself and asks for a restart: said in the
+    // bar for a host to offer it. Latched: a restart (a fresh process) clears it.
+    updateInstalledW.on("begin", () => {
+        log("watcher: update_installed begin → setIpcRestartNeeded(true)");
+        setIpcRestartNeeded(true);
     });
     // #1116 Slice 1 — API-unreachable retry banner in the pane → ORANGE bar. The
     // `begin` edge sets the flag ; it is cleared on busy-begin / Stop (below),
@@ -1767,6 +1776,8 @@ async function mainSse(): Promise<void> {
         // #451: operator-supplied RAW prompt → inject it into the Claude
         // session exactly like a wake (sendKeys sets the wake-in-flight +
         // coalesce markers so the timer doesn't auto-wake on top of it).
+        // #3074 — restart Claude for an update, on a human's order (idle first).
+        else if (c.action === "restart_claude") void restartClaudeForUpdate();
         else if (c.action === "prompt" && typeof c.text === "string") {
             const preview = c.text.length > 80 ? c.text.slice(0, 80) + "…" : c.text;
             log(`SSE control: prompt injection (${c.text.length} chars): ${preview}`);
@@ -2251,8 +2262,12 @@ async function mainSse(): Promise<void> {
         }
         try {
             const promptMap = mergePrompts(loadPromptsFromYaml(pingsPath(sd!)), {});
+            // #3074 — after a restart for an update, the agent is told so, once.
+            const restarted = name ? takeAfterRestartNote(name) : false;
             // #2523 — a crew agent is told who it is and that it waits; never to triage.
-            const boot = bootReminderFor(process.env.AIBALL_ROLE);
+            const boot = restarted
+                ? { slot: "post_restart_reminder", fallback: POST_RESTART_REMINDER }
+                : bootReminderFor(process.env.AIBALL_ROLE);
             const reminder = renderSlot(promptMap, boot.slot, { agent: process.env.AIBALL_AGENT ?? "" }, boot.fallback);
             if (reminder.length === 0) return;
             const typing = humanIsTyping(sd!);
@@ -2975,6 +2990,69 @@ async function mainPoll(): Promise<void> {
     process.exit(0);
 }
 
+/**
+ * #388 / #407 — a hard restart of this loop: a DETACHED `claude-loop restart
+ * <name>` that survives the teardown (this process dies in it), exiting only
+ * once the child really spawned, its output in a log outside the state dir
+ * that `rm` deletes. `extra` goes to `restart` (#3074: `--resume`).
+ */
+function hardRestart(why: string, extra: string[]): void {
+    if (!name) { process.exit(0); }
+    const logPath = join(STATE_ROOT, "restart.log");
+    // #412: route restart.log through the level logger (tag=name →
+    // `<ts> [name] LEVEL msg`); these are info-level lifecycle lines.
+    const restartLog = createLogger({
+        tag: name,
+        write: (line) => { try { appendFileSync(logPath, line); } catch { /* nowhere */ } },
+    });
+    const log = (m: string): void => restartLog.info(m);
+    try {
+        const bin = join(installRoot(), "bin", "claude-loop");
+        const out = openSync(logPath, "a"); // restart child's stdout+stderr → the log
+        const child = spawn(bin, ["restart", name!, ...extra], { detached: true, stdio: ["ignore", out, out] });
+        child.unref();
+        child.on("spawn", () => { log(`${why} → restart child pid ${child.pid} spawned`); process.exit(0); });
+        child.on("error", (e) => { log(`${why} → restart spawn FAILED: ${String(e)}`); process.exit(1); });
+        // Safety net: never hang the dying timer if neither event fires.
+        setTimeout(() => { log(`${why} → restart child events timed out; exiting anyway`); process.exit(0); }, 3000);
+    } catch (e) {
+        log(`${why} → restart threw: ${String(e)}`);
+        process.exit(1);
+    }
+}
+
+/** #3074 — how long a restart for an update waits for Claude to go idle. */
+const RESTART_IDLE_WAIT_MS = 5 * 60_000;
+let restartPending = false;
+
+/**
+ * #3074 — restart Claude for an update it installed, on a human's order from
+ * the daemon: once Claude is idle (never mid-turn), leave a note beside the
+ * state dir (a restart deletes the dir itself), then hard-restart resuming the
+ * conversation. The new loop reads the note once Claude is live and tells the
+ * agent the session was restarted (`post_restart_reminder`).
+ */
+async function restartClaudeForUpdate(): Promise<void> {
+    if (restartPending || !name) return;
+    restartPending = true;
+    const until = Date.now() + RESTART_IDLE_WAIT_MS;
+    while (getIpcState().paneBusy !== false) {
+        if (Date.now() > until) {
+            log("restart_claude: Claude never went idle within the wait — not restarted");
+            restartPending = false;
+            return;
+        }
+        await sleep(2000);
+    }
+    try {
+        writeFileSync(afterRestartNotePath(name), JSON.stringify({ reason: "update", at: new Date().toISOString() }));
+    } catch (e) {
+        log(`restart_claude: note not written (${String(e)}) — restarting anyway`);
+    }
+    log("restart_claude: Claude idle → hard restart, resuming the conversation");
+    hardRestart("restart_claude", ["--resume"]);
+}
+
 async function main(): Promise<void> {
     // #388: SIGHUP = hard self-restart. The timer can't rm+start itself inline
     // (rm kills its own tmux session AND this very pid mid-handler), so delegate
@@ -2986,30 +3064,7 @@ async function main(): Promise<void> {
     // the parent → loop left un-restarted (no timer). Now: (1) exit ONLY after
     // the child's `spawn` event (it really exists), (2) capture the restart's
     // output to a log OUTSIDE the rm'd state dir, so failures are visible.
-    process.on("SIGHUP", () => {
-        if (!name) { process.exit(0); }
-        const logPath = join(STATE_ROOT, "restart.log");
-        // #412: route restart.log through the level logger (tag=name →
-        // `<ts> [name] LEVEL msg`); these are info-level lifecycle lines.
-        const restartLog = createLogger({
-            tag: name,
-            write: (line) => { try { appendFileSync(logPath, line); } catch { /* nowhere */ } },
-        });
-        const log = (m: string): void => restartLog.info(m);
-        try {
-            const bin = join(installRoot(), "bin", "claude-loop");
-            const out = openSync(logPath, "a"); // restart child's stdout+stderr → the log
-            const child = spawn(bin, ["restart", name!], { detached: true, stdio: ["ignore", out, out] });
-            child.unref();
-            child.on("spawn", () => { log(`SIGHUP → restart child pid ${child.pid} spawned`); process.exit(0); });
-            child.on("error", (e) => { log(`SIGHUP → restart spawn FAILED: ${String(e)}`); process.exit(1); });
-            // Safety net: never hang the dying timer if neither event fires.
-            setTimeout(() => { log("SIGHUP → restart child events timed out; exiting anyway"); process.exit(0); }, 3000);
-        } catch (e) {
-            log(`SIGHUP → restart threw: ${String(e)}`);
-            process.exit(1);
-        }
-    });
+    process.on("SIGHUP", () => hardRestart("SIGHUP", []));
     // #407: SIGUSR2 = soft reload — the signal mirror of `claude-loop reload`
     // (respawn the detached timer to repick timer.ts/state.ts; claude untouched).
     // Unified with the daemon so a signal means the SAME thing on both CLIs:
