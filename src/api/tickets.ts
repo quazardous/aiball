@@ -145,19 +145,17 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
     if (!isHuman(consumerOf(req))) {
         return refuse(res, 403, "owner change is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
-    // #3060 — the new owner is `owner`. Everywhere else `by_agent` is the
-    // author (who is the caller); the old name is still read here, only when
-    // `owner` is absent, until the clients that send it have moved.
+    // #3060 — the new owner is `owner`; `by_agent` is the author, as
+    // everywhere else: the caller, or refused.
     const body = (req.body ?? {}) as { owner?: unknown; by_agent?: unknown };
-    const given = body.owner !== undefined ? body.owner : body.by_agent;
-    const owner = typeof given === "string" ? given.trim() : "";
+    if (authorFor(req, res, body.by_agent) === null) return;
+    const owner = typeof body.owner === "string" ? body.owner.trim() : "";
     if (!owner) return badRequest(res, "owner required (a consumer id)");
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     setTicketOwner(id, owner);
     upsertTicketSubscription(owner, id);
-    // `by_agent` in the answer too, for the clients that read it.
-    res.json({ ticket_id: id, owner, by_agent: owner, ticket: ticketStateAfter(id, consumerOf(req)) });
+    res.json({ ticket_id: id, owner, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
 /**

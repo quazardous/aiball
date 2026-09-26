@@ -262,7 +262,7 @@ test("writes: every body tvty sends is accepted", async () => {
         ["POST", `/api/tickets/${other}/milestone`, { milestone_id: null }, 200],
         ["POST", `/api/tickets/${other}/assign`, { assignee: "worker" }, 200],
         ["POST", `/api/tickets/${other}/release`, {}, 200],
-        ["POST", `/api/tickets/${other}/owner`, { by_agent: "worker" }, 200],
+        ["POST", `/api/tickets/${other}/owner`, { owner: "worker" }, 200],
         ["POST", `/api/tickets/${other}/relations`, { target_ticket_id: main, kind: "relates_to" }, 200],
         ["POST", `/api/tickets/${other}/relations`, { target_ticket_id: main, kind: "ignored" }, 200],
         ["POST", `/api/messages/${step}/step`, {}, 200],

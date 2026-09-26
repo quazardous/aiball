@@ -1,7 +1,7 @@
 /**
- * #3060 — `POST /api/tickets/:id/owner` takes the new owner as `owner`; the
- * old `by_agent` (elsewhere the author) is still read, only when `owner` is
- * absent. Moderator only, as before.
+ * #3060 — `POST /api/tickets/:id/owner` takes the new owner as `owner`.
+ * `by_agent` is the author there as everywhere: the caller, or refused; it
+ * never names the new owner. Moderator only, as before.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -41,13 +41,14 @@ async function setOwner(body: unknown): Promise<{ status: number; json: Record<s
     return { status: r.status, json: await r.json() as Record<string, unknown> };
 }
 
-test("owner sets it; the old by_agent still does; owner wins over it; neither is a 400", async () => {
+test("owner sets it; by_agent never does, and naming someone else there is refused", async () => {
     const a = await setOwner({ owner: "alice" });
-    assert.deepEqual([a.status, a.json.owner, a.json.by_agent], [200, "alice", "alice"]);
+    assert.deepEqual([a.status, a.json.owner, "by_agent" in a.json], [200, "alice", false]);
     assert.equal(getMessage(t)?.by_agent, "alice");
-    assert.equal((await setOwner({ by_agent: "bob" })).status, 200);
-    assert.equal(getMessage(t)?.by_agent, "bob", "the old name is still read");
-    await setOwner({ owner: "alice", by_agent: "bob" });
-    assert.equal(getMessage(t)?.by_agent, "alice", "owner wins");
+    assert.equal((await setOwner({ by_agent: "bob" })).status, 403, "by_agent is the author, and bob is not the caller");
+    assert.equal(getMessage(t)?.by_agent, "alice");
+    assert.equal((await setOwner({ by_agent: "boss" })).status, 400, "the caller as author, and no owner");
+    assert.equal((await setOwner({ owner: "bob", by_agent: "boss" })).status, 200);
+    assert.equal(getMessage(t)?.by_agent, "bob");
     assert.equal((await setOwner({})).status, 400);
 });
