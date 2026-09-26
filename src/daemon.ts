@@ -7,6 +7,7 @@ import { DAEMON_PID_PATH } from "./paths.js";
 import { reloadConfig } from "./config-reload.js";
 import { attachWs } from "./ws.js";
 import { attachBus } from "./bus/server.js";
+import { attachBusRelay } from "./bus/relay.js";
 import { initSessions } from "./sessions/registry.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
@@ -14,7 +15,7 @@ import { drainSpool, watchSpool } from "./spool.js";
 import { backfillParentTicketRelations } from "./db.js";
 import { startScheduler, CRON_TASKS } from "./cron/index.js";
 import { registerAutomationRuntime } from "./automation/runtime.js";
-import { loadProxy, startProxyWsClient } from "./proxy.js";
+import { loadProxy, loadProxyTokens, startProxyWsClient } from "./proxy.js";
 import { attachProxyWs } from "./proxy-ws.js";
 import { checkForUpdatesAtBoot } from "./api/version-routes.js";
 
@@ -126,6 +127,10 @@ function main(): void {
     // `/api` to its upstream and serves no bus of its own.
     const core = !loadProxy();
     if (core) attachBus(server);
+    // #3071 — a proxy node relays the bus to its upstream, as it relays /api.
+    const relay = loadProxy();
+    const relayTokens = relay ? loadProxyTokens() : null;
+    if (relay) attachBusRelay(server, relay, relayTokens!);
     // #3066 — the session hosts still running from before this start.
     if (core) {
         void initSessions()
@@ -183,6 +188,7 @@ function main(): void {
         // there: same user, no token. Local clients (tvty) no longer need TCP.
         attachWs(udsServer, "/ws", { trusted: true });
         if (core) attachBus(udsServer, { trusted: true });
+        else if (relay) attachBusRelay(udsServer, relay, relayTokens!);
         udsServer.listen(SOCK_PATH, () => {
             try { chmodSync(SOCK_PATH, 0o600); } catch { /* best effort */ }
             console.log(`aiball daemon listening on unix:${SOCK_PATH} (local-trust)`);

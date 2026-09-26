@@ -204,6 +204,41 @@ export function loadProxyTokens(): ProxyTokenStore {
 }
 
 /**
+ * #3071 — the bearer a relayed request carries upstream, for `/api` and `/bus`
+ * alike: one rule, so the two doors cannot vouch differently.
+ * - #394 node-managed store: a known LOCAL bearer is swapped for the
+ *   per-consumer upstream token it maps to (the upstream gets hard proof, and
+ *   that token never lives client-side). An unknown bearer (the client already
+ *   carries its own upstream token, QW-A) passes as it is.
+ * - #394 strict mode: the node may not assert an identity — a request without
+ *   its own bearer is refused here, the node token is never injected.
+ * - Otherwise a token-less local caller (web UI / CLI on the local socket) gets
+ *   the node token, which vouches for its `x-aiball-consumer`.
+ * The node advertises its label (#463) on every relayed request besides.
+ */
+export function relayAuthorization(
+    cfg: ProxyConfig,
+    store: ProxyTokenStore,
+    incoming: unknown,
+): { ok: true; authorization?: string } | { ok: false; error: string } {
+    let authorization = typeof incoming === "string" && incoming ? incoming : undefined;
+    if (store.size > 0 && authorization) {
+        const m = /^Bearer\s+(.+)$/i.exec(authorization);
+        const mapped = m ? store.get(m[1].trim()) : undefined;
+        if (mapped) authorization = `Bearer ${mapped.remote}`;
+    }
+    if (cfg.strict && !authorization) {
+        return {
+            ok: false,
+            error: "proxy strict mode: a per-consumer bearer token is required "
+                + "(the node token is not injected as a fallback in strict mode)",
+        };
+    }
+    if (!cfg.strict && cfg.token && !authorization) authorization = `Bearer ${cfg.token}`;
+    return { ok: true, authorization };
+}
+
+/**
  * A transparent streaming reverse-proxy middleware to the remote daemon.
  * Forwards method + path (`req.originalUrl`) + headers + body; injects the
  * bearer token; pipes the response back (works for JSON and SSE alike).
@@ -222,46 +257,13 @@ export function proxyMiddleware(cfg: ProxyConfig, tokens?: ProxyTokenStore): Req
             ...req.headers,
             host: target.host,
         };
-        // #463 — advertise this node's label on every forwarded request so the
-        // upstream daemon's `tokens.label` tracks the node's current config (a
-        // rename here is picked up at next request, no re-mint needed). Skip
-        // when not set (shouldn't happen — loadProxy() defaults to hostname()
-        // — but defensive).
-        if (cfg.nodeLabel) headers["x-aiball-node-label"] = cfg.nodeLabel;
-        // #394 node-managed store : si le bearer entrant est un token LOCAL
-        // connu, on le SWAP contre le token A per-consumer mappé → A reçoit la
-        // preuve dure per-consumer (le token A est la preuve), et ce token A ne
-        // vit jamais côté client (custody sur le node). Un bearer inconnu (le
-        // client porte déjà son propre token A, cf QW-A) passe tel quel.
-        const incoming = headers["authorization"];
-        if (store.size > 0 && typeof incoming === "string") {
-            const m = /^Bearer\s+(.+)$/i.exec(incoming);
-            const mapped = m ? store.get(m[1].trim()) : undefined;
-            if (mapped) headers["authorization"] = `Bearer ${mapped.remote}`;
-        }
-        // #394 « tuer le point faible » : en mode strict, le node n'a plus le
-        // droit d'affirmer une identité. Une requête sans son propre bearer
-        // per-consumer est rejetée ICI (401) — on ne forwarde pas, on n'injecte
-        // pas le token node. Plus de passe-partout réseau ⇒ le point faible
-        // cross-host disparaît (cf docs/SECURITY.md).
-        if (cfg.strict && !headers["authorization"]) {
-            res.status(401).json({
-                error: "proxy strict mode: a per-consumer bearer token is required "
-                    + "(the node token is not injected as a fallback in strict mode)",
-            });
+        const auth = relayAuthorization(cfg, store, headers["authorization"]);
+        if (!auth.ok) {
+            res.status(401).json({ error: auth.error });
             return;
         }
-        // #394 QW-A: a caller that already carries its OWN bearer (a per-consumer
-        // agent token, #390-style) keeps it → the upstream authenticates THAT
-        // consumer with hard per-consumer proof, end-to-end through the proxy.
-        // The node token is only a FALLBACK for genuinely token-less local
-        // callers (web UI / CLI over the UDS) — then it vouches for the relayed
-        // x-aiball-consumer (X-Forwarded-For model). So: per-consumer proof when
-        // the caller has a token, node-vouched identity otherwise. (Disabled in
-        // strict mode — the early return above already 401'd any token-less call.)
-        if (!cfg.strict && cfg.token && !headers["authorization"]) {
-            headers["authorization"] = `Bearer ${cfg.token}`;
-        }
+        if (auth.authorization) headers["authorization"] = auth.authorization;
+        if (cfg.nodeLabel) headers["x-aiball-node-label"] = cfg.nodeLabel;
         const upstream = reqFn(
             {
                 protocol: target.protocol,
