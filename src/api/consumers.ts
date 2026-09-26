@@ -4,17 +4,13 @@
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
 import { serveMethod } from "../bus/http.js";
-import { parseAgentBar } from "../agent-bar.js";
-import { setAgentBar } from "../agent-bar-store.js";
 import { listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
 import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
 import {
     deleteConsumer,
-    ensureConsumer,
     getConsumer,
     listConsumers,
-    setConsumerState,
     updateConsumer,
     upsertConsumer,
     isHuman,
@@ -67,11 +63,7 @@ consumersRouter.get("/consumers/:consumer_id/wait-credit", (req: Request, res: R
 
 // #397: single consumer lookup (incl. micro_prompt) — the claude-loop timer
 // fetches its own row to inject `{consumer_prompt}` into the wake prompt.
-consumersRouter.get("/consumers/:consumer_id", (req: Request, res: Response) => {
-    const c = getConsumer(String(req.params.consumer_id));
-    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
-    res.json(c);
-});
+consumersRouter.get("/consumers/:consumer_id", serveMethod("consumer.get"));
 
 // #442: remotely HARD-KILL the claude-loop running as <consumer_id>. Pushes a
 // `control:kill` event onto the loop's live SSE (the loop already holds one) →
@@ -298,53 +290,7 @@ consumersRouter.delete("/consumers/:consumer_id", (req: Request, res: Response) 
  * state. Humans can't push state (kind=human is silently rejected to
  * keep the UI semantic clean: state badges are for loop agents only).
  */
-consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Response) => {
-    const target = String(req.params.consumer_id);
-    const caller = consumerOf(req);
-    if (target !== caller) {
-        return refuse(res, 403, "can only push state for your own consumer_id");
-    }
-    const c = getConsumer(caller);
-    if (!c) {
-        ensureConsumer(caller);
-    } else if (c.kind === "human") {
-        return refuse(res, 403, "state push is for loop agents, not humans");
-    }
-    const body = (req.body ?? {}) as { state?: unknown; human?: unknown; human_word?: unknown; cwd?: unknown; project?: unknown };
-    if (body.state !== "busy" && body.state !== "idle" && body.state !== "boot") {
-        return badRequest(res, "state must be one of: busy, idle, boot");
-    }
-    // #280: optional live human-presence flag pushed alongside the state.
-    const human = typeof body.human === "boolean" ? body.human : undefined;
-    // #310/#426/#619: optional presence word (stop/wait/boot/loop), mirrors
-    // the bar. `ask` retired by #619 collapse ; `boot` added by #619 zm2ehq
-    // for the launch-grace dedicated word.
-    const humanWord =
-        body.human_word === "stop" || body.human_word === "wait"
-        || body.human_word === "boot" || body.human_word === "loop"
-            ? body.human_word
-            : undefined;
-    // #393: optional loop root, pushed on each heartbeat → marks the project local.
-    const cwd = typeof body.cwd === "string" && body.cwd ? body.cwd : undefined;
-    // #393 (Option A): optional loop project → exact root↔project attribution.
-    const project = typeof body.project === "string" && body.project ? body.project : undefined;
-    setConsumerState(caller, body.state, human, humanWord, cwd, project);
-    // #1132 — heartbeat dedupe : only broadcast when something actually
-    // changed. Loops re-push an identical state every heartbeat ; blasting
-    // `consumer_changed` each time made every open browser tab refetch its
-    // consumer surfaces per heartbeat per loop. Real flips (state / human
-    // presence / word) still broadcast — and the SSE-close presence flip has
-    // its own broadcast (live-presence.ts), so a killed loop still clears
-    // live (#443).
-    const changed = !c
-        || c.state !== body.state
-        || (human !== undefined && (c.state_human ?? null) !== human)
-        || (humanWord !== undefined && (c.state_human_word ?? null) !== humanWord);
-    if (changed) {
-        broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
-    }
-    res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord, cwd, project });
-});
+consumersRouter.put("/consumers/:consumer_id/state", serveMethod("consumer.push_state"));
 
 /**
  * #3031 — a given agent's backlog, for a moderator watching it: the rows that
@@ -361,21 +307,8 @@ consumersRouter.get("/consumers/:consumer_id/backlog", serveMethod("consumer.bac
  * its own on change (throttled); a human, or the agent itself, reads it.
  * Own-bar only, and agents only — the same rule as the state push above.
  */
-consumersRouter.put("/consumers/:consumer_id/bar", (req: Request, res: Response) => {
-    const target = String(req.params.consumer_id);
-    const caller = consumerOf(req);
-    if (target !== caller) {
-        return refuse(res, 403, "can only push the bar of your own consumer_id");
-    }
-    const c = getConsumer(caller);
-    if (c?.kind === "human") {
-        return refuse(res, 403, "the bar is a loop agent's, not a human's");
-    }
-    const bar = parseAgentBar(req.body);
-    if ("error" in bar) return badRequest(res, bar.error);
-    const changed = setAgentBar(caller, bar);
-    res.json({ consumer_id: caller, changed });
-});
+// Over HTTP the body is the bar itself.
+consumersRouter.put("/consumers/:consumer_id/bar", serveMethod("consumer.push_bar", (req) => ({ consumer_id: req.params.consumer_id, bar: req.body })));
 
 consumersRouter.get("/consumers/:consumer_id/bar", serveMethod("consumer.bar"));
 

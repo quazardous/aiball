@@ -262,3 +262,9 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `project.delete` | human, agent | `DELETE /api/projects/:name` |
 | `project.add_token_usage` | human, agent | `POST /api/projects/:project/token-usage` |
 | `consumer.presence` | human, agent | `GET /api/presence` |
+| `consumer.get` | human, agent | `GET /api/consumers/:consumer_id` |
+| `consumer.push_state` | agent, its own | `PUT /api/consumers/:consumer_id/state` |
+| `consumer.push_bar` | agent, its own | `PUT /api/consumers/:consumer_id/bar` — on the bus the bar is `bar`; over HTTP it is the whole body |
+| `ticket.add_token_usage` | human, agent | `POST /api/tickets/:id/token-usage` |
+| `message.list` | human, agent | `GET /api/messages` — `summary`, `open` are booleans |
+| `ticket.bookends` | human, agent | `GET /api/tickets/bookends` |

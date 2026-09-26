@@ -29,18 +29,15 @@ import {
     subTicketCounts,
     getTicketStages,
     getTicketTitles,
-    getTicketBookends,
     getMessage,
     markTicketUnseen,
     ticketUnreadFlags,
     ticketAgentLastActivity,
     ticketOthersLastActivity,
-    addTicketTokenUsage,
     getTicketTokenUsage,
     isHuman,
     listTypedRelationsForTicket,
     listPendingChildren,
-    ticketsClaimedBy,
     ticketSelfLastActivity,
     listTicketSubscriptionsForTicket,
     getConsumer,
@@ -48,7 +45,7 @@ import {
 import { computeActionableTicketIds } from "../db/projects.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
 import { listSubscriptions } from "../db/subscriptions.js";
-import { isAssignmentLive, pickFocusClaim } from "../db/assignment-gate.js";
+import { isAssignmentLive } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { broadcast } from "../ws.js";
@@ -149,25 +146,7 @@ ticketsRouter.post("/tickets/:id/release", serveMethod("ticket.release"));
  * holds no live claim. Policy lives here, where the claim does; the loop side
  * stays dumb (keeps posting the marker).
  */
-ticketsRouter.post("/tickets/:id/token-usage", (req: Request, res: Response) => {
-    const markerId = Number(req.params.id);
-    const caller = consumerOf(req);
-    // #439: anchor on the held claim; the marker is the fallback.
-    const focus = pickFocusClaim(
-        ticketsClaimedBy(caller).map((c) => ({ id: c.id, claimedAt: c.claimed_at })),
-        Date.now(),
-        assignWindowSec() * 1000,
-    );
-    const id = focus ?? markerId;
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    const b = (req.body ?? {}) as { in?: unknown; out?: unknown; cache_w?: unknown; cache_r?: unknown };
-    const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
-    addTicketTokenUsage(id, { in: n(b.in), out: n(b.out), cacheW: n(b.cache_w), cacheR: n(b.cache_r) });
-    // #439: surface both so a stale-marker vs claim-anchor mismatch is debuggable.
-    // #2072 — usage changes the row's token chip, so the row comes back too.
-    res.json({ ticket_id: id, marker_id: markerId, ok: true, ticket: ticketStateAfter(id, consumerOf(req)) });
-});
+ticketsRouter.post("/tickets/:id/token-usage", serveMethod("ticket.add_token_usage"));
 
 /**
  * #352: list a ticket's EXPLICIT subscriptions (follows + mutes), for the
@@ -191,11 +170,7 @@ ticketsRouter.get("/tickets/:id/subscriptions", (req: Request, res: Response) =>
  *   - project=NAME    (optional) restrict to a project; otherwise cross-project.
  *   - include_snoozed=1  include snoozed tickets in the scope.
  */
-ticketsRouter.get("/tickets/bookends", (req, res) => {
-    const project = typeof req.query.project === "string" ? req.query.project : undefined;
-    const includeSnoozed = req.query.include_snoozed === "1";
-    res.json(getTicketBookends({ project, includeSnoozed }));
-});
+ticketsRouter.get("/tickets/bookends", serveMethod("ticket.bookends"));
 
 /**
  * Unified inbox view: one row per ticket, decorated with the latest activity

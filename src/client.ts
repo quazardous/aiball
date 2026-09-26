@@ -574,7 +574,7 @@ export class AiballClient {
         return this.call("graph.audit", params(q));
     }
     listMessages(q: Record<string, string | number | undefined> = {}) {
-        return this.http("GET", `/api/messages${query(q)}`);
+        return this.call("message.list", params(q));
     }
     getMessage(id: number) {
         return this.call("message.get", { id });
@@ -935,10 +935,7 @@ export class AiballClient {
     }
 
     getConsumer(id: string) {
-        return this.http<{ consumer_id: string; micro_prompt?: string | null; agent_type?: string | null }>(
-            "GET",
-            `/api/consumers/${encodeURIComponent(id)}`,
-        );
+        return this.call<{ consumer_id: string; micro_prompt?: string | null; agent_type?: string | null }>("consumer.get", { consumer_id: id });
     }
 
     /** #1819: the facts for judging whether a human is around — elapsed
@@ -982,11 +979,7 @@ export class AiballClient {
     /** #404: push a turn's token-usage delta onto a ticket (additive). Called
      *  best-effort by the Stop-hook's token-capture; failures are swallowed. */
     postTokenUsage(ticketId: number, u: { in: number; out: number; cacheW: number; cacheR: number }) {
-        return this.http(
-            "POST",
-            `/api/tickets/${ticketId}/token-usage`,
-            { in: u.in, out: u.out, cache_w: u.cacheW, cache_r: u.cacheR },
-        );
+        return this.call("ticket.add_token_usage", { id: ticketId, in: u.in, out: u.out, cache_w: u.cacheW, cache_r: u.cacheR });
     }
 
     /** #634 david `svzkpw` — push a turn's token-usage delta onto a PROJECT
@@ -1015,20 +1008,12 @@ export class AiballClient {
         if (cwd !== undefined) body.cwd = cwd;
         // #393 (Option A): the loop's project → exact root↔project attribution.
         if (project !== undefined) body.project = project;
-        return this.http<{ consumer_id: string; state: string; human?: boolean; human_word?: string }>(
-            "PUT",
-            `/api/consumers/${encodeURIComponent(this.agentId)}/state`,
-            body,
-        );
+        return this.call<{ consumer_id: string; state: string; human?: boolean; human_word?: string }>("consumer.push_state", { consumer_id: this.agentId, ...body });
     }
 
     /** #3030 — push this loop's bar as data (see `agent-bar.ts`), on change. */
     pushAgentBar(bar: AgentBar) {
-        return this.http<{ consumer_id: string; changed: boolean }>(
-            "PUT",
-            `/api/consumers/${encodeURIComponent(this.agentId)}/bar`,
-            bar,
-        );
+        return this.call<{ consumer_id: string; changed: boolean }>("consumer.push_bar", { consumer_id: this.agentId, bar });
     }
 
     /**
@@ -1135,7 +1120,7 @@ export class AiballClient {
     /** #2198 — `project`, `summary` (no bodies) and `limit` are applied by the
      *  daemon, so nothing crosses the socket only to be thrown away. */
     myPendingTickets(opts: PendingListOpts = {}) {
-        return this.http("GET", `/api/messages?${this.pendingQuery("ticket_created", opts)}`);
+        return this.call("message.list", this.pendingQuery("ticket_created", opts));
     }
     /**
      * Pending comments authored by this agent. Symmetric to
@@ -1144,17 +1129,20 @@ export class AiballClient {
      * (per #B.69).
      */
     myPendingComments(opts: PendingListOpts = {}) {
-        return this.http("GET", `/api/messages?${this.pendingQuery("comment_added", opts)}`);
+        return this.call("message.list", this.pendingQuery("comment_added", opts));
     }
-    private pendingQuery(kind: "ticket_created" | "comment_added", opts: PendingListOpts): string {
-        const q = new URLSearchParams({ kind, status: "pending", by_agent: this.agentId });
-        if (opts.project) q.set("project", opts.project);
-        if (opts.summary) q.set("summary", "1");
-        if (opts.limit) q.set("limit", String(opts.limit));
-        // #2339 — poll lists the pending tickets it counts: a ticket closed
-        // while it waited in moderation is not waiting any more.
-        if (kind === "ticket_created") q.set("open", "1");
-        return q.toString();
+    private pendingQuery(kind: "ticket_created" | "comment_added", opts: PendingListOpts): Record<string, unknown> {
+        return {
+            kind,
+            status: "pending",
+            by_agent: this.agentId,
+            ...(opts.project ? { project: opts.project } : {}),
+            ...(opts.summary ? { summary: true } : {}),
+            ...(opts.limit ? { limit: opts.limit } : {}),
+            // #2339 — poll lists the pending tickets it counts: a ticket closed
+            // while it waited in moderation is not waiting any more.
+            ...(kind === "ticket_created" ? { open: true } : {}),
+        };
     }
     /**
      * First + last non-rejected ticket in scope — used by the slim
@@ -1162,14 +1150,10 @@ export class AiballClient {
      * restrict. include_snoozed widens the scope.
      */
     bookends(opts: { project?: string; includeSnoozed?: boolean } = {}) {
-        const qs = new URLSearchParams();
-        if (opts.project) qs.set("project", opts.project);
-        if (opts.includeSnoozed) qs.set("include_snoozed", "1");
-        const q = qs.toString();
-        return this.http<{ first: unknown; last: unknown }>(
-            "GET",
-            `/api/tickets/bookends${q ? "?" + q : ""}`,
-        );
+        return this.call<{ first: unknown; last: unknown }>("ticket.bookends", {
+            ...(opts.project ? { project: opts.project } : {}),
+            ...(opts.includeSnoozed ? { include_snoozed: true } : {}),
+        });
     }
     myPendingCount() {
         return this.call<{ count: number }>("message.pending_count", { by_agent: this.agentId });
@@ -1482,18 +1466,11 @@ function httpError(
     return err;
 }
 
-/** A query's fields as a method's params: what `query()` leaves out (unset, empty) is left out. */
+/** A filter's fields as a method's params: an unset or empty one is left out, as a query string did. */
 function params(q: Record<string, string | number | undefined>): Record<string, string | number> {
     const out: Record<string, string | number> = {};
     for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== "") out[k] = v;
     return out;
-}
-
-function query(q: Record<string, string | number | undefined>): string {
-    const parts = Object.entries(q)
-        .filter(([, v]) => v !== undefined && v !== "")
-        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
-    return parts.length ? `?${parts.join("&")}` : "";
 }
 
 /**

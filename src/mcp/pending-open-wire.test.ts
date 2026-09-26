@@ -3,7 +3,7 @@
  * `open=1` drops closed tickets; this one proves the MCP client sends it, for the
  * tickets only: a comment awaiting moderation has no open or closed of its own.
  *
- * Drives the real client with its transport stubbed.
+ * Drives the real client with its transport stubbed (#3067: the bus call).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,15 +16,16 @@ process.env.AIBALL_SOCK = "";
 
 const { client } = await import("./_helpers.js");
 
-const paths: string[] = [];
-(client as unknown as Record<string, unknown>).http = async (_method: string, path: string) => { paths.push(path); return []; };
+const sent: { method: string; params: Record<string, unknown> }[] = [];
+(client as unknown as Record<string, unknown>).call = async (method: string, params: Record<string, unknown>) => { sent.push({ method, params }); return []; };
 
 test("the pending tickets poll lists are the open ones, the pending comments are not filtered", async () => {
     await client.myPendingTickets({ project: "p", summary: true, limit: 51 });
     await client.myPendingComments({ project: "p", summary: true, limit: 51 });
-    const [tickets, comments] = paths.map((p) => new URLSearchParams(p.split("?")[1]));
-    assert.equal(tickets!.get("kind"), "ticket_created");
-    assert.equal(tickets!.get("open"), "1");
-    assert.equal(comments!.get("kind"), "comment_added");
-    assert.equal(comments!.get("open"), null);
+    assert.deepEqual(sent.map((s) => s.method), ["message.list", "message.list"]);
+    const [tickets, comments] = sent.map((s) => s.params);
+    assert.equal(tickets!.kind, "ticket_created");
+    assert.equal(tickets!.open, true);
+    assert.equal(comments!.kind, "comment_added");
+    assert.equal(comments!.open, undefined);
 });

@@ -243,6 +243,28 @@
       ]
     },
     {
+      "name": "consumer.get",
+      "description": "One consumer's record, its micro-prompt included: the loop reads its own for the wake.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "consumer.list",
       "description": "Every consumer, each as `consumerEntry` builds it: presence, pings, wait credit, session.",
       "paramStructure": "by-name",
@@ -303,6 +325,80 @@
           "schema": {
             "type": "string"
           }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.push_bar",
+      "description": "A loop's bar as data, pushed on change. Own bar only, and agents only.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "bar",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.push_state",
+      "description": "A loop's state (`busy`, `idle`, `boot`), with the human's presence and its word, the loop's root and project. Own state only, and agents only; the board hears of it only when something changed .",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cwd",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "human",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "human_word",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "state",
+          "required": false,
+          "schema": {}
         }
       ],
       "result": {
@@ -828,6 +924,70 @@
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.list",
+      "description": "Messages, filtered by status, project, kind and author; `open` drops closed tickets before the limit, `summary` drops the bodies.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "by_agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "open",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "summary",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],
@@ -1880,6 +2040,48 @@
       ]
     },
     {
+      "name": "ticket.add_token_usage",
+      "description": "Add a turn's token usage to a ticket: the one the caller holds by claim , else the one it names. The answer carries the ticket's row , whose token chip changed.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "cache_r",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "cache_w",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "in",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "out",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.assign",
       "description": "#418: assign or claim a ticket. Without `assignee` (or naming the caller), the caller claims it; naming someone else pushes it to them, a human's gesture. The assignee is subscribed. A live assignment takes the ticket out of the other consumers' actionable pool until it lapses, is released, or the ticket closes.",
       "paramStructure": "by-name",
@@ -1897,6 +2099,35 @@
           "name": "assignee",
           "required": false,
           "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.bookends",
+      "description": "The first and last open tickets of a project, snoozed ones left out unless `include_snoozed`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "include_snoozed",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {

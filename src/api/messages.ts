@@ -19,14 +19,8 @@
  * name (src/bus/methods/); the code is there, the route only maps the request.
  */
 import { serveMethod } from "../bus/http.js";
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
 import { ERROR_CODES } from "../domain.js";
-import {
-    listMessages,
-    type MessageKind,
-    type MessageStatus,
-} from "../db.js";
-import { withTags } from "./_helpers.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
 
@@ -83,31 +77,7 @@ export const SUBMIT_REFUSAL_STATUS: Partial<Record<string, number>> = {
 // The body is the message; nothing rides in the path or the query.
 messagesRouter.post("/messages", serveMethod("message.post", (req) => req.body ?? {}, { status: 201 }));
 
-messagesRouter.get("/messages", (req: Request, res: Response) => {
-    const { status, project, kind, by_agent, limit, summary, open } = req.query;
-    const list = listMessages({
-        status: status as MessageStatus | undefined,
-        project: project as string | undefined,
-        kind: kind as MessageKind | undefined,
-        by_agent: typeof by_agent === "string" ? by_agent : undefined,
-        limit: limit ? Number(limit) : undefined,
-        // #2339 — `open=1` drops closed tickets before the limit.
-        open: open === "1" || open === "true",
-    });
-    // #2198 — `summary=1` drops the bodies HERE, before they cross the socket.
-    // poll() used to fetch every pending ticket with its full body and throw
-    // the bodies away in the MCP process: 92 919 bytes on the wire to deliver
-    // 35 690. A projection belongs where the data is.
-    const rows = summary === "1" || summary === "true"
-        ? list.map((m) => {
-            const r: Record<string, unknown> = { ...m };
-            delete r.body;
-            delete r.original_body;
-            return r;
-        }) as unknown as typeof list
-        : list;
-    res.json(withTags(rows));
-});
+messagesRouter.get("/messages", serveMethod("message.list"));
 
 messagesRouter.get("/messages/:id", serveMethod("message.get"));
 

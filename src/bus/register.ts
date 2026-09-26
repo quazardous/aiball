@@ -15,3 +15,4 @@ import "./methods/session.js";
 import "./methods/read-state.js";
 import "./methods/lookup.js";
 import "./methods/project.js";
+import "./methods/loop-io.js";
