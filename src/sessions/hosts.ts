@@ -186,15 +186,21 @@ export async function startHost(o: StartHost): Promise<HostLink> {
     }
     const bin = sessionHostBin();
     if (!existsSync(bin)) throw new Error(`no session host at ${bin}: build it with cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml`);
+    if (!existsSync(o.cwd)) throw new Error(`no such directory: ${o.cwd}`);
     mkdirSync(hostsDir(), { recursive: true, mode: 0o700 });
     rmSync(dir, { recursive: true, force: true });
     const args = ["--dir", dir, ...(o.agent ? ["--agent", o.agent] : ["--name", o.name!])];
     if (o.size) args.push("--rows", String(o.size.rows), "--cols", String(o.size.cols));
     args.push("--", ...o.argv);
+    // A spawn that fails (a missing cwd reads as ENOENT) is an 'error' event:
+    // unheard, it kills the daemon.
     const child = spawn(bin, args, { cwd: o.cwd, env: o.env, detached: true, stdio: "ignore" });
+    let spawnError: Error | null = null;
+    child.on("error", (e) => { spawnError = e; });
     child.unref();
     const deadline = Date.now() + 5000;
     while (!existsSync(join(dir, "host.json"))) {
+        if (spawnError) throw new Error(`the session host could not start: ${(spawnError as Error).message}`);
         if (Date.now() > deadline) throw new Error("the session host did not come up");
         if (child.exitCode !== null) throw new Error(`the session host exited (${child.exitCode})`);
         await new Promise((r) => setTimeout(r, 25));
