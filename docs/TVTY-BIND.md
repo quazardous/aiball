@@ -3,9 +3,8 @@
 > **Status: a design, partly built.** Built: the session host and sessions
 > without an agent ([`SESSION-HOST.md`](./SESSION-HOST.md)), `HOST_BUSY`, the
 > attach protocol served by the host ([`LOOP-HOST.md`](./LOOP-HOST.md)). Not
-> yet: an agent's session on the host, `--force`, `session.handover`, the
-> `host` field, and `attach.sock` on claude-loop's proxy. Each section says
-> which.
+> yet: an agent's session on the host, `--force`, `session.handover` and the
+> `host` field. Each section says which.
 
 This page is the contract between tvty and claude-loop over one agent's
 Claude: where it runs, who may watch it and type into it, and how it moves
@@ -119,21 +118,16 @@ carries `attach: { socket: null, reason: "remote" }`, so tvty can say so
 instead of failing. The daemon relaying the attach protocol, which `LOOP-HOST.md`
 foresees, is for later.
 
-## The loops already running
+## Loops in claude-loop
 
-claude-loop's proxy serves `attach.sock` with the host's code (the same Rust
-crate). *To build.* A loop started before that has no socket:
+claude-loop's own proxy does not serve `attach.sock`: a loop gets its socket
+by moving onto the session host (`claude-loop start --host`, or the handover),
+and claude-loop goes away in the end. Until then:
 
-- its bar says `attach: { socket: null, reason: "no_socket" }`, and tvty
-  attaches to it through tmux, for that loop only, until every loop has its
-  socket; then tvty drops tmux. `remote` never falls back to tmux;
-- it gets its socket at its next restart. `claude-loop restart --resume
-  <agent>` restarts it now: Claude stops when idle and comes back with the
-  same conversation, in a few seconds.
-
-Replacing a running proxy without restarting Claude would need the new proxy
-to adopt a terminal and a process it did not start. It is not done, for a
-transition that happens once.
+- a loop still in claude-loop has `attach: { socket: null, reason:
+  "no_socket" }`, and tvty attaches to it through tmux, for that loop only;
+  `remote` never falls back to tmux;
+- tvty drops tmux once every loop runs on the host.
 
 ## What tvty reads and calls
 
