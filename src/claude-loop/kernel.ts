@@ -98,7 +98,9 @@ import {
     type Plate,
     type WakeHint,
     type WakeEventHint,
+    writeBarHost,
 } from "./state.js";
+import { isBarHost } from "../agent-bar.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { loopConfig } from "./loop-config.js";
 import { armErrorBackoff, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
@@ -1892,6 +1894,17 @@ async function mainSse(): Promise<void> {
             // already fired at the IPC layer (markAsProxy → onProxyConnect) ; here
             // we just no-op it instead of letting it fall through to "unknown".
             if (event.event === "hello") return;
+            // #3044 — who draws the bar (`claude-loop bar`, or the API relaying a
+            // host's switch): the state file is the one truth, and the bar
+            // renderer applies it on its next tick (≤ 1 s).
+            if (event.event === "bar_host") {
+                const host = (event as { host?: unknown }).host;
+                if (isBarHost(host)) {
+                    writeBarHost(sd!, host);
+                    log(`proxy-event: bar host → ${host}`);
+                }
+                return;
+            }
             const verdict = dispatchProxyEvent(sd!, event);
             log(formatVerdictLogLine(verdict));
         },

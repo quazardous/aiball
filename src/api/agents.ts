@@ -457,23 +457,20 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
 export type LoopAfkAction = "toggle" | "off" | "arm_10m" | "arm_inf";
 
 /**
- * #2333 — queue an AFK change on a consumer's LOCAL loop, through its socket.
- * Shared by the per-agent route below and the all-loops message / release
- * routes. Node-relayed loops are refused (not implemented). Returns the loop
- * name, or the HTTP status and reason it could not be reached.
+ * The state dir of a consumer's LOCAL loop, where its socket lives, or the
+ * HTTP status and reason it cannot be reached. Node-relayed loops are refused
+ * (not implemented). Shared by the loop controls that go through the socket.
  */
-export function sendAfkToLoop(
+export function localLoopDir(
     consumerId: string,
-    action: LoopAfkAction,
-    durationSec = 600,
-): { ok: true; loop: string } | { ok: false; status: number; error: string; code: ErrorCode } {
+): { ok: true; loop: string; sd: string } | { ok: false; status: number; error: string; code: ErrorCode } {
     const consumer = getConsumer(consumerId);
     if (!consumer || !consumer.cwd) {
         // #3039 — an agent unknown, or without a loop heartbeat, has no loop to reach.
         return { ok: false, status: 404, error: `consumer not found / no cwd : ${consumerId}`, code: consumer ? ERROR_CODES.LOOP_NOT_FOUND : ERROR_CODES.CONSUMER_NOT_FOUND };
     }
     if (consumer.last_seen_via === "node") {
-        return { ok: false, status: 501, error: "AFK toggle over node-relayed pane is not implemented yet", code: ERROR_CODES.NOT_IMPLEMENTED };
+        return { ok: false, status: 501, error: "loop control over a node-relayed pane is not implemented yet", code: ERROR_CODES.NOT_IMPLEMENTED };
     }
     const loopName = resolveLoopName(consumer.cwd);
     if (!loopName) {
@@ -485,6 +482,23 @@ export function sendAfkToLoop(
     if (!existsSync(sd)) {
         return { ok: false, status: 404, error: `loop state dir missing : ${sd}`, code: ERROR_CODES.LOOP_NOT_FOUND };
     }
+    return { ok: true, loop: loopName, sd };
+}
+
+/**
+ * #2333 — queue an AFK change on a consumer's LOCAL loop, through its socket.
+ * Shared by the per-agent route below and the all-loops message / release
+ * routes. Returns the loop name, or the HTTP status and reason it could not be
+ * reached.
+ */
+export function sendAfkToLoop(
+    consumerId: string,
+    action: LoopAfkAction,
+    durationSec = 600,
+): { ok: true; loop: string } | { ok: false; status: number; error: string; code: ErrorCode } {
+    const where = localLoopDir(consumerId);
+    if (!where.ok) return where;
+    const { sd, loop: loopName } = where;
     const nowMs = Date.now();
     let payload: Record<string, unknown>;
     if (action === "toggle") {

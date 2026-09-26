@@ -26,6 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { mouseSetupCommands } from "./mouse-setup.js";
+import { isBarHost, type BarHost } from "../agent-bar.js";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
@@ -72,10 +73,11 @@ import {
     zenPath,
     pingsSnapshotNote,
     type Plate,
+    writeBarHost,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
 import { cmdLog } from "./cmds/log.js";
-import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweepOrphans } from "./cmds/manage.js";
+import { cmdBar, cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweepOrphans } from "./cmds/manage.js";
 import { cmdInspect } from "./cmds/inspect.js";
 import { cmdHealth } from "./cmds/health.js";
 import { cmdDebug } from "./cmds/debug.js";
@@ -224,6 +226,8 @@ interface StartOpts {
     force?: boolean;
     /** #3017: `--mouse on|off`, over `claude_loop.mouse`. Undefined = the config. */
     mouse?: boolean;
+    /** #3044: `--bar tmux|external`, over `claude_loop.bar`. Undefined = the config. */
+    bar?: BarHost;
     /** Resume-picker auto-dismiss (#B.154): summary | as-is | abort. */
     resumeMode?: string;
     /**
@@ -1311,6 +1315,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     for (const args of mouseSetupCommands(tname, mouse, mouse ? resolveClipboardCmd() : null)) {
         spawnSync(MUX_CMD, args, { stdio: "ignore" });
     }
+    // #3044 — who draws the bar. `external`: another host (tvty) draws it from
+    // the bar data, and tmux's status line goes off at once rather than on the
+    // renderer's first tick. The state file is what the renderer and a later
+    // `claude-loop bar` read and write.
+    const barHost = opts.bar ?? ctx.claude_loop.bar;
+    writeBarHost(sd, barHost);
+    if (barHost === "external") spawnSync(MUX_CMD, ["set-option", "-t", tname, "status", "off"], { stdio: "ignore" });
     // #862 Slice 5 + david `<fix>` — seed BOOT inline (status-bg + @cl_*)
     // pour couvrir la fenêtre cmdStart→BarRenderer.start (~1s : fork
     // bash→tsx→node + boot timer). Sans seed, tmux affiche ses defaults
@@ -1757,6 +1768,8 @@ async function cmdStatus(name: string | undefined): Promise<void> {
     process.stdout.write(`  wait           : ${ctx.claude_loop.wait ? "true (--wait — boot-grace honored, post-boot arms NOT AFK 10m)" : "false (--no-wait — eager drain at boot end, post-boot bar `loop`)"}\n`);
     // #3017 — the mouse setting a new loop here would get (`start --mouse` overrides it).
     process.stdout.write(`  mouse (config) : ${ctx.claude_loop.mouse ? "on (wheel scrolls the pane, drag copies; Shift for the terminal's own selection)" : "off (the terminal keeps its native selection and right-click)"}\n`);
+    // #3044 — who draws a new loop's bar here (`start --bar` overrides it).
+    process.stdout.write(`  bar (config)   : ${ctx.claude_loop.bar === "external" ? "external (another host draws it; tmux's status line is off)" : "tmux (its status line)"}\n`);
     // #591 qef8m6 — surface project_type so it's visible from the CLI without
     // calling the welcome MCP. Null = welcome falls back to `public`.
     process.stdout.write(`  project_type   : ${ctx.project_type ?? "(unset — welcome defaults to 'public')"}\n`);
@@ -2030,6 +2043,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             "#3017: tmux mouse mode for this loop — `on` (wheel scrolls the pane, drag copies to the clipboard) or `off` (the terminal keeps its native selection and right-click). Overrides `claude_loop.mouse`.",
         ).choices(["on", "off"]))
         .addOption(new Option(
+            "--bar <host>",
+            "#3044: who draws the loop's bar — `tmux` (its status line) or `external` (another host draws it from the bar data; tmux's line is off). Overrides `claude_loop.bar`.",
+        ).choices(["tmux", "external"]))
+        .addOption(new Option(
             "--resume-mode <mode>",
             "How to auto-dismiss the claude --resume picker (summary | as-is | abort)",
         ).default("as-is").choices(["summary", "as-is", "abort"]))
@@ -2082,7 +2099,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             type?: string; denyCode?: boolean;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
-            once?: boolean; zen?: boolean; mouse?: string;
+            once?: boolean; zen?: boolean; mouse?: string; bar?: string;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -2098,6 +2115,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 runOnce: opts.once === true,
                 force: opts.force === true,
                 mouse: opts.mouse === "on" ? true : opts.mouse === "off" ? false : undefined,
+                bar: isBarHost(opts.bar) ? opts.bar : undefined,
                 resumeMode: opts.resumeMode,
                 wait: waitExplicit ? opts.wait : undefined,
                 aiballUrl: opts.aiballUrl,
@@ -2218,6 +2236,10 @@ async function main(): Promise<void> {
         .option("--on", "force mute ON")
         .option("--off", "force mute OFF")
         .action((name: string | undefined, opts: { on?: boolean; off?: boolean }) => cmdZen(name ?? resolveCurrentLoopName(), opts));
+    // #3044 — who draws a running loop's bar.
+    program.command("bar [host] [name]")
+        .description("Who draws the loop's bar: `tmux` (its status line) or `external` (another host, e.g. tvty, draws it from the bar data; tmux's status line goes off). The bar is pushed to aiball either way. Bare = show it. Name optional — defaults to the current-cwd loop. A new loop's default is `claude_loop.bar`.")
+        .action((host: string | undefined, name: string | undefined) => cmdBar(name ?? resolveCurrentLoopName(), host));
     // #866 Slice 3 — hidden subcommand callable from `kill-on-exit.sh`
     // (bash trap). Sends a cooperative shutdown frame over the timer's
     // loop.sock. No-op silencieux si le socket est mort. Garde le SIGKILL

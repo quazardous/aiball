@@ -15,6 +15,12 @@ export type BarPhase = "boot" | "idle" | "busy";
 export type BarPresence = "boot" | "stop" | "wait" | "loop";
 /** off = the loop runs on its own; wait_10m / wait_inf = held for a human. */
 export type BarAfkMode = "off" | "wait_10m" | "wait_inf";
+/** #3044 — who draws the bar: tmux's status line, or another host (tmux's line is off). */
+export type BarHost = "tmux" | "external";
+export const BAR_HOSTS: readonly BarHost[] = ["tmux", "external"];
+export function isBarHost(v: unknown): v is BarHost {
+    return typeof v === "string" && (BAR_HOSTS as readonly string[]).includes(v);
+}
 
 export interface AgentBar {
     /** What claude is doing. */
@@ -45,6 +51,8 @@ export interface AgentBar {
     next_wake_at: string | null;
     /** While booting: when the boot started, and when its grace ends. */
     boot: { started_at: string; deadline_at: string | null } | null;
+    /** #3044 — who draws the bar: `tmux` (its status line) or `external` (tmux's line is off). */
+    host: BarHost;
 }
 
 const PHASES: readonly string[] = ["boot", "idle", "busy"];
@@ -85,6 +93,8 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     if (!(boot === null || (isObj(boot) && typeof boot.started_at === "string" && isDateOrNull(boot.started_at) && isDateOrNull(boot.deadline_at)))) {
         return { error: "boot must be null or { started_at: ISO date, deadline_at: ISO date | null }" };
     }
+    // #3044 — absent from loops started before the field: they draw in tmux.
+    if (b.host !== undefined && !isBarHost(b.host)) return { error: `host must be one of ${BAR_HOSTS.join(", ")}` };
     return {
         phase: b.phase as BarPhase,
         presence: b.presence as BarPresence,
@@ -98,5 +108,6 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         counters: c === null ? null : { open: (c as Record<string, number | null>).open!, backlog: (c as Record<string, number | null>).backlog!, events: (c as Record<string, number | null>).events! },
         next_wake_at: b.next_wake_at as string | null,
         boot: boot === null ? null : { started_at: (boot as Record<string, string>).started_at!, deadline_at: (boot as Record<string, string | null>).deadline_at ?? null },
+        host: b.host === undefined ? "tmux" : b.host as BarHost,
     };
 }

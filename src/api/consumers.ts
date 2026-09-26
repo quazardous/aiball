@@ -4,7 +4,7 @@
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
 import { listTicketsFor } from "./tickets.js";
-import { parseAgentBar } from "../agent-bar.js";
+import { isBarHost, parseAgentBar } from "../agent-bar.js";
 import { getAgentBar, setAgentBar } from "../agent-bar-store.js";
 import { type WaitCreditRow, listWaitCreditMoves, listWaitCredits, waitCreditBalance, waitCreditEnabled } from "../db/wait-credit.js";
 import { unreadPingCount } from "../db/pings.js";
@@ -46,7 +46,9 @@ import { isPresent, presenceRunning } from "../live-presence.js";
 import { canControlLoop } from "../loop-control.js";
 import { spoolPrompt, drainPrompts } from "../loop-prompts.js";
 import { pickHoldTargets, type LoopHoldResult } from "../loop-hold.js";
-import { sendAfkToLoop } from "./agents.js";
+import { localLoopDir, sendAfkToLoop } from "./agents.js";
+import { loopSockPath } from "../claude-loop/state.js";
+import { sendEventOnce } from "../claude-loop/ipc-events.js";
 import { badRequest, consumerOf, notFound, tokenKindOf, refuse } from "./_helpers.js";
 import { ERROR_CODES } from "../domain.js";
 
@@ -432,6 +434,27 @@ consumersRouter.get("/consumers/:consumer_id/bar", (req: Request, res: Response)
     const view = getAgentBar(target);
     if (!view) return notFound(res, "no bar pushed by this consumer yet");
     res.json(view);
+});
+
+/**
+ * #3044 — who draws an agent's bar: `tmux` (its status line) or `external`
+ * (another host draws it from the bar data; tmux's line goes off). A loop
+ * control, like AFK: a moderator's, never a proxy node's. Relayed to the loop,
+ * whose kernel records it; the next bar pushed carries the new `host`.
+ */
+consumersRouter.post("/consumers/:consumer_id/bar-host", async (req: Request, res: Response) => {
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
+    const host = (req.body ?? {}).host;
+    if (!isBarHost(host)) return badRequest(res, "host must be tmux or external");
+    const where = localLoopDir(String(req.params.consumer_id));
+    if (!where.ok) return refuse(res, where.status, where.error, where.code);
+    try {
+        await sendEventOnce(loopSockPath(where.sd), { kind: "proxyEvent", data: { event: "bar_host", host } }, { timeoutMs: 1000, throwOnError: true });
+    } catch (e) {
+        return refuse(res, 502, `the loop did not take it: ${(e as Error).message}`, ERROR_CODES.BAD_GATEWAY);
+    }
+    res.status(202).json({ consumer_id: req.params.consumer_id, loop: where.loop, host });
 });
 
 /**

@@ -20,6 +20,7 @@
  * ```
  */
 import { parseMouse } from "../claude-loop/mouse-setup.js";
+import { isBarHost, type BarHost } from "../agent-bar.js";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
@@ -277,6 +278,12 @@ export interface AiballConfig {
          *  terminal's native selection and right-click alone. Global
          *  `claude_loop.mouse`, overridden per project; `start --mouse` wins. */
         mouse: boolean;
+        /** #3044: who draws the loop's bar — `tmux` (its status line) or
+         *  `external` (another host draws it, e.g. tvty: tmux's line is off,
+         *  the bar is still pushed to aiball). Global `claude_loop.bar`,
+         *  overridden per project; `start --bar` wins; `claude-loop bar`
+         *  switches a running loop. */
+        bar: BarHost;
         /** #351: key/combo that flags the human AFK (→ immediate redirect).
          *  VS Code notation: `+` joins modifiers, a space = a 2-combo
          *  sequence (e.g. "esc esc", "ctrl+a"). CL_AFK_KEY. */
@@ -466,6 +473,7 @@ const DEFAULTS: AiballConfig = {
         pane_probe_slow_ms: 1000,
         esc_takeover: true,
         mouse: true,
+        bar: "tmux",
         // #351 / #381: AFK = a single ATOMIC combo that TOGGLES away/back —
         // #381 (david s4r9n8) dropped the 2-press timing sequence. Default
         // `f9` (david 9garjb) — the previous `alt+esc` was confirmed
@@ -559,6 +567,24 @@ function pickColors(block: unknown): Partial<AiballConfig["colors"]> {
 }
 
 /** Read a `colors:` block from a YAML file (the global config). Missing/malformed → {}. */
+/** #3044 — a `claude_loop.bar` value: `tmux` or `external`; anything else, undefined. */
+export function parseBarHost(value: unknown): BarHost | undefined {
+    const v = typeof value === "string" ? value.trim().toLowerCase() : value;
+    return isBarHost(v) ? v : undefined;
+}
+
+/** #3044 — `claude_loop.bar` from the global config file; undefined when unset. */
+function readGlobalLoopBar(path: string): BarHost | undefined {
+    if (!existsSync(path)) return undefined;
+    try {
+        const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;
+        const cl = raw.claude_loop;
+        return cl && typeof cl === "object" ? parseBarHost((cl as Record<string, unknown>).bar) : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 /** #3017 — `claude_loop.mouse` from the global config file; undefined when unset. */
 function readGlobalLoopMouse(path: string): boolean | undefined {
     if (!existsSync(path)) return undefined;
@@ -744,6 +770,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     // terminal behaves), set once; a project's `.aiball.yaml` can still override.
     const globalMouse = readGlobalLoopMouse(globalConfigPath());
     if (globalMouse !== undefined) cfg.claude_loop.mouse = globalMouse;
+    // #3044 — `claude_loop.bar`, same layers.
+    const globalBar = readGlobalLoopBar(globalConfigPath());
+    if (globalBar !== undefined) cfg.claude_loop.bar = globalBar;
 
     // #160 Phase 1 — upstream bindings GLOBAL layer. Read AVANT le per-project
     // pour que celui-ci puisse override. Format YAML attendu (per-project map) :
@@ -832,6 +861,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #3017 — on/off (or a boolean); anything else keeps the global value.
             const mouse = parseMouse(cl.mouse);
             if (mouse !== undefined) cfg.claude_loop.mouse = mouse;
+            // #3044 — tmux / external; anything else keeps the global value.
+            const bar = parseBarHost(cl.bar);
+            if (bar !== undefined) cfg.claude_loop.bar = bar;
             // #351: AFK combo.
             if (typeof cl.afk_key === "string" && cl.afk_key.trim()) {
                 cfg.claude_loop.afk_key = cl.afk_key.trim();

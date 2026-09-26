@@ -21,6 +21,7 @@ const base = (): AgentBar => ({
     counters: null,
     next_wake_at: null,
     boot: null,
+    host: "tmux",
 });
 
 function renderer(current: { bar: AgentBar }) {

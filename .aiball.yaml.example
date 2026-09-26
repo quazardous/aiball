@@ -118,6 +118,13 @@ claude_loop:
   # ~/.config/aiball/config.yaml; `claude-loop start --mouse on|off` wins.
   mouse: on
 
+  # Who draws the loop's bar. `tmux`: its status line. `external`: another
+  # host draws it from the bar data (tvty does), and tmux's status line is
+  # off; the bar is pushed to aiball either way. Also settable in the global
+  # config; `claude-loop start --bar tmux|external` wins, and
+  # `claude-loop bar external|tmux` switches a running loop.
+  bar: tmux
+
   # AFK key — F9 cycles 3 states: `AFK` (autonomous loop, dim) →
   # `NOT AFK 10m` (jaune countdown) → `NOT AFK ∞` (rouge indefinite)
   # → back to `AFK`. Typing also arms / refreshes the 10m hold

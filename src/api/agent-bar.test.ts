@@ -60,6 +60,7 @@ const bar = (over: Record<string, unknown> = {}) => ({
     counters: { open: 3, backlog: 1, events: 0 },
     next_wake_at: "2026-09-26T09:30:00.000Z",
     boot: null,
+    host: "tmux",
     ...over,
 });
 
@@ -105,4 +106,11 @@ test("the bar is stale unless its loop is present", async () => {
 
 test("the shape the daemon accepts round-trips unchanged", () => {
     assert.deepEqual(parseAgentBar(bar()), bar());
+    assert.deepEqual(parseAgentBar(bar({ host: "external" })), bar({ host: "external" }));
+});
+
+test("#3044 — a bar without host (a loop started before the field) draws in tmux; an unknown host is refused", () => {
+    const { host: _h, ...old } = bar();
+    assert.equal((parseAgentBar(old) as { host: string }).host, "tmux");
+    assert.match(String((parseAgentBar(bar({ host: "web" })) as { error: string }).error), /host/);
 });

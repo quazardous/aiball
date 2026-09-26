@@ -34,3 +34,13 @@ test("a value that is neither on nor off is ignored", () => {
     global("claude_loop:\n  mouse: sometimes\n");
     assert.equal(loadConfig(project("p-junk", null)).claude_loop.mouse, true);
 });
+
+test("#3044 — claude_loop.bar: tmux by default, set globally, overridden per project, junk ignored", () => {
+    global("");
+    assert.equal(loadConfig(project("b-default", null)).claude_loop.bar, "tmux");
+    global("claude_loop:\n  bar: external\n");
+    assert.equal(loadConfig(project("b-global", "consumer:\n  project: b-global\n")).claude_loop.bar, "external");
+    assert.equal(loadConfig(project("b-override", "claude_loop:\n  bar: tmux\n")).claude_loop.bar, "tmux");
+    global("claude_loop:\n  bar: web\n");
+    assert.equal(loadConfig(project("b-junk", null)).claude_loop.bar, "tmux");
+});

@@ -26,6 +26,7 @@ import {
     typingGlyphChunk,
     logBarPaint,
     proxyIsAlive,
+    readBarHost,
     readLoopStateInput,
     stateBg,
     tmuxName,
@@ -35,7 +36,7 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { afkState } from "./bar-render.js";
-import type { AgentBar } from "../agent-bar.js";
+import type { AgentBar, BarHost } from "../agent-bar.js";
 
 /** Snapshot canonical de la barre tmux. Chaque champ correspond à une
  *  tmux user-option / propriété peinte par les writers actuels. Pur
@@ -298,7 +299,20 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
         boot: phase === "boot"
             ? { started_at: new Date(input.loopStartMs).toISOString(), deadline_at: iso(ipc.bootDeadlineMs ?? null) }
             : null,
+        host: readBarHost(sd),
     };
+}
+
+/**
+ * #3044 — what a change of bar host does to the tmux session: `external` turns
+ * tmux's status line off; back to `tmux` turns it on and repaints it whole (the
+ * renderer skipped every change meanwhile). The first reading only acts when it
+ * is `external`: a loop drawing in tmux leaves the session's line as it is.
+ */
+export function barHostTransition(prev: BarHost | null, next: BarHost): { status: "on" | "off" | null; repaint: boolean } {
+    if (prev === next) return { status: null, repaint: false };
+    if (next === "external") return { status: "off", repaint: false };
+    return prev === null ? { status: null, repaint: false } : { status: "on", repaint: true };
 }
 
 /** Diff deux snapshots et retourne la liste des champs qui ont
@@ -365,6 +379,8 @@ export class BarRenderer {
     private lastPublishedAt = 0;
     private pendingBar: AgentBar | null = null;
     private publishTimer: NodeJS.Timeout | null = null;
+    /** #3044 — the bar host last applied to the session; null before the first tick. */
+    private lastHost: BarHost | null = null;
     /** At most one push per this window; the last change of a burst is sent
      *  when it closes, so the daemon always ends on the loop's true state. */
     static readonly PUBLISH_MIN_GAP_MS = 1000;
@@ -473,6 +489,11 @@ export class BarRenderer {
     tick(): void {
         this.publishBar();
         try {
+            // #3044 — another host draws the bar: the data is still published
+            // (above), tmux's line is off, and nothing is painted into it.
+            const host = readBarHost(this.sd);
+            if (host !== this.lastHost) this.applyHost(host);
+            if (host === "external") return;
             const next = computeBarSnapshot(this.sd);
             const changed = diffSnapshots(this.lastSnapshot, next);
             if (changed.length === 0) return;
@@ -488,6 +509,15 @@ export class BarRenderer {
         } catch {
             // Swallow — next tick retries. Le bus ne doit pas crash.
         }
+    }
+
+    /** #3044 — apply a new bar host to the session (see `barHostTransition`). */
+    private applyHost(host: BarHost): void {
+        const t = barHostTransition(this.lastHost, host);
+        this.lastHost = host;
+        if (t.status) this.spawn(MUX_CMD, ["set-option", "-t", tmuxName(this.name), "status", t.status], { stdio: "ignore" });
+        if (t.repaint) this.lastSnapshot = null;
+        logBarPaint(this.sd, "barrender:host", host);
     }
 
     /** Peint les options tmux qui ont changé. Pure (depends seulement

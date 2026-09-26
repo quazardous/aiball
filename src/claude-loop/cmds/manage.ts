@@ -39,7 +39,10 @@ import {
     zenPath,
     refreshPingsSnapshot,
     type Plate,
+    readBarHost,
+    writeBarHost,
 } from "../state.js";
+import { isBarHost } from "../../agent-bar.js";
 import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
 
@@ -264,6 +267,31 @@ export function cmdWake(name: string): void {
  * `--on` / `--off` to be explicit ; bare = toggle. Verbose enough to
  * see the new state at a glance.
  */
+/**
+ * #3044 — who draws a running loop's bar: `tmux` (its status line) or
+ * `external` (another host draws it from the bar data; tmux's line goes off).
+ * Writes the loop's state file, which its bar renderer applies within a
+ * second; the bar keeps being pushed to aiball either way. Bare = show it.
+ */
+export function cmdBar(name: string, host: string | undefined): void {
+    const sd = stateDirFor(name);
+    if (!existsSync(sd)) die(`no state dir at ${sd}`);
+    const current = readBarHost(sd);
+    if (host === undefined) {
+        process.stdout.write(`bar of '${name}': ${current}\n`);
+        return;
+    }
+    if (!isBarHost(host)) die(`bar host must be tmux or external, not '${host}'`);
+    if (host === current) {
+        process.stdout.write(`bar of '${name}' already ${host} — no change\n`);
+        return;
+    }
+    writeBarHost(sd, host);
+    process.stdout.write(host === "external"
+        ? `bar of '${name}' → external: tmux's status line goes off; the bar is still pushed to aiball\n`
+        : `bar of '${name}' → tmux: its status line is back\n`);
+}
+
 export function cmdZen(name: string, opts?: { on?: boolean; off?: boolean }): void {
     const sd = stateDirFor(name);
     if (!existsSync(sd)) die(`no state dir at ${sd}`);

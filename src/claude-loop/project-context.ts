@@ -57,6 +57,8 @@ export interface ProjectContext {
         esc_takeover: boolean;
         /** #3017 — turn tmux's mouse mode on for the session (default true). */
         mouse: boolean;
+        /** #3044 — who draws the bar: `tmux` or `external`. */
+        bar: "tmux" | "external";
         afk_key: string;
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */

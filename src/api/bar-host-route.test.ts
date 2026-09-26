@@ -1,0 +1,47 @@
+/**
+ * #3044 — `POST /api/consumers/:id/bar-host`: a loop control, like AFK. A
+ * moderator's, never an agent's; the host must be tmux or external; an agent
+ * without a local loop is a 404 LOOP_NOT_FOUND. Relayed to the loop's kernel,
+ * which records it in the loop's state file.
+ */
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AddressInfo } from "node:net";
+
+process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3044-api-"));
+process.env.AIBALL_SOCK = "";
+
+const { createApp } = await import("../app.js");
+const { issueToken } = await import("../db/tokens.js");
+const { upsertConsumer } = await import("../db.js");
+
+upsertConsumer({ consumer_id: "boss", kind: "human" });
+upsertConsumer({ consumer_id: "worker", kind: "agent" });
+const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "3044-h" }).token;
+const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "3044-w" }).token;
+
+const server = createApp().listen(0);
+await new Promise<void>((r) => server.once("listening", () => r()));
+const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+after(() => {
+    server.close();
+    try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
+});
+
+async function post(token: string, body: unknown): Promise<{ status: number; code: unknown }> {
+    const r = await fetch(`${BASE}/api/consumers/worker/bar-host`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    return { status: r.status, code: ((await r.json()) as { code?: unknown }).code };
+}
+
+test("an agent may not switch it; a moderator must name tmux or external; no local loop is a 404", async () => {
+    assert.deepEqual(await post(WORKER, { host: "external" }), { status: 403, code: "MODERATOR_ONLY" });
+    assert.deepEqual(await post(HUMAN, { host: "web" }), { status: 400, code: "BAD_REQUEST" });
+    assert.deepEqual(await post(HUMAN, { host: "external" }), { status: 404, code: "LOOP_NOT_FOUND" }, "worker has no loop heartbeat");
+});

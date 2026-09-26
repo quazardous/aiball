@@ -972,8 +972,17 @@ boot window. Times are absolute dates, never countdowns.
 The loop pushes on change, at most once a second (a burst ends on its last value).
 A human, or the agent itself, reads it with `GET /api/consumers/<agent>/bar`, and
 `/ws` announces each change as an `agent_bar` event. A bar is `stale` once its loop
-is gone. The daemon keeps only the latest bar, in memory. The tmux bar itself is
-unchanged.
+is gone. The daemon keeps only the latest bar, in memory.
+
+**Who draws it** is the bar's `host`: `tmux` (its status line) or `external`
+(another host draws it, and tmux's status line is off, so the bar does not show
+twice). Either way the bar is pushed. A new loop takes `claude_loop.bar`
+(global config, overridden per project), or `claude-loop start --bar
+tmux|external`. A running loop switches with `claude-loop bar external|tmux`
+(bare: shows it), or through the API: `POST /api/consumers/<agent>/bar-host
+{host}`, a moderator's loop control like AFK. The choice lives in the loop's
+state dir (`bar-host`), so it survives a reload; going back to `tmux` repaints
+the line whole.
 
 ### The mouse: wheel or native selection
 

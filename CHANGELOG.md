@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `claude_loop.bar: external` (or `start --bar external`, `claude-loop bar
+  external` on a running loop, `POST /api/consumers/<agent>/bar-host`) turns
+  tmux's status line off for a loop whose bar another host draws; the bar is
+  still pushed, and says who draws it (`host`).
 - A ticket is filed in one call with its tags, assignee, milestone, level and
   parent (`POST /api/messages`): all checked first, refused whole with the
   field named, and announced once, already whole. The MCP `ticket_new` and the

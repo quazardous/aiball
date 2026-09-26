@@ -35,6 +35,7 @@ import {
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import type { BarHost } from "../agent-bar.js";
 import { homedir, uptime as osUptime } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -433,6 +434,23 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
 // que la loop bossait ou dormait ; « les N derniers écrans » est ce que veut
 // quelqu'un qui lit le corpus.
 export function paneCaptureDir(sd: string): string { return join(sd, "pane-captures"); }
+
+/** #3044 — who draws this loop's bar: one word, `tmux` or `external`. Absent = tmux. */
+export function barHostPath(sd: string): string { return join(sd, "bar-host"); }
+
+/** #3044 — the loop's bar host, from its state file; anything but `external` is tmux. */
+export function readBarHost(sd: string): BarHost {
+    try {
+        return readFileSync(barHostPath(sd), "utf8").trim() === "external" ? "external" : "tmux";
+    } catch {
+        return "tmux";
+    }
+}
+
+/** #3044 — set who draws the bar; the kernel's renderer applies it on its next tick. */
+export function writeBarHost(sd: string, host: BarHost): void {
+    writeFileSync(barHostPath(sd), `${host}\n`);
+}
 
 // #990 — unified capture dir. `CL_CAPTURE=1` records a replayable session :
 // each writer-process appends its own NDJSON timeline here (the kernel →
