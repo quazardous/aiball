@@ -8,14 +8,14 @@
  * itself — otherwise any local process could wake the agents. The source is the
  * key's label, never a field of the body, so a caller cannot speak as another.
  */
+import { serveMethod } from "../bus/http.js";
 import { Router, type Request, type Response } from "express";
 import { readBearerToken, type AuthenticatedRequest } from "../auth.js";
 import { getTokenAndTouch } from "../db/tokens.js";
 import { keyScopes } from "../db/signal-keys.js";
-import { isHuman } from "../db/consumers.js";
-import { ackSignal, listPendingSignals, parseSignalBody, postSignal } from "../db/signals.js";
+import { parseSignalBody, postSignal } from "../db/signals.js";
 import { emitSignal } from "../event-bus.js";
-import { badRequest, consumerOf, refuse } from "./_helpers.js";
+import { badRequest, refuse } from "./_helpers.js";
 import { ERROR_CODES, type ErrorCode } from "../domain.js";
 
 export const signalsRouter = Router();
@@ -68,18 +68,7 @@ signalsRouter.post("/signals", (req: Request, res: Response) => {
 });
 
 /** Signals waiting for the caller. A human may look at another consumer's. */
-signalsRouter.get("/signals", (req: Request, res: Response) => {
-    const caller = consumerOf(req);
-    const asked = typeof req.query.consumer_id === "string" && req.query.consumer_id ? req.query.consumer_id : caller;
-    if (asked !== caller && !isHuman(caller)) return refuse(res, 403, "only a human may read another consumer's signals", ERROR_CODES.MODERATOR_ONLY);
-    res.json({ consumer_id: asked, signals: listPendingSignals(asked) });
-});
+signalsRouter.get("/signals", serveMethod("signal.list"));
 
 /** The caller's loop injected the signal: stop delivering it. */
-signalsRouter.post("/signals/:id/ack", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id)) return badRequest(res, "invalid signal id");
-    const acked = ackSignal(id, consumerOf(req));
-    if (!acked) return refuse(res, 404, "no pending delivery of this signal for you");
-    res.json({ id, acked: true });
-});
+signalsRouter.post("/signals/:id/ack", serveMethod("signal.ack"));

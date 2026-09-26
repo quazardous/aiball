@@ -4,18 +4,9 @@
  * helper). Carved out of api.ts on 2026-05-19 — behavior-preserving
  * move.
  */
+import { serveMethod } from "../bus/http.js";
 import { Router } from "express";
-import { outboxPath } from "../paths.js";
-import { badRequest } from "./_helpers.js";
 
 export const agentHelpersRouter = Router();
 
-agentHelpersRouter.get("/feed-path", (req, res) => {
-    const project = req.query.project as string | undefined;
-    if (!project) return badRequest(res, "project query required");
-    try {
-        res.json({ path: outboxPath(project) });
-    } catch (e) {
-        return badRequest(res, (e as Error).message);
-    }
-});
+agentHelpersRouter.get("/feed-path", serveMethod("project.feed_path"));

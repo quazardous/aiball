@@ -338,12 +338,12 @@ export class AiballClient {
 
     /** The FILTERED view: keys always, values only where the schema says. */
     ticketPayload(ticketId: number) {
-        return this.http("GET", `/api/tickets/${ticketId}/payload`);
+        return this.call("ticket.payload", { id: ticketId });
     }
 
     /** Deposit or replace. `publicKeys` names the keys that are NOT secret. */
     setTicketPayload(ticketId: number, payload: Record<string, unknown>, publicKeys: string[]) {
-        return this.http("PUT", `/api/tickets/${ticketId}/payload`, { payload, schema: publicKeys });
+        return this.call("ticket.set_payload", { id: ticketId, payload, schema: publicKeys });
     }
 
     /**
@@ -353,12 +353,12 @@ export class AiballClient {
      * shells keep in history.
      */
     dumpTicketPayload(ticketId: number) {
-        return this.http("POST", `/api/tickets/${ticketId}/payload/dump`, {});
+        return this.call("ticket.dump_payload", { id: ticketId });
     }
 
     /** Revoke: destroy the values, keep the trace that they existed. */
     revokeTicketPayload(ticketId: number) {
-        return this.http("DELETE", `/api/tickets/${ticketId}/payload`);
+        return this.call("ticket.revoke_payload", { id: ticketId });
     }
 
     /**
@@ -688,7 +688,7 @@ export class AiballClient {
     /** #2180 — a ticket's pending `child_of` children, one level, each with who
      *  attached it and when. A read. */
     pendingChildren(ticket_id: number) {
-        return this.http<{
+        return this.call<{
             ticket_id: number;
             children: Array<{
                 ticket_id: number;
@@ -698,16 +698,16 @@ export class AiballClient {
                 attached_by: string | null;
                 attached_at: string;
             }>;
-        }>("GET", `/api/tickets/${ticket_id}/pending-children`);
+        }>("ticket.pending_children", { id: ticket_id });
     }
     /** #2180 — approve exactly these children (human only). Pass the ids you
      *  listed: anything that is not, or no longer, a pending child comes back in
      *  `skipped` and is never approved. */
     approvePendingChildren(ticket_id: number, ticket_ids: number[]) {
-        return this.http<{
+        return this.call<{
             approved: number[];
             skipped: Array<{ ticket_id: number; reason: string }>;
-        }>("POST", `/api/tickets/${ticket_id}/approve-pending-children`, { ticket_ids });
+        }>("ticket.approve_pending_children", { id: ticket_id, ticket_ids });
     }
     /** #2216/#2241 — set a ticket's level (human only). The response may carry a
      *  `warning` when the ticket's holder does not work on the new level. */
@@ -839,10 +839,7 @@ export class AiballClient {
         }>>("project.list", { detailed: true, consumer_id: this.agentId, ...ls });
     }
     feedPath(project: string) {
-        return this.http<{ path: string }>(
-            "GET",
-            `/api/feed-path?project=${encodeURIComponent(project)}`,
-        ).catch(() => {
+        return this.call<{ path: string }>("project.feed_path", { project }).catch(() => {
             // Daemon down: compute locally
             if (!/^[a-zA-Z0-9_.-]+$/.test(project))
                 throw new Error(`invalid project name: ${project}`);
@@ -891,11 +888,11 @@ export class AiballClient {
     }
     /** #2255 — external signals still waiting for this agent. */
     listSignals() {
-        return this.http("GET", "/api/signals");
+        return this.call("signal.list");
     }
     /** #2255 — the loop injected this signal: stop delivering it. */
     ackSignal(signal_id: number) {
-        return this.http("POST", `/api/signals/${signal_id}/ack`, {});
+        return this.call("signal.ack", { id: signal_id });
     }
 
     // ---- ticket subscriptions + pings ------------------------------------

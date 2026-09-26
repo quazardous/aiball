@@ -37,7 +37,6 @@ import {
     getTicketTokenUsage,
     isHuman,
     listTypedRelationsForTicket,
-    listPendingChildren,
     ticketSelfLastActivity,
     listTicketSubscriptionsForTicket,
     getConsumer,
@@ -53,7 +52,6 @@ import { broadcast } from "../ws.js";
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
 import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
 import { DECISION_KINDS } from "../decisions.js";
-import { applyModeration } from "./moderation.js";
 
 /**
  * #2072 — the ticket's state AFTER a mutation, in the exact shape the list
@@ -800,12 +798,7 @@ ticketsRouter.post("/tickets/:id/move", serveMethod("ticket.move"));
  * when. What the moderator reads before sweeping. A read, open like the other
  * ticket reads.
  */
-ticketsRouter.get("/tickets/:id/pending-children", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    res.json({ ticket_id: id, children: listPendingChildren(id) });
-});
+ticketsRouter.get("/tickets/:id/pending-children", serveMethod("ticket.pending_children"));
 
 /**
  * #2180 — approve a ticket's pending children in one gesture. Human only: this
@@ -818,40 +811,7 @@ ticketsRouter.get("/tickets/:id/pending-children", (req: Request, res: Response)
  * attached after the listing, or an unrelated id slipped into the list, is
  * never approved.
  */
-ticketsRouter.post("/tickets/:id/approve-pending-children", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    const caller = consumerOf(req);
-    if (!isHuman(caller)) {
-        return refuse(res, 403, "approving pending children is moderation — a registered human moderator only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const raw = ((req.body ?? {}) as { ticket_ids?: unknown }).ticket_ids;
-    if (!Array.isArray(raw) || raw.length === 0 || raw.some((n) => !Number.isInteger(n) || (n as number) <= 0)) {
-        return badRequest(res, "ticket_ids (a non-empty array of ticket ids — the ones you were shown) required");
-    }
-    const pending = new Set(listPendingChildren(id).map((c) => c.ticket_id));
-    const children = new Set(
-        listTypedRelationsForTicket(id).filter((r) => r.kind === "parent_of").map((r) => r.target_ticket_id),
-    );
-    const approved: number[] = [];
-    const skipped: Array<{ ticket_id: number; reason: string }> = [];
-    for (const childId of new Set(raw as number[])) {
-        const child = getMessage(childId);
-        if (!pending.has(childId) || !child || child.status !== "pending") {
-            skipped.push({
-                ticket_id: childId,
-                reason: children.has(childId)
-                    ? `not pending (${child?.status ?? "missing"})`
-                    : `not a child of #${id}`,
-            });
-            continue;
-        }
-        if (applyModeration(child, "approved", caller)) approved.push(childId);
-        else skipped.push({ ticket_id: childId, reason: "not found" });
-    }
-    res.json({ ticket_id: id, approved, skipped });
-});
+ticketsRouter.post("/tickets/:id/approve-pending-children", serveMethod("ticket.approve_pending_children"));
 
 // ---- Typed inter-ticket relations (#B.123 phase B) ------------------------
 //

@@ -1626,6 +1626,28 @@
       ]
     },
     {
+      "name": "project.feed_path",
+      "description": "The file a project's feed is written to, for `aiball feed-path`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "project.list",
       "description": "The projects. `detailed` adds each one's counters for `consumer_id`; `landscape` its landscape hash, which only the loop asks for; `project` narrows a detailed answer to one.",
       "paramStructure": "by-name",
@@ -2097,6 +2119,52 @@
       "x-relayed": false
     },
     {
+      "name": "signal.ack",
+      "description": "The caller's loop injected the signal: stop delivering it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "signal.list",
+      "description": "The signals waiting for the caller; a human may look at another consumer's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "tag.list",
       "description": "Without `project`, the database's tags (applied by numeric id). With it, the merged catalog (config ⊕ database, each annotated with `source`); `_global` or empty selects the cross-project view.",
       "paramStructure": "by-name",
@@ -2161,6 +2229,35 @@
       ]
     },
     {
+      "name": "ticket.approve_pending_children",
+      "description": "Approve exactly the pending children named (human only: it is moderation). Anything that is not, or no longer, a pending child of this ticket comes back in `skipped`, never approved.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "ticket_ids",
+          "required": true,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.assign",
       "description": "#418: assign or claim a ticket. Without `assignee` (or naming the caller), the caller claims it; naming someone else pushes it to them, a human's gesture. The assignee is subscribed. A live assignment takes the ticket out of the other consumers' actionable pool until it lapses, is released, or the ticket closes.",
       "paramStructure": "by-name",
@@ -2206,6 +2303,30 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.dump_payload",
+      "description": "The values themselves, the deliberate gesture. A closed ticket ends access (409), a revoked payload has none left (410); either refusal says which in `details.access`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
           }
         }
       ],
@@ -2390,6 +2511,54 @@
       ]
     },
     {
+      "name": "ticket.payload",
+      "description": "A ticket's payload, filtered: every key, values only where the schema says. No secret in it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.pending_children",
+      "description": "A ticket's pending `child_of` children, one level, with who attached each and when.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.postpone",
       "description": "Snooze a ticket (#B.329) until `until` (ISO 8601): hidden from the open inbox until then, when the reveal job brings it back. a human's gesture only: an agent never deals with snooze.",
       "paramStructure": "by-name",
@@ -2444,6 +2613,30 @@
     {
       "name": "ticket.release",
       "description": "#418 / #436: release what the caller holds, back to the shared pool: an agent its own claim; the assignee or a moderator the assignment.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.revoke_payload",
+      "description": "Revoke: the values are destroyed, the trace that they existed stays.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -2525,6 +2718,40 @@
       },
       "x-callers": [
         "human"
+      ]
+    },
+    {
+      "name": "ticket.set_payload",
+      "description": "Deposit or replace a ticket's payload; `schema` names the keys that are public.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "payload",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "schema",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
       ]
     },
     {

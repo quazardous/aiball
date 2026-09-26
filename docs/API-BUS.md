@@ -269,3 +269,12 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `message.list` | human, agent | `GET /api/messages` — `summary`, `open` are booleans |
 | `ticket.bookends` | human, agent | `GET /api/tickets/bookends` |
 | `session.host` | human or agent, local only | — `claude-loop start --host` runs its prepared command in the agent's session on this daemon's host; the answer carries `control`, the socket the kernel drives |
+| `ticket.payload` | human, agent | `GET /api/tickets/:id/payload` |
+| `ticket.set_payload` | the reporter, the assignee, a human | `PUT /api/tickets/:id/payload` |
+| `ticket.dump_payload` | the reporter, the assignee, a human | `POST /api/tickets/:id/payload/dump` — a closed ticket (409) or a revoked payload (410) says which in `details.access` |
+| `ticket.revoke_payload` | the reporter, the assignee, a human | `DELETE /api/tickets/:id/payload` |
+| `ticket.pending_children` | human, agent | `GET /api/tickets/:id/pending-children` |
+| `ticket.approve_pending_children` | human | `POST /api/tickets/:id/approve-pending-children` |
+| `signal.list` | human, agent; another consumer's, human | `GET /api/signals` |
+| `signal.ack` | human, agent | `POST /api/signals/:id/ack` |
+| `project.feed_path` | human, agent | `GET /api/feed-path` |
