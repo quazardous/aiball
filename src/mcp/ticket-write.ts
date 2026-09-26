@@ -91,7 +91,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .positive()
                     .optional()
                     .describe(
-                        "#2910 — the milestone this ticket belongs to (the id of a ticket of level `milestone` in the same project, not yet released). Planning: a human's or a cto agent's gesture; for an agent that works on tasks only, the ticket is created and the answer warns that the milestone was not set.",
+                        "#2910 — the milestone this ticket belongs to (the id of a ticket of level `milestone` in the same project, not yet released). Planning: a human's or a cto agent's gesture. Checked with the rest before anything is written: a milestone this agent may not set, or one already released, refuses the whole ticket.",
                     ),
             },
         },
@@ -113,15 +113,13 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // pipeline (validator extends to allow it on ticket_created ;
                 // db/messages stamps meta.decision={kind,status:"pending"}).
                 decision_kind: kindForVerb(then) ?? undefined,
-            })) as { id?: number };
+                // #3037 — filed with its tags and milestone in the same call: an
+                // unknown tag or a milestone this agent may not set refuses the
+                // whole ticket, nothing is half-created.
+                ...(tags && tags.length > 0 ? { tags } : {}),
+                ...(milestone !== undefined ? { milestone } : {}),
+            })) as { id?: number; milestone?: unknown };
             markActiveTicket(res?.id); // #404: focus = the new ticket (token attribution)
-            if (tags && tags.length > 0 && typeof res?.id === "number") {
-                // PUT /api/messages/:id/tags accepts tag NAMES alongside ids
-                // — it resolves via getTagByName server-side. Unknown names
-                // bubble up as 400; let the error propagate to the agent so
-                // it knows the tag was wrong rather than silently swallow.
-                await client.setMessageTags(res.id, tags);
-            }
             // « Nobody is listening » hint (per #B.215): show the agent how
             // many owners / followers exist on the target project, and flag
             // freshly-created projects (= this post is the only thing on it).
@@ -140,15 +138,6 @@ export function registerTicketWriteTools(server: McpServer): void {
             }
             const decorated: Record<string, unknown> = { ...res };
             if (scope) decorated.scope = scope;
-            // #2910 — the ticket exists either way; a refused milestone is said, not thrown.
-            if (milestone !== undefined && typeof res?.id === "number") {
-                try {
-                    decorated.milestone = (await client.setTicketMilestone(res.id, milestone)).milestone;
-                } catch (e) {
-                    const warnings = Array.isArray(decorated.warnings) ? decorated.warnings as string[] : [];
-                    decorated.warnings = [...warnings, `the ticket was created, but not put in milestone #${milestone}: ${(e as Error).message}`];
-                }
-            }
             if (stats) {
                 decorated.target_project = {
                     name: proj,

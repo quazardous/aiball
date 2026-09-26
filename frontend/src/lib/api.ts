@@ -629,14 +629,19 @@ export interface PostMessageInput {
     kind: MessageKind;
     title?: string;
     body?: string;
-    by_agent?: string;
     ticket_id?: number;
     parent_id?: number;
     intent?: Intent | null;
     /** #B.222 urgency hint (ticket_created only; defaults to "normal"). */
     priority?: Priority;
-    /** #2216 — tickets only. */
+    /** #2216 — tickets only. #3037 — honoured at creation (a level other than
+     *  `task` by a human moderator), with the other extras below. */
     level?: "task" | "milestone" | "roadmap";
+    /** #3037 — a new ticket's extras, checked and applied in the same call:
+     *  a refusal refuses the whole ticket. Tags by id or by name. */
+    tags?: (number | string)[];
+    assignee?: string;
+    milestone?: number;
     /** #B.129 — tag a message as a decision proposal at post-time. The
      *  server checks the kind against where it may sit (the transition table). */
     decision_kind?: DecisionKind;

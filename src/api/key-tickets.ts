@@ -27,14 +27,10 @@ import { readBearerToken, type AuthenticatedRequest } from "../auth.js";
 import { getTokenAndTouch } from "../db/tokens.js";
 import { keyProjects, keyScopes } from "../db/signal-keys.js";
 import { getDb } from "../db/connection.js";
-import { getTagByName, setMessageTags } from "../db/tags.js";
-import { setTicketAssignment } from "../db/tickets.js";
-import { insertPing } from "../db/pings.js";
-import { listProjectSubscribers, upsertTicketSubscription } from "../db/subscriptions.js";
 import { getMessage } from "../db.js";
-import { broadcast } from "../ws.js";
 import * as schema from "../schema.js";
-import { submitMessage, validateNewMessage } from "../messages.js";
+import { validateNewMessage } from "../messages.js";
+import { fileTicket, isExtrasRefusal, ticketExtras } from "../file-ticket.js";
 import { refuse, withTagsOne } from "./_helpers.js";
 import { ERROR_CODES, type ErrorCode } from "../domain.js";
 
@@ -110,30 +106,15 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
         }
     }
 
-    // Tags are resolved before anything is written: an unknown name refuses the
-    // whole request rather than leaving a ticket without the tags it asked for.
-    const tagIds: number[] = [];
-    if (body.tags !== undefined) {
-        if (!Array.isArray(body.tags) || body.tags.some((t) => typeof t !== "string")) {
-            return refuse(res, 400, "tags must be a list of tag names");
-        }
-        for (const name of body.tags as string[]) {
-            const tag = getTagByName(name, project) ?? getTagByName(name);
-            if (!tag) return refuse(res, 400, `unknown tag ${name}`);
-            tagIds.push(tag.id);
-        }
-    }
-
-    // The assignee must already work on the project: a key hands work to one of
-    // its consumers, it does not recruit someone new.
-    let assignee: string | null = null;
-    if (body.assignee !== undefined && body.assignee !== null) {
-        if (typeof body.assignee !== "string" || !body.assignee.trim()) return refuse(res, 400, "assignee must be a consumer id");
-        assignee = body.assignee.trim();
-        if (!listProjectSubscribers(project).includes(assignee)) {
-            return refuse(res, 400, `${assignee} is not subscribed to ${project} — assign a consumer of the project`);
-        }
-    }
+    // #3037 — tags and assignee are checked like every ticket's extras, before
+    // anything is written; a key's assignee must already work on the project.
+    const extras = ticketExtras(
+        { tags: body.tags, assignee: body.assignee },
+        project,
+        grant.source,
+        { assigneeRule: "subscriber" },
+    );
+    if (isExtrasRefusal(extras)) return refuse(res, extras.status, extras.error, extras.code);
 
     const v = validateNewMessage({
         kind: "ticket_created",
@@ -150,19 +131,8 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
     if (body.approved !== undefined && typeof body.approved !== "boolean") {
         return refuse(res, 400, "approved must be true or false");
     }
-    const msg = submitMessage(v, { preApprovedByKey: body.approved === true });
+    const msg = fileTicket(v, extras, grant.source, { preApprovedByKey: body.approved === true });
     if (externalId) recordExternalId(msg.id, externalId);
-    if (tagIds.length) setMessageTags(msg.id, tagIds, grant.source);
-    if (assignee) {
-        setTicketAssignment(msg.id, assignee, grant.source);
-        upsertTicketSubscription(assignee, msg.id);
-        // The creation fan-out reached the owners; a follower or crew assignee
-        // was not among them. The ping is idempotent, so an owner is not
-        // pinged twice.
-        insertPing(assignee, { id: msg.id, kind: msg.kind, intent: msg.intent }, grant.source);
-        const updated = getMessage(msg.id);
-        if (updated) broadcast({ type: "message_edited", data: updated });
-    }
     const out = getMessage(msg.id) ?? msg;
     res.status(201).json({ ...withTagsOne(out), existing: false });
 });

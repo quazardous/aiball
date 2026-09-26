@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A ticket is filed in one call with its tags, assignee, milestone, level and
+  parent (`POST /api/messages`): all checked first, refused whole with the
+  field named, and announced once, already whole. The MCP `ticket_new` and the
+  web composer file this way — see `docs/API-FILING.md`.
 - The inbox API can say, on each row, whose turn it is, which band the row
   sorts into and the one state mark to show, computed for the reader
   (`/api/inbox?view=turn`), and sort by that band (`sort=band`). The web

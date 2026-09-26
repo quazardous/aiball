@@ -208,29 +208,13 @@ async function submit(scopeOverride?: Scope) {
                 // #B.245 tristate. Forward only when non-default so the
                 // payload stays clean for the typical case.
                 ...(scope.value !== "default" ? { scope: scope.value } : {}),
+                // #3037 — the ticket is filed with its tags and assignee in the
+                // same call: a refusal (an unknown tag…) refuses it whole and is
+                // shown, instead of leaving a ticket half-set behind a warning.
+                ...(ticketTagIds.value.length > 0 ? { tags: ticketTagIds.value } : {}),
+                ...(assignee.value.trim() ? { assignee: assignee.value.trim() } : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
-            // #514 (nd967z) : push assign in a 2e step une fois le ticket
-            // créé. Best-effort comme les tags : si l'assign rate, le ticket
-            // est déjà posted, on warne et continue (le user peut retry
-            // depuis le Manage panel).
-            if (createdId !== null && assignee.value.trim()) {
-                try {
-                    await api.assignTicket(createdId, assignee.value.trim());
-                } catch (e) {
-                    console.warn("[composer] failed to assign new ticket:", e);
-                }
-            }
-            // #292: apply the tags chosen in the composer to the freshly
-            // created ticket (deferred — it had no id until now). Best-effort:
-            // the ticket is already posted, so a tag failure only warns.
-            if (createdId !== null && ticketTagIds.value.length > 0) {
-                try {
-                    await api.setMessageTags(createdId, ticketTagIds.value);
-                } catch (e) {
-                    console.warn("[composer] failed to apply tags to new ticket:", e);
-                }
-            }
         } else {
             // Capture the comment's id too — needed by #B.104 to fill
             // the `answered_in` audit field on the parent's meta.

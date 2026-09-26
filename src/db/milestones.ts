@@ -177,16 +177,18 @@ export function listMilestones(project: string): MilestoneRow[] {
  * it can. `milestoneId` null (leaving any milestone) is always possible.
  */
 export function milestoneTargetRefusal(
-    ticket: { id: number; project: string; level?: string | null },
+    ticket: { id: number | null; project: string; level?: string | null },
     milestoneId: number | null,
 ): { error: string; code: ErrorCode } | null {
     if (milestoneId === null) return null;
-    if ((ticket.level ?? "task") === "milestone") return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${ticket.id} is itself a milestone: a milestone does not belong to another` };
+    // #3037 — a ticket being filed has no id yet.
+    const self = ticket.id === null ? "this ticket" : `#${ticket.id}`;
+    if ((ticket.level ?? "task") === "milestone") return { code: ERROR_CODES.MILESTONE_INVALID, error: `${self} is itself a milestone: a milestone does not belong to another` };
     const m = getDb().select({ id: schema.tickets.id, project: schema.tickets.project, level: schema.tickets.level, status: schema.tickets.status })
         .from(schema.tickets).where(eq(schema.tickets.id, milestoneId)).get();
     if (!m || m.status !== "approved") return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${milestoneId} is not a ticket of this board` };
     if (m.level !== "milestone") return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${milestoneId} is not a milestone (its level is ${m.level})` };
-    if (m.project !== ticket.project) return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${milestoneId} is a milestone of ${m.project}; #${ticket.id} is in ${ticket.project}` };
+    if (m.project !== ticket.project) return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${milestoneId} is a milestone of ${m.project}; ${self} is in ${ticket.project}` };
     if (closedAmong([milestoneId]).has(milestoneId)) return { code: ERROR_CODES.MILESTONE_RELEASED, error: `milestone #${milestoneId} is already released (closed)` };
     return null;
 }

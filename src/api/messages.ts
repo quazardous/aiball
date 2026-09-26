@@ -51,6 +51,7 @@ import {
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
+import { fileTicket, isExtrasRefusal, NO_EXTRAS, ticketExtras } from "../file-ticket.js";
 import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
 import { decisionGesture } from "../ticket-transitions.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
@@ -147,8 +148,12 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     if (commitsRule.refusal) return badRequest(res, commitsRule.refusal, ERROR_CODES.COMMITS_REQUIRED);
     // #2331 — a project's lead filing a ticket without a plan is reminded, not refused.
     const warning = v.kind === "ticket_created" ? creationHandbackFor(v).warning : commitsRule.warning;
+    // #3037 — a new ticket comes with its extras (tags, assignee, milestone,
+    // level), all checked before anything is written.
+    const extras = v.kind === "ticket_created" ? ticketExtras((req.body ?? {}) as Record<string, unknown>, v.project, author) : NO_EXTRAS;
+    if (isExtrasRefusal(extras)) return refuse(res, extras.status, extras.error, extras.code);
     try {
-        const msg = submitMessage(v);
+        const msg = v.kind === "ticket_created" ? fileTicket(v, extras, author) : submitMessage(v);
         applyPlatformTag(msg, req);
         return res.status(201).json({ ...withTagsOne(msg), ...(warning ? { warnings: [warning] } : {}) });
     } catch (err) {

@@ -189,6 +189,8 @@ export const ERROR_CODES = {
     ALREADY_IMPORTED: "ALREADY_IMPORTED",
     /** #3036 — a body names an author other than the authenticated caller. */
     AUTHOR_MISMATCH: "AUTHOR_MISMATCH",
+    /** #3037 — a tag named (or given by id) that does not exist. */
+    TAG_UNKNOWN: "TAG_UNKNOWN",
     FORBIDDEN_CLOSE: "FORBIDDEN_CLOSE",
     PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
     PARENT_PENDING_MODERATION: "PARENT_PENDING_MODERATION",

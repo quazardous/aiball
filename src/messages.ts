@@ -886,6 +886,13 @@ export interface SubmitOpts {
      * only the live UI-arrival announcement is muted.
      */
     skipBroadcast?: boolean;
+    /**
+     * #3037 — runs once the message row exists and before anything announces
+     * it (pings, broadcast, moderation, lifecycle): a new ticket's tags,
+     * assignee, milestone and level land here, so every event already sees the
+     * whole ticket. Returns the row to go on with. Only `fileTicket` sets it.
+     */
+    beforeAnnounce?: (msg: Message) => Message;
 }
 
 /**
@@ -976,6 +983,7 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
         getDb().update(schema.messages).set({ meta: json }).where(eq(schema.messages.id, msg.id)).run();
         msg = { ...msg, meta: json };
     }
+    if (opts.beforeAnnounce) msg = opts.beforeAnnounce(msg);
     autoSubscribeAuthor(msg);
     // Fan out delivery pings at INSERTION. Since #697 F3 (david `hwct2h`),
     // `fanOutPings` itself gates the subscriber / owner / follower paths

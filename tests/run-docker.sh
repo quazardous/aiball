@@ -56,10 +56,14 @@ run_e2e() {
 
 run_sim() {
     local shards="${AIBALL_SIM_SHARDS:-4}"
-    echo "=== sim (shards=$shards, cpus=${AIBALL_SIM_CPUS:-2} each) ==="
+    local src="${AIBALL_TEST_SRC:-$PWD}"
+    echo "=== sim (shards=$shards, cpus=${AIBALL_SIM_CPUS:-2} each, from $src) ==="
     local code=0
-    AIBALL_TEST_CPUS="${AIBALL_SIM_CPUS:-2}" nice -n 10 npm run --silent sim -- run --shards "$shards" "$@" || code=$?
-    nice -n 10 npm run --silent sim -- down || true
+    # The driver and its scenarios come from the source under test too, not only
+    # the daemon: run from this checkout, a scratch copy's boards were driven by
+    # the checkout's older scenarios and passed what they should have failed.
+    (cd "$src" && AIBALL_TEST_CPUS="${AIBALL_SIM_CPUS:-2}" nice -n 10 npm run --silent sim -- run --shards "$shards" "$@") || code=$?
+    (cd "$src" && nice -n 10 npm run --silent sim -- down) || true
     return $code
 }
 

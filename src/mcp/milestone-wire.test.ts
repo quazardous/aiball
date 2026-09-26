@@ -1,6 +1,6 @@
 /**
  * #2910 — the milestone reaches the daemon from every MCP tool that takes it:
- * `ticket_update` and `ticket_new` set it, `ticket_list` filters on it,
+ * `ticket_update` sets it, `ticket_new` files the ticket with it (#3037), `ticket_list` filters on it,
  * `milestone_list` reads the project's milestones. Driving the real handlers
  * with the client stubbed: what matters is what leaves the tool.
  */
@@ -35,7 +35,8 @@ stub.setTicketMilestone = async (id: number, m: number | null) => {
 const listed: Record<string, string | undefined>[] = [];
 stub.listTickets = async (q: Record<string, string | undefined>) => { listed.push(q); return []; };
 stub.listMilestones = async (project: string) => ({ project, milestones: [{ id: 5, title: "0.1" }] });
-stub.postMessage = async () => ({ id: 42 });
+const posted: Record<string, unknown>[] = [];
+stub.postMessage = async (body: Record<string, unknown>) => { posted.push(body); return { id: 42 }; };
 stub.projectStats = async () => { throw new Error("no stats"); };
 (client as unknown as { defaultProject: string }).defaultProject = "p";
 
@@ -48,12 +49,12 @@ test("ticket_update sets and clears the milestone", async () => {
     assert.deepEqual(set.slice(-2), [[7, 5], [7, null]]);
 });
 
-test("ticket_new sets it once the ticket exists, and a refusal is a warning, not a lost ticket", async () => {
-    assert.deepEqual((await json("ticket_new", { title: "t", milestone: 5 })).milestone?.id, 5);
-    assert.deepEqual(set.at(-1), [42, 5]);
-    const refused = await json("ticket_new", { title: "t", milestone: 999 });
-    assert.equal(refused.id, 42, "the ticket is there");
-    assert.match(String(refused.warnings), /not put in milestone #999/);
+test("ticket_new files it with the ticket, in the same call: no follow-up, so no half-set ticket (#3037)", async () => {
+    const before = set.length;
+    await json("ticket_new", { title: "t", milestone: 5, tags: ["front"] });
+    assert.equal(posted.at(-1)?.milestone, 5);
+    assert.deepEqual(posted.at(-1)?.tags, ["front"]);
+    assert.equal(set.length, before, "no separate milestone call");
 });
 
 test("ticket_list filters on it, and milestone_list reads the project's", async () => {
