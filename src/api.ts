@@ -1,5 +1,6 @@
 import { projectTicketStates } from "./db/inbox-agg.js";
 import { serveMethod } from "./bus/http.js";
+import { standingPromptView } from "./bus/methods/project.js";
 import { trimStepWaits } from "./db/wait-credit.js";
 import { invalidateInboxAgg } from "./db/inbox-agg.js";
 import { invalidateFlagsCache } from "./db/projects.js";
@@ -15,33 +16,23 @@ import {
     STRATEGIES,
     listProjectsDetailed,
     isRootActive,
-    createProject,
-    getProject,
-    deleteProject,
-    renameProject,
     getProjectStatsRich,
     purgeOldClosedTickets,
     getGlobalCounts,
-    getProjectStats,
     isHuman,
     type Strategy,
-    addProjectTokenUsage,
-    getProjectStandingPrompt,
-    getPresenceFacts,
     setProjectStandingPrompt,
 } from "./db.js";
 import { captureTokenSnapshotIfDue, getTokenTimeseries } from "./db.js";
-import { getProjectWakeFocus, setProjectWakeFocus } from "./db/settings.js";
+import { setProjectWakeFocus } from "./db/settings.js";
 import { listTicketIdsInProject } from "./db/tickets.js";
-import { activeFocus, describeFocus, parseFocusTickets } from "./wake-focus.js";
-import { focusRelatives } from "./db/focus-relatives.js";
-import { projectCriticalTicket } from "./db/critical-ticket.js";
-import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
+import { parseFocusTickets } from "./wake-focus.js";
+import { statSync, readdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { installRoot } from "./claude-loop/state.js";
 import { broadcast } from "./ws.js";
-import { outboxPath, AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "./paths.js";
+import { AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "./paths.js";
 import { loadLaunchers, getLauncher } from "./launchers.js";
 import { bearerAuth } from "./auth.js";
 import { reloadConfig } from "./config-reload.js";
@@ -209,12 +200,7 @@ api.patch("/projects/:project/strategy", (req: Request, res: Response) => {
 // no verdict derived from them. Elapsed time rather than a boolean, because
 // the threshold depends on what the agent is about to commit, and that
 // knowledge lives in the agent, not here.
-api.get("/presence", (req: Request, res: Response) => {
-    const project = typeof req.query.project === "string" && req.query.project
-        ? req.query.project
-        : undefined;
-    res.json(getPresenceFacts(consumerOf(req), project));
-});
+api.get("/presence", serveMethod("consumer.presence"));
 
 // #1832 — the project's standing instruction, shown at the head of every wake.
 // Mirrors the per-project strategy pair above: GET returns the current value,
@@ -224,35 +210,12 @@ api.get("/presence", (req: Request, res: Response) => {
 // single-line text input rather than a textarea — david's call, so that the
 // widget reminds him to stay short instead of a validator rejecting a paste
 // after the fact.
-/** #2525 — the standing prompt, and the wake focus beside it. */
-function standingPromptView(project: string) {
-    const focus = getProjectWakeFocus(project);
-    const active = activeFocus(focus, Date.now(), focusRelatives);
-    return {
-        project,
-        standing_prompt: getProjectStandingPrompt(project),
-        focus_tickets: focus?.tickets ?? null,
-        focus_until: focus?.until ?? null,
-        // Past its end the stored focus no longer applies: the wake and the
-        // filters read this, the form still shows what was typed.
-        focus_active: active !== null,
-        focus_line: describeFocus(active),
-    };
-}
 
-api.get("/projects/:project/standing-prompt", (req: Request, res: Response) => {
-    const project = String(req.params.project ?? "");
-    if (!project) return badRequest(res, "project required");
-    res.json(standingPromptView(project));
-});
+api.get("/projects/:project/standing-prompt", serveMethod("project.standing_prompt"));
 
 // #2770 — the open ticket of the project holding back the most open tickets,
 // for the loop to name before its backlog. An indicator: nothing acts on it.
-api.get("/projects/:project/critical", (req: Request, res: Response) => {
-    const project = String(req.params.project ?? "");
-    if (!project) return badRequest(res, "project required");
-    res.json({ project, critical: projectCriticalTicket(project) });
-});
+api.get("/projects/:project/critical", serveMethod("project.critical"));
 
 // #2910 — a project's milestones, oldest first: state (open / released) and
 // progress. Readable by every consumer, coders included.
@@ -300,14 +263,7 @@ api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) =>
  * Additive — accumulates. Body: `{ in?, out?, cache_w?, cache_r? }`.
  * Symmetric to POST /tickets/:id/token-usage.
  */
-api.post("/projects/:project/token-usage", (req: Request, res: Response) => {
-    const project = String(req.params.project ?? "");
-    if (!project) return badRequest(res, "project required");
-    const b = (req.body ?? {}) as { in?: unknown; out?: unknown; cache_w?: unknown; cache_r?: unknown };
-    const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
-    addProjectTokenUsage(project, { in: n(b.in), out: n(b.out), cacheW: n(b.cache_w), cacheR: n(b.cache_r) });
-    res.json({ project, ok: true });
-});
+api.post("/projects/:project/token-usage", serveMethod("project.add_token_usage"));
 
 // -------- messages -------------------------------------------------------
 // All /messages routes (CRUD + moderation + decision-on-comment + #B.104
@@ -317,19 +273,7 @@ api.use(messagesRouter);
 
 // -------- tickets (derived view) -------------------------------------------
 
-api.get("/projects", (req, res) => {
-    if (req.query.detailed === "1") {
-        const consumer = req.query.consumer_id as string | undefined;
-        // #379: `&landscape=1` ajoute landscape_hash + landscape_last_activity
-        // par projet (calcul O(N) gated → seul le timer claude-loop le demande).
-        const landscape = req.query.landscape === "1";
-        // #2682 — a loop only reads its own project: `&project=<name>` narrows the answer.
-        const only = typeof req.query.project === "string" && req.query.project ? req.query.project : null;
-        const all = listProjectsDetailed(consumer, landscape);
-        return res.json(only ? all.filter((p) => p.name === only) : all);
-    }
-    res.json(listProjects());
-});
+api.get("/projects", serveMethod("project.list"));
 
 /**
  * Register a project explicitly (#B.216 phase A pass 2). The CLI's
@@ -342,31 +286,7 @@ api.get("/projects", (req, res) => {
  * 201 on success with the inserted row; 409 on duplicate name; 400 on
  * empty/whitespace name.
  */
-api.post("/projects", (req, res) => {
-    const raw = (req.body ?? {}) as {
-        name?: unknown;
-        display_name?: unknown;
-        description?: unknown;
-        created_by?: unknown;
-    };
-    if (typeof raw.name !== "string" || !raw.name.trim()) {
-        return refuse(res, 400, "name is required");
-    }
-    const name = raw.name.trim();
-    if (/\s/.test(name)) {
-        return refuse(res, 400, "name must not contain whitespace");
-    }
-    if (getProject(name)) {
-        return refuse(res, 409, `project ${name} already exists`);
-    }
-    const project = createProject({
-        name,
-        display_name: typeof raw.display_name === "string" ? raw.display_name : null,
-        description: typeof raw.description === "string" ? raw.description : null,
-        created_by: typeof raw.created_by === "string" ? raw.created_by : null,
-    });
-    res.status(201).json(project);
-});
+api.post("/projects", serveMethod("project.create", undefined, { status: 201 }));
 
 // #2629 — declared step delays against when the agent actually came back.
 api.get("/steps/timing", (req, res) => {
@@ -387,9 +307,7 @@ api.post("/steps/trim", (req, res) => {
     res.json({ max_minutes: max, trimmed });
 });
 
-api.get("/projects/:name/stats", (req, res) => {
-    res.json(getProjectStats(req.params.name));
-});
+api.get("/projects/:name/stats", serveMethod("project.stats"));
 
 /**
  * Mantis-style rich stats for the per-project page. Distinct from
@@ -560,20 +478,7 @@ api.post("/launchers/:id/run", (req, res) => {
     }
 });
 
-api.delete("/projects/:name", (req, res) => {
-    const name = req.params.name;
-    const { deleted_messages } = deleteProject(name);
-    // Best-effort outbox cleanup. If it fails (permission, race), we still
-    // return success — the DB is the source of truth.
-    try {
-        const path = outboxPath(name);
-        if (existsSync(path)) unlinkSync(path);
-    } catch {
-        /* ignore */
-    }
-    broadcast({ type: "project_deleted", data: { project: name, deleted_messages } });
-    res.json({ project: name, deleted_messages, ok: true });
-});
+api.delete("/projects/:name", serveMethod("project.delete"));
 
 /**
  * #699 — rename a project across every table that stores its name (cascade
@@ -581,32 +486,7 @@ api.delete("/projects/:name", (req, res) => {
  * per-table row counts so the caller can audit the cascade. 404 when the
  * old name doesn't exist, 409 when the new name collides.
  */
-api.post("/projects/:name/rename", (req, res) => {
-    const oldName = req.params.name;
-    const newName = typeof req.body?.new_name === "string" ? req.body.new_name : "";
-    if (!newName) return refuse(res, 400, "new_name required (string)");
-    try {
-        const result = renameProject(oldName, newName);
-        // Outbox file follows the project name — rename it too.
-        try {
-            const oldPath = outboxPath(oldName);
-            const newPath = outboxPath(result.new_name);
-            if (existsSync(oldPath)) {
-                writeFileSync(newPath, "");
-                unlinkSync(oldPath);
-            }
-        } catch {
-            /* best-effort — DB is the source of truth */
-        }
-        broadcast({ type: "project_renamed", data: { old: result.old_name, new: result.new_name } });
-        res.json({ ...result, ok: true });
-    } catch (e) {
-        const msg = (e as Error).message ?? String(e);
-        if (msg.includes("does not exist")) return refuse(res, 404, msg);
-        if (msg.includes("already exists")) return refuse(res, 409, msg);
-        return refuse(res, 400, msg);
-    }
-});
+api.post("/projects/:name/rename", serveMethod("project.rename"));
 
 // #1992 — the compiled graph. Both routes recompile lazily when the message log
 // has moved (~320 ms on the whole corpus) and report that in `freshness`, so a

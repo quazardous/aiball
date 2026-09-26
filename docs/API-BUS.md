@@ -253,3 +253,12 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `ticket.subscribe` | human, agent | `POST /api/ticket-subscriptions` |
 | `ticket.subscription` | human, agent | `GET /api/ticket-subscriptions/:ticket_id` |
 | `ticket.unsubscribe` | human, agent | `DELETE /api/ticket-subscriptions/:ticket_id` |
+| `project.list` | human, agent | `GET /api/projects` — `detailed`, `landscape` are booleans |
+| `project.create` | human, agent | `POST /api/projects` |
+| `project.stats` | human, agent | `GET /api/projects/:name/stats` |
+| `project.standing_prompt` | human, agent | `GET /api/projects/:project/standing-prompt` |
+| `project.critical` | human, agent | `GET /api/projects/:project/critical` |
+| `project.rename` | human, agent | `POST /api/projects/:name/rename` |
+| `project.delete` | human, agent | `DELETE /api/projects/:name` |
+| `project.add_token_usage` | human, agent | `POST /api/projects/:project/token-usage` |
+| `consumer.presence` | human, agent | `GET /api/presence` |

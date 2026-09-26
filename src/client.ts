@@ -377,7 +377,7 @@ export class AiballClient {
 
     /** Per-project subscriber + content stats (« nobody is listening » hint). */
     projectStats(project: string) {
-        return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);
+        return this.call("project.stats", { name: project });
     }
 
     /**
@@ -633,7 +633,7 @@ export class AiballClient {
         return this.call("ticket.get", { id, ...q });
     }
     listProjects() {
-        return this.http("GET", "/api/projects");
+        return this.call("project.list");
     }
     /** #2089 — soft config reload, in band. `aiball reload` used to send
      *  SIGUSR2 to the pidfile, which on Windows terminates the daemon instead
@@ -654,13 +654,13 @@ export class AiballClient {
         description?: string;
         created_by?: string;
     } = {}) {
-        return this.http<{
+        return this.call<{
             name: string;
             display_name: string | null;
             description: string | null;
             created_at: string;
             created_by: string | null;
-        }>("POST", "/api/projects", {
+        }>("project.create", {
             name,
             display_name: opts.display_name,
             description: opts.description,
@@ -810,8 +810,8 @@ export class AiballClient {
         // #379: pass `landscape=1` to also get landscape_hash + landscape_last_activity
         // per project (the drained-strategy reset/dedup primitive). Off by default —
         // only the claude-loop timer asks for it, sidebar polls don't pay the O(N).
-        const ls = (opts?.landscape ? "&landscape=1" : "") + (opts?.project ? `&project=${encodeURIComponent(opts.project)}` : "");
-        return this.http<Array<{
+        const ls = { ...(opts?.landscape ? { landscape: true } : {}), ...(opts?.project ? { project: opts.project } : {}) };
+        return this.call<Array<{
             name: string;
             last_activity: string;
             ticket_count: number;
@@ -836,7 +836,7 @@ export class AiballClient {
             roots?: string[];
             // #265: scope to our own agent id so the actionable_count is
             // "actionable for me" (the conversational gate is per-consumer).
-        }>>("GET", `/api/projects?detailed=1&consumer_id=${encodeURIComponent(this.agentId)}${ls}`);
+        }>>("project.list", { detailed: true, consumer_id: this.agentId, ...ls });
     }
     feedPath(project: string) {
         return this.http<{ path: string }>(
@@ -944,14 +944,13 @@ export class AiballClient {
     /** #1819: the facts for judging whether a human is around — elapsed
      *  times, no verdict. `project` scopes the human-message lookup. */
     presence(project?: string | null) {
-        const qs = project ? `?project=${encodeURIComponent(project)}` : "";
-        return this.http<{
+        return this.call<{
             last_human_message_at?: string | null;
             last_human_message_age_sec?: number | null;
             loop_presence_word?: string | null;
             loop_human_flag?: boolean | null;
             loop_state_age_sec?: number | null;
-        }>("GET", `/api/presence${qs}`);
+        }>("consumer.presence", project ? { project } : {});
     }
 
     /** #1832: the project's standing instruction, shown at the head of every
@@ -959,10 +958,7 @@ export class AiballClient {
      *  edits it precisely so the NEXT wake picks it up, so a cached value
      *  would defeat the point. */
     getProjectStandingPrompt(project: string) {
-        return this.http<{ project: string; standing_prompt?: string | null; focus_line?: string }>(
-            "GET",
-            `/api/projects/${encodeURIComponent(project)}/standing-prompt`,
-        );
+        return this.call<{ project: string; standing_prompt?: string | null; focus_line?: string }>("project.standing_prompt", { project });
     }
 
     /** #2910 — put a ticket in a milestone, move it, or take it out (null). */
@@ -975,18 +971,12 @@ export class AiballClient {
 
     /** #2910 — a project's milestones, oldest first, with state and progress. */
     listMilestones(project: string) {
-        return this.http<{ project: string; milestones: { id: number; title: string; released: boolean; released_at: string | null; created_at: string; done: number; open: number }[] }>(
-            "GET",
-            `/api/projects/${encodeURIComponent(project)}/milestones`,
-        );
+        return this.call<{ project: string; milestones: { id: number; title: string; released: boolean; released_at: string | null; created_at: string; done: number; open: number }[] }>("project.milestones", { project });
     }
 
     /** #2770 — the project's critical ticket (holds back the most open tickets), or null. */
     getProjectCritical(project: string) {
-        return this.http<{ project: string; critical: { id: number; title: string; holds: number; last_moved_at: string | null; quiet: string } | null }>(
-            "GET",
-            `/api/projects/${encodeURIComponent(project)}/critical`,
-        );
+        return this.call<{ project: string; critical: { id: number; title: string; holds: number; last_moved_at: string | null; quiet: string } | null }>("project.critical", { project });
     }
 
     /** #404: push a turn's token-usage delta onto a ticket (additive). Called
@@ -1002,11 +992,7 @@ export class AiballClient {
     /** #634 david `svzkpw` — push a turn's token-usage delta onto a PROJECT
      *  (no-marker fallback path in the Stop-hook). Additive ; best-effort. */
     postProjectTokenUsage(project: string, u: { in: number; out: number; cacheW: number; cacheR: number }) {
-        return this.http(
-            "POST",
-            `/api/projects/${encodeURIComponent(project)}/token-usage`,
-            { in: u.in, out: u.out, cache_w: u.cacheW, cache_r: u.cacheR },
-        );
+        return this.call("project.add_token_usage", { project, in: u.in, out: u.out, cache_w: u.cacheW, cache_r: u.cacheR });
     }
 
     /**
@@ -1200,7 +1186,7 @@ export class AiballClient {
      * renameProject). 404 / 409 / 400 surface as `http()` errors.
      */
     renameProject(oldName: string, newName: string) {
-        return this.http<{
+        return this.call<{
             ok: boolean;
             old_name: string;
             new_name: string;
@@ -1213,7 +1199,7 @@ export class AiballClient {
             consumers: number;
             config_overrides: number;
             project_token_usage: number;
-        }>("POST", `/api/projects/${encodeURIComponent(oldName)}/rename`, { new_name: newName });
+        }>("project.rename", { name: oldName, new_name: newName });
     }
     /**
      * #699 — delete a project. Surface for the new CLI command after the
@@ -1221,11 +1207,11 @@ export class AiballClient {
      * appeler le aiball cli").
      */
     deleteProject(name: string) {
-        return this.http<{
+        return this.call<{
             ok: boolean;
             project: string;
             deleted_messages: number;
-        }>("DELETE", `/api/projects/${encodeURIComponent(name)}`);
+        }>("project.delete", { name });
     }
     /** #1164 S1 — plans of MINE that were accepted and I haven't acted on
      *  since ("what should I go execute now"). */

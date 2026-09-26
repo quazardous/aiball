@@ -293,6 +293,28 @@
       ]
     },
     {
+      "name": "consumer.presence",
+      "description": "The facts an agent needs to judge whether a human is around, as elapsed times, with no verdict: the threshold depends on what it is about to commit.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "consumer.restart_claude",
       "description": "Restart an agent's Claude after it installed an update of itself (the bar says `alerts.restart_needed`). A loop control. Refused while Claude works (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts Claude resuming its conversation, and tells the agent once it is back.",
       "paramStructure": "by-name",
@@ -1321,12 +1343,250 @@
       ]
     },
     {
+      "name": "project.add_token_usage",
+      "description": "Add a turn's token usage to a project (the Stop hook's fallback when no ticket is marked).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "cache_r",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "cache_w",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "in",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "out",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.create",
+      "description": "Register a project (#B.216): it is listed before its first ticket.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "created_by",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "description",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "display_name",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.critical",
+      "description": "The open ticket of the project holding back the most others. An indicator.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.delete",
+      "description": "Delete a project and its messages; its outbox file goes with it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.list",
+      "description": "The projects. `detailed` adds each one's counters for `consumer_id`; `landscape` its landscape hash, which only the loop asks for; `project` narrows a detailed answer to one.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "detailed",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "landscape",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "project.milestones",
       "description": "A project's milestones, oldest first: state (open / released) and progress.",
       "paramStructure": "by-name",
       "params": [
         {
           "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.rename",
+      "description": "Rename a project in every table that stores its name, and its outbox file; the answer counts the rows each table changed.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "new_name",
+          "required": true,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.standing_prompt",
+      "description": "The project's standing instruction and wake focus, shown at the head of every wake.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.stats",
+      "description": "A project's subscriber and content counts: the \"nobody is listening\" hint.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
           "required": true,
           "schema": {
             "type": "string"
