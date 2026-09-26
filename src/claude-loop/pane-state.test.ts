@@ -162,19 +162,17 @@ test("snapshotPane: live compacting (esc to interrupt + Compacting NN% au footer
     assert.equal(snap.special, "compacting");
 });
 
-test("snapshotPane: format (12s) sans progress bar — busy:true mais special:null (#678 trade-off)", () => {
-    // #650 documenta une variante "(12s · ↓ tokens · esc to interrupt)" sans
-    // progress bar. La capture #678 david `y3s6a8` montre le format ACTUEL
-    // (avec `▰▱` + `%`). Le fix #678 retire `esc to interrupt` du live signal
-    // pour ne pas mis-classifier les turns normales post-/compact (stale
-    // Compacting en scrollback + esc-to-interrupt du footer auto-mode =
-    // faux positif persistant). La variante sans-progress n'est donc plus
-    // détectée — busy reste true (esc-to-interrupt fait toujours
-    // paneFooterShowsBusy), seul le tag compacting tombe. Si cette variante
-    // refait surface en pratique, on rajoutera un discriminant strict
-    // (e.g. esc-to-interrupt ON THE SAME LINE que Compacting).
+test("snapshotPane: the barless format (12s · ↓ tokens) is compacting again (#3045)", () => {
+    // #678 had dropped this variant (no progress bar): a stale `Compacting`
+    // line in scrollback, plus the auto-mode footer's `esc to interrupt`, was a
+    // lasting false positive. It said it would come back with a stricter
+    // discriminant if the variant resurfaced — it did (#3045: Claude Code no
+    // longer draws the bar). The discriminant is the spinner's token counter,
+    // which only a running spinner carries, on a line in the footer.
     const live = "● earlier\n✶ Compacting conversation… (12s · ↓ 1.2k tokens)\n  ⏵⏵ auto mode on · esc to interrupt";
     const snap = snapshotPane(live);
     assert.equal(snap.busy, true);
-    assert.equal(snap.special, null);
+    assert.equal(snap.special, "compacting");
+    // The #678 false positive stays out: stale text without a counter.
+    assert.equal(snapshotPane("● earlier\n✶ Compacting conversation… (12s)\n  ⏵⏵ auto mode on · esc to interrupt").special, null);
 });
