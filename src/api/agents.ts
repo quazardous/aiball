@@ -34,7 +34,7 @@ import { sendEventOnce } from "../claude-loop/ipc-events.js";
 import { captureCursor, captureGeometry } from "../pane.js";
 import { getConsumer, isHuman } from "../db.js";
 import { canControlLoop } from "../loop-control.js";
-import { consumerOf, tokenKindOf } from "./_helpers.js";
+import { consumerOf, tokenKindOf, refuse } from "./_helpers.js";
 import {
     getNodeSocketForConsumerIp,
     listConnectedNodeIds,
@@ -43,6 +43,7 @@ import {
     unregisterResponseHandler,
 } from "../proxy-ws.js";
 import { listNodes } from "../db/nodes.js";
+import { ERROR_CODES, type ErrorCode } from "../domain.js";
 
 export const agentsRouter = Router();
 
@@ -96,14 +97,14 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
     const rawName = req.params.name;
     const consumerId = typeof rawName === "string" ? rawName : "";
     if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
-        return res.status(400).json({ error: "bad consumer id" });
+        return refuse(res, 400, "bad consumer id");
     }
     // Resolve consumer → cwd → loop name. The URL carries the consumer id
     // (what the UI knows about) ; the tmux session name is a runtime
     // construct claude-loop assigns at start. We bridge the two via cwd.
     const consumer = getConsumer(consumerId);
     if (!consumer) {
-        return res.status(404).json({ error: `consumer not found : ${consumerId}` });
+        return refuse(res, 404, `consumer not found : ${consumerId}`, ERROR_CODES.CONSUMER_NOT_FOUND);
     }
     // #505 phase 2 — node-relayed agent : on route via la WS reverse au node
     // qui héberge le pane, au lieu de dégrader en `event:unavailable` (#503).
@@ -180,15 +181,11 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
         return;
     }
     if (!consumer.cwd) {
-        return res.status(404).json({
-            error: `consumer has no cwd — needs an active claude-loop heartbeat first`,
-        });
+        return refuse(res, 404, `consumer has no cwd — needs an active claude-loop heartbeat first`, ERROR_CODES.LOOP_NOT_FOUND);
     }
     const loopName = resolveLoopName(consumer.cwd);
     if (!loopName) {
-        return res.status(404).json({
-            error: `no claude-loop dir matches cwd ${consumer.cwd}`,
-        });
+        return refuse(res, 404, `no claude-loop dir matches cwd ${consumer.cwd}`, ERROR_CODES.LOOP_NOT_FOUND);
     }
     const target = `${tmuxName(loopName)}.0`;
 
@@ -319,11 +316,11 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
     const rawName = req.params.name;
     const consumerId = typeof rawName === "string" ? rawName : "";
     if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
-        return res.status(400).json({ error: "bad consumer id" });
+        return refuse(res, 400, "bad consumer id");
     }
     const keys = (req.body as { keys?: unknown } | undefined)?.keys;
     if (typeof keys !== "string") {
-        return res.status(400).json({ error: "keys must be a string" });
+        return refuse(res, 400, "keys must be a string");
     }
     if (keys.length === 0) {
         // Nothing to send — accept silently. xterm sometimes emits empty
@@ -332,11 +329,11 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
         return res.status(204).end();
     }
     if (Buffer.byteLength(keys, "utf8") > MAX_KEYS_BYTES) {
-        return res.status(413).json({ error: `keys payload exceeds ${MAX_KEYS_BYTES} bytes` });
+        return refuse(res, 413, `keys payload exceeds ${MAX_KEYS_BYTES} bytes`);
     }
     const consumer = getConsumer(consumerId);
     if (!consumer) {
-        return res.status(404).json({ error: `consumer not found : ${consumerId}` });
+        return refuse(res, 404, `consumer not found : ${consumerId}`, ERROR_CODES.CONSUMER_NOT_FOUND);
     }
     // #505 phase 2 — node-relayed agent : route via WS reverse au lieu du 501.
     // Fallback 503 si le node n'est pas connecté en WS (peut être restart en
@@ -349,6 +346,7 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
             const allNodes = listNodes();
             const matchingNode = allNodes.find((n) => n.last_seen_ip === consumer.last_seen_ip);
             return res.status(503).json({
+                code: ERROR_CODES.UNAVAILABLE,
                 error: connectedIds.length === 0
                     ? "No proxy node currently has a live WS to this daemon."
                     : !matchingNode
@@ -361,9 +359,7 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
             });
         }
         if (!consumer.cwd) {
-            return res.status(404).json({
-                error: `consumer has no cwd — needs an active claude-loop heartbeat first`,
-            });
+            return refuse(res, 404, `consumer has no cwd — needs an active claude-loop heartbeat first`, ERROR_CODES.LOOP_NOT_FOUND);
         }
         const requestId = newRequestId();
         // POST keys = one-shot : on attend UN ack (ok/error) avec un timeout
@@ -384,22 +380,18 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
             ws.send(JSON.stringify({ kind: "pane.keys", request_id: requestId, consumer_id: consumerId, cwd: consumer.cwd, keys }));
         } catch (e) {
             unregisterResponseHandler(requestId);
-            return res.status(502).json({ error: `failed to send to node: ${(e as Error).message}` });
+            return refuse(res, 502, `failed to send to node: ${(e as Error).message}`);
         }
         const ack = await ackPromise;
         if (ack.ok) return res.status(204).end();
-        return res.status(502).json({ error: ack.error ?? "node refused" });
+        return refuse(res, 502, ack.error ?? "node refused");
     }
     if (!consumer.cwd) {
-        return res.status(404).json({
-            error: `consumer has no cwd — needs an active claude-loop heartbeat first`,
-        });
+        return refuse(res, 404, `consumer has no cwd — needs an active claude-loop heartbeat first`, ERROR_CODES.LOOP_NOT_FOUND);
     }
     const loopName = resolveLoopName(consumer.cwd);
     if (!loopName) {
-        return res.status(404).json({
-            error: `no claude-loop dir matches cwd ${consumer.cwd}`,
-        });
+        return refuse(res, 404, `no claude-loop dir matches cwd ${consumer.cwd}`, ERROR_CODES.LOOP_NOT_FOUND);
     }
     const target = `${tmuxName(loopName)}.0`;
 
@@ -430,7 +422,7 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
     child.stderr.on("data", (b: Buffer) => { stderr += b.toString("utf8"); });
     child.on("error", (e) => {
         if (res.headersSent) return;
-        res.status(500).json({ error: `spawn failed : ${e.message}` });
+        refuse(res, 500, `spawn failed : ${e.message}`);
     });
     child.on("close", (code) => {
         if (res.headersSent) return;
@@ -439,6 +431,7 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
         } else {
             res.status(502).json({
                 error: `send-keys exited ${code}`,
+                code: ERROR_CODES.BAD_GATEWAY,
                 detail: stderr.trim() || null,
             });
         }
@@ -473,23 +466,24 @@ export function sendAfkToLoop(
     consumerId: string,
     action: LoopAfkAction,
     durationSec = 600,
-): { ok: true; loop: string } | { ok: false; status: number; error: string } {
+): { ok: true; loop: string } | { ok: false; status: number; error: string; code: ErrorCode } {
     const consumer = getConsumer(consumerId);
     if (!consumer || !consumer.cwd) {
-        return { ok: false, status: 404, error: `consumer not found / no cwd : ${consumerId}` };
+        // #3039 — an agent unknown, or without a loop heartbeat, has no loop to reach.
+        return { ok: false, status: 404, error: `consumer not found / no cwd : ${consumerId}`, code: consumer ? ERROR_CODES.LOOP_NOT_FOUND : ERROR_CODES.CONSUMER_NOT_FOUND };
     }
     if (consumer.last_seen_via === "node") {
-        return { ok: false, status: 501, error: "AFK toggle over node-relayed pane is not implemented yet" };
+        return { ok: false, status: 501, error: "AFK toggle over node-relayed pane is not implemented yet", code: ERROR_CODES.NOT_IMPLEMENTED };
     }
     const loopName = resolveLoopName(consumer.cwd);
     if (!loopName) {
-        return { ok: false, status: 404, error: `no claude-loop dir matches cwd ${consumer.cwd}` };
+        return { ok: false, status: 404, error: `no claude-loop dir matches cwd ${consumer.cwd}`, code: ERROR_CODES.LOOP_NOT_FOUND };
     }
     const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
         ?? join(homedir(), ".claude-loop");
     const sd = join(stateRoot, loopName);
     if (!existsSync(sd)) {
-        return { ok: false, status: 404, error: `loop state dir missing : ${sd}` };
+        return { ok: false, status: 404, error: `loop state dir missing : ${sd}`, code: ERROR_CODES.LOOP_NOT_FOUND };
     }
     const nowMs = Date.now();
     let payload: Record<string, unknown>;
@@ -510,24 +504,22 @@ agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
     // #2333 — holding or releasing someone's loop is a loop control like kill and
     // prompt: moderator only, proxy nodes denied. It checked nothing before.
     const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
     const rawName = req.params.name;
     const consumerId = typeof rawName === "string" ? rawName : "";
     if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
-        return res.status(400).json({ error: "bad consumer id" });
+        return refuse(res, 400, "bad consumer id");
     }
     const body = (req.body ?? {}) as { action?: unknown; durationSec?: unknown };
     const action = body.action;
     if (action !== "toggle" && action !== "off" && action !== "arm_10m" && action !== "arm_inf") {
-        return res.status(400).json({
-            error: "action must be one of toggle / off / arm_10m / arm_inf",
-        });
+        return refuse(res, 400, "action must be one of toggle / off / arm_10m / arm_inf");
     }
     const durationSec = typeof body.durationSec === "number" && Number.isFinite(body.durationSec)
         ? Math.max(1, Math.floor(body.durationSec))
         : 600;
     const sent = sendAfkToLoop(consumerId, action, durationSec);
-    if (!sent.ok) return res.status(sent.status).json({ error: sent.error });
+    if (!sent.ok) return refuse(res, sent.status, sent.error, sent.code);
     res.status(202).json({
         consumer_id: consumerId,
         loop: sent.loop,

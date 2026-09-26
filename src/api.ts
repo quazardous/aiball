@@ -51,7 +51,7 @@ import { searchMessages } from "./search.js";
 import { graphAudit, ticketNeighbors } from "./db/graph-query.js";
 import { bearerAuth } from "./auth.js";
 import { reloadConfig } from "./config-reload.js";
-import { badRequest, consumerOf } from "./api/_helpers.js";
+import { badRequest, consumerOf, refuse } from "./api/_helpers.js";
 import { schedulerStatus } from "./cron/index.js";
 import { AIBALL_VERSION } from "./version.js";
 import { agentHelpersRouter } from "./api/agent-helpers.js";
@@ -73,6 +73,7 @@ import { ticketsRouter } from "./api/tickets.js";
 import { managedConfigRouter } from "./api/managed-config.js";
 import { ticketSubscriptionsRouter } from "./api/ticket-subscriptions.js";
 import { uploadsRouter } from "./api/uploads.js";
+import { ERROR_CODES } from "./domain.js";
 
 export const api = Router();
 
@@ -143,13 +144,14 @@ api.post("/daemon/reload", (req: Request, res: Response) => {
         return res.status(403).json({
             error: "daemon reload is local-only — run `aiball reload` on the machine "
                 + "running the daemon (it goes over the Unix socket)",
+            code: ERROR_CODES.FORBIDDEN,
         });
     }
     try {
         res.json({ reloaded: true, ...reloadConfig() });
     } catch (e) {
         // The daemon stays up; say what happened rather than dying.
-        res.status(500).json({ reloaded: false, error: (e as Error).message });
+        res.status(500).json({ reloaded: false, error: (e as Error).message, code: ERROR_CODES.INTERNAL });
     }
 });
 
@@ -358,14 +360,14 @@ api.post("/projects", (req, res) => {
         created_by?: unknown;
     };
     if (typeof raw.name !== "string" || !raw.name.trim()) {
-        return res.status(400).json({ error: "name is required" });
+        return refuse(res, 400, "name is required");
     }
     const name = raw.name.trim();
     if (/\s/.test(name)) {
-        return res.status(400).json({ error: "name must not contain whitespace" });
+        return refuse(res, 400, "name must not contain whitespace");
     }
     if (getProject(name)) {
-        return res.status(409).json({ error: `project ${name} already exists` });
+        return refuse(res, 409, `project ${name} already exists`);
     }
     const project = createProject({
         name,
@@ -386,7 +388,7 @@ api.get("/steps/timing", (req, res) => {
 
 // #2645 david — cut every waiting step down to at most N minutes from now.
 api.post("/steps/trim", (req, res) => {
-    if (!isHuman(consumerOf(req))) return res.status(403).json({ error: "only a human moderator can trim the agents' waits" });
+    if (!isHuman(consumerOf(req))) return refuse(res, 403, "only a human moderator can trim the agents' waits", ERROR_CODES.MODERATOR_ONLY);
     const max = Number((req.body ?? {}).max_minutes);
     if (!Number.isInteger(max) || max < 0) return badRequest(res, "max_minutes: a whole number of minutes, 0 or more");
     const trimmed = trimStepWaits(max);
@@ -515,7 +517,7 @@ api.post("/projects/:name/launch", (req, res) => {
     const name = String(req.params.name);
     const caller = consumerOf(req);
     if (!caller || !isHuman(caller)) {
-        return res.status(403).json({ error: "launch is human-only — it spawns a claude-loop process" });
+        return refuse(res, 403, "launch is human-only — it spawns a claude-loop process", ERROR_CODES.MODERATOR_ONLY);
     }
     const root = String(((req.body ?? {}) as { root?: unknown }).root ?? "");
     const meta = listProjectsDetailed().find((p) => p.name === name);
@@ -525,7 +527,7 @@ api.post("/projects/:name/launch", (req, res) => {
     }
     // #393 (3c): refuse a second loop at the same root — one is already running.
     if (isRootActive(root)) {
-        return res.status(409).json({ error: "a claude-loop is already running for this root" });
+        return refuse(res, 409, "a claude-loop is already running for this root");
     }
     try {
         const bin = join(installRoot(), "bin", "claude-loop");
@@ -536,7 +538,7 @@ api.post("/projects/:name/launch", (req, res) => {
         child.unref();
         return res.json({ ok: true, project: name, root, pid: child.pid });
     } catch (e) {
-        return res.status(500).json({ error: `failed to launch claude-loop: ${(e as Error).message}` });
+        return refuse(res, 500, `failed to launch claude-loop: ${(e as Error).message}`);
     }
 });
 
@@ -551,11 +553,11 @@ api.get("/launchers", (_req, res) => {
 api.post("/launchers/:id/run", (req, res) => {
     const caller = consumerOf(req);
     if (!caller || !isHuman(caller)) {
-        return res.status(403).json({ error: "launchers are human-only — they spawn a process on the daemon host" });
+        return refuse(res, 403, "launchers are human-only — they spawn a process on the daemon host", ERROR_CODES.MODERATOR_ONLY);
     }
     const launcher = getLauncher(String(req.params.id));
     if (!launcher) {
-        return res.status(404).json({ error: `no launcher with id '${req.params.id}' (declared in config?)` });
+        return refuse(res, 404, `no launcher with id '${req.params.id}' (declared in config?)`);
     }
     try {
         // Detached + stdio ignored → survives the daemon; inherits the user's
@@ -569,7 +571,7 @@ api.post("/launchers/:id/run", (req, res) => {
         child.unref();
         return res.json({ ok: true, id: launcher.id, label: launcher.label, pid: child.pid });
     } catch (e) {
-        return res.status(500).json({ error: `failed to launch '${launcher.id}': ${(e as Error).message}` });
+        return refuse(res, 500, `failed to launch '${launcher.id}': ${(e as Error).message}`);
     }
 });
 
@@ -597,7 +599,7 @@ api.delete("/projects/:name", (req, res) => {
 api.post("/projects/:name/rename", (req, res) => {
     const oldName = req.params.name;
     const newName = typeof req.body?.new_name === "string" ? req.body.new_name : "";
-    if (!newName) return res.status(400).json({ error: "new_name required (string)" });
+    if (!newName) return refuse(res, 400, "new_name required (string)");
     try {
         const result = renameProject(oldName, newName);
         // Outbox file follows the project name — rename it too.
@@ -615,9 +617,9 @@ api.post("/projects/:name/rename", (req, res) => {
         res.json({ ...result, ok: true });
     } catch (e) {
         const msg = (e as Error).message ?? String(e);
-        if (msg.includes("does not exist")) return res.status(404).json({ error: msg });
-        if (msg.includes("already exists")) return res.status(409).json({ error: msg });
-        return res.status(400).json({ error: msg });
+        if (msg.includes("does not exist")) return refuse(res, 404, msg);
+        if (msg.includes("already exists")) return refuse(res, 409, msg);
+        return refuse(res, 400, msg);
     }
 });
 
@@ -633,7 +635,7 @@ api.post("/projects/:name/rename", (req, res) => {
 api.get("/graph/neighbors", (req: Request, res: Response) => {
     const ticketId = Number(req.query.ticket_id);
     if (!Number.isSafeInteger(ticketId) || ticketId <= 0) {
-        return res.status(400).json({ error: "ticket_id required" });
+        return refuse(res, 400, "ticket_id required");
     }
     const minWeight = typeof req.query.min_weight === "string"
         ? Number(req.query.min_weight) || undefined

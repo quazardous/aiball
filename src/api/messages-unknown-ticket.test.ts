@@ -89,5 +89,5 @@ test("an unexpected error becomes a 500 that says nothing about the server", () 
         console.error = original;
     }
     assert.equal(res.statusCode, 500);
-    assert.deepEqual(res.body, { error: "internal error" });
+    assert.deepEqual(res.body, { error: "internal error", code: "INTERNAL" });
 });

@@ -13,10 +13,9 @@
  *
  * Pure (no Express / DB) so it unit-tests in isolation.
  */
-export interface LoopControlVerdict {
-    ok: boolean;
-    reason?: string;
-}
+import { ERROR_CODES, type ErrorCode } from "./domain.js";
+
+export type LoopControlVerdict = { ok: true } | { ok: false; reason: string; code: ErrorCode };
 
 /**
  * May a caller drive a loop (kill it, inject a prompt, …)? `tokenKind` is the
@@ -29,10 +28,10 @@ export function canControlLoop(
     callerIsHuman: boolean,
 ): LoopControlVerdict {
     if (tokenKind === "node") {
-        return { ok: false, reason: "proxy nodes cannot control loops (anti-DoS — local/direct moderator only)" };
+        return { ok: false, reason: "proxy nodes cannot control loops (anti-DoS — local/direct moderator only)", code: ERROR_CODES.FORBIDDEN };
     }
     if (!callerIsHuman) {
-        return { ok: false, reason: "loop control is moderator-only" };
+        return { ok: false, reason: "loop control is moderator-only", code: ERROR_CODES.MODERATOR_ONLY };
     }
     return { ok: true };
 }

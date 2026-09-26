@@ -24,8 +24,9 @@ import {
     coerceConfigValue,
     getSchemaEntry,
 } from "../config/schema.js";
-import { badRequest, notFound } from "./_helpers.js";
+import { badRequest, notFound, refuse } from "./_helpers.js";
 import { consumerOf } from "./_helpers.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const managedConfigRouter = Router();
 
@@ -71,7 +72,7 @@ managedConfigRouter.put("/managed-config/:key", (req: Request, res: Response) =>
 
     // Protected keys: write reserved to a human/moderator.
     if (entry.protected && !isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: `config key '${key}' is protected (moderator-only)` });
+        return refuse(res, 403, `config key '${key}' is protected (moderator-only)`, ERROR_CODES.MODERATOR_ONLY);
     }
 
     const value = coerceConfigValue(entry, body.value);
@@ -94,7 +95,7 @@ managedConfigRouter.delete("/managed-config/:key", (req: Request, res: Response)
         ? req.query.project.trim()
         : "";
     if (entry.protected && !isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: `config key '${key}' is protected (moderator-only)` });
+        return refuse(res, 403, `config key '${key}' is protected (moderator-only)`, ERROR_CODES.MODERATOR_ONLY);
     }
     deleteConfigOverride(project, key);
     res.status(204).end();

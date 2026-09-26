@@ -15,7 +15,7 @@
  * `readTicketPayloadRaw()`.
  */
 import { Router, type Request, type Response } from "express";
-import { badRequest, consumerOf, notFound } from "./_helpers.js";
+import { badRequest, consumerOf, notFound, refuse } from "./_helpers.js";
 import { getMessage } from "../db.js";
 import { isTicketClosed } from "../db/messages.js";
 import { isHuman } from "../db/consumers.js";
@@ -26,6 +26,7 @@ import {
     writeTicketPayload,
 } from "../db/payloads.js";
 import { canReadPayloadSecrets, payloadAccessState } from "../db/ticket-payload.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const payloadsRouter = Router();
 
@@ -41,7 +42,7 @@ function ticketOr404(req: Request, res: Response): TicketRow | null {
     const id = Number(req.params.id);
     const t = getMessage(id) as TicketRow | undefined;
     if (!t || t.kind !== "ticket_created") {
-        notFound(res, "ticket not found");
+        notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
         return null;
     }
     return t;
@@ -56,9 +57,7 @@ function ticketOr404(req: Request, res: Response): TicketRow | null {
 function guardSecretAccess(req: Request, res: Response, t: TicketRow): boolean {
     const caller = consumerOf(req);
     if (canReadPayloadSecrets(t, caller, isHuman(caller))) return true;
-    res.status(403).json({
-        error: "only the reporter, the assignee or a moderator can reach this payload's values",
-    });
+    refuse(res, 403, "only the reporter, the assignee or a moderator can reach this payload's values");
     return false;
 }
 
@@ -129,11 +128,12 @@ payloadsRouter.post("/tickets/:id/payload/dump", (req: Request, res: Response) =
     if (!view) return notFound(res, "this ticket carries no payload");
     const access = payloadAccessState({ closed: isTicketClosed(t.id) }, view);
     if (access === "revoked") {
-        return res.status(410).json({ error: "this payload was revoked — its values are gone", access });
+        return res.status(410).json({ error: "this payload was revoked — its values are gone", code: ERROR_CODES.GONE, access });
     }
     if (access === "ticket-closed") {
         return res.status(409).json({
             error: "this ticket is closed — reopen it to reach the payload",
+            code: ERROR_CODES.CONFLICT,
             access,
         });
     }

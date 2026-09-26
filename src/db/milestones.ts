@@ -11,6 +11,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
+import { ERROR_CODES, type ErrorCode } from "../domain.js";
 
 export interface MilestoneRef {
     id: number;
@@ -172,21 +173,21 @@ export function listMilestones(project: string): MilestoneRow[] {
 }
 
 /**
- * Why `milestoneId` cannot hold `ticket`, or null when it can. `milestoneId`
- * null (leaving any milestone) is always possible.
+ * Why `milestoneId` cannot hold `ticket`, with its code (#3039), or null when
+ * it can. `milestoneId` null (leaving any milestone) is always possible.
  */
 export function milestoneTargetRefusal(
     ticket: { id: number; project: string; level?: string | null },
     milestoneId: number | null,
-): string | null {
+): { error: string; code: ErrorCode } | null {
     if (milestoneId === null) return null;
-    if ((ticket.level ?? "task") === "milestone") return `#${ticket.id} is itself a milestone: a milestone does not belong to another`;
+    if ((ticket.level ?? "task") === "milestone") return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${ticket.id} is itself a milestone: a milestone does not belong to another` };
     const m = getDb().select({ id: schema.tickets.id, project: schema.tickets.project, level: schema.tickets.level, status: schema.tickets.status })
         .from(schema.tickets).where(eq(schema.tickets.id, milestoneId)).get();
-    if (!m || m.status !== "approved") return `#${milestoneId} is not a ticket of this board`;
-    if (m.level !== "milestone") return `#${milestoneId} is not a milestone (its level is ${m.level})`;
-    if (m.project !== ticket.project) return `#${milestoneId} is a milestone of ${m.project}; #${ticket.id} is in ${ticket.project}`;
-    if (closedAmong([milestoneId]).has(milestoneId)) return `milestone #${milestoneId} is already released (closed)`;
+    if (!m || m.status !== "approved") return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${milestoneId} is not a ticket of this board` };
+    if (m.level !== "milestone") return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${milestoneId} is not a milestone (its level is ${m.level})` };
+    if (m.project !== ticket.project) return { code: ERROR_CODES.MILESTONE_INVALID, error: `#${milestoneId} is a milestone of ${m.project}; #${ticket.id} is in ${ticket.project}` };
+    if (closedAmong([milestoneId]).has(milestoneId)) return { code: ERROR_CODES.MILESTONE_RELEASED, error: `milestone #${milestoneId} is already released (closed)` };
     return null;
 }
 

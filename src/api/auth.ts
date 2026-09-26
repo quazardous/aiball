@@ -31,10 +31,11 @@ import {
     type TokenKind,
 } from "../db.js";
 import { hashPassword, verifyPassword } from "../auth.js";
-import { badRequest, consumerOf } from "./_helpers.js";
+import { badRequest, consumerOf, refuse } from "./_helpers.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AIBALL_HOME } from "../paths.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const authRouter = Router();
 
@@ -104,7 +105,7 @@ authRouter.post("/auth/setup", async (req: Request, res: Response) => {
     }
     const installRow = getToken(token);
     if (!installRow || installRow.kind !== "install") {
-        return res.status(401).json({ error: "invalid install token" });
+        return refuse(res, 401, "invalid install token", ERROR_CODES.TOKEN_INVALID);
     }
     // A valid install token is proof of CLI access (only `aiball auth
     // init/reinit` mints one). CLI access already grants full power
@@ -163,12 +164,12 @@ authRouter.post("/auth/login", async (req: Request, res: Response) => {
     const c = getConsumer(consumer_id);
     if (!c || !c.enabled || c.kind !== "human") {
         // Same response shape on failure to avoid revealing enumeration.
-        return res.status(401).json({ error: "invalid credentials" });
+        return refuse(res, 401, "invalid credentials");
     }
     const hash = getPasswordHash(consumer_id);
-    if (!hash) return res.status(401).json({ error: "invalid credentials" });
+    if (!hash) return refuse(res, 401, "invalid credentials");
     const ok = await verifyPassword(password, hash);
-    if (!ok) return res.status(401).json({ error: "invalid credentials" });
+    if (!ok) return refuse(res, 401, "invalid credentials");
     touchLastLogin(consumer_id);
     const auth = issueToken({ consumer_id, kind: "auth", label: "web login" });
     res.json({
@@ -197,6 +198,6 @@ authRouter.post("/auth/logout", (req: Request, res: Response) => {
 authRouter.get("/me", (req: Request, res: Response) => {
     const id = consumerOf(req);
     const c = getConsumer(id);
-    if (!c) return res.status(404).json({ error: "consumer not found" });
+    if (!c) return refuse(res, 404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
     res.json(c);
 });

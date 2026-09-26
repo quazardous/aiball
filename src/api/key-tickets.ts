@@ -35,7 +35,8 @@ import { getMessage } from "../db.js";
 import { broadcast } from "../ws.js";
 import * as schema from "../schema.js";
 import { submitMessage, validateNewMessage } from "../messages.js";
-import { withTagsOne } from "./_helpers.js";
+import { refuse, withTagsOne } from "./_helpers.js";
+import { ERROR_CODES, type ErrorCode } from "../domain.js";
 
 export const keyTicketsRouter = Router();
 
@@ -43,25 +44,26 @@ export const EXTERNAL_ID_MAX = 200;
 
 type KeyGrant = { source: string; projects: string[] };
 
-function keyGrantOf(req: Request): KeyGrant | { status: 401 | 403; error: string } {
+function keyGrantOf(req: Request): KeyGrant | { status: 401 | 403; error: string; code: ErrorCode } {
     const ar = req as AuthenticatedRequest;
     if (ar.token_kind === "signal" && ar.signal_source) {
-        if (!ar.signal_scopes?.includes("tickets:create")) return { status: 403, error: "this key lacks the scope tickets:create" };
+        if (!ar.signal_scopes?.includes("tickets:create")) return { status: 403, error: "this key lacks the scope tickets:create", code: ERROR_CODES.KEY_SCOPE_MISSING };
         return { source: ar.signal_source, projects: ar.signal_projects ?? [] };
     }
     const onSocket = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
     const bearer = onSocket ? readBearerToken(req) : null;
     if (onSocket && bearer) {
         const row = getTokenAndTouch(bearer);
-        if (!row) return { status: 401, error: "invalid or expired API key" };
+        if (!row) return { status: 401, error: "invalid or expired API key", code: ERROR_CODES.TOKEN_INVALID };
         if (row.kind === "signal") {
-            if (!keyScopes(row).includes("tickets:create")) return { status: 403, error: "this key lacks the scope tickets:create" };
+            if (!keyScopes(row).includes("tickets:create")) return { status: 403, error: "this key lacks the scope tickets:create", code: ERROR_CODES.KEY_SCOPE_MISSING };
             return { source: row.label ?? "unnamed", projects: keyProjects(row) };
         }
     }
     return {
         status: 403,
         error: "POST /api/tickets is for an API key with the scope tickets:create — agents and humans file tickets with POST /api/messages",
+        code: ERROR_CODES.FORBIDDEN,
     };
 }
 
@@ -86,19 +88,19 @@ function recordExternalId(ticketId: number, externalId: string): void {
 
 keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
     const grant = keyGrantOf(req);
-    if ("status" in grant) return res.status(grant.status).json({ error: grant.error });
+    if ("status" in grant) return refuse(res, grant.status, grant.error, grant.code);
     const body = (req.body ?? {}) as Record<string, unknown>;
 
     const project = typeof body.project === "string" ? body.project.trim() : "";
-    if (!project) return res.status(400).json({ error: "project is required" });
+    if (!project) return refuse(res, 400, "project is required");
     if (!grant.projects.includes(project)) {
-        return res.status(403).json({ error: `this key may not create tickets in ${project} — its projects: ${grant.projects.join(", ") || "none"}` });
+        return refuse(res, 403, `this key may not create tickets in ${project} — its projects: ${grant.projects.join(", ") || "none"}`);
     }
 
     let externalId: string | null = null;
     if (body.external_id !== undefined && body.external_id !== null) {
         if (typeof body.external_id !== "string" || !body.external_id.trim() || body.external_id.length > EXTERNAL_ID_MAX) {
-            return res.status(400).json({ error: `external_id must be a non-empty string of at most ${EXTERNAL_ID_MAX} characters` });
+            return refuse(res, 400, `external_id must be a non-empty string of at most ${EXTERNAL_ID_MAX} characters`);
         }
         externalId = body.external_id.trim();
         const existing = findByExternalId(grant.source, externalId);
@@ -113,11 +115,11 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
     const tagIds: number[] = [];
     if (body.tags !== undefined) {
         if (!Array.isArray(body.tags) || body.tags.some((t) => typeof t !== "string")) {
-            return res.status(400).json({ error: "tags must be a list of tag names" });
+            return refuse(res, 400, "tags must be a list of tag names");
         }
         for (const name of body.tags as string[]) {
             const tag = getTagByName(name, project) ?? getTagByName(name);
-            if (!tag) return res.status(400).json({ error: `unknown tag ${name}` });
+            if (!tag) return refuse(res, 400, `unknown tag ${name}`);
             tagIds.push(tag.id);
         }
     }
@@ -126,10 +128,10 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
     // its consumers, it does not recruit someone new.
     let assignee: string | null = null;
     if (body.assignee !== undefined && body.assignee !== null) {
-        if (typeof body.assignee !== "string" || !body.assignee.trim()) return res.status(400).json({ error: "assignee must be a consumer id" });
+        if (typeof body.assignee !== "string" || !body.assignee.trim()) return refuse(res, 400, "assignee must be a consumer id");
         assignee = body.assignee.trim();
         if (!listProjectSubscribers(project).includes(assignee)) {
-            return res.status(400).json({ error: `${assignee} is not subscribed to ${project} — assign a consumer of the project` });
+            return refuse(res, 400, `${assignee} is not subscribed to ${project} — assign a consumer of the project`);
         }
     }
 
@@ -142,11 +144,11 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
         intent: body.intent,
         by_agent: grant.source,
     });
-    if ("error" in v) return res.status(400).json({ error: v.error });
+    if ("error" in v) return refuse(res, 400, v.error);
     v.by_agent = grant.source;
 
     if (body.approved !== undefined && typeof body.approved !== "boolean") {
-        return res.status(400).json({ error: "approved must be true or false" });
+        return refuse(res, 400, "approved must be true or false");
     }
     const msg = submitMessage(v, { preApprovedByKey: body.approved === true });
     if (externalId) recordExternalId(msg.id, externalId);

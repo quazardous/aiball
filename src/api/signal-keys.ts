@@ -14,13 +14,14 @@ import {
     revokeSignalKey,
     updateSignalKey,
 } from "../db/signal-keys.js";
-import { consumerOf, notFound } from "./_helpers.js";
+import { consumerOf, notFound, refuse } from "./_helpers.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const signalKeysRouter = Router();
 
 function moderatorOnly(req: Request, res: Response): boolean {
     if (isHuman(consumerOf(req))) return true;
-    res.status(403).json({ error: "signal keys and received signals are moderator-only" });
+    refuse(res, 403, "signal keys and received signals are moderator-only", ERROR_CODES.MODERATOR_ONLY);
     return false;
 }
 
@@ -33,7 +34,7 @@ signalKeysRouter.get("/signal-keys", (req: Request, res: Response) => {
 signalKeysRouter.post("/signal-keys", (req: Request, res: Response) => {
     if (!moderatorOnly(req, res)) return;
     const r = issueSignalKey(req.body?.label, req.body?.note, req.body?.scopes, req.body?.projects);
-    if ("error" in r) return res.status(r.status).json({ error: r.error });
+    if ("error" in r) return refuse(res, r.status, r.error);
     res.status(201).json(r);
 });
 
@@ -42,7 +43,7 @@ signalKeysRouter.patch("/signal-keys/:key_id", (req: Request, res: Response) => 
     const r = updateSignalKey(String(req.params.key_id), {
         note: req.body?.note, scopes: req.body?.scopes, projects: req.body?.projects,
     });
-    if ("error" in r) return res.status(r.status).json({ error: r.error });
+    if ("error" in r) return refuse(res, r.status, r.error);
     res.json(r);
 });
 

@@ -127,7 +127,66 @@ export type MessageScope = typeof MESSAGE_SCOPES[number];
 
 // #582 — error codes thrown by submitMessage / api handlers and mapped to HTTP
 // status by the API layer. Single source for both throw sites and catch sites.
+// #3039 — and the `code` of every API refusal, `{ error, code, details? }`: the
+// sentence is for a human, the code is the contract a client reacts on. A code,
+// once shipped, keeps its meaning; a refusal nobody has made precise yet carries
+// the generic code of its HTTP status (`errorCodeForStatus`).
 export const ERROR_CODES = {
+    // Generic, one per HTTP status: a refusal no client reacts on specifically.
+    BAD_REQUEST: "BAD_REQUEST",
+    UNAUTHORIZED: "UNAUTHORIZED",
+    FORBIDDEN: "FORBIDDEN",
+    NOT_FOUND: "NOT_FOUND",
+    CONFLICT: "CONFLICT",
+    GONE: "GONE",
+    PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
+    TOO_MANY_REQUESTS: "TOO_MANY_REQUESTS",
+    INTERNAL: "INTERNAL",
+    NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
+    BAD_GATEWAY: "BAD_GATEWAY",
+    UNAVAILABLE: "UNAVAILABLE",
+    /** #3039 — no token was sent (over TCP, or a key-only door). */
+    AUTH_REQUIRED: "AUTH_REQUIRED",
+    /** #3039 — the token or key sent is unknown, revoked or expired. */
+    TOKEN_INVALID: "TOKEN_INVALID",
+    /** #3039 — the key is valid but lacks the scope this door needs. */
+    KEY_SCOPE_MISSING: "KEY_SCOPE_MISSING",
+    /** #3039 — a gesture reserved to a registered human moderator. */
+    MODERATOR_ONLY: "MODERATOR_ONLY",
+    /** #3039 — the consumer (agent or human) named does not exist. */
+    CONSUMER_NOT_FOUND: "CONSUMER_NOT_FOUND",
+    /** #3039 — the message (comment or ticket event) named does not exist. */
+    MESSAGE_NOT_FOUND: "MESSAGE_NOT_FOUND",
+    /** #3039 — no running claude-loop answers for this agent. */
+    LOOP_NOT_FOUND: "LOOP_NOT_FOUND",
+    /** #3039 — a claim on a ticket assigned to someone else. */
+    TICKET_ASSIGNED: "TICKET_ASSIGNED",
+    /** #3039 — a claim on a ticket another agent holds, still protected. */
+    TICKET_HELD: "TICKET_HELD",
+    /** #3039 — deciding a proposal a newer decision on the ticket replaced. */
+    DECISION_SUPERSEDED: "DECISION_SUPERSEDED",
+    /** #3039 — approving or rejecting a message already moderated. */
+    ALREADY_MODERATED: "ALREADY_MODERATED",
+    /** #3039 — putting a ticket in a milestone that is already released. */
+    MILESTONE_RELEASED: "MILESTONE_RELEASED",
+    /** #3039 — putting a ticket in something that is not a milestone of its project. */
+    MILESTONE_INVALID: "MILESTONE_INVALID",
+    /** #3039 — an agent's comment without `then` and without `handback`. */
+    HANDBACK_REQUIRED: "HANDBACK_REQUIRED",
+    /** #3039 — a `handback` that contradicts the comment's `then`. */
+    HANDBACK_CONTRADICTS: "HANDBACK_CONTRADICTS",
+    /** #3039 — an agent's comment that does not say which commits it delivers. */
+    COMMITS_REQUIRED: "COMMITS_REQUIRED",
+    /** #3039 — `then: continue` without `resume_on`. */
+    STEP_RESUME_REQUIRED: "STEP_RESUME_REQUIRED",
+    /** #3039 — `resume_on.timer` above the project's maximum. */
+    STEP_TIMER_TOO_LONG: "STEP_TIMER_TOO_LONG",
+    /** #3039 — `resume_on.ticket` names no ticket, or this very one. */
+    STEP_RESUME_INVALID: "STEP_RESUME_INVALID",
+    /** #3039 — a lineage relation that would close a cycle. */
+    RELATION_CYCLE: "RELATION_CYCLE",
+    /** #3039 — importing an upstream issue a ticket already mirrors (`existing_ticket_id`). */
+    ALREADY_IMPORTED: "ALREADY_IMPORTED",
     FORBIDDEN_CLOSE: "FORBIDDEN_CLOSE",
     PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
     PARENT_PENDING_MODERATION: "PARENT_PENDING_MODERATION",
@@ -141,6 +200,29 @@ export const ERROR_CODES = {
     LEVEL_READ_ONLY: "LEVEL_READ_ONLY",
 } as const;
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
+
+/** #3039 — the generic code of an HTTP status, for a refusal with no precise one. */
+export function errorCodeForStatus(status: number): ErrorCode {
+    switch (status) {
+        case 400: return ERROR_CODES.BAD_REQUEST;
+        case 401: return ERROR_CODES.UNAUTHORIZED;
+        case 403: return ERROR_CODES.FORBIDDEN;
+        case 404: return ERROR_CODES.NOT_FOUND;
+        case 409: return ERROR_CODES.CONFLICT;
+        case 410: return ERROR_CODES.GONE;
+        case 413: return ERROR_CODES.PAYLOAD_TOO_LARGE;
+        case 429: return ERROR_CODES.TOO_MANY_REQUESTS;
+        case 501: return ERROR_CODES.NOT_IMPLEMENTED;
+        case 502: return ERROR_CODES.BAD_GATEWAY;
+        case 503: return ERROR_CODES.UNAVAILABLE;
+        default: return status >= 500 ? ERROR_CODES.INTERNAL : ERROR_CODES.BAD_REQUEST;
+    }
+}
+
+/** #3039 — whether a thrown error carries one of the codes above. */
+export function isErrorCode(v: unknown): v is ErrorCode {
+    return typeof v === "string" && Object.prototype.hasOwnProperty.call(ERROR_CODES, v);
+}
 
 export function isMessageKind(s: string): s is MessageKind {
     return (MESSAGE_KINDS as readonly string[]).includes(s);

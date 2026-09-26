@@ -40,6 +40,9 @@ dates are YYYY-MM-DD.
 - A loop's bar is also available as data for other hosts:
   `GET /api/consumers/<agent>/bar`, and an `agent_bar` event on `/ws` when it
   changes or its loop stops.
+- Every API refusal carries a stable `code` next to its sentence
+  (`{ error, code }`): the generic code of its HTTP status, or a precise one
+  where a client may react on it — see `docs/API-ERRORS.md`.
 - `claude_loop.mouse: off` (global config or a project's `.aiball.yaml`,
   or `claude-loop start --mouse off`) leaves the terminal's own selection
   and right-click menu to a loop, instead of tmux's mouse mode.

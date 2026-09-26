@@ -30,6 +30,7 @@ import {
 } from "../db.js";
 import { UPLOADS_DIR } from "../paths.js";
 import { badRequest, consumerOf } from "./_helpers.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const uploadsRouter = Router();
 
@@ -115,6 +116,7 @@ uploadsRouter.post(
         if (buf.length > max) {
             return res.status(413).json({
                 error: `upload exceeds limit (${buf.length} > ${max} bytes)`,
+                code: ERROR_CODES.PAYLOAD_TOO_LARGE,
                 max_bytes: max,
                 received_bytes: buf.length,
             });

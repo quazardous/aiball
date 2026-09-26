@@ -7,17 +7,41 @@ import type { Request, Response } from "express";
 import { listMessageTags, tagsForMessages, type Tag } from "../db.js";
 import { parseMeta } from "../questions.js";
 import type { AuthenticatedRequest } from "../auth.js";
+import { errorCodeForStatus, isErrorCode, type ErrorCode } from "../domain.js";
 
-export function badRequest(res: Response, msg: string): Response {
-    return res.status(400).json({ error: msg });
+/**
+ * #3039 — every refusal is `{ error, code, details? }`: the sentence for a
+ * human, the code (`ERROR_CODES`) for a client. Without a code, the helpers
+ * put the generic one of their status; name a precise one where a client may
+ * react on it.
+ */
+export function refuse(res: Response, status: number, msg: string, code?: ErrorCode, details?: Record<string, unknown>): Response {
+    return res.status(status).json({ error: msg, code: code ?? errorCodeForStatus(status), ...(details ? { details } : {}) });
 }
 
-export function notFound(res: Response, msg = "not found"): Response {
-    return res.status(404).json({ error: msg });
+/**
+ * #3039 — a caught error as a refusal: its own code when it carries one, else
+ * the generic code of `status`.
+ */
+export function refuseError(res: Response, status: number, err: unknown): Response {
+    const code = (err as { code?: unknown } | null)?.code;
+    return refuse(res, status, err instanceof Error ? err.message : String(err), isErrorCode(code) ? code : undefined);
 }
 
-export function conflict(res: Response, msg: string): Response {
-    return res.status(409).json({ error: msg });
+export function badRequest(res: Response, msg: string, code?: ErrorCode): Response {
+    return refuse(res, 400, msg, code);
+}
+
+export function forbidden(res: Response, msg: string, code?: ErrorCode): Response {
+    return refuse(res, 403, msg, code);
+}
+
+export function notFound(res: Response, msg = "not found", code?: ErrorCode): Response {
+    return refuse(res, 404, msg, code);
+}
+
+export function conflict(res: Response, msg: string, code?: ErrorCode): Response {
+    return refuse(res, 409, msg, code);
 }
 
 /**

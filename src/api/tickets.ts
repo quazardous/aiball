@@ -99,7 +99,7 @@ function ticketStateAfter(id: number, consumerId: string) {
     if (!t || t.kind !== "ticket_created") return null;
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
-import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotes } from "./_helpers.js";
+import { badRequest, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotes } from "./_helpers.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
@@ -143,12 +143,12 @@ export { ticketDecision, hotWindowSec } from "./inbox-row.js";
 ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     if (!isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: "owner change is moderator-only" });
+        return refuse(res, 403, "owner change is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     const by_agent = typeof req.body?.by_agent === "string" ? req.body.by_agent.trim() : "";
     if (!by_agent) return badRequest(res, "by_agent required (non-empty string)");
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     setTicketOwner(id, by_agent);
     upsertTicketSubscription(by_agent, id);
     res.json({ ticket_id: id, by_agent, ticket: ticketStateAfter(id, consumerOf(req)) });
@@ -170,14 +170,12 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const caller = consumerOf(req);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const rawAssignee = typeof req.body?.assignee === "string" ? req.body.assignee.trim() : "";
     const target = rawAssignee || caller; // no assignee → self-claim
     const isClaim = target === caller;
     if (!isClaim && !isHuman(caller)) {
-        return res.status(403).json({
-            error: "assigning another consumer is moderator-only (an agent can only claim for itself)",
-        });
+        return refuse(res, 403, "assigning another consumer is moderator-only (an agent can only claim for itself)", ERROR_CODES.MODERATOR_ONLY);
     }
     // #575 david : un agent ne peut pas claim un ticket encore pending
     // moderation. Symétrique au guard #569 (`then:resolved/plan` sur
@@ -202,9 +200,7 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     // Covers MCP `ticket_claim({ticket_id})`, which reaches here directly; the
     // zero-arg form already picks from the scoped actionable pool.
     if (isClaim && !isHuman(caller) && !seesLevel(caller, t.level)) {
-        return res.status(403).json({
-            error: `#${t.id} is a ${t.level ?? "task"} ticket, and this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets only`,
-        });
+        return refuse(res, 403, `#${t.id} is a ${t.level ?? "task"} ticket, and this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets only`, ERROR_CODES.LEVEL_READ_ONLY);
     }
     // #2379 david `prrg57` — "claim est une version faible de assign… tant qu'un
     // agent est actif sur un ticket son claim est protégé pendant X minutes, un
@@ -215,16 +211,12 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     let takenOverFrom: string | null = null;
     if (isClaim && !isHuman(caller)) {
         if (t.assignee && t.assignee !== caller) {
-            return res.status(409).json({
-                error: `#${t.id} is assigned to ${t.assignee} — an assignment supersedes a claim. Ask on the thread, or have a human reassign it.`,
-            });
+            return refuse(res, 409, `#${t.id} is assigned to ${t.assignee} — an assignment supersedes a claim. Ask on the thread, or have a human reassign it.`, ERROR_CODES.TICKET_ASSIGNED);
         }
         if (t.claimant && t.claimant !== caller) {
             const until = claimProtectedUntil(t.claimant, t.id, t.claimed_at ?? null, t.project);
             if (until && until > Date.now()) {
-                return res.status(409).json({
-                    error: `#${t.id} is held by ${t.claimant}, who is working on it — protected until ${new Date(until).toISOString()}. Ask on the thread, or come back after that.`,
-                });
+                return refuse(res, 409, `#${t.id} is held by ${t.claimant}, who is working on it — protected until ${new Date(until).toISOString()}. Ask on the thread, or come back after that.`, ERROR_CODES.TICKET_HELD);
             }
             // Past the protection the ticket is takeable: a forgotten claim must
             // not freeze it. But the take-over is said, so its holder hears it.
@@ -320,14 +312,14 @@ ticketsRouter.post("/tickets/:id/release", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const caller = consumerOf(req);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     // #436: release whatever the caller holds. An agent releases its own CLAIM;
     // the assignee or a moderator releases the ASSIGNMENT. A caller who holds
     // neither (and isn't a moderator) can't release someone else's hold.
     const holdsClaim = t.claimant === caller;
     const canReleaseAssignment = (t.assignee === caller) || isHuman(caller);
     if (!holdsClaim && !canReleaseAssignment) {
-        return res.status(403).json({ error: "only the claimant, the assignee, or a moderator can release this ticket" });
+        return refuse(res, 403, "only the claimant, the assignee, or a moderator can release this ticket");
     }
     if (holdsClaim) releaseTicketClaim(id);
     if (canReleaseAssignment && t.assignee) releaseTicketAssignment(id);
@@ -361,7 +353,7 @@ ticketsRouter.post("/tickets/:id/token-usage", (req: Request, res: Response) => 
     );
     const id = focus ?? markerId;
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const b = (req.body ?? {}) as { in?: unknown; out?: unknown; cache_w?: unknown; cache_r?: unknown };
     const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
     addTicketTokenUsage(id, { in: n(b.in), out: n(b.out), cacheW: n(b.cache_w), cacheR: n(b.cache_r) });
@@ -378,7 +370,7 @@ ticketsRouter.post("/tickets/:id/token-usage", (req: Request, res: Response) => 
 ticketsRouter.get("/tickets/:id/subscriptions", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     if (!isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: "subscription management is moderator-only" });
+        return refuse(res, 403, "subscription management is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     res.json({ ticket_id: id, subscriptions: listTicketSubscriptionsForTicket(id) });
 });
@@ -1145,7 +1137,7 @@ ticketsRouter.get("/tickets", (req, res) => {
 ticketsRouter.post("/tickets/:id/mark-read", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     // Optional up_to_id bounds the ack (#B.191) — see markTicketSeen.
     const upToId = req.body?.up_to_id;
     const opts = typeof upToId === "number" && upToId > 0 ? { upTo: upToId } : undefined;
@@ -1156,7 +1148,7 @@ ticketsRouter.post("/tickets/:id/mark-read", (req: Request, res: Response) => {
 ticketsRouter.post("/tickets/:id/mark-unread", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const r = markTicketUnseen(consumerOf(req), id);
     res.json({ ticket_id: id, ...r, ticket: ticketStateAfter(id, consumerOf(req)) });
 });
@@ -1174,15 +1166,13 @@ ticketsRouter.post("/tickets/:id/mark-unread", (req: Request, res: Response) => 
 ticketsRouter.post("/tickets/:id/postpone", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const caller = consumerOf(req);
     // #784 david : snooze is a human-only concern (organisational hide-
     // for-later). An agent should never be aware of "snooze" — even on
     // its own ticket. Only registered humans can postpone.
     if (!isHuman(caller)) {
-        return res.status(403).json({
-            error: "only a registered human moderator can snooze a ticket",
-        });
+        return refuse(res, 403, "only a registered human moderator can snooze a ticket", ERROR_CODES.MODERATOR_ONLY);
     }
     const { until } = (req.body ?? {}) as { until?: unknown };
     if (typeof until !== "string" || !until) {
@@ -1197,7 +1187,7 @@ ticketsRouter.post("/tickets/:id/postpone", (req: Request, res: Response) => {
     }
     const iso = new Date(parsed).toISOString();
     const ok = setTicketPostpone(id, iso);
-    if (!ok) return notFound(res, "ticket not found");
+    if (!ok) return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const updated = getMessage(id);
     if (updated) broadcast({ type: "message_edited", data: updated });
     res.json({ ticket_id: id, postponed_until: iso, ticket: ticketStateAfter(id, consumerOf(req)) });
@@ -1206,14 +1196,12 @@ ticketsRouter.post("/tickets/:id/postpone", (req: Request, res: Response) => {
 ticketsRouter.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const caller = consumerOf(req);
     // #784 david : same human-only rule as /postpone — snooze is a
     // human-only concern, and unsnooze is its reverse.
     if (!isHuman(caller)) {
-        return res.status(403).json({
-            error: "only a registered human moderator can unsnooze a ticket",
-        });
+        return refuse(res, 403, "only a registered human moderator can unsnooze a ticket", ERROR_CODES.MODERATOR_ONLY);
     }
     setTicketPostpone(id, null);
     const updated = getMessage(id);
@@ -1230,12 +1218,10 @@ ticketsRouter.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
 ticketsRouter.post("/tickets/:id/move", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const caller = consumerOf(req);
     if (!isHuman(caller) && t.by_agent !== caller) {
-        return res.status(403).json({
-            error: `only the ticket reporter (${t.by_agent}) or a registered human moderator can move this ticket`,
-        });
+        return refuse(res, 403, `only the ticket reporter (${t.by_agent}) or a registered human moderator can move this ticket`);
     }
     const { project } = (req.body ?? {}) as { project?: unknown };
     if (typeof project !== "string" || !project.trim()) {
@@ -1261,7 +1247,7 @@ ticketsRouter.post("/tickets/:id/move", (req: Request, res: Response) => {
 ticketsRouter.get("/tickets/:id/pending-children", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     res.json({ ticket_id: id, children: listPendingChildren(id) });
 });
 
@@ -1279,12 +1265,10 @@ ticketsRouter.get("/tickets/:id/pending-children", (req: Request, res: Response)
 ticketsRouter.post("/tickets/:id/approve-pending-children", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const caller = consumerOf(req);
     if (!isHuman(caller)) {
-        return res.status(403).json({
-            error: "approving pending children is moderation — a registered human moderator only",
-        });
+        return refuse(res, 403, "approving pending children is moderation — a registered human moderator only", ERROR_CODES.MODERATOR_ONLY);
     }
     const raw = ((req.body ?? {}) as { ticket_ids?: unknown }).ticket_ids;
     if (!Array.isArray(raw) || raw.length === 0 || raw.some((n) => !Number.isInteger(n) || (n as number) <= 0)) {
@@ -1339,7 +1323,7 @@ ticketsRouter.post("/tickets/import", async (req: Request, res: Response) => {
         return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
     } catch (err) {
         if (err instanceof AlreadyCoupledError) {
-            return res.status(409).json({ error: err.message, existing_ticket_id: err.existingTicketId });
+            return res.status(409).json({ error: err.message, code: ERROR_CODES.ALREADY_IMPORTED, existing_ticket_id: err.existingTicketId });
         }
         return badRequest(res, err instanceof Error ? err.message : String(err));
     }
@@ -1365,7 +1349,7 @@ ticketsRouter.post("/tickets/:id/export", async (req: Request, res: Response) =>
         return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
     } catch (err) {
         if (err instanceof AlreadyCoupledError) {
-            return res.status(409).json({ error: err.message, existing_ticket_id: err.existingTicketId });
+            return res.status(409).json({ error: err.message, code: ERROR_CODES.ALREADY_IMPORTED, existing_ticket_id: err.existingTicketId });
         }
         return badRequest(res, err instanceof Error ? err.message : String(err));
     }
@@ -1373,9 +1357,9 @@ ticketsRouter.post("/tickets/:id/export", async (req: Request, res: Response) =>
 
 ticketsRouter.get("/tickets/:id/relations", (req, res) => {
     const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
+    if (!Number.isFinite(id)) return refuse(res, 400, "ticket id required");
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     res.json({ ticket_id: id, relations: listTypedRelationsForTicket(id), ticket: ticketStateAfter(id, consumerOf(req)) });
 });
 
@@ -1395,22 +1379,20 @@ function ticketStepRoute(req: Request, res: Response, tag: boolean) {
     if (!Number.isFinite(id)) return badRequest(res, "ticket id required");
     const caller = consumerOf(req);
     if (!isHuman(caller)) {
-        return res.status(403).json({ error: "only a registered human moderator can mark a ticket as a step" });
+        return refuse(res, 403, "only a registered human moderator can mark a ticket as a step", ERROR_CODES.MODERATOR_ONLY);
     }
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     let latest: ReturnType<typeof getMessage> = null;
     for (const m of listMessages({ kind: "comment_added", ticket_id: id })) {
         if (m.status !== "approved") continue;
         if (!latest || m.id > latest.id) latest = m;
     }
     if (!latest) {
-        return res.status(409).json({ error: "this ticket has no comment to mark as a step" });
+        return refuse(res, 409, "this ticket has no comment to mark as a step");
     }
     if (!latest.by_agent || isHuman(latest.by_agent)) {
-        return res.status(409).json({
-            error: "the thread's last word is a human's — tagging an older comment would not move the ticket; answer the agent, or tag its own comment in the thread",
-        });
+        return refuse(res, 409, "the thread's last word is a human's — tagging an older comment would not move the ticket; answer the agent, or tag its own comment in the thread");
     }
     try {
         const updated = tag ? tagMessageAsStep(latest.id, caller) : untagMessageStep(latest.id);
@@ -1419,7 +1401,7 @@ function ticketStepRoute(req: Request, res: Response, tag: boolean) {
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
     } catch (e) {
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 }
 
@@ -1430,21 +1412,19 @@ function ticketStepRoute(req: Request, res: Response, tag: boolean) {
  */
 ticketsRouter.post("/tickets/:id/milestone", (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
+    if (!Number.isFinite(id)) return refuse(res, 400, "ticket id required");
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const raw = (req.body ?? {}).milestone_id;
     if (raw !== null && !(Number.isInteger(raw) && raw > 0)) {
-        return res.status(400).json({ error: "milestone_id must be a milestone ticket id, or null to take the ticket out of its milestone" });
+        return refuse(res, 400, "milestone_id must be a milestone ticket id, or null to take the ticket out of its milestone", ERROR_CODES.MILESTONE_INVALID);
     }
     const caller = consumerOf(req);
     if (!isHuman(caller) && !seesLevel(caller, "milestone")) {
-        return res.status(403).json({
-            error: `setting a ticket's milestone is planning: a human's gesture or a cto agent's; this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets`,
-        });
+        return refuse(res, 403, `setting a ticket's milestone is planning: a human's gesture or a cto agent's; this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets`, ERROR_CODES.LEVEL_READ_ONLY);
     }
     const refusal = milestoneTargetRefusal({ id: t.id, project: t.project, level: t.level ?? "task" }, raw as number | null);
-    if (refusal) return res.status(400).json({ error: refusal });
+    if (refusal) return refuse(res, 400, refusal.error, refusal.code);
     setTicketMilestone(id, raw as number | null);
     const updated = getMessage(id);
     if (updated) broadcast({ type: "message_edited", data: withTagsOne(updated) });
@@ -1453,26 +1433,24 @@ ticketsRouter.post("/tickets/:id/milestone", (req: Request, res: Response) => {
 
 ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
+    if (!Number.isFinite(id)) return refuse(res, 400, "ticket id required");
     const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     const body = (req.body ?? {}) as { target_ticket_id?: number; kind?: string; axis_kind?: string };
     const target = Number(body.target_ticket_id);
     if (!Number.isFinite(target) || target <= 0) {
-        return res.status(400).json({ error: "target_ticket_id required (positive integer)" });
+        return refuse(res, 400, "target_ticket_id required (positive integer)");
     }
     if (target === id) {
-        return res.status(400).json({ error: "a ticket cannot relate to itself" });
+        return refuse(res, 400, "a ticket cannot relate to itself");
     }
     const kindStr = typeof body.kind === "string" ? body.kind : "";
     if (!isRelationKind(kindStr)) {
-        return res.status(400).json({
-            error: `kind must be one of ${RELATION_KINDS.join(", ")}`,
-        });
+        return refuse(res, 400, `kind must be one of ${RELATION_KINDS.join(", ")}`);
     }
     const targetTicket = getMessage(target);
     if (!targetTicket || targetTicket.kind !== "ticket_created") {
-        return res.status(404).json({ error: `target ticket #${target} not found` });
+        return refuse(res, 404, `target ticket #${target} not found`, ERROR_CODES.TICKET_NOT_FOUND);
     }
     const caller = consumerOf(req);
     // Permission (#275): mirror the edit/snooze gate (isHuman bypass +
@@ -1505,22 +1483,16 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
         !callerIsProjectOwner &&
         !(touchesGateOnly && callerIsAssignee)
     ) {
-        return res.status(403).json({
-            error: `only a registered human moderator, the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}), a project-owner of either project, or (for depends_on / blocks) the agent either ticket is assigned to can relate them`,
-        });
+        return refuse(res, 403, `only a registered human moderator, the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}), a project-owner of either project, or (for depends_on / blocks) the agent either ticket is assigned to can relate them`);
     }
     // Anti-cycle (#275): lineage (child_of/parent_of) must stay a DAG.
     // Reject an edge that would close a loop. parent_of is the mirror of
     // child_of, so swap (child, parent) for the check.
     if (kindStr === "child_of" && lineageWouldCycle(id, target)) {
-        return res.status(409).json({
-            error: `#${id} child_of #${target} would create a lineage cycle`,
-        });
+        return refuse(res, 409, `#${id} child_of #${target} would create a lineage cycle`, ERROR_CODES.RELATION_CYCLE);
     }
     if (kindStr === "parent_of" && lineageWouldCycle(target, id)) {
-        return res.status(409).json({
-            error: `#${id} parent_of #${target} would create a lineage cycle`,
-        });
+        return refuse(res, 409, `#${id} parent_of #${target} would create a lineage cycle`, ERROR_CODES.RELATION_CYCLE);
     }
     // #1468 — an `ignored` tombstone may be scoped to ONE axis via `axis_kind`
     // (the kind whose axis to remove: `depends_on` cuts the gate, leaving a
@@ -1528,14 +1500,10 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     // target-scoped cut that removes every axis.
     const axisKindStr = typeof body.axis_kind === "string" ? body.axis_kind : "";
     if (axisKindStr && !isRelationKind(axisKindStr)) {
-        return res.status(400).json({
-            error: `axis_kind must be one of ${RELATION_KINDS.join(", ")}`,
-        });
+        return refuse(res, 400, `axis_kind must be one of ${RELATION_KINDS.join(", ")}`);
     }
     if (axisKindStr && kindStr !== "ignored") {
-        return res.status(400).json({
-            error: "axis_kind only applies when removing a relation (kind=ignored)",
-        });
+        return refuse(res, 400, "axis_kind only applies when removing a relation (kind=ignored)");
     }
     const cutAxis = axisKindStr ? relationAxis(axisKindStr as RelationKind) : undefined;
     // Idempotency (#275): at most one active edge per (source, target, axis).
@@ -1561,7 +1529,7 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
         by_agent: caller,
         axis: cutAxis,
     });
-    if (!event) return res.status(500).json({ error: "failed to create relation event" });
+    if (!event) return refuse(res, 500, "failed to create relation event");
     broadcast({ type: "message_created", data: event });
     res.json({
         ticket_id: id,
@@ -1586,17 +1554,17 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     if (!requested) {
         requested = getMessageByHashid(raw);
     }
-    if (!requested) return notFound(res, "ticket not found");
+    if (!requested) return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     // If the id is a comment (or close/reopen event), resolve up to its
     // parent ticket and attach `focus_message_id` so the UI can scroll to
     // the right place. Lets `#N` references in markdown be opened blindly.
     let t = requested;
     let focusMessageId: number | null = null;
     if (t.kind !== "ticket_created") {
-        if (!t.ticket_id) return notFound(res, "ticket not found");
+        if (!t.ticket_id) return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
         const parent = getMessage(t.ticket_id);
         if (!parent || parent.kind !== "ticket_created") {
-            return notFound(res, "ticket not found");
+            return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
         }
         focusMessageId = requested.id;
         t = parent;

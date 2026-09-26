@@ -54,7 +54,8 @@ open.
 - **`src/client.ts` imports a type from `src/event-bus.ts`**, which types itself on
   the database's `Message`: no code crosses at run time, but the client's types
   still depend on the core's.
-- **The API has no written contract.** Clients rely on routes and fields that exist
+- **The API has no written contract**, beyond its refusals ([`API-ERRORS.md`](./API-ERRORS.md):
+  every one carries a stable `code`). Clients rely on routes and fields that exist
   only in the code; tvty calls part of the API by hand, outside the shared client.
 
 ## Uploads in texts

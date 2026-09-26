@@ -10,8 +10,10 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { api } from "./api.js";
 import { serveUpload } from "./api/uploads.js";
+import { errorCodeDefaults } from "./api/error-codes.js";
 import { loadProxy, proxyMiddleware, proxyLandingHtml } from "./proxy.js";
 import { mountVersionRoutes } from "./api/version-routes.js";
+import { refuse } from "./api/_helpers.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -44,11 +46,11 @@ export function jsonErrorHandler(
     const e = err as { status?: unknown; statusCode?: unknown; message?: unknown };
     const raw = typeof e.status === "number" ? e.status : typeof e.statusCode === "number" ? e.statusCode : 500;
     if (raw >= 400 && raw < 500) {
-        res.status(raw).json({ error: typeof e.message === "string" ? e.message : "bad request" });
+        refuse(res, raw, typeof e.message === "string" ? e.message : "bad request");
         return;
     }
     console.error(`[api] ${req.method} ${req.originalUrl} failed:`, err);
-    res.status(500).json({ error: "internal error" });
+    refuse(res, 500, "internal error");
 }
 
 /**
@@ -61,6 +63,8 @@ export function createApp(): express.Express {
     const app = express();
     // #2682 — per-route request counts and durations (GET /api/debug/requests).
     app.use(requestStatsMiddleware);
+    // #3039 — every JSON refusal carries a code, the generic one of its status at least.
+    app.use(errorCodeDefaults);
     app.get("/api/debug/requests", (_req, res) => res.json(requestStatsReport()));
 
     // #394: proxy mode. When a `proxy:` block is configured, this daemon is a

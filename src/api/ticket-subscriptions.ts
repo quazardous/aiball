@@ -12,6 +12,7 @@ import {
     upsertTicketSubscription,
 } from "../db.js";
 import { badRequest, notFound } from "./_helpers.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const ticketSubscriptionsRouter = Router();
 
@@ -33,7 +34,7 @@ ticketSubscriptionsRouter.post("/ticket-subscriptions", (req: Request, res: Resp
     }
     const t = getMessage(ticket_id);
     if (!t || t.kind !== "ticket_created") {
-        return notFound(res, "ticket not found");
+        return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
     }
     // #352: muted=true mutes (suppress pings even by role); default false = follow.
     const muted = req.body?.muted === true;

@@ -47,7 +47,8 @@ import { canControlLoop } from "../loop-control.js";
 import { spoolPrompt, drainPrompts } from "../loop-prompts.js";
 import { pickHoldTargets, type LoopHoldResult } from "../loop-hold.js";
 import { sendAfkToLoop } from "./agents.js";
-import { badRequest, consumerOf, notFound, tokenKindOf } from "./_helpers.js";
+import { badRequest, consumerOf, notFound, tokenKindOf, refuse } from "./_helpers.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const consumersRouter = Router();
 
@@ -76,7 +77,7 @@ consumersRouter.get("/consumers", (_req, res) => {
 // #2645 — one agent's wait credit: per project, and its latest movements.
 consumersRouter.get("/consumers/:consumer_id/wait-credit", (req: Request, res: Response) => {
     const c = getConsumer(String(req.params.consumer_id));
-    if (!c) return notFound(res, "consumer not found");
+    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
     if (c.kind === "human") return res.json({ consumer_id: c.consumer_id, credits: null, moves: [] });
     const limit = Number(req.query.limit);
     res.json({
@@ -90,7 +91,7 @@ consumersRouter.get("/consumers/:consumer_id/wait-credit", (req: Request, res: R
 // fetches its own row to inject `{consumer_prompt}` into the wake prompt.
 consumersRouter.get("/consumers/:consumer_id", (req: Request, res: Response) => {
     const c = getConsumer(String(req.params.consumer_id));
-    if (!c) return notFound(res, "consumer not found");
+    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
     res.json(c);
 });
 
@@ -103,7 +104,7 @@ consumersRouter.get("/consumers/:consumer_id", (req: Request, res: Response) => 
 consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Response) => {
     const target = String(req.params.consumer_id);
     const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
     const delivered = isPresent(target);
     emitControl(target, { action: "kill" });
     res.json({ consumer_id: target, action: "kill", delivered });
@@ -121,7 +122,7 @@ consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Re
 consumersRouter.post("/consumers/:consumer_id/prompt", (req: Request, res: Response) => {
     const target = String(req.params.consumer_id);
     const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
     if (!text) return badRequest(res, "text required");
     const present = deliverLoopPrompt(target, text);
@@ -156,7 +157,7 @@ function holdTargets(requested: unknown): string[] {
 // loop-stop and prompt. One line per loop in the daemon log and in the reply.
 consumersRouter.post("/loops/message-all", (req: Request, res: Response) => {
     const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
     const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
     if (!message) return badRequest(res, "message required");
     const hold = req.body?.hold === true;
@@ -177,7 +178,7 @@ consumersRouter.post("/loops/message-all", (req: Request, res: Response) => {
 // #2333 — on return: lift the hold on every agent loop (or the ones named).
 consumersRouter.post("/loops/release-all", (req: Request, res: Response) => {
     const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
     const results: LoopHoldResult[] = holdTargets(req.body?.consumers).map((consumer_id) => {
         const released = sendAfkToLoop(consumer_id, "off");
         const result: LoopHoldResult = { consumer_id, hold: released.ok ? "released" : "failed" };
@@ -246,9 +247,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     const CAPABILITY_FIELDS = ["can_claim", "can_create_agent", "agent_type"] as const;
     const touchesCapability = CAPABILITY_FIELDS.some((f) => body[f] !== undefined);
     if (touchesCapability && !isHuman(consumerOf(req))) {
-        return res.status(403).json({
-            error: "consumer capability fields (can_claim, can_create_agent, agent_type) are human-only — set them via the moderator UI, not from an agent",
-        });
+        return refuse(res, 403, "consumer capability fields (can_claim, can_create_agent, agent_type) are human-only — set them via the moderator UI, not from an agent", ERROR_CODES.MODERATOR_ONLY);
     }
     if (body.agent_type !== undefined && !(AGENT_TYPES as readonly unknown[]).includes(body.agent_type)) {
         return badRequest(res, `agent_type must be one of: ${AGENT_TYPES.join(", ")}`);
@@ -296,7 +295,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         patch.notify_project_broadcasts = body.notify_project_broadcasts;
     }
     const updated: Consumer | null = updateConsumer(consumer_id, patch);
-    if (!updated) return notFound(res, "consumer not found");
+    if (!updated) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
     broadcast({ type: "consumer_changed", data: updated });
     res.json(updated);
 });
@@ -304,7 +303,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
 consumersRouter.delete("/consumers/:consumer_id", (req: Request, res: Response) => {
     const consumer_id = String(req.params.consumer_id);
     const c = getConsumer(consumer_id);
-    if (!c) return notFound(res, "consumer not found");
+    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
     deleteConsumer(consumer_id);
     broadcast({ type: "consumer_changed", data: { consumer_id, deleted: true } });
     res.json({ consumer_id, deleted: true });
@@ -325,13 +324,13 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
     const target = String(req.params.consumer_id);
     const caller = consumerOf(req);
     if (target !== caller) {
-        return res.status(403).json({ error: "can only push state for your own consumer_id" });
+        return refuse(res, 403, "can only push state for your own consumer_id");
     }
     const c = getConsumer(caller);
     if (!c) {
         ensureConsumer(caller);
     } else if (c.kind === "human") {
-        return res.status(403).json({ error: "state push is for loop agents, not humans" });
+        return refuse(res, 403, "state push is for loop agents, not humans");
     }
     const body = (req.body ?? {}) as { state?: unknown; human?: unknown; human_word?: unknown; cwd?: unknown; project?: unknown };
     if (body.state !== "busy" && body.state !== "idle" && body.state !== "boot") {
@@ -381,10 +380,10 @@ consumersRouter.get("/consumers/:consumer_id/backlog", (req: Request, res: Respo
     const target = String(req.params.consumer_id);
     const caller = consumerOf(req);
     if (target !== caller && !isHuman(caller)) {
-        return res.status(403).json({ error: "an agent's backlog is readable by a human or by the agent itself" });
+        return refuse(res, 403, "an agent's backlog is readable by a human or by the agent itself");
     }
     const c = getConsumer(target);
-    if (!c) return notFound(res, "consumer not found");
+    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
     const project = typeof req.query.project === "string" && req.query.project ? req.query.project : undefined;
     const query: Record<string, string> = { backlog: "1" };
     for (const key of ["project", "cooldown_sec", "limit"] as const) {
@@ -412,11 +411,11 @@ consumersRouter.put("/consumers/:consumer_id/bar", (req: Request, res: Response)
     const target = String(req.params.consumer_id);
     const caller = consumerOf(req);
     if (target !== caller) {
-        return res.status(403).json({ error: "can only push the bar of your own consumer_id" });
+        return refuse(res, 403, "can only push the bar of your own consumer_id");
     }
     const c = getConsumer(caller);
     if (c?.kind === "human") {
-        return res.status(403).json({ error: "the bar is a loop agent's, not a human's" });
+        return refuse(res, 403, "the bar is a loop agent's, not a human's");
     }
     const bar = parseAgentBar(req.body);
     if ("error" in bar) return badRequest(res, bar.error);
@@ -428,7 +427,7 @@ consumersRouter.get("/consumers/:consumer_id/bar", (req: Request, res: Response)
     const target = String(req.params.consumer_id);
     const caller = consumerOf(req);
     if (target !== caller && !isHuman(caller)) {
-        return res.status(403).json({ error: "an agent's bar is readable by a human or by the agent itself" });
+        return refuse(res, 403, "an agent's bar is readable by a human or by the agent itself");
     }
     const view = getAgentBar(target);
     if (!view) return notFound(res, "no bar pushed by this consumer yet");
@@ -443,7 +442,7 @@ consumersRouter.get("/consumers/:consumer_id/bar", (req: Request, res: Response)
  */
 consumersRouter.get("/nodes", (req: Request, res: Response) => {
     if (!isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: "nodes list is moderator-only" });
+        return refuse(res, 403, "nodes list is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     // #510 — décorer chaque node avec son état WS reverse courant. Lecture
     // mémoire (proxy-ws map) — pas de coût DB. Le NodeView reste compatible
@@ -495,11 +494,12 @@ consumersRouter.post("/nodes/enroll", (req: Request, res: Response) => {
         return res.status(403).json({
             error: "the hub is not accepting pairing right now — open the window "
                 + "in aiball under Nodes, then run this again",
+            code: ERROR_CODES.FORBIDDEN,
         });
     }
     const ip = req.ip ?? req.socket.remoteAddress ?? "unknown";
     if (enrollRateLimited(ip)) {
-        return res.status(429).json({ error: "too many pairing requests — wait a minute" });
+        return refuse(res, 429, "too many pairing requests — wait a minute");
     }
     const { label, display_host, display_host_provider } = (req.body ?? {}) as {
         label?: unknown; display_host?: unknown; display_host_provider?: unknown;
@@ -552,7 +552,7 @@ consumersRouter.get("/nodes/enroll/:id", (req: Request, res: Response) => {
  */
 consumersRouter.get("/nodes/pairing", (req: Request, res: Response) => {
     if (!isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: "pairing window is moderator-only" });
+        return refuse(res, 403, "pairing window is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     res.json(pairingWindow());
 });
@@ -560,7 +560,7 @@ consumersRouter.get("/nodes/pairing", (req: Request, res: Response) => {
 consumersRouter.post("/nodes/pairing/:verb", (req: Request, res: Response) => {
     const caller = consumerOf(req);
     if (!isHuman(caller)) {
-        return res.status(403).json({ error: "pairing window is moderator-only" });
+        return refuse(res, 403, "pairing window is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     const verb = String(req.params.verb);
     if (verb !== "open" && verb !== "close") return badRequest(res, "verb must be open or close");
@@ -581,7 +581,7 @@ consumersRouter.post("/nodes/pairing/:verb", (req: Request, res: Response) => {
 /** #2074 — the human side. Moderator-only, like every other node surface. */
 consumersRouter.get("/nodes/enrollments", (req: Request, res: Response) => {
     if (!isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: "pairing requests are moderator-only" });
+        return refuse(res, 403, "pairing requests are moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     res.json(listEnrollments());
 });
@@ -589,7 +589,7 @@ consumersRouter.get("/nodes/enrollments", (req: Request, res: Response) => {
 consumersRouter.post("/nodes/enrollments/:id/:verdict", (req: Request, res: Response) => {
     const caller = consumerOf(req);
     if (!isHuman(caller)) {
-        return res.status(403).json({ error: "approving a node is moderator-only" });
+        return refuse(res, 403, "approving a node is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     const verdict = String(req.params.verdict);
     if (verdict !== "approve" && verdict !== "reject") {
@@ -599,7 +599,7 @@ consumersRouter.post("/nodes/enrollments/:id/:verdict", (req: Request, res: Resp
     const view = verdict === "approve" ? approveEnrollment(id, caller) : rejectEnrollment(id, caller);
     // Null means the request was no longer decidable — expired, or already
     // decided. Saying so beats silently minting a second token.
-    if (!view) return res.status(409).json({ error: "pairing request is no longer pending" });
+    if (!view) return refuse(res, 409, "pairing request is no longer pending");
     broadcast({ type: "consumer_changed", data: { enrollment: view } });
     res.json(view);
 });
@@ -608,7 +608,7 @@ consumersRouter.post("/nodes/enrollments/:id/:verdict", (req: Request, res: Resp
  *  token → the proxy can no longer relay). Moderator-only. */
 consumersRouter.delete("/nodes/:node_id", (req: Request, res: Response) => {
     if (!isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: "node revoke is moderator-only" });
+        return refuse(res, 403, "node revoke is moderator-only", ERROR_CODES.MODERATOR_ONLY);
     }
     const node_id = String(req.params.node_id);
     if (!revokeNode(node_id, consumerOf(req))) return notFound(res, "node not found");

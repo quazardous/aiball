@@ -57,7 +57,7 @@ import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
 import { emitLifecycle } from "../event-bus.js";
-import { badRequest, conflict, consumerOf, notFound, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
+import { badRequest, conflict, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
 import { getInboxAgg } from "../db/inbox-agg.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
@@ -94,6 +94,26 @@ function applyPlatformTag(msg: { id: number; kind: string }, req: Request): void
     }
 }
 
+/**
+ * #3039 — the refusals `submitMessage` throws, by code, and their HTTP status;
+ * the answer carries the code. Anything else it throws is a 500.
+ */
+const SUBMIT_REFUSAL_STATUS: Partial<Record<string, number>> = {
+    [ERROR_CODES.FORBIDDEN_CLOSE]: 403,
+    // #561 — 400 (not 500): the client can say which project does not exist.
+    [ERROR_CODES.PROJECT_NOT_FOUND]: 400,
+    // #569 — the agent waits for the ticket's approval, or posts a plain comment.
+    [ERROR_CODES.PARENT_PENDING_MODERATION]: 409,
+    // #2308 — a step (`then: continue`) from an agent not holding the ticket.
+    [ERROR_CODES.STEP_NOT_HOLDER]: 409,
+    // #2910 — a milestone still holding open tickets is not released.
+    [ERROR_CODES.MILESTONE_HAS_OPEN]: 409,
+    // #2910 — a ticket above the levels the agent works on is read-only to it.
+    [ERROR_CODES.LEVEL_READ_ONLY]: 403,
+    // #2215 — the parent ticket does not exist.
+    [ERROR_CODES.TICKET_NOT_FOUND]: 404,
+};
+
 messagesRouter.post("/messages", (req: Request, res: Response) => {
     const v = validateNewMessage(req.body);
     if ("error" in v) return badRequest(res, v.error);
@@ -114,11 +134,11 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
     if (!v.by_agent) v.by_agent = consumerOf(req);
     // #2275 / #2331 — an agent's comment carries a then, or says whether it hands the ticket back.
     const noDecision = withoutDecisionRefusal(v, consumerOf(req));
-    if (noDecision) return badRequest(res, noDecision);
+    if (noDecision) return badRequest(res, noDecision.error, noDecision.code);
     // #2652 — an agent's comment says which commits it delivers, or that it delivers none.
     const clientFeatures = String(req.headers["x-aiball-client"] ?? "").split(",").map((f) => f.trim());
     const commitsRule = commitsRequirement(v, consumerOf(req), clientFeatures.includes("commits"));
-    if (commitsRule.refusal) return badRequest(res, commitsRule.refusal);
+    if (commitsRule.refusal) return badRequest(res, commitsRule.refusal, ERROR_CODES.COMMITS_REQUIRED);
     // #2331 — a project's lead filing a ticket without a plan is reminded, not refused.
     const warning = v.kind === "ticket_created" ? creationHandbackFor(v).warning : commitsRule.warning;
     try {
@@ -126,36 +146,8 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
         applyPlatformTag(msg, req);
         return res.status(201).json({ ...withTagsOne(msg), ...(warning ? { warnings: [warning] } : {}) });
     } catch (err) {
-        const code = (err as { code?: string }).code;
-        if (code === ERROR_CODES.FORBIDDEN_CLOSE) {
-            return res.status(403).json({ error: (err as Error).message });
-        }
-        // #561 — 400 (not 500) so the UI/MCP client can surface a usable
-        // message when the project doesn't exist.
-        if (code === ERROR_CODES.PROJECT_NOT_FOUND) {
-            return res.status(400).json({ error: (err as Error).message });
-        }
-        // #569 — 409 conflict: agent must wait for the ticket to be approved
-        // or post a plain comment instead of a resolution/plan proposal.
-        if (code === ERROR_CODES.PARENT_PENDING_MODERATION) {
-            return res.status(409).json({ error: (err as Error).message });
-        }
-        // #2308 — a step (`then: continue`) from an agent not holding the ticket.
-        if (code === ERROR_CODES.STEP_NOT_HOLDER) {
-            return res.status(409).json({ error: (err as Error).message });
-        }
-        // #2910 — a milestone still holding open tickets is not released.
-        if (code === ERROR_CODES.MILESTONE_HAS_OPEN) {
-            return res.status(409).json({ error: (err as Error).message });
-        }
-        // #2910 — a ticket above the levels the agent works on is read-only to it.
-        if (code === ERROR_CODES.LEVEL_READ_ONLY) {
-            return res.status(403).json({ error: (err as Error).message });
-        }
-        // #2215 — the parent ticket does not exist.
-        if (code === ERROR_CODES.TICKET_NOT_FOUND) {
-            return res.status(404).json({ error: (err as Error).message });
-        }
+        const status = SUBMIT_REFUSAL_STATUS[(err as { code?: string }).code ?? ""];
+        if (status) return refuseError(res, status, err);
         throw err;
     }
 });
@@ -188,7 +180,7 @@ messagesRouter.get("/messages", (req: Request, res: Response) => {
 
 messagesRouter.get("/messages/:id", (req, res) => {
     const m = getMessage(Number(req.params.id));
-    if (!m) return notFound(res);
+    if (!m) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     // #3040 — the uploads its text cites, resolved as on a thread read.
     const localTrust = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
     res.json({ ...withTagsOne(m), attachments: resolveAttachments([m.body], localTrust) });
@@ -222,14 +214,14 @@ function decide(
 ): void | Response {
     const id = Number(req.params.id);
     const existing = getMessage(id);
-    if (!existing) return notFound(res);
+    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     if (existing.status !== "pending") {
-        return badRequest(res, `message already ${existing.status}`);
+        return badRequest(res, `message already ${existing.status}`, ERROR_CODES.ALREADY_MODERATED);
     }
     // #2180 — the ripple lives in ./moderation.ts so the pending-children
     // sweep applies exactly the same side-effects per child.
     const decorated = applyModeration(existing, status, consumerOf(req));
-    if (!decorated) return notFound(res);
+    if (!decorated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     res.json(decorated);
 }
 
@@ -258,9 +250,9 @@ messagesRouter.post("/messages/:id/reject", (req, res) => decide(req, res, "reje
 messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
-    if (!existing) return notFound(res);
+    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     if (existing.status !== "pending") {
-        return badRequest(res, `message already ${existing.status}`);
+        return badRequest(res, `message already ${existing.status}`, ERROR_CODES.ALREADY_MODERATED);
     }
     if (!existing.ticket_id) {
         return badRequest(res, "message has no parent ticket to close");
@@ -269,7 +261,7 @@ messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Respon
     // decide(req, res, "approved") minus the res.json — we want to ship
     // the combined response below.
     const approved = updateMessageStatus(id, "approved", "human", null, existing.kind);
-    if (!approved) return notFound(res);
+    if (!approved) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     const approvedDecorated = withTagsOne(approved);
     deliverToOutbox(approved);
     fanOutPings(approved);
@@ -302,14 +294,12 @@ messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Respon
             closed: withTagsOne(closeMsg),
         });
     } catch (err) {
-        const code = (err as { code?: string }).code;
-        if (code === ERROR_CODES.FORBIDDEN_CLOSE) {
-            return res.status(403).json({ error: (err as Error).message });
-        }
+        if ((err as { code?: string }).code === ERROR_CODES.FORBIDDEN_CLOSE) return refuseError(res, 403, err);
         // The approve already landed ; we surface the close error so the
         // client knows to refresh + retry the close manually.
         return res.status(500).json({
             error: `accepted resolution but failed to close: ${(err as Error).message}`,
+            code: ERROR_CODES.INTERNAL,
             approved: approvedDecorated,
         });
     }
@@ -318,7 +308,7 @@ messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Respon
 messagesRouter.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
-    if (!existing) return notFound(res);
+    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     const { title, body, summary, intent, priority, scope, level } = req.body ?? {};
     if (
         title === undefined &&
@@ -361,11 +351,11 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
         }
         if (existing.kind !== "ticket_created") return badRequest(res, "level applies to tickets only");
         if (!isHuman(consumerOf(req))) {
-            return res.status(403).json({ error: "a ticket's level is set by a human moderator only" });
+            return refuse(res, 403, "a ticket's level is set by a human moderator only", ERROR_CODES.MODERATOR_ONLY);
         }
     }
     const updated = editMessage(id, { title, body, summary, intent, priority, scope, level: level as TicketLevel | undefined });
-    if (!updated) return notFound(res);
+    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
     // #509 — priority_changed lifecycle quand la priorité d'un ticket bouge
@@ -407,15 +397,13 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
 messagesRouter.post("/messages/:id/delete", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
-    if (!existing) return notFound(res);
+    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     if (existing.kind !== "comment_added") {
         return badRequest(res, "only comments can be deleted");
     }
     const caller = consumerOf(req);
     if (!isHuman(caller)) {
-        return res.status(403).json({
-            error: "only a registered human moderator can delete a comment",
-        });
+        return refuse(res, 403, "only a registered human moderator can delete a comment", ERROR_CODES.MODERATOR_ONLY);
     }
     let updated;
     try {
@@ -423,7 +411,7 @@ messagesRouter.post("/messages/:id/delete", (req, res) => {
     } catch (e) {
         return badRequest(res, (e as Error).message);
     }
-    if (!updated) return notFound(res);
+    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     deletePingsForMessage(id);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
@@ -461,7 +449,7 @@ messagesRouter.post("/messages/:id/questions/:qid/answer", (req, res) => {
         answered_at: new Date().toISOString(),
         answered_in,
     });
-    if (!updated) return notFound(res);
+    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
     res.json(decorated);
@@ -521,7 +509,7 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
             if (latest > 0 && latest !== id) {
                 const newer = getMessage(latest);
                 const ref = newer?.hashid ? `#${newer.hashid}` : `message ${latest}`;
-                return conflict(res, `a newer decision replaced this one — decide ${ref} instead`);
+                return conflict(res, `a newer decision replaced this one — decide ${ref} instead`, ERROR_CODES.DECISION_SUPERSEDED);
             }
         }
     }
@@ -540,13 +528,13 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
             const effect = decisionGesture(k)?.onAccept;
             if (effect === "close_resolved" || effect === "close_unresolved") {
                 const open = openTicketsIn(ticket.id);
-                if (open.length > 0) return conflict(res, milestoneOpenRefusal(ticket.id, open));
+                if (open.length > 0) return conflict(res, milestoneOpenRefusal(ticket.id, open), ERROR_CODES.MILESTONE_HAS_OPEN);
             }
         }
     }
     try {
         const updated = applyMessageDecision(id, body.status, by, newKind);
-        if (!updated) return notFound(res);
+        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         // #260/#261: notify the proposal's author that their plan/resolution
         // was accepted (go-signal to execute) or rejected (ball back in
         // their court). Same service the moderation decide() path uses.
@@ -674,7 +662,7 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
     } catch (e) {
         // Domain-level conflict (no decision present, or already
         // terminal) — surface as 409 so the UI can show the reason.
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 });
 
@@ -693,12 +681,10 @@ messagesRouter.post("/messages/:id/resurface", (req: Request, res: Response) => 
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
     const existing = getMessage(id);
-    if (!existing) return notFound(res);
+    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     const caller = consumerOf(req);
     if (!isHuman(caller)) {
-        return res.status(403).json({
-            error: "only a registered human moderator can resurface a message",
-        });
+        return refuse(res, 403, "only a registered human moderator can resurface a message", ERROR_CODES.MODERATOR_ONLY);
     }
     const { resurfaced } = clearSeenForMessage(id);
     // Broadcast so subscribers (UI list rows) refresh their unread chip.
@@ -725,12 +711,12 @@ messagesRouter.post("/messages/:id/summarize", (req: Request, res: Response) => 
     }
     try {
         const updated = setMessageSummary(id, body.summary);
-        if (!updated) return notFound(res);
+        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
     } catch (e) {
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 });
 
@@ -756,7 +742,7 @@ messagesRouter.post("/messages/:id/vote", (req: Request, res: Response) => {
     const voter = consumerOf(req);
     try {
         const updated = setMessageVote(id, voter, body.value);
-        if (!updated) return notFound(res);
+        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         const decorated = withVotesOne(withTagsOne(updated), voter);
         // Broadcast pour live update — chaque viewer recompute son `mine` côté
         // client à partir de meta.votes (qui IS dans le payload broadcasté).
@@ -772,7 +758,7 @@ messagesRouter.post("/messages/:id/vote", (req: Request, res: Response) => {
         }
         res.json(decorated);
     } catch (e) {
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 });
 
@@ -796,12 +782,12 @@ messagesRouter.post("/messages/:id/reclassify", (req: Request, res: Response) =>
     }
     try {
         const updated = reclassifyMessageDecision(id, body.new_kind);
-        if (!updated) return notFound(res);
+        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
     } catch (e) {
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 });
 
@@ -832,12 +818,12 @@ messagesRouter.post("/messages/:id/promote", (req: Request, res: Response) => {
     try {
         const by = consumerOf(req);
         const updated = promoteMessageToDecision(id, body.kind, status, by);
-        if (!updated) return notFound(res);
+        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
     } catch (e) {
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 });
 
@@ -851,12 +837,12 @@ messagesRouter.post("/messages/:id/untag", (req: Request, res: Response) => {
     if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
     try {
         const updated = removeMessageDecision(id);
-        if (!updated) return notFound(res);
+        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
     } catch (e) {
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 });
 
@@ -873,21 +859,21 @@ function stepTagRoute(req: Request, res: Response, tag: boolean) {
     if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
     const caller = consumerOf(req);
     if (!isHuman(caller)) {
-        return res.status(403).json({ error: "only a registered human moderator can tag a comment as a step" });
+        return refuse(res, 403, "only a registered human moderator can tag a comment as a step", ERROR_CODES.MODERATOR_ONLY);
     }
     const existing = getMessage(id);
-    if (!existing) return notFound(res);
+    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     if (tag && (!existing.by_agent || isHuman(existing.by_agent))) {
-        return res.status(409).json({ error: "only an agent's comment can be tagged as a step" });
+        return refuse(res, 409, "only an agent's comment can be tagged as a step");
     }
     try {
         const updated = tag ? tagMessageAsStep(id, caller) : untagMessageStep(id);
-        if (!updated) return notFound(res);
+        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
     } catch (e) {
-        return res.status(409).json({ error: (e as Error).message });
+        return refuseError(res, 409, e);
     }
 }
 
@@ -895,7 +881,7 @@ messagesRouter.post("/messages/:id/note", (req, res) => {
     const id = Number(req.params.id);
     const { note } = req.body ?? {};
     const updated = noteMessage(id, typeof note === "string" ? note : null);
-    if (!updated) return notFound(res);
+    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_noted", data: decorated });
     res.json(decorated);

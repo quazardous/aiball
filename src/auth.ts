@@ -22,6 +22,8 @@ import {
 } from "./db.js";
 import { getConsumer, updateConsumer } from "./db/consumers.js";
 import { keyProjects, keyScopes } from "./db/signal-keys.js";
+import { refuse } from "./api/_helpers.js";
+import { ERROR_CODES } from "./domain.js";
 
 // The options overload of `crypto.scrypt` doesn't survive `promisify`'s
 // type inference, so we keep the callback form behind a typed helper.
@@ -197,6 +199,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
     if (!token) {
         res.status(401).set("www-authenticate", "Bearer").json({
             error: "authentication required",
+            code: ERROR_CODES.AUTH_REQUIRED,
             hint: anyHumanCredentials()
                 ? "log in at /login or pass Authorization: Bearer <agent token>"
                 : "no humans yet — run `aiball auth init` in a terminal, then open the printed setup URL",
@@ -207,13 +210,12 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
     if (!row) {
         res.status(401).set("www-authenticate", "Bearer").json({
             error: "invalid or expired token",
+            code: ERROR_CODES.TOKEN_INVALID,
         });
         return;
     }
     if (row.kind === "install") {
-        res.status(403).json({
-            error: "install tokens cannot access /api/* — use POST /api/auth/setup first",
-        });
+        refuse(res, 403, "install tokens cannot access /api/* — use POST /api/auth/setup first");
         return;
     }
     // #2255 — a signal key opens exactly one door. It is bound to no consumer
@@ -226,11 +228,11 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
             : req.method === "POST" && req.path === "/tickets" ? "tickets:create"
             : null;
         if (!door) {
-            res.status(403).json({ error: `an API key can only POST /api/signals (scope signals) or POST /api/tickets (scope tickets:create)` });
+            refuse(res, 403, `an API key can only POST /api/signals (scope signals) or POST /api/tickets (scope tickets:create)`);
             return;
         }
         if (!scopes.includes(door)) {
-            res.status(403).json({ error: `this key lacks the scope ${door}` });
+            refuse(res, 403, `this key lacks the scope ${door}`, ERROR_CODES.KEY_SCOPE_MISSING);
             return;
         }
         const ar = req as AuthenticatedRequest;
@@ -277,7 +279,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         return;
     }
     if (!row.consumer_id) {
-        res.status(403).json({ error: "token is not bound to a consumer" });
+        refuse(res, 403, "token is not bound to a consumer");
         return;
     }
     const ar = req as AuthenticatedRequest;

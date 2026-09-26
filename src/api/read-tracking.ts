@@ -21,9 +21,10 @@ import {
     unreadCount,
     unreadPingCount,
 } from "../db.js";
-import { badRequest, consumerOf, withTags } from "./_helpers.js";
+import { badRequest, consumerOf, refuse, withTags } from "./_helpers.js";
 import { isHuman } from "../db.js";
 import { ticketsAwaitingModeration } from "../db/tickets.js";
+import { ERROR_CODES } from "../domain.js";
 
 export const readTrackingRouter = Router();
 
@@ -128,9 +129,7 @@ readTrackingRouter.post("/mark-read", (req: Request, res: Response) => {
     const human = localTrust || isHuman(consumerOf(req));
     const crossConsumer = consumer_id !== consumerOf(req);
     if ((crossConsumer || del === true) && !human) {
-        return res.status(403).json({
-            error: "targeting another consumer or delete requires a human moderator (local CLI or the web UI)",
-        });
+        return refuse(res, 403, "targeting another consumer or delete requires a human moderator (local CLI or the web UI)", ERROR_CODES.MODERATOR_ONLY);
     }
     // #1185 — bulk prune across ALL projects (mark-seen or delete).
     if (all_projects === true) {
@@ -173,7 +172,7 @@ readTrackingRouter.post("/pings/purge-seen-closed", (req: Request, res: Response
     const localTrust =
         (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
     if (!localTrust && !isHuman(consumerOf(req))) {
-        return res.status(403).json({ error: "human moderator only (local CLI or the web UI)" });
+        return refuse(res, 403, "human moderator only (local CLI or the web UI)", ERROR_CODES.MODERATOR_ONLY);
     }
     return res.json(purgeSeenPingsForClosedTickets());
 });

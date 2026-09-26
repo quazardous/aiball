@@ -24,7 +24,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "./db/connection.js";
 import * as schema from "./schema.js";
 import { type CommitCredit, type WaitGrant, earnForCommits, planStepWait, recordStepSpend, refundOnReturn, waitCreditBalance, waitCreditEnabled, waitCreditRules } from "./db/wait-credit.js";
-import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type Priority } from "./domain.js";
+import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, type ErrorCode, type Priority } from "./domain.js";
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
 import { isTicketClosed } from "./db/messages.js";
@@ -96,10 +96,10 @@ export function summaryOverBudget(length: number, max: number): string {
  * Judged on the AUTHENTICATED caller, never on the body's `by_agent`: the UI
  * posts without one, and a body can name anyone. Humans are exempt from the
  * requirement. Server-side writes (the upstream watcher…) call `submitMessage`
- * directly and never come here. Returns the refusal, or null when the message
- * may go through.
+ * directly and never come here. Returns the refusal and its code (#3039), or
+ * null when the message may go through.
  */
-export function withoutDecisionRefusal(msg: NewMessage, caller: string): string | null {
+export function withoutDecisionRefusal(msg: NewMessage, caller: string): { error: string; code: ErrorCode } | null {
     if (msg.kind !== "comment_added") return null;
     const required = !isHuman(caller) && getConfig("tickets.require_then", msg.project) !== false;
     // #2449 david `wng7h4` — a step says when its author resumes, every time:
@@ -113,20 +113,24 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): string 
     // #2765 david — `resume_on: { ticket?, timer? }`, whichever comes first: a
     // step says what it waits for, a ticket moving or a number of minutes.
     const resumeTicket = msg.step_resume_on_ticket;
-    const stepRefusal = required && msg.step === true && msg.step_after_minutes === undefined && resumeTicket === undefined
-        ? "then: continue needs resume_on — { timer: 0 } if you carry on at once, { timer: N } (minutes: the soonest a look is worth it, not how long the job takes) if the next step waits on a job, { ticket: N } to resume when that ticket moves, or both: whichever comes first"
+    const stepRefusal: { error: string; code: ErrorCode } | null = required && msg.step === true && msg.step_after_minutes === undefined && resumeTicket === undefined
+        ? { code: ERROR_CODES.STEP_RESUME_REQUIRED, error: "then: continue needs resume_on — { timer: 0 } if you carry on at once, { timer: N } (minutes: the soonest a look is worth it, not how long the job takes) if the next step waits on a job, { ticket: N } to resume when that ticket moves, or both: whichever comes first" }
         : msg.step === true && msg.step_after_minutes !== undefined && msg.step_after_minutes > maxAfter
-            ? `resume_on.timer is at most ${maxAfter} on this project (tickets.step_after_max_minutes) — a longer wait is not one step waiting on a job: resume on the ticket you wait for, hand the ticket back, or propose a plan`
+            ? { code: ERROR_CODES.STEP_TIMER_TOO_LONG, error: `resume_on.timer is at most ${maxAfter} on this project (tickets.step_after_max_minutes) — a longer wait is not one step waiting on a job: resume on the ticket you wait for, hand the ticket back, or propose a plan` }
             : resumeTicket !== undefined && getMessage(resumeTicket)?.kind !== "ticket_created"
-                ? `resume_on.ticket: #${resumeTicket} is not a ticket`
+                ? { code: ERROR_CODES.STEP_RESUME_INVALID, error: `resume_on.ticket: #${resumeTicket} is not a ticket` }
                 : resumeTicket !== undefined && resumeTicket === msg.ticket_id
-                    ? "resume_on.ticket names this very ticket: a step waits on another one"
+                    ? { code: ERROR_CODES.STEP_RESUME_INVALID, error: "resume_on.ticket names this very ticket: a step waits on another one" }
                     : null;
-    const refusal = stepRefusal ?? handbackRefusal({
+    const handback = handbackRefusal({
         decisionKind: msg.decision_kind,
         step: msg.step === true,
         handback: msg.handback,
         required,
+    });
+    const refusal = stepRefusal ?? (handback === null ? null : {
+        error: handback,
+        code: msg.handback === undefined ? ERROR_CODES.HANDBACK_REQUIRED : ERROR_CODES.HANDBACK_CONTRADICTS,
     });
     // Traced like the summary budget: a refusal leaves nothing in the database.
     if (refusal) console.error(`[handback] refused comment agent=${caller} project=${msg.project}`);
