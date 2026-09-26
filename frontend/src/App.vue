@@ -11,6 +11,7 @@ import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
 import { useInboxCache } from "./lib/inbox-cache";
 import { useLoader } from "./lib/loader";
+import { coalesce } from "./lib/coalesce";
 import BulkBar from "./components/BulkBar.vue";
 import { type BulkAction, useBulkActions } from "./lib/ticket-actions";
 import {
@@ -374,7 +375,9 @@ const pendingFocusId = ref<number | null>(null);
 const { connected } = useInboxWs({ strategy, openTicketId });
 
 // Local consumers — same effects as before, just driven by the bus now.
-useBus("projects.refresh", () => { loadProjects(); });
+// #3099 — one re-read of the projects per burst of live events, not one per event.
+const loadProjectsSoon = coalesce(() => { loadProjects(); }, 500);
+useBus("projects.refresh", () => { loadProjectsSoon(); });
 // #2074 — a node asking to be paired. The toast carries the code so the two
 // screens can be compared before anything is approved; clicking it opens the
 // request rather than making the human go and find it.

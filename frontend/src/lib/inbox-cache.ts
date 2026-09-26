@@ -19,6 +19,7 @@
 // wants ticket data reads it; a component that wants to change it calls a
 // method. Nothing else touches the array.
 
+import { coalesce, latestOnly } from "./coalesce";
 import { ref, type Ref } from "vue";
 import { api, type InboxRow, type Message, type Priority } from "./api";
 import { useBus } from "./bus";
@@ -65,17 +66,29 @@ export function useInboxCache(opts: UseInboxCacheOpts) {
     /** Rows matching the filters, all pages — the pager needs it, the page cannot say it. */
     const total = ref(0);
 
+    /** #3099 — only the latest read lands: a page asked before a switch of project is dropped. */
+    const reads = latestOnly();
+
     /** Read the current page. Throws on failure so a caller can surface it. */
     async function fetchPage(): Promise<void> {
+        const token = reads.begin();
         const res = await api.inbox({
             ...queryFor(filters),
             sort: filters.sortBy.value,
             limit: filters.pageSize.value,
             offset: (filters.page.value - 1) * filters.pageSize.value,
         });
+        if (!reads.isLatest(token)) return;
         rows.value = res.rows;
         total.value = res.total;
     }
+
+    /**
+     * #3099 — a re-read asked by live events: at most one every 500 ms, the
+     * last one winning. A busy board sends about one event a second, and each
+     * used to re-read the whole page.
+     */
+    const refetchSoon = coalesce(() => { void fetchPage().catch(() => {}); }, 500);
 
     /** Drop everything — another view owns the screen. */
     function clear(): void {
@@ -96,7 +109,7 @@ export function useInboxCache(opts: UseInboxCacheOpts) {
             page: filters.page.value,
         });
         if (decision.kind === "ignore") return;
-        if (decision.kind === "refetch") { await fetchPage().catch(() => {}); return; }
+        if (decision.kind === "refetch") { refetchSoon(); return; }
         try {
             const { rows: fresh } = await api.inbox({ ...queryFor(filters), ids: [decision.ticketId] });
             const updated = fresh[0];
@@ -120,7 +133,7 @@ export function useInboxCache(opts: UseInboxCacheOpts) {
     useBus("message.decided", (m) => { void applyEvent(m); });
     // The blanket lane: something changed and nobody said what. Kept for the
     // callers that cannot be precise (bulk actions, snooze, a WS reconnect).
-    useBus("inbox.refresh", () => { if (enabled.value) void fetchPage().catch(() => {}); });
+    useBus("inbox.refresh", () => { if (enabled.value) refetchSoon(); });
 
     return { rows, total, fetchPage, clear };
 }
