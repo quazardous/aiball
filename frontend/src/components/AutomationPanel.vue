@@ -1,18 +1,19 @@
 <script setup lang="ts">
 /**
- * #457 — "Automation" : seule page d'automation du workflow.
+ * #457 — "Automation": the workflow's one automation page.
  *
- * Slice 5.3a — quand `editRuleId` est set (URL = `/automation/rules/<id>` ou
- * `/new`), on affiche la rule detail page À LA PLACE de la liste. La nav
- * `Automation → <id>` se fait via DetailHeader (composant générique aiball
- * détail) qui émet `close` pour revenir à la liste.
+ * Slice 5.3a — when `editRuleId` is set (URL `/automation/rules/<id>` or
+ * `/new`), the rule detail page shows INSTEAD of the list. Navigating
+ * `Automation → <id>` goes through DetailHeader (the generic aiball detail
+ * component), which emits `close` to return to the list.
  *
- * #506 — les anciens panels `<RulesPanel>` (moderation legacy) + `<WorkFiltersPanel>`
- * (work filters legacy) ont été retirés une fois que #483 a re-wiré les deux
- * call-sites sur `automation_rules` via le moteur unifié : leurs UIs éditaient
- * des rows qui ne sont plus consultées par le moteur — affichage trompeur.
- * The legacy moderation backend (`/api/rules`, its table) is gone (#2697);
- * `aiball rule` now writes automation rules. `/api/work-filters` remains.
+ * #506 — the old `<RulesPanel>` (legacy moderation) and `<WorkFiltersPanel>`
+ * (legacy work filters) were removed once #483 rewired both call sites onto
+ * `automation_rules` through the unified engine: their UIs edited rows the
+ * engine no longer read, a misleading display. Both legacy backends are gone
+ * too — `/api/rules` and `/api/work-filters`, and their tables (migrations
+ * 0074 and 0075) —
+ * and `aiball rule` now writes automation rules.
  */
 import PanelHeader from "./ui/PanelHeader.vue";
 import AutomationRulesSection from "./AutomationRulesSection.vue";
