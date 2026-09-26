@@ -91,7 +91,16 @@ const DEFAULT_OPTS: Required<CompactingDetectorOptions> = {
  * `\d+%` is anchored at end-of-line so the auto-mode banner's
  * `88% of your weekly limit · resets …` stops triggering (the `%` is
  * mid-line). The compact's own `▰▱…▰ 27%` IS end-of-line.
+ *
+ * #3045 — Claude Code dropped the bar: a compact now shows only its spinner
+ * line, `✦ Compacting conversation… (33s · ↓ 1.9k tokens)`. That line in the
+ * footer is the third live signal, recognised by its token counter (`↓`/`↑`
+ * N tokens), which only a running spinner carries: a `Compacting
+ * conversation… (42s)` left over in the footer still does not count.
  */
+/** #3045 — the running compact's spinner line: its elapsed time and its token counter. */
+const LIVE_COMPACT_SPINNER = /(Compacting|Summarizing the) conversation\S*\s*\(\d+[smh][^)]*[↓↑]\s*[\d.,]+\s*[kKmM]?\s*tokens/im;
+
 export function classifyCompacting(
     paneText: string,
     ctx: CompactingDetectorCtx = {},
@@ -109,7 +118,8 @@ export function classifyCompacting(
     if (!hasText) return false;
     const hasProgressBar = /[▰▱]/.test(footer);
     const hasEolPercent = /\d+\s?%\s*$/m.test(footer);
-    return hasProgressBar || hasEolPercent;
+    const hasLiveSpinner = LIVE_COMPACT_SPINNER.test(footer);
+    return hasProgressBar || hasEolPercent || hasLiveSpinner;
 }
 
 /**

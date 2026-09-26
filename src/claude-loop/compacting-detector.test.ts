@@ -33,6 +33,35 @@ test("classifyCompacting: live /compact with bar+EOL% in the wider footer → tr
     assert.equal(classifyCompacting(liveCompactCapture), true);
 });
 
+// #3045 — the render since Claude Code dropped the progress bar (david's
+// capture, 2026-09-26): the spinner line alone, with its token counter.
+const barlessCompactCapture = [
+    "  export type MessageScope = typeof MESSAGE_SCOPES",
+    "  … +30 lines (ctrl+o to expand)",
+    "  Allowed by auto mode classifier",
+    "",
+    "✦ Compacting conversation… (33s · ↓ 1.9k tokens)",
+    "",
+    "─".repeat(80),
+    "❯ ",
+    "─".repeat(80),
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt",
+].join("\n");
+
+test("classifyCompacting: the barless render, spinner line with its token counter → true (#3045)", () => {
+    assert.equal(classifyCompacting(barlessCompactCapture), true);
+    assert.equal(classifyCompacting(barlessCompactCapture.replace("Compacting conversation", "Summarizing the conversation")), true);
+});
+
+test("classifyCompacting: the barless spinner line out of the footer (scrollback) → false (#3045)", () => {
+    const scrolled = [
+        "✦ Compacting conversation… (33s · ↓ 1.9k tokens)",
+        ...Array.from({ length: 15 }, (_, i) => `line ${i}`),
+        "❯ ",
+    ].join("\n");
+    assert.equal(classifyCompacting(scrolled), false);
+});
+
 test("classifyCompacting: rejects the legacy 5-line footer scope (regression guard)", () => {
     // Verify the bug 2 root cause: with footerLines=5 the live signal
     // sits one line too high → returns false. The fix is widening the

@@ -71,6 +71,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop sees Claude Code compacting its conversation again: the progress
+  bar is gone from that screen, and the spinner line alone is now recognised.
 - In a thread, a proposal replaced by a newer decision no longer reads
   "pending": it shows as superseded, since only the latest decision can be
   accepted or rejected.
