@@ -46,7 +46,7 @@ relay the protocol for a client elsewhere (the web UI, a remote tvty).
 | `0x08` | `size` | proxy → client | JSON `{rows, cols}` |
 | `0x09` | `screen` | proxy → client | JSON: the screen, for previews |
 | `0x0a` | `exited` | proxy → client | JSON `{code, restarting}` |
-| `0x0b` | `closed` | proxy → client | JSON `{}` |
+| `0x0b` | `closed` | proxy → client | JSON `{ reason? }` |
 | `0x0c` | `error` | proxy → client | JSON `{code, error}` |
 | `0x0d` | `history_request` | client → proxy | JSON `{before, count}` |
 | `0x0e` | `history` | proxy → client | JSON `{first, lines}` |
@@ -190,7 +190,10 @@ that typed or pasted (see above: not a mouse or focus report) or took focus
   a fresh `snapshot` follows once the new claude draws. With
   `restarting: false`, `closed` follows and the proxy closes the connection.
 - `closed` alone when the proxy stops for another reason.
-- So a session is really over when `closed` arrives, and only then.
+- `closed { reason: "handover", to }` when the session moves to another host
+  (see [`SESSION-HOST.md`](./SESSION-HOST.md)): not an end — the client finds
+  the new side through the agent's bar and attaches there.
+- So a session is really over when `closed` arrives without a handover reason, and only then.
 - A client that loses the socket without either has lost the proxy: the loop's
   own liveness (the proxy's pid, `proxy-alive`) says whether it is gone.
 
