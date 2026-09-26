@@ -270,6 +270,12 @@ export interface Plate {
     role?: string | null;
     /** #1576 — `--consumer` as passed at launch (crew id, or an explicit override). */
     consumer?: string | null;
+    /**
+     * #3066 — the agent whose session on the daemon's host runs this loop's
+     * Claude; absent for a loop in tmux. `restart` keeps it on the host, and
+     * `rm` stops that session.
+     */
+    host_agent?: string | null;
     /** #1576 — `--project` as passed at launch. */
     project?: string | null;
 }

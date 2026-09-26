@@ -189,7 +189,7 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `bus.subscribe` | human, agent | — see *Subscriptions* |
 | `bus.unsubscribe` | human, agent | — see *Subscriptions* |
 | `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY` |
-| `session.stop` | human, not relayed | — ends a session and its host |
+| `session.stop` | human; an agent its own session, locally (its loop's `rm`); not relayed | — ends a session and its host |
 | `session.list` | human, agent | — every session this daemon hosts |
 | `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
 | `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |

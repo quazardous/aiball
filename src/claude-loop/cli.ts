@@ -825,6 +825,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         role: opts.role ?? null,
         consumer: opts.consumer ?? null,
         project: opts.project ?? null,
+        host_agent: opts.host ? ctx.agent : null,
     };
     writePlate(sd, plate);
 
@@ -2316,7 +2317,7 @@ async function main(): Promise<void> {
     program.command("rm [name]")
         .description("Kill tmux + timer + remove state dir. Name optional — defaults to the loop registered for the current cwd (mirrors reload/restart/stop).")
         .option("--force", "Silence error when state dir is missing")
-        .action((name: string | undefined, opts: { force?: boolean }) => cmdRm(name ?? resolveCurrentLoopName(), opts.force === true));
+        .action(async (name: string | undefined, opts: { force?: boolean }) => cmdRm(name ?? resolveCurrentLoopName(), opts.force === true));
     program.command("wake <name>")
         .description("Force the next timer tick to fire immediately")
         .action(cmdWake);
@@ -2349,7 +2350,8 @@ async function main(): Promise<void> {
     program.command("restart [name]")
         .description("HARD restart (#388): kill claude + the loop entirely, then relaunch fresh with the same start config (from the plate). Unlike `reload` (timer-only), this stops + starts. Detached + no-attach — reconnect with `attach`. Also the SIGHUP action: `kill -HUP <timer.pid>` self-restarts. Name optional — defaults to the current-cwd loop.")
         .option("--resume", "#3074: resume Claude's conversation on the relaunch, whatever the loop's start config says (a restart for an update).")
-        .action((name: string | undefined, opts: { resume?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true }));
+        .option("--host", "#3066: relaunch on the aiball daemon's session host instead of tmux (with --resume: move a loop onto the host, its conversation kept). A loop already on the host stays there.")
+        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true, host: opts.host === true }));
     program.command("stop [name]")
         .description("Clean-STOP a loop: kill claude/tmux + exit the timer, but KEEP the state dir (loop shows dead, stays restart/prune-able — `rm` is the halt+delete). Also the SIGTERM action: `kill -TERM <timer.pid>` (#442 — convention HUP=restart, USR2=reload, TERM=stop). Remotely via the daemon: the Consumers-page stop button. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdStop(name ?? resolveCurrentLoopName()));

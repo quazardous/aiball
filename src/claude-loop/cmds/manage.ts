@@ -13,6 +13,7 @@
  * the cli.ts-local `selfRoot()` (computes the same value, just lives
  * in state.ts).
  */
+import { AiballClient } from "../../client.js";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -180,8 +181,14 @@ function patchEnvSet(envFilePath: string, kvList: string[]): void {
     writeFileSync(envFilePath, lines.join("\n") + "\n");
 }
 
-export function cmdRm(name: string, force: boolean): void {
+export async function cmdRm(name: string, force: boolean): Promise<void> {
     const sd = stateDirFor(name);
+    // #3066 — a loop on the session host: its session goes with it.
+    const hostAgent = existsSync(platePath(sd)) ? readPlate(sd).host_agent : null;
+    if (hostAgent) {
+        await new AiballClient({ agentId: hostAgent }).sessionStop(hostAgent)
+            .catch((e: Error) => process.stdout.write(`claude-loop: the host session of ${hostAgent} did not stop: ${e.message}\n`));
+    }
     // #866 Slice 2 — cooperative shutdown via loop.sock avant tout.
     // Au cas où le wrapper-pid #413 ne pointe pas vers le vrai timer,
     // le timer écoute son socket et se kill proprement à réception.
@@ -477,7 +484,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
  * (`plate.pings_path` points into the state dir we're about to rm), so the
  * relaunch falls back to the default ping phrases.
  */
-export function restartStartArgs(name: string, plate: Plate, opts: { resume?: boolean } = {}): string[] {
+export function restartStartArgs(name: string, plate: Plate, opts: { resume?: boolean; host?: boolean } = {}): string[] {
     // #1576 — the launch identity, top-level, independent of `remote`. Falls
     // back to the remote block for plates written before the top-level fields
     // existed, so an older remote loop keeps replaying what it used to.
@@ -503,11 +510,13 @@ export function restartStartArgs(name: string, plate: Plate, opts: { resume?: bo
         "--no-attach",
         // #3074 — a restart for an update resumes the conversation.
         ...(opts.resume ? ["--resume"] : []),
+        // #3066 — onto the session host when asked; a loop already there stays.
+        ...(opts.host || plate.host_agent ? ["--host"] : []),
         ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),
     ];
 }
 
-export function cmdRestart(name: string, opts: { resume?: boolean } = {}): void {
+export function cmdRestart(name: string, opts: { resume?: boolean; host?: boolean } = {}): void {
     const sd = stateDirFor(name);
     if (!existsSync(platePath(sd))) {
         die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);

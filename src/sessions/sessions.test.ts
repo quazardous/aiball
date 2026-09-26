@@ -30,6 +30,7 @@ const { presenceConnect, presenceDisconnect } = await import("../live-presence.j
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 upsertConsumer({ consumer_id: "human", kind: "human" });
+upsertConsumer({ consumer_id: "hosted", kind: "agent" });
 const NODE = issueToken({ kind: "node", label: "n" }).token;
 resetLoginEnvForTests({ PATH: process.env.PATH ?? "/usr/bin:/bin" });
 
@@ -155,5 +156,9 @@ test("session.host: local callers only, and one session per agent", { skip }, as
     const remote = await BusClient.connect({ url, token: issueToken({ kind: "agent", consumer_id: "worker", label: "w2" }).token });
     clients.push(remote);
     assert.equal((await refused(remote.call("session.host", { agent: "other", argv: ["cat"], cwd: home }))).status, 403, "not over TCP");
-    await (await as("boss")).call("session.stop", { agent: "hosted" });
+    const other = await refused(worker.call("session.stop", { agent: "hosted" }));
+    assert.equal(other.code, "MODERATOR_ONLY", "an agent stops its own session, not another's");
+    const own = await as("hosted");
+    await own.call("session.stop", { agent: "hosted" });
+    assert.equal(listSessionViews().filter((v) => v.agent === "hosted").length, 0, "its own loop's rm stops it");
 });

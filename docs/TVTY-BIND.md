@@ -121,8 +121,15 @@ foresees, is for later.
 ## Loops in claude-loop
 
 claude-loop's own proxy does not serve `attach.sock`: a loop gets its socket
-by moving onto the session host (`claude-loop start --host`, or the handover),
-and claude-loop goes away in the end. Until then:
+by moving onto the session host, and claude-loop goes away in the end.
+
+- A new loop: `claude-loop start --host`, or `session.start` (tvty's
+  "+ session").
+- A running one: `claude-loop restart --resume <loop> --host`. Claude stops
+  when idle and comes back on the host with the same conversation; the loop
+  stays there across later restarts, and `claude-loop rm` stops its session.
+
+Until then:
 
 - a loop still in claude-loop has `attach: { socket: null, reason:
   "no_socket" }`, and tvty attaches to it through tmux, for that loop only;

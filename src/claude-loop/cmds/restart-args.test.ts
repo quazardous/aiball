@@ -95,3 +95,13 @@ test("claude passthrough args stay last, after the `--` separator", () => {
     // The role must sit BEFORE the separator, or claude would receive it.
     assert.ok(args.indexOf("--role") < dash);
 });
+
+test("#3066 --host moves a loop onto the session host, and a loop already there stays", () => {
+    assert.ok(!restartStartArgs("n", plate()).includes("--host"), "a tmux loop stays in tmux");
+    const moved = restartStartArgs("n", plate(), { resume: true, host: true });
+    assert.ok(moved.includes("--host") && moved.includes("--resume"), "moved, with its conversation");
+    assert.ok(restartStartArgs("n", plate({ host_agent: "worker" })).includes("--host"), "a host loop restarts on the host");
+    assert.ok(moved.indexOf("--host") < moved.indexOf("--") || !moved.includes("--"), "a start flag, before Claude's own arguments");
+    const withArgs = restartStartArgs("n", plate({ claude_args: ["--model", "x"] }), { host: true });
+    assert.ok(withArgs.indexOf("--host") < withArgs.indexOf("--"), "never passed to Claude");
+});

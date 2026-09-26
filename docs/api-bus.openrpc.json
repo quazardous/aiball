@@ -2091,7 +2091,8 @@
         "schema": {}
       },
       "x-callers": [
-        "human"
+        "human",
+        "agent"
       ],
       "x-relayed": false
     },

@@ -135,10 +135,15 @@ defineMethod({
 /** Stop a session: its command, then its host, whose files go with it. Answers once the host is gone. */
 defineMethod({
     name: "session.stop",
-    ...HUMAN_HERE,
+    // A human's gesture; and an agent's own loop stops its own session (`claude-loop rm`), locally.
+    who: ["human", "agent"],
+    relayed: false,
     params: z.object({ agent: z.string().optional(), name: z.string().optional() }),
-    run: async (_c, p) => {
+    run: async (caller, p) => {
         if (!p.agent === !p.name) throw new Refusal(400, "one of agent or name");
+        if (caller.kind !== "human" && (caller.transport !== "uds" || p.agent !== caller.consumer_id)) {
+            throw new Refusal(403, "stopping a session is a human's gesture, or an agent's own loop on this machine", ERROR_CODES.MODERATOR_ONLY);
+        }
         const link = sessionFor(p);
         if (!link) throw new Refusal(404, "no such session on this daemon", ERROR_CODES.NOT_FOUND);
         const exit_code = await stopSession(link);
