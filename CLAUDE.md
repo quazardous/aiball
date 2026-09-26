@@ -65,6 +65,7 @@ Root:
 - [`CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md) — the `claude-loop` wrapper: hooks, timer, keystroke detection, state files.
 - [`HOOKS.md`](./docs/HOOKS.md) — Claude Code hook events: which aiball wires, which it deliberately doesn't, and why.
 - [`SM-NETWORK.md`](./docs/SM-NETWORK.md) — XState v5 state-machine network: per-controller slices, composition root, bridge pattern, add-a-controller checklist.
+- [`LOOP-HOST.md`](./docs/LOOP-HOST.md) — attaching to a loop without tmux: the protocol clients (tvty, `claude-loop attach`, the web) will speak to the proxy that holds the session. A design, not yet implemented.
 - [`PTY-PROXY.md`](./docs/PTY-PROXY.md) — the Unix PTY proxy (live human-typing detection).
 - [`PTY-PROXY-WINDOWS.md`](./docs/PTY-PROXY-WINDOWS.md) — the Windows ConPTY port.
 - [`SANDBOX.md`](./docs/SANDBOX.md) — `aiball sandbox` (experimental autonomous agent).

@@ -238,6 +238,14 @@ token on a direct remote, but on the local socket and through a proxy node the
 identity is the `x-aiball-consumer` header the caller declares — there it keeps
 authorship consistent, it does not prove it.
 
+## Attaching to a loop (planned)
+
+The protocol in [`LOOP-HOST.md`](./LOOP-HOST.md) will listen on
+`<state_dir>/attach.sock`, mode `0600`: the same boundary as `loop.sock`,
+whoever can open the loop's state directory can watch it and type into it.
+There is no token; it is not reachable from another host except through the
+daemon, which will relay it behind its own authentication.
+
 ## Uploads — capability URLs
 
 A file pasted or attached in a thread is stored under its SHA-256 and cited in
