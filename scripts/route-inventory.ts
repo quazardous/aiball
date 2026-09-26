@@ -109,6 +109,11 @@ function callsIn(source: string): Call[] {
     for (const m of text.matchAll(/["'`](GET|POST|PUT|PATCH|DELETE)["'`][^;]{0,200}?[`"'](\/api\/[^`"'\s)]+)/g)) {
         add(m[1] as Verb, m[2]!);
     }
+    // #3052 — a Rust client's verb is its method: `self.get("/api/…")`,
+    // `self.post(&format!("/api/…"), …)`.
+    for (const m of text.matchAll(/\.(get|post|put|patch|delete)\(\s*&?(?:format!\(\s*)?"(\/api\/[^"\s)]+)"/g)) {
+        add(m[1]!.toUpperCase() as Verb, m[2]!);
+    }
     for (const m of text.matchAll(/[`"'](\/api\/[^`"'\s)]+)/g)) {
         const path = normalizeCall(m[1]!);
         if (![...seen].some((k) => k.endsWith(` ${path}`))) add("*", m[1]!);
@@ -160,24 +165,35 @@ const tvtyFiles = walk(join(TVTY, "src"), (f) => f.endsWith(".rs"));
 byConsumer.get("tvty")!.push(...callsIn(tvtyFiles.map((f) => readFileSync(f, "utf8")).join("\n")));
 
 // --- matching -----------------------------------------------------------------
-function pathMatches(route: string, call: string): boolean {
+/**
+ * `strict`: a segment the caller builds at run time (`{}`) stands for a route
+ * parameter only. Loose, it may also stand for a literal segment — the only
+ * way to read `/api/messages/{id}/{verb}`, and never a certainty (#3052: read
+ * loosely, `/api/tickets/{id}` also "called" `/api/tickets/purge`).
+ */
+function pathMatches(route: string, call: string, strict: boolean): boolean {
     const r = route.split("/");
     const c = call.split("/");
     if (r.length !== c.length) return false;
-    return r.every((seg, i) => seg === c[i] || seg.startsWith(":") || c[i] === "{}");
+    return r.every((seg, i) => seg === c[i] || seg.startsWith(":") || (!strict && c[i] === "{}"));
 }
 const users = new Map<string, Set<Consumer>>(uniqueRoutes.map((r) => [routeKey(r), new Set()]));
+/** Routes a consumer may call through a segment built at run time: a possible call, not a certain one. */
+const maybe = new Map<string, Set<Consumer>>(uniqueRoutes.map((r) => [routeKey(r), new Set()]));
 const unmatched = new Map<Consumer, Set<string>>(CONSUMERS.map((c) => [c, new Set()]));
 for (const [consumer, calls] of byConsumer) {
     for (const call of calls) {
-        const hits = uniqueRoutes.filter((r) => pathMatches(r.path, call.path) && (call.verb === "*" || call.verb === r.verb));
-        if (hits.length === 0) unmatched.get(consumer)!.add(`${call.verb === "*" ? "" : call.verb + " "}${call.path}`);
+        const verbOk = (r: { verb: Verb }) => call.verb === "*" || call.verb === r.verb;
+        const hits = uniqueRoutes.filter((r) => pathMatches(r.path, call.path, true) && verbOk(r));
+        const loose = hits.length > 0 ? [] : uniqueRoutes.filter((r) => pathMatches(r.path, call.path, false) && verbOk(r));
+        if (hits.length === 0 && loose.length === 0) unmatched.get(consumer)!.add(`${call.verb === "*" ? "" : call.verb + " "}${call.path}`);
         for (const r of hits) users.get(routeKey(r))!.add(consumer);
+        for (const r of loose) maybe.get(routeKey(r))!.add(consumer);
     }
 }
 
 // --- output -------------------------------------------------------------------
-const mark = (s: Set<Consumer>, c: Consumer) => (s.has(c) ? "●" : "");
+const mark = (s: Set<Consumer>, m: Set<Consumer>, c: Consumer) => (s.has(c) ? "●" : m.has(c) ? "◐" : "");
 const counts = {
     total: uniqueRoutes.length,
     none: uniqueRoutes.filter((r) => users.get(routeKey(r))!.size === 0).length,
@@ -196,13 +212,17 @@ const lines: string[] = [
     "**sim** (the board simulator), **web** (the web UI), **tvty** (the tvty terminal, from",
     "its checkout when present).",
     "",
+    "● the consumer calls the route. ◐ it may: its call builds a segment at run time",
+    "(`/api/messages/{id}/{verb}`), which could be this route or a sibling.",
+    "",
     `**${counts.total} routes** · ${counts.core} called by loop, mcp, cli or tvty · ${counts.webOnly} by the web UI alone · ${counts.none} by no consumer in the code.`,
     "",
     "| Route | loop | mcp | cli | sim | web | tvty |",
     "|---|:-:|:-:|:-:|:-:|:-:|:-:|",
     ...uniqueRoutes.map((r) => {
         const u = users.get(routeKey(r))!;
-        return `| \`${r.verb} ${r.path}\` | ${CONSUMERS.map((c) => mark(u, c)).join(" | ")} |`;
+        const m = maybe.get(routeKey(r))!;
+        return `| \`${r.verb} ${r.path}\` | ${CONSUMERS.map((c) => mark(u, m, c)).join(" | ")} |`;
     }),
     "",
     "## Calls that match no route",

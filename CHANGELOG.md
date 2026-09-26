@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `docs/API.md` indexes the API contract; tvty's calls are tested on aiball's
+  side, with every field it reads. The route inventory tells a certain call
+  (●) from a possible one (◐, a segment built at run time).
 - `claude_loop.bar: external` (or `start --bar external`, `claude-loop bar
   external` on a running loop, `POST /api/consumers/<agent>/bar-host`) turns
   tmux's status line off for a loop whose bar another host draws; the bar is

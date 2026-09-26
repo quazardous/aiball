@@ -9,7 +9,10 @@ Consumers: **loop** (claude-loop), **mcp** (the MCP server), **cli** (the `aibal
 **sim** (the board simulator), **web** (the web UI), **tvty** (the tvty terminal, from
 its checkout when present).
 
-**164 routes** · 100 called by loop, mcp, cli or tvty · 47 by the web UI alone · 17 by no consumer in the code.
+● the consumer calls the route. ◐ it may: its call builds a segment at run time
+(`/api/messages/{id}/{verb}`), which could be this route or a sibling.
+
+**165 routes** · 91 called by loop, mcp, cli or tvty · 54 by the web UI alone · 19 by no consumer in the code.
 
 | Route | loop | mcp | cli | sim | web | tvty |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
@@ -28,13 +31,14 @@ its checkout when present).
 | `POST /api/backlog-wake` | ● |  |  | ● |  |  |
 | `GET /api/config` |  | ● |  |  | ● |  |
 | `GET /api/consumers` |  |  | ● |  | ● | ● |
-| `POST /api/consumers` | ● |  |  |  | ● | ● |
+| `POST /api/consumers` | ● |  |  |  | ● |  |
 | `DELETE /api/consumers/:consumer_id` |  |  |  |  | ● |  |
 | `GET /api/consumers/:consumer_id` | ● | ● |  |  |  |  |
 | `PATCH /api/consumers/:consumer_id` | ● |  | ● |  | ● |  |
-| `GET /api/consumers/:consumer_id/backlog` |  |  |  |  |  |  |
-| `GET /api/consumers/:consumer_id/bar` |  |  |  |  |  |  |
+| `GET /api/consumers/:consumer_id/backlog` |  |  |  |  |  | ● |
+| `GET /api/consumers/:consumer_id/bar` |  |  |  |  |  | ● |
 | `PUT /api/consumers/:consumer_id/bar` | ● |  |  |  |  |  |
+| `POST /api/consumers/:consumer_id/bar-host` |  |  |  |  |  |  |
 | `POST /api/consumers/:consumer_id/loop-stop` |  |  |  |  | ● |  |
 | `POST /api/consumers/:consumer_id/prompt` |  |  |  |  | ● |  |
 | `PUT /api/consumers/:consumer_id/state` | ● |  |  |  |  |  |
@@ -62,27 +66,27 @@ its checkout when present).
 | `GET /api/mention-suggestions` |  |  |  |  | ● | ● |
 | `GET /api/messages` |  | ● | ● | ● | ● |  |
 | `POST /api/messages` |  | ● | ● | ● | ● | ● |
-| `GET /api/messages/:id` | ● | ● | ● | ● |  |  |
-| `POST /api/messages/:id/accept-and-close` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/approve` |  | ● |  | ● | ● | ● |
+| `GET /api/messages/:id` | ● | ● | ● | ● |  | ● |
+| `POST /api/messages/:id/accept-and-close` |  |  |  | ◐ | ● | ◐ |
+| `POST /api/messages/:id/approve` |  | ● |  | ◐ | ● | ◐ |
 | `POST /api/messages/:id/decide` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/delete` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/edit` |  | ● | ● | ● | ● | ● |
-| `POST /api/messages/:id/note` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/promote` |  |  |  | ● | ● | ● |
+| `POST /api/messages/:id/delete` |  |  |  | ◐ | ● | ● |
+| `POST /api/messages/:id/edit` |  | ● | ● | ◐ | ● | ● |
+| `POST /api/messages/:id/note` |  |  |  | ◐ | ● | ◐ |
+| `POST /api/messages/:id/promote` |  |  |  | ◐ | ● | ● |
 | `POST /api/messages/:id/questions/:qid/answer` |  |  |  |  | ● | ● |
-| `POST /api/messages/:id/reclassify` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/reject` | ● | ● |  | ● | ● | ● |
-| `POST /api/messages/:id/resurface` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/step` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/summarize` |  |  |  | ● |  | ● |
-| `GET /api/messages/:id/tags` |  |  |  |  |  | ● |
-| `POST /api/messages/:id/tags` |  |  |  | ● |  | ● |
-| `PUT /api/messages/:id/tags` |  | ● |  |  | ● | ● |
+| `POST /api/messages/:id/reclassify` |  |  |  | ◐ | ● | ◐ |
+| `POST /api/messages/:id/reject` | ● | ● |  | ◐ | ● | ◐ |
+| `POST /api/messages/:id/resurface` |  |  |  | ◐ | ● | ● |
+| `POST /api/messages/:id/step` |  |  |  | ● | ● | ◐ |
+| `POST /api/messages/:id/summarize` |  |  |  | ◐ |  | ◐ |
+| `GET /api/messages/:id/tags` |  |  |  |  |  |  |
+| `POST /api/messages/:id/tags` |  |  |  | ◐ |  | ● |
+| `PUT /api/messages/:id/tags` |  |  |  |  | ● |  |
 | `DELETE /api/messages/:id/tags/:tag` |  |  |  |  |  | ● |
-| `POST /api/messages/:id/unstep` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/untag` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/vote` |  |  |  | ● | ● | ● |
+| `POST /api/messages/:id/unstep` |  |  |  | ◐ | ● | ◐ |
+| `POST /api/messages/:id/untag` |  |  |  | ◐ | ● | ● |
+| `POST /api/messages/:id/vote` |  |  |  | ◐ | ● | ● |
 | `GET /api/micro-status` |  | ● |  |  |  |  |
 | `GET /api/my-pending/count` |  |  |  |  |  |  |
 | `GET /api/node` |  |  | ● |  |  |  |
@@ -133,7 +137,7 @@ its checkout when present).
 | `GET /api/subscriptions` | ● | ● | ● |  |  |  |
 | `POST /api/subscriptions` | ● | ● | ● |  |  |  |
 | `GET /api/tags` |  |  |  |  | ● | ● |
-| `POST /api/tags` |  |  |  |  | ● | ● |
+| `POST /api/tags` |  |  |  |  | ● |  |
 | `DELETE /api/tags/:id` |  |  |  |  | ● |  |
 | `PATCH /api/tags/:id` |  |  |  |  | ● |  |
 | `PUT /api/tags/override` |  |  |  |  | ● |  |
@@ -158,7 +162,7 @@ its checkout when present).
 | `POST /api/tickets/:id/payload/dump` |  | ● | ● |  |  |  |
 | `GET /api/tickets/:id/pending-children` |  |  | ● |  | ● |  |
 | `POST /api/tickets/:id/postpone` |  |  |  | ● | ● | ● |
-| `GET /api/tickets/:id/relations` |  |  |  |  |  | ● |
+| `GET /api/tickets/:id/relations` |  |  |  |  |  |  |
 | `POST /api/tickets/:id/relations` |  | ● |  |  | ● | ● |
 | `POST /api/tickets/:id/release` |  | ● |  |  | ● | ● |
 | `POST /api/tickets/:id/step` |  |  |  |  | ● |  |
@@ -166,15 +170,15 @@ its checkout when present).
 | `POST /api/tickets/:id/token-usage` | ● | ● |  |  |  |  |
 | `POST /api/tickets/:id/unsnooze` |  |  |  |  | ● | ● |
 | `POST /api/tickets/:id/unstep` |  |  |  |  | ● |  |
-| `GET /api/tickets/bookends` | ● | ● | ● |  | ● | ● |
-| `POST /api/tickets/import` |  | ● | ● |  | ● | ● |
-| `POST /api/tickets/purge` |  |  |  |  | ● | ● |
+| `GET /api/tickets/bookends` |  | ● |  |  |  |  |
+| `POST /api/tickets/import` |  | ● | ● |  | ● |  |
+| `POST /api/tickets/purge` |  |  |  |  | ● |  |
 | `GET /api/token-usage/timeseries` |  |  |  |  | ● |  |
 | `GET /api/unread` | ● | ● | ● | ● |  |  |
 | `GET /api/unread/count` |  | ● |  |  |  |  |
 | `POST /api/uploads` |  | ● |  |  | ● | ● |
-| `POST /api/uploads/gc` |  |  |  |  |  |  |
-| `GET /api/uploads/stats` |  |  |  |  |  |  |
+| `POST /api/uploads/gc` |  |  |  |  |  | ◐ |
+| `GET /api/uploads/stats` |  |  |  |  |  | ◐ |
 | `GET /api/version` | ● |  | ● |  |  |  |
 | `POST /api/version/check` |  |  | ● |  |  |  |
 
@@ -183,3 +187,4 @@ its checkout when present).
 A path a consumer requests that no server route serves: dead code, a drifted path,
 or a route this script cannot read (a regex route, a path built at run time).
 
+- **tvty**: `/api/uploads/ab12`

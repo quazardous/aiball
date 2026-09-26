@@ -55,9 +55,10 @@ open.
 - **`src/client.ts` imports a type from `src/event-bus.ts`**, which types itself on
   the database's `Message`: no code crosses at run time, but the client's types
   still depend on the core's.
-- **The API has no written contract**, beyond its refusals ([`API-ERRORS.md`](./API-ERRORS.md):
-  every one carries a stable `code`). Clients rely on routes and fields that exist
-  only in the code; tvty calls part of the API by hand, outside the shared client.
+- **The API's contract is written in parts** ([`API.md`](./API.md) is the index): the
+  inbox row, filing a ticket, refusals. Routes and fields outside those parts still
+  exist only in the code. tvty calls the API by hand, outside the shared client; its
+  calls are tested on aiball's side instead (`src/api/tvty-contract.test.ts`).
 
 ## Uploads in texts
 
