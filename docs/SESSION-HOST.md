@@ -23,6 +23,16 @@ never the others, and a host is a few megabytes. It grows from `cl-pty-proxy`:
 its PTY handling, its keystroke detection (typing, a lone ESC, the AFK
 combination) and its screen model.
 
+## Sessions without an agent
+
+A host can also hold a **named session without an agent**: any command (a
+shell, a tool), no loop kernel, no wakes. It outlives its clients like an
+agent's session, which is what tmux gives such terminals today. Its files are
+in `$AIBALL_HOME/hosts/term-<name>/`, it is started by `session.start` with
+`{ name, argv, cwd }` instead of an agent, and the bus lists these sessions
+with the agents' (`session.list`), so clients show them as a group of their
+own.
+
 ## The host outlives the daemon
 
 The daemon restarts on every deploy, and on every change to its code in a dev
@@ -89,8 +99,9 @@ host.
 
 | Method | Params | Result, or refusal |
 |---|---|---|
-| `session.start` | `{ agent, project?, cwd, crew?, size?: {rows, cols}, env? }` | `{ agent, host: "daemon", attach: { socket } }`; `HOST_BUSY` when the agent runs elsewhere |
-| `session.stop` | `{ agent }` | `{ agent, exit_code }`: Claude stopped, the host gone |
+| `session.start` | `{ agent, project?, cwd, crew?, size?: {rows, cols}, env? }`, or `{ name, argv, cwd, size?, env? }` for a session without an agent | `{ agent \| name, host: "daemon", attach: { socket } }`; `HOST_BUSY` when the agent (or the name) runs elsewhere |
+| `session.stop` | `{ agent }` or `{ name }` | `{ agent \| name, exit_code }`: the command stopped, the host gone |
+| `session.list` | — | every session on this machine: `{ agent?, name?, argv, cwd, host, attach: { socket }, clients }` |
 | `session.handover` | `{ agent, to: "daemon" \| "claude-loop" }` | `{ agent, host, attach? }`; `NOT_IDLE` when Claude stays busy past the delay |
 
 **Size.** `size` is the PTY's size when Claude starts, so a client that starts
