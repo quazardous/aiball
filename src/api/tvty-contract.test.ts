@@ -3,7 +3,7 @@
  * share `client.ts`, so a change here that would break it has to fail here.
  *
  * The calls below are tvty's, as it sends them (tvty `src/aiball.rs`, at
- * 95661cf): over the local socket, as the human, with the exact bodies. The
+ * 7e02bed): over the local socket, as the human, with the exact bodies. The
  * fields are the ones its serde structs read. Most of them are `Option` or
  * `#[serde(default)]` on tvty's side, so a field dropped here would not make
  * tvty fail — it would silently lose a feature. So every field tvty reads must
@@ -167,6 +167,7 @@ const BAR: Shape = {
         proxy_alive: "boolean", zen: "boolean",
         counters: { open: "number?", backlog: "number?", events: "number?" },
         next_wake_at: "string?", boot: { started_at: "string", deadline_at: "string?" },
+        host: "string?",
     },
     stale: "boolean",
 };
@@ -276,6 +277,7 @@ test("writes: every body tvty sends is accepted", async () => {
         ["POST", "/api/messages", { project: P, kind: "ticket_closed", ticket_id: other, parent_id: other }, 201],
         ["POST", "/api/messages", { project: P, kind: "ticket_reopened", ticket_id: other, parent_id: other }, 201],
         ["POST", `/api/tickets/${filed}/move`, { project: `${P}-b` }, 200],
+        ["POST", "/api/consumers/worker/bar-host", { host: "external" }, 404], // no loop on this test board: LOOP_NOT_FOUND
     ];
     for (const [method, path, body, status] of writes) {
         const r = await call(method, path, body).catch((e) => { throw new Error(`${method} ${JSON.stringify(path)}: ${(e as Error).message}`); });
@@ -304,7 +306,7 @@ const COVERED = new Set([
     "POST /api/messages/:id/unstep", "POST /api/messages/:id/promote", "POST /api/messages/:id/untag",
     "POST /api/messages/:id/vote", "POST /api/messages/:id/resurface", "POST /api/messages/:id/decide",
     "POST /api/messages/:id/approve", "POST /api/messages/:id/reject", "POST /api/messages/:id/delete",
-    "POST /api/tickets/:id/move", "POST /api/uploads",
+    "POST /api/tickets/:id/move", "POST /api/uploads", "POST /api/consumers/:consumer_id/bar-host",
 ]);
 
 test("every route the inventory says tvty calls (●) is covered here", () => {

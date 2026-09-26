@@ -12,7 +12,7 @@ its checkout when present).
 ● the consumer calls the route. ◐ it may: its call builds a segment at run time
 (`/api/messages/{id}/{verb}`), which could be this route or a sibling.
 
-**165 routes** · 91 called by loop, mcp, cli or tvty · 54 by the web UI alone · 19 by no consumer in the code.
+**165 routes** · 92 called by loop, mcp, cli or tvty · 54 by the web UI alone · 18 by no consumer in the code.
 
 | Route | loop | mcp | cli | sim | web | tvty |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
@@ -38,7 +38,7 @@ its checkout when present).
 | `GET /api/consumers/:consumer_id/backlog` |  |  |  |  |  | ● |
 | `GET /api/consumers/:consumer_id/bar` |  |  |  |  |  | ● |
 | `PUT /api/consumers/:consumer_id/bar` | ● |  |  |  |  |  |
-| `POST /api/consumers/:consumer_id/bar-host` |  |  |  |  |  |  |
+| `POST /api/consumers/:consumer_id/bar-host` |  |  |  |  |  | ● |
 | `POST /api/consumers/:consumer_id/loop-stop` |  |  |  |  | ● |  |
 | `POST /api/consumers/:consumer_id/prompt` |  |  |  |  | ● |  |
 | `PUT /api/consumers/:consumer_id/state` | ● |  |  |  |  |  |
