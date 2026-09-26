@@ -117,6 +117,8 @@ export function hostPort(opts: {
 }): TerminalPort & { ready: Promise<void>; close(): void } {
     let sock: Socket | null = null;
     let open = false;
+    /** The connection failed or closed: the host is gone. Before it is up, it is not gone yet. */
+    let lost = false;
     let exited = false;
     let latest: ScreenSnapshot = { text: "", cursor: null };
     let nextId = 1;
@@ -169,10 +171,11 @@ export function hostPort(opts: {
                 }
             }
         });
-        s.on("error", (e) => { opts.log(`host port: control.sock ${e.message}`); if (!open) reject(e); });
+        s.on("error", (e) => { opts.log(`host port: control.sock ${e.message}`); if (!open) { lost = true; reject(e); } });
         s.on("close", () => {
             if (open) opts.onLink?.(false);
             open = false;
+            lost = true;
             for (const done of waiting.values()) done({ error: { message: "control.sock closed" } });
             waiting.clear();
         });
@@ -185,7 +188,8 @@ export function hostPort(opts: {
     return {
         kind: "host",
         ready,
-        alive: () => open && !exited,
+        // The kernel's main loop asks at once, before the connection is up.
+        alive: () => !lost && !exited,
         screen: () => latest,
         async inject(phrase, onWillInject) {
             try { onWillInject?.(); } catch { /* the caller's markers are best effort */ }

@@ -3,11 +3,13 @@
  * session runs a command on this machine: starting or stopping one is a
  * human's gesture, never through a proxy node.
  */
+import { spawn } from "node:child_process";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 import { defineMethod, Refusal } from "../methods.js";
 import { defineSubject } from "../subscriptions.js";
 import { ERROR_CODES } from "../../domain.js";
-import { SESSION_NAME } from "../../sessions/hosts.js";
+import { hostDirFor, SESSION_NAME } from "../../sessions/hosts.js";
 import { allowedEnv, loginEnv } from "../../sessions/env.js";
 import { listSessionViews, sessionFor, startSession, stopSession, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
@@ -20,7 +22,14 @@ const HUMAN_HERE = {
 
 const size = z.object({ rows: z.number().int().min(1).max(1000), cols: z.number().int().min(1).max(1000) }).optional();
 
-/** Start a session on this machine: an agent's (with the loop kernel, to come) or a named one running `argv`, in `cwd`, at `size`, with the login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs. */
+/**
+ * Start a session on this machine, in `cwd`. With `name`: a session without an
+ * agent running `argv`. Without: an agent's loop, started as `claude-loop
+ * start` would (`agent`, or `crew` with a crew agent's name, or neither and
+ * the folder decides), on this daemon's host; the answer names the agent. The
+ * login environment and a local caller's allow-listed `env`. HOST_BUSY when it
+ * already runs.
+ */
 defineMethod({
     name: "session.start",
     ...HUMAN_HERE,
@@ -30,20 +39,48 @@ defineMethod({
         argv: z.array(z.string()).min(1).optional(),
         cwd: z.string().min(1),
         project: z.string().optional(),
-        crew: z.boolean().optional(),
+        crew: z.string().regex(SESSION_NAME).optional(),
         size,
         env: z.record(z.string(), z.unknown()).optional(),
     }),
     run: async (caller, p) => {
-        if (!p.agent === !p.name) throw new Refusal(400, "one of agent or name");
-        if (p.agent) {
-            if (isPresent(p.agent)) {
-                throw new Refusal(409, `${p.agent} runs in claude-loop`, ERROR_CODES.HOST_BUSY, { host: "claude-loop" });
+        if (p.name && (p.agent || p.crew)) throw new Refusal(400, "name is a session without an agent: not with agent or crew");
+        if (p.agent && p.crew) throw new Refusal(400, "agent or crew, not both");
+        if (!p.name) {
+            const named = p.agent ?? p.crew;
+            if (named && isPresent(named)) {
+                throw new Refusal(409, `${named} runs in claude-loop`, ERROR_CODES.HOST_BUSY, { host: "claude-loop" });
             }
-            // The loop kernel that drives an agent's Claude comes with the next phase.
-            throw new Refusal(501, "an agent's session on a host comes with the loop kernel in the daemon", ERROR_CODES.NOT_IMPLEMENTED);
+            if (named && sessionFor({ agent: named })) {
+                throw new Refusal(409, `${named} runs on this daemon's host already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
+            }
+            // #3066 3c — the loop's own start prepares Claude (settings, hooks,
+            // state) as for tmux, then asks back for the host (session.host)
+            // and starts the kernel on it: one way to prepare Claude, not two.
+            const env = { ...loginEnv(), ...(caller.transport === "uds" ? allowedEnv(p.env) : {}) };
+            const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
+            const child = spawn(CLAUDE_LOOP_BIN, [
+                "start", "--host", "--no-attach", "--cwd", p.cwd,
+                ...(p.agent ? ["--agent", p.agent] : []),
+                ...(p.crew ? ["--crew", p.crew] : []),
+                ...(p.project ? ["--project", p.project] : []),
+            ], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
+            child.unref();
+            const deadline = Date.now() + 30_000;
+            for (;;) {
+                // The named agent's session; or, when the folder decides, the new one started here.
+                const view = named
+                    ? listSessionViews().find((v) => v.agent === named)
+                    : listSessionViews().find((v) => v.agent && !before.has(v.agent) && v.cwd === p.cwd);
+                if (view) return view;
+                if (child.exitCode !== null && child.exitCode !== 0) {
+                    throw new Refusal(500, `claude-loop start --host exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
+                }
+                if (Date.now() > deadline) throw new Refusal(504, "the agent's session did not come up in 30 s", ERROR_CODES.INTERNAL);
+                await new Promise((r) => setTimeout(r, 200));
+            }
         }
-        if (sessionFor({ name: p.name })) {
+        if (sessionFor({ name: p.name! })) {
             throw new Refusal(409, `a session named ${p.name} runs already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
         }
         if (!p.argv) throw new Refusal(400, "argv: the command a session without an agent runs");
@@ -52,6 +89,43 @@ defineMethod({
         try {
             const link = await startSession({ name: p.name, argv: p.argv, cwd: p.cwd, size: p.size, env });
             return viewOf(link);
+        } catch (e) {
+            throw new Refusal(500, (e as Error).message, ERROR_CODES.INTERNAL);
+        }
+    },
+});
+
+/** The loop's launcher, next to the daemon's source. */
+const CLAUDE_LOOP_BIN = resolve(import.meta.dirname, "..", "..", "..", "bin", "claude-loop");
+
+/**
+ * #3066 3c — `claude-loop start --host` asks for its host here: the command
+ * it prepared (Claude, its settings and hooks), run in an agent's session on
+ * this daemon's host. The command's environment gets `CL_HOST_CONTROL`, so
+ * Claude's hooks drive the host; the answer gives it to the kernel the loop
+ * starts next. Local callers only: the command runs on this machine.
+ */
+defineMethod({
+    name: "session.host",
+    who: ["human", "agent"],
+    relayed: false,
+    params: z.object({
+        agent: z.string().regex(SESSION_NAME),
+        argv: z.array(z.string()).min(1),
+        cwd: z.string().min(1),
+        size,
+        env: z.record(z.string(), z.unknown()).optional(),
+    }),
+    run: async (caller, p) => {
+        if (caller.transport !== "uds") throw new Refusal(403, "a session runs on this machine: local callers only", ERROR_CODES.FORBIDDEN);
+        if (sessionFor({ agent: p.agent })) {
+            throw new Refusal(409, `${p.agent} runs on this daemon's host already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
+        }
+        const control = join(hostDirFor({ agent: p.agent }), "control.sock");
+        const env = { ...loginEnv(), ...allowedEnv(p.env), CL_HOST_CONTROL: control };
+        try {
+            const link = await startSession({ agent: p.agent, argv: p.argv, cwd: p.cwd, size: p.size, env });
+            return { ...viewOf(link), control };
         } catch (e) {
             throw new Refusal(500, (e as Error).message, ERROR_CODES.INTERNAL);
         }

@@ -268,3 +268,4 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `ticket.add_token_usage` | human, agent | `POST /api/tickets/:id/token-usage` |
 | `message.list` | human, agent | `GET /api/messages` — `summary`, `open` are booleans |
 | `ticket.bookends` | human, agent | `GET /api/tickets/bookends` |
+| `session.host` | human or agent, local only | — `claude-loop start --host` runs its prepared command in the agent's session on this daemon's host; the answer carries `control`, the socket the kernel drives |

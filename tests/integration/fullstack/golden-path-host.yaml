@@ -1,0 +1,8 @@
+# #3066 — the golden path with the loop on the daemon's session host, no tmux:
+# a mention seeds an unread ping; the kernel, driving the host through its
+# control socket, wakes Claude on it, and the unread drops to 0.
+scenario: golden-path-wake-host
+fixture: mention-unread
+steps:
+  - { at: 0, spawn: { fake_claude: quick-prompt, host: true } }
+  - { at: 90, expect: { daemon: { "unread.test-agent": 0 } } }

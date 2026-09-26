@@ -38,6 +38,28 @@ export AIBALL_HOME=/agent-state
 export AIBALL_SOCK=""
 export TERM="${TERM:-xterm-256color}"
 
+# #3066 — host mode: the session host is the daemon's, on the daemon's machine,
+# so this container runs its own daemon, and the loop starts on its host once
+# the harness has seeded it (it touches /agent-daemon/go).
+if [ "${AGENT_HOST:-}" = "1" ]; then
+    mkdir -p /agent-daemon
+    echo "[agent] host mode: starting a local daemon in /agent-daemon"
+    AIBALL_HOME=/agent-daemon AIBALL_SOCK=/agent-daemon/sock nohup npx tsx /app/src/daemon.ts > /agent-daemon/daemon.log 2>&1 &
+    for _ in $(seq 1 60); do
+        if curl -sf -o /dev/null http://127.0.0.1:7777/api/health; then break; fi
+        sleep 1
+    done
+    echo "[agent] waiting for the harness's go"
+    while [ ! -f /agent-daemon/go ]; do sleep 1; done
+    export AIBALL_SOCK=/agent-daemon/sock
+    unset AIBALL_URL
+    /app/bin/claude-loop start "$NAME" \
+        --host --interval 5 --no-wait --no-attach \
+        --consumer "$CONSUMER" --project "$PROJECT"
+    echo "[agent] loop started on the session host — holding container alive"
+    exec sleep infinity
+fi
+
 echo "[agent] starting claude-loop '${NAME}' (scenario=${SCENARIO}) → ${DAEMON_URL} as ${CONSUMER}/${PROJECT}"
 # NOTE: do NOT pass `--check-cmd false`. An explicit check-cmd routes the timer
 # to the legacy `mainPoll` loop (state.ts isInternalCheckCmd), which has NONE of

@@ -36,6 +36,9 @@ RUN pip install --no-cache-dir --break-system-packages \
 
 COPY --from=proxy /build/windows/cl-pty-proxy/target/release/cl-pty-proxy /opt/cl-pty-proxy/cl-pty-proxy
 ENV CL_PROXY_BIN=/opt/cl-pty-proxy/cl-pty-proxy
+# #3066 — the session host, for the host-mode scenarios (the daemon starts it).
+COPY --from=proxy /build/windows/cl-pty-proxy/target/release/cl-session-host /opt/cl-pty-proxy/cl-session-host
+ENV CL_SESSION_HOST_BIN=/opt/cl-pty-proxy/cl-session-host
 
 COPY package.json package-lock.json ./
 RUN npm ci

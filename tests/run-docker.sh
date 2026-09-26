@@ -69,7 +69,7 @@ run_fullstack() {
         done
     fi
     echo "=== fullstack (port ${AIBALL_TEST_PORT}, from $src) ==="
-    for f in smoke golden-path; do
+    for f in smoke golden-path golden-path-host; do
         (cd "$src" && nice -n 10 tests/integration/run_fullstack.py "tests/integration/fullstack/$f.yaml") || code=1
     done
     return $code

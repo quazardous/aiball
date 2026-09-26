@@ -121,7 +121,7 @@ test("starting a session is a human's gesture, never through a proxy node", { sk
     assert.equal(listSessionViews().length, 0, "nothing started");
 });
 
-test("an agent in claude-loop is HOST_BUSY; its hosted session comes with the loop kernel", { skip }, async () => {
+test("an agent in claude-loop is HOST_BUSY", { skip }, async () => {
     const boss = await as("boss");
     presenceConnect("worker", "terminal");
     const busy = await refused(boss.call("session.start", { agent: "worker", cwd: home }));
@@ -137,4 +137,23 @@ test("a socket path too long is refused before anything starts", { skip }, async
 
 test("the environment a caller may give: an allow-list", () => {
     assert.deepEqual(allowedEnv({ PATH: "/x", LANG: "fr_FR.UTF-8", LC_ALL: "C", LD_PRELOAD: "/evil.so", NODE_OPTIONS: "--require x", HOME: "/elsewhere", n: 3 }), { PATH: "/x", LANG: "fr_FR.UTF-8", LC_ALL: "C" });
+});
+
+test("the loop's parameters: a name is a session without an agent, not with agent or crew", { skip }, async () => {
+    const boss = await as("boss");
+    assert.equal((await refused(boss.call("session.start", { name: "t", agent: "worker", argv: ["cat"], cwd: home }))).status, 400);
+    assert.equal((await refused(boss.call("session.start", { agent: "worker", crew: "helper", cwd: home }))).status, 400);
+});
+
+test("session.host: local callers only, and one session per agent", { skip }, async () => {
+    const worker = await as("worker");
+    const hosted = await worker.call<{ agent: string; control: string; attach: { socket: string } }>("session.host", { agent: "hosted", argv: ["cat"], cwd: home });
+    assert.equal(hosted.agent, "hosted");
+    assert.ok(existsSync(hosted.control), "the control socket the kernel is given");
+    const busy = await refused(worker.call("session.host", { agent: "hosted", argv: ["cat"], cwd: home }));
+    assert.deepEqual([busy.status, busy.code], [409, "HOST_BUSY"]);
+    const remote = await BusClient.connect({ url, token: issueToken({ kind: "agent", consumer_id: "worker", label: "w2" }).token });
+    clients.push(remote);
+    assert.equal((await refused(remote.call("session.host", { agent: "other", argv: ["cat"], cwd: home }))).status, 403, "not over TCP");
+    await (await as("boss")).call("session.stop", { agent: "hosted" });
 });

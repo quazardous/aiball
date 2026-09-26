@@ -225,6 +225,8 @@ interface StartOpts {
     wait?: boolean;
     /** Bypass the live-loop conflict check (#B.154). */
     force?: boolean;
+    /** #3066: Claude on the daemon's session host, not in tmux. */
+    host?: boolean;
     /** #3017: `--mouse on|off`, over `claude_loop.mouse`. Undefined = the config. */
     mouse?: boolean;
     /** #3044: `--bar tmux|external`, over `claude_loop.bar`. Undefined = the config. */
@@ -468,6 +470,32 @@ function resolveCurrentLoopName(): string {
     if (matches.length === 0) die(`no claude-loop registered for cwd ${cwd}. Pass a name or run \`claude-loop list\`.`);
     const names = matches.map((m) => `${m.name}${m.alive ? "" : " (dead)"}`).join(", ");
     die(`multiple loops in cwd ${cwd}: ${names}. Pass a name explicitly.`);
+}
+
+/**
+ * The detached kernel (the timer), logging into loop.log. It inherits CL_*
+ * from the env file its shell sources; `extraEnv` adds to it (#3066: the
+ * session host's control socket).
+ */
+function startKernel(sd: string, root: string, tsxBin: string, extraEnv: Record<string, string> = {}): void {
+    const logFd = openSync(loopLogPath(sd), "a");
+    const loopScript = join(root, "src/claude-loop/kernel.ts");
+    // Same resolution as the claude launch: a bare `bash` here reaches the WSL
+    // launcher from a PowerShell-launched `claude-loop`, which opens a console,
+    // fails to source a Windows path, and dies — leaving loop.log EMPTY. The
+    // loop then sits in boot forever with nothing to read (#1584).
+    const child = spawn(resolveBashCmd(), [
+        "-lc",
+        // #B.228 — tsx by its absolute path, so the timer can be respawned
+        // from any cwd (`claude-loop reload` from a project dir without tsx).
+        `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; exec ${tsxBin} ${shQuote(loopScript)}`,
+    ], {
+        detached: true,
+        stdio: ["ignore", logFd, logFd],
+        env: { ...process.env, ...extraEnv },
+    });
+    child.unref();
+    writeFileSync(loopPidPath(sd), String(child.pid) + "\n");
 }
 
 async function cmdStart(opts: StartOpts): Promise<void> {
@@ -1154,6 +1182,34 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #991 — source the persistent env then the volatile env.local (if any).
     const innerCmd = `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; source ${shQuote(trapPath)}; ${launch}`;
 
+    // #3066 3c — on the daemon's session host: the host is Claude's PTY (no
+    // tmux, no PTY proxy); the daemon runs the same prepared command there,
+    // with CL_HOST_CONTROL in its environment for Claude's hooks, and the
+    // kernel below drives the host through that socket.
+    if (opts.host) {
+        const hostCmd = `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; source ${shQuote(trapPath)}; ${claudeCmd}`;
+        const cols = process.stdout.columns, rows = process.stdout.rows;
+        let hosted: { control: string; attach: { socket: string | null } };
+        try {
+            hosted = await new AiballClient({ agentId: ctx.agent }).sessionHost({
+                agent: ctx.agent,
+                argv: [resolveBashCmd(), "-lc", hostCmd],
+                cwd,
+                ...(cols && rows ? { size: { rows, cols } } : {}),
+            });
+        } catch (e) {
+            die(`the daemon did not start the session host: ${(e as Error).message}`);
+        }
+        startKernel(sd, root, tsxBin, { [CL_ENV.HOST_CONTROL]: hosted.control });
+        process.stdout.write([
+            `loop '${name}' started on the session host`,
+            `  state:  ${sd}`,
+            `  attach: ${hosted.attach.socket ?? "(none)"} — with tvty`,
+            "",
+        ].join("\n"));
+        return;
+    }
+
     const tname = tmuxName(name);
     // Resolve bash via absolute path on Windows — the PATH is not trustworthy
     // here (WSL preempts Git Bash), and psmux's server is persistent, so a
@@ -1354,28 +1410,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
     );
 
-    // Detached timer process. Inherits CL_* env via the env file
-    // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
-    const logFd = openSync(loopLogPath(sd), "a");
-    const loopScript = join(root, "src/claude-loop/kernel.ts");
-    // Same resolution as the claude launch above: a bare `bash` here reaches
-    // the WSL launcher from a PowerShell-launched `claude-loop`, which opens a
-    // console, fails to source a Windows path, and dies — leaving loop.log
-    // EMPTY because its output never crosses back to the inherited fd. The
-    // loop then sits in boot forever with nothing to read (#1584).
-    const child = spawn(resolveBashCmd(), [
-        "-lc",
-        // #B.228 defensive: same fix as the hook commands above —
-        // call tsx via its absolute path so the timer can be respawned
-        // from any cwd (relevant for `claude-loop reload` called from a
-        // project dir without tsx in its node_modules).
-        `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; exec ${tsxBin} ${shQuote(loopScript)}`,
-    ], {
-        detached: true,
-        stdio: ["ignore", logFd, logFd],
-    });
-    child.unref();
-    writeFileSync(loopPidPath(sd), String(child.pid) + "\n");
+    startKernel(sd, root, tsxBin);
 
     // No more sleep+send-keys race for the startup ping — handled
     // by src/claude-loop/session-start-hook.ts which fires when the
@@ -2084,6 +2119,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--pings <yaml>", "Path to custom ping-phrases YAML")
         // Commander convention: `--no-foo` flips foo to false.
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
+        .option("--host", "#3066: run Claude on the aiball daemon's session host instead of tmux (docs/SESSION-HOST.md). Attach with tvty; the bar is data only.")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
         .option("--no-resume", "#616: don't auto-inject `--resume` even when `.aiball.yaml claude.always_resume: true` says to. Per-invocation opt-out. Equivalent to `claude-loop start -- --no-resume`.")
         // #639 (david `uqdava`): explicit `--resume` flag forces
@@ -2144,7 +2180,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
-            attach: boolean; startupPing: boolean; force?: boolean;
+            attach: boolean; startupPing: boolean; force?: boolean; host?: boolean;
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             role?: string;
@@ -2167,6 +2203,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 noStartupPing: opts.startupPing === false,
                 runOnce: opts.once === true,
                 force: opts.force === true,
+                host: opts.host === true,
                 mouse: opts.mouse === "on" ? true : opts.mouse === "off" ? false : undefined,
                 bar: isBarHost(opts.bar) ? opts.bar : undefined,
                 resumeMode: opts.resumeMode,

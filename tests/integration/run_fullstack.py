@@ -91,9 +91,19 @@ def _send_keys(loop_name: str, args: list[str]) -> None:
     _agent_exec(["tmux", "send-keys", "-t", f"{loop_name}.0", *args], capture=True)
 
 
+# #3066 — a host-mode scenario: the session host is the daemon's, on the
+# daemon's machine, so the agent container runs its own daemon (its state in
+# /agent-daemon) and the loop talks to it; this is where it is driven.
+HOST_MODE = {"on": False}
+
+
 def _daemon_ctl(*args: str) -> object:
-    """Run tests/daemon-ctl.ts inside the daemon container ; parse its JSON line."""
-    r = _compose("exec", "-T", "daemon", "npx", "tsx", "/app/tests/daemon-ctl.ts", *args, capture=True)
+    """Run tests/daemon-ctl.ts next to the daemon the loop talks to ; parse its JSON line."""
+    if HOST_MODE["on"]:
+        r = _compose("exec", "-T", "-e", "AIBALL_HOME=/agent-daemon", "-e", "AIBALL_SOCK=", "agent",
+                     "npx", "tsx", "/app/tests/daemon-ctl.ts", *args, capture=True)
+    else:
+        r = _compose("exec", "-T", "daemon", "npx", "tsx", "/app/tests/daemon-ctl.ts", *args, capture=True)
     if r.returncode != 0:
         raise RuntimeError(f"daemon-ctl {args} failed: {r.stderr.strip() or r.stdout.strip()}")
     return json.loads(r.stdout.strip()) if r.stdout.strip() else None
@@ -117,6 +127,16 @@ def _dump_loop(loop_name: str, lines: int = 80) -> None:
     print(f"[fullstack] inspect {loop_name}: {r.stdout.strip() or r.stderr.strip()}")
     log = _agent_exec(["sh", "-c", f"tail -n {lines} \"$HOME/.claude-loop/{loop_name}/loop.log\""])
     print(f"[fullstack] loop.log (last {lines} lines):\n{log.stdout or log.stderr}")
+
+
+def _wait_agent_daemon_ready(timeout_s: float = 90.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        r = _agent_exec(["curl", "-sf", "-o", "/dev/null", "http://127.0.0.1:7777/api/health"])
+        if r.returncode == 0:
+            return
+        time.sleep(2)
+    raise TimeoutError(f"the agent's daemon not ready after {timeout_s}s")
 
 
 def _resolve(value: object, handles: dict) -> object:
@@ -177,6 +197,9 @@ def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
     loop_name = "agent1"
     import os
     env = {**os.environ, "AGENT_SCENARIO": spawn.fake_claude, "AGENT_NAME": loop_name}
+    HOST_MODE["on"] = spawn.host
+    if spawn.host:
+        env["AGENT_HOST"] = "1"
 
     passed = failed = skipped = 0
     handles: dict = {}
@@ -195,13 +218,23 @@ def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
 
     try:
         _wait_daemon_ready()
-        if sc.fixture:
+        if sc.fixture and not spawn.host:
             handles = _daemon_ctl("seed", sc.fixture) or {}
             print(f"[fullstack] seeded fixture '{sc.fixture}' → handles {handles}")
         print("[fullstack] compose up -d agent ...")
-        up2 = _compose("up", "-d", "agent", env=env, capture=True)
+        # --build: the agent image carries built binaries (the proxy, the host);
+        # an image cached from before a Dockerfile change would lack them.
+        up2 = _compose("up", "-d", "--build", "agent", env=env, capture=True)
         if up2.returncode != 0:
             raise RuntimeError(f"compose up agent failed: {up2.stderr}")
+        if spawn.host:
+            # The agent's own daemon first, then the seed, then the loop (it waits for `go`).
+            _wait_agent_daemon_ready()
+            if sc.fixture:
+                handles = _daemon_ctl("seed", sc.fixture) or {}
+                print(f"[fullstack] seeded fixture '{sc.fixture}' (agent's daemon) → handles {handles}")
+            _agent_exec(["touch", "/agent-daemon/go"])
+            print("[fullstack] host mode: the loop starts on the session host")
         _wait_loop_ready(loop_name)
         print("[fullstack] loop ready — playing timeline")
         t0 = time.monotonic()

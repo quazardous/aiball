@@ -1328,6 +1328,10 @@ export class AiballClient {
         return this.http("PATCH", `/api/consumers/${encodeURIComponent(id)}`, patch);
     }
 
+    /** #3066 3c — run the prepared command in this agent's session on the daemon's host. */
+    sessionHost(o: { agent: string; argv: string[]; cwd: string; size?: { rows: number; cols: number }; env?: Record<string, string> }) {
+        return this.call<{ agent: string; attach: { socket: string | null }; control: string; pid: number }>("session.host", o);
+    }
     health() {
         return this.http<{ ok: boolean; ts: string; version?: string }>("GET", "/api/health");
     }

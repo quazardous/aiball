@@ -1877,6 +1877,83 @@
       ]
     },
     {
+      "name": "session.host",
+      "description": "#3066 3c — `claude-loop start --host` asks for its host here: the command it prepared (Claude, its settings and hooks), run in an agent's session on this daemon's host. The command's environment gets `CL_HOST_CONTROL`, so Claude's hooks drive the host; the answer gives it to the kernel the loop starts next. Local callers only: the command runs on this machine.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          }
+        },
+        {
+          "name": "argv",
+          "required": true,
+          "schema": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "env",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        {
+          "name": "size",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "rows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "cols": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              }
+            },
+            "required": [
+              "rows",
+              "cols"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "session.list",
       "description": "Every session this daemon hosts: agent or name, cwd, running, clients, and the socket clients attach to.",
       "paramStructure": "by-name",
@@ -1892,7 +1969,7 @@
     },
     {
       "name": "session.start",
-      "description": "Start a session on this machine: an agent's (with the loop kernel, to come) or a named one running `argv`, in `cwd`, at `size`, with the login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs.",
+      "description": "Start a session on this machine, in `cwd`. With `name`: a session without an agent running `argv`. Without: an agent's loop, started as `claude-loop start` would (`agent`, or `crew` with a crew agent's name, or neither and the folder decides), on this daemon's host; the answer names the agent. The login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1926,7 +2003,8 @@
           "name": "crew",
           "required": false,
           "schema": {
-            "type": "boolean"
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
           }
         },
         {

@@ -50,8 +50,10 @@ class ScenarioError(ValueError):
 @dataclass(frozen=True)
 class SpawnStep:
     """The `spawn` step. `fake_claude` is the probe-mode scenario name
-    (from `bin/fake-claude --list-probes`). Always implicit t=0."""
+    (from `bin/fake-claude --list-probes`). Always implicit t=0. `host`
+    (#3066): the loop runs on the daemon's session host, not in tmux."""
     fake_claude: str
+    host: bool = False
 
 
 @dataclass(frozen=True)
@@ -226,7 +228,10 @@ def _parse_step(path: Path, idx: int, raw: dict) -> Step:
         fc = spawn.get("fake_claude")
         if not isinstance(fc, str) or not fc:
             raise ScenarioError(f"{path} step[{idx}].spawn.fake_claude: required non-empty string")
-        return SpawnStep(fake_claude=fc)
+        host = spawn.get("host", False)
+        if not isinstance(host, bool):
+            raise ScenarioError(f"{path} step[{idx}].spawn.host: must be a boolean")
+        return SpawnStep(fake_claude=fc, host=host)
     # #981 S2 — `at` is the canonical key (chronological multi-target format) ;
     # `at_seconds` stays accepted as an alias for the #638 scenarios.
     at = raw.get("at", raw.get("at_seconds"))
