@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
 import { captureCursorSync } from "../pane.js";
 import { injectRawBytes, injectWakePhrase, MUX_CMD } from "./state.js";
+import { CL_ENV } from "./env-vars.js";
 
 export interface ScreenSnapshot {
     text: string;
@@ -80,7 +81,40 @@ export function tmuxPort(opts: { session: string; stateDir: string | undefined; 
  * most 4 a second), seeded by `host.screen` on connecting, so reading it costs
  * nothing; typing is `host.inject`, which never counts as a human's keys.
  */
-export function hostPort(opts: { controlSocket: string; log: (msg: string) => void }): TerminalPort & { ready: Promise<void>; close(): void } {
+/** `host.keys`: a client's keys meant something for the loop (docs/SESSION-HOST.md). */
+export interface HostKeys {
+    typing?: boolean;
+    lone_esc?: boolean;
+    afk_key?: boolean;
+    reload?: boolean;
+    now_ms?: number;
+}
+
+/**
+ * The proxy events a `host.keys` stands for: the ones the tmux proxy emits for
+ * the same verdict, so the kernel handles keys from either the same way.
+ */
+export function proxyEventsOfKeys(k: HostKeys): Record<string, unknown>[] {
+    const now_ms = typeof k.now_ms === "number" ? k.now_ms : Date.now();
+    const out: Record<string, unknown>[] = [];
+    if (k.afk_key) out.push({ event: "keystroke", kind: "afk_key", now_ms });
+    if (k.typing) {
+        out.push({ event: "keystroke", kind: "typing", now_ms });
+        out.push({ event: "marker", name: "touch_marker", now_ms });
+    }
+    if (k.lone_esc) out.push({ event: "keystroke", kind: "typing", now_ms });
+    if (k.reload) out.push({ event: "reload", now_ms });
+    return out;
+}
+
+export function hostPort(opts: {
+    controlSocket: string;
+    log: (msg: string) => void;
+    /** A human's keys through an attached client. */
+    onKeys?: (keys: HostKeys) => void;
+    /** The control connection came up, or went down. */
+    onLink?: (up: boolean) => void;
+}): TerminalPort & { ready: Promise<void>; close(): void } {
     let sock: Socket | null = null;
     let open = false;
     let exited = false;
@@ -110,6 +144,7 @@ export function hostPort(opts: { controlSocket: string; log: (msg: string) => vo
         s.setEncoding("utf8");
         s.on("connect", () => {
             open = true;
+            opts.onLink?.(true);
             call("host.screen").then((v) => { latest = screenOf(v); resolve(); }, reject);
         });
         s.on("data", (chunk: string) => {
@@ -127,6 +162,8 @@ export function hostPort(opts: { controlSocket: string; log: (msg: string) => vo
                     done?.(m);
                 } else if (m.method === "host.screen_changed") {
                     latest = screenOf(m.params);
+                } else if (m.method === "host.keys") {
+                    opts.onKeys?.((m.params ?? {}) as HostKeys);
                 } else if (m.method === "host.exited") {
                     exited = !(m.params as { restarting?: boolean } | undefined)?.restarting;
                 }
@@ -134,6 +171,7 @@ export function hostPort(opts: { controlSocket: string; log: (msg: string) => vo
         });
         s.on("error", (e) => { opts.log(`host port: control.sock ${e.message}`); if (!open) reject(e); });
         s.on("close", () => {
+            if (open) opts.onLink?.(false);
             open = false;
             for (const done of waiting.values()) done({ error: { message: "control.sock closed" } });
             waiting.clear();
@@ -161,4 +199,20 @@ export function hostPort(opts: { controlSocket: string; log: (msg: string) => vo
         end() { void call("host.stop", {}).catch(() => { /* already gone */ }); },
         close() { sock?.end(); },
     };
+}
+
+/**
+ * #3066 — the terminal for a process that is not the kernel (a hook): the
+ * session host when `CL_HOST_CONTROL` is set in its environment, which Claude
+ * passes down to its hooks, tmux otherwise. A host port is connected before it
+ * is returned; `close` lets the process exit.
+ */
+export async function terminalFromEnv(opts: { session: string; stateDir: string | undefined; log: (msg: string) => void }): Promise<TerminalPort & { close(): void }> {
+    const control = process.env[CL_ENV.HOST_CONTROL];
+    if (control) {
+        const port = hostPort({ controlSocket: control, log: opts.log });
+        await port.ready.catch((e: Error) => opts.log(`host port: ${e.message}`));
+        return port;
+    }
+    return { ...tmuxPort(opts), close() { /* nothing held */ } };
 }

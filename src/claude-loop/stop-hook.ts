@@ -13,11 +13,10 @@
  *
  * Always emits `{}` and exits 0 — never block claude's stop.
  */
-import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_SOCK_KIND, MUX_CMD, PANE_BUSY_DELAY_MS, humanPresentHold, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_SOCK_KIND, PANE_BUSY_DELAY_MS, humanPresentHold, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
@@ -28,6 +27,7 @@ import { emitHookEventToTimer } from "./hook-emit.js";
 import { sendEventOnce } from "./ipc-events.js";
 import { loopSockPath } from "./state.js";
 import { queryLoopState } from "./hook-verdict.js";
+import { terminalFromEnv } from "./terminal-port.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -158,17 +158,10 @@ function classifyTurn(): string {
 // the footer text is by definition stale; gating on it left the bar
 // stuck on busy forever (david: "claude-loop reste encore en busy
 // alors qu'on a fait plusieur tour de ping → hook stop").
-function readPane(): string {
-    try {
-        const r = spawnSync(MUX_CMD, [
-            "capture-pane", "-t", `${tmuxName(name!)}.0`, "-p",
-        ], { encoding: "utf8" });
-        return r.stdout ?? "";
-    } catch { return ""; }
-}
-
 (async () => {
-    const paneText = readPane();
+    // #3066 — the host's screen when the loop runs on one, tmux's otherwise.
+    const term = await terminalFromEnv({ session: tmuxName(name!), stateDir: sd, log });
+    const paneText = term.screen().text;
     const pane = snapshotPane(paneText);
     // #345 B: claude a-t-il été interrompu (ESC) et bailé mid-turn ? Sert
     // UNIQUEMENT à décorer la barre `[idle:interrupted]` (précédence sur
@@ -321,7 +314,7 @@ function readPane(): string {
                 kind: "proxyEvent",
                 data: { event: "marker", name: "set_last_wake_at", at_ms: wakeAtMs, now_ms: wakeAtMs },
             }, { timeoutMs: 200 });
-            const wakeDelivered = await injectWakePhrase(`${tmuxName(name!)}.0`, phrase, () => {
+            const wakeDelivered = await term.inject(phrase, () => {
                 // Post-wake tempo — emit busy_defer_until via a Stop event
                 // (= same channel the pane-busy branch above uses). The
                 // dispatcher's HookService subscriber materializes the

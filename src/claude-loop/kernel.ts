@@ -47,7 +47,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
-import { tmuxPort, type TerminalPort } from "./terminal-port.js";
+import { hostPort, proxyEventsOfKeys, tmuxPort, type HostKeys, type TerminalPort } from "./terminal-port.js";
 import { drainOffload, listOffloadComponents } from "./offload.js";
 import { getKernelBus, bridgeActorToKernel } from "./kernel-bus.js";
 import {
@@ -330,8 +330,18 @@ function log(msg: string): void {
     logger.info(msg);
 }
 
-// #3066 3a — the terminal Claude runs in: tmux today, the session host next.
-const term: TerminalPort = tmuxPort({ session: tname, stateDir: sd, log });
+// #3066 — the terminal Claude runs in: the session host when its control
+// socket is given (the daemon started this kernel for it), tmux otherwise.
+const hostControl = process.env[CL_ENV.HOST_CONTROL] || null;
+/** Filled once the loop server's handlers exist: the host's keys and link go to them. */
+const hostHooks: { keys: (k: HostKeys) => void; link: (up: boolean) => void } = { keys: () => {}, link: () => {} };
+const term: TerminalPort = hostControl
+    ? hostPort({ controlSocket: hostControl, log, onKeys: (k) => hostHooks.keys(k), onLink: (up) => hostHooks.link(up) })
+    : tmuxPort({ session: tname, stateDir: sd, log });
+if (hostControl && sd) {
+    // The bar is data only on a host: tvty draws it, and there is no tmux line to paint.
+    writeBarHost(sd, "external");
+}
 // #1032 S2 — drain every component's offload buffer into the central log,
 // each entry replayed with its ORIGINAL ts (→ unified timeline), then cleared.
 // Called at boot : the timer has just (re)started, so anything the hooks/proxy
@@ -381,8 +391,10 @@ log(`kernel.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
 // main-loop s'arme (ligne ~1086) et tape sa 1ère probe — soit 2-5s
 // supplémentaires d'orphelin. Probe AVANT d'armer quoi que ce soit.
 // Logique pure dans `parent-liveness.ts` pour qu'on puisse la tester.
-if (probeParentTmuxAtBoot(MUX_CMD, tname)) {
-    log(`startup: tmux session '${tname}' already gone — exit immediately (orphan-prevent)`);
+if (hostControl ? !existsSync(hostControl) : probeParentTmuxAtBoot(MUX_CMD, tname)) {
+    log(hostControl
+        ? `startup: session host '${hostControl}' already gone — exit immediately (orphan-prevent)`
+        : `startup: tmux session '${tname}' already gone — exit immediately (orphan-prevent)`);
     // No cleanShutdown : functions below not defined yet ; the prior
     // timer already swept on its way out.
     process.exit(0);
@@ -1902,7 +1914,7 @@ async function mainSse(): Promise<void> {
     // dispatch (proxy → timer). The dispatcher (`proxy-event-dispatcher.ts`)
     // is unchanged — it still sees the legacy event shape, the wrap is
     // unwrapped at the server boundary.
-    const loopServer = createLoopServer(loopSockPath(sd!), {
+    const loopHandlers: Parameters<typeof createLoopServer>[1] = {
         onProxyEvent: (event) => {
             // #1040 — reload hotkey (Ctrl+N by default) : the proxy detects the
             // key, consumes it, and emits {event:"reload"}. Re-exec the timer on
@@ -2002,7 +2014,11 @@ async function mainSse(): Promise<void> {
         // chronologically interleaved. The line is already terminated by
         // \n by createLogger (cf. `src/log.ts:83`).
         onLogLine: (line) => process.stdout.write(line),
-    });
+    };
+    const loopServer = createLoopServer(loopSockPath(sd!), loopHandlers);
+    // #3066 — on a host, its keys and its control link stand for the proxy's.
+    hostHooks.keys = (k) => { for (const e of proxyEventsOfKeys(k)) loopHandlers.onProxyEvent?.(e); };
+    hostHooks.link = (up) => { if (up) loopHandlers.onProxyConnect?.(); else loopHandlers.onProxyDisconnect?.(); };
     // #3048 — is the proxy's screen model the screen tmux shows? Now and then,
     // on a screen that holds still, compare the two and keep the score. An
     // indicator only: nothing reads the screen from the proxy yet.
@@ -2595,15 +2611,25 @@ async function mainSse(): Promise<void> {
     // le timer self-exit → plus de timer-survivant qui roule du vieux
     // code après un reload non-propre. Pisynth-aiball desync de ce
     // matin = cause directe (cf. #862 thread).
-    const parentWatchdog = installParentTmuxWatchdog({
-        muxCmd: MUX_CMD,
-        sessionName: tname,
-        intervalMs: 5000,
-        onDead: () => {
-            log(`runtime watchdog: tmux session '${tname}' is gone — kernel self-exiting`);
-            process.exit(0);
-        },
-    });
+    const parentWatchdog = hostControl
+        // On a host: the same 5 s check, through the port (Claude ended, or the host went away).
+        ? (() => {
+            const t = setInterval(() => {
+                if (term.alive()) return;
+                log(`runtime watchdog: session host '${hostControl}' is gone — kernel self-exiting`);
+                process.exit(0);
+            }, 5000);
+            return { stop: () => clearInterval(t) };
+        })()
+        : installParentTmuxWatchdog({
+            muxCmd: MUX_CMD,
+            sessionName: tname,
+            intervalMs: 5000,
+            onDead: () => {
+                log(`runtime watchdog: tmux session '${tname}' is gone — kernel self-exiting`);
+                process.exit(0);
+            },
+        });
     process.on("exit", () => parentWatchdog.stop());
     const loopBus = new LoopStateBus();
     // #862 Slice 5 — `repaintAfkState` retiré ; BarRenderer reads

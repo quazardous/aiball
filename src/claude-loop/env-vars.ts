@@ -13,6 +13,8 @@ export const CL_ENV = {
     STATE_DIR: "CL_STATE_DIR",
     NAME: "CL_NAME",
     TMUX: "CL_TMUX",
+    /** #3066 — the session host's control.sock: set, the kernel drives the host instead of tmux. */
+    HOST_CONTROL: "CL_HOST_CONTROL",
     PINGS: "CL_PINGS",
     LOG_LEVEL: "CL_LOG_LEVEL",
 

@@ -60,3 +60,15 @@ test("the host port reads the screen and types, beside the daemon's own connecti
     await until("Claude gone", () => !port.alive());
     assert.deepEqual(logs, [], "nothing went wrong on the way");
 });
+
+test("host.keys stands for the proxy events the tmux proxy emits for the same verdict", async () => {
+    const { proxyEventsOfKeys } = await import("./terminal-port.js");
+    assert.deepEqual(proxyEventsOfKeys({ typing: true, now_ms: 5 }), [
+        { event: "keystroke", kind: "typing", now_ms: 5 },
+        { event: "marker", name: "touch_marker", now_ms: 5 },
+    ]);
+    assert.deepEqual(proxyEventsOfKeys({ afk_key: true, now_ms: 5 }), [{ event: "keystroke", kind: "afk_key", now_ms: 5 }]);
+    assert.deepEqual(proxyEventsOfKeys({ lone_esc: true, now_ms: 5 }), [{ event: "keystroke", kind: "typing", now_ms: 5 }]);
+    assert.deepEqual(proxyEventsOfKeys({ reload: true, now_ms: 5 }), [{ event: "reload", now_ms: 5 }]);
+    assert.deepEqual(proxyEventsOfKeys({ now_ms: 5 }), [], "a key that means nothing for the loop");
+});
