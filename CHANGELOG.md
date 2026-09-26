@@ -30,6 +30,17 @@ dates are YYYY-MM-DD.
   authenticated once when it connects, calls and batches go straight to the
   core, and revoking a token closes its connections. The first step of
   moving every client onto it; see `docs/API-BUS.md`.
+- The bus carries every call tvty makes, reads and writes, as methods; their
+  HTTP routes answer exactly as the methods do.
+- Subscriptions on the bus push the data itself: the board's rows (also when
+  a field changes with time alone), agents' states and bars, a ticket's
+  thread, one's pings; a client that reconnects gets what it missed.
+- A proxy node relays the bus to its upstream, as it relays the HTTP API.
+- The bus's contract is published, generated from the code: OpenRPC for the
+  methods, AsyncAPI for the subjects.
+- `cl-session-host`: a session held in a PTY that clients attach to and the
+  daemon drives, outliving both; the daemon runs named sessions on it. The
+  first step of replacing tmux and claude-loop.
 
 - `claude-loop debug-proxy`: the real PTY proxy in front of a byte logger, in
   your terminal: every key and what the proxy decided about it. With

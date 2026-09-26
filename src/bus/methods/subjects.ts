@@ -32,6 +32,7 @@ function idOf(sub: Subscription): string {
 
 defineSubject({
     pattern: "agent.*.bar",
+    doc: { value: "the agent's bar, as consumer.bar gives it, or null; with *, keyed by agent", event: "the bar, whenever it changes or goes stale" },
     wildcard: true,
     access: (caller, id) => ownOrHuman(caller, id, "bar"),
     value: (sub) => {
@@ -49,6 +50,7 @@ defineSubject({
  */
 defineSubject({
     pattern: "agent.*.state",
+    doc: { value: "the agent's entry, as consumer.list gives it; with *, keyed by agent", event: "the whole entry again whenever it changed; null once the consumer is deleted" },
     wildcard: true,
     access: (caller) => consumers(caller),
     value: (sub) => {
@@ -76,6 +78,7 @@ defineSubject({
 
 defineSubject({
     pattern: "ticket.*",
+    doc: { value: "what ticket.get gives with full: true", event: "{ type, message }: a message created, edited, decided, noted or tagged on the ticket" },
     access: (caller) => consumers(caller),
     value: (sub) => getMethod("ticket.get")!.run(sub.caller, { id: sub.parts[1], full: true }),
 });
@@ -145,6 +148,7 @@ const sharedCtx = new WeakMap<object, InboxRowContext>();
 
 const projectTickets: SubjectSpec = {
     pattern: "project.*.tickets",
+    doc: { value: "the rows inbox.list gives with view: turn (options open, include_postponed); with *, keyed by project", event: "{ op: upsert, row } or { op: remove, id, project }; a row is pushed when it changed, time-derived fields included" },
     // `project.*.tickets`: every project the subscriber sees, and the ones created later.
     wildcard: true,
     // The rows a view holds live on the subscription: a replay onto the current
@@ -261,6 +265,7 @@ function pingedMessage(p: { ticket_id?: number; comment_id?: number }) {
 
 defineSubject({
     pattern: "user.*.pings",
+    doc: { value: "{ unread }", event: "a ping, and message: what it points at (kind, status, author, project, ticket title, decision)" },
     access: (caller, id) => (id === caller.consumer_id ? null : new Refusal(403, "one's own pings only")),
     value: (sub) => {
         const id = idOf(sub);
@@ -337,6 +342,7 @@ defineMethod({
     run: (caller, p) => subscribe(caller, p.subject, p.since, { open: p.open, include_postponed: p.include_postponed }),
 });
 
+/** End a subscription: no more events for it. Closing the connection ends them all. */
 defineMethod({
     name: "bus.unsubscribe",
     who: ["human", "agent"],

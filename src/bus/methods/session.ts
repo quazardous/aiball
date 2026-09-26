@@ -20,6 +20,7 @@ const HUMAN_HERE = {
 
 const size = z.object({ rows: z.number().int().min(1).max(1000), cols: z.number().int().min(1).max(1000) }).optional();
 
+/** Start a session on this machine: an agent's (with the loop kernel, to come) or a named one running `argv`, in `cwd`, at `size`, with the login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs. */
 defineMethod({
     name: "session.start",
     ...HUMAN_HERE,
@@ -57,6 +58,7 @@ defineMethod({
     },
 });
 
+/** Stop a session: its command, then its host, whose files go with it. Answers once the host is gone. */
 defineMethod({
     name: "session.stop",
     ...HUMAN_HERE,
@@ -70,6 +72,7 @@ defineMethod({
     },
 });
 
+/** Every session this daemon hosts: agent or name, cwd, running, clients, and the socket clients attach to. */
 defineMethod({
     name: "session.list",
     who: ["human", "agent"],
@@ -80,6 +83,7 @@ defineMethod({
 /** `session.<name>.state`: a session without an agent; `*` for all, those started later too. */
 defineSubject({
     pattern: "session.*.state",
+    doc: { value: "a session without an agent, as session.list gives it, or null; with *, keyed by name", event: "{ name, session }: started, clients, exited; session null once stopped" },
     wildcard: true,
     access: (caller) => (caller.kind === "key" ? new Refusal(403, "a consumer's subject") : null),
     value: (sub) => {

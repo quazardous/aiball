@@ -1,0 +1,1580 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "aiball bus",
+    "version": "0.48.0",
+    "description": "JSON-RPC 2.0 over a WebSocket at /bus, protocol version 1. See docs/API-BUS.md."
+  },
+  "methods": [
+    {
+      "name": "bus.subjects",
+      "description": "The subjects of this bus, as an AsyncAPI document, generated from the code.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "bus.subscribe",
+      "description": "Subscribe to a subject: its current value, then its changes as `bus.event` notifications. With `since` (the epoch and the last `seq` received), what was missed instead, while the daemon still holds it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "subject",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "include_postponed",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "open",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "epoch": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "epoch",
+              "seq"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "bus.unsubscribe",
+      "description": "End a subscription: no more events for it. Closing the connection ends them all.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "bus.whoami",
+      "description": "Who the connection runs as: what every call on it is authorized against.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.afk",
+      "description": "Hold or release an agent's loop (AFK), as its own keys would.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "action",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "durationSec",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "consumer.backlog",
+      "description": "An agent's backlog as its loop sees it, with its unread pings and its wait credit on the project. Read-only: nothing is marked read, no wake recorded.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cooldown_sec",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.bar",
+      "description": "An agent's loop bar as data, for hosts other than tmux.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.list",
+      "description": "Every consumer, each as `consumerEntry` builds it: presence, pings, wait credit, session.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.set_bar_host",
+      "description": "Who draws an agent's bar: `tmux` (its status line) or `external` (another host draws it from the bar data). Relayed to the loop, whose kernel records it; the next bar pushed carries the new `host`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "host",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "inbox.list",
+      "description": "The board's ticket rows for the caller (docs/API-INBOX.md), with `total` before paging. `view: \"turn\"` adds the pilot's fields (#3005 / #3038); `ids` narrows to named tickets : an empty answer means they no longer belong in this view. Read state, unread and the pilot's fields are the caller's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "ids",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "include_postponed",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "intent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "open",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "priority",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sort",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "unread",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "view",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "mention.suggestions",
+      "description": "What the composer offers after `@`: projects and known agents.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.accept_and_close",
+      "description": "Accept a pending resolution and close its ticket in one gesture, so no client sees the state in between. The close pings no one: the accepted decision already did . Not one transaction: when the close fails after the accept, the refusal (500) carries the accepted decision.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "body",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.add_tag",
+      "description": "Tag a message (idempotent: re-adding changes nothing). a tag new on a ticket fires the `tagged` automation trigger. `set_by` is the caller.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "set_by",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "tag",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.answer_question",
+      "description": "Mark a question of a message answered (#B.104): its checkbox ticked, the audit in `meta.questions`. Idempotent. who answers is the caller.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "qid",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "answered_by",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "answered_in",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.approve",
+      "description": "Moderate a pending message: approve or reject it (the ripple, the same one the pending-children sweep applies, lives in api/moderation.ts).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.decide",
+      "description": "Accept or reject the decision a comment carries (#B.129): a plan, a resolution, a wontfix, an escalation. Idempotent on the same status; a decided one refuses another (409): post a fresh decision instead. who decides is the caller. `body` is a closing note for an accept that closes the ticket ; `new_kind` requalifies it as it is decided.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.delete",
+      "description": "Delete a comment , a human's gesture. A soft delete: gone from counts, gates and reads, shown as a tombstone to a thread read that asks for it. Pings are wiped. A comment carrying a finalized decision is refused.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.edit",
+      "description": "Edit a message: title, body, summary, intent, priority, scope, and a ticket's level (a human's gesture: an agent could drop a ticket out of every coder's queue). a priority that moved fires `priority_changed`; a level its holder does not work on says so.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "body",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "intent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "level",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "priority",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "scope",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "summary",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "title",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.get",
+      "description": "One message, with its tags and the uploads its text cites .",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.note",
+      "description": "A moderation note on a message; anything but a string clears it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.post",
+      "description": "Post a message: a ticket (with its extras, #3037), a comment, a decision or a lifecycle event. the author is the caller. the decision events (plan_accepted…) are the daemon's own: `message.decide` makes them. The params are the message itself, as HTTP's body.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "by_agent",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.promote",
+      "description": "#B.256 — make a comment a decision: pending with `kind` alone, or decided at once with `status` accepted / rejected.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.reclassify",
+      "description": "Swap a pending decision's kind (plan / resolution…) without deciding it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "new_kind",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.reject",
+      "description": "Moderate a pending message: approve or reject it (the ripple, the same one the pending-children sweep applies, lives in api/moderation.ts).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.remove_tag",
+      "description": "Untag a message; `tag` is a tag id or name.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.resurface",
+      "description": "Resurface a message: its pings unseen again, so the recipients see it at their next wake. A human's gesture: an agent must not fabricate unread.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "message.step",
+      "description": "Tag an agent's comment as a step (`then: continue`) the agent did not post, or remove that tag. A human's gesture. Silent: no ping — the agent finds the ticket back in its pool at its next wake.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "message.summarize",
+      "description": "Set a comment's one-line summary (#B.130); an empty string clears it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "summary",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.unstep",
+      "description": "Tag an agent's comment as a step (`then: continue`) the agent did not post, or remove that tag. A human's gesture. Silent: no ping — the agent finds the ticket back in its pool at its next wake.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "message.untag",
+      "description": "Clear a comment's pending decision (#B.256); a decided one keeps its audit.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.vote",
+      "description": "Vote on a comment: 1, -1, or 0 to take one's vote back. a thumb up pings the comment's author.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "value",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.milestones",
+      "description": "A project's milestones, oldest first: state (open / released) and progress.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "rpc.discover",
+      "description": "The methods of this bus, as an OpenRPC document, generated from the code.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "session.list",
+      "description": "Every session this daemon hosts: agent or name, cwd, running, clients, and the socket clients attach to.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "session.start",
+      "description": "Start a session on this machine: an agent's (with the loop kernel, to come) or a named one running `argv`, in `cwd`, at `size`, with the login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "agent",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          }
+        },
+        {
+          "name": "argv",
+          "required": false,
+          "schema": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "crew",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "env",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "size",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "rows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "cols": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              }
+            },
+            "required": [
+              "rows",
+              "cols"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "session.stop",
+      "description": "Stop a session: its command, then its host, whose files go with it. Answers once the host is gone.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "tag.list",
+      "description": "Without `project`, the database's tags (applied by numeric id). With it, the merged catalog (config ⊕ database, each annotated with `source`); `_global` or empty selects the cross-project view.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.assign",
+      "description": "#418: assign or claim a ticket. Without `assignee` (or naming the caller), the caller claims it; naming someone else pushes it to them, a human's gesture. The assignee is subscribed. A live assignment takes the ticket out of the other consumers' actionable pool until it lapses, is released, or the ticket closes.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "assignee",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.get",
+      "description": "One ticket, by id, comment id or hashid (a comment resolves to its thread, with `focus_message_id`). The header alone by default; `full`, `brief` (from the latest summary_until on) or `digest` (the snapshots) for the thread. `actionable`, `claimable`, `unread` and the votes are the caller's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        {
+          "name": "brief",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "digest",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "digest_limit",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "full",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "include_deleted",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "offset",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "order",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "summary",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "tail",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.mark_read",
+      "description": "Mark a ticket's events read for the caller, up to `up_to_id` when given (#B.191).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "up_to_id",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.move",
+      "description": "Move a ticket, whole thread, to another project : its reporter or a human. The answer is the moved head , with the canonical row.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.postpone",
+      "description": "Snooze a ticket (#B.329) until `until` (ISO 8601): hidden from the open inbox until then, when the reveal job brings it back. a human's gesture only: an agent never deals with snooze.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "until",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "ticket.relate",
+      "description": "Relate two tickets (#B.123 / #275): child_of / parent_of (a lineage, kept a tree), depends_on / blocks, related. A human, the reporter of either ticket, a project-owner of either project, or for depends_on / blocks the agent either is assigned to. The same relation twice is a no-op.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.release",
+      "description": "#418 / #436: release what the caller holds, back to the shared pool: an agent its own claim; the assignee or a moderator the assignment.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.set_milestone",
+      "description": "Put a ticket in a milestone, move it to another, or take it out (`milestone_id: null`). Planning: a human's gesture or a cto agent's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "milestone_id",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.set_owner",
+      "description": "#352: change a ticket's owner (its reporter). The new owner is subscribed, so they get the thread's pings; owner-bypass (close/reopen) follows it. the new owner is `owner`; `by_agent` is the author, the caller.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "by_agent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "owner",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "ticket.unsnooze",
+      "description": "Bring a snoozed ticket back now.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    }
+  ],
+  "components": {
+    "errors": {
+      "PARSE_ERROR": {
+        "code": -32700,
+        "message": "parse error"
+      },
+      "INVALID_REQUEST": {
+        "code": -32600,
+        "message": "invalid request"
+      },
+      "METHOD_NOT_FOUND": {
+        "code": -32601,
+        "message": "method not found"
+      },
+      "INVALID_PARAMS": {
+        "code": -32602,
+        "message": "invalid params"
+      },
+      "INTERNAL_ERROR": {
+        "code": -32603,
+        "message": "internal error"
+      },
+      "refusal": {
+        "code": 400,
+        "message": "a method's refusal: the JSON-RPC code is the HTTP status it matches, data.code is aiball's error code",
+        "data": {
+          "codes": [
+            "ALREADY_IMPORTED",
+            "ALREADY_MODERATED",
+            "AUTHOR_MISMATCH",
+            "AUTH_REQUIRED",
+            "BAD_GATEWAY",
+            "BAD_REQUEST",
+            "COMMITS_REQUIRED",
+            "CONFLICT",
+            "CONSUMER_NOT_FOUND",
+            "DECISION_SUPERSEDED",
+            "FORBIDDEN",
+            "FORBIDDEN_CLOSE",
+            "GONE",
+            "HANDBACK_CONTRADICTS",
+            "HANDBACK_REQUIRED",
+            "HOST_BUSY",
+            "INTERNAL",
+            "KEY_SCOPE_MISSING",
+            "LEVEL_READ_ONLY",
+            "LOOP_NOT_FOUND",
+            "MESSAGE_NOT_FOUND",
+            "MILESTONE_HAS_OPEN",
+            "MILESTONE_INVALID",
+            "MILESTONE_RELEASED",
+            "MODERATOR_ONLY",
+            "NOT_FOUND",
+            "NOT_IDLE",
+            "NOT_IMPLEMENTED",
+            "PARENT_PENDING_MODERATION",
+            "PAYLOAD_TOO_LARGE",
+            "PROJECT_NOT_FOUND",
+            "RELATION_CYCLE",
+            "STEP_NOT_HOLDER",
+            "STEP_RESUME_INVALID",
+            "STEP_RESUME_REQUIRED",
+            "STEP_TIMER_TOO_LONG",
+            "TAG_UNKNOWN",
+            "TICKET_ASSIGNED",
+            "TICKET_HELD",
+            "TICKET_NOT_FOUND",
+            "TOKEN_INVALID",
+            "TOO_MANY_REQUESTS",
+            "UNAUTHORIZED",
+            "UNAVAILABLE"
+          ]
+        }
+      }
+    }
+  }
+}

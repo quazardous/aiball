@@ -22,6 +22,14 @@ The WebSocket is at **`/bus`**:
 - over TCP: a token, as for `/api` — `Authorization: Bearer <token>`, or
   `?token=` where headers cannot be set (a browser).
 
+**Through a proxy node** ([`REMOTE.md`](./REMOTE.md)), `/bus` is on the node's
+socket and port too: the node relays each connection to its upstream's `/bus`,
+one upstream connection each, opened as it relays `/api` (the caller's own
+token when it has one; otherwise the node token and the consumer named — never
+in strict mode). Messages pass as they are; the `bus.hello` is the upstream's;
+either side closing closes the other. The upstream sees the caller relayed
+(see *Who may call a method*).
+
 The caller is authenticated **once**, on this opening request, by the same code
 as an HTTP request, and every call on the connection runs as that caller. An
 opening that fails is answered in HTTP with `{ error, code }` (401
@@ -155,6 +163,16 @@ than 8 MiB waiting); 1003, a binary frame.
 The daemon pings every 25 seconds; a client that has not answered by the next
 ping is cut. WebSocket libraries answer pings on their own.
 
+## The contract, generated
+
+The methods are published as an OpenRPC document and the subjects as an
+AsyncAPI one, both generated from the code (the methods' params from their
+schemas, their descriptions from the comments above them):
+[`api-bus.openrpc.json`](./api-bus.openrpc.json) and
+[`api-bus.asyncapi.json`](./api-bus.asyncapi.json), served live by
+`rpc.discover` and `bus.subjects`. `npx tsx scripts/bus-contract.ts` rewrites
+them; a test fails when they are stale.
+
 ## Methods
 
 Parameters are the fields the HTTP route took — its path, query and body
@@ -164,6 +182,8 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | Method | Callers | Replaces |
 |---|---|---|
 | `bus.whoami` | human, agent | — who the connection runs as: `{ consumer, kind, relayed, transport }` |
+| `rpc.discover` | human, agent | — this bus's methods, as OpenRPC |
+| `bus.subjects` | human, agent | — this bus's subjects, as AsyncAPI |
 | `bus.subscribe` | human, agent | — see *Subscriptions* |
 | `bus.unsubscribe` | human, agent | — see *Subscriptions* |
 | `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY` |

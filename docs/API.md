@@ -44,5 +44,9 @@ inventory's own reader, so a call tvty adds fails the test at once, naming
 tvty's commit; without the checkout (Docker, CI), it reads `API-ROUTES.md`.
 When tvty changes what it reads, the field table in the test changes with it.
 
-There is no formal schema (OpenAPI, JSON Schema) published yet: the documents
-above and that test stand for it.
+The bus's contract is published, generated from the code: the methods as an
+OpenRPC document ([`api-bus.openrpc.json`](./api-bus.openrpc.json), also served
+by `rpc.discover`) and the subjects as an AsyncAPI document
+([`api-bus.asyncapi.json`](./api-bus.asyncapi.json), served by `bus.subjects`).
+A test fails when the written documents are not what the code produces, and
+checks that every method and subject tvty's code names is in them.

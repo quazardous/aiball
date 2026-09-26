@@ -68,6 +68,7 @@ export function consumerEntries(): ConsumerEntry[] {
     return listConsumers().map((c) => consumerEntry(c, ctx));
 }
 
+/** Every consumer, each as `consumerEntry` builds it: presence, pings, wait credit, session. */
 defineMethod({
     name: "consumer.list",
     who: ["human", "agent"],

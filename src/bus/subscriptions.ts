@@ -52,6 +52,8 @@ export interface SubjectSpec {
     hears?(sub: Subscription, subject: string): boolean;
     /** What the subscriber receives of an event, or `SKIP` for nothing (`null` is data). */
     deliver?(sub: Subscription, subject: string, data: unknown): unknown;
+    /** What the published contract says of the value and of an event (#3069). */
+    doc?: { value: string; event: string };
     /** Called once the subscription is gone (a source to let go of). */
     release?(sub: Subscription): void;
     /** The concrete subject an event goes out under, when it hears wider (`hears`). */
@@ -65,6 +67,11 @@ export const SKIP: unique symbol = Symbol("skip");
 
 export function defineSubject(spec: SubjectSpec): void {
     specs.push(spec);
+}
+
+/** Every subject defined, for the published contract. */
+export function subjectSpecs(): readonly SubjectSpec[] {
+    return specs;
 }
 
 interface Published { seq: number; subject: string; data: unknown }
