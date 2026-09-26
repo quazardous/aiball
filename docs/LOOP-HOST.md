@@ -15,11 +15,18 @@ session itself** and let clients attach to it: a plain terminal (through
 ## Finding a loop's socket
 
 A client does not look for the socket on disk: **aiball publishes it**. An
-agent's bar (`GET /api/consumers/<agent>/bar`, the `agent_bar` event) carries
-`attach`: `{ "socket": "<state_dir>/attach.sock" }` when the loop's proxy
-holds the session and accepts clients, `null` otherwise (a tmux-hosted loop, no
-loop). The path is only meaningful on the loop's own host; the daemon will
-relay the protocol for a client elsewhere (the web UI, a remote tvty).
+agent's bar (`GET /api/consumers/<agent>/bar`, the `agent.<id>.bar` subject)
+carries `attach`:
+
+```json
+"attach": { "socket": "/…/attach.sock" }              // attachable from this machine
+"attach": { "socket": null, "reason": "remote" }      // on another machine: not attachable
+"attach": { "socket": null, "reason": "no_socket" }   // a loop started before its proxy served one
+```
+
+`reason` is there exactly when `socket` is `null`. The path is only
+meaningful on the loop's own host; the daemon will relay the protocol for a
+client elsewhere (the web UI, a remote tvty).
 
 ## Transport
 

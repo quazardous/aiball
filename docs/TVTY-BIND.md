@@ -42,10 +42,15 @@ Any number of clients may **watch** a Claude and type into it at once: tvty,
 the terminal claude-loop runs in, the web. Watching takes nothing and asks no
 confirmation. Only **moving** Claude from one place to the other does.
 
-- **The attach socket**: an agent's bar carries `attach.socket` when its
-  Claude can be attached from this machine, the same field whatever holds
-  it; `null` otherwise ([`LOOP-HOST.md`](./LOOP-HOST.md), *Finding a loop's
-  socket*).
+- **The attach socket**: an agent's bar carries `attach`, the same field
+  whatever holds Claude ([`LOOP-HOST.md`](./LOOP-HOST.md), *Finding a loop's
+  socket*):
+
+  ```json
+  "attach": { "socket": "/…/attach.sock" }              // attachable from this machine
+  "attach": { "socket": null, "reason": "remote" }      // on another machine: not attachable
+  "attach": { "socket": null, "reason": "no_socket" }   // a loop started before its proxy served one
+  ```
 - **The size** belongs to the last interactive client that typed, pasted or
   took focus; a read-only client never resizes; a smaller client crops
   ([`LOOP-HOST.md`](./LOOP-HOST.md), *Size*). In the attached mode, the
@@ -110,8 +115,8 @@ What tvty lists, from the bus alone:
 
 The attach socket is local. An agent whose loop runs on another machine,
 behind a proxy node, is visible on the bus but not attachable: its bar
-carries `attach: null` with `reason: "remote"`, so tvty can say so instead of
-failing. The daemon relaying the attach protocol, which `LOOP-HOST.md`
+carries `attach: { socket: null, reason: "remote" }`, so tvty can say so
+instead of failing. The daemon relaying the attach protocol, which `LOOP-HOST.md`
 foresees, is for later.
 
 ## The loops already running
@@ -119,8 +124,9 @@ foresees, is for later.
 claude-loop's proxy serves `attach.sock` with the host's code (the same Rust
 crate). *To build.* A loop started before that has no socket:
 
-- its bar says `attach: null`, and tvty attaches to it through tmux, for that
-  loop only, until every loop has its socket; then tvty drops tmux;
+- its bar says `attach: { socket: null, reason: "no_socket" }`, and tvty
+  attaches to it through tmux, for that loop only, until every loop has its
+  socket; then tvty drops tmux. `remote` never falls back to tmux;
 - it gets its socket at its next restart. `claude-loop restart --resume
   <agent>` restarts it now: Claude stops when idle and comes back with the
   same conversation, in a few seconds.
