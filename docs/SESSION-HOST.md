@@ -31,7 +31,9 @@ agent's session, which is what tmux gives such terminals today. Its files are
 in `$AIBALL_HOME/hosts/term-<name>/`, it is started by `session.start` with
 `{ name, argv, cwd }` instead of an agent, and the bus lists these sessions
 with the agents' (`session.list`), so clients show them as a group of their
-own.
+own. Their changes (started, clients, exited, stopped) come on the subject
+`session.<name>.state`; `session.*.state` gives them all, those started later
+included.
 
 ## The host outlives the daemon
 
