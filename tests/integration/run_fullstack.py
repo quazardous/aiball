@@ -111,6 +111,14 @@ def _wait_daemon_ready(timeout_s: float = 60.0) -> None:
     raise TimeoutError(f"daemon not ready after {timeout_s}s")
 
 
+def _dump_loop(loop_name: str, lines: int = 80) -> None:
+    """The loop's inspect snapshot and the tail of its log, for a failed run."""
+    r = _agent_exec(["/app/bin/claude-loop", "inspect", loop_name])
+    print(f"[fullstack] inspect {loop_name}: {r.stdout.strip() or r.stderr.strip()}")
+    log = _agent_exec(["sh", "-c", f"tail -n {lines} \"$HOME/.claude-loop/{loop_name}/loop.log\""])
+    print(f"[fullstack] loop.log (last {lines} lines):\n{log.stdout or log.stderr}")
+
+
 def _resolve(value: object, handles: dict) -> object:
     """Substitute `@name` references with the fixture handle ids. Recurses
     into dicts/lists ; a bare `@name` string → handles[name]."""
@@ -157,7 +165,7 @@ def _eval_expect(step: ExpectStep, snapshot: dict) -> list[str]:
     return fails
 
 
-def run(scenario_path: Path, only: set[str] | None) -> int:
+def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
     sc = parse_scenario(scenario_path)
     if only is not None:
         sc = filter_scenario_by_targets(sc, only)
@@ -243,8 +251,15 @@ def run(scenario_path: Path, only: set[str] | None) -> int:
         print(f"FATAL during run: {e}", file=sys.stderr)
         failed += 1
     finally:
-        print("[fullstack] compose down -v ...")
-        _compose("down", "-v", env=env, capture=True)
+        # #3093 — a failure said nothing of why: show what the loop saw before the
+        # stack goes, its snapshot and the end of its log.
+        if failed:
+            _dump_loop(loop_name)
+        if keep:
+            print("[fullstack] --keep: stack left up (docker compose -f tests/docker-compose.yml down -v)")
+        else:
+            print("[fullstack] compose down -v ...")
+            _compose("down", "-v", env=env, capture=True)
 
     print(f"[fullstack] result: {passed} passed, {failed} failed, {skipped} skipped")
     # Non-zero if anything failed OR anything was skipped (incomplete coverage).
@@ -255,9 +270,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Full-stack scenario orchestrator (#984)")
     ap.add_argument("scenario", type=Path, help="scenario yaml file")
     ap.add_argument("--only", help="comma-separated targets for partial run (e.g. human,expect_inspect)")
+    ap.add_argument("--keep", action="store_true", help="leave the stack up after the run, to look at it")
     args = ap.parse_args()
     only = set(args.only.split(",")) if args.only else None
-    return run(args.scenario, only)
+    return run(args.scenario, only, keep=args.keep)
 
 
 if __name__ == "__main__":

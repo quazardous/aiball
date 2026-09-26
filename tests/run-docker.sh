@@ -4,10 +4,13 @@
 #   bash tests/run-docker.sh unit [files...]   the unit suite (`npm test`), or only the given files
 #   bash tests/run-docker.sh e2e               the business-API scenarios (tests/scenario-*.ts)
 #   bash tests/run-docker.sh sim [scenario...] the board simulator's scenarios (tests/sim/scenarios)
-#   bash tests/run-docker.sh critical          before every deploy: unit, e2e, and the simulator's
-#                                              scenarios marked `critical: true`; exit code = worst
-#   bash tests/run-docker.sh full              before a release or after a large change: unit, e2e
-#                                              and every scenario (`all` is the same)
+#   bash tests/run-docker.sh fullstack         a real claude-loop driving fake-claude against a real
+#                                              daemon (tests/integration/fullstack): the loop kernel
+#   bash tests/run-docker.sh critical          before every deploy: unit, e2e, fullstack, and the
+#                                              simulator's scenarios marked `critical: true`;
+#                                              exit code = worst
+#   bash tests/run-docker.sh full              before a release or after a large change: unit, e2e,
+#                                              fullstack and every scenario (`all` is the same)
 #
 # The simulator plays its scenarios over AIBALL_SIM_SHARDS boards side by side
 # (default 4), each capped at AIBALL_SIM_CPUS cores (default 2).
@@ -54,6 +57,24 @@ run_e2e() {
     nice -n 10 bash tests/run-e2e.sh
 }
 
+# #3093 — nothing else runs the loop kernel: e2e drives the API, the simulator
+# drives agents through their MCP tools. These put a real claude-loop, its proxy
+# and its hooks against a real daemon, and check a wake goes all the way through.
+run_fullstack() {
+    local src="${AIBALL_TEST_SRC:-$PWD}" code=0 f
+    if [ -z "${AIBALL_TEST_PORT:-}" ]; then
+        local p
+        for p in $(seq 17911 17999); do
+            if ! (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then export AIBALL_TEST_PORT=$p; break; fi
+        done
+    fi
+    echo "=== fullstack (port ${AIBALL_TEST_PORT}, from $src) ==="
+    for f in smoke golden-path; do
+        (cd "$src" && nice -n 10 tests/integration/run_fullstack.py "tests/integration/fullstack/$f.yaml") || code=1
+    done
+    return $code
+}
+
 run_sim() {
     local shards="${AIBALL_SIM_SHARDS:-4}"
     local src="${AIBALL_TEST_SRC:-$PWD}"
@@ -81,10 +102,12 @@ case "$what" in
     unit) run_unit "$@" ;;
     e2e) run_e2e ;;
     sim) run_sim "$@" ;;
+    fullstack) run_fullstack ;;
     critical)
         code=0
         timed run_unit || code=1
         timed run_e2e || code=1
+        timed run_fullstack || code=1
         timed run_sim --critical || code=1
         echo "=== critical profile: ${SECONDS} s ==="
         exit $code
@@ -93,6 +116,7 @@ case "$what" in
         code=0
         timed run_unit || code=1
         timed run_e2e || code=1
+        timed run_fullstack || code=1
         timed run_sim || code=1
         echo "=== full profile: ${SECONDS} s ==="
         exit $code

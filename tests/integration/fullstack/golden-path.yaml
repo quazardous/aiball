@@ -6,4 +6,7 @@ scenario: golden-path-wake
 fixture: mention-unread
 steps:
   - { at: 0, spawn: { fake_claude: quick-prompt } }
-  - { at: 45, expect: { daemon: { "unread.test-agent": 0 } } }
+# The first wake cannot come before ~50 s: boot seals at its 30 s minimum, the
+# session goes live ~10 s later, and the bootstrap skill it injects defers the
+# next wake by ~10 s. 90 s leaves room for the wake, its delivery and the ack.
+  - { at: 90, expect: { daemon: { "unread.test-agent": 0 } } }

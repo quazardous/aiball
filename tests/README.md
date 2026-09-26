@@ -7,10 +7,11 @@ Two complementary layers, one stack (#dz8sm5):
 | **Pure logic** | `npm run test:docker -- unit` | fast `node:test` units, no DB | `src/**/*.test.ts` |
 | **e2e scenarios** | `npm run test:docker -- e2e` | real daemon in Docker, business-API cinématiques | `tests/scenario-*.ts` |
 | **Board simulator** | `npm run test:docker -- sim` | real daemon + simulated agents through the MCP handlers | `tests/sim/scenarios/*.yaml` |
+| **Full stack** | `npm run test:docker -- fullstack` | real daemon + a real `claude-loop` (kernel, proxy, hooks) driving `fake-claude`: the only layer that runs the loop kernel | `tests/integration/fullstack/*.yaml` |
 
 ## Where tests run
 
-`bash tests/run-docker.sh unit|e2e|sim|all` (= `npm run test:docker -- …`) is
+`bash tests/run-docker.sh unit|e2e|sim|fullstack|critical|all` (= `npm run test:docker -- …`) is
 the one entry point for anything heavier than a single test file:
 
 - **unit** runs `npm test` in the `tests` compose service: same image as the
