@@ -53,18 +53,20 @@ defineSubject({
     doc: { value: "the agent's entry, as consumer.list gives it; with *, keyed by agent", event: "the whole entry again whenever it changed; null once the consumer is deleted" },
     wildcard: true,
     access: (caller) => consumers(caller),
+    // Empty on a resumed subscription: its first event per consumer is then pushed whole.
+    setup: (sub) => { sub.state.sent = new Map<string, string>(); },
     value: (sub) => {
         const id = idOf(sub);
         const all = consumerEntries();
         const mine = id === "*" ? all : all.filter((c) => c.consumer_id === id);
-        sub.state.sent = new Map(mine.map((c) => [c.consumer_id, JSON.stringify(c)]));
+        const sent = sub.state.sent as Map<string, string>;
+        for (const c of mine) sent.set(c.consumer_id, JSON.stringify(c));
         if (id !== "*") return mine[0] ?? null;
         return Object.fromEntries(all.map((c) => [c.consumer_id, c]));
     },
     deliver: (sub, subject) => {
         const id = subject.split(".")[1];
-        // Absent on a subscription resumed with `since`: its value was not rebuilt.
-        const sent = (sub.state.sent ??= new Map<string, string>()) as Map<string, string>;
+        const sent = sub.state.sent as Map<string, string>;
         const entry = consumerEntryFor(id);
         const json = JSON.stringify(entry);
         if (sent.get(id) === json) return SKIP;
@@ -155,11 +157,11 @@ const projectTickets: SubjectSpec = {
     // rows could keep one that left while the client was away.
     replay: false,
     access: (caller) => consumers(caller),
+    setup: (sub) => { sub.state.sent = new Map<number, Sent>(); },
     value: (sub) => {
         const project = sub.parts[1] === "*" ? undefined : sub.parts[1];
         const out = getMethod("inbox.list")!.run(sub.caller, { project, view: "turn", ...viewOpts(sub) }) as { rows: TurnRow[] };
-        const sent = new Map<number, Sent>();
-        sub.state.sent = sent;
+        const sent = sentOf(sub);
         // What time will change: the same rows' deadlines, computed once for the view.
         const tickets = out.rows.map((r) => getMessage(r.id)).filter((t): t is Message => !!t);
         const ctx = buildInboxRowContext(tickets, consumerIdOf(sub.caller), project);
@@ -240,6 +242,11 @@ export function sweepDeadlines(now = Date.now()): void {
 
 const pingSources = new Map<string, { count: number; off: () => void }>();
 
+/** Tests only: how many subscriptions hold `user`'s ping source; null when it is unwired. */
+export function pingSourceCountForTests(user: string): number | null {
+    return pingSources.get(user)?.count ?? null;
+}
+
 /**
  * What a ping points at, so a client need not read it again: the comment (or
  * the ticket), its ticket's title and project, its author, kind, status, and
@@ -267,7 +274,8 @@ defineSubject({
     pattern: "user.*.pings",
     doc: { value: "{ unread }", event: "a ping, and message: what it points at (kind, status, author, project, ticket title, decision)" },
     access: (caller, id) => (id === caller.consumer_id ? null : new Refusal(403, "one's own pings only")),
-    value: (sub) => {
+    // The ping source is wired for every subscription, a resumed one included (#3089).
+    setup: (sub) => {
         const id = idOf(sub);
         const src = pingSources.get(id);
         if (src) src.count++;
@@ -281,8 +289,8 @@ defineSubject({
                 }),
             });
         }
-        return { unread: unreadPingCount(id) };
     },
+    value: (sub) => ({ unread: unreadPingCount(idOf(sub)) }),
     release: (sub) => {
         const src = pingSources.get(idOf(sub));
         if (src && --src.count === 0) {

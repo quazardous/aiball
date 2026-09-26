@@ -46,7 +46,14 @@ export interface SubjectSpec {
      */
     replay?: boolean;
     access(caller: Caller, id: string): Refusal | null;
-    /** The current value, for one id or (`*`) all of them as `id → value`. */
+    /**
+     * #3089 — what a subscription needs wired or kept, whichever way it starts:
+     * called on every subscribe, BEFORE the value or the replay. A resumed
+     * subscription (`since`) does not compute its value, so nothing a
+     * subscription relies on may live in `value`.
+     */
+    setup?(sub: Subscription): void;
+    /** The current value, for one id or (`*`) all of them as `id → value`. Computes; wires nothing (see `setup`). */
     value(sub: Subscription): unknown;
     /** Which published subjects this subscription hears; by default its own. */
     hears?(sub: Subscription, subject: string): boolean;
@@ -177,6 +184,7 @@ export function subscribe(
     const denied = spec.access(caller, id);
     if (denied) throw denied;
     const sub: Subscription = { id: randomUUID(), subject, parts, spec, caller, opts, state: {}, session };
+    spec.setup?.(sub);
     // Registered before anything is read: nothing published after this point is missed.
     const canReplay = spec.replay !== false && since?.epoch === BUS_EPOCH && typeof since.seq === "number"
         && (since.seq >= seq || (ring.length > 0 && ring[0].seq <= since.seq + 1));

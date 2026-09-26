@@ -274,3 +274,26 @@ test("#3070 a state subscription resumed with since gets the events it missed, e
     assert.equal((missed[0].data as { present: boolean }).present, true);
     presenceDisconnect("resumed");
 });
+
+test("#3089 a pings subscription resumed with since still gets its pings, and letting it go balances the source", async () => {
+    const t = ticket("pinged later");
+    const c = await open("worker");
+    const first = await c.call<Sub>("bus.subscribe", { subject: "user.worker.pings" });
+    await c.call("bus.unsubscribe", { id: first.id });
+    const back = await c.call<Sub>("bus.subscribe", { subject: "user.worker.pings", since: { epoch: first.epoch, seq: first.seq } });
+    assert.equal(back.replayed, true, "the path that used to lose the source");
+    const m = submitMessage({ project: "p-subs", kind: "comment_added", ticket_id: t, parent_id: t, body: "after resume", by_agent: "boss" });
+    await c.settle();
+    const ping = c.events.find((e) => e.subject === "user.worker.pings" && (e.data as { comment_id?: number }).comment_id === m.id);
+    assert.ok(ping, "pushed to the resumed subscription");
+    const { pingSourceCountForTests } = await import("./methods/subjects.js");
+    assert.equal(pingSourceCountForTests("worker"), 1, "one source, held by the one subscription");
+    await c.call("bus.unsubscribe", { id: back.id });
+    assert.equal(pingSourceCountForTests("worker"), null, "every subscription let go: the source is unwired");
+    const two = [await c.call<Sub>("bus.subscribe", { subject: "user.worker.pings" }), await c.call<Sub>("bus.subscribe", { subject: "user.worker.pings", since: { epoch: first.epoch, seq: first.seq } })];
+    assert.equal(pingSourceCountForTests("worker"), 2, "two subscriptions share one source");
+    await c.call("bus.unsubscribe", { id: two[0].id });
+    assert.equal(pingSourceCountForTests("worker"), 1);
+    await c.call("bus.unsubscribe", { id: two[1].id });
+    assert.equal(pingSourceCountForTests("worker"), null);
+});
