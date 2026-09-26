@@ -1,10 +1,11 @@
 /**
  * #3067 — the rarer calls of aiball's own clients, on the bus: a ticket's
  * payload zone (docs/PAYLOADS.md), its pending children, a consumer's
- * signals, and a project's feed path.
+ * signals, a project's feed path; the board's config, the step timing report,
+ * coupling a ticket to an upstream issue, and reloading the daemon's config.
  */
 import { z } from "zod";
-import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
+import { authorOf, consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { getMessage } from "../../db.js";
 import { isTicketClosed, listPendingChildren, listTypedRelationsForTicket } from "../../db/messages.js";
 import { isHuman } from "../../db/consumers.js";
@@ -14,6 +15,16 @@ import { ackSignal, listPendingSignals } from "../../db/signals.js";
 import { applyModeration } from "../../api/moderation.js";
 import { outboxPath } from "../../paths.js";
 import { ERROR_CODES } from "../../domain.js";
+import { findConfigUpwards, globalConfigPath, loadConfig } from "../../autopoll/config.js";
+import { defaultPingsPath } from "../../claude-loop/state.js";
+import { getStrategy, getUploadMaxBytes } from "../../db.js";
+import { resolveFormatting } from "../../formatting.js";
+import { listWaitCredits } from "../../db/wait-credit.js";
+import { stepTimingReport, stepTimingRows } from "../../db/step-timing.js";
+import { importUpstream, AlreadyCoupledError } from "../../upstream-import.js";
+import { exportUpstream } from "../../upstream-export.js";
+import { withTagsOne } from "../../api/_helpers.js";
+import { reloadConfig } from "../../config-reload.js";
 
 type TicketRow = { id: number; kind: string; by_agent?: string | null; assignee?: string | null };
 
@@ -190,6 +201,113 @@ defineMethod({
             return { path: outboxPath(p.project) };
         } catch (e) {
             throw new Refusal(400, (e as Error).message);
+        }
+    },
+});
+
+/**
+ * #235 — the board's configuration a client reads once at boot: formatting,
+ * strategy, upload limit, and (#160) the upstream bindings per project. The
+ * YAML chain is re-read on each call (defaults, global, the daemon's cwd).
+ */
+defineMethod({
+    name: "config.get",
+    who: ["human", "agent"],
+    params: z.object({}),
+    run: () => ({
+        formatting: resolveFormatting({
+            shippedDefaultsPath: defaultPingsPath(),
+            globalConfigPath: globalConfigPath(),
+            projectConfigPath: findConfigUpwards(process.cwd()),
+        }),
+        strategy: getStrategy(),
+        uploadMaxBytes: getUploadMaxBytes(),
+        upstream: loadConfig(process.cwd()).upstream,
+    }),
+});
+
+/** #2629 — declared step delays against when the agent actually came back, with the wait credits. */
+defineMethod({
+    name: "step.timing",
+    who: ["human", "agent"],
+    params: z.object({ project: z.string().optional(), since_days: z.coerce.number().optional() }),
+    run: (_caller, p) => {
+        const project = p.project || null;
+        const days = p.since_days;
+        const since = days !== undefined && Number.isFinite(days) && days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : null;
+        return { project, since, buckets: stepTimingReport(stepTimingRows({ project, since })), credits: listWaitCredits(project) };
+    },
+});
+
+/** A ticket already mirroring the issue: 409, the ticket in `details.existing_ticket_id`. */
+function coupledRefusal(err: unknown): Refusal {
+    if (err instanceof AlreadyCoupledError) {
+        return new Refusal(409, err.message, ERROR_CODES.ALREADY_IMPORTED, { existing_ticket_id: err.existingTicketId });
+    }
+    return new Refusal(400, err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * Upstream coupling — manual import: fetch an external issue (`gh#123`, which
+ * needs a default binding, or `gh:owner/repo#123`) and file a ticket coupled
+ * to it. Nothing here runs by itself.
+ */
+defineMethod({
+    name: "ticket.import",
+    who: ["human", "agent"],
+    params: z.object({ project: z.string().optional(), ref: z.unknown().optional(), by_agent: z.unknown().optional() }),
+    run: async (caller, p) => {
+        const ref = typeof p.ref === "string" ? p.ref.trim() : "";
+        if (!ref) throw new Refusal(400, "ref required (e.g. gh#123 or gh:owner/repo#123)");
+        if (!p.project) throw new Refusal(400, "project required");
+        const by_agent = authorOf(caller, p.by_agent);
+        try {
+            const { ticket, external, provider } = await importUpstream({ project: p.project, ref, by_agent });
+            return { ticket: withTagsOne(ticket), external, provider };
+        } catch (err) {
+            throw coupledRefusal(err);
+        }
+    },
+});
+
+/**
+ * Upstream coupling — manual export: open a NEW external issue from a ticket
+ * and couple them. It writes to the remote: a client confirms first.
+ */
+defineMethod({
+    name: "ticket.export",
+    who: ["human", "agent"],
+    params: z.object({ id: ticketId, kind: z.string().optional(), repo: z.string().optional(), by_agent: z.unknown().optional() }),
+    run: async (caller, p) => {
+        const by_agent = authorOf(caller, p.by_agent);
+        try {
+            const { ticket, external, provider } = await exportUpstream({ ticket_id: p.id, kind: p.kind, repo: p.repo, by_agent });
+            return { ticket: withTagsOne(ticket), external, provider };
+        } catch (err) {
+            throw coupledRefusal(err);
+        }
+    },
+});
+
+/**
+ * #2089 — reload the daemon's config in place (`aiball reload`). Local-trust,
+ * not moderator: it replaces a signal to the pidfile, which any process of the
+ * same uid could send, and the Unix socket is that same boundary. It re-reads a
+ * config file and says what it read; a failure leaves the daemon up.
+ */
+defineMethod({
+    name: "daemon.reload",
+    who: ["human", "agent"],
+    relayed: false,
+    params: z.object({}),
+    run: (caller) => {
+        if (caller.transport !== "uds") {
+            throw new Refusal(403, "daemon reload is local-only — run `aiball reload` on the machine running the daemon (it goes over the Unix socket)", ERROR_CODES.FORBIDDEN);
+        }
+        try {
+            return { reloaded: true, ...reloadConfig() };
+        } catch (e) {
+            throw new Refusal(500, (e as Error).message, ERROR_CODES.INTERNAL, { reloaded: false });
         }
     },
 });

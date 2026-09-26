@@ -12,7 +12,10 @@ The bus is how a client talks to aiball: **one permanent connection** per
 client, JSON-RPC 2.0 over a WebSocket. The core is a table of **methods**,
 functions of the caller and their parameters; the bus calls them directly.
 HTTP stays for what a browser fetches by URL: the web UI's files, and uploaded
-files.
+files. It also stays for the probes that answer for the daemon you reach and
+need no token: `/api/health`, `/api/node`, `/api/version` and
+`/api/auth/status`. A proxy node answers these itself, where the bus would
+relay the question upstream.
 
 ## Connecting
 
@@ -278,3 +281,15 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `signal.list` | human, agent; another consumer's, human | `GET /api/signals` |
 | `signal.ack` | human, agent | `POST /api/signals/:id/ack` |
 | `project.feed_path` | human, agent | `GET /api/feed-path` |
+| `message.set_tags` | human, agent | `PUT /api/messages/:id/tags` — replaces the set; `tag_ids` takes ids or names |
+| `automation.rules` | human, agent | `GET /api/automation/rules` — `enabled_only` is a boolean |
+| `automation.create_rule` | human, agent | `POST /api/automation/rules` |
+| `automation.update_rule` | human, agent | `PATCH /api/automation/rules/:id` |
+| `automation.delete_rule` | human, agent | `DELETE /api/automation/rules/:id` — 204 over HTTP; a rule from the YAML config is refused |
+| `consumer.upsert` | human, agent | `POST /api/consumers` |
+| `consumer.update` | human, agent; the capability fields, human | `PATCH /api/consumers/:consumer_id` |
+| `config.get` | human, agent | `GET /api/config` |
+| `step.timing` | human, agent | `GET /api/steps/timing` |
+| `ticket.import` | human, agent | `POST /api/tickets/import` — an issue a ticket already mirrors is a 409 whose `details.existing_ticket_id` names it |
+| `ticket.export` | human, agent | `POST /api/tickets/:id/export` — same 409 |
+| `daemon.reload` | human or agent, local only | `POST /api/daemon/reload` |

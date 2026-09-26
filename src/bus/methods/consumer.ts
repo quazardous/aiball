@@ -2,7 +2,9 @@
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { ERROR_CODES } from "../../domain.js";
-import { getConsumer, listConsumers, pingCountsByConsumer, type Consumer } from "../../db.js";
+import { getConsumer, isHuman, listConsumers, pingCountsByConsumer, updateConsumer, upsertConsumer, type Consumer, type ConsumerKind } from "../../db.js";
+import { AGENT_TYPES, type AgentType } from "../../db/consumers.js";
+import { broadcast } from "../../ws.js";
 import { sessionFor, viewOf } from "../../sessions/registry.js";
 import { isPresent, presenceRunning } from "../../live-presence.js";
 import { emitControl } from "../../event-bus.js";
@@ -190,5 +192,82 @@ defineMethod({
         const sent = sendAfkToLoop(consumerId, action, durationSec);
         if (!sent.ok) throw new Refusal(sent.status, sent.error, sent.code);
         return { consumer_id: consumerId, loop: sent.loop, action, queued: true };
+    },
+});
+
+const KINDS = ["human", "agent", "sandbox"] as const;
+
+function checkKind(kind: unknown): void {
+    if (kind !== undefined && !(KINDS as readonly unknown[]).includes(kind)) {
+        throw new Refusal(400, "kind must be 'human', 'agent', or 'sandbox'");
+    }
+}
+
+/**
+ * #B.79 — create a consumer, or update it. #2221 — an absent field leaves the
+ * record's value alone (a partial call once wiped the note and re-enabled a
+ * disabled agent); an explicit null clears it.
+ */
+defineMethod({
+    name: "consumer.upsert",
+    who: ["human", "agent"],
+    params: z.object({ consumer_id: z.unknown(), kind: z.unknown().optional(), display_name: z.unknown().optional(), enabled: z.unknown().optional(), note: z.unknown().optional() }),
+    run: (_caller, p) => {
+        if (typeof p.consumer_id !== "string" || !p.consumer_id) throw new Refusal(400, "consumer_id required");
+        checkKind(p.kind);
+        const c = upsertConsumer({
+            consumer_id: p.consumer_id,
+            kind: p.kind as ConsumerKind | undefined,
+            display_name: typeof p.display_name === "string" || p.display_name === null ? p.display_name : undefined,
+            enabled: typeof p.enabled === "boolean" ? p.enabled : undefined,
+            note: typeof p.note === "string" || p.note === null ? p.note : undefined,
+        });
+        broadcast({ type: "consumer_changed", data: c });
+        return c;
+    },
+});
+
+/**
+ * Patch a consumer. #1477 — the capability fields (`can_claim`,
+ * `can_create_agent`, #2201 `agent_type`) are a human's to set, never an
+ * agent's: an agent flipping its own `can_claim` would make the authority
+ * model decorative. The other fields stay editable by anyone.
+ */
+defineMethod({
+    name: "consumer.update",
+    who: ["human", "agent"],
+    params: z.object({
+        consumer_id: z.string(),
+        kind: z.unknown().optional(), display_name: z.unknown().optional(), enabled: z.unknown().optional(),
+        note: z.unknown().optional(), micro_prompt: z.unknown().optional(), can_claim: z.unknown().optional(),
+        can_create_agent: z.unknown().optional(), agent_type: z.unknown().optional(), notify_project_broadcasts: z.unknown().optional(),
+    }),
+    run: (caller, p) => {
+        checkKind(p.kind);
+        const touchesCapability = p.can_claim !== undefined || p.can_create_agent !== undefined || p.agent_type !== undefined;
+        if (touchesCapability && !isHuman(consumerIdOf(caller))) {
+            throw new Refusal(403, "consumer capability fields (can_claim, can_create_agent, agent_type) are human-only — set them via the moderator UI, not from an agent", ERROR_CODES.MODERATOR_ONLY);
+        }
+        if (p.agent_type !== undefined && !(AGENT_TYPES as readonly unknown[]).includes(p.agent_type)) {
+            throw new Refusal(400, `agent_type must be one of: ${AGENT_TYPES.join(", ")}`);
+        }
+        const textOrNull = (v: unknown): string | null => (typeof v === "string" ? v : null);
+        const patch: Parameters<typeof updateConsumer>[1] = {};
+        if (p.kind !== undefined) patch.kind = p.kind as ConsumerKind;
+        if (p.display_name !== undefined) patch.display_name = textOrNull(p.display_name);
+        if (typeof p.enabled === "boolean") patch.enabled = p.enabled;
+        if (p.note !== undefined) patch.note = textOrNull(p.note);
+        if (p.micro_prompt !== undefined) patch.micro_prompt = textOrNull(p.micro_prompt);
+        if (typeof p.can_claim === "boolean") patch.can_claim = p.can_claim;
+        if (typeof p.can_create_agent === "boolean") patch.can_create_agent = p.can_create_agent;
+        if (p.agent_type !== undefined) patch.agent_type = p.agent_type as AgentType;
+        // #516 — tri-state: null, true or false; any other type changes nothing.
+        if (p.notify_project_broadcasts === null || typeof p.notify_project_broadcasts === "boolean") {
+            patch.notify_project_broadcasts = p.notify_project_broadcasts;
+        }
+        const updated = updateConsumer(p.consumer_id, patch);
+        if (!updated) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
+        broadcast({ type: "consumer_changed", data: updated });
+        return updated;
     },
 });

@@ -4,8 +4,6 @@ import { standingPromptView } from "./bus/methods/project.js";
 import { trimStepWaits } from "./db/wait-credit.js";
 import { invalidateInboxAgg } from "./db/inbox-agg.js";
 import { invalidateFlagsCache } from "./db/projects.js";
-import { listWaitCredits } from "./db/wait-credit.js";
-import { stepTimingReport, stepTimingRows } from "./db/step-timing.js";
 import { Router, type Request, type Response } from "express";
 import {
     listProjects,
@@ -35,7 +33,6 @@ import { broadcast } from "./ws.js";
 import { AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "./paths.js";
 import { loadLaunchers, getLauncher } from "./launchers.js";
 import { bearerAuth } from "./auth.js";
-import { reloadConfig } from "./config-reload.js";
 import { badRequest, consumerOf, refuse } from "./api/_helpers.js";
 import { schedulerStatus } from "./cron/index.js";
 import { AIBALL_VERSION } from "./version.js";
@@ -123,22 +120,7 @@ api.get("/health", (_req, res) => {
  * read. It mints nothing, exposes nothing, and cannot fail in a way that takes
  * the daemon down.
  */
-api.post("/daemon/reload", (req: Request, res: Response) => {
-    const local = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
-    if (!local) {
-        return res.status(403).json({
-            error: "daemon reload is local-only — run `aiball reload` on the machine "
-                + "running the daemon (it goes over the Unix socket)",
-            code: ERROR_CODES.FORBIDDEN,
-        });
-    }
-    try {
-        res.json({ reloaded: true, ...reloadConfig() });
-    } catch (e) {
-        // The daemon stays up; say what happened rather than dying.
-        res.status(500).json({ reloaded: false, error: (e as Error).message, code: ERROR_CODES.INTERNAL });
-    }
-});
+api.post("/daemon/reload", serveMethod("daemon.reload"));
 
 api.get("/strategy", (_req, res) => {
     res.json({ strategy: getStrategy() });
@@ -289,12 +271,7 @@ api.get("/projects", serveMethod("project.list"));
 api.post("/projects", serveMethod("project.create", undefined, { status: 201 }));
 
 // #2629 — declared step delays against when the agent actually came back.
-api.get("/steps/timing", (req, res) => {
-    const project = typeof req.query.project === "string" && req.query.project ? req.query.project : null;
-    const days = Number(req.query.since_days);
-    const since = Number.isFinite(days) && days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : null;
-    res.json({ project, since, buckets: stepTimingReport(stepTimingRows({ project, since })), credits: listWaitCredits(project) });
-});
+api.get("/steps/timing", serveMethod("step.timing"));
 
 // #2645 david — cut every waiting step down to at most N minutes from now.
 api.post("/steps/trim", (req, res) => {

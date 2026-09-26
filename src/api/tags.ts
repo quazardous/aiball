@@ -14,14 +14,12 @@ import {
     insertTag,
     listMessageTags,
     listTags,
-    setMessageTags,
     updateTag,
     type Tag,
 } from "../db.js";
 import { broadcast } from "../ws.js";
-import { emitLifecycle } from "../event-bus.js";
 import { configTagNames, resolveConfigTags } from "../config-tags.js";
-import { authorFor, badRequest, conflict, notFound } from "./_helpers.js";
+import { badRequest, conflict, notFound } from "./_helpers.js";
 
 export const tagsRouter = Router();
 
@@ -216,39 +214,7 @@ tagsRouter.get("/messages/:id/tags", (req, res) => {
     res.json(listMessageTags(id));
 });
 
-tagsRouter.put("/messages/:id/tags", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const m = getMessage(id);
-    if (!m) return notFound(res);
-    const { tag_ids, set_by } = req.body ?? {};
-    if (!Array.isArray(tag_ids)) {
-        return badRequest(res, "tag_ids must be an array of ids");
-    }
-    const ids: number[] = [];
-    for (const r of tag_ids) {
-        const tag = typeof r === "number" ? getTag(r) : getTagByName(String(r));
-        if (!tag) return badRequest(res, `unknown tag: ${r}`);
-        ids.push(tag.id);
-    }
-    // #457 slice 2 : diff added-tags so the automation engine sees one
-    // `ticket_tagged` event per NEW tag (PUT is a bulk replace, but the
-    // engine's lever `match_tag_added` operates per-add).
-    const before = new Set(listMessageTags(id).map((t) => t.name));
-    // #3036 — who tags is who is authenticated.
-    const setBy = authorFor(req, res, set_by, "set_by");
-    if (setBy === null) return;
-    setMessageTags(id, ids, setBy);
-    const tags = listMessageTags(id);
-    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
-    if (m.kind === "ticket_created") {
-        const allNames = tags.map((t) => t.name);
-        for (const t of tags) {
-            if (before.has(t.name)) continue;
-            emitLifecycle({ op: "tagged", message: m, added_tag: t.name, all_tags: allNames });
-        }
-    }
-    res.json(tags);
-});
+tagsRouter.put("/messages/:id/tags", serveMethod("message.set_tags"));
 
 tagsRouter.post("/messages/:id/tags", serveMethod("message.add_tag", undefined, { status: 201 }));
 

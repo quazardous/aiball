@@ -7,6 +7,250 @@
   },
   "methods": [
     {
+      "name": "automation.create_rule",
+      "description": "Create a rule. `actions` is the canonical stack; without it the single `action` is required. `expression` (#457 slice 5.2), when set, replaces the AND of the flat `match_*` fields; a malformed tree is refused here so it never reaches the engine.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "action",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "actions",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "expression",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_by_agent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_intent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_kind",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_priority",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_project",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_tag_added",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_tags",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "position",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "scope_consumer",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "triggers",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "automation.delete_rule",
+      "description": "Delete a rule of the database; a YAML rule lives in its file and is refused.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "automation.rules",
+      "description": "The rules, database first (the UI's, which may override), then the YAML's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "enabled_only",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "scope_consumer",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "trigger",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "automation.update_rule",
+      "description": "Change any part of a rule; only what is present changes, checked as on create.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "action",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "actions",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "enabled",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "expression",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_by_agent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_intent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_kind",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_priority",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_project",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_tag_added",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "match_tags",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "position",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "scope_consumer",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "triggers",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "backlog.record_wake",
       "description": "A backlog wake just named this ticket for the consumer: the per-consumer cooldown starts again.",
       "paramStructure": "by-name",
@@ -134,6 +378,20 @@
     {
       "name": "bus.whoami",
       "description": "Who the connection runs as: what every call on it is authorized against.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "config.get",
+      "description": "The board's configuration a client reads once at boot: formatting, strategy, upload limit, and the upstream bindings per project. The YAML chain is re-read on each call (defaults, global, the daemon's cwd).",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -456,6 +714,128 @@
       },
       "x-callers": [
         "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "consumer.update",
+      "description": "Patch a consumer. the capability fields (`can_claim`, `can_create_agent`, #2201 `agent_type`) are a human's to set, never an agent's: an agent flipping its own `can_claim` would make the authority model decorative. The other fields stay editable by anyone.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent_type",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "can_claim",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "can_create_agent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "display_name",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "enabled",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "micro_prompt",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "notify_project_broadcasts",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.upsert",
+      "description": "#B.79 — create a consumer, or update it. an absent field leaves the record's value alone (a partial call once wiped the note and re-enabled a disabled agent); an explicit null clears it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "display_name",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "enabled",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "daemon.reload",
+      "description": "Reload the daemon's config in place (`aiball reload`). Local-trust, not moderator: it replaces a signal to the pidfile, which any process of the same uid could send, and the Unix socket is that same boundary. It re-reads a config file and says what it read; a failure leaves the daemon up.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
       ],
       "x-relayed": false
     },
@@ -1265,6 +1645,40 @@
           "schema": {
             "type": "string"
           }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "message.set_tags",
+      "description": "Replace a message's tags (`tag_ids`: tag ids or names). each tag new on a ticket fires its own `tagged` trigger, as `match_tag_added` works per tag. `set_by` is the caller.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "tag_ids",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "set_by",
+          "required": false,
+          "schema": {}
         }
       ],
       "result": {
@@ -2165,6 +2579,35 @@
       ]
     },
     {
+      "name": "step.timing",
+      "description": "Declared step delays against when the agent actually came back, with the wait credits.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "since_days",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "tag.list",
       "description": "Without `project`, the database's tags (applied by numeric id). With it, the merged catalog (config ⊕ database, each annotated with `source`); `_global` or empty selects the cross-project view.",
       "paramStructure": "by-name",
@@ -2340,6 +2783,49 @@
       ]
     },
     {
+      "name": "ticket.export",
+      "description": "Upstream coupling — manual export: open a NEW external issue from a ticket and couple them. It writes to the remote: a client confirms first.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "by_agent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "repo",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.get",
       "description": "One ticket, by id, comment id or hashid (a comment resolves to its thread, with `focus_message_id`). The header alone by default; `full`, `brief` (from the latest summary_until on) or `digest` (the snapshots) for the thread. `actionable`, `claimable`, `unread` and the votes are the caller's.",
       "paramStructure": "by-name",
@@ -2427,6 +2913,38 @@
           "schema": {
             "type": "string"
           }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.import",
+      "description": "Upstream coupling — manual import: fetch an external issue (`gh#123`, which needs a default binding, or `gh:owner/repo#123`) and file a ticket coupled to it. Nothing here runs by itself.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "by_agent",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "ref",
+          "required": false,
+          "schema": {}
         }
       ],
       "result": {

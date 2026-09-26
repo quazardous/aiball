@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { authorOf, defineMethod, Refusal } from "../methods.js";
 import { id } from "../params.js";
-import { addMessageTag, getTag, getTagByName, listMessageTags, listTags, removeMessageTag } from "../../db/tags.js";
+import { addMessageTag, getTag, getTagByName, listMessageTags, listTags, removeMessageTag, setMessageTags } from "../../db/tags.js";
 import { getMessage } from "../../db.js";
 import { broadcast } from "../../ws.js";
 import { emitLifecycle } from "../../event-bus.js";
@@ -65,6 +65,40 @@ defineMethod({
         broadcast({ type: "message_tagged", data: { message_id: p.id, tags } });
         if (m.kind === "ticket_created" && !wasPresent) {
             emitLifecycle({ op: "tagged", message: m, added_tag: t.name, all_tags: tags.map((x) => x.name) });
+        }
+        return tags;
+    },
+});
+
+/**
+ * Replace a message's tags (`tag_ids`: tag ids or names). #457 — each tag new
+ * on a ticket fires its own `tagged` trigger, as `match_tag_added` works per
+ * tag. #3036 — `set_by` is the caller.
+ */
+defineMethod({
+    name: "message.set_tags",
+    who: ["human", "agent"],
+    params: z.object({ id, tag_ids: z.unknown(), set_by: z.unknown().optional() }),
+    run: (caller, p) => {
+        const m = getMessage(p.id);
+        if (!m) throw new Refusal(404, "not found");
+        if (!Array.isArray(p.tag_ids)) throw new Refusal(400, "tag_ids must be an array of ids");
+        const ids: number[] = [];
+        for (const r of p.tag_ids) {
+            const tag = typeof r === "number" ? getTag(r) : getTagByName(String(r));
+            if (!tag) throw new Refusal(400, `unknown tag: ${r}`);
+            ids.push(tag.id);
+        }
+        const before = new Set(listMessageTags(p.id).map((t) => t.name));
+        const setBy = authorOf(caller, p.set_by, "set_by");
+        setMessageTags(p.id, ids, setBy);
+        const tags = listMessageTags(p.id);
+        broadcast({ type: "message_tagged", data: { message_id: p.id, tags } });
+        if (m.kind === "ticket_created") {
+            const allNames = tags.map((t) => t.name);
+            for (const t of tags) {
+                if (!before.has(t.name)) emitLifecycle({ op: "tagged", message: m, added_tag: t.name, all_tags: allNames });
+            }
         }
         return tags;
     },

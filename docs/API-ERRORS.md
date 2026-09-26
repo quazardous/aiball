@@ -9,8 +9,10 @@ Every refusal the API answers is JSON:
 - `error` is a sentence for a human. Its wording may change; don't match on it.
 - `code` is the contract. A client branches on it. A code, once shipped, keeps
   its meaning.
-- Some refusals carry more fields next to these two (`hint`, `existing_ticket_id`,
-  `access`, `max_bytes`…); they are listed with the code below.
+- Some refusals carry more fields; they are listed with the code below. A
+  route that serves a bus method ([`API-BUS.md`](./API-BUS.md)) puts them
+  under `details` (`details.access`, `details.existing_ticket_id`), as the bus
+  does; the others still put them next to these two (`hint`, `max_bytes`).
 
 The codes live in `ERROR_CODES` (`src/domain.ts`). A refusal that no client has
 needed to tell apart yet carries the **generic code of its HTTP status**; a
@@ -94,7 +96,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `MILESTONE_RELEASED` | 400 | `POST /api/tickets/:id/milestone` with a milestone already released. |
 | `MILESTONE_INVALID` | 400 | The same route with something that is not a milestone of the ticket's project (or a milestone put in another). |
 | `RELATION_CYCLE` | 409 | `POST /api/tickets/:id/relations`: a lineage that would close a cycle. |
-| `ALREADY_IMPORTED` | 409 | `POST /api/tickets/import`: a ticket already mirrors this upstream issue; `existing_ticket_id` names it. |
+| `ALREADY_IMPORTED` | 409 | `POST /api/tickets/import` and `POST /api/tickets/:id/export`: a ticket already mirrors this upstream issue; `details.existing_ticket_id` names it. |
 
 **Sessions** (the bus's `session.*`, [`SESSION-HOST.md`](./SESSION-HOST.md)):
 

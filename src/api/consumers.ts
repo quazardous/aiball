@@ -6,16 +6,11 @@
 import { serveMethod } from "../bus/http.js";
 import { listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
-import { AGENT_TYPES, type AgentType } from "../db/consumers.js";
 import {
     deleteConsumer,
     getConsumer,
     listConsumers,
-    updateConsumer,
-    upsertConsumer,
     isHuman,
-    type Consumer,
-    type ConsumerKind,
 } from "../db.js";
 import { listNodesWithRevoked, revokeNode } from "../db/nodes.js";
 import { ENROLLMENT_TTL_MS } from "../db/node-enrollment.js";
@@ -159,116 +154,9 @@ consumersRouter.post("/loops/release-all", (req: Request, res: Response) => {
     res.json({ action: "release", results });
 });
 
-consumersRouter.post("/consumers", (req: Request, res: Response) => {
-    const { consumer_id, kind, display_name, enabled, note } = (req.body ?? {}) as {
-        consumer_id?: unknown;
-        kind?: unknown;
-        display_name?: unknown;
-        enabled?: unknown;
-        note?: unknown;
-    };
-    if (typeof consumer_id !== "string" || !consumer_id) {
-        return badRequest(res, "consumer_id required");
-    }
-    if (kind !== undefined && kind !== "human" && kind !== "agent" && kind !== "sandbox") {
-        return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
-    }
-    // #2221 — an absent field stays undefined so an existing record keeps it:
-    // defaulting here (null name/note, enabled true) wiped the note and
-    // re-enabled a disabled agent on every partial POST. An explicit null still
-    // clears; a brand-new record gets its defaults from upsertConsumer.
-    const c = upsertConsumer({
-        consumer_id,
-        kind: kind as ConsumerKind | undefined,
-        display_name: typeof display_name === "string" || display_name === null ? display_name : undefined,
-        enabled: typeof enabled === "boolean" ? enabled : undefined,
-        note: typeof note === "string" || note === null ? note : undefined,
-    });
-    broadcast({ type: "consumer_changed", data: c });
-    res.json(c);
-});
+consumersRouter.post("/consumers", serveMethod("consumer.upsert"));
 
-consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) => {
-    const consumer_id = String(req.params.consumer_id);
-    const body = (req.body ?? {}) as {
-        kind?: unknown;
-        display_name?: unknown;
-        enabled?: unknown;
-        note?: unknown;
-        micro_prompt?: unknown;
-        can_claim?: unknown;
-        can_create_agent?: unknown;
-        agent_type?: unknown;
-        notify_project_broadcasts?: unknown;
-    };
-    if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
-        return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
-    }
-    // #1477 — a consumer's CAPABILITY fields are human-piloted and never
-    // writable by an agent. Without this guard any authenticated agent could
-    // flip its own `can_claim` (self-promote out of assignment-only), which
-    // would make the whole #1435 authority model — and #508's specialist
-    // no-claim consumers already in prod — decorative. Mirrors the human gate
-    // on the sibling routes (loop-stop / prompt / nodes). Non-capability
-    // fields (display_name, note, micro_prompt, …) stay editable as before.
-    // Future capability flags (e.g. can_create_agent) join CAPABILITY_FIELDS.
-    // #2201 — agent_type joins them: which MCP tools an agent is shown is decided
-    // by a human, never by the agent itself.
-    const CAPABILITY_FIELDS = ["can_claim", "can_create_agent", "agent_type"] as const;
-    const touchesCapability = CAPABILITY_FIELDS.some((f) => body[f] !== undefined);
-    if (touchesCapability && !isHuman(consumerOf(req))) {
-        return refuse(res, 403, "consumer capability fields (can_claim, can_create_agent, agent_type) are human-only — set them via the moderator UI, not from an agent", ERROR_CODES.MODERATOR_ONLY);
-    }
-    if (body.agent_type !== undefined && !(AGENT_TYPES as readonly unknown[]).includes(body.agent_type)) {
-        return badRequest(res, `agent_type must be one of: ${AGENT_TYPES.join(", ")}`);
-    }
-    const patch: {
-        kind?: ConsumerKind;
-        display_name?: string | null;
-        enabled?: boolean;
-        note?: string | null;
-        micro_prompt?: string | null;
-        can_claim?: boolean;
-        can_create_agent?: boolean;
-        agent_type?: AgentType;
-        notify_project_broadcasts?: boolean | null;
-    } = {};
-    if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
-    if (body.display_name !== undefined) {
-        patch.display_name = body.display_name === null
-            ? null
-            : (typeof body.display_name === "string" ? body.display_name : null);
-    }
-    if (body.enabled !== undefined && typeof body.enabled === "boolean") {
-        patch.enabled = body.enabled;
-    }
-    if (body.note !== undefined) {
-        patch.note = body.note === null ? null : (typeof body.note === "string" ? body.note : null);
-    }
-    if (body.micro_prompt !== undefined) {
-        patch.micro_prompt = body.micro_prompt === null
-            ? null
-            : (typeof body.micro_prompt === "string" ? body.micro_prompt : null);
-    }
-    if (body.can_claim !== undefined && typeof body.can_claim === "boolean") {
-        patch.can_claim = body.can_claim;
-    }
-    if (body.can_create_agent !== undefined && typeof body.can_create_agent === "boolean") {
-        patch.can_create_agent = body.can_create_agent;
-    }
-    if (body.agent_type !== undefined) patch.agent_type = body.agent_type as AgentType;
-    // #516 — tri-state (null | true | false). API accepte les 3 valeurs ;
-    // tout autre type est silently ignored (no-op).
-    if (body.notify_project_broadcasts === null
-        || body.notify_project_broadcasts === true
-        || body.notify_project_broadcasts === false) {
-        patch.notify_project_broadcasts = body.notify_project_broadcasts;
-    }
-    const updated: Consumer | null = updateConsumer(consumer_id, patch);
-    if (!updated) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
-    broadcast({ type: "consumer_changed", data: updated });
-    res.json(updated);
-});
+consumersRouter.patch("/consumers/:consumer_id", serveMethod("consumer.update"));
 
 consumersRouter.delete("/consumers/:consumer_id", (req: Request, res: Response) => {
     const consumer_id = String(req.params.consumer_id);

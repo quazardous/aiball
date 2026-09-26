@@ -71,10 +71,8 @@ export function ticketStateAfter(id: number, consumerId: string) {
     if (!t || t.kind !== "ticket_created") return null;
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
-import { authorFor, badRequest, consumerOf, notFound, refuse, refuseError, withTagsOne } from "./_helpers.js";
+import { badRequest, consumerOf, notFound, refuse, refuseError, withTagsOne } from "./_helpers.js";
 import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
-import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
-import { exportUpstream } from "../upstream-export.js";
 
 export const ticketsRouter = Router();
 
@@ -827,51 +825,14 @@ ticketsRouter.post("/tickets/:id/approve-pending-children", serveMethod("ticket.
  * only; nothing here runs automatically. Body: { project?, ref } where `ref`
  * is a bare `gh#123` (needs a default binding) or explicit `gh:owner/repo#123`.
  */
-ticketsRouter.post("/tickets/import", async (req: Request, res: Response) => {
-    const body = (req.body ?? {}) as { project?: string; ref?: string; by_agent?: string };
-    const ref = typeof body.ref === "string" ? body.ref.trim() : "";
-    if (!ref) return badRequest(res, "ref required (e.g. gh#123 or gh:owner/repo#123)");
-    const project = typeof body.project === "string" && body.project ? body.project : undefined;
-    if (!project) return badRequest(res, "project required");
-    const by_agent = authorFor(req, res, body.by_agent);
-    if (by_agent === null) return;
-    try {
-        const { ticket, external, provider } = await importUpstream({ project, ref, by_agent });
-        return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
-    } catch (err) {
-        if (err instanceof AlreadyCoupledError) {
-            return res.status(409).json({ error: err.message, code: ERROR_CODES.ALREADY_IMPORTED, existing_ticket_id: err.existingTicketId });
-        }
-        return badRequest(res, err instanceof Error ? err.message : String(err));
-    }
-});
+ticketsRouter.post("/tickets/import", serveMethod("ticket.import", undefined, { status: 201 }));
 
 /**
  * Upstream coupling phase 2 — Slice 1: manual export. Create a NEW external
  * issue from an existing aiball ticket and couple it. WRITES to the remote —
  * surfaces gate it behind an explicit confirmation. Body: { kind?, repo? }.
  */
-ticketsRouter.post("/tickets/:id/export", async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "ticket id required");
-    const body = (req.body ?? {}) as { kind?: string; repo?: string; by_agent?: string };
-    const by_agent = authorFor(req, res, body.by_agent);
-    if (by_agent === null) return;
-    try {
-        const { ticket, external, provider } = await exportUpstream({
-            ticket_id: id,
-            kind: body.kind,
-            repo: body.repo,
-            by_agent,
-        });
-        return res.status(201).json({ ticket: withTagsOne(ticket), external, provider });
-    } catch (err) {
-        if (err instanceof AlreadyCoupledError) {
-            return res.status(409).json({ error: err.message, code: ERROR_CODES.ALREADY_IMPORTED, existing_ticket_id: err.existingTicketId });
-        }
-        return badRequest(res, err instanceof Error ? err.message : String(err));
-    }
-});
+ticketsRouter.post("/tickets/:id/export", serveMethod("ticket.export", undefined, { status: 201 }));
 
 ticketsRouter.get("/tickets/:id/relations", (req, res) => {
     const id = Number(req.params.id);

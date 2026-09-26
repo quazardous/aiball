@@ -16,6 +16,7 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2180keep-"));
 process.env.AIBALL_SOCK = "";
 
 const { createApp } = await import("../app.js");
+const { attachBus } = await import("../bus/server.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, getConsumer } = await import("../db.js");
 const { updateConsumer } = await import("../db/consumers.js");
@@ -28,9 +29,13 @@ updateConsumer("agent-x", { enabled: false });
 const TOKEN = issueToken({ kind: "agent", consumer_id: "boss", label: "2180keep" }).token;
 
 const server = createApp().listen(0);
+// The client calls the bus.
+const wss = attachBus(server);
 await new Promise<void>((r) => server.once("listening", () => r()));
 const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
+    for (const ws of wss.clients) ws.terminate();
+    server.closeAllConnections();
     server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });

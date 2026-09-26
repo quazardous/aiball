@@ -639,9 +639,7 @@ export class AiballClient {
      *  SIGUSR2 to the pidfile, which on Windows terminates the daemon instead
      *  of reloading it. */
     reloadDaemon() {
-        return this.http<{ reloaded: boolean; global_config: string; hot_window_sec: unknown }>(
-            "POST", "/api/daemon/reload", {},
-        );
+        return this.call<{ reloaded: boolean; global_config: string; hot_window_sec: unknown }>("daemon.reload");
     }
     /**
      * Explicitly register a project (#B.216 phase A pass 2). The CLI's
@@ -774,11 +772,11 @@ export class AiballClient {
      * token) and applies labels→tags + the per-ticket coupling columns.
      */
     importUpstream(ref: string, project?: string) {
-        return this.http<{
+        return this.call<{
             ticket: { id: number; title: string | null; tags: unknown[] };
             external: { num: number; title: string; state: string; url: string; labels: string[] };
             provider: string;
-        }>("POST", "/api/tickets/import", {
+        }>("ticket.import", {
             ref,
             ...(project ? { project } : {}),
         });
@@ -791,11 +789,12 @@ export class AiballClient {
      * default binding; omit to use it.
      */
     exportUpstream(ticket_id: number, opts: { kind?: string; repo?: string; by_agent?: string } = {}) {
-        return this.http<{
+        return this.call<{
             ticket: { id: number; title: string | null; tags: unknown[] };
             external: { num: number; title: string; state: string; url: string; labels: string[] };
             provider: string;
-        }>("POST", `/api/tickets/${ticket_id}/export`, {
+        }>("ticket.export", {
+            id: ticket_id,
             ...(opts.kind ? { kind: opts.kind } : {}),
             ...(opts.repo ? { repo: opts.repo } : {}),
             ...(opts.by_agent ? { by_agent: opts.by_agent } : {}),
@@ -862,9 +861,9 @@ export class AiballClient {
      *  `upstream` binding map (which projects have a coupling target) so the
      *  MCP can gate the import/export tools on it. */
     getConfig() {
-        return this.http<{
+        return this.call<{
             upstream?: Record<string, Array<{ kind: string; ref: string; default?: boolean }>>;
-        }>("GET", "/api/config");
+        }>("config.get");
     }
     /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO.
      *  #798 — `since` is an ISO 8601 cutoff. Filters messages whose
@@ -1245,7 +1244,7 @@ export class AiballClient {
      */
     setMessageTags(id: number, tag_names: string[]) {
         // #3036 — who tags is the caller; the daemon takes it from the identity sent.
-        return this.http("PUT", `/api/messages/${id}/tags`, { tag_ids: tag_names });
+        return this.call("message.set_tags", { id, tag_ids: tag_names });
     }
     note(id: number, note: string | null) {
         return this.call("message.note", { id, note });
@@ -1253,7 +1252,7 @@ export class AiballClient {
     /** #2697 — moderation rules are automation rules: trigger `message_posted`,
      *  action `decision`. That is the only table moderation reads. */
     async listRules() {
-        const rules = await this.http("GET", "/api/automation/rules?trigger=message_posted") as Array<{
+        const rules = await this.call("automation.rules", { trigger: "message_posted" }) as Array<{
             actions?: Array<{ kind?: string }>;
         }>;
         return rules.filter((r) => (r.actions ?? []).some((a) => a.kind === "decision"));
@@ -1266,17 +1265,17 @@ export class AiballClient {
         note?: string;
     }) {
         const { decision, ...match } = rule;
-        return this.http("POST", "/api/automation/rules", {
+        return this.call("automation.create_rule", {
             triggers: ["message_posted"],
             action: { kind: "decision", decision },
             ...match,
         });
     }
     deleteRule(id: number) {
-        return this.http("DELETE", `/api/automation/rules/${id}`);
+        return this.call("automation.delete_rule", { id });
     }
     toggleRule(id: number, enabled: boolean) {
-        return this.http("PATCH", `/api/automation/rules/${id}`, { enabled });
+        return this.call("automation.update_rule", { id, enabled });
     }
     /**
      * Bulk mark-read by project. Pass either upToId or all=true.
@@ -1317,12 +1316,12 @@ export class AiballClient {
         enabled?: boolean;
         note?: string | null;
     }) {
-        return this.http("POST", "/api/consumers", input);
+        return this.call("consumer.upsert", input);
     }
     /** #2180 — patch a consumer record. The capability fields (`agent_type`,
      *  `can_claim`) are refused unless the caller is a human (`--human`). */
     patchConsumer(id: string, patch: { agent_type?: "coder" | "cto"; can_claim?: boolean }) {
-        return this.http("PATCH", `/api/consumers/${encodeURIComponent(id)}`, patch);
+        return this.call("consumer.update", { consumer_id: id, ...patch });
     }
 
     /** #3066 3c — run the prepared command in this agent's session on the daemon's host. */
@@ -1360,11 +1359,8 @@ export class AiballClient {
 
     /** #2629 — declared step delays against when the agent came back. */
     stepTiming(project: string | null, sinceDays: number | null) {
-        const qs = new URLSearchParams();
-        if (project) qs.set("project", project);
-        if (sinceDays) qs.set("since_days", String(sinceDays));
-        return this.http<{ project: string | null; since: string | null; buckets: Array<{ bucket: string; steps: number; avg_declared: number; early: number; on_time: number; late: number; pending: number }>; credits?: Array<{ consumer_id: string; project: string; balance: number; earned: number; spent: number; refunded: number }> }>(
-            "GET", `/api/steps/timing${qs.size ? `?${qs}` : ""}`);
+        return this.call<{ project: string | null; since: string | null; buckets: Array<{ bucket: string; steps: number; avg_declared: number; early: number; on_time: number; late: number; pending: number }>; credits?: Array<{ consumer_id: string; project: string; balance: number; earned: number; spent: number; refunded: number }> }>(
+            "step.timing", { ...(project ? { project } : {}), ...(sinceDays ? { since_days: sinceDays } : {}) });
     }
 
     /** #2586 — running / installed / latest release, as the daemon last checked. */

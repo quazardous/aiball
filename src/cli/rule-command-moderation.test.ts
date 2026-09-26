@@ -20,18 +20,25 @@ const { issueToken } = await import("../db/tokens.js");
 const { evaluate } = await import("../rules.js");
 const { AiballClient } = await import("../client.js");
 const { createApp } = await import("../app.js");
+const { attachBus } = await import("../bus/server.js");
 
 getDb();
 createProject({ name: "p2697" });
 upsertConsumer({ consumer_id: "mod2697", kind: "human" });
 
 const server = createApp().listen(0);
+// The client calls the bus.
+const wss = attachBus(server);
 await new Promise<void>((r) => server.once("listening", () => r()));
 const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 const token = issueToken({ kind: "auth", consumer_id: "mod2697", label: "2697" }).token;
 const client = new AiballClient({ url, token, home: process.env.AIBALL_HOME, agentId: "mod2697" });
 
-after(() => { server.close(); });
+after(() => {
+    for (const ws of wss.clients) ws.terminate();
+    server.closeAllConnections();
+    server.close();
+});
 
 const decide = () => evaluate({ project: "p2697", kind: "comment_added", by_agent: "agent2697" }).decision;
 
