@@ -68,6 +68,7 @@ use windows_sys::Win32::System::Pipes::{
     PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
 
+mod capture;
 mod core;
 mod screen;
 mod ws_client;

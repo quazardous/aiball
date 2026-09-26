@@ -158,25 +158,35 @@ parser panic would end the session. Unix only for now.
 
 ## Diagnostic
 
+- **`claude-loop debug-proxy`** runs the real proxy in front of a byte logger
+  (`fake-claude-log`), in your terminal, with the loop's AFK settings: type,
+  try the AFK combination, quit with Ctrl-C, and it prints the timeline of every
+  key and what the proxy decided (typing, lone ESC, AFK fired, swallowed…).
+  `claude-loop debug-keys` shows what the terminal sends; this shows what the
+  proxy makes of it.
+- With `CL_CAPTURE=1` (below), the proxy writes `proxy.ndjson` into the
+  capture: one line per key — its raw bytes, what was forwarded, the verdict,
+  the markers — and one per injection, on the panes' clock (Unix).
 - `CL_PROXY_DEBUG=1` prints every byte run the proxy reads, in hex, to its
   stderr; `CL_PROXY_DEBUG_FILE=<file>` appends the same lines to a file.
-- The proxy does not write to a session capture (below): a capture holds the
-  pane timeline only.
 
 ### Unified session capture — `CL_CAPTURE=1`
 
 `CL_CAPTURE=1` records a session into `<state_dir>/capture/` so it can be
 replayed later. It supersedes the scattered debug logs (`CL_BAR_PAINT_LOG`),
-which keep working as deprecated aliases. The timeline is NDJSON, stamped with
-an epoch-seconds `t`:
+which keep working as deprecated aliases. Each writer appends its own NDJSON
+timeline, stamped with the same epoch-seconds `t`:
 
 ```
 <state_dir>/capture/
-  panes.ndjson     # timer: one row per distinct pane frame → {t, kind:"pane", file}
+  proxy.ndjson     # proxy: one row per key (raw, forward, verdict, markers) and per injection
+  panes.ndjson     # kernel: one row per distinct pane frame → {t, kind:"pane", file}
   panes/<ms>.txt   # the pane frames themselves (referenced by `file`, not inlined)
 ```
 
-Enable it on a running loop with
+The proxy reads `CL_CAPTURE` when it starts: set it at `claude-loop start`
+for its keys to be captured. The kernel's panes can also be switched on for a
+running loop with
 `claude-loop reload <name> --set CL_CAPTURE=1` (the env is patched before the
 respawn). The capture is append-only — it's scoped to the session you want
 to record, so delete the dir when done.

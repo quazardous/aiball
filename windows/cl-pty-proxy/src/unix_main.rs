@@ -228,10 +228,14 @@ pub fn run() -> i32 {
     let screen = (env::var("CL_SCREEN_MODEL").as_deref() == Ok("1"))
         .then(|| crate::screen::Screen::new(rows, cols));
     let ws_cell: Arc<Mutex<Option<ws_client::WsHandle>>> = Arc::new(Mutex::new(None));
+    // #3057 — CL_CAPTURE=1: every keystroke and injection, with its verdict,
+    // in <state_dir>/capture/proxy.ndjson (merged with the panes by cl-capture).
+    let capture = crate::capture::Capture::from_env();
     // #768 — ws client over UDS : emit proxyEvents + receive inject. None
     // when CL_STATE_DIR is unset (degraded : events dropped, bytes still forward).
     let ws = loop_sock_path().map(|sock| {
         let inj_writer = writer.clone();
+        let inj_capture = capture.clone();
         ws_client::start(
             sock,
             ws_client::Callbacks {
@@ -239,6 +243,9 @@ pub fn run() -> i32 {
                     if let Ok(mut w) = inj_writer.lock() {
                         let _ = w.write_all(text.as_bytes());
                         let _ = w.flush();
+                    }
+                    if let Some(c) = &inj_capture {
+                        c.write(&crate::capture::inject_line(crate::capture::now_s(), text));
                     }
                 }),
                 on_view: Box::new(|_v: &serde_json::Value| { /* cached only ; BarRenderer paints */ }),
@@ -300,6 +307,7 @@ pub fn run() -> i32 {
         let running = running.clone();
         let ws = ws.clone();
         let boot = boot_ts;
+        let capture = capture.clone();
         thread::spawn(move || {
             let mut decider = core::Decider::new(afk_combos, esc_takeover, afk_window_ms, reload_key);
             let mut buf = [0u8; 8192];
@@ -318,6 +326,9 @@ pub fn run() -> i32 {
                             is_down: true,
                         };
                         let v = decider.on_unit(&unit, now_ms);
+                        if let Some(c) = &capture {
+                            c.write(&crate::capture::key_line(crate::capture::now_s(), data, &v));
+                        }
                         if let Some(ws) = &ws {
                             let ev_ms = ts_now();
                             if v.afk_fired {

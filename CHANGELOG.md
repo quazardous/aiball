@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `claude-loop debug-proxy`: the real PTY proxy in front of a byte logger, in
+  your terminal: every key and what the proxy decided about it. With
+  `CL_CAPTURE=1`, the proxy's keys and decisions join the session capture.
 - With `CL_SCREEN_MODEL=1`, a loop's PTY proxy keeps a model of claude's
   screen and answers `getScreen`; the kernel compares it with tmux's capture
   every 30 s and keeps the score (`claude-loop health`: `proxy screen`).

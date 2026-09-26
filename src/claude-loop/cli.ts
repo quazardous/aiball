@@ -15,13 +15,14 @@ import { commandExists } from "../sysdeps.js";
 import {
     copyFileSync,
     existsSync,
+    mkdtempSync,
     openSync,
     readFileSync,
     readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -1916,6 +1917,58 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
  * est intercepté par gnome": press the combo — if NOTHING prints, the window
  * manager / terminal swallowed it before aiball ever saw the bytes. Quit: Ctrl-C.
  */
+/**
+ * #3057 — the keyboard seen by the proxy itself: `cl-pty-proxy` in front of
+ * `fake-claude-log` (a byte logger standing in for claude), attached to this
+ * terminal, with the loop's AFK settings and `CL_CAPTURE=1`. Every key and
+ * what the proxy decided about it lands in a capture, read back with
+ * `cl-capture timeline` at the end. `debug-keys` shows what the terminal
+ * sends; this shows what the proxy makes of it.
+ */
+function cmdDebugProxy(): void {
+    const ctx = resolveProjectContext();
+    const release = join(selfRoot(), "windows", "cl-pty-proxy", "target", "release");
+    const proxyBin = process.env[CL_ENV.PROXY_BIN]?.trim() || join(release, "cl-pty-proxy");
+    const loggerBin = join(dirname(proxyBin), "fake-claude-log");
+    for (const [what, bin] of [["proxy", proxyBin], ["fake-claude-log", loggerBin]] as const) {
+        if (!existsSync(bin)) die(`debug-proxy: no ${what} at ${bin} — build it: ${BUILD_CMD}`);
+    }
+    if (!process.stdin.isTTY) die("debug-proxy: stdin is not a TTY — run it directly in a real terminal.");
+    let afkSpecJson = "";
+    try {
+        afkSpecJson = JSON.stringify(parseAfkKey(ctx.claude_loop.afk_key, ctx.claude_loop.afk_window_ms).combos);
+    } catch (e) {
+        process.stderr.write(`claude-loop: invalid afk_key "${ctx.claude_loop.afk_key}" — AFK disabled (${(e as Error).message})\n`);
+    }
+    const sd = mkdtempSync(join(tmpdir(), "cl-debug-proxy-"));
+    const logFile = join(sd, "fake-claude.log");
+    process.stdout.write([
+        `claude-loop debug-proxy`,
+        `  afk_key : "${ctx.claude_loop.afk_key}"   esc_takeover : ${ctx.claude_loop.esc_takeover ? "on" : "off"}`,
+        `  capture : ${join(sd, "capture")}`,
+        ``,
+        `The real PTY proxy runs in front of a byte logger. Type as you would to claude,`,
+        `try your AFK combo. What reaches the logger is echoed by its terminal; a key the`,
+        `proxy swallows (the AFK combo) does not show. Quit: Ctrl-C (it reaches the logger).`,
+        ``,
+    ].join("\n"));
+    spawnSync(proxyBin, ["--", loggerBin], {
+        stdio: "inherit",
+        env: {
+            ...process.env,
+            [CL_ENV.STATE_DIR]: sd,
+            [CL_ENV.CAPTURE]: "1",
+            [CL_ENV.AFK_SPEC]: afkSpecJson,
+            [CL_ENV.AFK_WINDOW_MS]: String(ctx.claude_loop.afk_window_ms),
+            [CL_ENV.ESC_TAKEOVER]: ctx.claude_loop.esc_takeover ? "1" : "0",
+            FAKE_CLAUDE_LOG: logFile,
+        },
+    });
+    process.stdout.write(`\n  what the proxy decided: cl-capture timeline ${join(sd, "capture")}\n  what reached "claude": ${logFile}\n`);
+    const timeline = spawnSync(join(selfRoot(), "bin", "cl-capture"), ["timeline", join(sd, "capture")], { encoding: "utf8" });
+    if (timeline.stdout) process.stdout.write(`\n${timeline.stdout}`);
+}
+
 function cmdDebugKeys(): void {
     const ctx = resolveProjectContext();
     let spec: AfkSpec | null = null;
@@ -2334,6 +2387,9 @@ async function main(): Promise<void> {
         .action((opts: { events?: boolean; counterOnly?: boolean; cooled?: boolean; limit?: string; json?: boolean }) => cmdBacklog(opts));
     // #381 (david yf8wht): direct raw-stdin key reader — no PTY/tmux/claude. Shows
     // each keystroke's bytes + afk grammar decode, to tell if GNOME ate alt+esc.
+    program.command("debug-proxy")
+        .description("Run the real PTY proxy in front of a byte logger, in this terminal, with the loop's AFK settings: every key and what the proxy decided about it, in a capture read back at the end (the Unix successor of debug-proxy-tty)")
+        .action(() => cmdDebugProxy());
     program.command("debug-keys")
         .description("Read keys directly from this terminal and print them in afk_key grammar (alt+esc, ctrl+g, …) — diagnose whether the WM/terminal swallows your combo (#381)")
         .action(() => cmdDebugKeys());
