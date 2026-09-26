@@ -65,6 +65,8 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- `POST /api/tickets/:id/owner` takes the new owner as `owner` (`by_agent`,
+  which elsewhere means the author, is still read there for now).
 - The author of a write is the caller the request authenticates as: a body
   that names someone else (`by_agent`, `set_by`, `answered_by`,
   `decided_by`) is refused, and the MCP write tools no longer offer

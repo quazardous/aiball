@@ -1085,11 +1085,11 @@ export const api = {
             { consumer_id: currentConsumer(), ticket_id: ticketId, muted },
         ),
     /** Reassign a ticket's owner (= by_agent). Moderator-only server-side (#352). */
-    changeTicketOwner: (ticketId: number, by_agent: string) =>
-        req<{ ticket_id: number; by_agent: string }>(
+    changeTicketOwner: (ticketId: number, owner: string) =>
+        req<{ ticket_id: number; owner: string }>(
             "POST",
             `/api/tickets/${ticketId}/owner`,
-            { by_agent },
+            { owner },
         ),
     /** #352: a ticket's explicit subscriptions (follows + mutes). Moderator-only. */
     ticketSubscriptions: (ticketId: number) =>
