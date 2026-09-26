@@ -12,6 +12,13 @@ name = "cl-pty-proxy"
 path = "src/main.rs"
 
 [[bin]]
+# #3066 — the session host: one session in a PTY, served to clients on
+# attach.sock (docs/LOOP-HOST.md) and driven by the daemon on control.sock
+# (docs/SESSION-HOST.md). Replaces tmux + the per-loop proxy.
+name = "cl-session-host"
+path = "src/session_host.rs"
+
+[[bin]]
 name = "fake-claude-log"
 path = "src/bin/fake-claude-log.rs"
 

@@ -1,7 +1,7 @@
 # Session host: Claude's sessions without tmux or claude-loop
 
-> **Status: a design, not yet implemented.** This page fixes the host's side
-> before it is coded. Clients attach to it with the protocol of
+> **Status: the host is built (`cl-session-host`); the daemon's side is not
+> yet.** This page fixes the host's side and what clients will call. Clients attach to it with the protocol of
 > [`LOOP-HOST.md`](./LOOP-HOST.md); the daemon drives it with the control
 > channel described here.
 
@@ -50,6 +50,14 @@ Each host keeps its files in `$AIBALL_HOME/hosts/<agent>/`:
 | `attach.sock` | clients, per [`LOOP-HOST.md`](./LOOP-HOST.md), mode `0600` |
 | `control.sock` | the daemon, described below, mode `0600` |
 
+A Unix socket's path is at most about 100 bytes: the daemon checks
+`<dir>/control.sock` fits before it starts a host.
+
+The host is the `cl-session-host` binary, built with `cl-pty-proxy`:
+`cl-session-host --dir <dir> --agent <id> | --name <name> [--rows R --cols C]
+[-- argv…]` — with an argv it starts the command at once, otherwise it waits
+for `host.start`.
+
 On start, the daemon reads every `host.json`, checks the pid is alive and
 answers on `control.sock`, and takes control again; a dead host's directory is
 removed. Whoever can open the directory can attach or control: the same
@@ -78,7 +86,7 @@ output.
 | `host.inject` | `{ text }` | `{}` — writes `text` to Claude's input, as the kernel's wakes do today |
 | `host.screen` | — | `{ text, cursor: {x, y}, rows, cols, seq }` — the visible screen, as `getScreen` today |
 | `host.start` | `{ argv, env?, cwd? }` | `{ pid }` — starts Claude in the PTY; refused while one runs |
-| `host.stop` | `{ signal?: "TERM" \| "INT", timeout_ms? }` | `{ exit_code }` — ends Claude; the host itself stays |
+| `host.stop` | `{ signal?: "TERM" \| "INT", timeout_ms?, restart? }` | `{ exit_code }` — ends Claude (SIGKILL past the timeout); the host itself stays. With `restart`, attached clients get `exited { restarting: true }` and stay for the next `host.start` |
 | `host.shutdown` | — | `{}` — Claude stopped first, then the host exits and removes its files |
 | `host.resize` | `{ rows, cols }` | `{}` — only while no interactive client owns the size |
 
@@ -87,9 +95,9 @@ output.
 | Notification | Params | When |
 |---|---|---|
 | `host.screen_changed` | `{ text, cursor, rows, cols, seq }` | the screen changed; at most 4 per second, the latest state |
-| `host.keys` | `{ kind, now_ms }` | a client's keys meant something for the loop: `typing`, `lone_esc`, `afk_key`, `reload` — what `proxyEvent`s carry today |
+| `host.keys` | `{ typing, lone_esc, afk_key, reload, afk_active, now_ms }` | a client's keys meant something for the loop — the PTY proxy's keystroke verdict, what its `proxyEvent`s carry today |
 | `host.clients` | `{ count, interactive }` | a client attached or left |
-| `host.exited` | `{ code, signal }` | Claude ended; the host waits for `host.start` or `host.shutdown` |
+| `host.exited` | `{ code, restarting }` | Claude ended; the host waits for `host.start` or `host.shutdown` |
 
 The kernel reads the screen from `host.screen_changed` rather than by polling:
 the watchers (busy, prompt, dialogs, compacting) run on each change.
