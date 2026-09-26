@@ -22,7 +22,6 @@ import { serveMethod } from "../bus/http.js";
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
 import { Router, type Request, type Response } from "express";
-import { levelsVisibleTo, seesLevel } from "../db/consumers.js";
 import { ERROR_CODES } from "../domain.js";
 import {
     listMessages,
@@ -39,27 +38,19 @@ import {
     addTicketTokenUsage,
     getTicketTokenUsage,
     isHuman,
-    insertTypedRelation,
     listTypedRelationsForTicket,
     listPendingChildren,
-    lineageWouldCycle,
-    setTicketAssignment,
-    setTicketClaim,
     ticketsClaimedBy,
     ticketSelfLastActivity,
-    releaseTicketClaim,
-    upsertTicketSubscription,
     listTicketSubscriptionsForTicket,
     getConsumer,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
-import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
-import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
-import { claimProtectedUntil } from "../db/claim-hold.js";
+import { listSubscriptions } from "../db/subscriptions.js";
+import { isAssignmentLive, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
-import { RELATION_KINDS, isRelationKind, relationAxis, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
@@ -90,7 +81,6 @@ import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
 import { importUpstream, AlreadyCoupledError } from "../upstream-import.js";
 import { exportUpstream } from "../upstream-export.js";
 import type { AuthenticatedRequest } from "../auth.js";
-import { submitMessage } from "../messages.js";
 
 export const ticketsRouter = Router();
 
@@ -139,143 +129,7 @@ ticketsRouter.post("/tickets/:id/owner", serveMethod("ticket.set_owner"));
  */
 /** #2379 — when the claim of `holder` stops protecting this ticket (epoch ms), or null. */
 
-ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const caller = consumerOf(req);
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    const rawAssignee = typeof req.body?.assignee === "string" ? req.body.assignee.trim() : "";
-    const target = rawAssignee || caller; // no assignee → self-claim
-    const isClaim = target === caller;
-    if (!isClaim && !isHuman(caller)) {
-        return refuse(res, 403, "assigning another consumer is moderator-only (an agent can only claim for itself)", ERROR_CODES.MODERATOR_ONLY);
-    }
-    // #575 david : un agent ne peut pas claim un ticket encore pending
-    // moderation. Symétrique au guard #569 (`then:resolved/plan` sur
-    // pending) : claim = "I'm focusing on this NOW" = work intent. Sur un
-    // ticket pending l'agent ne peut rien faire d'utile (poster un comment
-    // peut être bloqué par la rule engine, proposer une résolution est
-    // déjà rejeté par #569), donc claim n'a aucun sens. Humains bypass :
-    // un moderator peut claim pendant la review (focus de modération).
-    // Push-assign (isClaim=false) reste discretionnel : moderator peut
-    // pré-déléguer un pending à un agent, qui sera notifié à l'approve.
-    // Couvre aussi MCP `ticket_claim` qui delegate via
-    // `client.assignTicket(head.id)` (cf. src/mcp/ticket-write.ts).
-    if (isClaim && t.status !== "approved" && !isHuman(caller)) {
-        return res.status(409).json({
-            error: `cannot claim a ticket in status "${t.status}" — the reporter must moderate (approve) the ticket first`,
-            code: ERROR_CODES.PARENT_PENDING_MODERATION,
-        });
-    }
-    // #2241 — an agent claims only within its scope: a cto agent `roadmap` and
-    // `milestone` tickets, a coder agent tasks. Same claim, different scope. A
-    // human is not restricted, and neither is a moderator's push-assignment.
-    // Covers MCP `ticket_claim({ticket_id})`, which reaches here directly; the
-    // zero-arg form already picks from the scoped actionable pool.
-    if (isClaim && !isHuman(caller) && !seesLevel(caller, t.level)) {
-        return refuse(res, 403, `#${t.id} is a ${t.level ?? "task"} ticket, and this agent works on ${(levelsVisibleTo(caller) ?? []).join(" and ")} tickets only`, ERROR_CODES.LEVEL_READ_ONLY);
-    }
-    // #2379 david `prrg57` — "claim est une version faible de assign… tant qu'un
-    // agent est actif sur un ticket son claim est protégé pendant X minutes, un
-    // autre agent ne peut pas claim un ticket protégé, le assign supplante le
-    // claim". Until now a claim by id went through on a ticket someone else held:
-    // the holder lost it without a word, and the thread kept no trace. A human
-    // still takes any ticket — moderating is the job.
-    let takenOverFrom: string | null = null;
-    if (isClaim && !isHuman(caller)) {
-        if (t.assignee && t.assignee !== caller) {
-            return refuse(res, 409, `#${t.id} is assigned to ${t.assignee} — an assignment supersedes a claim. Ask on the thread, or have a human reassign it.`, ERROR_CODES.TICKET_ASSIGNED);
-        }
-        if (t.claimant && t.claimant !== caller) {
-            const until = claimProtectedUntil(t.claimant, t.id, t.claimed_at ?? null, t.project);
-            if (until && until > Date.now()) {
-                return refuse(res, 409, `#${t.id} is held by ${t.claimant}, who is working on it — protected until ${new Date(until).toISOString()}. Ask on the thread, or come back after that.`, ERROR_CODES.TICKET_HELD);
-            }
-            // Past the protection the ticket is takeable: a forgotten claim must
-            // not freeze it. But the take-over is said, so its holder hears it.
-            takenOverFrom = t.claimant;
-        }
-    }
-    // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,
-    // persistent). Two distinct fields now — a ticket can be both.
-    let releasedClaims: number[] = [];
-    // #523 — surfaced when this assign auto-releases a prior claim by a
-    // DIFFERENT consumer (cf. setTicketAssignment).
-    let assignReleasedClaim: { ticket_id: number; claimant: string } | null = null;
-    if (isClaim) {
-        // #439 one-focus: picking this up auto-releases my OTHER live claims I
-        // never commented on since grabbing them (bare pickups, zero work lost),
-        // so an agent holds one focus at a time instead of stacking locks. Claims
-        // I've actually worked (a self comment after claimed_at) survive. Runs
-        // BEFORE the new claim so re-engaging the head I already hold is a no-op.
-        const myClaims = ticketsClaimedBy(caller);
-        if (myClaims.length > 0) {
-            const selfActMs = new Map<number, number>();
-            for (const [tid, iso] of ticketSelfLastActivity(caller, myClaims.map((c) => c.id))) {
-                const ms = Date.parse(iso);
-                if (!Number.isNaN(ms)) selfActMs.set(tid, ms);
-            }
-            releasedClaims = claimsToAutoRelease(
-                myClaims.map((c) => ({ id: c.id, claimedAt: c.claimed_at })),
-                selfActMs,
-                id,
-                Date.now(),
-                assignWindowSec() * 1000,
-            );
-            for (const rid of releasedClaims) releaseTicketClaim(rid);
-        }
-        setTicketClaim(id, caller);
-    } else {
-        // #523 — setTicketAssignment auto-releases the existing claim if
-        // claimant ≠ new assignee. Surface who got ejected for audit +
-        // for the broadcast below.
-        const ar = setTicketAssignment(id, target, caller);
-        if (ar.released_claim) {
-            // No dedicated ping for the ex-claimant: the broadcast below
-            // refreshes their UI on the next SSE tick (claim icon drops,
-            // own-claim boost in work-order drops too).
-            assignReleasedClaim = ar.released_claim;
-        }
-    }
-    if (takenOverFrom) {
-        // A structural event: it says what happened and reaches the former
-        // holder through the usual fan-out (a claim subscribes its holder to the
-        // thread). It is not a comment — whose turn it is does not move.
-        submitMessage({
-            project: t.project,
-            kind: "claim_taken_over",
-            ticket_id: id,
-            parent_id: id,
-            body: `${caller} took over the claim held by ${takenOverFrom}, whose protection had lapsed.`,
-            by_agent: caller,
-        });
-    }
-    upsertTicketSubscription(target, id);
-    // #448 david: the claim landed in the DB but the UI didn't reflect it live —
-    // this path never broadcast, so an open inbox/thread kept showing the
-    // pre-claim state until a manual reload. Emit message_edited on each
-    // touched ticket (the new claim/assign + any claims the one-focus rule
-    // auto-released) so the WS relay fires inbox.refresh + thread.refresh and
-    // the holder icon (lists + header) appears/clears in real time. Mirrors the
-    // moveTicket broadcast. releasedClaims never includes `id` (built excluding
-    // the new claim), so no dup.
-    for (const rid of [id, ...releasedClaims]) {
-        const updated = getMessage(rid);
-        if (updated) broadcast({ type: "message_edited", data: updated });
-    }
-    res.json({
-        ticket_id: id,
-        assignee: isClaim ? null : target,
-        claimant: isClaim ? caller : null,
-        assigned_by: caller,
-        is_claim: isClaim,
-        // #439: which other live claims this self-claim auto-released (one-focus).
-        released_claims: releasedClaims,
-        // #523 : claim libéré par CET assignment (ex-claimant ≠ nouveau assignee).
-        // null si pas de claim avant, ou self-assign (assignee == claimant).
-        assign_released_claim: assignReleasedClaim,
-    });
-});
+ticketsRouter.post("/tickets/:id/assign", serveMethod("ticket.assign"));
 
 /**
  * #418: release a ticket's assignment / claim — back to the shared pool. The
@@ -1146,112 +1000,7 @@ function ticketStepRoute(req: Request, res: Response, tag: boolean) {
  */
 ticketsRouter.post("/tickets/:id/milestone", serveMethod("ticket.set_milestone"));
 
-ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return refuse(res, 400, "ticket id required");
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    const body = (req.body ?? {}) as { target_ticket_id?: number; kind?: string; axis_kind?: string };
-    const target = Number(body.target_ticket_id);
-    if (!Number.isFinite(target) || target <= 0) {
-        return refuse(res, 400, "target_ticket_id required (positive integer)");
-    }
-    if (target === id) {
-        return refuse(res, 400, "a ticket cannot relate to itself");
-    }
-    const kindStr = typeof body.kind === "string" ? body.kind : "";
-    if (!isRelationKind(kindStr)) {
-        return refuse(res, 400, `kind must be one of ${RELATION_KINDS.join(", ")}`);
-    }
-    const targetTicket = getMessage(target);
-    if (!targetTicket || targetTicket.kind !== "ticket_created") {
-        return refuse(res, 404, `target ticket #${target} not found`, ERROR_CODES.TICKET_NOT_FOUND);
-    }
-    const caller = consumerOf(req);
-    // Permission (#275): mirror the edit/snooze gate (isHuman bypass +
-    // reporter), but accept the reporter of EITHER end — a relation links
-    // two tickets, and standing on one of them is enough to attach the
-    // other (e.g. file your own ticket as child_of someone else's). Human
-    // moderators bypass entirely; the UI is human-driven, so this doesn't
-    // change its behaviour.
-    // #820 david `39nh52` : project-owner of EITHER project also passes.
-    // Le owner d'un projet voit tout, doit pouvoir lier ses tickets aux
-    // tickets cross-projet sans demander à david de poser à la main.
-    // Relation reste informative ; abus → l'autre end peut delete via la
-    // route DELETE existante.
-    const callerIsProjectOwner =
-        listProjectSubscribers(t.project, { roles: ["owner"] }).includes(caller)
-        || listProjectSubscribers(targetTicket.project, { roles: ["owner"] }).includes(caller);
-    // #2368 — the agent either ticket is assigned to may set or cut the
-    // dependency gate between them: a relation is how the holder says its ticket
-    // waits on another. (A claimant needs no rule of its own: only an owner of
-    // the project can claim, and owners already pass.) Only that axis — lineage
-    // and cross-references stay with the reporters and owners.
-    const GATE_KINDS = ["depends_on", "blocks"];
-    const touchesGateOnly = GATE_KINDS.includes(kindStr)
-        || (kindStr === "ignored" && typeof body.axis_kind === "string" && GATE_KINDS.includes(body.axis_kind));
-    const callerIsAssignee = t.assignee === caller || targetTicket.assignee === caller;
-    if (
-        !isHuman(caller) &&
-        t.by_agent !== caller &&
-        targetTicket.by_agent !== caller &&
-        !callerIsProjectOwner &&
-        !(touchesGateOnly && callerIsAssignee)
-    ) {
-        return refuse(res, 403, `only a registered human moderator, the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}), a project-owner of either project, or (for depends_on / blocks) the agent either ticket is assigned to can relate them`);
-    }
-    // Anti-cycle (#275): lineage (child_of/parent_of) must stay a DAG.
-    // Reject an edge that would close a loop. parent_of is the mirror of
-    // child_of, so swap (child, parent) for the check.
-    if (kindStr === "child_of" && lineageWouldCycle(id, target)) {
-        return refuse(res, 409, `#${id} child_of #${target} would create a lineage cycle`, ERROR_CODES.RELATION_CYCLE);
-    }
-    if (kindStr === "parent_of" && lineageWouldCycle(target, id)) {
-        return refuse(res, 409, `#${id} parent_of #${target} would create a lineage cycle`, ERROR_CODES.RELATION_CYCLE);
-    }
-    // #1468 — an `ignored` tombstone may be scoped to ONE axis via `axis_kind`
-    // (the kind whose axis to remove: `depends_on` cuts the gate, leaving a
-    // `parent_of` lineage to the same target alive). Omitted = the historical
-    // target-scoped cut that removes every axis.
-    const axisKindStr = typeof body.axis_kind === "string" ? body.axis_kind : "";
-    if (axisKindStr && !isRelationKind(axisKindStr)) {
-        return refuse(res, 400, `axis_kind must be one of ${RELATION_KINDS.join(", ")}`);
-    }
-    if (axisKindStr && kindStr !== "ignored") {
-        return refuse(res, 400, "axis_kind only applies when removing a relation (kind=ignored)");
-    }
-    const cutAxis = axisKindStr ? relationAxis(axisKindStr as RelationKind) : undefined;
-    // Idempotency (#275): at most one active edge per (source, target, axis).
-    // Re-posting the same active kind, or removing (ignored) an edge that
-    // isn't there, is a no-op — don't append a redundant event.
-    const before = listTypedRelationsForTicket(id);
-    if (kindStr === "ignored") {
-        // Axis-scoped: only a relation on THAT axis counts as something to cut.
-        const hit = cutAxis
-            ? before.some((r) => r.target_ticket_id === target && relationAxis(r.kind) === cutAxis)
-            : before.some((r) => r.target_ticket_id === target);
-        if (!hit) {
-            return res.json({ ticket_id: id, event_id: null, noop: true, relations: before });
-        }
-    } else if (before.some((r) => r.target_ticket_id === target && r.kind === kindStr)) {
-        const dup = before.find((r) => r.target_ticket_id === target && r.kind === kindStr)!;
-        return res.json({ ticket_id: id, event_id: dup.last_event_id, noop: true, relations: before });
-    }
-    const event = insertTypedRelation({
-        source_ticket_id: id,
-        target_ticket_id: target,
-        relation_kind: kindStr as RelationKind,
-        by_agent: caller,
-        axis: cutAxis,
-    });
-    if (!event) return refuse(res, 500, "failed to create relation event");
-    broadcast({ type: "message_created", data: event });
-    res.json({
-        ticket_id: id,
-        event_id: event.id,
-        relations: listTypedRelationsForTicket(id),
-    });
-});
+ticketsRouter.post("/tickets/:id/relations", serveMethod("ticket.relate"));
 
 ticketsRouter.get("/tickets/:id", serveMethod("ticket.get"));
 

@@ -131,6 +131,14 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `consumer.set_bar_host` | human, not relayed | `POST /api/consumers/:consumer_id/bar-host` |
 | `consumer.afk` | human, not relayed | `POST /api/agents/:name/afk` |
 | `message.get` | human, agent | `GET /api/messages/:id` |
+| `message.post` | human, agent | `POST /api/messages` — the params are the message |
+| `message.decide` | human, agent | `POST /api/messages/:id/decide` |
+| `message.approve` | human, agent | `POST /api/messages/:id/approve` |
+| `message.reject` | human, agent | `POST /api/messages/:id/reject` |
+| `message.accept_and_close` | human, agent | `POST /api/messages/:id/accept-and-close` — a close that fails after the accept is a 500 whose `data.details.approved` is the accepted decision |
+| `message.edit` | human, agent; a ticket's level, human | `POST /api/messages/:id/edit` |
+| `message.step` | human | `POST /api/messages/:id/step` |
+| `message.unstep` | human | `POST /api/messages/:id/unstep` |
 | `message.delete` | human | `POST /api/messages/:id/delete` |
 | `message.answer_question` | human, agent | `POST /api/messages/:id/questions/:qid/answer` |
 | `message.resurface` | human | `POST /api/messages/:id/resurface` |
@@ -142,6 +150,8 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `message.note` | human, agent | `POST /api/messages/:id/note` |
 | `message.add_tag` | human, agent | `POST /api/messages/:id/tags` |
 | `message.remove_tag` | human, agent | `DELETE /api/messages/:id/tags/:tag` |
+| `ticket.assign` | human, agent; pushing to another, human | `POST /api/tickets/:id/assign` |
+| `ticket.relate` | human, a reporter or project-owner of either ticket, or its assignee (depends_on / blocks) | `POST /api/tickets/:id/relations` |
 | `ticket.set_owner` | human | `POST /api/tickets/:id/owner` |
 | `ticket.release` | human, agent | `POST /api/tickets/:id/release` |
 | `ticket.mark_read` | human, agent | `POST /api/tickets/:id/mark-read` |

@@ -201,6 +201,13 @@ export interface CallerContext {
     signal_source?: string;
     signal_scopes?: string[];
     signal_projects?: string[];
+    /**
+     * #2652 — protocol features the client declares it knows (`x-aiball-client`),
+     * and the platform it runs on (`x-aiball-platform`): what the client is,
+     * not who. Read with the identity.
+     */
+    client_features?: string[];
+    platform?: string | null;
 }
 
 /**
@@ -369,6 +376,14 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
 function readHints(input: AuthInput, ctx: CallerContext): void {
     readNoClaimHint(input, ctx);
     readRoleHint(input, ctx);
+    readClient(input, ctx);
+}
+
+function readClient(input: AuthInput, ctx: CallerContext): void {
+    const features = String(input.header("x-aiball-client") ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+    if (features.length) ctx.client_features = features;
+    const platform = input.header("x-aiball-platform");
+    if (typeof platform === "string" && platform) ctx.platform = platform;
 }
 
 /**

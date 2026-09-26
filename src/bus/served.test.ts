@@ -88,6 +88,13 @@ const cases: { name: string; token: string; http: [string, string, unknown?]; bu
     { name: "a ticket, full", token: HUMAN, http: ["GET", `/api/tickets/${T}?full=1`], bus: ["ticket.get", { id: T, full: true }] },
     { name: "a ticket, digest", token: HUMAN, http: ["GET", `/api/tickets/${T}?digest=1&digest_limit=2`], bus: ["ticket.get", { id: T, digest: true, digest_limit: 2 }] },
     { name: "no such ticket", token: AGENT, http: ["GET", "/api/tickets/999999"], bus: ["ticket.get", { id: 999999 }] },
+    { name: "a post with no kind", token: AGENT, http: ["POST", "/api/messages", { project: "p-served", body: "b" }], bus: ["message.post", { project: "p-served", body: "b" }] },
+    { name: "a post naming another author", token: AGENT, http: ["POST", "/api/messages", { by_agent: "boss", kind: "comment_added", project: "p-served", ticket_id: T, body: "b" }], bus: ["message.post", { by_agent: "boss", kind: "comment_added", project: "p-served", ticket_id: T, body: "b" }] },
+    { name: "deciding a ticket head", token: HUMAN, http: ["POST", `/api/messages/${T}/decide`, { status: "accepted" }], bus: ["message.decide", { id: T, status: "accepted" }] },
+    { name: "an agent pushing a ticket to another", token: AGENT, http: ["POST", `/api/tickets/${T}/assign`, { assignee: "boss" }], bus: ["ticket.assign", { id: T, assignee: "boss" }] },
+    { name: "a ticket related to itself", token: HUMAN, http: ["POST", `/api/tickets/${T}/relations`, { target_ticket_id: T, kind: "related" }], bus: ["ticket.relate", { id: T, target_ticket_id: T, kind: "related" }] },
+    { name: "an agent editing a level", token: AGENT, http: ["POST", `/api/messages/${T}/edit`, { level: "milestone" }], bus: ["message.edit", { id: T, level: "milestone" }] },
+    { name: "an agent stepping a comment", token: AGENT, http: ["POST", `/api/messages/${T}/step`], bus: ["message.step", { id: T }] },
     { name: "a move to the same project", token: HUMAN, http: ["POST", `/api/tickets/${T}/move`, { project: "p-served" }], bus: ["ticket.move", { id: T, project: "p-served" }] },
 ];
 

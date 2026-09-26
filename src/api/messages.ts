@@ -15,44 +15,22 @@
  *   POST /messages/:id/reclassify               — #B.129 follow-up: swap decision kind
  *   POST /messages/:id/note                     — moderator note
  *
- * `decide()` helper is local — shared by approve/reject; not exported.
+ * #3063 — a route that says `serveMethod(name)` serves the bus method of that
+ * name (src/bus/methods/); the code is there, the route only maps the request.
  */
 import { serveMethod } from "../bus/http.js";
-import { earnOnClose } from "../db/wait-credit.js";
-import { milestoneOpenRefusal, openTicketsIn } from "../db/milestones.js";
 import { Router, type Request, type Response } from "express";
-import { ERROR_CODES, MESSAGE_SCOPES, TICKET_LEVELS, type TicketLevel } from "../domain.js";
-import { seesLevel } from "../db/consumers.js";
+import { ERROR_CODES } from "../domain.js";
 import {
-    INTENTS,
-    PRIORITIES,
-    applyMessageDecision,
-    editMessage,
-    getMessage,
-    isHuman,
     listMessages,
     listPendingDecisionsForReporter,
     listPlansToExecute,
-    updateMessageStatus,
-    type Intent,
     type MessageKind,
     type MessageStatus,
-    type Priority,
 } from "../db.js";
-import { isDecisionKind, type DecisionKind } from "../decisions.js";
-import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
-import { fileTicket, isExtrasRefusal, NO_EXTRAS, ticketExtras } from "../file-ticket.js";
-import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, withoutDecisionRefusal, validateNewMessage } from "../messages.js";
-import { decisionGesture } from "../ticket-transitions.js";
-import { fanOutPings, notifyDecision } from "../notifications.js";
-import { deliverToOutbox } from "../outbox.js";
-import { broadcast } from "../ws.js";
-import { emitLifecycle } from "../event-bus.js";
-import { authorFor, badRequest, conflict, consumerOf, notFound, refuse, refuseError, withTags, withTagsOne } from "./_helpers.js";
-import { getInboxAgg } from "../db/inbox-agg.js";
+import { consumerOf, withTags } from "./_helpers.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
-import { applyModeration } from "./moderation.js";
 
 export const messagesRouter = Router();
 
@@ -68,10 +46,9 @@ export const messagesRouter = Router();
  * ticket that is perfectly labelled, so a failure here is logged and the
  * creation still succeeds.
  */
-function applyPlatformTag(msg: { id: number; kind: string }, req: Request): void {
+export function applyPlatformTag(msg: { id: number; kind: string }, platform: string | null): void {
     if (msg.kind !== "ticket_created") return;
-    const header = req.headers["x-aiball-platform"];
-    const name = platformTagName(typeof header === "string" ? header : null);
+    const name = platformTagName(platform);
     // No header, or a platform we have no name for: nothing happens, and a
     // client that never sends it files tickets exactly as it always has.
     if (!name) return;
@@ -89,7 +66,7 @@ function applyPlatformTag(msg: { id: number; kind: string }, req: Request): void
  * #3039 — the refusals `submitMessage` throws, by code, and their HTTP status;
  * the answer carries the code. Anything else it throws is a 500.
  */
-const SUBMIT_REFUSAL_STATUS: Partial<Record<string, number>> = {
+export const SUBMIT_REFUSAL_STATUS: Partial<Record<string, number>> = {
     [ERROR_CODES.FORBIDDEN_CLOSE]: 403,
     // #561 — 400 (not 500): the client can say which project does not exist.
     [ERROR_CODES.PROJECT_NOT_FOUND]: 400,
@@ -105,53 +82,8 @@ const SUBMIT_REFUSAL_STATUS: Partial<Record<string, number>> = {
     [ERROR_CODES.TICKET_NOT_FOUND]: 404,
 };
 
-messagesRouter.post("/messages", (req: Request, res: Response) => {
-    // #3036 — the author IS the caller: a body naming someone else is refused.
-    // Settled BEFORE validation, which judges "human or agent" (summary_until…)
-    // on the author: judged on the body, a human leaving by_agent out was
-    // taken for an agent.
-    const author = authorFor(req, res, (req.body as { by_agent?: unknown } | undefined)?.by_agent);
-    if (author === null) return;
-    const v = validateNewMessage(req.body, author);
-    if ("error" in v) return badRequest(res, v.error);
-    // #830 — decision-event kinds (plan_accepted / plan_rejected / …) are
-    // emitted server-side by the /decide handler ONLY. External callers
-    // can't fabricate them: a real accept/reject must flow through the
-    // decision validation pipeline (gates by-status, applies the meta
-    // flip atomically). Reject any direct POST with one of these kinds.
-    if (isDecisionEventKind(v.kind)) {
-        return badRequest(res, `kind ${v.kind} is server-emitted only — use POST /messages/:id/decide to accept/reject a decision`);
-    }
-    // #595 — auto-fill by_agent from the auth context when the caller omits
-    // it. The bulk-close UI in App.vue calls POST /messages without by_agent
-    // and `submitMessage` then can't run `assertCloseAuthority` properly
-    // (no consumer to compare to the ticket reporter, no isHuman bypass) —
-    // every close on a ticket the moderator didn't open returned 403. Same
-    // pattern as api/tickets.ts:assign which has always done `consumerOf(req)`.
-    v.by_agent = author;
-    // #2275 / #2331 — an agent's comment carries a then, or says whether it hands the ticket back.
-    const noDecision = withoutDecisionRefusal(v, consumerOf(req));
-    if (noDecision) return badRequest(res, noDecision.error, noDecision.code);
-    // #2652 — an agent's comment says which commits it delivers, or that it delivers none.
-    const clientFeatures = String(req.headers["x-aiball-client"] ?? "").split(",").map((f) => f.trim());
-    const commitsRule = commitsRequirement(v, consumerOf(req), clientFeatures.includes("commits"));
-    if (commitsRule.refusal) return badRequest(res, commitsRule.refusal, ERROR_CODES.COMMITS_REQUIRED);
-    // #2331 — a project's lead filing a ticket without a plan is reminded, not refused.
-    const warning = v.kind === "ticket_created" ? creationHandbackFor(v).warning : commitsRule.warning;
-    // #3037 — a new ticket comes with its extras (tags, assignee, milestone,
-    // level), all checked before anything is written.
-    const extras = v.kind === "ticket_created" ? ticketExtras((req.body ?? {}) as Record<string, unknown>, v.project, author) : NO_EXTRAS;
-    if (isExtrasRefusal(extras)) return refuse(res, extras.status, extras.error, extras.code);
-    try {
-        const msg = v.kind === "ticket_created" ? fileTicket(v, extras, author) : submitMessage(v);
-        applyPlatformTag(msg, req);
-        return res.status(201).json({ ...withTagsOne(msg), ...(warning ? { warnings: [warning] } : {}) });
-    } catch (err) {
-        const status = SUBMIT_REFUSAL_STATUS[(err as { code?: string }).code ?? ""];
-        if (status) return refuseError(res, status, err);
-        throw err;
-    }
-});
+// The body is the message; nothing rides in the path or the query.
+messagesRouter.post("/messages", serveMethod("message.post", (req) => req.body ?? {}, { status: 201 }));
 
 messagesRouter.get("/messages", (req: Request, res: Response) => {
     const { status, project, kind, by_agent, limit, summary, open } = req.query;
@@ -202,26 +134,8 @@ messagesRouter.get("/decisions/plans-to-execute", (req: Request, res: Response) 
     res.json({ plans: listPlansToExecute(consumer) });
 });
 
-function decide(
-    req: Request,
-    res: Response,
-    status: MessageStatus,
-): void | Response {
-    const id = Number(req.params.id);
-    const existing = getMessage(id);
-    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    if (existing.status !== "pending") {
-        return badRequest(res, `message already ${existing.status}`, ERROR_CODES.ALREADY_MODERATED);
-    }
-    // #2180 — the ripple lives in ./moderation.ts so the pending-children
-    // sweep applies exactly the same side-effects per child.
-    const decorated = applyModeration(existing, status, consumerOf(req));
-    if (!decorated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    res.json(decorated);
-}
-
-messagesRouter.post("/messages/:id/approve", (req, res) => decide(req, res, "approved"));
-messagesRouter.post("/messages/:id/reject", (req, res) => decide(req, res, "rejected"));
+messagesRouter.post("/messages/:id/approve", serveMethod("message.approve"));
+messagesRouter.post("/messages/:id/reject", serveMethod("message.reject"));
 
 /**
  * #618 (spinoff de #617) — atomic accept-and-close. Avant : le client
@@ -242,143 +156,9 @@ messagesRouter.post("/messages/:id/reject", (req, res) => decide(req, res, "reje
  * envelopper les 2 dans une transaction Drizzle si on observe des
  * échecs partiels.
  */
-messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const existing = getMessage(id);
-    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    if (existing.status !== "pending") {
-        return badRequest(res, `message already ${existing.status}`, ERROR_CODES.ALREADY_MODERATED);
-    }
-    if (!existing.ticket_id) {
-        return badRequest(res, "message has no parent ticket to close");
-    }
-    // Step 1 : approve the pending decision message. Inline mirror of
-    // decide(req, res, "approved") minus the res.json — we want to ship
-    // the combined response below.
-    const approved = updateMessageStatus(id, "approved", "human", null, existing.kind);
-    if (!approved) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    const approvedDecorated = withTagsOne(approved);
-    deliverToOutbox(approved);
-    fanOutPings(approved);
-    notifyDecision(approved, consumerOf(req));
-    broadcast({ type: "message_decided", data: approvedDecorated });
-    emitLifecycle({ op: "decided", message: approvedDecorated });
-    // No status_changed emit : that hook fires only for ticket_created
-    // status flips ; this is a comment-with-decision approval.
-    // Step 2 : insert the ticket_closed event. submitMessage handles its
-    // own broadcasts + close-time cleanup (autoApproveStaleDecisionsOnClose
-    // etc) inside its existing path.
-    const byAgent = consumerOf(req);
-    const body = typeof req.body?.body === "string" ? req.body.body : undefined;
-    try {
-        // #921 — skip ping fan-out : la décision d'acceptance ci-dessus
-        // a déjà pingé tous les consumers concernés (resolution_accepted).
-        // Le ticket_closed auto-émis qui suit est redondant côté ping
-        // (mêmes consumers, info équivalente). Les broadcasts + lifecycle
-        // emits restent (UI list / thread doivent voir le close).
-        const closeMsg = submitMessage({
-            project: approved.project,
-            kind: "ticket_closed",
-            ticket_id: existing.ticket_id,
-            parent_id: existing.ticket_id,
-            body,
-            by_agent: byAgent,
-        }, { skipFanOut: true });
-        return res.json({
-            approved: approvedDecorated,
-            closed: withTagsOne(closeMsg),
-        });
-    } catch (err) {
-        if ((err as { code?: string }).code === ERROR_CODES.FORBIDDEN_CLOSE) return refuseError(res, 403, err);
-        // The approve already landed ; we surface the close error so the
-        // client knows to refresh + retry the close manually.
-        return res.status(500).json({
-            error: `accepted resolution but failed to close: ${(err as Error).message}`,
-            code: ERROR_CODES.INTERNAL,
-            approved: approvedDecorated,
-        });
-    }
-});
+messagesRouter.post("/messages/:id/accept-and-close", serveMethod("message.accept_and_close"));
 
-messagesRouter.post("/messages/:id/edit", (req, res) => {
-    const id = Number(req.params.id);
-    const existing = getMessage(id);
-    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    const { title, body, summary, intent, priority, scope, level } = req.body ?? {};
-    if (
-        title === undefined &&
-        body === undefined &&
-        summary === undefined &&
-        intent === undefined &&
-        priority === undefined &&
-        scope === undefined &&
-        level === undefined
-    ) {
-        return badRequest(res, "provide title, body, summary, intent, priority, scope, and/or level");
-    }
-    // #1565 — `title` is the ticket's real column (NOT NULL), no longer an
-    // overlay that null could clear. Reject rather than 500 at the DB layer.
-    if (title !== undefined && typeof title !== "string") {
-        return badRequest(res, "title must be a string");
-    }
-    if (intent !== undefined && intent !== null) {
-        if (typeof intent !== "string" || !INTENTS.includes(intent as Intent)) {
-            return badRequest(res, `intent must be one of ${INTENTS.join(", ")}`);
-        }
-    }
-    if (priority !== undefined && priority !== null) {
-        if (typeof priority !== "string" || !PRIORITIES.includes(priority as Priority)) {
-            return badRequest(res, `priority must be one of ${PRIORITIES.join(", ")}`);
-        }
-    }
-    // #553 — scope is the #B.245 tristate.
-    if (scope !== undefined && scope !== null) {
-        if (typeof scope !== "string" || !(MESSAGE_SCOPES as readonly string[]).includes(scope)) {
-            return badRequest(res, `scope must be one of ${MESSAGE_SCOPES.join(", ")}`);
-        }
-    }
-    // #2216/#2241 — a ticket's level decides whose backlog and notifications it
-    // reaches, so a human sets it: an agent able to move a ticket to another level
-    // could drop it out of every coder's queue.
-    if (level !== undefined) {
-        if (typeof level !== "string" || !(TICKET_LEVELS as readonly string[]).includes(level)) {
-            return badRequest(res, `level must be one of ${TICKET_LEVELS.join(", ")}`);
-        }
-        if (existing.kind !== "ticket_created") return badRequest(res, "level applies to tickets only");
-        if (!isHuman(consumerOf(req))) {
-            return refuse(res, 403, "a ticket's level is set by a human moderator only", ERROR_CODES.MODERATOR_ONLY);
-        }
-    }
-    const updated = editMessage(id, { title, body, summary, intent, priority, scope, level: level as TicketLevel | undefined });
-    if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    const decorated = withTagsOne(updated);
-    broadcast({ type: "message_edited", data: decorated });
-    // #509 — priority_changed lifecycle quand la priorité d'un ticket bouge
-    // réellement (normalise NULL→"normal" sur les 2 côtés pour éviter un faux
-    // positif). Runtime ticket_priority_changed dispatch en dépend.
-    if (
-        priority !== undefined
-        && existing.kind === "ticket_created"
-        && (existing.priority ?? "normal") !== (decorated.priority ?? "normal")
-    ) {
-        emitLifecycle({
-            op: "priority_changed",
-            message: decorated,
-            old_priority: existing.priority ?? "normal",
-        });
-    }
-    // #2241 — moving a ticket to a level its holder does not work on takes it out
-    // of their backlog without a sound. Not blocked (nobody loses the ticket
-    // itself), but said.
-    const held = existing as { claimant?: string | null; assignee?: string | null; level?: string };
-    const leftBehind = level !== undefined && level !== held.level
-        ? [...new Set([held.claimant, held.assignee].filter((h): h is string => !!h && !seesLevel(h, level)))]
-        : [];
-    const warning = leftBehind.length > 0
-        ? `held by ${leftBehind.join(", ")}, who ${leftBehind.length > 1 ? "do" : "does"} not work on ${level} tickets: this ticket now leaves their backlog and notifications`
-        : null;
-    res.json(warning ? { ...decorated, warning } : decorated);
-});
+messagesRouter.post("/messages/:id/edit", serveMethod("message.edit"));
 
 /**
  * Delete a comment (#309) — UI affordance, **human moderator only**. Soft
@@ -416,204 +196,7 @@ messagesRouter.post("/messages/:id/questions/:qid/answer", serveMethod("message.
  * a terminal decision returns 409: the proper flow is to post a new
  * comment with a fresh decision (e.g. plan v2 after a rejected v1).
  */
-messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const body = (req.body ?? {}) as {
-        status?: unknown;
-        decided_by?: unknown;
-        new_kind?: unknown;
-        // #980 `7cnyjb` — optional closing note carried on the auto-close
-        // event when accepting a resolution / wontfix (front sends it here
-        // instead of a separate postBodyAs("ticket_closed")).
-        body?: unknown;
-    };
-    if (body.status !== "accepted" && body.status !== "rejected") {
-        return badRequest(res, "status must be 'accepted' or 'rejected'");
-    }
-    // #3036 — who decides is who is authenticated.
-    const by = authorFor(req, res, body.decided_by, "decided_by");
-    if (by === null) return;
-    let newKind: DecisionKind | undefined;
-    if (body.new_kind !== undefined && body.new_kind !== null) {
-        if (typeof body.new_kind !== "string") {
-            return badRequest(res, "new_kind must be a string when set");
-        }
-        if (!isDecisionKind(body.new_kind)) {
-            return badRequest(res, "new_kind must be a valid decision kind");
-        }
-        newKind = body.new_kind;
-    }
-    // #2376 david `dvqfvt` (case 4) — only the LATEST decision of a thread can
-    // be accepted or rejected. A replaced one is moot: deciding it sent the
-    // agent a `plan_accepted` for a plan nobody works on any more, while the
-    // newer decision kept the ticket gated. Same rule the list badges, the
-    // stats and the close already follow.
-    {
-        const target = getMessage(id);
-        const ticketId = target?.kind === "ticket_created" ? target.id : target?.ticket_id ?? null;
-        if (target && ticketId != null) {
-            const agg = getInboxAgg(target.project).get(ticketId);
-            const latest = agg?.latestDecisionId ?? 0;
-            if (latest > 0 && latest !== id) {
-                const newer = getMessage(latest);
-                const ref = newer?.hashid ? `#${newer.hashid}` : `message ${latest}`;
-                return conflict(res, `a newer decision replaced this one — decide ${ref} instead`, ERROR_CODES.DECISION_SUPERSEDED);
-            }
-        }
-    }
-    // #2910 — accepting a resolution or a wontfix closes the ticket: on a
-    // milestone that still holds open tickets, refuse the accept itself rather
-    // than accept and then fail the close.
-    if (body.status === "accepted") {
-        const target = getMessage(id);
-        const ticketId = target?.kind === "ticket_created" ? target.id : target?.ticket_id ?? null;
-        const ticket = ticketId != null ? getMessage(ticketId) : null;
-        if (target && ticket?.level === "milestone") {
-            let k: string | undefined = newKind;
-            if (!k) {
-                try { k = (JSON.parse(target.meta ?? "null") as { decision?: { kind?: string } } | null)?.decision?.kind; } catch { /* no decision */ }
-            }
-            const effect = decisionGesture(k)?.onAccept;
-            if (effect === "close_resolved" || effect === "close_unresolved") {
-                const open = openTicketsIn(ticket.id);
-                if (open.length > 0) return conflict(res, milestoneOpenRefusal(ticket.id, open), ERROR_CODES.MILESTONE_HAS_OPEN);
-            }
-        }
-    }
-    try {
-        const updated = applyMessageDecision(id, body.status, by, newKind);
-        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        // #260/#261: notify the proposal's author that their plan/resolution
-        // was accepted (go-signal to execute) or rejected (ball back in
-        // their court). Same service the moderation decide() path uses.
-        notifyDecision(updated, by);
-        const decorated = withTagsOne(updated);
-        broadcast({ type: "message_edited", data: decorated });
-        // #321 phase 2 (additive): a plan/resolution decision changed (accept/
-        // reject/reclassify) → emit so #322's rules can react (e.g. re-attribute
-        // when a plan is accepted). The `meta.decision` carries the new state.
-        emitLifecycle({ op: "decided", message: decorated });
-        // #830 david `a7pn65` — emit a dedicated decision-event message so
-        // the wake-injection pipeline can route it through its own template
-        // branch (= the agent receives "Your plan on #X was accepted by Y"
-        // verbatim instead of re-pulling the original proposal body with no
-        // verbal hint). The new event is a sibling of the original comment
-        // (parent_id = original.id) carrying its hashid in meta.decision_ref.
-        // Best-effort : a failure here surfaces as a server log but doesn't
-        // fail the decide — the meta flip already landed, the rest is just
-        // narration.
-        // #863 — for a TICKET-level decision (`ticket_new({then:"plan"})`,
-        // #803 path), `applyMessageDecision` returns a synthesized
-        // `ticket_created` Message whose `ticket_id` is null BY CONVENTION
-        // (the message IS the ticket). The original guard `updated.ticket_id
-        // != null` skipped the plan_accepted emission for those cases →
-        // regression : ticket-level plan accept didn't wake. Fallback :
-        // when the synthesized message is `ticket_created`, the ticket id
-        // IS `updated.id`.
-        const eventTicketId = updated.kind === "ticket_created" ? updated.id : updated.ticket_id;
-        if (updated.meta && eventTicketId != null) {
-            try {
-                const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
-                const decisionKind = m.decision?.kind;
-                const eventKindStr = decisionKind && (body.status === "accepted" || body.status === "rejected")
-                    ? `${decisionKind}_${body.status}`
-                    : "";
-                if (eventKindStr && isDecisionEventKind(eventKindStr)) {
-                    // parent_id = the original proposal's message id ;
-                    // the wake builder + UI resolve the backlink (e.g.
-                    // hashid display) via getMessage(parent_id) — no
-                    // need to duplicate the ref in meta here.
-                    // Cast safe : isDecisionEventKind narrowing isn't a
-                    // type guard on the string union ; the runtime check
-                    // makes the cast sound.
-                    submitMessage({
-                        project: updated.project,
-                        kind: eventKindStr as MessageKind,
-                        ticket_id: eventTicketId,
-                        parent_id: updated.id,
-                        body: null,
-                        by_agent: by,
-                    });
-                }
-            } catch {
-                /* malformed meta or decision-event insert failed — don't
-                   fail the decide ; the proposal status flip is the
-                   authoritative signal, the event is decoration. */
-            }
-        }
-        // #802 + #980 `7cnyjb` — accepting a `resolution` OR a `wontfix`
-        // (effective kind, post-reclassify) auto-closes the ticket from the
-        // SAME endpoint. wontfix (#802) closes WITHOUT flipping resolved
-        // (junk/test/out-of-scope triage) ; resolution lands as closed-resolved
-        // (`resolved` is derived from the accepted meta, db/tickets.ts:103 —
-        // no separate event). Pre-#980 only wontfix auto-closed here ; a
-        // resolution relied on the front POSTing a separate `ticket_closed`,
-        // whose fan-out was the 2nd ping (`resolution_accepted` +
-        // `ticket_closed`, cf. #965/#972). Folding the close in with
-        // `skipFanOut` → ONE ping. The author of the proposal can't always
-        // close (non-reporter agent triaging) ; this acceptance IS the
-        // reporter's close authorization. Best-effort : a failure here is
-        // logged but doesn't fail the decide (the meta flip already landed).
-        if (
-            body.status === "accepted"
-            && updated.meta
-            && updated.ticket_id != null
-        ) {
-            try {
-                const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
-                const k = m.decision?.kind;
-                // #2308 — which acceptances close the ticket is the table's `onAccept`.
-                const effect = decisionGesture(k)?.onAccept;
-                if (effect === "close_resolved" || effect === "close_unresolved") {
-                    // Optional closing note rides on the close event ; wontfix
-                    // keeps its synthesized default when no note is supplied.
-                    const closeBody =
-                        typeof body.body === "string" && body.body.trim()
-                            ? body.body
-                            : effect === "close_unresolved"
-                                ? `(auto-close from accepted ${k} #${updated.hashid ?? id})`
-                                : undefined;
-                    // #921 — skip the blanket ping fan-out: the proposer already
-                    // heard it through `<kind>_accepted`, and two wakes for one
-                    // gesture is noise.
-                    // #2380 david `75jv33` — but that accept now wakes the
-                    // PROPOSER alone, so everyone else (the reporter first of
-                    // all) would hear nothing at all of a ticket closing on
-                    // them. The close fans out to them, minus the proposer:
-                    // one wake each, nobody left out.
-                    // #980 N2 — skipBroadcast : le `<kind>_accepted` est aussi
-                    // la SEULE notif UI (toaster + `e:` counter). Le refresh
-                    // qu'il déclenche fait re-dériver `ticket.closed` (la row
-                    // existe). Sans ça, l'auto-close re-broadcaste → 2e toaster.
-                    const closeMsg = submitMessage({
-                        project: updated.project,
-                        kind: "ticket_closed",
-                        ticket_id: updated.ticket_id,
-                        parent_id: updated.ticket_id,
-                        body: closeBody,
-                        by_agent: by,
-                    }, { skipFanOut: true, skipBroadcast: true });
-                    if (closeMsg.status === "approved") {
-                        fanOutPings(closeMsg, { except: updated.by_agent });
-                        // #2640 — a ticket closed on an agent's accepted
-                        // resolution or wontfix is proof of work: wait credit.
-                        if (updated.by_agent && !isHuman(updated.by_agent)) {
-                            earnOnClose(updated.by_agent, updated.project, updated.ticket_id, effect === "close_resolved" ? "resolved" : "wontfix");
-                        }
-                    }
-                }
-            } catch {
-                /* malformed meta or close failed — don't fail the decide */
-            }
-        }
-        res.json(decorated);
-    } catch (e) {
-        // Domain-level conflict (no decision present, or already
-        // terminal) — surface as 409 so the UI can show the reason.
-        return refuseError(res, 409, e);
-    }
-});
+messagesRouter.post("/messages/:id/decide", serveMethod("message.decide"));
 
 /**
  * #827 david `n4ejhf` / `bur6be` — resurface a message : reset `seen_at`
@@ -686,35 +269,7 @@ messagesRouter.post("/messages/:id/promote", serveMethod("message.promote"));
  */
 messagesRouter.post("/messages/:id/untag", serveMethod("message.untag"));
 
-/**
- * #2369 — tag an agent's comment as a step (`then: continue`) the agent did not
- * post, or remove that tag. Human moderators only. Silent: no ping — the agent
- * finds the ticket back in its pool at its next wake.
- */
-messagesRouter.post("/messages/:id/step", (req, res) => stepTagRoute(req, res, true));
-messagesRouter.post("/messages/:id/unstep", (req, res) => stepTagRoute(req, res, false));
-
-function stepTagRoute(req: Request, res: Response, tag: boolean) {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const caller = consumerOf(req);
-    if (!isHuman(caller)) {
-        return refuse(res, 403, "only a registered human moderator can tag a comment as a step", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const existing = getMessage(id);
-    if (!existing) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-    if (tag && (!existing.by_agent || isHuman(existing.by_agent))) {
-        return refuse(res, 409, "only an agent's comment can be tagged as a step");
-    }
-    try {
-        const updated = tag ? tagMessageAsStep(id, caller) : untagMessageStep(id);
-        if (!updated) return notFound(res, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        const decorated = withTagsOne(updated);
-        broadcast({ type: "message_edited", data: decorated });
-        res.json(decorated);
-    } catch (e) {
-        return refuseError(res, 409, e);
-    }
-}
+messagesRouter.post("/messages/:id/step", serveMethod("message.step"));
+messagesRouter.post("/messages/:id/unstep", serveMethod("message.unstep"));
 
 messagesRouter.post("/messages/:id/note", serveMethod("message.note"));
