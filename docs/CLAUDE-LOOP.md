@@ -339,7 +339,7 @@ claude-loop list                       # alive/dead + state summary
 claude-loop status [name]              # connection type, default agent, daemon reachability
 claude-loop tail <name> --lines 30     # last N lines of the claude pane
 claude-loop tail <name> --timer        # detached timer's stdout log
-claude-loop attach <name>              # tmux attach
+claude-loop attach <name>              # tmux attach; a loop on the session host: attach to the host (detach: Ctrl-B D)
 claude-loop wake <name>                # force the next tick (bypass check-cmd)
 claude-loop reload [name]              # respawn the timer in place (keeps claude)
 claude-loop restart [name] --resume    # hard restart, resuming Claude's conversation whatever the start config says

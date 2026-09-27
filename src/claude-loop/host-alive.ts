@@ -28,3 +28,8 @@ export function liveHostAgent(sd: string, home: string = AIBALL_HOME): string | 
         return null;
     }
 }
+
+/** The socket a terminal attaches to, for an agent's session on the host. */
+export function hostAttachSocket(agent: string, home: string = AIBALL_HOME): string {
+    return join(home, "hosts", agent, "attach.sock");
+}

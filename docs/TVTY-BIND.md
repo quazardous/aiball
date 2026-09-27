@@ -41,6 +41,10 @@ Any number of clients may **watch** a Claude and type into it at once: tvty,
 the terminal claude-loop runs in, the web. Watching takes nothing and asks no
 confirmation. Only **moving** Claude from one place to the other does.
 
+- **From a plain terminal**: `claude-loop attach <loop>` attaches to a loop
+  on the host as it attaches to a tmux loop: the screen, the keys (a human's,
+  AFK included) and the terminal's size go through the host's attach socket.
+  Ctrl-B D detaches, Ctrl-B Ctrl-B sends one Ctrl-B; leaving stops nothing.
 - **The attach socket**: an agent's bar carries `attach`, the same field
   whatever holds Claude ([`LOOP-HOST.md`](./LOOP-HOST.md), *Finding a loop's
   socket*):

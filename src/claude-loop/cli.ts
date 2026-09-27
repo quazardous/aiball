@@ -91,7 +91,8 @@ import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
-import { liveHostAgent } from "./host-alive.js";
+import { hostAttachSocket, liveHostAgent } from "./host-alive.js";
+import { attachHost } from "./host-attach.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -1536,14 +1537,25 @@ function cmdList(): void {
     }
 }
 
-function cmdAttach(name: string | undefined): void {
+async function cmdAttach(name: string | undefined): Promise<void> {
     // #415 (david) : `claude-loop attach` sans nom → résout le loop unique
     // du cwd courant (même convention que tail/reload/restart/check).
     // resolveCurrentLoopName privilégie déjà l'alive sur égalité et meurt
     // avec un message de désambiguïsation si plusieurs loops partagent le cwd.
     const resolved = name ?? resolveCurrentLoopName();
-    if (!tmuxAlive(resolved)) die(`loop '${resolved}' not alive`);
-    spawnSync(MUX_CMD, ["attach", "-t", tmuxName(resolved)], { stdio: "inherit" });
+    if (tmuxAlive(resolved)) {
+        spawnSync(MUX_CMD, ["attach", "-t", tmuxName(resolved)], { stdio: "inherit" });
+        return;
+    }
+    // #3066 — a loop on the daemon's session host: attach to the host itself.
+    const agent = liveHostAgent(stateDirFor(resolved));
+    if (!agent) die(`loop '${resolved}' not alive`);
+    const end = await attachHost(hostAttachSocket(agent), { stdin: process.stdin, stdout: process.stdout });
+    const why = end.reason === "detached" ? `detached from '${resolved}' — Claude carries on on the host`
+        : end.reason === "exited" ? `the session of '${resolved}' ended (code ${end.code ?? "?"})`
+        : `the host of '${resolved}' ${end.reason === "error" ? "refused" : "closed"} the attach${end.message ? `: ${end.message}` : ""}`;
+    process.stdout.write(`${why}\n`);
+    process.exit(end.reason === "error" ? 1 : 0);
 }
 
 
@@ -2300,7 +2312,7 @@ async function main(): Promise<void> {
     }
     program.command("attach [name]")
         .description("tmux attach to a loop session. Name optional — defaults to the single loop registered for the current cwd (#415).")
-        .action((name: string | undefined) => cmdAttach(name));
+        .action(async (name: string | undefined) => { await cmdAttach(name); });
     program.command("tail [name]")
         .description("Follow the claude pane live (--timer / --stop-hook / --log for the wake-decision logs). Name optional — defaults to the loop registered for the current cwd. Ctrl-C to stop; pass --once for a snapshot.")
         .option("--lines <n>", "Lines to show", "40")
