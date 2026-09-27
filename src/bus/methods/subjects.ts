@@ -392,11 +392,21 @@ onBroadcast((ev) => {
     if (MESSAGE_EVENTS.has(ev.type)) {
         const t = ticketOfEvent(ev);
         if (!t) return;
-        const message = ev.type === "message_tagged" ? d : ev.data;
-        publish(`ticket.${t.id}`, { type: ev.type, message });
-        publish("tickets", { ticket_id: t.id, project: t.project } satisfies TicketMoved);
+        ticketMoved(t, ev.type, ev.type === "message_tagged" ? d : ev.data);
     }
 });
+
+/**
+ * A ticket changed: its thread hears the event, and its row is built again in
+ * every `project.*.tickets` view. #3163 — also called straight, for a change
+ * the board does not broadcast (the auto-close of an accepted resolution or
+ * wontfix, kept off `board.events` so the web shows one toast), without which
+ * the views keep the row as it was before the close.
+ */
+export function ticketMoved(t: Pick<Message, "id" | "project">, type: string, message: unknown): void {
+    publish(`ticket.${t.id}`, { type, message });
+    publish("tickets", { ticket_id: t.id, project: t.project } satisfies TicketMoved);
+}
 
 // ---- the methods --------------------------------------------------------------
 

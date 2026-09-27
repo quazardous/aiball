@@ -125,6 +125,23 @@ test("a project's rows: the list's, and each change pushed is the row the list g
     assert.deepEqual(c.events.at(-1)!.data, { op: "remove", id: t1, project: "p-subs" }, "a closed ticket leaves an open view");
 });
 
+test("#3163 — a ticket closed by an accepted resolution leaves an open view, and shows closed in the others", async () => {
+    const t = ticket("resolved by accept");
+    const proposal = submitMessage({ project: "p-subs", kind: "comment_added", ticket_id: t, parent_id: t, body: "done", decision_kind: "resolution", summary_until: "done", by_agent: "worker" } as never);
+    const c = await open("boss");
+    await c.call<Sub>("bus.subscribe", { subject: "project.p-subs.tickets", open: true });
+    const all = await open("boss");
+    await all.call<Sub>("bus.subscribe", { subject: "project.p-subs.tickets" });
+    await c.call("message.decide", { id: proposal.id, status: "accepted" });
+    await c.settle();
+    await all.settle();
+    const mine = (e: Ev) => (e.data as { id?: number; row?: { id: number } }).id === t || (e.data as { row?: { id: number } }).row?.id === t;
+    assert.deepEqual(c.events.filter(mine).at(-1)?.data, { op: "remove", id: t, project: "p-subs" }, "the open view drops it");
+    const last = all.events.filter(mine).at(-1)?.data as { op: string; row: { closed: boolean } };
+    assert.equal(last.op, "upsert");
+    assert.equal(last.row.closed, true, "the full view has it closed");
+});
+
 test("a ticket moved to another project leaves the view it was in", async () => {
     const t2 = ticket("two");
     const c = await open("worker");

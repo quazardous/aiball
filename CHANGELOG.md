@@ -185,6 +185,8 @@ dates are YYYY-MM-DD.
   ignores the stop signals: past the grace, its whole process group is killed.
 - Stopping a shell session takes a moment, not ten seconds: the host hangs up
   first, as a closing terminal does, then sends the stop signal a second later.
+- A ticket closed by an accepted resolution or wontfix now leaves the bus's open
+  ticket views at once, instead of staying until something else touched it.
 
 - A loop that comes back has its bar live again at once, rather than showing
   stale until it pushes a different one.

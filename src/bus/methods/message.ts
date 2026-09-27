@@ -41,6 +41,7 @@ import { applyPlatformTag, SUBMIT_REFUSAL_STATUS } from "../../api/messages.js";
 import { applyModeration } from "../../api/moderation.js";
 import { tagMessageAsStep, untagMessageStep } from "../../db/messages.js";
 import { broadcast } from "../../ws.js";
+import { ticketMoved } from "./subjects.js";
 import { resolveAttachments } from "../../db/uploads.js";
 import { withTagsOne, withVotesOne } from "../../api/_helpers.js";
 
@@ -697,6 +698,8 @@ defineMethod({
                         by_agent: by,
                     }, { skipFanOut: true, skipBroadcast: true });
                     if (closeMsg.status === "approved") {
+                        // #3163 — no broadcast, but the bus views still see the ticket close.
+                        ticketMoved({ id: updated.ticket_id, project: updated.project }, "message_created", closeMsg);
                         fanOutPings(closeMsg, { except: updated.by_agent });
                         // #2640 — a ticket closed on an agent's accepted
                         // resolution or wontfix is proof of work: wait credit.
