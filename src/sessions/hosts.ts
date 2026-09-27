@@ -5,6 +5,7 @@
  * and takes their control channel back. Claude's bytes never pass through here:
  * clients attach to the host's own socket.
  */
+import { hostDirName, MAX_SOCKET_PATH } from "../session-dir.js";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -14,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { AIBALL_HOME } from "../paths.js";
 
 /** A Unix socket's path is at most about 100 bytes. */
-export const MAX_SOCKET_PATH = 100;
+export { MAX_SOCKET_PATH } from "../session-dir.js";
 
 export const SESSION_NAME = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -22,9 +23,9 @@ export function hostsDir(): string {
     return join(AIBALL_HOME, "hosts");
 }
 
-/** An agent's session lives in `hosts/<agent>`, a named one in `hosts/term-<name>`. */
+/** An agent's session lives in `hosts/<agent>`, a named one in `hosts/term-<name>`; a short hashed folder when that would make a socket path too long (src/session-dir.ts). */
 export function hostDirFor(key: { agent?: string; name?: string }): string {
-    return join(hostsDir(), key.agent ? key.agent : `term-${key.name}`);
+    return join(hostsDir(), hostDirName(key, hostsDir()));
 }
 
 /** The binary: `CL_SESSION_HOST_BIN`, or this checkout's release build. */

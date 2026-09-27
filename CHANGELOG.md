@@ -162,6 +162,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A session with a long name starts on a deep aiball home: its host folder
+  takes a short name when a socket path would be too long.
+
 - Stopping a session on the host no longer leaves a program running that
   ignores the stop signals: past the grace, its whole process group is killed.
 

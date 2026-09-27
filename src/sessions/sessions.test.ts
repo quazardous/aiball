@@ -130,10 +130,13 @@ test("an agent in claude-loop is HOST_BUSY", { skip }, async () => {
     presenceDisconnect("worker");
 });
 
-test("a socket path too long is refused before anything starts", { skip }, async () => {
+test("#3141 a name too long for the socket path starts all the same, in a short folder", { skip }, async () => {
     const boss = await as("boss");
-    const r = await refused(boss.call("session.start", { name: "n".repeat(64), argv: ["cat"], cwd: home }));
-    assert.match(r.message, /socket path/);
+    const name = "n".repeat(64);
+    const v = await boss.call<{ name: string; attach: { socket: string } }>("session.start", { name, argv: ["cat"], cwd: home });
+    assert.equal(v.name, name);
+    assert.match(v.attach.socket, /term-[0-9a-f]{8}\/attach\.sock$/);
+    await boss.call("session.stop", { name });
 });
 
 test("the environment a caller may give: an allow-list", () => {

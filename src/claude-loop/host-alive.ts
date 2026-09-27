@@ -5,6 +5,7 @@
  * sockets (`$AIBALL_HOME/hosts/<agent>/host.json`). Read on this machine only:
  * a loop is started where its host runs.
  */
+import { hostDirName } from "../session-dir.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AIBALL_HOME } from "../paths.js";
@@ -20,7 +21,7 @@ export function liveHostAgent(sd: string, home: string = AIBALL_HOME): string | 
     }
     if (!agent) return null;
     try {
-        const info = JSON.parse(readFileSync(join(home, "hosts", agent, "host.json"), "utf8")) as { pid?: unknown };
+        const info = JSON.parse(readFileSync(join(home, "hosts", hostDirName({ agent }, join(home, "hosts")), "host.json"), "utf8")) as { pid?: unknown };
         if (typeof info.pid !== "number") return null;
         process.kill(info.pid, 0);
         return agent;
@@ -31,7 +32,7 @@ export function liveHostAgent(sd: string, home: string = AIBALL_HOME): string | 
 
 /** The socket a terminal attaches to, for an agent's session on the host. */
 export function hostAttachSocket(agent: string, home: string = AIBALL_HOME): string {
-    return join(home, "hosts", agent, "attach.sock");
+    return join(home, "hosts", hostDirName({ agent }, join(home, "hosts")), "attach.sock");
 }
 
 /**
