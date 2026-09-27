@@ -339,7 +339,7 @@ claude-loop list                       # alive/dead + state summary
 claude-loop status [name]              # connection type, default agent, daemon reachability
 claude-loop tail <name> --lines 30     # last N lines of the claude pane
 claude-loop tail <name> --timer        # detached timer's stdout log
-claude-loop attach <name>              # tmux attach; a loop on the session host: attach to the host (detach: Ctrl-B D)
+claude-loop attach <name> [--read-only] # attach in tmux or on the session host; --read-only watches a copy (detach: Ctrl-B D)
 claude-loop wake <name>                # force the next tick (bypass check-cmd)
 claude-loop reload [name]              # respawn the timer in place (keeps claude)
 claude-loop restart [name] --resume    # hard restart, resuming Claude's conversation whatever the start config says
@@ -766,7 +766,10 @@ an **atomic lock**:
 - A **stale** lock left by a start that crashed mid-spawn self-reclaims: the
   holder pid is recorded in the lock and a dead pid is reclaimed transparently.
 - `pruneDeadStateDirs` skips dotfiles so it never deletes a live lock.
-- `--force` bypasses the lock (and the check) — explicit override.
+- A start that finds the loop already live never starts a second one: on a
+  terminal it attaches to it, as a read-only copy, or with the controls under
+  `--force`; off a terminal, or with `--no-attach`, it is refused, saying where
+  the loop runs ([`TVTY-BIND.md`](./TVTY-BIND.md)).
 
 Granularity is **(cwd, agent)**: a different agent may still run its own loop in
 the same directory. The lock logic is pure/injectable (`src/claude-loop/start-lock.ts`,

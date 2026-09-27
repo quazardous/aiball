@@ -75,3 +75,31 @@ test("a real host: the screen shown, keys typed, the size followed, and a detach
     await until("the client gone", async () => ((await link.call("host.hello")) as { clients: number }).clients === 0);
     assert.equal(((await link.call("host.hello")) as { claude: { running: boolean } }).claude.running, true, "the session carries on");
 });
+
+test("#3166 — a read-only copy: the screen shown, the keys and the size go nowhere, Ctrl-B D still leaves", { skip }, async () => {
+    const link = await startHost({ name: "copy", argv: ["cat"], cwd: home, size: { rows: 20, cols: 70 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+    cleanups.push(async () => { await link.call("host.shutdown").catch(() => {}); link.close(); });
+
+    const stdin = new PassThrough();
+    let shown = "";
+    let errors = 0;
+    const stdout = Object.assign(new EventEmitter(), {
+        columns: 100,
+        rows: 30,
+        write(chunk: string | Buffer) { shown += chunk.toString(); return true; },
+    });
+    const ended = attachHost(join(link.info.dir, "attach.sock"), { stdin, stdout: stdout as never }, { readonly: true });
+    ended.then((e) => { if (e.reason === "error") errors++; });
+
+    await until("attached", async () => ((await link.call("host.hello")) as { clients: number }).clients === 1);
+    stdin.write("not from the copy\r");
+    stdout.emit("resize");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.ok(!shown.includes("not from the copy"), "nothing typed reached the session");
+    const size = ((await link.call("host.hello")) as { size: { rows: number; cols: number } }).size;
+    assert.deepEqual([size.rows, size.cols], [20, 70], "the copy does not resize the session");
+
+    stdin.write("\x02d");
+    assert.deepEqual(await ended, { reason: "detached" });
+    assert.equal(errors, 0);
+});

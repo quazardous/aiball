@@ -93,6 +93,7 @@ import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { attachHost } from "./host-attach.js";
+import { joinLiveLoop, type LivePlace } from "./join-live.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -636,17 +637,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // suffix fallback). Auto-clean a dead state-dir so a plain
         // `claude-loop start` from a project that recently had a loop
         // just works.
-        if (tmuxAlive(name)) {
-            die(`loop '${name}' already alive at ${sd}. Attach via 'claude-loop attach' or 'rm ${name}' first to start fresh.`);
-        }
-        // #3066 — a loop on the daemon's session host has no tmux session: it
-        // is alive while its host runs. Refused here, before its state-dir is
-        // wiped and its processes swept (they run inside the host).
-        const hostAgent = liveHostAgent(sd);
-        if (hostAgent) {
-            die(`loop '${name}' runs on the daemon's session host (agent ${hostAgent}). Open it in tvty, `
-                + `move it again with 'claude-loop restart --resume ${name} --host', or 'claude-loop rm ${name}' first to start fresh.`);
-        }
+        // #3166 — a live loop of this name is joined, never started twice.
+        // #3066 — one on the session host has no tmux session: it is alive
+        // while its host runs; joined here, before its state-dir is wiped and
+        // its processes swept (they run inside the host).
+        if (tmuxAlive(name)) return joinLive(name, "tmux", opts);
+        if (liveHostAgent(sd)) return joinLive(name, "host", opts);
         rmSync(sd, { recursive: true, force: true });
         process.stdout.write(`claude-loop: removed stale state-dir for dead loop '${name}' (cleared so restart can reuse the same deterministic name)\n`);
     }
@@ -738,7 +734,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // already runs in the same cwd for the same agent — david saw
     // 14 dead loops accumulate from repeated rm-less restarts.
     pruneDeadStateDirs();
-    if (!opts.force) {
+    // #3166 — `--force` no longer skips this: it takes the controls of the
+    // live loop, and never starts a second one next to it.
+    {
         // #403: take an ATOMIC start lock on (cwd, agent) BEFORE the live-loop
         // check, to close the check-then-spawn TOCTOU race — two concurrent
         // `claude-loop start` in the same dir+agent can no longer both win
@@ -751,18 +749,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             die(
                 `another 'claude-loop start' is in progress (or a loop is live) for ${cwd}` +
                 (ctx.agent ? ` for agent '${ctx.agent}'` : "") +
-                `.\n  Retry in a moment, attach the live loop, or override with --force.`,
+                `.\n  Retry in a moment, or attach the live loop.`,
             );
         }
         process.once("exit", releaseLock);
         const conflict = findLiveLoopForCwdAgent(cwd, ctx.agent);
-        if (conflict) {
-            die(
-                `live loop '${conflict.name}' already runs in ${cwd}` +
-                (conflict.agent ? ` for agent '${conflict.agent}'` : "") +
-                `.\n  Attach with: claude-loop attach ${conflict.name}\n  Override with: --force\n  Stop with: claude-loop rm ${conflict.name}`,
-            );
-        }
+        if (conflict) return joinLive(conflict.name, tmuxAlive(conflict.name) ? "tmux" : "host", opts);
     }
     const pingsSrc = opts.pings ?? defaultPingsPath();
     if (!existsSync(pingsSrc)) die(`pings file not found: ${pingsSrc}`);
@@ -1236,6 +1228,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             `  attach: ${hosted.attach.socket ?? "(none)"} — with tvty`,
             "",
         ].join("\n"));
+        // #3166 — attached by default, as in tmux; `--no-attach`, or no
+        // terminal to attach, leaves it running on the host.
+        if (opts.attach !== false && isInteractiveTerminal()) await attachLoop(name, { readonly: false });
         return;
     }
 
@@ -1546,20 +1541,40 @@ function cmdList(): void {
     }
 }
 
-async function cmdAttach(name: string | undefined): Promise<void> {
+async function cmdAttach(name: string | undefined, opts: { readonly?: boolean } = {}): Promise<void> {
     // #415 (david) : `claude-loop attach` sans nom → résout le loop unique
     // du cwd courant (même convention que tail/reload/restart/check).
     // resolveCurrentLoopName privilégie déjà l'alive sur égalité et meurt
     // avec un message de désambiguïsation si plusieurs loops partagent le cwd.
-    const resolved = name ?? resolveCurrentLoopName();
+    await attachLoop(name ?? resolveCurrentLoopName(), { readonly: opts.readonly === true });
+}
+
+/** #3166 — both ends of a start, and `attach`, are a terminal on the loop's Claude. */
+function isInteractiveTerminal(): boolean {
+    return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+/** #3166 — `claude-loop` where the loop already runs: this terminal joins it (join-live.ts). */
+async function joinLive(name: string, place: LivePlace, opts: StartOpts): Promise<void> {
+    const v = joinLiveLoop({ force: opts.force === true, attach: opts.attach !== false, tty: isInteractiveTerminal() }, { name, place });
+    if (v.kind === "refuse") die(v.message);
+    process.stdout.write(`${v.message}\n`);
+    await attachLoop(name, { readonly: v.readonly });
+}
+
+/**
+ * Attach this terminal to a live loop's Claude, in tmux or on the session
+ * host; `readonly` watches a copy (#3166). Leaving stops nothing.
+ */
+async function attachLoop(resolved: string, opts: { readonly: boolean }): Promise<void> {
     if (tmuxAlive(resolved)) {
-        spawnSync(MUX_CMD, ["attach", "-t", tmuxName(resolved)], { stdio: "inherit" });
+        spawnSync(MUX_CMD, ["attach", ...(opts.readonly ? ["-r"] : []), "-t", tmuxName(resolved)], { stdio: "inherit" });
         return;
     }
     // #3066 — a loop on the daemon's session host: attach to the host itself.
     const agent = liveHostAgent(stateDirFor(resolved));
     if (!agent) die(`loop '${resolved}' not alive`);
-    const end = await attachHost(hostAttachSocket(agent), { stdin: process.stdin, stdout: process.stdout });
+    const end = await attachHost(hostAttachSocket(agent), { stdin: process.stdin, stdout: process.stdout }, { readonly: opts.readonly });
     const why = end.reason === "detached" ? `detached from '${resolved}' — Claude carries on on the host`
         : end.reason === "exited" ? `the session of '${resolved}' ended (code ${end.code ?? "?"})`
         : `the host of '${resolved}' ${end.reason === "error" ? "refused" : "closed"} the attach${end.message ? `: ${end.message}` : ""}`;
@@ -2167,7 +2182,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // `claude.always_resume` to true, regardless of what the per-project
         // .aiball.yaml says.
         .option("--resume", "#639: force resume mode for this invocation — overrides `claude.always_resume` to true, regardless of yaml config. Mirror of `--no-resume` for the positive case.")
-        .option("--force", "Spawn even if another live loop already runs in this cwd")
+        .option("--force", "#3166: where the loop already runs, attach with the controls instead of a read-only copy (never starts a second loop)")
         .addOption(new Option(
             "--mouse <on|off>",
             "#3017: tmux mouse mode for this loop — `on` (wheel scrolls the pane, drag copies to the clipboard) or `off` (the terminal keeps its native selection and right-click). Overrides `claude_loop.mouse`.",
@@ -2321,8 +2336,9 @@ async function main(): Promise<void> {
         program.addCommand(crew);
     }
     program.command("attach [name]")
-        .description("tmux attach to a loop session. Name optional — defaults to the single loop registered for the current cwd (#415).")
-        .action(async (name: string | undefined) => { await cmdAttach(name); });
+        .description("Attach to a loop's Claude, in tmux or on the session host. Name optional — defaults to the single loop registered for the current cwd (#415).")
+        .option("-r, --read-only", "#3166: watch a copy: type nothing, resize nothing")
+        .action(async (name: string | undefined, o: { readOnly?: boolean }) => { await cmdAttach(name, { readonly: o.readOnly === true }); });
     program.command("tail [name]")
         .description("Follow the claude pane live (--timer / --stop-hook / --log for the wake-decision logs). Name optional — defaults to the loop registered for the current cwd. Ctrl-C to stop; pass --once for a snapshot.")
         .option("--lines <n>", "Lines to show", "40")

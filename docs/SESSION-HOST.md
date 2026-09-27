@@ -116,7 +116,6 @@ host.
 | `session.host` | `{ agent, argv, cwd, size?, env? }` — local callers only | `claude-loop start --host` runs the command it prepared in the agent's session; the answer adds `control`, the socket its kernel drives |
 | `session.stop` | `{ agent }` or `{ name }`, `wait?` | `{ agent \| name, stopping: true }` as soon as the stop is under way — the end comes as the session's state going to null; with `wait`, `{ agent \| name, exit_code }` once the command stopped and the host is gone |
 | `session.list` | — | every session on this machine: `{ agent?, name?, argv, cwd, host, attach: { socket }, clients }` |
-| `session.handover` | `{ agent, to: "daemon" \| "claude-loop" }` | `{ agent, host, attach? }`; `NOT_IDLE` when Claude stays busy past the delay |
 
 **Size.** `size` is the PTY's size when Claude starts, so a client that starts
 a session and attaches right after gets no redraw; without it, 80 × 24 until
@@ -129,23 +128,14 @@ accepted only from a caller on the local socket, and only for the variables of
 an allow-list (`PATH`, `LANG` and `LC_*`, proxies, `NVM_*`, `TERM` and the
 like): from another machine, an environment is a way to run code on this one.
 
-## Handover
+## Changing mode
 
-`session.handover {agent, to: "daemon" | "claude-loop"}` moves a Claude from
-one host to the other without losing its conversation:
-
-1. the current side waits until Claude is **idle** (end of turn, empty
-   prompt), and refuses after a delay rather than stop it mid-work;
-2. it reads the conversation id and stops Claude cleanly;
-3. the other side starts Claude in the same working directory with
-   `--resume <id>`;
-4. the loop's state — wakes, AFK, backlog, wait credit — is aiball's and
-   carries over as it is.
-
-Clients attached to the old side get `closed { reason: "handover", to }` and
-attach to the new side through the agent's bar; a `closed` without that reason
-still means the session is over. When the loop kernel restarts Claude on the
-same host, clients get `exited { restarting: true }`, as `LOOP-HOST.md` says.
+There is nothing to hand over between clients: claude-loop and tvty attach to
+the same Claude, wherever it runs ([`TVTY-BIND.md`](./TVTY-BIND.md)). Moving
+Claude between tmux and the host is `claude-loop restart --resume <loop>
+--host` (or `--tmux`): Claude stops when idle and comes back with the same
+conversation. When the loop kernel restarts Claude on the same host, clients
+get `exited { restarting: true }`, as `LOOP-HOST.md` says.
 
 ## Windows
 

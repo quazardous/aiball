@@ -6,7 +6,9 @@
  * the host's keystroke detection (AFK) sees them as it sees tmux's.
  *
  * Detach with Ctrl-B D, as in tmux; Ctrl-B Ctrl-B sends one Ctrl-B. Leaving
- * stops nothing: Claude carries on on the host.
+ * stops nothing: Claude carries on on the host. #3166 — `readonly` watches a
+ * copy: the keys go nowhere (Ctrl-B D still detaches) and the size stays the
+ * other clients'.
  */
 import { connect, type Socket } from "node:net";
 
@@ -75,7 +77,8 @@ export interface AttachIo {
 /** Why the attach ended: the user detached, the session ended, or the host refused or went away. */
 export type AttachEnd = { reason: "detached" } | { reason: "exited"; code: number | null } | { reason: "closed" | "error"; message: string };
 
-export function attachHost(socketPath: string, io: AttachIo): Promise<AttachEnd> {
+export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: boolean } = {}): Promise<AttachEnd> {
+    const readonly = opts.readonly === true;
     return new Promise((resolve) => {
         const sock: Socket = connect(socketPath);
         const reader = new FrameReader();
@@ -85,7 +88,7 @@ export function attachHost(socketPath: string, io: AttachIo): Promise<AttachEnd>
         const onResize = () => sock.write(frame(FRAME.resize, JSON.stringify(size())));
         const onKeys = (chunk: Buffer | string) => {
             const r = keys.feed(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-            if (r.send.length > 0) sock.write(frame(FRAME.input, r.send));
+            if (r.send.length > 0 && !readonly) sock.write(frame(FRAME.input, r.send));
             if (r.detach) finish({ reason: "detached" });
         };
         const finish = (end: AttachEnd) => {
@@ -100,11 +103,11 @@ export function attachHost(socketPath: string, io: AttachIo): Promise<AttachEnd>
             resolve(end);
         };
         sock.on("connect", () => {
-            sock.write(frame(FRAME.hello, JSON.stringify({ version: 1, client: "claude-loop", mode: "interactive", view: "stream", scrollback: 0, size: size() })));
+            sock.write(frame(FRAME.hello, JSON.stringify({ version: 1, client: "claude-loop", mode: readonly ? "readonly" : "interactive", view: "stream", scrollback: 0, size: size() })));
             if (io.stdin.isTTY) io.stdin.setRawMode?.(true);
             io.stdin.on("data", onKeys);
             io.stdin.resume();
-            io.stdout.on("resize", onResize);
+            if (!readonly) io.stdout.on("resize", onResize);
         });
         sock.on("data", (chunk: Buffer) => {
             for (const f of reader.push(chunk)) {

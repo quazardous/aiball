@@ -102,6 +102,14 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- `claude-loop` where the agent's loop already runs (in tmux or on the session
+  host) attaches to it instead of refusing: as a read-only copy, or with the
+  controls under `--force`. `--force` never starts a second loop any more.
+  `claude-loop attach --read-only` watches a copy.
+- On the session host, `claude-loop` attaches after starting, as it does in
+  tmux (`--no-attach` to leave it running).
+- The design drops `session.handover`: both clients attach to the same Claude,
+  and changing mode is `claude-loop restart --resume --host|--tmux`.
 - `session.stop` answers `{ stopping: true }` as soon as the stop is under way,
   so it no longer holds the caller's connection; the end arrives as the
   session's state going to null. Pass `wait: true` for the former answer, with
