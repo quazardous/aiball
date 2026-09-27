@@ -18,3 +18,5 @@ import "./methods/project.js";
 import "./methods/loop-io.js";
 import "./methods/misc.js";
 import "./methods/automation.js";
+import "./methods/board.js";
+import "./methods/nodes.js";

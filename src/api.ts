@@ -1,37 +1,11 @@
-import { projectTicketStates } from "./db/inbox-agg.js";
 import { serveMethod } from "./bus/http.js";
-import { standingPromptView } from "./bus/methods/project.js";
 import { trimStepWaits } from "./db/wait-credit.js";
 import { invalidateInboxAgg } from "./db/inbox-agg.js";
 import { invalidateFlagsCache } from "./db/projects.js";
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
 import {
-    listProjects,
-    getStrategy,
-    setStrategy,
-    getProjectStrategy,
-    setProjectStrategy,
-    STRATEGIES,
-    listProjectsDetailed,
-    isRootActive,
-    getProjectStatsRich,
-    purgeOldClosedTickets,
-    getGlobalCounts,
     isHuman,
-    type Strategy,
-    setProjectStandingPrompt,
 } from "./db.js";
-import { captureTokenSnapshotIfDue, getTokenTimeseries } from "./db.js";
-import { setProjectWakeFocus } from "./db/settings.js";
-import { listTicketIdsInProject } from "./db/tickets.js";
-import { parseFocusTickets } from "./wake-focus.js";
-import { statSync, readdirSync } from "node:fs";
-import { spawn } from "node:child_process";
-import { join } from "node:path";
-import { installRoot } from "./claude-loop/state.js";
-import { broadcast } from "./ws.js";
-import { AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "./paths.js";
-import { loadLaunchers, getLauncher } from "./launchers.js";
 import { bearerAuth } from "./auth.js";
 import { badRequest, consumerOf, refuse } from "./api/_helpers.js";
 import { schedulerStatus } from "./cron/index.js";
@@ -122,61 +96,21 @@ api.get("/health", (_req, res) => {
  */
 api.post("/daemon/reload", serveMethod("daemon.reload"));
 
-api.get("/strategy", (_req, res) => {
-    res.json({ strategy: getStrategy() });
-});
+api.get("/strategy", serveMethod("strategy.get"));
 
 // #1200 — token usage over time. Lazy-captures a snapshot if the throttle
 // window elapsed (so the series populates even without the boot job / restart),
 // then returns the per-project series. Optional ?project= and ?days= scoping.
-api.get("/token-usage/timeseries", (req: Request, res: Response) => {
-    captureTokenSnapshotIfDue();
-    const project = typeof req.query.project === "string" ? req.query.project : undefined;
-    const days = Number(req.query.days);
-    const sinceMs = Number.isFinite(days) && days > 0 ? Date.now() - days * 86_400_000 : undefined;
-    res.json({ series: getTokenTimeseries({ project, sinceMs }) });
-});
+api.get("/token-usage/timeseries", serveMethod("token_usage.timeseries"));
 
-api.patch("/strategy", (req: Request, res: Response) => {
-    const s = req.body?.strategy;
-    if (typeof s !== "string" || !(STRATEGIES as readonly string[]).includes(s)) {
-        return badRequest(res, `strategy must be one of ${STRATEGIES.join(", ")}`);
-    }
-    setStrategy(s as Strategy);
-    broadcast({ type: "strategy_changed", data: { strategy: s } });
-    res.json({ strategy: s });
-});
+api.patch("/strategy", serveMethod("strategy.set"));
 
 // Per-project strategy override (#B.127). Returns the project override
 // (or null when unset) alongside the global, so the UI can render a
 // "Use global (currently: X)" sentinel choice.
-api.get("/projects/:project/strategy", (req: Request, res: Response) => {
-    const project = String(req.params.project ?? "");
-    if (!project) return badRequest(res, "project required");
-    res.json({
-        project,
-        strategy: getProjectStrategy(project),
-        global: getStrategy(),
-    });
-});
+api.get("/projects/:project/strategy", serveMethod("project.strategy"));
 
-api.patch("/projects/:project/strategy", (req: Request, res: Response) => {
-    const project = String(req.params.project ?? "");
-    if (!project) return badRequest(res, "project required");
-    const s = req.body?.strategy;
-    // Pass null (or omit) to clear the override and fall back to global.
-    if (s === null || s === undefined) {
-        setProjectStrategy(project, null);
-        broadcast({ type: "strategy_changed", data: { project, strategy: null } });
-        return res.json({ project, strategy: null, global: getStrategy() });
-    }
-    if (typeof s !== "string" || !(STRATEGIES as readonly string[]).includes(s)) {
-        return badRequest(res, `strategy must be one of ${STRATEGIES.join(", ")} or null`);
-    }
-    setProjectStrategy(project, s as Strategy);
-    broadcast({ type: "strategy_changed", data: { project, strategy: s } });
-    res.json({ project, strategy: s, global: getStrategy() });
-});
+api.patch("/projects/:project/strategy", serveMethod("project.set_strategy"));
 
 // #1819 — the facts an agent needs to judge whether a human is around, with
 // no verdict derived from them. Elapsed time rather than a boolean, because
@@ -203,41 +137,7 @@ api.get("/projects/:project/critical", serveMethod("project.critical"));
 // progress. Readable by every consumer, coders included.
 api.get("/projects/:project/milestones", serveMethod("project.milestones"));
 
-api.patch("/projects/:project/standing-prompt", (req: Request, res: Response) => {
-    const project = String(req.params.project ?? "");
-    if (!project) return badRequest(res, "project required");
-    const v = req.body?.standing_prompt;
-    if (v !== null && v !== undefined && typeof v !== "string") {
-        return badRequest(res, "standing_prompt must be a string or null");
-    }
-    // #2525 — the wake focus, checked whole before anything is written.
-    const hasFocus = req.body && ("focus_tickets" in req.body || "focus_until" in req.body);
-    let nextFocus: { tickets: string; until: string | null } | null = null;
-    if (hasFocus) {
-        const tickets = req.body.focus_tickets;
-        const until = req.body.focus_until;
-        if (tickets !== null && tickets !== undefined && typeof tickets !== "string") return badRequest(res, "focus_tickets must be a string or null");
-        if (until !== null && until !== undefined && (typeof until !== "string" || !Number.isFinite(Date.parse(until)))) {
-            return badRequest(res, "focus_until must be an ISO date or null");
-        }
-        if (typeof tickets === "string" && tickets.trim()) {
-            const parsed = parseFocusTickets(tickets);
-            if ("error" in parsed) return badRequest(res, parsed.error);
-            const known = new Set(listTicketIdsInProject(project, parsed.ids));
-            const foreign = parsed.ids.filter((id) => !known.has(id));
-            if (foreign.length) return badRequest(res, `not a ticket of ${project}: ${foreign.map((id) => `#${id}`).join(", ")}`);
-            nextFocus = { tickets: tickets.trim(), until: typeof until === "string" ? new Date(until).toISOString() : null };
-        }
-    }
-    if (v !== undefined) setProjectStandingPrompt(project, v ?? null);
-    if (hasFocus) setProjectWakeFocus(project, nextFocus);
-    // No broadcast. The strategy pair above emits one because moderation
-    // strategy changes what every open board does next; this only changes what
-    // the next wake says, it is edited from a single page, and that page
-    // re-reads on load. Adding a WS event type for a decorative field would
-    // cost more than it carries.
-    res.json(standingPromptView(project));
-});
+api.patch("/projects/:project/standing-prompt", serveMethod("project.set_standing_prompt"));
 
 /**
  * #634 david `svzkpw` — push a turn's token-usage delta onto a PROJECT
@@ -292,9 +192,7 @@ api.get("/projects/:name/stats", serveMethod("project.stats"));
  * by ticket_new) — this one bundles pulse + live + top-N aggregates
  * for a dashboard view.
  */
-api.get("/projects/:name/stats-rich", (req, res) => {
-    res.json(getProjectStatsRich(req.params.name, projectTicketStates(req.params.name)));
-});
+api.get("/projects/:name/stats-rich", serveMethod("project.stats_rich"));
 
 /**
  * Autocomplete catalog for the composer's @-mentions (per #B.71).
@@ -304,18 +202,7 @@ api.get("/projects/:name/stats-rich", (req, res) => {
  */
 api.get("/mention-suggestions", serveMethod("mention.suggestions"));
 
-api.post("/projects/:name/purge", (req, res) => {
-    const name = req.params.name;
-    const raw = (req.body ?? {}) as { older_than_days?: unknown };
-    const days = typeof raw.older_than_days === "number" && raw.older_than_days > 0
-        ? Math.floor(raw.older_than_days)
-        : 365;
-    const result = purgeOldClosedTickets(name, days);
-    if (result.purged_tickets > 0) {
-        broadcast({ type: "project_purged", data: { project: name, ...result, older_than_days: days } });
-    }
-    res.json({ project: name, older_than_days: days, ...result, ok: true });
-});
+api.post("/projects/:name/purge", serveMethod("project.purge"));
 
 /**
  * #475 david : "danger zone globale pour purger les tickets fermés depuis
@@ -333,59 +220,9 @@ api.post("/projects/:name/purge", (req, res) => {
  * tickets / messages). Read-only, single round-trip, called once on
  * panel mount.
  */
-function dirSize(path: string): { bytes: number; files: number } {
-    let bytes = 0;
-    let files = 0;
-    try {
-        for (const ent of readdirSync(path, { withFileTypes: true })) {
-            const child = join(path, ent.name);
-            if (ent.isDirectory()) {
-                const sub = dirSize(child);
-                bytes += sub.bytes;
-                files += sub.files;
-            } else if (ent.isFile()) {
-                try { bytes += statSync(child).size; files += 1; } catch { /* race : file vanished */ }
-            }
-        }
-    } catch { /* dir absent — return zeros */ }
-    return { bytes, files };
-}
-api.get("/info", (_req, res) => {
-    const counts = getGlobalCounts();
-    let dbBytes = 0;
-    try { dbBytes = statSync(DB_PATH).size; } catch { /* db absent — keep 0 */ }
-    const uploads = dirSize(UPLOADS_DIR);
-    res.json({
-        version: AIBALL_VERSION,
-        uptime_sec: Math.floor(process.uptime()),
-        home: AIBALL_HOME,
-        db: { path: DB_PATH, bytes: dbBytes },
-        uploads: { path: UPLOADS_DIR, bytes: uploads.bytes, files: uploads.files },
-        counts,
-        ts: new Date().toISOString(),
-    });
-});
+api.get("/info", serveMethod("board.info"));
 
-api.post("/tickets/purge", (req, res) => {
-    const raw = (req.body ?? {}) as { older_than_days?: unknown };
-    const days = typeof raw.older_than_days === "number" && raw.older_than_days > 0
-        ? Math.floor(raw.older_than_days)
-        : 365;
-    const projects = listProjects();
-    const per_project: Array<{ project: string; purged_tickets: number; purged_messages: number }> = [];
-    let purged_tickets = 0;
-    let purged_messages = 0;
-    for (const p of projects) {
-        const r = purgeOldClosedTickets(p, days);
-        if (r.purged_tickets > 0) {
-            broadcast({ type: "project_purged", data: { project: p, ...r, older_than_days: days } });
-        }
-        per_project.push({ project: p, ...r });
-        purged_tickets += r.purged_tickets;
-        purged_messages += r.purged_messages;
-    }
-    res.json({ older_than_days: days, purged_tickets, purged_messages, per_project, ok: true });
-});
+api.post("/tickets/purge", serveMethod("board.purge"));
 
 // #393 phase 4: launch a claude-loop for a known LOCAL root, from the UI.
 // HUMAN-ONLY (it spawns a process) and restricted to a root this project has
@@ -393,77 +230,15 @@ api.post("/tickets/purge", (req, res) => {
 // never an arbitrary path. Spawns on THIS daemon's host; proxy-aware (#394):
 // a launch hitting the remote daemon transparently forwards to the local node
 // that owns the root, which spawns it there. Detached + --no-attach.
-api.post("/projects/:name/launch", (req, res) => {
-    const name = String(req.params.name);
-    const caller = consumerOf(req);
-    if (!caller || !isHuman(caller)) {
-        return refuse(res, 403, "launch is human-only — it spawns a claude-loop process", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const root = String(((req.body ?? {}) as { root?: unknown }).root ?? "");
-    const meta = listProjectsDetailed().find((p) => p.name === name);
-    const knownRoots = meta?.roots ?? [];
-    if (!root || !knownRoots.includes(root)) {
-        return badRequest(res, `root must be one of this project's known local roots: ${JSON.stringify(knownRoots)}`);
-    }
-    // #393 (3c): refuse a second loop at the same root — one is already running.
-    if (isRootActive(root)) {
-        return refuse(res, 409, "a claude-loop is already running for this root");
-    }
-    try {
-        const bin = join(installRoot(), "bin", "claude-loop");
-        const child = spawn(bin, ["start", "--cwd", root, "--no-attach"], {
-            detached: true,
-            stdio: "ignore",
-        });
-        child.unref();
-        return res.json({ ok: true, project: name, root, pid: child.pid });
-    } catch (e) {
-        return refuse(res, 500, `failed to launch claude-loop: ${(e as Error).message}`);
-    }
-});
+api.post("/projects/:name/launch", serveMethod("project.launch"));
 
 // #398: operator-approved command launchers. GET lists the declared launchers
 // (config-only — see launchers.ts); POST runs one by id (HUMAN-ONLY, detached
 // spawn). The API never accepts a command, only a launcher id → the daemon can
 // only ever spawn what the operator declared in config.
-api.get("/launchers", (_req, res) => {
-    res.json(loadLaunchers());
-});
+api.get("/launchers", serveMethod("launcher.list"));
 
-api.post("/launchers/:id/run", (req, res) => {
-    const caller = consumerOf(req);
-    if (!caller || !isHuman(caller)) {
-        return refuse(res, 403, "launchers are human-only — they spawn a process on the daemon host", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const launcher = getLauncher(String(req.params.id));
-    if (!launcher) {
-        return refuse(res, 404, `no launcher with id '${req.params.id}' (declared in config?)`);
-    }
-    try {
-        // Detached + stdio ignored → survives the daemon; inherits the user's
-        // graphical-session env (WAYLAND_DISPLAY/DISPLAY/XDG_RUNTIME_DIR), so GUI
-        // apps launch (#398 verified). cmd/args come from config, never the API.
-        const child = spawn(launcher.cmd, launcher.args ?? [], {
-            detached: true,
-            stdio: "ignore",
-            ...(launcher.cwd ? { cwd: launcher.cwd } : {}),
-        });
-        child.unref();
-        return res.json({ ok: true, id: launcher.id, label: launcher.label, pid: child.pid });
-    } catch (e) {
-        return refuse(res, 500, `failed to launch '${launcher.id}': ${(e as Error).message}`);
-    }
-});
-
-api.delete("/projects/:name", serveMethod("project.delete"));
-
-/**
- * #699 — rename a project across every table that stores its name (cascade
- * via transactional UPDATEs). Body : `{ new_name: string }`. Returns the
- * per-table row counts so the caller can audit the cascade. 404 when the
- * old name doesn't exist, 409 when the new name collides.
- */
-api.post("/projects/:name/rename", serveMethod("project.rename"));
+api.post("/launchers/:id/run", serveMethod("launcher.run"));
 
 // #1992 — the compiled graph. Both routes recompile lazily when the message log
 // has moved (~320 ms on the whole corpus) and report that in `freshness`, so a

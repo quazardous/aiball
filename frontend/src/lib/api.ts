@@ -817,11 +817,7 @@ export const api = {
     listProjects: () => call<string[]>("project.list"),
     /** #1200 — token-usage-over-time series (per project snapshots). */
     tokenTimeseries: (opts: { project?: string; days?: number } = {}) => {
-        const qs = new URLSearchParams();
-        if (opts.project) qs.set("project", opts.project);
-        if (opts.days) qs.set("days", String(opts.days));
-        const q = qs.toString();
-        return req<{ series: TokenSnapshotRow[] }>("GET", `/api/token-usage/timeseries${q ? "?" + q : ""}`);
+        return call<{ series: TokenSnapshotRow[] }>("token_usage.timeseries", { project: opts.project || undefined, days: opts.days || undefined });
     },
     /**
      * Explicitly register a project (#B.216 phase A pass 2). 409 means
@@ -843,36 +839,28 @@ export const api = {
     deleteProject: (name: string) =>
         call<{ project: string; deleted_messages: number; ok: boolean }>("project.delete", { name }),
     purgeOldClosed: (name: string, older_than_days = 365) =>
-        req<{
+        call<{
             project: string;
             older_than_days: number;
             purged_tickets: number;
             purged_messages: number;
             ok: boolean;
-        }>(
-            "POST",
-            `/api/projects/${encodeURIComponent(name)}/purge`,
-            { older_than_days },
-        ),
+        }>("project.purge", { name, older_than_days }),
     // #475 david : global "Purge tickets closed > 1 year" depuis la Danger
     // zone de Settings > General. Boucle server-side sur listProjects().
     purgeAllOldClosed: (older_than_days = 365) =>
-        req<{
+        call<{
             older_than_days: number;
             purged_tickets: number;
             purged_messages: number;
             per_project: { project: string; purged_tickets: number; purged_messages: number }[];
             ok: boolean;
-        }>(
-            "POST",
-            `/api/tickets/purge`,
-            { older_than_days },
-        ),
+        }>("board.purge", { older_than_days }),
     // #476 david : "ajout d'un zone information global — avec la taille des
     // data / image etc les infos etc". Daemon-wide info zone (version, db
     // size, uploads size, totals) rendered in Settings > General.
     getInfo: () =>
-        req<{
+        call<{
             version: string;
             uptime_sec: number;
             home: string;
@@ -886,40 +874,22 @@ export const api = {
                 messages: number;
             };
             ts: string;
-        }>("GET", "/api/info"),
+        }>("board.info"),
     projectStatsRich: (name: string) =>
-        req<unknown>(
-            "GET",
-            `/api/projects/${encodeURIComponent(name)}/stats-rich`,
-        ),
+        call<unknown>("project.stats_rich", { name }),
     // Per-project strategy override (#B.127). `strategy: null` in the
     // response = no override, the project follows the global strategy.
     getProjectStrategy: (name: string) =>
-        req<{ project: string; strategy: Strategy | null; global: Strategy }>(
-            "GET",
-            `/api/projects/${encodeURIComponent(name)}/strategy`,
-        ),
+        call<{ project: string; strategy: Strategy | null; global: Strategy }>("project.strategy", { project: name }),
     setProjectStrategy: (name: string, strategy: Strategy | null) =>
-        req<{ project: string; strategy: Strategy | null; global: Strategy }>(
-            "PATCH",
-            `/api/projects/${encodeURIComponent(name)}/strategy`,
-            { strategy },
-        ),
+        call<{ project: string; strategy: Strategy | null; global: Strategy }>("project.set_strategy", { project: name, strategy }),
     getProjectStandingPrompt: (name: string) =>
         call<StandingPromptView>("project.standing_prompt", { project: name }),
     /** #2525 — the wake focus, beside the standing instruction. */
     setProjectWakeFocus: (name: string, focus_tickets: string | null, focus_until: string | null) =>
-        req<StandingPromptView>(
-            "PATCH",
-            `/api/projects/${encodeURIComponent(name)}/standing-prompt`,
-            { focus_tickets, focus_until },
-        ),
+        call<StandingPromptView>("project.set_standing_prompt", { project: name, focus_tickets, focus_until }),
     setProjectStandingPrompt: (name: string, standing_prompt: string | null) =>
-        req<{ project: string; standing_prompt: string | null }>(
-            "PATCH",
-            `/api/projects/${encodeURIComponent(name)}/standing-prompt`,
-            { standing_prompt },
-        ),
+        call<{ project: string; standing_prompt: string | null }>("project.set_standing_prompt", { project: name, standing_prompt }),
     mentionSuggestions: () =>
         call<{ projects: string[]; agents: string[] }>("mention.suggestions"),
     listMessages: (params: {
@@ -985,11 +955,7 @@ export const api = {
             typeof upToId === "number" ? { id, up_to_id: upToId } : { id },
         ),
     markTicketUnread: (id: number) =>
-        req<{ ticket_id: number; updated: number }>(
-            "POST",
-            `/api/tickets/${id}/mark-unread`,
-            {},
-        ),
+        call<{ ticket_id: number; updated: number }>("ticket.mark_unread", { id }),
     // The UI always needs the full thread (body + comments) — the
     // summary default that landed in 0.5.x (#B.87) targets agents, not
     // the moderator browser. Force full=1.
@@ -1075,10 +1041,7 @@ export const api = {
         call<{ ticket_id: number; owner: string }>("ticket.set_owner", { id: ticketId, owner }),
     /** #352: a ticket's explicit subscriptions (follows + mutes). Moderator-only. */
     ticketSubscriptions: (ticketId: number) =>
-        req<{ ticket_id: number; subscriptions: { consumer_id: string; muted: boolean; subscribed_at: string }[] }>(
-            "GET",
-            `/api/tickets/${ticketId}/subscriptions`,
-        ),
+        call<{ ticket_id: number; subscriptions: { consumer_id: string; muted: boolean; subscribed_at: string }[] }>("ticket.subscribers", { id: ticketId }),
     // ---- upstream coupling (GitHub / GitLab) -----------------------------
     /** Import an external issue (`gh#123` or `gh:owner/repo#123`) as a new
      *  coupled ticket. 409 if already coupled (with `existing_ticket_id`). */
@@ -1189,9 +1152,9 @@ export const api = {
         call<Message>("message.step", { id }),
     /** #2383 — mark the ticket as a step (its latest agent comment), or remove that tag. */
     stepTicket: (id: number) =>
-        req<Message>("POST", `/api/tickets/${id}/step`, {}),
+        call<Message>("ticket.step", { id }),
     unstepTicket: (id: number) =>
-        req<Message>("POST", `/api/tickets/${id}/unstep`, {}),
+        call<Message>("ticket.unstep", { id }),
     unstepMessage: (id: number) =>
         call<Message>("message.unstep", { id }),
     /** #2910 — a project's milestones, oldest first. */
@@ -1276,21 +1239,11 @@ export const api = {
     // #449: unified config manager. Pass a project for the per-project view
     // (overrides + effective); omit it for the global view.
     listManagedConfig: (project?: string | null) =>
-        req<{ project: string | null; config: ManagedConfigRow[] }>(
-            "GET",
-            `/api/managed-config${project ? `?project=${encodeURIComponent(project)}` : ""}`,
-        ),
+        call<{ project: string | null; config: ManagedConfigRow[] }>("config.managed", { project: project || undefined }),
     setManagedConfig: (key: string, value: ConfigPrimitive, project?: string | null) =>
-        req<{ key: string; project: string | null; value: ConfigPrimitive }>(
-            "PUT",
-            `/api/managed-config/${encodeURIComponent(key)}`,
-            project ? { value, project } : { value },
-        ),
+        call<{ key: string; project: string | null; value: ConfigPrimitive }>("config.set", project ? { key, value, project } : { key, value }),
     clearManagedConfig: (key: string, project?: string | null) =>
-        req<void>(
-            "DELETE",
-            `/api/managed-config/${encodeURIComponent(key)}${project ? `?project=${encodeURIComponent(project)}` : ""}`,
-        ),
+        call<{ key: string; project: string | null; cleared: boolean }>("config.clear", { key, project: project || undefined }),
 
     listTags: () => call<Tag[]>("tag.list"),
     // Merged config+DB catalog for the Tags admin panel (#223). Pass a
@@ -1301,20 +1254,20 @@ export const api = {
     // config tags; the override is keyed by name. `color: null` resets to
     // the config default.
     overrideTag: (body: { name: string; color?: string | null; position?: number }) =>
-        req<Tag>("PUT", "/api/tags/override", body),
+        call<Tag>("tag.override", { ...body }),
     addTag: (body: { name: string; color?: string; note?: string; position?: number; project?: string | null }) =>
-        req<Tag>("POST", "/api/tags", body),
+        call<Tag>("tag.create", { ...body }),
     updateTag: (
         id: number,
         body: Partial<{ name: string; color: string | null; note: string | null; position: number }>,
-    ) => req<Tag>("PATCH", `/api/tags/${id}`, body),
-    delTag: (id: number) => req<void>("DELETE", `/api/tags/${id}`),
+    ) => call<Tag>("tag.update", { ...body, id }),
+    delTag: (id: number) => call<{ id: number; deleted: boolean }>("tag.delete", { id }),
     setMessageTags: (id: number, tag_ids: number[]) =>
         call<Tag[]>("message.set_tags", { id, tag_ids }),
 
-    getStrategy: () => req<{ strategy: Strategy }>("GET", "/api/strategy"),
+    getStrategy: () => call<{ strategy: Strategy }>("strategy.get"),
     setStrategy: (s: Strategy) =>
-        req<{ strategy: Strategy }>("PATCH", "/api/strategy", { strategy: s }),
+        call<{ strategy: Strategy }>("strategy.set", { strategy: s }),
 
     // ---- auth (#B.94) ----------------------------------------------------
     authStatus: () =>
@@ -1332,17 +1285,13 @@ export const api = {
     authLogin: (body: { consumer_id: string; password: string }) =>
         req<{ token: string; consumer_id: string }>("POST", "/api/auth/login", body),
     authLogout: () => req<{ ok: boolean }>("POST", "/api/auth/logout"),
-    me: () => req<Consumer>("GET", "/api/me"),
+    me: () => call<Consumer>("consumer.me"),
 
     listConsumers: () => call<Consumer[]>("consumer.list"),
     /** #393: launch a claude-loop for a known local root of this project
      *  (human-only, server validates the root). */
     launchLoop: (project: string, root: string) =>
-        req<{ ok: boolean; project: string; root: string; pid: number }>(
-            "POST",
-            `/api/projects/${encodeURIComponent(project)}/launch`,
-            { root },
-        ),
+        call<{ ok: boolean; project: string; root: string; pid: number }>("project.launch", { name: project, root }),
     upsertConsumer: (body: {
         consumer_id: string;
         kind?: ConsumerKind;
@@ -1355,23 +1304,14 @@ export const api = {
         patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null; micro_prompt: string | null; can_claim: boolean; can_create_agent: boolean; agent_type: "coder" | "cto"; notify_project_broadcasts: boolean | null }>,
     ) => call<Consumer>("consumer.update", { ...patch, consumer_id }),
     deleteConsumer: (consumer_id: string) =>
-        req<{ consumer_id: string; deleted: boolean }>(
-            "DELETE",
-            `/api/consumers/${encodeURIComponent(consumer_id)}`,
-        ),
+        call<{ consumer_id: string; deleted: boolean }>("consumer.delete", { consumer_id }),
     /** #442: remotely hard-kill the claude-loop running as this consumer.
      *  `delivered` = a live loop was connected to receive the control event. */
     /** #2645 — one agent's wait credit per project, and its latest movements. */
     consumerWaitCredit: (consumer_id: string) =>
-        req<{ consumer_id: string; credits: WaitCreditRow[] | null; moves: WaitCreditMove[] }>(
-            "GET",
-            `/api/consumers/${encodeURIComponent(consumer_id)}/wait-credit`,
-        ),
+        call<{ consumer_id: string; credits: WaitCreditRow[] | null; moves: WaitCreditMove[] }>("consumer.wait_credit", { consumer_id }),
     stopLoop: (consumer_id: string) =>
-        req<{ consumer_id: string; action: string; delivered: boolean }>(
-            "POST",
-            `/api/consumers/${encodeURIComponent(consumer_id)}/loop-stop`,
-        ),
+        call<{ consumer_id: string; action: string; delivered: boolean }>("consumer.stop_loop", { consumer_id }),
     /** #1185 — operator prune of a consumer's ping backlog across all
      *  projects. `del` hard-deletes the rows; default marks them seen.
      *  Gated server-side to the human moderator (this UI). */
@@ -1388,60 +1328,53 @@ export const api = {
      *  session. Always `spooled`; `delivered` = a live loop received it now
      *  (else it's drained from the spool when the loop reconnects). */
     sendLoopPrompt: (consumer_id: string, text: string) =>
-        req<{ consumer_id: string; action: string; spooled: boolean; delivered: boolean }>(
-            "POST",
-            `/api/consumers/${encodeURIComponent(consumer_id)}/prompt`,
-            { text },
-        ),
+        call<{ consumer_id: string; action: string; spooled: boolean; delivered: boolean }>("consumer.prompt", { consumer_id, text }),
     /** #2333 — type a message into every live agent loop; with `hold`, then
      *  hold each one indefinitely (NOT AFK ∞). One result per loop. */
     messageAllLoops: (message: string, hold: boolean) =>
-        req<{ action: string; results: LoopHoldResult[] }>("POST", "/api/loops/message-all", { message, hold }),
+        call<{ action: string; results: LoopHoldResult[] }>("loops.message_all", { message, hold }),
     /** #2333 — lift the hold on every live agent loop. */
     releaseAllLoops: () =>
-        req<{ action: string; results: LoopHoldResult[] }>("POST", "/api/loops/release-all", {}),
+        call<{ action: string; results: LoopHoldResult[] }>("loops.release_all"),
     /** #398: operator-approved command launchers (declared in the global
      *  config `launchers:` list; the API only ever takes an id). */
-    listLaunchers: () => req<Launcher[]>("GET", "/api/launchers"),
+    listLaunchers: () => call<Launcher[]>("launcher.list"),
     /** #398: run a launcher by id (human-only; detached spawn on the host). */
     runLauncher: (id: string) =>
-        req<{ ok: boolean; id: string; label: string; pid: number }>(
-            "POST",
-            `/api/launchers/${encodeURIComponent(id)}/run`,
-        ),
+        call<{ ok: boolean; id: string; label: string; pid: number }>("launcher.run", { id }),
     /** #424: proxy-node tokens + the consumers each relays (moderator-only). */
-    listNodes: () => req<NodeView[]>("GET", "/api/nodes"),
+    listNodes: () => call<NodeView[]>("node.list"),
     /** #2074 — the enrolment switch: the public pairing route only answers
      *  while this window is open. Shut by default, and shut again on restart. */
-    getPairingWindow: () => req<PairingWindow>("GET", "/api/nodes/pairing"),
+    getPairingWindow: () => call<PairingWindow>("node.pairing"),
     setPairingWindow: (verb: "open" | "close", minutes?: number) =>
-        req<PairingWindow>("POST", `/api/nodes/pairing/${verb}`, verb === "open" ? { minutes } : undefined),
+        call<PairingWindow>("node.set_pairing", verb === "open" ? { verb, minutes } : { verb }),
     /** #2074 — proxy nodes asking to be paired, waiting on a human. */
-    listNodeEnrollments: () => req<NodeEnrollment[]>("GET", "/api/nodes/enrollments"),
+    listNodeEnrollments: () => call<NodeEnrollment[]>("node.enrollments"),
     /** #2074 — approve mints the node's token; reject is final. Both refuse a
      *  request that is no longer pending, so a stale panel cannot double-mint. */
     decideNodeEnrollment: (id: string, verdict: "approve" | "reject") =>
-        req<NodeEnrollment>("POST", `/api/nodes/enrollments/${encodeURIComponent(id)}/${verdict}`),
+        call<NodeEnrollment>("node.decide_enrollment", { id, verdict }),
     /** #424: revoke a node by its non-secret handle (deletes the node token). */
     revokeNode: (node_id: string) =>
-        req<{ node_id: string; revoked: boolean }>("DELETE", `/api/nodes/${encodeURIComponent(node_id)}`),
+        call<{ node_id: string; revoked: boolean }>("node.revoke", { node_id }),
     /** #2276 — signal keys (moderator-only). With a project, each key also
      *  counts the signals that reached it. Never carries a token. */
     listSignalKeys: (project?: string) =>
-        req<SignalKeyView[]>("GET", `/api/signal-keys${project ? `?project=${encodeURIComponent(project)}` : ""}`),
+        call<SignalKeyView[]>("signal_key.list", { project: project || undefined }),
     /** #2276 — the ONLY answer that carries the token: show it once. */
     createSignalKey: (label: string, note: string, grants?: { scopes: string[]; projects: string[] }) =>
-        req<{ key: SignalKeyView; token: string }>("POST", "/api/signal-keys", { label, note, ...(grants ?? {}) }),
+        call<{ key: SignalKeyView; token: string }>("signal_key.create", { label, note, ...(grants ?? {}) }),
     /** #2526 — change what a key may do, and where it may create tickets. */
     updateSignalKeyGrants: (key_id: string, scopes: string[], projects: string[]) =>
-        req<SignalKeyView>("PATCH", `/api/signal-keys/${encodeURIComponent(key_id)}`, { scopes, projects }),
+        call<SignalKeyView>("signal_key.update", { key_id, scopes, projects }),
     updateSignalKeyNote: (key_id: string, note: string) =>
-        req<SignalKeyView>("PATCH", `/api/signal-keys/${encodeURIComponent(key_id)}`, { note }),
+        call<SignalKeyView>("signal_key.update", { key_id, note }),
     revokeSignalKey: (key_id: string) =>
-        req<{ key_id: string; revoked: boolean }>("DELETE", `/api/signal-keys/${encodeURIComponent(key_id)}`),
+        call<{ key_id: string; revoked: boolean }>("signal_key.revoke", { key_id }),
     /** #2276 — signals aimed at the project or at one of its owners, newest first. */
     listProjectSignals: (project: string) =>
-        req<{ project: string; signals: ProjectSignal[] }>("GET", `/api/projects/${encodeURIComponent(project)}/signals`),
+        call<{ project: string; signals: ProjectSignal[] }>("project.signals", { name: project }),
 };
 
 /** #2276 — a signal key as the Signals tab shows it: addressed by `key_id`, never by its token. */

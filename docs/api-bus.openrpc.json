@@ -282,6 +282,40 @@
       ]
     },
     {
+      "name": "board.info",
+      "description": "The daemon's info zone: version, uptime, the database and uploads sizes, global counts.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "board.purge",
+      "description": "The same purge over every project, one `project_purged` event per project touched.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "older_than_days",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "bus.subjects",
       "description": "The subjects of this bus, as an AsyncAPI document, generated from the code.",
       "paramStructure": "by-name",
@@ -390,10 +424,93 @@
       ]
     },
     {
+      "name": "config.clear",
+      "description": "Clear an override: the layer below applies again.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "config.get",
       "description": "The board's configuration a client reads once at boot: formatting, strategy, upload limit, and the upstream bindings per project. The YAML chain is re-read on each call (defaults, global, the daemon's cwd).",
       "paramStructure": "by-name",
       "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "config.managed",
+      "description": "The config as resolved (schema, layers, effective value), for a project or the whole board.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "config.set",
+      "description": "Set an override, on the board or a project as the key's scope allows; a protected key is a human's to set.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "value",
+          "required": false,
+          "schema": {}
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {}
@@ -501,6 +618,28 @@
       ]
     },
     {
+      "name": "consumer.delete",
+      "description": "Delete a consumer's record.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "consumer.get",
       "description": "One consumer's record, its micro-prompt included: the loop reads its own for the wake.",
       "paramStructure": "by-name",
@@ -525,6 +664,20 @@
     {
       "name": "consumer.list",
       "description": "Every consumer, each as `consumerEntry` builds it: presence, pings, wait credit, session.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.me",
+      "description": "The caller's own record: who the page is logged in as.",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -593,6 +746,33 @@
         "human",
         "agent"
       ]
+    },
+    {
+      "name": "consumer.prompt",
+      "description": "A raw prompt typed into the loop's Claude session, as a wake would be, unfiltered: a moderator's gesture, never a proxy node's (a prompt can steer the agent). Always spooled; `delivered` when a live loop took it now.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "text",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
     },
     {
       "name": "consumer.push_bar",
@@ -718,6 +898,28 @@
       "x-relayed": false
     },
     {
+      "name": "consumer.stop_loop",
+      "description": "Stop the claude-loop running as this consumer, from afar: a `control:kill` its loop receives. `delivered` says whether a loop was connected to hear it (false: nothing was running).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "consumer.update",
       "description": "Patch a consumer. the capability fields (`can_claim`, `can_create_agent`, #2201 `agent_type`) are a human's to set, never an agent's: an agent flipping its own `can_claim` would make the authority model decorative. The other fields stay editable by anyone.",
       "paramStructure": "by-name",
@@ -813,6 +1015,35 @@
           "name": "note",
           "required": false,
           "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "consumer.wait_credit",
+      "description": "An agent's wait credit, per project, and its latest movements (`limit`, 30 by default). A human has none.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
         }
       ],
       "result": {
@@ -1042,6 +1273,91 @@
         "human",
         "agent"
       ]
+    },
+    {
+      "name": "launcher.list",
+      "description": "The launchers the operator declared in config: the only commands the API can start.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "launcher.run",
+      "description": "Run a declared launcher by id, detached; its command and arguments come from the config, never from the call. A human's gesture.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "loops.message_all",
+      "description": "A message to every agent loop running here (or the ones named), typed into each session at once; with `hold`, each loop is then held (NOT AFK ∞) so no wake starts new work while the operator is away. One line per loop in the daemon's log and in the answer.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumers",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "hold",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "message",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "loops.release_all",
+      "description": "On return: lift the hold on every agent loop, or the ones named.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumers",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
     },
     {
       "name": "mention.suggestions",
@@ -1819,6 +2135,120 @@
       ]
     },
     {
+      "name": "node.decide_enrollment",
+      "description": "Approve or reject a pairing request; one no longer pending (expired, decided) is a 409.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "verdict",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "node.enrollments",
+      "description": "The pairing requests, each with the code the node printed.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "node.list",
+      "description": "The proxy nodes, with their label, last activity and peer address, the consumers each relays, and the state of its reverse channel; the ones revoked lately stay listed, as a receipt.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "node.pairing",
+      "description": "The pairing window: while it is shut, no node may ask to be enrolled.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "node.revoke",
+      "description": "Revoke a node: its token goes, and it can no longer relay.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "node_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "node.set_pairing",
+      "description": "Open the pairing window for `minutes` (the default when absent), or close it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "verb",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "minutes",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
       "name": "ping.count",
       "description": "How many unseen pings the consumer has.",
       "paramStructure": "by-name",
@@ -2062,6 +2492,33 @@
       ]
     },
     {
+      "name": "project.launch",
+      "description": "Start a claude-loop for a project, at one of the roots it has run at (never an arbitrary path), on this daemon's host, detached. It spawns a process: a human's gesture. One loop per root.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "root",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
       "name": "project.list",
       "description": "The projects. `detailed` adds each one's counters for `consumer_id`; `landscape` its landscape hash, which only the loop asks for; `project` narrows a detailed answer to one.",
       "paramStructure": "by-name",
@@ -2127,6 +2584,34 @@
       ]
     },
     {
+      "name": "project.purge",
+      "description": "Delete a project's tickets closed for longer than `older_than_days` (365 by default).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "older_than_days",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "project.rename",
       "description": "Rename a project in every table that stores its name, and its outbox file; the answer counts the rows each table changed.",
       "paramStructure": "by-name",
@@ -2151,6 +2636,93 @@
       "x-callers": [
         "human",
         "agent"
+      ]
+    },
+    {
+      "name": "project.set_standing_prompt",
+      "description": "Set a project's standing instruction (null or empty clears it), and #2525 its wake focus: `focus_tickets` is checked whole, every ticket must belong to the project, before anything is written. No length cap: the UI's one-line input is what keeps it short. No broadcast: it changes what the next wake says, edited from one page that re-reads on load.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "focus_tickets",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "focus_until",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "standing_prompt",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.set_strategy",
+      "description": "Set a project's strategy; null clears it, and the project follows the board's again.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "strategy",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.signals",
+      "description": "The signals a project received.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
       ]
     },
     {
@@ -2186,6 +2758,52 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.stats_rich",
+      "description": "A project's dashboard: pulse, live counts and top-N aggregates.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "project.strategy",
+      "description": "#B.127 — a project's own strategy, or null when it follows the board's; the board's beside it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
           }
         }
       ],
@@ -2579,6 +3197,118 @@
       ]
     },
     {
+      "name": "signal_key.create",
+      "description": "Mint a signal key; its token is in this answer and nowhere else, ever.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "label",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "projects",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "scopes",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "signal_key.list",
+      "description": "The signal keys, or those granted a project.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "signal_key.revoke",
+      "description": "Revoke a signal key.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "key_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "signal_key.update",
+      "description": "Change a key's note, scopes or projects.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "key_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "projects",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "scopes",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
       "name": "step.timing",
       "description": "Declared step delays against when the agent actually came back, with the wait credits.",
       "paramStructure": "by-name",
@@ -2608,6 +3338,104 @@
       ]
     },
     {
+      "name": "strategy.get",
+      "description": "The moderation strategy of the whole board.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "strategy.set",
+      "description": "Set the board's moderation strategy; every open board hears of it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "strategy",
+          "required": true,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "tag.create",
+      "description": "Create a tag, global or a project's (`_global` or empty is global): two projects may each have a tag of the same name. A name the config defines is the config's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "color",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "position",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "tag.delete",
+      "description": "Delete a database tag; a config tag is refused.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "tag.list",
       "description": "Without `project`, the database's tags (applied by numeric id). With it, the merged catalog (config ⊕ database, each annotated with `source`); `_global` or empty selects the cross-project view.",
       "paramStructure": "by-name",
@@ -2618,6 +3446,80 @@
           "schema": {
             "type": "string"
           }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "tag.override",
+      "description": "A config tag's color and order, set from the UI (its name stays the config's): a row keyed by name, created or updated. A null color goes back to the config's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "color",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "position",
+          "required": false,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "tag.update",
+      "description": "Change a database tag; a config tag, or a name the config holds, is refused.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "color",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "position",
+          "required": false,
+          "schema": {}
         }
       ],
       "result": {
@@ -3000,6 +3902,30 @@
       ]
     },
     {
+      "name": "ticket.mark_unread",
+      "description": "Mark a ticket unread again for the caller; the answer carries its row.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.move",
       "description": "Move a ticket, whole thread, to another project : its reporter or a human. The answer is the moved head , with the canonical row.",
       "paramStructure": "by-name",
@@ -3273,6 +4199,30 @@
       ]
     },
     {
+      "name": "ticket.step",
+      "description": "Tag the ticket's latest comment, an agent's, as a step.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.subscribe",
       "description": "Follow a ticket, or mute it (`muted`: no pings, even by role).",
       "paramStructure": "by-name",
@@ -3298,6 +4248,30 @@
           "required": false,
           "schema": {
             "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "ticket.subscribers",
+      "description": "A ticket's explicit subscriptions, follows and mutes, for the moderator who manages who else is pinged (owners pinged by their role are not listed).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
           }
         }
       ],
@@ -3387,6 +4361,30 @@
       ]
     },
     {
+      "name": "ticket.unstep",
+      "description": "Remove that step tag.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "ticket.unsubscribe",
       "description": "Stop following (or unmute) a ticket: back to what the consumer's role says.",
       "paramStructure": "by-name",
@@ -3402,6 +4400,35 @@
         },
         {
           "name": "consumer_id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "token_usage.timeseries",
+      "description": "Token usage over time, per project. Takes a snapshot first when the throttle allows, so the series fills even without a boot job.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "days",
+          "required": false,
+          "schema": {
+            "type": "number"
+          }
+        },
+        {
+          "name": "project",
           "required": false,
           "schema": {
             "type": "string"

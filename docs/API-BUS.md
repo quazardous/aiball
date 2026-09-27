@@ -293,3 +293,45 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `ticket.import` | human, agent | `POST /api/tickets/import` — an issue a ticket already mirrors is a 409 whose `details.existing_ticket_id` names it |
 | `ticket.export` | human, agent | `POST /api/tickets/:id/export` — same 409 |
 | `daemon.reload` | human or agent, local only | `POST /api/daemon/reload` |
+| `strategy.get` | human, agent | `GET /api/strategy` |
+| `strategy.set` | human, agent | `PATCH /api/strategy` |
+| `project.strategy` | human, agent | `GET /api/projects/:project/strategy` |
+| `project.set_strategy` | human, agent | `PATCH /api/projects/:project/strategy` — null clears the project's own |
+| `project.set_standing_prompt` | human, agent | `PATCH /api/projects/:project/standing-prompt` — the prompt, the wake focus, or both |
+| `project.stats_rich` | human, agent | `GET /api/projects/:name/stats-rich` |
+| `project.purge` | human, agent | `POST /api/projects/:name/purge` |
+| `board.purge` | human, agent | `POST /api/tickets/purge` — every project |
+| `board.info` | human, agent | `GET /api/info` |
+| `token_usage.timeseries` | human, agent | `GET /api/token-usage/timeseries` |
+| `config.managed` | human, agent | `GET /api/managed-config` |
+| `config.set` | human, agent; a protected key, human | `PUT /api/managed-config/:key` |
+| `config.clear` | human, agent; a protected key, human | `DELETE /api/managed-config/:key` — 204 over HTTP |
+| `tag.create` | human, agent | `POST /api/tags` |
+| `tag.override` | human, agent | `PUT /api/tags/override` — a config tag's color and order |
+| `tag.update` | human, agent | `PATCH /api/tags/:id` |
+| `tag.delete` | human, agent | `DELETE /api/tags/:id` — 204 over HTTP |
+| `consumer.me` | human, agent | `GET /api/me` |
+| `ticket.mark_unread` | human, agent | `POST /api/tickets/:id/mark-unread` |
+| `ticket.subscribers` | human | `GET /api/tickets/:id/subscriptions` — a ticket's follows and mutes |
+| `ticket.step` | human | `POST /api/tickets/:id/step` |
+| `ticket.unstep` | human | `POST /api/tickets/:id/unstep` |
+| `consumer.wait_credit` | human, agent | `GET /api/consumers/:consumer_id/wait-credit` |
+| `consumer.delete` | human, agent | `DELETE /api/consumers/:consumer_id` |
+| `consumer.stop_loop` | human, never through a proxy node | `POST /api/consumers/:consumer_id/loop-stop` |
+| `consumer.prompt` | human, never through a proxy node | `POST /api/consumers/:consumer_id/prompt` |
+| `loops.message_all` | human, never through a proxy node | `POST /api/loops/message-all` |
+| `loops.release_all` | human, never through a proxy node | `POST /api/loops/release-all` |
+| `project.launch` | human | `POST /api/projects/:name/launch` — one of the project's known roots only |
+| `launcher.list` | human, agent | `GET /api/launchers` |
+| `launcher.run` | human | `POST /api/launchers/:id/run` — a launcher that cannot start is a 500 |
+| `node.list` | human | `GET /api/nodes` |
+| `node.pairing` | human | `GET /api/nodes/pairing` |
+| `node.set_pairing` | human | `POST /api/nodes/pairing/:verb` — `open` (with `minutes`) or `close` |
+| `node.enrollments` | human | `GET /api/nodes/enrollments` |
+| `node.decide_enrollment` | human | `POST /api/nodes/enrollments/:id/:verdict` — 409 when no longer pending |
+| `node.revoke` | human | `DELETE /api/nodes/:node_id` |
+| `signal_key.list` | human | `GET /api/signal-keys` |
+| `signal_key.create` | human | `POST /api/signal-keys` — the only answer that carries the token |
+| `signal_key.update` | human | `PATCH /api/signal-keys/:key_id` |
+| `signal_key.revoke` | human | `DELETE /api/signal-keys/:key_id` |
+| `project.signals` | human | `GET /api/projects/:name/signals` |

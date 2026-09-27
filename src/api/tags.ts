@@ -5,21 +5,17 @@
  * the top-level api router.
  */
 import { serveMethod } from "../bus/http.js";
-import { Router, type Request, type Response } from "express";
+import { Router } from "express";
 import {
-    deleteTag,
     getMessage,
     getTag,
     getTagByName,
-    insertTag,
     listMessageTags,
     listTags,
-    updateTag,
     type Tag,
 } from "../db.js";
-import { broadcast } from "../ws.js";
-import { configTagNames, resolveConfigTags } from "../config-tags.js";
-import { badRequest, conflict, notFound } from "./_helpers.js";
+import { resolveConfigTags } from "../config-tags.js";
+import { notFound } from "./_helpers.js";
 
 export const tagsRouter = Router();
 
@@ -100,113 +96,13 @@ export function tagCatalog(project: string | null): CatalogTag[] {
 // where `_global` / empty selects the cross-project view (project=null).
 tagsRouter.get("/tags", serveMethod("tag.list"));
 
-tagsRouter.post("/tags", (req: Request, res: Response) => {
-    const { name, color, note, position, project } = req.body ?? {};
-    if (typeof name !== "string" || !name.trim()) {
-        return badRequest(res, "name required");
-    }
-    if (configTagNames().has(name.trim())) {
-        return conflict(res, `tag '${name}' is defined in config — edit the yaml, not the UI`);
-    }
-    // #554 — accept `project` from the body. Empty string / "_global"
-    // / undefined → global tag (project=null). Otherwise scope to that
-    // project. The composite UNIQUE (name, project) ensures two projects
-    // can each have a `win` tag without clashing.
-    const projectScope = typeof project === "string" && project.trim() && project.trim() !== "_global"
-        ? project.trim()
-        : null;
-    if (getTagByName(name.trim(), projectScope)) {
-        return badRequest(res, `tag '${name}' already exists${projectScope ? ` in project '${projectScope}'` : " (global)"}`);
-    }
-    const t = insertTag({
-        name: name.trim(),
-        color: typeof color === "string" ? color : null,
-        note: typeof note === "string" ? note : null,
-        position: typeof position === "number" ? position : 0,
-        project: projectScope,
-    });
-    broadcast({ type: "tag_changed", data: t });
-    res.status(201).json(t);
-});
+tagsRouter.post("/tags", serveMethod("tag.create", undefined, { status: 201 }));
 
-// Config-tag override (#223 zcjqgp). A config tag's NAME is immutable
-// (the PATCH/DELETE-by-id endpoints stay 409 on config names), but its
-// color + order ARE editable from the UI. The override persists as a DB
-// row keyed by NAME — upserted here. `color: null` resets to the config
-// default (the catalog falls back to the config color). DB-source tags
-// keep using PATCH /tags/:id; this is the config-tag write path.
-tagsRouter.put("/tags/override", (req: Request, res: Response) => {
-    const { name, color, position } = req.body ?? {};
-    if (typeof name !== "string" || !name.trim()) {
-        return badRequest(res, "name required");
-    }
-    const tagName = name.trim();
-    if (!configTagNames().has(tagName)) {
-        return badRequest(res, `'${tagName}' is not a config tag`);
-    }
-    if (color !== undefined && color !== null && typeof color !== "string") {
-        return badRequest(res, "color must be a string or null");
-    }
-    if (position !== undefined && typeof position !== "number") {
-        return badRequest(res, "position must be a number");
-    }
-    const existing = getTagByName(tagName);
-    const t = existing
-        ? updateTag(existing.id, {
-            color: color === undefined ? undefined : color,
-            position: position === undefined ? undefined : position,
-        })
-        : insertTag({
-            name: tagName,
-            color: typeof color === "string" ? color : null,
-            position: typeof position === "number" ? position : 0,
-        });
-    broadcast({ type: "tag_changed", data: t });
-    res.json(t);
-});
+tagsRouter.put("/tags/override", serveMethod("tag.override"));
 
-tagsRouter.patch("/tags/:id", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const { name, color, note, position } = req.body ?? {};
-    if (name !== undefined && (typeof name !== "string" || !name.trim())) {
-        return badRequest(res, "name must be a non-empty string");
-    }
-    const existing = getTag(id);
-    const configNames = configTagNames();
-    if (existing && configNames.has(existing.name)) {
-        return conflict(res, `tag '${existing.name}' is defined in config — edit the yaml, not the UI`);
-    }
-    if (typeof name === "string" && configNames.has(name.trim())) {
-        return conflict(res, `tag '${name}' is defined in config — edit the yaml, not the UI`);
-    }
-    if (typeof name === "string") {
-        const dup = getTagByName(name.trim());
-        if (dup && dup.id !== id) {
-            return badRequest(res, `tag '${name}' already exists`);
-        }
-    }
-    const updated = updateTag(id, {
-        name: typeof name === "string" ? name.trim() : undefined,
-        color: color === null || typeof color === "string" ? color : undefined,
-        note: note === null || typeof note === "string" ? note : undefined,
-        position: typeof position === "number" ? position : undefined,
-    });
-    if (!updated) return notFound(res);
-    broadcast({ type: "tag_changed", data: updated });
-    res.json(updated);
-});
+tagsRouter.patch("/tags/:id", serveMethod("tag.update"));
 
-tagsRouter.delete("/tags/:id", (req, res) => {
-    const id = Number(req.params.id);
-    const existing = getTag(id);
-    if (!existing) return notFound(res);
-    if (configTagNames().has(existing.name)) {
-        return conflict(res, `tag '${existing.name}' is defined in config — edit the yaml, not the UI`);
-    }
-    deleteTag(id);
-    broadcast({ type: "tag_changed", data: { id, deleted: true } });
-    res.status(204).end();
-});
+tagsRouter.delete("/tags/:id", serveMethod("tag.delete", undefined, { status: 204, respond: (res) => { res.end(); } }));
 
 tagsRouter.get("/messages/:id/tags", (req, res) => {
     const id = Number(req.params.id);

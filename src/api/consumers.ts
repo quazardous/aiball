@@ -4,39 +4,18 @@
  * #B.79 consumer concept; #B.177 B1 state-push.
  */
 import { serveMethod } from "../bus/http.js";
-import { listWaitCreditMoves, listWaitCredits } from "../db/wait-credit.js";
 import { Router, type Request, type Response } from "express";
-import {
-    deleteConsumer,
-    getConsumer,
-    listConsumers,
-    isHuman,
-} from "../db.js";
-import { listNodesWithRevoked, revokeNode } from "../db/nodes.js";
 import { ENROLLMENT_TTL_MS } from "../db/node-enrollment.js";
 import {
-    approveEnrollment,
     collectEnrollmentToken,
     createEnrollment,
     getEnrollment,
-    listEnrollments,
-    rejectEnrollment,
 } from "../db/node-enrollments.js";
-import { getProxyNodeWsState } from "../proxy-ws.js";
 import {
-    DEFAULT_PAIRING_WINDOW_MS,
-    closePairingWindow,
-    openPairingWindow,
     pairingWindow,
 } from "../node-pairing-window.js";
 import { broadcast } from "../ws.js";
-import { emitControl } from "../event-bus.js";
-import { isPresent, presenceRunning } from "../live-presence.js";
-import { canControlLoop } from "../loop-control.js";
-import { spoolPrompt, drainPrompts } from "../loop-prompts.js";
-import { pickHoldTargets, type LoopHoldResult } from "../loop-hold.js";
-import { sendAfkToLoop } from "./agents.js";
-import { badRequest, consumerOf, notFound, tokenKindOf, refuse } from "./_helpers.js";
+import { notFound, refuse } from "./_helpers.js";
 import { ERROR_CODES } from "../domain.js";
 
 export const consumersRouter = Router();
@@ -44,17 +23,7 @@ export const consumersRouter = Router();
 consumersRouter.get("/consumers", serveMethod("consumer.list"));
 
 // #2645 — one agent's wait credit: per project, and its latest movements.
-consumersRouter.get("/consumers/:consumer_id/wait-credit", (req: Request, res: Response) => {
-    const c = getConsumer(String(req.params.consumer_id));
-    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
-    if (c.kind === "human") return res.json({ consumer_id: c.consumer_id, credits: null, moves: [] });
-    const limit = Number(req.query.limit);
-    res.json({
-        consumer_id: c.consumer_id,
-        credits: listWaitCredits().filter((r) => r.consumer_id === c.consumer_id),
-        moves: listWaitCreditMoves(c.consumer_id, Number.isFinite(limit) ? limit : 30),
-    });
-});
+consumersRouter.get("/consumers/:consumer_id/wait-credit", serveMethod("consumer.wait_credit"));
 
 // #397: single consumer lookup (incl. micro_prompt) — the claude-loop timer
 // fetches its own row to inject `{consumer_prompt}` into the wake prompt.
@@ -66,14 +35,7 @@ consumersRouter.get("/consumers/:consumer_id", serveMethod("consumer.get"));
 // since it rides the daemon. Gated to a local/direct human moderator; proxy
 // nodes are DENIED (anti-DoS — see loop-control.ts). `delivered` says whether a
 // live loop was connected to receive it right now (false ⇒ nothing was running).
-consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Response) => {
-    const target = String(req.params.consumer_id);
-    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
-    const delivered = isPresent(target);
-    emitControl(target, { action: "kill" });
-    res.json({ consumer_id: target, action: "kill", delivered });
-});
+consumersRouter.post("/consumers/:consumer_id/loop-stop", serveMethod("consumer.stop_loop"));
 
 // #451: send a RAW, unfiltered prompt into the loop's Claude session. The prompt
 // is SPOOLED first (VOLATILE, in the daemon's memory — no DB/file, cleared on a
@@ -84,89 +46,23 @@ consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Re
 // gate as loop-stop (moderator only; proxy nodes DENIED — an arbitrary prompt
 // can hijack the agent). `delivered` = a live loop received it now; `spooled`
 // is always true.
-consumersRouter.post("/consumers/:consumer_id/prompt", (req: Request, res: Response) => {
-    const target = String(req.params.consumer_id);
-    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
-    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
-    if (!text) return badRequest(res, "text required");
-    const present = deliverLoopPrompt(target, text);
-    res.json({ consumer_id: target, action: "prompt", spooled: true, delivered: present });
-});
-
-/** #451 — spool a prompt for a loop, then flush the whole queue when the loop is
- *  live. Returns whether it was delivered now (else it waits for the reconnect). */
-function deliverLoopPrompt(target: string, text: string): boolean {
-    spoolPrompt(target, text);
-    const present = isPresent(target);
-    if (present) {
-        // Live → flush the whole queue (this prompt + anything spooled earlier).
-        for (const t of drainPrompts(target)) emitControl(target, { action: "prompt", text: t });
-    }
-    return present;
-}
-
-/** #2333 — the agent loops an all-loops control reaches: the live ones, or the ones named. */
-function holdTargets(requested: unknown): string[] {
-    const named = Array.isArray(requested) ? requested.filter((x): x is string => typeof x === "string") : null;
-    return pickHoldTargets(
-        listConsumers().map((c) => ({ consumer_id: c.consumer_id, kind: c.kind, present: presenceRunning(c.consumer_id) })),
-        named,
-    );
-}
+consumersRouter.post("/consumers/:consumer_id/prompt", serveMethod("consumer.prompt"));
 
 // #2333 — a message to every agent loop running on this aiball. It is typed into
 // each session right away (a control prompt does not go through the wake gates),
 // and with `hold: true` each loop is then held indefinitely (NOT AFK ∞), so no
 // auto-wake starts new work while the operator is away. Same privilege gate as
 // loop-stop and prompt. One line per loop in the daemon log and in the reply.
-consumersRouter.post("/loops/message-all", (req: Request, res: Response) => {
-    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
-    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
-    if (!message) return badRequest(res, "message required");
-    const hold = req.body?.hold === true;
-    const results: LoopHoldResult[] = holdTargets(req.body?.consumers).map((consumer_id) => {
-        const delivered = deliverLoopPrompt(consumer_id, message);
-        const result: LoopHoldResult = { consumer_id, prompt: delivered ? "delivered" : "spooled" };
-        if (hold) {
-            const held = sendAfkToLoop(consumer_id, "arm_inf");
-            result.hold = held.ok ? "armed" : "failed";
-            if (!held.ok) result.hold_error = held.error;
-        }
-        console.error(`[loops-message-all] ${consumer_id} prompt=${result.prompt}${hold ? ` hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}` : ""}`);
-        return result;
-    });
-    res.json({ action: hold ? "message-and-hold" : "message", results });
-});
+consumersRouter.post("/loops/message-all", serveMethod("loops.message_all"));
 
 // #2333 — on return: lift the hold on every agent loop (or the ones named).
-consumersRouter.post("/loops/release-all", (req: Request, res: Response) => {
-    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
-    if (!verdict.ok) return refuse(res, 403, verdict.reason, verdict.code);
-    const results: LoopHoldResult[] = holdTargets(req.body?.consumers).map((consumer_id) => {
-        const released = sendAfkToLoop(consumer_id, "off");
-        const result: LoopHoldResult = { consumer_id, hold: released.ok ? "released" : "failed" };
-        if (!released.ok) result.hold_error = released.error;
-        console.error(`[loops-release-all] ${consumer_id} hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}`);
-        return result;
-    });
-    res.json({ action: "release", results });
-});
+consumersRouter.post("/loops/release-all", serveMethod("loops.release_all"));
 
 consumersRouter.post("/consumers", serveMethod("consumer.upsert"));
 
 consumersRouter.patch("/consumers/:consumer_id", serveMethod("consumer.update"));
 
-consumersRouter.delete("/consumers/:consumer_id", (req: Request, res: Response) => {
-    const consumer_id = String(req.params.consumer_id);
-    const c = getConsumer(consumer_id);
-    if (!c) return notFound(res, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
-    deleteConsumer(consumer_id);
-    broadcast({ type: "consumer_changed", data: { consumer_id, deleted: true } });
-    res.json({ consumer_id, deleted: true });
-});
-
+consumersRouter.delete("/consumers/:consumer_id", serveMethod("consumer.delete"));
 /**
  * #B.177 B1: claude-loop timer pushes its current state here on every
  * heartbeat tick (busy / idle / boot). `state_since` only advances on
@@ -214,21 +110,7 @@ consumersRouter.post("/consumers/:consumer_id/bar-host", serveMethod("consumer.s
  * token value (a node is addressed by a non-secret `node_id`). Moderator-only,
  * like the other token-adjacent surfaces.
  */
-consumersRouter.get("/nodes", (req: Request, res: Response) => {
-    if (!isHuman(consumerOf(req))) {
-        return refuse(res, 403, "nodes list is moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    // #510 — décorer chaque node avec son état WS reverse courant. Lecture
-    // mémoire (proxy-ws map) — pas de coût DB. Le NodeView reste compatible
-    // back-compat ; les anciens clients ignorent le champ ws_state.
-    // #2085 — plus the nodes revoked recently: the click that destroyed a
-    // credential deserves a receipt, not a row quietly disappearing.
-    const decorated = listNodesWithRevoked().map((n) => ({
-        ...n,
-        ws_state: n.revoked_at ? null : getProxyNodeWsState(n.node_id),
-    }));
-    res.json(decorated);
-});
+consumersRouter.get("/nodes", serveMethod("node.list"));
 
 /**
  * #2074 — PAIRING. The two routes below are the only UNAUTHENTICATED ones in
@@ -324,69 +206,15 @@ consumersRouter.get("/nodes/enroll/:id", (req: Request, res: Response) => {
  * point: the one structurally-public route in the API becomes conditional on an
  * authenticated decision, instead of standing open on its own.
  */
-consumersRouter.get("/nodes/pairing", (req: Request, res: Response) => {
-    if (!isHuman(consumerOf(req))) {
-        return refuse(res, 403, "pairing window is moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    res.json(pairingWindow());
-});
+consumersRouter.get("/nodes/pairing", serveMethod("node.pairing"));
 
-consumersRouter.post("/nodes/pairing/:verb", (req: Request, res: Response) => {
-    const caller = consumerOf(req);
-    if (!isHuman(caller)) {
-        return refuse(res, 403, "pairing window is moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const verb = String(req.params.verb);
-    if (verb !== "open" && verb !== "close") return badRequest(res, "verb must be open or close");
-    if (verb === "close") {
-        const w = closePairingWindow();
-        broadcast({ type: "consumer_changed", data: { pairing_window: w } });
-        return res.json(w);
-    }
-    const { minutes } = (req.body ?? {}) as { minutes?: unknown };
-    const ms = typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0
-        ? minutes * 60_000
-        : DEFAULT_PAIRING_WINDOW_MS;
-    const w = openPairingWindow(caller, ms);
-    broadcast({ type: "consumer_changed", data: { pairing_window: w } });
-    res.json(w);
-});
+consumersRouter.post("/nodes/pairing/:verb", serveMethod("node.set_pairing"));
 
 /** #2074 — the human side. Moderator-only, like every other node surface. */
-consumersRouter.get("/nodes/enrollments", (req: Request, res: Response) => {
-    if (!isHuman(consumerOf(req))) {
-        return refuse(res, 403, "pairing requests are moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    res.json(listEnrollments());
-});
+consumersRouter.get("/nodes/enrollments", serveMethod("node.enrollments"));
 
-consumersRouter.post("/nodes/enrollments/:id/:verdict", (req: Request, res: Response) => {
-    const caller = consumerOf(req);
-    if (!isHuman(caller)) {
-        return refuse(res, 403, "approving a node is moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const verdict = String(req.params.verdict);
-    if (verdict !== "approve" && verdict !== "reject") {
-        return badRequest(res, "verdict must be approve or reject");
-    }
-    const id = String(req.params.id);
-    const view = verdict === "approve" ? approveEnrollment(id, caller) : rejectEnrollment(id, caller);
-    // Null means the request was no longer decidable — expired, or already
-    // decided. Saying so beats silently minting a second token.
-    if (!view) return refuse(res, 409, "pairing request is no longer pending");
-    broadcast({ type: "consumer_changed", data: { enrollment: view } });
-    res.json(view);
-});
+consumersRouter.post("/nodes/enrollments/:id/:verdict", serveMethod("node.decide_enrollment"));
 
 /** #424: revoke a node by its non-secret handle (deletes the underlying node
  *  token → the proxy can no longer relay). Moderator-only. */
-consumersRouter.delete("/nodes/:node_id", (req: Request, res: Response) => {
-    if (!isHuman(consumerOf(req))) {
-        return refuse(res, 403, "node revoke is moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const node_id = String(req.params.node_id);
-    if (!revokeNode(node_id, consumerOf(req))) return notFound(res, "node not found");
-    broadcast({ type: "consumer_changed", data: { node_id, revoked: true } });
-    res.json({ node_id, revoked: true });
-});
-
+consumersRouter.delete("/nodes/:node_id", serveMethod("node.revoke"));

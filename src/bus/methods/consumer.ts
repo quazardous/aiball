@@ -2,13 +2,15 @@
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { ERROR_CODES } from "../../domain.js";
-import { getConsumer, isHuman, listConsumers, pingCountsByConsumer, updateConsumer, upsertConsumer, type Consumer, type ConsumerKind } from "../../db.js";
+import { deleteConsumer, getConsumer, isHuman, listConsumers, pingCountsByConsumer, updateConsumer, upsertConsumer, type Consumer, type ConsumerKind } from "../../db.js";
+import { spoolPrompt, drainPrompts } from "../../loop-prompts.js";
+import { pickHoldTargets, type LoopHoldResult } from "../../loop-hold.js";
 import { AGENT_TYPES, type AgentType } from "../../db/consumers.js";
 import { broadcast } from "../../ws.js";
 import { sessionFor, viewOf } from "../../sessions/registry.js";
 import { isPresent, presenceRunning } from "../../live-presence.js";
 import { emitControl } from "../../event-bus.js";
-import { listWaitCredits, waitCreditBalance, waitCreditEnabled, type WaitCreditRow } from "../../db/wait-credit.js";
+import { listWaitCreditMoves, listWaitCredits, waitCreditBalance, waitCreditEnabled, type WaitCreditRow } from "../../db/wait-credit.js";
 import { unreadPingCount } from "../../db/pings.js";
 import { listTicketsFor } from "../../api/tickets.js";
 import { getAgentBar } from "../../agent-bar-store.js";
@@ -269,5 +271,148 @@ defineMethod({
         if (!updated) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
         broadcast({ type: "consumer_changed", data: updated });
         return updated;
+    },
+});
+
+/** The caller's own record: who the page is logged in as. */
+defineMethod({
+    name: "consumer.me",
+    who: ["human", "agent"],
+    params: z.object({}),
+    run: (caller) => {
+        const c = getConsumer(consumerIdOf(caller));
+        if (!c) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
+        return c;
+    },
+});
+
+/** #2645 — an agent's wait credit, per project, and its latest movements (`limit`, 30 by default). A human has none. */
+defineMethod({
+    name: "consumer.wait_credit",
+    who: ["human", "agent"],
+    params: z.object({ consumer_id: z.string(), limit: z.coerce.number().optional() }),
+    run: (_c, p) => {
+        const c = getConsumer(p.consumer_id);
+        if (!c) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
+        if (c.kind === "human") return { consumer_id: c.consumer_id, credits: null, moves: [] };
+        return {
+            consumer_id: c.consumer_id,
+            credits: listWaitCredits().filter((r) => r.consumer_id === c.consumer_id),
+            moves: listWaitCreditMoves(c.consumer_id, p.limit !== undefined && Number.isFinite(p.limit) ? p.limit : 30),
+        };
+    },
+});
+
+/** Delete a consumer's record. */
+defineMethod({
+    name: "consumer.delete",
+    who: ["human", "agent"],
+    params: z.object({ consumer_id: z.string() }),
+    run: (_c, p) => {
+        if (!getConsumer(p.consumer_id)) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
+        deleteConsumer(p.consumer_id);
+        broadcast({ type: "consumer_changed", data: { consumer_id: p.consumer_id, deleted: true } });
+        return { consumer_id: p.consumer_id, deleted: true };
+    },
+});
+
+/**
+ * #442 — stop the claude-loop running as this consumer, from afar: a
+ * `control:kill` its loop receives. `delivered` says whether a loop was
+ * connected to hear it (false: nothing was running).
+ */
+defineMethod({
+    name: "consumer.stop_loop",
+    ...LOOP_CONTROL,
+    params: z.object({ consumer_id: z.string() }),
+    run: (_c, p) => {
+        const delivered = isPresent(p.consumer_id);
+        emitControl(p.consumer_id, { action: "kill" });
+        return { consumer_id: p.consumer_id, action: "kill", delivered };
+    },
+});
+
+/**
+ * #451 — spool a prompt for a loop, in the daemon's memory only, then flush the
+ * whole queue if the loop is live; otherwise it waits for the loop to connect.
+ * Returns whether it went now.
+ */
+function deliverLoopPrompt(target: string, text: string): boolean {
+    spoolPrompt(target, text);
+    const present = isPresent(target);
+    if (present) {
+        for (const t of drainPrompts(target)) emitControl(target, { action: "prompt", text: t });
+    }
+    return present;
+}
+
+/**
+ * #451 — a raw prompt typed into the loop's Claude session, as a wake would
+ * be, unfiltered: a moderator's gesture, never a proxy node's (a prompt can
+ * steer the agent). Always spooled; `delivered` when a live loop took it now.
+ */
+defineMethod({
+    name: "consumer.prompt",
+    ...LOOP_CONTROL,
+    params: z.object({ consumer_id: z.string(), text: z.unknown().optional() }),
+    run: (_c, p) => {
+        const text = typeof p.text === "string" ? p.text.trim() : "";
+        if (!text) throw new Refusal(400, "text required");
+        return { consumer_id: p.consumer_id, action: "prompt", spooled: true, delivered: deliverLoopPrompt(p.consumer_id, text) };
+    },
+});
+
+/** #2333 — the agent loops an all-loops control reaches: the live ones, or the ones named. */
+function holdTargets(requested: unknown): string[] {
+    const named = Array.isArray(requested) ? requested.filter((x): x is string => typeof x === "string") : null;
+    return pickHoldTargets(
+        listConsumers().map((c) => ({ consumer_id: c.consumer_id, kind: c.kind, present: presenceRunning(c.consumer_id) })),
+        named,
+    );
+}
+
+/**
+ * #2333 — a message to every agent loop running here (or the ones named),
+ * typed into each session at once; with `hold`, each loop is then held (NOT
+ * AFK ∞) so no wake starts new work while the operator is away. One line per
+ * loop in the daemon's log and in the answer.
+ */
+defineMethod({
+    name: "loops.message_all",
+    ...LOOP_CONTROL,
+    params: z.object({ message: z.unknown().optional(), hold: z.unknown().optional(), consumers: z.unknown().optional() }),
+    run: (_c, p) => {
+        const message = typeof p.message === "string" ? p.message.trim() : "";
+        if (!message) throw new Refusal(400, "message required");
+        const hold = p.hold === true;
+        const results: LoopHoldResult[] = holdTargets(p.consumers).map((consumer_id) => {
+            const delivered = deliverLoopPrompt(consumer_id, message);
+            const result: LoopHoldResult = { consumer_id, prompt: delivered ? "delivered" : "spooled" };
+            if (hold) {
+                const held = sendAfkToLoop(consumer_id, "arm_inf");
+                result.hold = held.ok ? "armed" : "failed";
+                if (!held.ok) result.hold_error = held.error;
+            }
+            console.error(`[loops-message-all] ${consumer_id} prompt=${result.prompt}${hold ? ` hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}` : ""}`);
+            return result;
+        });
+        return { action: hold ? "message-and-hold" : "message", results };
+    },
+});
+
+/** #2333 — on return: lift the hold on every agent loop, or the ones named. */
+defineMethod({
+    name: "loops.release_all",
+    ...LOOP_CONTROL,
+    params: z.object({ consumers: z.unknown().optional() }),
+    run: (_c, p) => {
+        const results: LoopHoldResult[] = holdTargets(p.consumers).map((consumer_id) => {
+            const released = sendAfkToLoop(consumer_id, "off");
+            const result: LoopHoldResult = { consumer_id, hold: released.ok ? "released" : "failed" };
+            if (!released.ok) result.hold_error = released.error;
+            console.error(`[loops-release-all] ${consumer_id} hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}`);
+            return result;
+        });
+        return { action: "release", results };
     },
 });

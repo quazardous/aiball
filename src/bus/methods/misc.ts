@@ -7,7 +7,11 @@
 import { z } from "zod";
 import { authorOf, consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { getMessage } from "../../db.js";
-import { isTicketClosed, listPendingChildren, listTypedRelationsForTicket } from "../../db/messages.js";
+import { isTicketClosed, listMessages, listPendingChildren, listTypedRelationsForTicket, tagMessageAsStep, untagMessageStep } from "../../db/messages.js";
+import { markTicketUnseen } from "../../db/pings.js";
+import { listTicketSubscriptionsForTicket } from "../../db/subscriptions.js";
+import { ticketStateAfter } from "../../api/tickets.js";
+import { broadcast } from "../../ws.js";
 import { isHuman } from "../../db/consumers.js";
 import { readTicketPayload, readTicketPayloadRaw, revokeTicketPayload, writeTicketPayload } from "../../db/payloads.js";
 import { canReadPayloadSecrets, payloadAccessState } from "../../db/ticket-payload.js";
@@ -310,4 +314,77 @@ defineMethod({
             throw new Refusal(500, (e as Error).message, ERROR_CODES.INTERNAL, { reloaded: false });
         }
     },
+});
+
+/** Mark a ticket unread again for the caller; the answer carries its row. */
+defineMethod({
+    name: "ticket.mark_unread",
+    who: ["human", "agent"],
+    params: z.object({ id: ticketId }),
+    run: (caller, p) => {
+        const t = ticketOf(p.id);
+        const me = consumerIdOf(caller);
+        return { ticket_id: t.id, ...markTicketUnseen(me, t.id), ticket: ticketStateAfter(t.id, me) };
+    },
+});
+
+/**
+ * #352 — a ticket's explicit subscriptions, follows and mutes, for the
+ * moderator who manages who else is pinged (owners pinged by their role are
+ * not listed).
+ */
+defineMethod({
+    name: "ticket.subscribers",
+    who: ["human", "agent"],
+    params: z.object({ id: ticketId }),
+    run: (caller, p) => {
+        if (!isHuman(consumerIdOf(caller))) throw new Refusal(403, "subscription management is moderator-only", ERROR_CODES.MODERATOR_ONLY);
+        return { ticket_id: p.id, subscriptions: listTicketSubscriptionsForTicket(p.id) };
+    },
+});
+
+/**
+ * #2383 — mark a ticket as a step from the ticket itself: its latest comment,
+ * which must be an agent's (a human's last word would leave the ticket where
+ * it is). A human moderator's gesture.
+ */
+function stepTicket(caller: Caller, id: number, tag: boolean) {
+    const me = consumerIdOf(caller);
+    if (!isHuman(me)) throw new Refusal(403, "only a registered human moderator can mark a ticket as a step", ERROR_CODES.MODERATOR_ONLY);
+    ticketOf(id);
+    let latest: ReturnType<typeof getMessage> = null;
+    for (const m of listMessages({ kind: "comment_added", ticket_id: id })) {
+        if (m.status !== "approved") continue;
+        if (!latest || m.id > latest.id) latest = m;
+    }
+    if (!latest) throw new Refusal(409, "this ticket has no comment to mark as a step");
+    if (!latest.by_agent || isHuman(latest.by_agent)) {
+        throw new Refusal(409, "the thread's last word is a human's — tagging an older comment would not move the ticket; answer the agent, or tag its own comment in the thread");
+    }
+    let updated: ReturnType<typeof getMessage>;
+    try {
+        updated = tag ? tagMessageAsStep(latest.id, me) : untagMessageStep(latest.id);
+    } catch (e) {
+        throw new Refusal(409, e instanceof Error ? e.message : String(e));
+    }
+    if (!updated) throw new Refusal(404, "not found");
+    const decorated = withTagsOne(updated);
+    broadcast({ type: "message_edited", data: decorated });
+    return decorated;
+}
+
+/** Tag the ticket's latest comment, an agent's, as a step. */
+defineMethod({
+    name: "ticket.step",
+    who: ["human", "agent"],
+    params: z.object({ id: ticketId }),
+    run: (caller, p) => stepTicket(caller, p.id, true),
+});
+
+/** Remove that step tag. */
+defineMethod({
+    name: "ticket.unstep",
+    who: ["human", "agent"],
+    params: z.object({ id: ticketId }),
+    run: (caller, p) => stepTicket(caller, p.id, false),
 });

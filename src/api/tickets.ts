@@ -21,7 +21,7 @@
 import { serveMethod } from "../bus/http.js";
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
-import { Router, type Request, type Response } from "express";
+import { Router, type Request } from "express";
 import { ERROR_CODES } from "../domain.js";
 import {
     listMessages,
@@ -30,7 +30,6 @@ import {
     getTicketStages,
     getTicketTitles,
     getMessage,
-    markTicketUnseen,
     ticketUnreadFlags,
     ticketAgentLastActivity,
     ticketOthersLastActivity,
@@ -38,7 +37,6 @@ import {
     isHuman,
     listTypedRelationsForTicket,
     ticketSelfLastActivity,
-    listTicketSubscriptionsForTicket,
     getConsumer,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
@@ -47,7 +45,6 @@ import { listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
-import { broadcast } from "../ws.js";
 
 import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
 import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
@@ -71,8 +68,7 @@ export function ticketStateAfter(id: number, consumerId: string) {
     if (!t || t.kind !== "ticket_created") return null;
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
-import { badRequest, consumerOf, notFound, refuse, refuseError, withTagsOne } from "./_helpers.js";
-import { tagMessageAsStep, untagMessageStep } from "../db/messages.js";
+import { consumerOf, notFound, refuse } from "./_helpers.js";
 
 export const ticketsRouter = Router();
 
@@ -149,14 +145,7 @@ ticketsRouter.post("/tickets/:id/token-usage", serveMethod("ticket.add_token_usa
  * moderator's inline manage panel. Moderator-only — it manages who else gets
  * pinged. Owners pinged by project role aren't listed (explicit-only, david).
  */
-ticketsRouter.get("/tickets/:id/subscriptions", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    if (!isHuman(consumerOf(req))) {
-        return refuse(res, 403, "subscription management is moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    }
-    res.json({ ticket_id: id, subscriptions: listTicketSubscriptionsForTicket(id) });
-});
-
+ticketsRouter.get("/tickets/:id/subscriptions", serveMethod("ticket.subscribers"));
 /**
  * Inbox bookends: oldest + newest non-rejected ticket matching the
  * scope. Used by the slim `poll()` (per #B.68) so agents see the
@@ -761,14 +750,7 @@ ticketsRouter.get("/tickets", serveMethod("ticket.list"));
 
 ticketsRouter.post("/tickets/:id/mark-read", serveMethod("ticket.mark_read"));
 
-ticketsRouter.post("/tickets/:id/mark-unread", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    const r = markTicketUnseen(consumerOf(req), id);
-    res.json({ ticket_id: id, ...r, ticket: ticketStateAfter(id, consumerOf(req)) });
-});
-
+ticketsRouter.post("/tickets/:id/mark-unread", serveMethod("ticket.mark_unread"));
 /**
  * Snooze a ticket (per #B.329). Body: `{ until: ISO8601 }` — the ticket
  * is hidden from the open inbox until that timestamp. The daemon's
@@ -850,39 +832,8 @@ ticketsRouter.get("/tickets/:id/relations", (req, res) => {
  * decides whose pool the ticket sits in, so tagging an older comment would
  * change nothing.
  */
-ticketsRouter.post("/tickets/:id/step", (req: Request, res: Response) => ticketStepRoute(req, res, true));
-ticketsRouter.post("/tickets/:id/unstep", (req: Request, res: Response) => ticketStepRoute(req, res, false));
-
-function ticketStepRoute(req: Request, res: Response, tag: boolean) {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return badRequest(res, "ticket id required");
-    const caller = consumerOf(req);
-    if (!isHuman(caller)) {
-        return refuse(res, 403, "only a registered human moderator can mark a ticket as a step", ERROR_CODES.MODERATOR_ONLY);
-    }
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    let latest: ReturnType<typeof getMessage> = null;
-    for (const m of listMessages({ kind: "comment_added", ticket_id: id })) {
-        if (m.status !== "approved") continue;
-        if (!latest || m.id > latest.id) latest = m;
-    }
-    if (!latest) {
-        return refuse(res, 409, "this ticket has no comment to mark as a step");
-    }
-    if (!latest.by_agent || isHuman(latest.by_agent)) {
-        return refuse(res, 409, "the thread's last word is a human's — tagging an older comment would not move the ticket; answer the agent, or tag its own comment in the thread");
-    }
-    try {
-        const updated = tag ? tagMessageAsStep(latest.id, caller) : untagMessageStep(latest.id);
-        if (!updated) return notFound(res);
-        const decorated = withTagsOne(updated);
-        broadcast({ type: "message_edited", data: decorated });
-        res.json(decorated);
-    } catch (e) {
-        return refuseError(res, 409, e);
-    }
-}
+ticketsRouter.post("/tickets/:id/step", serveMethod("ticket.step"));
+ticketsRouter.post("/tickets/:id/unstep", serveMethod("ticket.unstep"));
 
 /**
  * #2910 — put a ticket in a milestone, move it to another, or take it out

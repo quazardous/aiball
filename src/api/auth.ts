@@ -17,6 +17,7 @@
  * route on every sub-router gets req.consumer_id set.
  */
 import { Router, type Request, type Response } from "express";
+import { serveMethod } from "../bus/http.js";
 import {
     anyHumanCredentials,
     deleteToken,
@@ -31,7 +32,7 @@ import {
     type TokenKind,
 } from "../db.js";
 import { hashPassword, verifyPassword } from "../auth.js";
-import { badRequest, consumerOf, refuse } from "./_helpers.js";
+import { badRequest, refuse } from "./_helpers.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AIBALL_HOME } from "../paths.js";
@@ -195,9 +196,4 @@ authRouter.post("/auth/logout", (req: Request, res: Response) => {
  * GET /api/me — current authenticated consumer + display info. Useful
  * for the frontend to render "Hello, David" without an extra lookup.
  */
-authRouter.get("/me", (req: Request, res: Response) => {
-    const id = consumerOf(req);
-    const c = getConsumer(id);
-    if (!c) return refuse(res, 404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
-    res.json(c);
-});
+authRouter.get("/me", serveMethod("consumer.me"));

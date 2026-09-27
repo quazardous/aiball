@@ -1,61 +1,16 @@
 /**
  * #2276 — the Signals tab: who holds a signal key, and what a project received.
- *
- * Moderator-only, like the Nodes panel. A key is addressed by its non-secret
- * `key_id`; the token value leaves the daemon once, in the answer to the POST
- * that minted it.
+ * Served by the bus methods in src/bus/methods/nodes.ts, all a moderator's. A
+ * key is addressed by its non-secret `key_id`; the token value leaves the
+ * daemon once, in the answer to the POST that minted it.
  */
-import { Router, type Request, type Response } from "express";
-import { isHuman } from "../db/consumers.js";
-import {
-    issueSignalKey,
-    listProjectSignals,
-    listSignalKeys,
-    revokeSignalKey,
-    updateSignalKey,
-} from "../db/signal-keys.js";
-import { consumerOf, notFound, refuse } from "./_helpers.js";
-import { ERROR_CODES } from "../domain.js";
+import { Router } from "express";
+import { serveMethod } from "../bus/http.js";
 
 export const signalKeysRouter = Router();
 
-function moderatorOnly(req: Request, res: Response): boolean {
-    if (isHuman(consumerOf(req))) return true;
-    refuse(res, 403, "signal keys and received signals are moderator-only", ERROR_CODES.MODERATOR_ONLY);
-    return false;
-}
-
-signalKeysRouter.get("/signal-keys", (req: Request, res: Response) => {
-    if (!moderatorOnly(req, res)) return;
-    const project = typeof req.query.project === "string" && req.query.project ? req.query.project : undefined;
-    res.json(listSignalKeys(project));
-});
-
-signalKeysRouter.post("/signal-keys", (req: Request, res: Response) => {
-    if (!moderatorOnly(req, res)) return;
-    const r = issueSignalKey(req.body?.label, req.body?.note, req.body?.scopes, req.body?.projects);
-    if ("error" in r) return refuse(res, r.status, r.error);
-    res.status(201).json(r);
-});
-
-signalKeysRouter.patch("/signal-keys/:key_id", (req: Request, res: Response) => {
-    if (!moderatorOnly(req, res)) return;
-    const r = updateSignalKey(String(req.params.key_id), {
-        note: req.body?.note, scopes: req.body?.scopes, projects: req.body?.projects,
-    });
-    if ("error" in r) return refuse(res, r.status, r.error);
-    res.json(r);
-});
-
-signalKeysRouter.delete("/signal-keys/:key_id", (req: Request, res: Response) => {
-    if (!moderatorOnly(req, res)) return;
-    const key_id = String(req.params.key_id);
-    if (!revokeSignalKey(key_id)) return notFound(res, "no signal key with this id");
-    res.json({ key_id, revoked: true });
-});
-
-signalKeysRouter.get("/projects/:name/signals", (req: Request, res: Response) => {
-    if (!moderatorOnly(req, res)) return;
-    const project = String(req.params.name);
-    res.json({ project, signals: listProjectSignals(project) });
-});
+signalKeysRouter.get("/signal-keys", serveMethod("signal_key.list"));
+signalKeysRouter.post("/signal-keys", serveMethod("signal_key.create", undefined, { status: 201 }));
+signalKeysRouter.patch("/signal-keys/:key_id", serveMethod("signal_key.update"));
+signalKeysRouter.delete("/signal-keys/:key_id", serveMethod("signal_key.revoke"));
+signalKeysRouter.get("/projects/:name/signals", serveMethod("project.signals"));
