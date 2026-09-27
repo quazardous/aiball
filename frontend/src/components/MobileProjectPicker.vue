@@ -7,7 +7,7 @@
  * project picker on mobile (#537 david `f5cjs3`).
  */
 import { computed, ref } from "vue";
-import { isProjectActive } from "../lib/project-activity";
+import { splitProjects } from "../lib/project-activity";
 
 export interface ProjectOption {
     label: string;
@@ -58,14 +58,11 @@ function pickProject(v: string | null) {
 // #537 mirror Sidebar.vue split (david `f5cjs3` : ça marche pas sur mobile,
 // parce que le sidebar est `display:none` sous 720px et ce dropdown est le
 // picker mobile — il faut appliquer la même séparation actifs/inactifs ici).
-// C5.2 — the active/inactive rule lives in lib/project-activity.ts now.
 const allProjectOption = computed(() => props.projectOptions.find((p) => p.value === null) ?? null);
-const activeProjectOptions = computed(() =>
-    props.projectOptions.filter((p) => p.value !== null && (isProjectActive(p) || p.value === props.project)),
-);
-const inactiveProjectOptions = computed(() =>
-    props.projectOptions.filter((p) => p.value !== null && !isProjectActive(p) && p.value !== props.project),
-);
+// #3132 — active by activity, at least a few, the current one kept; the rest by name.
+const projectSplit = computed(() => splitProjects(props.projectOptions, props.project));
+const activeProjectOptions = computed(() => projectSplit.value.active);
+const inactiveProjectOptions = computed(() => projectSplit.value.inactive);
 const inactiveOpen = ref(false);
 </script>
 
@@ -105,7 +102,7 @@ const inactiveOpen = ref(false);
                     <span v-if="allProjectOption.open && allProjectOption.open > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--open">{{ allProjectOption.open }}</span>
                 </span>
             </button>
-            <!-- Active projects (running OU signal counter récent). -->
+            <!-- Active projects: a loop, or recent activity; by activity (#3132). -->
             <button
                 v-for="p in activeProjectOptions"
                 :key="p.value ?? '__active__'"

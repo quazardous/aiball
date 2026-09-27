@@ -280,9 +280,8 @@ provide("compact", compact);
 async function loadProjects() {
     try {
         const list = await api.listProjectsDetailed(myConsumerId);
-        // Alphabetical (#B.106). The backend returns by last-activity which
-        // makes the sidebar reshuffle every time anyone posts — confusing
-        // when scanning by name.
+        // Alphabetical (#B.106), for the lists that scan by name. The project
+        // pickers order their active group by activity themselves (#3132).
         list.sort((a, b) => a.name.localeCompare(b.name));
         projects.value = list;
     } catch (e) {
@@ -663,8 +662,7 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         local: p.local === true,
         // #393 (3c): a loop is currently running (rooted consumer heartbeating).
         running: p.running === true,
-        // #537 : recency du dernier ticket — drive le critère « inactif si
-        // dernier ticket très vieux » dans Sidebar.isProjectActive.
+        // #537, #3132 — when it last moved: the pickers' active group and its order.
         last_activity: p.last_activity ?? null,
     })),
 ]);

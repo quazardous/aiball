@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
-import { isProjectActive } from "../lib/project-activity";
+import { splitProjects } from "../lib/project-activity";
 
 export interface ProjectListItem {
     label: string;
@@ -69,24 +69,15 @@ const activeProjectLabel = computed(() => {
     return active?.label ?? "Projects";
 });
 
-// #537 david : split active / inactive — un projet est "actif" si une loop
-// tourne dessus OU s'il a au moins un counter non-trivial (pending /
-// unread / resolved) ET son dernier ticket est récent (≤14j, sinon les
-// counters sont stales — david `vr4mwj` : « inactif c'est aussi un projet
-// dont le derniier ticket est tres vieux »). `running` court-circuite : une
-// loop qui tourne = actif définitionnellement, peu importe l'âge du dernier
-// ticket. On garde le projet courant TOUJOURS visible même s'il est inactif
-// (sinon il disparaît quand sélectionné). Même Sidebar.vue sert mobile/
-// « version portable » via le `<details>` collapse #B.161 → le fix bénéficie
-// aux deux viewports d'un seul changement.
-// C5.2 — the active/inactive rule lives in lib/project-activity.ts now.
+// #537, #3132 — split active / inactive (lib/project-activity.ts): a loop
+// runs on it, or it moved within 3 days; ordered by activity; never fewer than
+// 5. The current project always stays visible. The same Sidebar serves mobile
+// through the `<details>` collapse (#B.161).
 const allProjectItem = computed(() => props.items.find((p) => p.value === null) ?? null);
-const activeProjects = computed(() =>
-    props.items.filter((p) => p.value !== null && (isProjectActive(p) || p.value === props.project)),
-);
-const inactiveProjects = computed(() =>
-    props.items.filter((p) => p.value !== null && !isProjectActive(p) && p.value !== props.project),
-);
+// #3132 — active by activity, at least a few, the current one kept; the rest by name.
+const projectSplit = computed(() => splitProjects(props.items, props.project));
+const activeProjects = computed(() => projectSplit.value.active);
+const inactiveProjects = computed(() => projectSplit.value.inactive);
 const inactiveOpen = ref(false);
 
 // #B.161 desktop: clicking the project summary on desktop should NOT
@@ -153,10 +144,9 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                  selon p.running / p.local pour différencier (vert si une
                  loop tourne, muted-italic si local sans loop, normal sinon),
                  et on rétrécit les badges count.
-                 #537 david : projets actifs (running OU pending/unread/resolved>0)
-                 en haut, inactifs (juste open/snoozed) cachés derrière un
-                 « More (N) » toggle. Le projet courant reste toujours visible
-                 même s'il est inactif. -->
+                 #537, #3132: active projects (a loop, or recent activity) on
+                 top by activity, the others behind a « More (N) » toggle. The
+                 current project always stays visible. -->
             <!-- All projects row (toujours en tête, quel que soit son état). -->
             <button
                 v-if="allProjectItem"

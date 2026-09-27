@@ -92,6 +92,11 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- The project pickers show the active projects first, by activity: those where
+  a loop runs, then the most recent. Active now means a loop, or activity in
+  the last three days (a waiting count alone no longer keeps a project up), and
+  the group never shows fewer than five. The rest folds behind "More", by name.
+
 - The GNOME indicator reads its counters on the bus and refreshes them when the
   board's events say they moved, instead of every 30 seconds. Refresh it with
   `aiball init gnome-extension --overwrite`, then log out and back in.
