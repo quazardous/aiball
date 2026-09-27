@@ -1042,71 +1042,54 @@ export class AiballClient {
         onSignal?: (payload: { id: number; source: string; title: string; body: string | null; severity: "normal" | "panic"; repeat_count: number; expires_at: string }) => void;
         onError?: (err: Error) => void;
     }): () => void {
-        const path = `/api/events?consumer_id=${encodeURIComponent(this.agentId)}`;
-        // Same UDS-or-TCP split as the rest of the client. UDS is
-        // auth-free (the daemon trusts same-uid callers); TCP needs
-        // the bearer token. SSE works identically on both transports.
-        const headers: Record<string, string> = { "x-aiball-consumer": this.agentId };
-        let reqOpts: import("node:http").RequestOptions;
-        if (this.socketPath) {
-            reqOpts = { socketPath: this.socketPath, path, method: "GET", headers };
-        } else {
-            const u = new URL(this.url);
-            if (this.token) headers["authorization"] = `Bearer ${this.token}`;
-            reqOpts = {
-                host: u.hostname,
-                port: u.port ? Number(u.port) : (u.protocol === "https:" ? 443 : 80),
-                path,
-                method: "GET",
-                headers,
-            };
-        }
-        const req = httpRequest(reqOpts, (res: IncomingMessage) => {
-            if ((res.statusCode ?? 0) >= 400) {
-                handlers.onError?.(new Error(`SSE ${path} → ${res.statusCode}`));
-                req.destroy();
-                return;
+        // #3068 — the loop's events come over the bus (`agent.<id>.events`), on a
+        // connection of their own: it is the loop's liveness, open for as long
+        // as the loop listens. Any end (the daemon closed it, a refusal) goes to
+        // onError once; the caller reconnects, as it did for the event stream.
+        type Ev = { event: string; data: unknown };
+        let stopped = false;
+        let failed = false;
+        let conn: BusClient | null = null;
+        const fail = (e: Error) => {
+            if (stopped || failed) return;
+            failed = true;
+            conn?.close();
+            handlers.onError?.(e);
+        };
+        const headers = this.identityHeaders();
+        void (async () => {
+            try {
+                conn = await BusClient.connect(this.socketPath
+                    ? { socket: this.socketPath, headers }
+                    : { url: this.url, token: this.token ?? undefined, headers });
+                if (stopped) { conn.close(); return; }
+                void conn.closed().then((code) => fail(new Error(`the bus closed the event subscription (${code})`)));
+                let subscription: string | null = null;
+                const early: Ev[] = [];
+                const dispatch = (ev: Ev) => {
+                    if (ev.event === "ping") handlers.onPing(ev.data as Parameters<typeof handlers.onPing>[0]);
+                    else if (ev.event === "control") handlers.onControl?.(ev.data as ControlEvent);
+                    else if (ev.event === "signal") handlers.onSignal?.(ev.data as Parameters<NonNullable<typeof handlers.onSignal>>[0]);
+                };
+                conn.onNotification((method, params) => {
+                    const p = params as { subscription?: string; data?: Ev } | null;
+                    if (method !== "bus.event" || !p?.data) return;
+                    if (subscription === null) { early.push(p.data); return; }
+                    if (p.subscription === subscription) dispatch(p.data);
+                });
+                const r = await conn.call<{ id: string; value: { consumer_id: string; unread: number } }>("bus.subscribe", {
+                    subject: `agent.${this.agentId}.events`,
+                });
+                subscription = r.id;
+                handlers.onHello?.(r.value);
+                for (const ev of early.splice(0)) dispatch(ev);
+            } catch (e) {
+                fail(e instanceof Error ? e : new Error(String(e)));
             }
-            let buf = "";
-            res.setEncoding("utf8");
-            res.on("data", (chunk: string) => {
-                buf += chunk;
-                // SSE frames are separated by a blank line. Process
-                // every complete frame; the tail (incomplete) stays
-                // in `buf` for the next chunk.
-                let idx: number;
-                while ((idx = buf.indexOf("\n\n")) !== -1) {
-                    const frame = buf.slice(0, idx);
-                    buf = buf.slice(idx + 2);
-                    let evName = "message";
-                    let dataStr = "";
-                    for (const line of frame.split("\n")) {
-                        if (line.startsWith(":")) continue;
-                        if (line.startsWith("event:")) evName = line.slice(6).trim();
-                        else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
-                    }
-                    if (!dataStr) continue;
-                    let payload: unknown;
-                    try { payload = JSON.parse(dataStr); }
-                    catch { continue; }
-                    if (evName === "ping") {
-                        handlers.onPing(payload as { ticket_id?: number; comment_id?: number; comment_hashid?: string; intent?: "panic" | "request" | "question" | "fyi" });
-                    } else if (evName === "hello" && handlers.onHello) {
-                        handlers.onHello(payload as { consumer_id: string; unread: number });
-                    } else if (evName === "control" && handlers.onControl) {
-                        handlers.onControl(payload as ControlEvent);
-                    } else if (evName === "signal" && handlers.onSignal) {
-                        handlers.onSignal(payload as { id: number; source: string; title: string; body: string | null; severity: "normal" | "panic"; repeat_count: number; expires_at: string });
-                    }
-                }
-            });
-            res.on("end", () => handlers.onError?.(new Error("SSE stream closed by server")));
-            res.on("error", (e) => handlers.onError?.(e));
-        });
-        req.on("error", (e) => handlers.onError?.(e));
-        req.end();
+        })();
         return () => {
-            try { req.destroy(); } catch { /* already torn */ }
+            stopped = true;
+            conn?.close();
         };
     }
     /** #800 — project optional. Omitted = cross-project consumer-scoped count. */

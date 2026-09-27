@@ -60,6 +60,7 @@ function toError(e: { code: number; message: string; data?: RpcErrorData }): Bus
 export class BusClient {
     private nextId = 1;
     private readonly pending = new Map<number, (r: RpcResponse) => void>();
+    private readonly notified = new Set<(method: string, params: unknown) => void>();
 
     private constructor(
         private readonly ws: WebSocket,
@@ -114,9 +115,22 @@ export class BusClient {
         });
     }
 
+    /** #3068 — hear the daemon's notifications (`bus.event`). Returns how to stop. */
+    onNotification(fn: (method: string, params: unknown) => void): () => void {
+        this.notified.add(fn);
+        return () => { this.notified.delete(fn); };
+    }
+
     private receive(text: string): void {
         const msg = JSON.parse(text) as RpcResponse | RpcResponse[];
         for (const r of Array.isArray(msg) ? msg : [msg]) {
+            const n = r as unknown as { method?: unknown; params?: unknown; id?: unknown };
+            if (typeof n.method === "string" && n.id === undefined) {
+                for (const fn of this.notified) {
+                    try { fn(n.method, n.params); } catch { /* a listener never breaks the connection */ }
+                }
+                continue;
+            }
             if (typeof r.id !== "number") continue;
             const resolve = this.pending.get(r.id);
             if (!resolve) continue;

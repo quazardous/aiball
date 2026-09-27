@@ -376,6 +376,17 @@
               "seq"
             ]
           }
+        },
+        {
+          "name": "source",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "terminal",
+              "ui"
+            ]
+          }
         }
       ],
       "result": {

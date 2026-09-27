@@ -24,6 +24,25 @@
         }
       }
     },
+    "agent.*.events": {
+      "address": "agent.{id}.events",
+      "parameters": {
+        "id": {
+          "description": "an id"
+        }
+      },
+      "messages": {
+        "value": {
+          "name": "value",
+          "summary": "{ consumer_id, unread }"
+        },
+        "event": {
+          "name": "event",
+          "summary": "`{ event, data }`: `ping` (the ping, outside the wake focus not sent), `control` (`kill`, `prompt`, `restart_claude`) or `signal`"
+        }
+      },
+      "x-replay": false
+    },
     "agent.*.state": {
       "address": "agent.{id}.state",
       "parameters": {

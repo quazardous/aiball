@@ -10,7 +10,10 @@ import { defineSubject, publish, sendTo, SKIP, subscribe, subscriptionsOf, unsub
 import { onBroadcast, type WsEvent } from "../../ws.js";
 import { getMessage, ticketUnreadFlags, unreadPingCount, type Message } from "../../db.js";
 import { getAgentBar, listAgentBars } from "../../agent-bar-store.js";
-import { onPing } from "../../event-bus.js";
+import { onControl, onPing, onSignal } from "../../event-bus.js";
+import { listPendingSignals } from "../../db/signals.js";
+import { drainPrompts } from "../../loop-prompts.js";
+import { presenceConnect, presenceDisconnect } from "../../live-presence.js";
 import { wakeFocusHidesTicket } from "../../db/backlog-rules.js";
 import { parseMeta } from "../../questions.js";
 import { buildInboxRow, buildInboxRowContext, inboxRowDeadline, type InboxRowContext } from "../../api/inbox-row.js";
@@ -300,6 +303,52 @@ defineSubject({
     },
 });
 
+// ---- agent.<id>.events --------------------------------------------------------
+
+/**
+ * #3068 — what a loop's event stream carried (`/api/events`), for the loop
+ * itself: its pings (#2525: one outside the wake focus is not pushed, the loop
+ * wakes on this push), the loop controls (#442 kill, #451 prompt, #3074
+ * restart), and external signals (#2255). The subscription IS the loop's
+ * liveness (#395): open, the loop is running; gone, after a grace, it is not.
+ * On every subscribe, the signals still waiting and the prompts spooled while
+ * the loop was away go out first, right after the answer. Nothing is replayed
+ * on `since`: the value tells the unread count, and the waiting signals come
+ * again, as they did on a reconnected stream.
+ */
+defineSubject({
+    pattern: "agent.*.events",
+    replay: false,
+    doc: {
+        value: "{ consumer_id, unread }",
+        event: "`{ event, data }`: `ping` (the ping, outside the wake focus not sent), `control` (`kill`, `prompt`, `restart_claude`) or `signal`",
+    },
+    access: (caller, id) => (id === caller.consumer_id ? null : new Refusal(403, "a loop's own events only")),
+    setup: (sub) => {
+        const id = idOf(sub);
+        const offs = [
+            onPing(id, (payload) => {
+                if (payload.ticket_id !== undefined && wakeFocusHidesTicket(id, payload.ticket_id)) return;
+                sendTo(sub, { event: "ping", data: payload });
+            }),
+            onControl(id, (payload) => sendTo(sub, { event: "control", data: payload })),
+            onSignal(id, (payload) => sendTo(sub, { event: "signal", data: payload })),
+        ];
+        sub.state.off = () => { for (const off of offs) off(); };
+        presenceConnect(id, sub.opts.source === "ui" ? "ui" : "terminal");
+        // After the answer: an event reaches a subscription only once it is registered.
+        setImmediate(() => {
+            for (const pending of listPendingSignals(id)) sendTo(sub, { event: "signal", data: pending });
+            for (const text of drainPrompts(id)) sendTo(sub, { event: "control", data: { action: "prompt", text } });
+        });
+    },
+    value: (sub) => ({ consumer_id: idOf(sub), unread: unreadPingCount(idOf(sub)) }),
+    release: (sub) => {
+        (sub.state.off as (() => void) | undefined)?.();
+        presenceDisconnect(idOf(sub));
+    },
+});
+
 // ---- board.events -------------------------------------------------------------
 
 /**
@@ -361,8 +410,10 @@ defineMethod({
         since: z.object({ epoch: z.string(), seq: z.number().int().nonnegative() }).optional(),
         open: z.boolean().optional(),
         include_postponed: z.boolean().optional(),
+        /** `agent.<id>.events`: how the loop was launched, `terminal` or `ui` (#395). */
+        source: z.enum(["terminal", "ui"]).optional(),
     }),
-    run: (caller, p) => subscribe(caller, p.subject, p.since, { open: p.open, include_postponed: p.include_postponed }),
+    run: (caller, p) => subscribe(caller, p.subject, p.since, { open: p.open, include_postponed: p.include_postponed, source: p.source }),
 });
 
 /** End a subscription: no more events for it. Closing the connection ends them all. */
