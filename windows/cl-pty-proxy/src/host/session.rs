@@ -323,10 +323,12 @@ impl Session {
         self.tell_clients();
     }
 
-    /// Stop the command: `signal`, then SIGKILL past `timeout`, both to its whole
-    /// process group (the PTY makes the command a session leader: its group is
-    /// its pid), so nothing it started lives on out of sight (#3141). With
-    /// `restart`, clients stay attached for the next `start`.
+    /// Stop the command, to its whole process group (the PTY makes the command
+    /// a session leader: its group is its pid), so nothing it started lives on
+    /// out of sight (#3141): SIGHUP first — a terminal closing, which is what
+    /// ends an interactive shell, one that ignores SIGTERM (#3158) — then
+    /// `signal` a moment later if it is still there, then SIGKILL past
+    /// `timeout`. With `restart`, clients stay attached for the next `start`.
     pub fn stop(&self, signal: i32, timeout: Duration, restart: bool) -> Option<i64> {
         let mut inner = self.inner.lock().unwrap();
         if !inner.claude.running {
@@ -334,10 +336,21 @@ impl Session {
         }
         inner.restarting = restart;
         let pid = inner.pty.as_ref().and_then(|p| p.pid);
-        if let Some(pid) = pid {
-            signal_group(pid, signal);
-        }
         let deadline = Instant::now() + timeout;
+        if let Some(pid) = pid {
+            signal_group(pid, libc::SIGHUP);
+            let after_hup = (Instant::now() + HANGUP_GRACE).min(deadline);
+            while inner.claude.running {
+                let left = after_hup.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                inner = self.exited.wait_timeout(inner, left).unwrap().0;
+            }
+            if inner.claude.running {
+                signal_group(pid, signal);
+            }
+        }
         while inner.claude.running {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
@@ -691,6 +704,9 @@ fn screen_frame(inner: &Inner, opts: &Value) -> Vec<u8> {
         "lines": lines,
     }))
 }
+
+/// #3158 — how long a hangup gets before the stop signal follows.
+const HANGUP_GRACE: Duration = Duration::from_secs(1);
 
 /// #3141 — `signal` to the command's process group, and to the command itself
 /// should it have left the group.

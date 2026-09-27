@@ -89,7 +89,7 @@ Nothing on this channel carries Claude's raw output.
 | `host.inject` | `{ text }` | `{}` — writes `text` to Claude's input, as the kernel's wakes do today |
 | `host.screen` | — | `{ text, cursor: {x, y}, rows, cols, seq }` — the visible screen, as `getScreen` today |
 | `host.start` | `{ argv, env?, cwd? }` | `{ pid }` — starts Claude in the PTY; refused while one runs |
-| `host.stop` | `{ signal?: "TERM" \| "INT", timeout_ms?, restart? }` | `{ exit_code }` — ends Claude (SIGKILL past the timeout); the host itself stays. With `restart`, attached clients get `exited { restarting: true }` and stay for the next `host.start` |
+| `host.stop` | `{ signal?: "TERM" \| "INT", timeout_ms?, restart? }` | `{ exit_code }` — ends Claude: a hangup first (a terminal closing, which a shell obeys), the signal a second later if it still runs, SIGKILL past the timeout, to its whole process group; the host itself stays. With `restart`, attached clients get `exited { restarting: true }` and stay for the next `host.start` |
 | `host.shutdown` | — | `{}` — Claude stopped first, then the host exits and removes its files |
 | `host.resize` | `{ rows, cols }` | `{}` — only while no interactive client owns the size |
 
@@ -114,7 +114,7 @@ host.
 |---|---|---|
 | `session.start` | `{ cwd, project?, agent?, crew?, size?, env?, mode? }` for an agent's loop (with neither `agent` nor `crew`, the folder decides, as `claude-loop start` does; `mode` `host` or `tmux`, the configured `claude_loop.session` by default), or `{ name, argv, cwd, size?, env? }` for a session without an agent | the session: `{ agent \| name, host: "daemon", attach: { socket } }`, or for a loop in tmux `{ agent, host: "tmux", tmux }`; `HOST_BUSY` when the agent (or the name) runs elsewhere |
 | `session.host` | `{ agent, argv, cwd, size?, env? }` — local callers only | `claude-loop start --host` runs the command it prepared in the agent's session; the answer adds `control`, the socket its kernel drives |
-| `session.stop` | `{ agent }` or `{ name }` | `{ agent \| name, exit_code }`: the command stopped, the host gone |
+| `session.stop` | `{ agent }` or `{ name }`, `wait?` | `{ agent \| name, stopping: true }` as soon as the stop is under way — the end comes as the session's state going to null; with `wait`, `{ agent \| name, exit_code }` once the command stopped and the host is gone |
 | `session.list` | — | every session on this machine: `{ agent?, name?, argv, cwd, host, attach: { socket }, clients }` |
 | `session.handover` | `{ agent, to: "daemon" \| "claude-loop" }` | `{ agent, host, attach? }`; `NOT_IDLE` when Claude stays busy past the delay |
 

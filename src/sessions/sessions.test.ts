@@ -52,7 +52,7 @@ async function as(consumer: string) {
 }
 async function stopAll() {
     const boss = await as("boss");
-    for (const v of listSessionViews()) await boss.call("session.stop", v.name ? { name: v.name } : { agent: v.agent }).catch(() => {});
+    for (const v of listSessionViews()) await boss.call("session.stop", v.name ? { name: v.name, wait: true } : { agent: v.agent, wait: true }).catch(() => {});
 }
 after(async () => {
     await stopAll().catch(() => {});
@@ -93,7 +93,7 @@ test("the daemon finds its hosts again after a restart", { skip }, async () => {
     assert.equal(await initSessions(), 1, "taken back from host.json");
     const again = listSessionViews()[0];
     assert.deepEqual([again.name, again.pid, again.running], ["survivor", v.pid, true]);
-    await boss.call("session.stop", { name: "survivor" });
+    await boss.call("session.stop", { name: "survivor", wait: true });
 });
 
 test("session.<name>.state: a session started after the subscription is heard", { skip }, async () => {
@@ -108,7 +108,7 @@ test("session.<name>.state: a session started after the subscription is heard", 
     const ev = events.find((e) => (e as { subject: string }).subject === "session.later.state") as { data: { session: { running: boolean } } } | undefined;
     assert.ok(ev, "the new session is announced");
     assert.equal(ev.data.session.running, true);
-    await boss.call("session.stop", { name: "later" });
+    await boss.call("session.stop", { name: "later", wait: true });
 });
 
 test("starting a session is a human's gesture, never through a proxy node", { skip }, async () => {
@@ -136,7 +136,7 @@ test("#3141 a name too long for the socket path starts all the same, in a short 
     const v = await boss.call<{ name: string; attach: { socket: string } }>("session.start", { name, argv: ["cat"], cwd: home });
     assert.equal(v.name, name);
     assert.match(v.attach.socket, /term-[0-9a-f]{8}\/attach\.sock$/);
-    await boss.call("session.stop", { name });
+    await boss.call("session.stop", { name, wait: true });
 });
 
 test("the environment a caller may give: an allow-list", () => {
@@ -160,7 +160,7 @@ test("#3125 — a session on the host gets a terminal that renders colours, and 
         assert.equal(readFileSync(out, "utf8"), "xterm-256color|truecolor|[[27,91,50,48,126]]");
     } finally {
         // Stopped whatever happens: the next test starts the same agent.
-        await (await as("hosted")).call("session.stop", { agent: "hosted" });
+        await (await as("hosted")).call("session.stop", { agent: "hosted", wait: true });
     }
 });
 
@@ -183,6 +183,6 @@ test("session.host: local callers only, and one session per agent", { skip }, as
     const other = await refused(worker.call("session.stop", { agent: "hosted" }));
     assert.equal(other.code, "MODERATOR_ONLY", "an agent stops its own session, not another's");
     const own = await as("hosted");
-    await own.call("session.stop", { agent: "hosted" });
+    await own.call("session.stop", { agent: "hosted", wait: true });
     assert.equal(listSessionViews().filter((v) => v.agent === "hosted").length, 0, "its own loop's rm stops it");
 });

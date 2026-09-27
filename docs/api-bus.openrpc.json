@@ -3287,7 +3287,7 @@
     },
     {
       "name": "session.stop",
-      "description": "Stop a session: its command, then its host, whose files go with it. Answers once the host is gone.",
+      "description": "Stop a session: its command, then its host, whose files go with it. Answers `{ stopping: true }` at once : the end comes as the session's state (`session.<name>.state` / `agent.<id>.state`, the session gone), so a slow program does not hold the caller's connection. With `wait`, answers once the host is gone, with the command's `exit_code` (`claude-loop rm`, which starts the loop again right after).",
       "paramStructure": "by-name",
       "params": [
         {
@@ -3302,6 +3302,13 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "wait",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],

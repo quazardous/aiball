@@ -102,6 +102,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- `session.stop` answers `{ stopping: true }` as soon as the stop is under way,
+  so it no longer holds the caller's connection; the end arrives as the
+  session's state going to null. Pass `wait: true` for the former answer, with
+  `exit_code`, once the host is gone.
 - **The managed settings are renamed once, as dotted paths without a unit**
   (`tickets.step_after_max_minutes` → `tickets.steps.max_wait`,
   `autopoll.throttle_seconds` → `autopoll.throttle`; the table is in the
@@ -179,6 +183,8 @@ dates are YYYY-MM-DD.
 
 - Stopping a session on the host no longer leaves a program running that
   ignores the stop signals: past the grace, its whole process group is killed.
+- Stopping a shell session takes a moment, not ten seconds: the host hangs up
+  first, as a closing terminal does, then sends the stop signal a second later.
 
 - A loop that comes back has its bar live again at once, rather than showing
   stale until it pushes a different one.

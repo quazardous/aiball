@@ -152,13 +152,20 @@ defineMethod({
     },
 });
 
-/** Stop a session: its command, then its host, whose files go with it. Answers once the host is gone. */
+/**
+ * Stop a session: its command, then its host, whose files go with it. Answers
+ * `{ stopping: true }` at once (#3158): the end comes as the session's state
+ * (`session.<name>.state` / `agent.<id>.state`, the session gone), so a slow
+ * program does not hold the caller's connection. With `wait`, answers once
+ * the host is gone, with the command's `exit_code` (`claude-loop rm`, which
+ * starts the loop again right after).
+ */
 defineMethod({
     name: "session.stop",
     // A human's gesture; and an agent's own loop stops its own session (`claude-loop rm`), locally.
     who: ["human", "agent"],
     relayed: false,
-    params: z.object({ agent: z.string().optional(), name: z.string().optional() }),
+    params: z.object({ agent: z.string().optional(), name: z.string().optional(), wait: z.boolean().optional() }),
     run: async (caller, p) => {
         if (!p.agent === !p.name) throw new Refusal(400, "one of agent or name");
         if (caller.kind !== "human" && (caller.transport !== "uds" || p.agent !== caller.consumer_id)) {
@@ -166,6 +173,10 @@ defineMethod({
         }
         const link = sessionFor(p);
         if (!link) throw new Refusal(404, "no such session on this daemon", ERROR_CODES.NOT_FOUND);
+        if (!p.wait) {
+            void stopSession(link).catch(() => { /* the session's state says how it ended */ });
+            return { agent: p.agent ?? null, name: p.name ?? null, stopping: true };
+        }
         const exit_code = await stopSession(link);
         return { agent: p.agent ?? null, name: p.name ?? null, exit_code };
     },

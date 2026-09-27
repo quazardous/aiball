@@ -1316,7 +1316,8 @@ export class AiballClient {
     }
     /** #3066 — stop this agent's session on the daemon's host (the loop's own `rm`). */
     sessionStop(agent: string) {
-        return this.call<{ agent: string; exit_code: number | null }>("session.stop", { agent });
+        // #3158 — waits for the host to be gone: `claude-loop rm` starts the loop again right after.
+        return this.call<{ agent: string; exit_code: number | null }>("session.stop", { agent, wait: true });
     }
     health() {
         return this.http<{ ok: boolean; ts: string; version?: string }>("GET", "/api/health");
