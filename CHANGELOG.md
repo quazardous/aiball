@@ -35,8 +35,7 @@ dates are YYYY-MM-DD.
   authenticated once when it connects, calls and batches go straight to the
   core, and revoking a token closes its connections. The first step of
   moving every client onto it; see `docs/API-BUS.md`.
-- The bus carries every call tvty makes, reads and writes, as methods; their
-  HTTP routes answer exactly as the methods do.
+- The bus carries every call tvty makes, reads and writes, as methods.
 - Subscriptions on the bus push the data itself: the board's rows (also when
   a field changes with time alone), agents' states and bars, a ticket's
   thread, one's pings; a client that reconnects gets what it missed.
@@ -92,6 +91,10 @@ dates are YYYY-MM-DD.
   and right-click menu to a loop, instead of tmux's mouse mode.
 
 ### Changed
+
+- The GNOME indicator reads its counters on the bus and refreshes them when the
+  board's events say they moved, instead of every 30 seconds. Refresh it with
+  `aiball init gnome-extension --overwrite`, then log out and back in.
 
 - The MCP server, the CLI and claude-loop call the daemon over the bus, one connection per process, for every operation that is a method; the rest still goes over HTTP.
 - The inbox turn view has no `unread` band any more: an unread ticket stays in the band its work is in, and its row still says it is unread (inbox row schema version 2).

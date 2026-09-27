@@ -105,7 +105,8 @@ cannot pile requests up inside the shell.
 
 ## No token lives in it
 
-The extension talks to the **Unix socket**, never the HTTP port. That is a
+The extension talks to the **Unix socket**, never the HTTP port — its probes
+over HTTP, its counters over the bus (a WebSocket on the same socket). That is a
 deliberate design point rather than a convenience: a client on the port needs a
 credential, whereas the socket's trust boundary is the operating system's — a
 process of the same user may open it, and a GNOME extension already is one. So
@@ -116,15 +117,22 @@ There is a test that fails if the extension ever grows an authorization header.
 
 ## Refresh rates, and why they differ
 
-Liveness is polled every 5 seconds, counters every 30. The two are not the same
-cost: the health check answers in about 1.5 ms, while the counters cost 150-220
-ms on a real board, and the daemon serves callers one at a time. Polling the
-expensive one often would spend a noticeable slice of the daemon on a panel
-nobody is looking at.
+Liveness is polled every 5 seconds. The counters are not polled: the extension
+subscribes to the board's events on the bus and reads the counters again when
+one of them may have moved a number — a ticket filed, decided or moderated, a
+loop coming or going. The two reads are not the same cost: the health check
+answers in about 1.5 ms, while the counters cost 150-220 ms on a real board,
+and the daemon serves callers one at a time.
 
-The rule that matters more than either interval: **the counters refresh when
-the menu opens**. The number you read is fresh at the moment you read it, and
-the idle cost stays at 1.5 ms every 5 seconds.
+A burst of events costs one read: it waits two seconds for the burst to settle,
+and never reads more than once every ten. A loop's status bar, which updates
+all the time, moves no counter and wakes nothing. With nothing happening, the
+counters are read again after five quiet minutes anyway: a postponed ticket
+coming back moves them, and no event says so. When the bus is down, or the
+subscription is refused, the counters are read every 30 seconds instead.
+
+And **the counters refresh when the menu opens**: the number you read is fresh
+at the moment you read it.
 
 ## The maintenance it commits you to
 

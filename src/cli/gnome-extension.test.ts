@@ -39,7 +39,7 @@ test("it lands the whole extension, not just a manifest", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "nodeState.js", "versionState.js", "stylesheet.css", "icons/aiball-symbolic.svg", "icons/aiball-proxy-symbolic.svg"]) {
+    for (const f of ["metadata.json", "extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "nodeState.js", "versionState.js", "countersState.js", "aiballBus.js", "stylesheet.css", "icons/aiball-symbolic.svg", "icons/aiball-proxy-symbolic.svg"]) {
         assert.ok(existsSync(join(dir, f)), `${f} is missing — the shell needs all of them`);
     }
 });
@@ -83,11 +83,14 @@ test("the extension holds no token, and asks for none", () => {
     const target = freshTarget();
     copyGnomeExtension({ target, force: false });
     const dir = join(target, GNOME_EXTENSION_UUID);
-    for (const f of ["extension.js", "aiballClient.js", "daemonActions.js", "tailscaleState.js", "nodeState.js"]) {
+    for (const f of ["extension.js", "aiballClient.js", "aiballBus.js", "countersState.js", "daemonActions.js", "tailscaleState.js", "nodeState.js"]) {
         const src = stripComments(readFileSync(join(dir, f), "utf8"));
         assert.doesNotMatch(src, /Authorization|Bearer|aiball_token|AIBALL_TOKEN/i, `${f}`);
     }
     assert.match(readFileSync(join(dir, "aiballClient.js"), "utf8"), /UnixSocketAddress/);
+    // The bus too: its connection goes through the socket, not the port.
+    assert.match(readFileSync(join(dir, "aiballBus.js"), "utf8"), /UnixSocketAddress/);
+    assert.doesNotMatch(stripComments(readFileSync(join(dir, "aiballBus.js"), "utf8")), /127\.0\.0\.1|:7777/);
 });
 
 // #2251 — the menu's daemon actions. They live in an import-free module so the
@@ -348,4 +351,76 @@ test("Install the update: the confirmation names the loops cut, a refusal offers
         "aiball update failed at npm install (exited with 1). Log: /h/update.log");
     assert.match(v.updateResult(JSON.stringify({ ok: false, reason: "no record" })), /cannot update from here: no record/);
     assert.match(v.updateResult("command not found"), /did not report/);
+});
+
+// #3129 — the counters come from the bus: `project.list`, read again when the
+// board's events say something moved them, at most every few seconds.
+const COUNTERS_FILE = join(import.meta.dirname, "..", "..", "gnome", GNOME_EXTENSION_UUID, "countersState.js");
+const counters = await import(pathToFileURL(COUNTERS_FILE).href) as {
+    BUS_PATH: string;
+    SETTLE_MS: number;
+    MIN_SPACING_MS: number;
+    QUIET_REFRESH_MS: number;
+    movesCounters: (e: unknown) => boolean;
+    request: (id: number, method: string, params?: Record<string, unknown>) => string;
+    classify: (text: string) => Record<string, unknown>;
+    sumCounts: (projects: unknown) => { pending: number; actionable: number; open: number; loops: number } | null;
+    refreshDelay: (now: number, lastReadAt: number | null, due: boolean) => number | null;
+    tickReads: (now: number, lastReadAt: number | null, subscribed: boolean) => boolean;
+};
+
+test("the counters module stays loadable outside the shell (no gi:// or resource:// import)", () => {
+    assert.doesNotMatch(stripComments(readFileSync(COUNTERS_FILE, "utf8")), /gi:\/\/|resource:\/\//);
+});
+
+test("the extension reads no board data over HTTP: the counters are project.list on the bus", () => {
+    const src = stripComments(readFileSync(join(import.meta.dirname, "..", "..", "gnome", GNOME_EXTENSION_UUID, "extension.js"), "utf8"));
+    assert.doesNotMatch(src, /\/api\/projects/);
+    assert.match(src, /'project\.list'/);
+    assert.match(src, /'board\.events'/);
+    assert.equal(counters.BUS_PATH, "/bus");
+});
+
+test("a frame from the daemon: its hello, a reply, a refusal, an event, and noise", () => {
+    assert.deepEqual(JSON.parse(counters.request(3, "project.list", { detailed: true })),
+        { jsonrpc: "2.0", id: 3, method: "project.list", params: { detailed: true } });
+    assert.equal(counters.classify(JSON.stringify({ jsonrpc: "2.0", method: "bus.hello", params: {} })).kind, "hello");
+    assert.deepEqual(counters.classify(JSON.stringify({ jsonrpc: "2.0", id: 3, result: [1] })), { kind: "reply", id: 3, result: [1] });
+    assert.deepEqual(counters.classify(JSON.stringify({ jsonrpc: "2.0", id: 4, error: { code: 403, message: "no" } })), { kind: "reply", id: 4, error: "no" });
+    assert.deepEqual(counters.classify(JSON.stringify({ jsonrpc: "2.0", method: "bus.event", params: { subscription: "s", subject: "board.events", seq: 1, data: { type: "message_created" } } })),
+        { kind: "event", subscription: "s", data: { type: "message_created" } });
+    assert.equal(counters.classify("not json").kind, "other");
+    assert.equal(counters.classify("null").kind, "other");
+});
+
+test("the events that move a counter wake a read; a loop's status bar does not", () => {
+    for (const type of ["message_created", "message_decided", "consumer_changed", "project_deleted"])
+        assert.equal(counters.movesCounters({ type, data: {} }), true, type);
+    for (const type of ["agent_bar", "tag_changed", "rule_changed"])
+        assert.equal(counters.movesCounters({ type, data: {} }), false, type);
+    assert.equal(counters.movesCounters(null), false);
+});
+
+test("the sums across projects, and nothing for a failed read", () => {
+    assert.deepEqual(counters.sumCounts([
+        { pending_count: 2, actionable_count: 5, open_count: 9, running: true },
+        { pending_count: 1, open_count: 1 },
+    ]), { pending: 3, actionable: 5, open: 10, loops: 1 });
+    assert.equal(counters.sumCounts(null), null);
+    assert.equal(counters.sumCounts({ error: "x" }), null);
+});
+
+test("a burst of events is one read: it settles, it is spaced, and a read already due absorbs the rest", () => {
+    const { SETTLE_MS, MIN_SPACING_MS } = counters;
+    assert.equal(counters.refreshDelay(1000, null, false), SETTLE_MS, "the first: after the burst settles");
+    assert.equal(counters.refreshDelay(1000, 999, false), MIN_SPACING_MS - 1, "right after a read: spaced");
+    assert.equal(counters.refreshDelay(100000, 1000, false), SETTLE_MS, "long after one: only the settle");
+    assert.equal(counters.refreshDelay(1000, null, true), null, "a read is due: it sees this event too");
+});
+
+test("the tick reads without a subscription, and with one only after a quiet spell", () => {
+    assert.equal(counters.tickReads(1000, 900, false), true);
+    assert.equal(counters.tickReads(1000, null, true), true);
+    assert.equal(counters.tickReads(1000 + counters.QUIET_REFRESH_MS - 1, 1000, true), false);
+    assert.equal(counters.tickReads(1000 + counters.QUIET_REFRESH_MS, 1000, true), true);
 });

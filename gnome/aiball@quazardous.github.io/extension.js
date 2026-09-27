@@ -24,22 +24,24 @@ import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import * as Dialog from 'resource:///org/gnome/shell/ui/dialog.js';
 
 import {defaultSocketPath, getJson} from './aiballClient.js';
+import {AiballBus} from './aiballBus.js';
+import {movesCounters, refreshDelay, sumCounts, tickReads} from './countersState.js';
 import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './daemonActions.js';
 import {TAILNET, aiballTailnetUrl, tailnetMenu, tailscaleConnection, tailscaleProvider} from './tailscaleState.js';
 import {HEALTH_PATH, ICON_LOCAL, NODE_PATH, actionLabel, daemonView, presentation} from './nodeState.js';
 import {VERSION, installConfirmation, parseVersion, updateResult, versionMenu} from './versionState.js';
 
 /*
- * Two cadences, because the two reads do not cost the same thing.
+ * Two reads, because they do not cost the same thing.
  *
- * `/api/health` answers in ~1.5 ms, so asking often is free and liveness stays
- * responsive. `/api/projects?detailed=1` costs 150-220 ms on a real board —
- * the daemon serves callers one at a time, so polling THAT every five seconds
- * would spend a couple of percent of it on a panel nobody is looking at.
- *
- * Hence the third rule, which matters more than either interval: the counters
- * are refreshed when the menu OPENS. The number you read is fresh at the
- * moment you read it, and the idle cost stays at 1.5 ms every five seconds.
+ * `/api/health` answers in ~1.5 ms, so asking every five seconds is free and
+ * liveness stays responsive. The counters (`project.list` on the bus) cost
+ * 150-220 ms on a real board, and the daemon serves callers one at a time. So
+ * they are read when the board's events say something moved them
+ * (countersState.js decides which, and how often at most), and when the menu
+ * OPENS: the number you read is fresh at the moment you read it. Without the
+ * events — the bus down, or a daemon that refuses the subscription — the
+ * 30-second tick reads them instead.
  */
 const HEALTH_INTERVAL_S = 5;
 const COUNTERS_INTERVAL_S = 30;
@@ -59,6 +61,11 @@ class AiballIndicator extends PanelMenu.Button {
         this._cancellable = new Gio.Cancellable();
         this._healthSource = 0;
         this._countersSource = 0;
+        this._bus = null;
+        this._connecting = null;
+        this._subscribed = false;
+        this._lastReadAt = null;
+        this._readSource = 0;
         this._up = null;
         this._boardUrl = BOARD_URL;
         this._presentation = null;
@@ -168,7 +175,8 @@ class AiballIndicator extends PanelMenu.Button {
             });
         this._countersSource = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, COUNTERS_INTERVAL_S, () => {
-                this._refreshCounters();
+                if (tickReads(Date.now(), this._lastReadAt, this._subscribed))
+                    this._refreshCounters();
                 return GLib.SOURCE_CONTINUE;
             });
     }
@@ -349,20 +357,90 @@ class AiballIndicator extends PanelMenu.Button {
     }
 
     async _refreshCounters() {
-        const projects = await this._getJson('/api/projects?detailed=1', COUNTERS_TIMEOUT_MS);
+        this._lastReadAt = Date.now();
+        const bus = await this._connectBus();
+        let projects = null;
+        if (bus) {
+            try {
+                projects = await this._deadline(bus.call('project.list', {detailed: true}), COUNTERS_TIMEOUT_MS);
+            } catch {
+                projects = null;
+            }
+        }
         if (this._cancellable.is_cancelled()) return;
-        if (!Array.isArray(projects)) {
-            this._setCounts(null);
-            return;
-        }
-        let pending = 0, actionable = 0, open = 0, loops = 0;
-        for (const p of projects) {
-            pending += p.pending_count ?? 0;
-            actionable += p.actionable_count ?? 0;
-            open += p.open_count ?? 0;
-            if (p.running) loops += 1;
-        }
-        this._setCounts({pending, actionable, open, loops});
+        this._setCounts(sumCounts(projects));
+    }
+
+    /**
+     * The bus, connected and subscribed to the board's events; null while the
+     * daemon is down. One attempt at a time: reads that arrive meanwhile wait
+     * for it.
+     */
+    _connectBus() {
+        if (this._bus?.open) return Promise.resolve(this._bus);
+        if (this._connecting) return this._connecting;
+        this._connecting = (async () => {
+            let bus;
+            try {
+                bus = await AiballBus.connect(this._socketPath, {
+                    onEvent: (event) => this._onBoardEvent(event),
+                    onClosed: () => {
+                        if (this._bus === bus) {
+                            this._bus = null;
+                            this._subscribed = false;
+                        }
+                    },
+                    timeoutMs: READ_TIMEOUT_MS,
+                });
+            } catch {
+                this._connecting = null;
+                return null;
+            }
+            if (this._cancellable.is_cancelled()) {
+                bus.close();
+                this._connecting = null;
+                return null;
+            }
+            this._bus = bus;
+            try {
+                await this._deadline(bus.call('bus.subscribe', {subject: 'board.events'}), READ_TIMEOUT_MS);
+                this._subscribed = true;
+            } catch {
+                // Calls still work; the tick reads the counters instead.
+                this._subscribed = false;
+            }
+            this._connecting = null;
+            return bus;
+        })();
+        return this._connecting;
+    }
+
+    /** A board event: read the counters again soon if it may have moved them. */
+    _onBoardEvent(event) {
+        if (this._cancellable.is_cancelled() || !movesCounters(event)) return;
+        const delay = refreshDelay(Date.now(), this._lastReadAt, this._readSource !== 0);
+        if (delay === null) return;
+        this._readSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+            this._readSource = 0;
+            this._refreshCounters();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    /** `promise`, or a rejection once `timeoutMs` has passed. */
+    _deadline(promise, timeoutMs) {
+        return new Promise((resolve, reject) => {
+            let timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
+                timer = 0;
+                reject(new Error('timed out'));
+                return GLib.SOURCE_REMOVE;
+            });
+            const done = () => {
+                if (timer) GLib.source_remove(timer);
+                timer = 0;
+            };
+            promise.then((v) => { done(); resolve(v); }, (e) => { done(); reject(e); });
+        });
     }
 
     _applyView(view) {
@@ -417,8 +495,12 @@ class AiballIndicator extends PanelMenu.Button {
         this._cancellable.cancel();
         if (this._healthSource) GLib.source_remove(this._healthSource);
         if (this._countersSource) GLib.source_remove(this._countersSource);
+        if (this._readSource) GLib.source_remove(this._readSource);
         this._healthSource = 0;
         this._countersSource = 0;
+        this._readSource = 0;
+        this._bus?.close();
+        this._bus = null;
         super.destroy();
     }
 });
