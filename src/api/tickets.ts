@@ -22,7 +22,6 @@ import { serveMethod } from "../bus/http.js";
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
 import { Router, type Request } from "express";
-import { ERROR_CODES } from "../domain.js";
 import {
     listMessages,
     tagsForMessages,
@@ -35,7 +34,6 @@ import {
     ticketOthersLastActivity,
     getTicketTokenUsage,
     isHuman,
-    listTypedRelationsForTicket,
     ticketSelfLastActivity,
     getConsumer,
 } from "../db.js";
@@ -68,7 +66,6 @@ export function ticketStateAfter(id: number, consumerId: string) {
     if (!t || t.kind !== "ticket_created") return null;
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
-import { consumerOf, notFound, refuse } from "./_helpers.js";
 
 export const ticketsRouter = Router();
 
@@ -815,14 +812,6 @@ ticketsRouter.post("/tickets/import", serveMethod("ticket.import", undefined, { 
  * surfaces gate it behind an explicit confirmation. Body: { kind?, repo? }.
  */
 ticketsRouter.post("/tickets/:id/export", serveMethod("ticket.export", undefined, { status: 201 }));
-
-ticketsRouter.get("/tickets/:id/relations", (req, res) => {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return refuse(res, 400, "ticket id required");
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found", ERROR_CODES.TICKET_NOT_FOUND);
-    res.json({ ticket_id: id, relations: listTypedRelationsForTicket(id), ticket: ticketStateAfter(id, consumerOf(req)) });
-});
 
 /**
  * #2383 — mark a ticket as a step from the ticket itself (a button in the

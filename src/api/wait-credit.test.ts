@@ -23,6 +23,8 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2640-"));
 process.env.AIBALL_SOCK = "";
 
 const { createApp } = await import("../app.js");
+const { attachBus } = await import("../bus/server.js");
+const { BusClient } = await import("../bus-client.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -47,10 +49,16 @@ upsertSubscription("worker", P, "owner");
 upsertSubscription("boss", P, "owner");
 
 const server = createApp().listen(0);
+// #3068 — trimming the waits is a bus method.
+const wss = attachBus(server);
 await new Promise<void>((r) => server.once("listening", () => r()));
 const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const REPO = mkdtempSync(join(tmpdir(), "aiball-2640-repo-"));
+const busClients: { close(): void }[] = [];
 after(() => {
+    for (const c of busClients) c.close();
+    for (const ws of wss.clients) ws.terminate();
+    server.closeAllConnections();
     server.close();
     for (const d of [process.env.AIBALL_HOME!, REPO]) try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
 });
@@ -278,9 +286,14 @@ test("#2645 trim: every waiting step comes down to N minutes from now, the cut-o
 
     // Read the inbox first, so a stale cache would show the old resume.
     await call(BOSS, "GET", `/api/inbox?ids=${t}&project=${P4}`);
-    assert.equal((await call(WORKER, "POST", "/api/steps/trim", { max_minutes: 5 })).status, 403);
-    const r = await call(BOSS, "POST", "/api/steps/trim", { max_minutes: 5 });
-    assert.equal(r.status, 200);
+    const bus = async (token: string) => {
+        const c = await BusClient.connect({ url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, token });
+        busClients.push(c);
+        return c;
+    };
+    await assert.rejects((await bus(WORKER)).call("step.trim", { max_minutes: 5 }), (e: { code: string }) => e.code === "MODERATOR_ONLY");
+    const boss = await bus(BOSS);
+    const r = { json: await boss.call<Record<string, unknown>>("step.trim", { max_minutes: 5 }) };
     const mine = (r.json.trimmed as Array<{ message_id: number; refunded: number; to: string }>).find((x) => x.message_id === step.json.id)!;
     assert.ok(mine, "the 45-minute step was trimmed");
     assert.equal(mine.refunded, 40, "the 40 minutes cut off come back (to the nearest minute)");
@@ -291,8 +304,8 @@ test("#2645 trim: every waiting step comes down to N minutes from now, the cut-o
     const rows = Array.isArray(inbox) ? inbox : (inbox.rows ?? []);
     assert.equal(rows.find((x) => x.id === t)?.step_resume_at, mine.to, "the inbox shows the new resume at once (caches invalidated)");
 
-    const again = await call(BOSS, "POST", "/api/steps/trim", { max_minutes: 5 });
-    assert.equal((again.json.trimmed as unknown[]).length, 0, "nothing left to trim");
+    const again = await boss.call<{ trimmed: unknown[] }>("step.trim", { max_minutes: 5 });
+    assert.equal(again.trimmed.length, 0, "nothing left to trim");
 });
 
 test("#2640 every part of the scheme is a per-project setting: off, no refund, commit age and count", async () => {

@@ -2,7 +2,8 @@
  * #3068 — the board's settings and housekeeping on the bus: the moderation
  * strategy (global and per project), a project's standing prompt and wake
  * focus, its rich stats, purging old closed tickets, the daemon's info zone,
- * the token series, the config manager's overrides (#449), and the processes
+ * the token series, the config manager's overrides (#449), the upload cap,
+ * trimming the agents' waits and purging old read pings, and the processes
  * a moderator may start on the daemon's host: a project's loop, a launcher.
  */
 import { spawn } from "node:child_process";
@@ -13,6 +14,7 @@ import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { standingPromptView } from "./project.js";
 import {
     captureTokenSnapshotIfDue,
+    DEFAULT_UPLOAD_MAX_BYTES,
     deleteConfigOverride,
     getGlobalCounts,
     getProjectStatsRich,
@@ -20,6 +22,7 @@ import {
     getResolvedConfig,
     getStrategy,
     getTokenTimeseries,
+    getUploadMaxBytes,
     isHuman,
     isRootActive,
     listProjects,
@@ -29,10 +32,15 @@ import {
     setProjectStandingPrompt,
     setProjectStrategy,
     setStrategy,
+    setUploadMaxBytes,
     STRATEGIES,
+    UPLOAD_HARD_CAP_BYTES,
     type Strategy,
 } from "../../db.js";
-import { projectTicketStates } from "../../db/inbox-agg.js";
+import { invalidateInboxAgg, projectTicketStates } from "../../db/inbox-agg.js";
+import { invalidateFlagsCache } from "../../db/projects.js";
+import { trimStepWaits } from "../../db/wait-credit.js";
+import { purgeSeenPingsForClosedTickets } from "../../db/pings.js";
 import { setProjectWakeFocus } from "../../db/settings.js";
 import { listTicketIdsInProject } from "../../db/tickets.js";
 import { parseFocusTickets } from "../../wake-focus.js";
@@ -356,5 +364,59 @@ defineMethod({
         const pid = spawnDetached(launcher.cmd, launcher.args ?? [], `launcher ${launcher.id}`, launcher.cwd);
         if (pid === undefined) throw new Refusal(500, `failed to launch '${launcher.id}'`);
         return { ok: true, id: launcher.id, label: launcher.label, pid };
+    },
+});
+
+/** The upload cap, its default and the hard cap no setting may pass. */
+function uploadCap() {
+    return { bytes: getUploadMaxBytes(), default: DEFAULT_UPLOAD_MAX_BYTES, hard_cap: UPLOAD_HARD_CAP_BYTES };
+}
+
+/** How large one upload may be. */
+defineMethod({
+    name: "upload.max_bytes",
+    who: ["human", "agent"],
+    params: z.object({}),
+    run: () => uploadCap(),
+});
+
+/** Change how large one upload may be (up to the hard cap). */
+defineMethod({
+    name: "upload.set_max_bytes",
+    who: ["human", "agent"],
+    params: z.object({ bytes: z.unknown() }),
+    run: (_caller, p) => {
+        if (typeof p.bytes !== "number" || !Number.isFinite(p.bytes) || p.bytes <= 0) throw new Refusal(400, "bytes must be a positive number");
+        setUploadMaxBytes(p.bytes);
+        return uploadCap();
+    },
+});
+
+/** #2645 — cut every waiting step down to at most `max_minutes` from now: a moderator's gesture. */
+defineMethod({
+    name: "step.trim",
+    who: ["human"],
+    denied: { message: "only a human moderator can trim the agents' waits", code: ERROR_CODES.MODERATOR_ONLY },
+    params: z.object({ max_minutes: z.unknown() }),
+    run: (_caller, p) => {
+        const max = Number(p.max_minutes);
+        if (!Number.isInteger(max) || max < 0) throw new Refusal(400, "max_minutes: a whole number of minutes, 0 or more");
+        const trimmed = trimStepWaits(max);
+        for (const t of trimmed) invalidateInboxAgg(t.project, t.ticket_id);
+        if (trimmed.length) invalidateFlagsCache(trimmed.map((t) => t.ticket_id));
+        return { max_minutes: max, trimmed };
+    },
+});
+
+/** Delete the pings already read that point at closed tickets: a moderator's, or a local caller's, housekeeping. */
+defineMethod({
+    name: "ping.purge_seen_closed",
+    who: ["human", "agent"],
+    params: z.object({}),
+    run: (caller) => {
+        if (caller.transport !== "uds" && caller.kind !== "human") {
+            throw new Refusal(403, "human moderator only (local CLI or the web UI)", ERROR_CODES.MODERATOR_ONLY);
+        }
+        return purgeSeenPingsForClosedTickets();
     },
 });

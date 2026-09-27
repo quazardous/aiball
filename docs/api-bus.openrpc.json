@@ -2358,6 +2358,20 @@
       ]
     },
     {
+      "name": "ping.purge_seen_closed",
+      "description": "Delete the pings already read that point at closed tickets: a moderator's, or a local caller's, housekeeping.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "project.add_token_usage",
       "description": "Add a turn's token usage to a project (the Stop hook's fallback when no ticket is marked).",
       "paramStructure": "by-name",
@@ -3346,6 +3360,25 @@
       "x-callers": [
         "human",
         "agent"
+      ]
+    },
+    {
+      "name": "step.trim",
+      "description": "Cut every waiting step down to at most `max_minutes` from now: a moderator's gesture.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "max_minutes",
+          "required": true,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
       ]
     },
     {
@@ -4586,6 +4619,40 @@
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "upload.max_bytes",
+      "description": "How large one upload may be.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "upload.set_max_bytes",
+      "description": "Change how large one upload may be (up to the hard cap).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "bytes",
+          "required": true,
+          "schema": {}
         }
       ],
       "result": {

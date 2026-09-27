@@ -337,3 +337,7 @@ boolean, and its "1" is accepted too. Results are the route's body.
 | `signal_key.update` | human | `PATCH /api/signal-keys/:key_id` |
 | `signal_key.revoke` | human | `DELETE /api/signal-keys/:key_id` |
 | `project.signals` | human | `GET /api/projects/:name/signals` |
+| `upload.max_bytes` | human, agent | — how large one upload may be, with the default and the hard cap |
+| `upload.set_max_bytes` | human, agent | — change it, up to the hard cap |
+| `step.trim` | human | — cut every waiting step down to `max_minutes` from now |
+| `ping.purge_seen_closed` | human, or a local caller | — delete the read pings that point at closed tickets |

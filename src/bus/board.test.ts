@@ -133,3 +133,15 @@ test("me, mark unread; the moderator's gestures stay a human's", async () => {
     await assert.rejects(w.call("ticket.step", { id: t.id }), code("MODERATOR_ONLY"));
     await assert.rejects(boss.call("ticket.step", { id: t.id }), status(409), "no comment yet");
 });
+
+test("#3068 — the upload cap and the read-pings purge, as methods", async () => {
+    const boss = await as(BOSS);
+    const w = await as(WORKER);
+    const set = await boss.call<{ bytes: number; hard_cap: number }>("upload.set_max_bytes", { bytes: 2_000_000 });
+    assert.equal(set.bytes, 2_000_000);
+    assert.equal((await w.call<{ bytes: number }>("upload.max_bytes", {})).bytes, 2_000_000);
+    await assert.rejects(boss.call("upload.set_max_bytes", { bytes: -1 }), status(400));
+
+    assert.equal(typeof (await boss.call<{ deleted: number }>("ping.purge_seen_closed", {})).deleted, "number");
+    await assert.rejects(w.call("ping.purge_seen_closed", {}), code("MODERATOR_ONLY"), "an agent from afar may not");
+});

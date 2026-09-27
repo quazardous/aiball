@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `claude-loop attach` also attaches to a loop running on the daemon's session
+  host, from any terminal: its screen, your keys and your terminal's size, as
+  with tmux. Ctrl-B D detaches, and Claude carries on.
+
 - Each row of the inbox turn view names its band (`band_name`), so a client need not rely on the band's position.
 - The bus: one permanent connection per client, JSON-RPC 2.0 over a
   WebSocket at `/bus`, on the local socket and over TCP. The caller is
@@ -126,6 +130,11 @@ dates are YYYY-MM-DD.
   edit, vote or delete on a comment act on the ticket with the same number.
 
 ### Removed
+
+- HTTP routes nothing called any more: a message's tags and a ticket's
+  relations (both come with the ticket), and three settings moved to the bus
+  (the upload cap, trimming the agents' waits, purging read pings of closed
+  tickets).
 
 - The `/ws` live feed and the `/api/events` stream. The web UI and the loops
   hear the board's events on the bus (`board.events`, and a loop's own

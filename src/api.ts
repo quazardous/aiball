@@ -1,13 +1,6 @@
 import { serveMethod } from "./bus/http.js";
-import { trimStepWaits } from "./db/wait-credit.js";
-import { invalidateInboxAgg } from "./db/inbox-agg.js";
-import { invalidateFlagsCache } from "./db/projects.js";
 import { Router } from "express";
-import {
-    isHuman,
-} from "./db.js";
 import { bearerAuth } from "./auth.js";
-import { badRequest, consumerOf, refuse } from "./api/_helpers.js";
 import { schedulerStatus } from "./cron/index.js";
 import { AIBALL_VERSION } from "./version.js";
 import { agentHelpersRouter } from "./api/agent-helpers.js";
@@ -29,7 +22,6 @@ import { ticketsRouter } from "./api/tickets.js";
 import { managedConfigRouter } from "./api/managed-config.js";
 import { ticketSubscriptionsRouter } from "./api/ticket-subscriptions.js";
 import { uploadsRouter } from "./api/uploads.js";
-import { ERROR_CODES } from "./domain.js";
 
 export const api = Router();
 
@@ -47,7 +39,7 @@ api.use(bearerAuth);
 api.use(authRouter);
 
 // =====================================================================
-// Uploads + upload-max-bytes settings — moved to ./api/uploads.ts
+// Uploads — ./api/uploads.ts; the upload cap is a bus method (upload.max_bytes).
 // (#B.213 phase 1.E).
 // =====================================================================
 api.use(uploadsRouter);
@@ -173,16 +165,6 @@ api.post("/projects", serveMethod("project.create", undefined, { status: 201 }))
 // #2629 — declared step delays against when the agent actually came back.
 api.get("/steps/timing", serveMethod("step.timing"));
 
-// #2645 david — cut every waiting step down to at most N minutes from now.
-api.post("/steps/trim", (req, res) => {
-    if (!isHuman(consumerOf(req))) return refuse(res, 403, "only a human moderator can trim the agents' waits", ERROR_CODES.MODERATOR_ONLY);
-    const max = Number((req.body ?? {}).max_minutes);
-    if (!Number.isInteger(max) || max < 0) return badRequest(res, "max_minutes: a whole number of minutes, 0 or more");
-    const trimmed = trimStepWaits(max);
-    for (const t of trimmed) invalidateInboxAgg(t.project, t.ticket_id);
-    if (trimmed.length) invalidateFlagsCache(trimmed.map((t) => t.ticket_id));
-    res.json({ max_minutes: max, trimmed });
-});
 
 api.get("/projects/:name/stats", serveMethod("project.stats"));
 

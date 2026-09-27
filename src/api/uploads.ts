@@ -6,8 +6,8 @@
  *   POST /uploads                         — store image bytes, returns url/sha
  *   GET  /uploads/stats                   — count + total bytes
  *   POST /uploads/gc                      — collect orphan uploads
- *   GET  /settings/upload-max-bytes       — current cap + defaults
- *   PATCH /settings/upload-max-bytes      — change per-upload cap
+ * The per-upload cap is read and set on the bus (`upload.max_bytes`,
+ * `upload.set_max_bytes`).
  *
  * Storage: `<AIBALL_HOME>/uploads/<sha256>.<ext>`. Hash-addressable so
  * duplicate uploads dedupe naturally.
@@ -18,14 +18,12 @@ import { createReadStream, existsSync, statSync, unlinkSync, writeFileSync } fro
 import { join as joinPath } from "node:path";
 import { createHash } from "node:crypto";
 import {
-    DEFAULT_UPLOAD_MAX_BYTES,
     UPLOAD_HARD_CAP_BYTES,
     deleteUploadRow,
     getUploadBySha,
     getUploadMaxBytes,
     insertUpload,
     listOrphanUploads,
-    setUploadMaxBytes,
     uploadStats,
 } from "../db.js";
 import { UPLOADS_DIR } from "../paths.js";
@@ -85,7 +83,7 @@ const UPLOAD_MIME_TO_EXT: Record<string, string> = {
  * returns `{ url, bytes, sha256 }`. The body must be the file bytes
  * directly (no multipart wrapper) — the frontend posts the Blob as the
  * fetch body with the right content-type. Cap is `getUploadMaxBytes()`,
- * defaulting to 10 MB (configurable via `/api/settings/upload-max-bytes`).
+ * defaulting to 10 MB (configurable with `upload.set_max_bytes`).
  *
  * Hash-addressable storage means duplicate uploads dedupe naturally and
  * the response URL doubles as a stable id for future referencing.
@@ -330,23 +328,4 @@ uploadsRouter.post("/uploads/gc", (req: Request, res: Response) => {
     });
 });
 
-uploadsRouter.get("/settings/upload-max-bytes", (_req, res) => {
-    res.json({
-        bytes: getUploadMaxBytes(),
-        default: DEFAULT_UPLOAD_MAX_BYTES,
-        hard_cap: UPLOAD_HARD_CAP_BYTES,
-    });
-});
 
-uploadsRouter.patch("/settings/upload-max-bytes", (req: Request, res: Response) => {
-    const { bytes } = (req.body ?? {}) as { bytes?: unknown };
-    if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
-        return badRequest(res, "bytes must be a positive number");
-    }
-    setUploadMaxBytes(bytes);
-    res.json({
-        bytes: getUploadMaxBytes(),
-        default: DEFAULT_UPLOAD_MAX_BYTES,
-        hard_cap: UPLOAD_HARD_CAP_BYTES,
-    });
-});

@@ -7,15 +7,12 @@
 import { serveMethod } from "../bus/http.js";
 import { Router } from "express";
 import {
-    getMessage,
     getTag,
     getTagByName,
-    listMessageTags,
     listTags,
     type Tag,
 } from "../db.js";
 import { resolveConfigTags } from "../config-tags.js";
-import { notFound } from "./_helpers.js";
 
 export const tagsRouter = Router();
 
@@ -103,12 +100,6 @@ tagsRouter.put("/tags/override", serveMethod("tag.override"));
 tagsRouter.patch("/tags/:id", serveMethod("tag.update"));
 
 tagsRouter.delete("/tags/:id", serveMethod("tag.delete", undefined, { status: 204, respond: (res) => { res.end(); } }));
-
-tagsRouter.get("/messages/:id/tags", (req, res) => {
-    const id = Number(req.params.id);
-    if (!getMessage(id)) return notFound(res);
-    res.json(listMessageTags(id));
-});
 
 tagsRouter.put("/messages/:id/tags", serveMethod("message.set_tags"));
 

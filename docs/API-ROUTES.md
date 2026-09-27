@@ -12,7 +12,7 @@ its checkout when present).
 ● the consumer calls the route. ◐ it may: its call builds a segment at run time
 (`/api/messages/{id}/{verb}`), which could be this route or a sibling.
 
-**162 routes** · 5 called by loop, mcp, cli or tvty · 7 by the web UI alone · 138 by no consumer in the code.
+**156 routes** · 5 called by loop, mcp, cli or tvty · 7 by the web UI alone · 132 by no consumer in the code.
 
 | Route | loop | mcp | cli | sim | web | tvty |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
@@ -79,7 +79,6 @@ its checkout when present).
 | `POST /api/messages/:id/resurface` |  |  |  | ◐ |  |  |
 | `POST /api/messages/:id/step` |  |  |  | ● |  |  |
 | `POST /api/messages/:id/summarize` |  |  |  | ◐ |  |  |
-| `GET /api/messages/:id/tags` |  |  |  |  |  |  |
 | `POST /api/messages/:id/tags` |  |  |  | ◐ |  |  |
 | `PUT /api/messages/:id/tags` |  |  |  |  |  |  |
 | `DELETE /api/messages/:id/tags/:tag` |  |  |  |  |  |  |
@@ -100,7 +99,6 @@ its checkout when present).
 | `GET /api/pings` |  |  |  |  |  |  |
 | `GET /api/pings/count` |  |  |  | ● |  |  |
 | `POST /api/pings/mark-read` |  |  |  |  |  |  |
-| `POST /api/pings/purge-seen-closed` |  |  |  |  |  |  |
 | `GET /api/presence` |  |  |  |  |  |  |
 | `GET /api/projects` |  |  |  |  |  |  |
 | `POST /api/projects` |  |  |  |  |  |  |
@@ -117,8 +115,6 @@ its checkout when present).
 | `PATCH /api/projects/:project/strategy` |  |  |  |  |  |  |
 | `POST /api/projects/:project/token-usage` |  |  |  |  |  |  |
 | `GET /api/search` |  |  |  |  |  |  |
-| `GET /api/settings/upload-max-bytes` |  |  |  |  |  |  |
-| `PATCH /api/settings/upload-max-bytes` |  |  |  |  |  |  |
 | `GET /api/signal-keys` |  |  |  |  |  |  |
 | `POST /api/signal-keys` |  |  |  |  |  |  |
 | `DELETE /api/signal-keys/:key_id` |  |  |  |  |  |  |
@@ -127,7 +123,6 @@ its checkout when present).
 | `POST /api/signals` |  |  |  |  |  |  |
 | `POST /api/signals/:id/ack` |  |  |  |  |  |  |
 | `GET /api/steps/timing` |  |  |  |  |  |  |
-| `POST /api/steps/trim` |  |  |  |  |  |  |
 | `GET /api/strategy` |  |  |  |  |  |  |
 | `PATCH /api/strategy` |  |  |  |  |  |  |
 | `DELETE /api/subscriptions` |  |  |  |  |  |  |
@@ -159,7 +154,6 @@ its checkout when present).
 | `POST /api/tickets/:id/payload/dump` |  |  |  |  |  |  |
 | `GET /api/tickets/:id/pending-children` |  |  |  |  |  |  |
 | `POST /api/tickets/:id/postpone` |  |  |  | ● |  |  |
-| `GET /api/tickets/:id/relations` |  |  |  |  |  |  |
 | `POST /api/tickets/:id/relations` |  |  |  |  |  |  |
 | `POST /api/tickets/:id/release` |  |  |  |  |  |  |
 | `POST /api/tickets/:id/step` |  |  |  |  |  |  |
