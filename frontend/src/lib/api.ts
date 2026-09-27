@@ -1347,6 +1347,10 @@ export const api = {
     /** #747 — hold or release an agent's loop (AFK), as its own keys would. */
     agentAfk: (name: string, action: "toggle" | "off" | "arm_10m" | "arm_inf") =>
         call<{ consumer_id: string; action: string; queued: boolean }>("consumer.afk", { name, action }),
+    /** #3128: keys typed into an agent's session, as xterm produced them. */
+    paneKeys: (agent: string, keys: string) => call<{ sent: number }>("agent.pane_keys", { agent, keys }),
+    /** #3128: the size a typing viewer would like, for a session on the host. */
+    paneResize: (agent: string, rows: number, cols: number) => call<{ applied: boolean }>("agent.pane_resize", { agent, rows, cols }),
     /** #398: run a launcher by id (human-only; detached spawn on the host). */
     runLauncher: (id: string) =>
         call<{ ok: boolean; id: string; label: string; pid: number }>("launcher.run", { id }),

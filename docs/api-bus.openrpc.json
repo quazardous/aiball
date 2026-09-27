@@ -7,6 +7,75 @@
   },
   "methods": [
     {
+      "name": "agent.pane_keys",
+      "description": "Type into an agent's session: the keys as typed or pasted (control keys and escape sequences included). On the session host they go through the screen this caller has open with `typing`, and the host's keystroke detection sees them; in tmux or on a node, straight to the pane.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "keys",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
+      "name": "agent.pane_resize",
+      "description": "The size a typing viewer would like, for a session on the host: applied while this viewer owns the size (it typed last), as with tmux's `latest`. Nothing for a tmux or node pane, whose size is its terminal's.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "cols",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        {
+          "name": "rows",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
       "name": "automation.create_rule",
       "description": "Create a rule. `actions` is the canonical stack; without it the single `action` is required. `expression` (#457 slice 5.2), when set, replaces the AND of the flat `match_*` fields; a malformed tree is refused here so it never reaches the engine.",
       "paramStructure": "by-name",
@@ -378,6 +447,29 @@
           }
         },
         {
+          "name": "size",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "rows": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "cols": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              }
+            },
+            "required": [
+              "rows",
+              "cols"
+            ]
+          }
+        },
+        {
           "name": "source",
           "required": false,
           "schema": {
@@ -386,6 +478,13 @@
               "terminal",
               "ui"
             ]
+          }
+        },
+        {
+          "name": "typing",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],

@@ -101,6 +101,12 @@ dates are YYYY-MM-DD.
   board's events say they moved, instead of every 30 seconds. Refresh it with
   `aiball init gnome-extension --overwrite`, then log out and back in.
 
+- The web terminal follows an agent running on the session host: its screen,
+  then Claude's output as it comes, and the keys typed go through the host,
+  which sees them as a human typing. It watches read-only until typing is
+  unlocked, and only then may take the session's size. The terminal of a tmux
+  loop, or of an agent on a proxy node, now comes over the bus too.
+
 - The MCP server, the CLI and claude-loop call the daemon over the bus, one connection per process, for every operation that is a method; the rest still goes over HTTP.
 - The inbox turn view has no `unread` band any more: an unread ticket stays in the band its work is in, and its row still says it is unread (inbox row schema version 2).
 - An agent's wait credit is capped, at 120 minutes by default
@@ -138,6 +144,9 @@ dates are YYYY-MM-DD.
   edit, vote or delete on a comment act on the ticket with the same number.
 
 ### Removed
+
+- The web terminal's HTTP routes (the pane stream and its keys): the terminal
+  is a bus subject now.
 
 - The HTTP routes that served an operation the bus now carries. Every client
   calls the bus; HTTP keeps the web UI's files, uploads, login, the probes

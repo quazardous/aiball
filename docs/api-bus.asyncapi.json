@@ -43,6 +43,25 @@
       },
       "x-replay": false
     },
+    "agent.*.screen": {
+      "address": "agent.{id}.screen",
+      "parameters": {
+        "id": {
+          "description": "an id"
+        }
+      },
+      "messages": {
+        "value": {
+          "name": "value",
+          "summary": "`{ source }`: where the screen comes from, `host`, `tmux` or `node`; null when it cannot be followed (an `unavailable` event says why)"
+        },
+        "event": {
+          "name": "event",
+          "summary": "`snapshot` / `output` (the session host: base64 bytes to write to a terminal, a snapshot after a reset), `size` (the host's size), `frame` (tmux or a node: the whole screen as text, with `cursor` and `geometry`), `error` (passing), `unavailable` (nothing more comes)"
+        }
+      },
+      "x-replay": false
+    },
     "agent.*.state": {
       "address": "agent.{id}.state",
       "parameters": {

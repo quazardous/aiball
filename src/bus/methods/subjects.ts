@@ -412,8 +412,12 @@ defineMethod({
         include_postponed: z.boolean().optional(),
         /** `agent.<id>.events`: how the loop was launched, `terminal` or `ui` (#395). */
         source: z.enum(["terminal", "ui"]).optional(),
+        /** `agent.<id>.screen`: whether this viewer may type (on the session host, an interactive client). */
+        typing: z.boolean().optional(),
+        /** `agent.<id>.screen`, with `typing`: the size this viewer would like once it types. */
+        size: z.object({ rows: z.number().int().min(1).max(1000), cols: z.number().int().min(1).max(1000) }).optional(),
     }),
-    run: (caller, p) => subscribe(caller, p.subject, p.since, { open: p.open, include_postponed: p.include_postponed, source: p.source }),
+    run: (caller, p) => subscribe(caller, p.subject, p.since, { open: p.open, include_postponed: p.include_postponed, source: p.source, typing: p.typing, size: p.size }),
 });
 
 /** End a subscription: no more events for it. Closing the connection ends them all. */

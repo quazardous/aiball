@@ -1,17 +1,18 @@
 <script setup lang="ts">
 /**
- * #464 — read-only live mirror of an agent's tmux/psmux pane via SSE.
+ * #464, #3128 — an agent's live terminal, from `agent.<id>.screen` on the bus.
  *
- * Slice 1 shipped a plain `<pre>` rendering (`capture-pane -p`, no ANSI).
- * David `anz94c` : "du moment que le runtime js est en cache osef du
- * poids" → upgrade to real terminal rendering with xterm.js (~200KB
- * gzip). Backend now spawns `capture-pane -e -p` so ANSI escapes reach
- * the browser ; here we feed them into a real `Terminal` instance.
+ * Two kinds of source, one subscription:
+ * - **the session host**: a snapshot that repaints the screen, then Claude's
+ *   output as it comes (`snapshot` / `output`, bytes). The terminal is the
+ *   session's size (`size`), and keeps its scrollback.
+ * - **tmux, or a proxy node**: the whole visible pane each time it changes
+ *   (`frame`, `capture-pane` text). We reset the terminal then write it —
+ *   never accumulate, the buffer would grow unbounded otherwise.
  *
- * Each SSE frame carries the FULL visible pane (capture-pane is a
- * snapshot, not a delta). To render it we reset the terminal then
- * write the snapshot — never accumulate, the buffer would grow
- * unbounded otherwise.
+ * Keys go out with `agent.pane_keys`. On the host they go through the screen
+ * this page opened with `typing`, so the subscription is made again when
+ * typing is unlocked: a page that only watches never takes the session's size.
  *
  * Fullscreen toggle (CSS `position: fixed` + ESC) per david `6gh3g8`.
  * FitAddon resizes the terminal to the container on mount + on each
@@ -28,8 +29,7 @@ import "@xterm/xterm/css/xterm.css";
 // ConsumerEditPage / ProjectDetailPage pour rendre l'état claude-loop dans
 // la barre du terminal — même rendu, pas de nouvelle barre.
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
-import { withBase } from "../lib/base";
-import { api } from "../lib/api";
+import { api, subscribeBus } from "../lib/api";
 
 const props = defineProps<{
     /** Consumer/agent id — the daemon constructs `cl-<name>` to target the
@@ -111,15 +111,18 @@ const sendError = ref<string | null>(null);
 
 const confirmDialog = useConfirm();
 
-let es: EventSource | null = null;
+let sub: { close(): void } | null = null;
+/** Where the screen comes from, as the subscription's value said. */
+const source = ref<"host" | "tmux" | "node" | null>(null);
+const isHost = computed(() => source.value === "host");
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let connectTimeoutId: number | null = null;
 let dataDisposer: { dispose(): void } | null = null;
 
 interface PaneFrame {
+    kind: "frame";
     text: string;
-    target: string;
     truncated?: boolean;
     captured_at: string;
     /** #531 — actual cursor position in the pane (0-based), fetched server-side
@@ -133,9 +136,17 @@ interface PaneFrame {
      *  doesn't know `#{pane_width}`) omits it and we fall back to fitting. */
     geometry?: { cols: number; rows: number } | null;
 }
-interface PaneError {
-    error: string;
-    target?: string;
+/** An event of `agent.<id>.screen`. */
+type ScreenEvent =
+    | PaneFrame
+    | { kind: "snapshot"; data: string; size: { rows: number; cols: number } | null }
+    | { kind: "output"; data: string }
+    | { kind: "size"; rows: number; cols: number }
+    | { kind: "error"; error: string }
+    | { kind: "unavailable"; error: string };
+
+function bytesOf(base64: string): Uint8Array {
+    return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 }
 
 function mountTerm() {
@@ -208,19 +219,8 @@ function disposeTerm() {
 
 async function postKeys(data: string) {
     try {
-        const token = localStorage.getItem("aiball.token");
-        const headers: Record<string, string> = { "content-type": "application/json" };
-        if (token) headers.authorization = `Bearer ${token}`;
-        const res = await fetch(
-            `/api/agents/${encodeURIComponent(props.agentName)}/pane/keys`,
-            { method: "POST", headers, body: JSON.stringify({ keys: data }) },
-        );
-        if (!res.ok) {
-            const text = await res.text();
-            sendError.value = `send-keys ${res.status} : ${text}`;
-        } else {
-            sendError.value = null;
-        }
+        await api.paneKeys(props.agentName, data);
+        sendError.value = null;
     } catch (e) {
         sendError.value = (e as Error).message;
     }
@@ -272,7 +272,7 @@ async function toggleReadWrite() {
     }
     confirmDialog.require({
         header: "Enable typing into the terminal",
-        message: `You're about to enable typing into ${props.agentName}'s live claude-loop tmux session. Every keystroke you type — including Ctrl-C, Enter, paste — will be sent to the running session. Continue ?`,
+        message: `You're about to enable typing into ${props.agentName}'s live Claude session. Every keystroke you type — including Ctrl-C, Enter, paste — will be sent to the running session. Continue ?`,
         icon: "pi pi-pencil",
         acceptLabel: "Enable typing",
         rejectLabel: "Cancel",
@@ -292,6 +292,9 @@ async function toggleReadWrite() {
 watch(isReadWrite, (rw) => {
     // #472 david `fw9cpd` : persist across tab switches (sessionStorage scoped).
     writeSession(RW_KEY, rw);
+    // #3128 — on the host, keys go through a screen opened with typing: open it
+    // again, as a typing (or, locked back, a watching) viewer.
+    if (isHost.value) openStream();
     if (!term) return;
     term.options.disableStdin = !rw;
     term.options.cursorBlink = rw;
@@ -323,74 +326,110 @@ function applyFrame(text: string, cursor?: { x: number; y: number } | null) {
     }
 }
 
-function openStream() {
-    closeStream();
-    lastError.value = null;
-    const token = localStorage.getItem("aiball.token");
-    const tokenQs = token ? `?token=${encodeURIComponent(token)}` : "";
-    const url = withBase(`/api/agents/${encodeURIComponent(props.agentName)}/pane/stream${tokenQs}`);
-    es = new EventSource(url);
-    connectTimeoutId = window.setTimeout(() => {
-        if (!connected.value && !lastError.value) {
-            lastError.value = "no response from server (check auth / loop)";
-        }
-    }, 5000);
-    es.onopen = () => {
-        connected.value = true;
-        if (connectTimeoutId !== null) {
-            clearTimeout(connectTimeoutId);
-            connectTimeoutId = null;
-        }
-    };
-    es.onerror = () => {
-        connected.value = false;
-    };
-    es.onmessage = (e) => {
-        try {
-            const frame = JSON.parse(e.data) as PaneFrame;
+/** The size this page would like, typing in fullscreen: its terminal's fit. */
+function wantedSize(): { rows: number; cols: number } | undefined {
+    if (!isReadWrite.value || !isFullscreen.value) return undefined;
+    const d = fitAddon?.proposeDimensions();
+    return d && d.rows > 0 && d.cols > 0 ? { rows: d.rows, cols: d.cols } : undefined;
+}
+
+/** On the host, tell the session the size we would like (applied once we type). */
+function sendWantedSize(): void {
+    const want = isHost.value ? wantedSize() : undefined;
+    if (want) void api.paneResize(props.agentName, want.rows, want.cols).catch(() => {});
+}
+
+/** The session's size on the host: the terminal takes it, whatever its box. */
+function adoptSize(size: { rows: number; cols: number } | null): void {
+    if (!size) return;
+    const changed = paneGeometry.value?.cols !== size.cols || paneGeometry.value?.rows !== size.rows;
+    paneGeometry.value = { cols: size.cols, rows: size.rows };
+    if (term && (term.cols !== size.cols || term.rows !== size.rows)) {
+        try { term.resize(size.cols, size.rows); } catch { /* noop */ }
+    }
+    if (changed && isMiniature.value) relayoutMiniature();
+}
+
+function onScreenEvent(e: ScreenEvent) {
+    if (!term) return;
+    switch (e.kind) {
+        case "frame": {
             // #1740 — adopt the source grid before painting, so the snapshot
             // lands in a terminal that has the pane's shape. A pane can be
             // resized under us (the human drags the tmux window), hence the
             // check on every frame rather than once on connect.
-            const g = frame.geometry;
+            const g = e.geometry;
             const changed = !!g && (paneGeometry.value?.cols !== g.cols || paneGeometry.value?.rows !== g.rows);
             if (g) paneGeometry.value = { cols: g.cols, rows: g.rows };
             if (changed) relayoutMiniature();
-            applyFrame(frame.text, frame.cursor);
-            lastCapturedAt.value = frame.captured_at;
-            truncated.value = !!frame.truncated;
+            applyFrame(e.text, e.cursor);
+            lastCapturedAt.value = e.captured_at;
+            truncated.value = !!e.truncated;
             lastError.value = null;
-        } catch {
-            /* ignore malformed frame */
+            return;
         }
-    };
-    es.addEventListener("error", (e: MessageEvent) => {
-        try {
-            const data = JSON.parse(e.data) as PaneError;
-            lastError.value = data.error;
-        } catch {
-            /* ignore malformed error frame */
+        case "snapshot":
+            adoptSize(e.size);
+            term.reset();
+            term.write(bytesOf(e.data));
+            lastCapturedAt.value = new Date().toISOString();
+            lastError.value = null;
+            return;
+        case "output":
+            term.write(bytesOf(e.data));
+            lastCapturedAt.value = new Date().toISOString();
+            return;
+        case "size":
+            adoptSize({ rows: e.rows, cols: e.cols });
+            return;
+        case "error":
+            lastError.value = e.error;
+            return;
+        case "unavailable":
+            // Nothing more comes: say why, and stop rather than reconnect in a loop.
+            lastError.value = e.error;
+            closeStream();
+            return;
+    }
+}
+
+function openStream() {
+    closeStream();
+    lastError.value = null;
+    connectTimeoutId = window.setTimeout(() => {
+        if (!connected.value && !lastError.value) {
+            lastError.value = "no response from the daemon";
         }
-    });
-    // #503 — backend ouvre la SSE, envoie 1 event `unavailable` puis close
-    // pour signaler qu'on ne peut pas servir ce pane localement (node-relayé,
-    // pane sur un autre host). On affiche le message + on ferme proprement
-    // pour ne pas reconnecter en boucle.
-    es.addEventListener("unavailable", (e: MessageEvent) => {
-        try {
-            const data = JSON.parse(e.data) as { error?: string };
-            lastError.value = data.error ?? "pane unavailable on this daemon";
-        } catch {
-            lastError.value = "pane unavailable on this daemon";
-        }
-        closeStream();
-    });
+    }, 5000);
+    const size = wantedSize();
+    sub = subscribeBus(
+        `agent.${props.agentName}.screen`,
+        (data) => onScreenEvent(data as ScreenEvent),
+        {
+            params: { typing: isReadWrite.value, ...(size ? { size } : {}) },
+            onValue: (v) => {
+                source.value = (v as { source?: "host" | "tmux" | "node" } | null)?.source ?? null;
+                if (term) {
+                    // A raw stream carries its own line endings, and scrolls.
+                    term.options.convertEol = !isHost.value;
+                    term.options.scrollback = isHost.value ? 1000 : 0;
+                }
+            },
+            onActive: (active) => {
+                connected.value = active;
+                if (active && connectTimeoutId !== null) {
+                    clearTimeout(connectTimeoutId);
+                    connectTimeoutId = null;
+                }
+            },
+        },
+    );
 }
 
 function closeStream() {
-    if (es) {
-        try { es.close(); } catch { /* noop */ }
-        es = null;
+    if (sub) {
+        try { sub.close(); } catch { /* noop */ }
+        sub = null;
     }
     if (connectTimeoutId !== null) {
         clearTimeout(connectTimeoutId);
@@ -489,6 +528,15 @@ async function settleAndFit(): Promise<void> {
         relayoutMiniature();
         return;
     }
+    if (isHost.value) {
+        // #3128 — the host's stream is drawn for the session's size: the
+        // terminal keeps it in fullscreen too. Typing, we ask for our fit.
+        await nextTick();
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        adoptSize(paneGeometry.value);
+        sendWantedSize();
+        return;
+    }
     if (!isFullscreen.value) {
         try { term?.resize(80, 24); } catch { /* noop */ }
     }
@@ -520,6 +568,10 @@ function onWindowResize() {
     // the reduction has to be recomputed when the box width changes.
     if (isMiniature.value) {
         relayoutMiniature();
+        return;
+    }
+    if (isHost.value) {
+        sendWantedSize();
         return;
     }
     fitAddon?.fit();
@@ -557,7 +609,7 @@ onBeforeUnmount(() => {
         <div class="terminal-view__bar">
             <span class="terminal-view__title">
                 <i class="pi pi-desktop" />
-                <code>cl-{{ agentName }}</code>
+                <code>{{ agentName }}</code>
             </span>
             <!-- #472 david `5uwgev` : claude-loop activity + presence word
                  affichés ici (mêmes ld-tags qu'ailleurs) — pas de nouvelle

@@ -122,6 +122,7 @@ events, and the same epoch), the answer is `replayed: true` with the missed
 | `session.<name>.state` | a session without an agent, as `session.list` gives it, or `null` | `{ name, session }`: started, clients, exited, and `session: null` once stopped | humans and agents |
 | `agent.<id>.events` | `{ consumer_id, unread }` | `{ event, data }`: a `ping` (not one outside the wake focus), a loop `control` (`kill`, `prompt`, `restart_claude`), a `signal`; the waiting signals and spooled prompts come right after the answer; the subscription is the loop's liveness; never replayed | the loop itself |
 | `board.events` | `null` | every event the board broadcasts, `{ type, data }`, the feed the web UI patches its views from | humans and agents |
+| `agent.<id>.screen` | `{ source }`: `host`, `tmux` or `node`; `null` when it cannot be followed | from the session host, `snapshot` (bytes that repaint the screen, base64, after a reset, with the `size`) then `output` (Claude's output as it comes, base64) and `size`; from tmux or a node, `frame` (the whole visible pane as text, with `cursor` and `geometry`) when it changed; `error` (passing), `unavailable` (why nothing more comes). Options `typing` (on the host, an interactive client: it may type, and takes the size once it does) and `size` (the size it would like). Never replayed: a new subscription gets a fresh snapshot | humans |
 
 `*` stands for one level: `agent.*.bar`, `agent.*.state` and
 `project.*.tickets` give every agent's or project's, including the ones
@@ -207,6 +208,8 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `consumer.set_bar_host` | human, not relayed | `POST /api/consumers/:consumer_id/bar-host` |
 | `consumer.afk` | human, not relayed | `POST /api/agents/:name/afk` |
 | `consumer.restart_claude` | human, not relayed | — restarts an agent's Claude after it installed an update (its bar's `alerts.restart_needed`): refused `NOT_IDLE` while Claude works; the loop resumes the conversation and tells the agent once it is back |
+| `agent.pane_keys` | human | `POST /api/agents/:name/pane/keys` — on the session host, through the caller's `agent.<id>.screen` opened with `typing` (`CONFLICT` without one); in tmux or on a node, straight to the pane |
+| `agent.pane_resize` | human | — the size a typing viewer would like, for a session on the host; applied while it owns the size |
 | `message.get` | human, agent | `GET /api/messages/:id` |
 | `message.post` | human, agent | `POST /api/messages` — the params are the message |
 | `message.decide` | human, agent | `POST /api/messages/:id/decide` |

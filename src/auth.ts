@@ -162,14 +162,11 @@ export function bearerFrom(header: (name: string) => string | undefined, query: 
     }
     const fallback = header("x-aiball-token");
     if (typeof fallback === "string" && fallback) return fallback.trim();
-    // #464 — EventSource (SSE in the browser) can't set custom headers,
-    // so we accept the bearer via `?token=` query as a last resort. This
-    // is only used by the SSE endpoints under /api/agents/*/pane/stream
-    // in practice ; other browser fetches send the Authorization header
-    // and never hit this path. Tokens-in-URL has known downsides (logs,
-    // Referer, history) — that's why this is the LAST fallback, only
-    // honored when no header was provided. A browser's WebSocket cannot set
-    // headers either, so the bus's opening request uses it too.
+    // A browser's WebSocket cannot set headers, so the bus's opening request
+    // carries the bearer as `?token=`; other browser fetches send the
+    // Authorization header and never hit this path. Tokens-in-URL has known
+    // downsides (logs, Referer, history) — that's why this is the LAST
+    // fallback, only honored when no header was provided.
     if (query && query.trim()) return query.trim();
     return null;
 }

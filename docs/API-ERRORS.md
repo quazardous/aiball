@@ -57,7 +57,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `MESSAGE_NOT_FOUND` | 404 | The message named in `/api/messages/:id/…`. |
 | `CONSUMER_NOT_FOUND` | 404 | The agent or human named. |
 | `PROJECT_NOT_FOUND` | 400 | The `project` of a new ticket or comment. |
-| `LOOP_NOT_FOUND` | 404 | No running claude-loop answers for this agent (`/api/agents/:name/afk`, `…/pane/stream`, `…/pane/keys`). |
+| `LOOP_NOT_FOUND` | 404 | No running claude-loop answers for this agent (`consumer.afk`, `consumer.set_bar_host`, `consumer.restart_claude`). |
 
 **Claiming a ticket** (`POST /api/tickets/:id/assign`):
 

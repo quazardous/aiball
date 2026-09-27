@@ -10,7 +10,7 @@ session, and you watch or drive it with `tmux attach`. The PTY proxy
 ways, and keeps a model of the screen (`CL_SCREEN_MODEL`, see
 [`PTY-PROXY.md`](./PTY-PROXY.md)). The next step is for the proxy to **hold the
 session itself** and let clients attach to it: a plain terminal (through
-`claude-loop attach`), tvty, and later the web UI, several at once.
+`claude-loop attach`), tvty, and the web UI, several at once.
 
 ## Finding a loop's socket
 
@@ -208,8 +208,11 @@ that typed or pasted (see above: not a mouse or focus report) or took focus
 
 - **Windows**: whether psmux remains the host there, or the proxy holds the
   session on ConPTY too. This protocol is written for Unix.
-- **The web UI** will attach through the daemon, which relays this protocol
-  over its own authenticated socket. Described, not specified here.
+- **The web UI** attaches through the daemon, which is the `stream` client
+  here and relays the snapshot, the output and the keys on the bus
+  (`agent.<id>.screen`, `agent.pane_keys`, [`API-BUS.md`](./API-BUS.md)):
+  `readonly` while the page only watches, `interactive` once typing is
+  unlocked.
 - **The proxy's crash policy**: holding the session makes the proxy's life the
   session's life. Its release build aborts on panic today; whether it should
   unwind instead is decided before the proxy holds sessions (see
