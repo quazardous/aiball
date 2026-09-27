@@ -162,6 +162,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Stopping a session on the host no longer leaves a program running that
+  ignores the stop signals: past the grace, its whole process group is killed.
+
 - A loop that comes back has its bar live again at once, rather than showing
   stale until it pushes a different one.
 
