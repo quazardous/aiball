@@ -113,6 +113,11 @@ export interface ResolvedConfig {
     protected: boolean;
     label: string;
     description: string;
+    /** #3147 — where it can be set, precedence first: `db` (`config.set`) and/or
+     *  `file` (`.aiball.yaml`, the global config). A file-only key is not
+     *  written by `config.set`, and its file value is not read here: this view
+     *  has no project folder to find the file in. */
+    sources: readonly ConfigSource[];
     /** #3137 — its section, and for a number its range, step and unit (null when none). */
     group: string;
     min: number | null;
@@ -156,6 +161,7 @@ export function getResolvedConfig(project?: string | null): ResolvedConfig[] {
             protected: !!entry.protected,
             label: entry.label,
             description: entry.description,
+            sources: effectiveSources(entry),
             group: groupOf(entry.key),
             min: entry.min ?? null,
             max: entry.max ?? null,

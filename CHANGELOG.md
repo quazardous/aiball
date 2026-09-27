@@ -162,6 +162,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A setting that lives only in `.aiball.yaml` no longer looks editable: each
+  managed setting says where it can be set (`sources`), and the web settings
+  page shows only those it can write.
+
 - A session with a long name starts on a deep aiball home: its host folder
   takes a short name when a socket path would be too long.
 

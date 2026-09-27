@@ -186,6 +186,8 @@ export interface ManagedConfigRow {
     /** #3138 — `duration`: seconds, written in the notation (`1h30m`). */
     type: "string" | "number" | "boolean" | "enum" | "duration";
     options: string[] | null;
+    /** #3147 — where it can be set: `db` (this page, `config.set`) and/or `file` (`.aiball.yaml`). */
+    sources: ("db" | "file")[];
     protected: boolean;
     label: string;
     description: string;

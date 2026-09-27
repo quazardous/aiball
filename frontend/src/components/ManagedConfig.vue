@@ -25,10 +25,11 @@ const isGlobalView = computed(() => !props.project);
 
 // Global view shows keys with a global value; project view shows keys that may
 // be overridden per project.
+// #3147 — only what this page can write: a file-only key lives in `.aiball.yaml`.
 const visibleRows = computed(() => rows.value.filter((r) =>
-    isGlobalView.value
+    r.sources.includes("db") && (isGlobalView.value
         ? r.scope === "global" || r.scope === "global+project"
-        : r.scope === "global+project" || r.scope === "project",
+        : r.scope === "global+project" || r.scope === "project"),
 ));
 
 function layerValue(r: ManagedConfigRow): ConfigPrimitive | null {

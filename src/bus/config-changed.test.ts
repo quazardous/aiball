@@ -87,3 +87,13 @@ test("config.changed: a set, a clear, a reload", async () => {
     reloadConfig();
     await until("the reload", () => heard.some((e) => e.op === "reload"));
 });
+
+test("#3147 each entry says where it can be set: a file-only key is not config.set's", async () => {
+    const r = await boss.call<{ config: Array<{ key: string; sources: string[] }> }>("config.managed", {});
+    const by = new Map(r.config.map((c) => [c.key, c.sources]));
+    assert.deepEqual(by.get("autopoll.tone"), ["file"]);
+    assert.deepEqual(by.get("tickets.steps.max_wait"), ["db"]);
+    assert.deepEqual(by.get("updates.check"), ["db", "file"]);
+    await assert.rejects(boss.call("config.set", { key: "autopoll.tone", value: "hint", project: "p" }), (e: { status: number }) => e.status === 400);
+});
+
