@@ -25,7 +25,8 @@ one place at a time, and a client arriving never moves it or restarts it.
 | In tmux | attaches as a **copy** (`tmux attach -r`); `--force` attaches with the controls | attaches through tmux |
 
 - **A copy** watches: it types nothing and never resizes the session. Detach
-  with Ctrl-B D, as from any attach.
+  with Ctrl-B D, as from any attach; a copy on the session host also leaves on
+  Ctrl-C or Ctrl-D, which would reach nothing anyway.
 - **The controls** are shared, as tmux shares them: every interactive client
   types, and the session's size follows the last one that typed, pasted or
   took focus ([`LOOP-HOST.md`](./LOOP-HOST.md), *Size*). Taking them demotes

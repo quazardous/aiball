@@ -276,6 +276,12 @@ export interface Plate {
      * `rm` stops that session.
      */
     host_agent?: string | null;
+    /**
+     * #3166 — that session's folder, as the daemon answered it (its control
+     * socket's folder): where its `host.json` and `attach.sock` are, in the
+     * daemon's home, whatever the loop's own home is.
+     */
+    host_dir?: string | null;
     /** #1576 — `--project` as passed at launch. */
     project?: string | null;
 }

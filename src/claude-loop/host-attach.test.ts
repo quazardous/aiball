@@ -103,3 +103,29 @@ test("#3166 — a read-only copy: the screen shown, the keys and the size go now
     assert.deepEqual(await ended, { reason: "detached" });
     assert.equal(errors, 0);
 });
+
+test("#3166 — a read-only copy also leaves on Ctrl-C or Ctrl-D; with the controls, Ctrl-C goes to the session", { skip }, async () => {
+    const link = await startHost({ name: "copy-cc", argv: ["bash", "-c", "trap '' INT; exec cat"], cwd: home, size: { rows: 20, cols: 70 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+    cleanups.push(async () => { await link.call("host.shutdown").catch(() => {}); link.close(); });
+    const sock = join(link.info.dir, "attach.sock");
+    const term = () => Object.assign(new EventEmitter(), { columns: 70, rows: 20, write() { return true; } });
+    for (const key of ["\x03", "\x04"]) {
+        const stdin = new PassThrough();
+        const ended = attachHost(sock, { stdin, stdout: term() as never }, { readonly: true });
+        await until("attached", async () => ((await link.call("host.hello")) as { clients: number }).clients === 1);
+        stdin.write(key);
+        assert.deepEqual(await ended, { reason: "detached" }, JSON.stringify(key));
+        await until("the client gone", async () => ((await link.call("host.hello")) as { clients: number }).clients === 0);
+    }
+    // With the controls, Ctrl-C is the session's: the attach stays.
+    const stdin = new PassThrough();
+    let over = false;
+    const ended = attachHost(sock, { stdin, stdout: term() as never });
+    ended.then(() => { over = true; });
+    await until("attached", async () => ((await link.call("host.hello")) as { clients: number }).clients === 1);
+    stdin.write("\x03");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(over, false, "Ctrl-C does not leave an interactive attach");
+    stdin.write("\x02d");
+    await ended;
+});

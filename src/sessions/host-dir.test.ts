@@ -41,8 +41,8 @@ test("the plain name while it fits, a short hashed one when a socket path would 
 });
 
 test("the daemon and claude-loop find the same folder for an agent", () => {
-    assert.equal(hostAttachSocket(LONG, home), join(hostDirFor({ agent: LONG }), "attach.sock"));
-    assert.equal(hostAttachSocket("worker", home), join(hostDirFor({ agent: "worker" }), "attach.sock"));
+    assert.equal(hostAttachSocket(join(home, "no-loop"), LONG, home), join(hostDirFor({ agent: LONG }), "attach.sock"));
+    assert.equal(hostAttachSocket(join(home, "no-loop"), "worker", home), join(hostDirFor({ agent: "worker" }), "attach.sock"));
 });
 
 test("a long name on a deep home starts a real host, and stops", { skip, timeout: 30_000 }, async () => {

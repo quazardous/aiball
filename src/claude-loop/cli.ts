@@ -180,7 +180,38 @@ function tmuxAlive(name: string): boolean {
 
 /** #3066 — alive in tmux or on the daemon's session host (host-alive.ts). */
 function loopAlive(name: string): boolean {
-    return isLoopAlive(stateDirFor(name), () => tmuxAlive(name));
+    return isLoopAlive(stateDirFor(name), () => tmuxAlive(name)) || daemonHosts(stateDirFor(name));
+}
+
+/**
+ * #3166 — the agents whose session runs on the daemon's host, as the daemon
+ * says (`session.list`), read once before a start deletes anything; null when
+ * the daemon does not answer. The host's own files may sit in a home this
+ * process does not share, and a plate from before `host_dir` points at this
+ * one: the daemon's word keeps such a loop from being taken for dead, wiped
+ * and swept.
+ */
+/** Agent → its attach socket (null when the daemon gives none). */
+let hostedByDaemon: Map<string, string | null> | null = null;
+async function readHostedByDaemon(agent: string | null): Promise<void> {
+    try {
+        const sessions = await new AiballClient({ agentId: agent ?? undefined }).sessionList();
+        hostedByDaemon = new Map(sessions.filter((s) => s.agent && s.running !== false).map((s) => [s.agent!, s.attach?.socket ?? null]));
+    } catch {
+        hostedByDaemon = null;
+    }
+}
+function daemonHostAgent(sd: string): string | null {
+    if (!hostedByDaemon) return null;
+    try {
+        const agent = readPlate(sd).host_agent;
+        return agent && hostedByDaemon.has(agent) ? agent : null;
+    } catch {
+        return null;
+    }
+}
+function daemonHosts(sd: string): boolean {
+    return daemonHostAgent(sd) !== null;
 }
 
 function selfRoot(): string {
@@ -628,6 +659,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     });
     if (proxy.kind === "refuse") die(proxy.reason);
     const sd = stateDirFor(name);
+    await readHostedByDaemon(ctx.agent);
     if (existsSync(sd)) {
         // #602 — with the deterministic naming (#594), restarting from the
         // same (cwd, agent) always hits the SAME state-dir. If the previous
@@ -642,7 +674,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // while its host runs; joined here, before its state-dir is wiped and
         // its processes swept (they run inside the host).
         if (tmuxAlive(name)) return joinLive(name, "tmux", opts);
-        if (liveHostAgent(sd)) return joinLive(name, "host", opts);
+        if (liveHostAgent(sd) || daemonHosts(sd)) return joinLive(name, "host", opts);
         rmSync(sd, { recursive: true, force: true });
         process.stdout.write(`claude-loop: removed stale state-dir for dead loop '${name}' (cleared so restart can reuse the same deterministic name)\n`);
     }
@@ -1221,6 +1253,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         } catch (e) {
             die(`the daemon did not start the session host: ${(e as Error).message}`);
         }
+        // #3166 — where the daemon put the host: liveness and attach read it
+        // there, not in this process's home (which a loop reaching its daemon
+        // by AIBALL_SOCK alone does not share).
+        writePlate(sd, { ...readPlate(sd), host_dir: dirname(hosted.control) });
         startKernel(sd, root, tsxBin, { [CL_ENV.HOST_CONTROL]: hosted.control });
         process.stdout.write([
             `loop '${name}' started on the session host`,
@@ -1572,9 +1608,12 @@ async function attachLoop(resolved: string, opts: { readonly: boolean }): Promis
         return;
     }
     // #3066 — a loop on the daemon's session host: attach to the host itself.
-    const agent = liveHostAgent(stateDirFor(resolved));
+    // #3166 — found by its files, or else by the daemon's word, whose socket wins.
+    const sd = stateDirFor(resolved);
+    if (!hostedByDaemon) await readHostedByDaemon(null);
+    const agent = liveHostAgent(sd) ?? daemonHostAgent(sd);
     if (!agent) die(`loop '${resolved}' not alive`);
-    const end = await attachHost(hostAttachSocket(agent), { stdin: process.stdin, stdout: process.stdout }, { readonly: opts.readonly });
+    const end = await attachHost(hostedByDaemon?.get(agent) ?? hostAttachSocket(sd, agent), { stdin: process.stdin, stdout: process.stdout }, { readonly: opts.readonly });
     const why = end.reason === "detached" ? `detached from '${resolved}' — Claude carries on on the host`
         : end.reason === "exited" ? `the session of '${resolved}' ended (code ${end.code ?? "?"})`
         : `the host of '${resolved}' ${end.reason === "error" ? "refused" : "closed"} the attach${end.message ? `: ${end.message}` : ""}`;

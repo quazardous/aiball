@@ -1314,6 +1314,10 @@ export class AiballClient {
     sessionHost(o: { agent: string; argv: string[]; cwd: string; size?: { rows: number; cols: number }; env?: Record<string, string> }) {
         return this.call<{ agent: string; attach: { socket: string | null }; control: string; pid: number }>("session.host", o);
     }
+    /** #3166 — the sessions on the daemon's host, as `session.list` gives them. */
+    sessionList() {
+        return this.call<Array<{ agent: string | null; name: string | null; running?: boolean; attach?: { socket: string | null } }>>("session.list", {});
+    }
     /** #3066 — stop this agent's session on the daemon's host (the loop's own `rm`). */
     sessionStop(agent: string) {
         // #3158 — waits for the host to be gone: `claude-loop rm` starts the loop again right after.

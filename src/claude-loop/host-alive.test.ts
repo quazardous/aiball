@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { liveHostAgent, loopAlive } from "./host-alive.js";
+import { hostAttachSocket, liveHostAgent, loopAlive } from "./host-alive.js";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3066-hostalive-"));
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -47,4 +47,20 @@ test("a loop is alive in tmux or on the host: prune, start and list never take a
     assert.equal(loopAlive(onHost, () => false, home), true, "no tmux session, but its host runs");
     assert.equal(loopAlive(loop("in-tmux", { host_agent: null }), () => true, home), true);
     assert.equal(loopAlive(loop("gone", { host_agent: null }), () => false, home), false);
+});
+
+test("#3166 — the host in the folder the daemon gave, when the daemon's home is not this one", () => {
+    // The daemon's home elsewhere: nothing under this home's hosts/ for that agent.
+    const daemonHome = join(home, "elsewhere");
+    const dir = join(daemonHome, "hosts", "split-claude");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "host.json"), JSON.stringify({ agent: "split-claude", pid: process.pid, version: 1 }));
+    const sd = loop("split", { host_agent: "split-claude", host_dir: dir });
+    assert.equal(liveHostAgent(sd, home), "split-claude", "alive: its host.json is where the daemon put it");
+    assert.equal(loopAlive(sd, () => false, home), true);
+    assert.equal(hostAttachSocket(sd, "split-claude", home), join(dir, "attach.sock"));
+    // A plate from before host_dir: the folder this home would give.
+    const old = loop("split-old", { host_agent: "split-claude" });
+    assert.equal(liveHostAgent(old, home), null, "not found here — start asks the daemon (session.list) before it wipes anything");
+    assert.equal(hostAttachSocket(old, "split-claude", home), join(home, "hosts", "split-claude", "attach.sock"));
 });

@@ -178,6 +178,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A read-only copy of a loop on the session host also leaves on Ctrl-C or
+  Ctrl-D, not only Ctrl-B D.
+- A second `claude-loop start` no longer kills a loop on the session host when
+  the loop reaches its daemon by `AIBALL_SOCK` alone (a daemon whose home is
+  not the loop's): the loop keeps the host's folder the daemon gave, and a
+  start asks the daemon which sessions run before it deletes anything.
 - An agent's state follows its loop at once: `boot` as soon as a loop starts,
   then each change of phase, instead of the previous run's `idle` until the
   next heartbeat, with a date from that run.

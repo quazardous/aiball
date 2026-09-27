@@ -27,6 +27,6 @@ export function joinLiveLoop(opts: { force: boolean; attach: boolean; tty: boole
     return {
         kind: "attach",
         readonly: true,
-        message: `loop '${live.name}' already runs ${where} — attaching as a copy, read-only (--force to take the controls; Ctrl-B D to detach)`,
+        message: `loop '${live.name}' already runs ${where} — attaching as a copy, read-only (--force to take the controls; Ctrl-B D to detach${live.place === "host" ? ", or Ctrl-C" : ""})`,
     };
 }

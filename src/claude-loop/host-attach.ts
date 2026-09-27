@@ -7,8 +7,8 @@
  *
  * Detach with Ctrl-B D, as in tmux; Ctrl-B Ctrl-B sends one Ctrl-B. Leaving
  * stops nothing: Claude carries on on the host. #3166 — `readonly` watches a
- * copy: the keys go nowhere (Ctrl-B D still detaches) and the size stays the
- * other clients'.
+ * copy: the keys go nowhere and the size stays the other clients'; Ctrl-C or
+ * Ctrl-D leaves it too, as Ctrl-B D does (they would reach nothing anyway).
  */
 import { connect, type Socket } from "node:net";
 
@@ -87,7 +87,9 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
         const size = () => ({ rows: io.stdout.rows ?? 24, cols: io.stdout.columns ?? 80 });
         const onResize = () => sock.write(frame(FRAME.resize, JSON.stringify(size())));
         const onKeys = (chunk: Buffer | string) => {
-            const r = keys.feed(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+            const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+            if (readonly && (buf.includes(0x03) || buf.includes(0x04))) return finish({ reason: "detached" });
+            const r = keys.feed(buf);
             if (r.send.length > 0 && !readonly) sock.write(frame(FRAME.input, r.send));
             if (r.detach) finish({ reason: "detached" });
         };
