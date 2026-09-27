@@ -91,6 +91,7 @@ import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
+import { liveHostAgent } from "./host-alive.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -627,6 +628,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // just works.
         if (tmuxAlive(name)) {
             die(`loop '${name}' already alive at ${sd}. Attach via 'claude-loop attach' or 'rm ${name}' first to start fresh.`);
+        }
+        // #3066 — a loop on the daemon's session host has no tmux session: it
+        // is alive while its host runs. Refused here, before its state-dir is
+        // wiped and its processes swept (they run inside the host).
+        const hostAgent = liveHostAgent(sd);
+        if (hostAgent) {
+            die(`loop '${name}' runs on the daemon's session host (agent ${hostAgent}). Open it in tvty, `
+                + `move it again with 'claude-loop restart --resume ${name} --host', or 'claude-loop rm ${name}' first to start fresh.`);
         }
         rmSync(sd, { recursive: true, force: true });
         process.stdout.write(`claude-loop: removed stale state-dir for dead loop '${name}' (cleared so restart can reuse the same deterministic name)\n`);
