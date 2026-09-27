@@ -41,7 +41,6 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { coalesce } from "./coalesce.js";
 import { appendFileSync, existsSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -180,7 +179,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { bootReminderFor, POST_RESTART_REMINDER, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
+import { bootReminderFor, POST_RESTART_REMINDER, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -1374,46 +1373,18 @@ function client(): AiballClient {
 //   - standalone (= jamais prepended à autre message)
 //   - skip si claude jamais idle stable (= force injection évitée)
 let postBootRemindersSent = false;
-// #1033 — fetch the 3 bar counters (open/backlog/events) and paint them.
-// Factored from the SSE-ping + heartbeat paths so it can ALSO fire eagerly
-// on `wakeBus.on("hello")` (aiball connection established / re-established) →
-// `o:N b:N e:N` appears as soon as we can talk to the daemon, instead of only
-// at the first heartbeat (~interval into the boot). Best-effort ; `setIpcCounters`
-// is skipped when all 3 fetches fail so the last-known segment is preserved (#835).
-// #2682 — coalesced: one refresh at a time, at most one per 5 s, a burst of
-// pings collapsing into one trailing refresh (each refresh is three daemon
-// requests, and the daemon serves one request at a time).
-const COUNTERS_MIN_GAP_MS = 5_000;
-let coalescedRefreshCounters: (() => Promise<void>) | null = null;
-function refreshCounters(): Promise<void> {
-    coalescedRefreshCounters ??= coalesce(refreshCountersNow, COUNTERS_MIN_GAP_MS);
-    return coalescedRefreshCounters();
-}
-async function refreshCountersNow(): Promise<void> {
-    try {
-        const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
-        const backlogQuery: Record<string, string | undefined> = {
-            backlog: "1",
-            limit: "500",
-            cooldown_sec: cooldownSec,
-        };
-        if (loopProject) backlogQuery.project = loopProject;
-        const [pingsR, projectsR, backlogR] = await Promise.allSettled([
-            client().pingsCount() as Promise<{ unread?: number }>,
-            client().listProjectsDetailed({ project: loopProject }) as Promise<Array<{ name: string; open_count?: number; actionable_count?: number }>>,
-            client().listTickets(backlogQuery) as Promise<unknown[]>,
-        ]);
-        const { open, backlog, events, actionableOpen } = deriveBarCounters(pingsR, projectsR, backlogR, loopProject);
-        if (events !== null || open !== null || backlog !== null) {
-            setIpcCounters({ open, backlog, events });
-            // #1055 S4 — surface the refreshed counters on the kernel bus.
-            getKernelBus().emit("counters:refreshed", { open, backlog, events });
-        }
-        // #1355 — arm the countdown on the actionable count (mirror of the
-        // delivery gate), not the raw backlog counter. Pushed separately so a
-        // partial fetch (projects ok, backlog failed) still updates it.
-        if (actionableOpen !== null) setIpcActionableOpen(actionableOpen);
-    } catch { /* counter sync best-effort */ }
+// #3133 — the bar counters (open/backlog/events, and the actionable count the
+// wake countdown arms on) are the daemon's: computed there on the events that
+// move them, given with the hello and pushed when a number changes. The loop
+// only paints them.
+function applyCounters(c: { open: number; actionable: number; backlog: number; events: number } | null | undefined): void {
+    if (!c) return;
+    setIpcCounters({ open: c.open, backlog: c.backlog, events: c.events });
+    // #1055 S4 — surface the counters on the kernel bus.
+    getKernelBus().emit("counters:refreshed", { open: c.open, backlog: c.backlog, events: c.events });
+    // #1355 — arm the countdown on the actionable count (mirror of the
+    // delivery gate), not the raw backlog counter.
+    setIpcActionableOpen(c.actionable);
 }
 // #999 model (a) — the latest SSE event awaiting a drain. Set by the SSE
 // ping handler (non-panic), consumed by the `turn:settled` drain (the single
@@ -1744,11 +1715,11 @@ async function mainSse(): Promise<void> {
         daemonLinkGrace.clear();
         log(`events hello: unread=${h.unread}`);
         getKernelBus().emit("daemon:hello", { unread: h.unread });
-        // #1033 — aiball connection established (boot OR reconnect) : refresh the
-        // bar counters eagerly so `o:N b:N e:N` appears as soon as we can talk to
-        // the daemon, instead of waiting for the first heartbeat (~interval).
-        void refreshCounters();
+        // #3133 — the hello carries the counters as they are: `o:N b:N e:N`
+        // appears as soon as we can talk to the daemon.
+        applyCounters(h.counters);
     });
+    wakeBus.on("counters", (c) => applyCounters(c));
     wakeBus.on("control", (c) => {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
@@ -1773,10 +1744,6 @@ async function mainSse(): Promise<void> {
         getKernelBus().emit("daemon:ping", { ticketId: p.ticket_id });
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
-        // #816 david — instant counter refresh on SSE ping (else the bar's
-        // `e:N` only repaints every ~30s on the heartbeat). #1033 — factored
-        // into `refreshCounters()`. Fire-and-forget : not on the critical path.
-        void refreshCounters();
         // #999 — model (a) : an SSE event does NOT fire a wake directly.
         // It records the payload as the pending hint ; the single drain
         // driver (`turn:settled`, the 10s tempo) picks it up on its next
@@ -2892,24 +2859,11 @@ async function mainSse(): Promise<void> {
         // marker (bug A on #712), no more inline write of `idle-marker`
         // by an inline probe (bug B on #712).
         const phase = loopBus.current()?.phase ?? "boot";
-        // #800 9sy4t3 — refresh both the bar tag (state + optional phase
-        // suffix like `[busy:compacting]`) and the COUNTERS segment
-        // (`o:M b:B e:N`) on every heartbeat, in every state (incl boot).
-        // david wants the 3 counts visible across [idle]/[boot]/[busy].
-        // #831 hot-fix : revert #800 — comment_count cross-project était
-        // le TOTAL de tous les comments approuvés sur tous les projets
-        // (= 5592 sur l'instance david, visiblement WTF). Back to
-        // pingsCount.unread en attendant un vrai backlog-scoped count
-        // côté backend (follow-up #832).
-        // Fail-open : individual fetch errors leave that counter null
-        // (= absent from the bar segment).
+        // Refresh the bar's view on every heartbeat, in every state (incl
+        // boot). The counters are the daemon's, pushed when they change (#3133).
         try {
             pushViewIfChanged();
-            // #1033 — counters fetch factored into `refreshCounters()` (shared
-            // with the SSE-ping + connection-`hello` paths). Awaited here so the
-            // heartbeat tick stays sequential.
-            await refreshCounters();
-        } catch { /* counters segment stays as-is */ }
+        } catch { /* the bar stays as-is */ }
         if (phase !== "boot") {
             try {
                 // #647 Slice 4 : pane-derived markers (screen-takeover or

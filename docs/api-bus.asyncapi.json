@@ -34,11 +34,11 @@
       "messages": {
         "value": {
           "name": "value",
-          "summary": "{ consumer_id, unread }"
+          "summary": "{ consumer_id, unread, counters }"
         },
         "event": {
           "name": "event",
-          "summary": "`{ event, data }`: `ping` (the ping, outside the wake focus not sent), `control` (`kill`, `prompt`, `restart_claude`) or `signal`"
+          "summary": "`{ event, data }`: `ping` (the ping, outside the wake focus not sent), `control` (`kill`, `prompt`, `restart_claude`), `signal`, or `counters` (the agent's counters, when a number changed)"
         }
       },
       "x-replay": false

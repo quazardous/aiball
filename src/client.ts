@@ -1034,7 +1034,9 @@ export class AiballClient {
      */
     subscribeEvents(handlers: {
         onPing: (payload: { ticket_id?: number; comment_id?: number; comment_hashid?: string; intent?: "panic" | "request" | "question" | "fyi" }) => void;
-        onHello?: (payload: { consumer_id: string; unread: number }) => void;
+        onHello?: (payload: { consumer_id: string; unread: number; counters?: { open: number; actionable: number; backlog: number; events: number } | null }) => void;
+        // #3133: the agent's counters, pushed by the daemon when a number changed.
+        onCounters?: (payload: { open: number; actionable: number; backlog: number; events: number }) => void;
         // #442/#451: out-of-band control events (remote kill / raw-prompt
         // injection) on the same stream.
         onControl?: (payload: ControlEvent) => void;
@@ -1070,6 +1072,7 @@ export class AiballClient {
                     if (ev.event === "ping") handlers.onPing(ev.data as Parameters<typeof handlers.onPing>[0]);
                     else if (ev.event === "control") handlers.onControl?.(ev.data as ControlEvent);
                     else if (ev.event === "signal") handlers.onSignal?.(ev.data as Parameters<NonNullable<typeof handlers.onSignal>>[0]);
+                    else if (ev.event === "counters") handlers.onCounters?.(ev.data as Parameters<NonNullable<typeof handlers.onCounters>>[0]);
                 };
                 conn.onNotification((method, params) => {
                     const p = params as { subscription?: string; data?: Ev } | null;
@@ -1077,7 +1080,7 @@ export class AiballClient {
                     if (subscription === null) { early.push(p.data); return; }
                     if (p.subscription === subscription) dispatch(p.data);
                 });
-                const r = await conn.call<{ id: string; value: { consumer_id: string; unread: number } }>("bus.subscribe", {
+                const r = await conn.call<{ id: string; value: Parameters<NonNullable<typeof handlers.onHello>>[0] }>("bus.subscribe", {
                     subject: `agent.${this.agentId}.events`,
                 });
                 subscription = r.id;

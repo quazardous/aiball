@@ -6,10 +6,10 @@
  * A bar is `stale` once its loop is no longer present: the same signal as the
  * `running` flag (the loop's event stream closed, past the reconnect grace), so a
  * dead loop never shows as busy. A host is told on the bus (`agent.<id>.bar`)
- * when a bar changes or goes stale.
+ * when a bar changes, goes stale, or is live again.
  */
 import type { AgentBar } from "./agent-bar.js";
-import { isPresent, onPresenceStop } from "./live-presence.js";
+import { isPresent, onPresenceStart, onPresenceStop } from "./live-presence.js";
 import { broadcast } from "./ws.js";
 
 interface Entry { bar: AgentBar; json: string; updatedAt: string }
@@ -45,6 +45,12 @@ export function getAgentBar(consumer: string): AgentBarView | null {
 
 // A loop that stopped: its bar goes stale, and hosts hear it at once.
 onPresenceStop((consumer) => {
+    const e = bars.get(consumer);
+    if (e) broadcast({ type: "agent_bar", data: view(consumer, e) });
+});
+
+// #3133 — and one that is back: the bar it left is live again (stale: false).
+onPresenceStart((consumer) => {
     const e = bars.get(consumer);
     if (e) broadcast({ type: "agent_bar", data: view(consumer, e) });
 });

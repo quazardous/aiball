@@ -14,6 +14,7 @@ import { onControl, onPing, onSignal } from "../../event-bus.js";
 import { listPendingSignals } from "../../db/signals.js";
 import { drainPrompts } from "../../loop-prompts.js";
 import { presenceConnect, presenceDisconnect } from "../../live-presence.js";
+import { onCounters, refreshCounters } from "../../agent-counters.js";
 import { wakeFocusHidesTicket } from "../../db/backlog-rules.js";
 import { parseMeta } from "../../questions.js";
 import { buildInboxRow, buildInboxRowContext, inboxRowDeadline, type InboxRowContext } from "../../api/inbox-row.js";
@@ -320,8 +321,8 @@ defineSubject({
     pattern: "agent.*.events",
     replay: false,
     doc: {
-        value: "{ consumer_id, unread }",
-        event: "`{ event, data }`: `ping` (the ping, outside the wake focus not sent), `control` (`kill`, `prompt`, `restart_claude`) or `signal`",
+        value: "{ consumer_id, unread, counters }",
+        event: "`{ event, data }`: `ping` (the ping, outside the wake focus not sent), `control` (`kill`, `prompt`, `restart_claude`), `signal`, or `counters` (the agent's counters, when a number changed)",
     },
     access: (caller, id) => (id === caller.consumer_id ? null : new Refusal(403, "a loop's own events only")),
     setup: (sub) => {
@@ -333,6 +334,7 @@ defineSubject({
             }),
             onControl(id, (payload) => sendTo(sub, { event: "control", data: payload })),
             onSignal(id, (payload) => sendTo(sub, { event: "signal", data: payload })),
+            onCounters(id, (counters) => sendTo(sub, { event: "counters", data: counters })),
         ];
         sub.state.off = () => { for (const off of offs) off(); };
         presenceConnect(id, sub.opts.source === "ui" ? "ui" : "terminal");
@@ -342,7 +344,8 @@ defineSubject({
             for (const text of drainPrompts(id)) sendTo(sub, { event: "control", data: { action: "prompt", text } });
         });
     },
-    value: (sub) => ({ consumer_id: idOf(sub), unread: unreadPingCount(idOf(sub)) }),
+    // The loop starts from counters computed now: its bar shows them at once.
+    value: (sub) => ({ consumer_id: idOf(sub), unread: unreadPingCount(idOf(sub)), counters: refreshCounters(idOf(sub)) }),
     release: (sub) => {
         (sub.state.off as (() => void) | undefined)?.();
         presenceDisconnect(idOf(sub));

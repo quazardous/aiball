@@ -63,6 +63,7 @@ export function presenceConnect(consumer: string, source: LaunchSource = "termin
     }
     live.set(consumer, { count: 1, source });
     emit(consumer, true, source);
+    for (const fn of startListeners) fn(consumer);
     return { becameLive: true };
 }
 
@@ -87,6 +88,14 @@ export function presenceDisconnect(consumer: string): void {
 const stopListeners: Array<(consumer: string) => void> = [];
 export function onPresenceStop(fn: (consumer: string) => void): void {
     stopListeners.push(fn);
+}
+
+/** #3133 — called when a consumer's presence really starts (not a reconnect
+ *  within the grace), after the `running:true` broadcast: the counterpart of
+ *  `onPresenceStop`. */
+const startListeners: Array<(consumer: string) => void> = [];
+export function onPresenceStart(fn: (consumer: string) => void): void {
+    startListeners.push(fn);
 }
 
 /** True while a consumer holds (or is within the grace of) a live SSE. */

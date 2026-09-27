@@ -95,6 +95,21 @@ function messageRowToRuleItem(
  * `Message` in hand from the fan-out path, but the moderation transition
  * ping in api.ts only needs id + kind.
  */
+/**
+ * #3133 — someone's pings changed (one recipient, or null: anyone's): the
+ * agents' counters are recomputed from it (src/agent-counters.ts).
+ */
+const pingListeners = new Set<(recipient: string | null) => void>();
+export function onPingsChanged(fn: (recipient: string | null) => void): () => void {
+    pingListeners.add(fn);
+    return () => pingListeners.delete(fn);
+}
+function pingsChanged(recipient: string | null): void {
+    for (const fn of pingListeners) {
+        try { fn(recipient); } catch { /* a listener never breaks a write */ }
+    }
+}
+
 export function insertPing(
     recipient: string,
     msg: {
@@ -161,6 +176,7 @@ export function insertPing(
             comment_hashid: isTicket ? undefined : (msg.hashid ?? undefined),
             intent,
         });
+        pingsChanged(recipient);
     }
 }
 
@@ -174,6 +190,7 @@ export function deletePingsForMessage(messageId: number): { deleted: number } {
     const r = getDb().delete(schema.pings)
         .where(targetMatches(messageId))
         .run();
+    pingsChanged(null);
     return { deleted: r.changes };
 }
 
@@ -188,6 +205,7 @@ export function markMessageSeen(
             targetMatches(message_id),
             isNull(schema.pings.seenAt),
         )).run();
+    pingsChanged(consumer_id);
     return { updated: r.changes };
 }
 
@@ -211,6 +229,7 @@ export function clearSeenForMessage(message_id: number): { resurfaced: number } 
             // doesn't count as a re-surface (would inflate the metric).
             sql`${schema.pings.seenAt} IS NOT NULL`,
         )).run();
+    pingsChanged(null);
     return { resurfaced: r.changes };
 }
 
@@ -269,6 +288,7 @@ export function purgeSeenPingsForClosedTickets(): { deleted: number } {
             OR comment_id IN (SELECT id FROM _messages
                               WHERE ticket_id IN (SELECT ticket_id FROM closed)))
     `);
+    pingsChanged(null);
     return { deleted: (r as { changes?: number }).changes ?? 0 };
 }
 
@@ -281,6 +301,7 @@ export function purgeSeenPingsForTicket(ticket_id: number): { deleted: number } 
     const r = db.delete(schema.pings)
         .where(and(targetInArray(ids), isNotNull(schema.pings.seenAt)))
         .run();
+    pingsChanged(null);
     return { deleted: r.changes };
 }
 
@@ -315,6 +336,7 @@ export function prunePings(
         .set({ seenAt: nowIso() })
         .where(and(eq(schema.pings.recipient, consumer_id), isNull(schema.pings.seenAt), scope))
         .run();
+    pingsChanged(consumer_id);
     return { affected: r.changes };
 }
 
@@ -338,6 +360,7 @@ export function markAllSeenForProject(
             isNull(schema.pings.seenAt),
             targetInArray(allIds),
         )).run();
+    pingsChanged(consumer_id);
     return { updated: r.changes };
 }
 
@@ -378,6 +401,7 @@ export function markTicketSeen(
             isNull(schema.pings.seenAt),
             or(...targetConds),
         )).run();
+    pingsChanged(consumer_id);
     return { updated: r.changes };
 }
 
@@ -405,6 +429,7 @@ export function markTicketUnseen(
             isNotNull(schema.pings.seenAt),
             or(...conds),
         )).run();
+    pingsChanged(consumer_id);
     return { updated: r.changes };
 }
 
@@ -429,6 +454,7 @@ export function markSeenUpToForProject(
             isNull(schema.pings.seenAt),
             targetInArray(allIds),
         )).run();
+    pingsChanged(consumer_id);
     return { updated: r.changes };
 }
 
@@ -456,6 +482,7 @@ export function markPingsRead(opts: {
         .set({ seenAt: nowIso() })
         .where(and(...conds))
         .run();
+    pingsChanged(opts.recipient);
     return { updated: r.changes };
 }
 

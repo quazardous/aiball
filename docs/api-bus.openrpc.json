@@ -728,6 +728,29 @@
       ]
     },
     {
+      "name": "consumer.counters",
+      "description": "An agent's counters, computed now: `open`, `actionable`, `backlog`, `events`, as its loop's bar shows them. The daemon computes them on the events that move them; this is for what moves with time alone (a snooze lapsing, a backlog cooldown ending) when a client needs them right: a changed number is pushed on `agent.<id>.state` too.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "consumer.delete",
       "description": "Delete a consumer's record.",
       "paramStructure": "by-name",

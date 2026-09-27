@@ -7,6 +7,7 @@ import { spoolPrompt, drainPrompts } from "../../loop-prompts.js";
 import { pickHoldTargets, type LoopHoldResult } from "../../loop-hold.js";
 import { AGENT_TYPES, type AgentType } from "../../db/consumers.js";
 import { broadcast } from "../../ws.js";
+import { cachedCounters, markCountersDirty, refreshCounters } from "../../agent-counters.js";
 import { sessionFor, viewOf } from "../../sessions/registry.js";
 import { isPresent, presenceRunning } from "../../live-presence.js";
 import { emitControl } from "../../event-bus.js";
@@ -45,10 +46,16 @@ function entryContext() {
  * One consumer as `consumer.list` gives it, and as `agent.<id>.state` pushes
  * it (#3070: the same builder, so the two cannot name a field differently):
  * its live presence (#443), its ping tally (#1185), each agent's wait credit
- * per project (#2645), and the session a host runs for it (#3066), or null.
+ * per project (#2645), the session a host runs for it (#3066), or null, and
+ * an agent's counters (#3133): the last computed, null before the first. An
+ * agent whose loop runs, or that has a session, has them computed then and
+ * pushed on `agent.<id>.state`; the others wait for an event that concerns
+ * them, or `consumer.counters`.
  */
 function consumerEntry(c: Consumer, ctx: ReturnType<typeof entryContext>) {
     const session = sessionFor({ agent: c.consumer_id });
+    const counters = c.kind === "agent" ? cachedCounters(c.consumer_id) : null;
+    if (c.kind === "agent" && !counters && (session || isPresent(c.consumer_id))) markCountersDirty(c.consumer_id);
     return {
         ...c,
         present: presenceRunning(c.consumer_id),
@@ -56,6 +63,7 @@ function consumerEntry(c: Consumer, ctx: ReturnType<typeof entryContext>) {
         ping_unseen: ctx.pings.get(c.consumer_id)?.unseen ?? 0,
         wait_credit: c.kind === "human" ? null : (ctx.credits.get(c.consumer_id) ?? []),
         session: session ? viewOf(session) : null,
+        counters,
     };
 }
 
@@ -414,5 +422,25 @@ defineMethod({
             return result;
         });
         return { action: "release", results };
+    },
+});
+
+/**
+ * #3133 — an agent's counters, computed now: `open`, `actionable`, `backlog`,
+ * `events`, as its loop's bar shows them. The daemon computes them on the
+ * events that move them; this is for what moves with time alone (a snooze
+ * lapsing, a backlog cooldown ending) when a client needs them right: a changed
+ * number is pushed on `agent.<id>.state` too.
+ */
+defineMethod({
+    name: "consumer.counters",
+    who: ["human", "agent"],
+    params: z.object({ consumer_id: z.string().min(1) }),
+    run: (caller, p) => {
+        ownOrHuman(caller, p.consumer_id, "counters");
+        const c = getConsumer(p.consumer_id);
+        if (!c) throw new Refusal(404, `no consumer ${p.consumer_id}`, ERROR_CODES.CONSUMER_NOT_FOUND);
+        if (c.kind !== "agent") throw new Refusal(400, "counters are an agent's");
+        return { consumer_id: p.consumer_id, ...refreshCounters(p.consumer_id) };
     },
 });

@@ -92,6 +92,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- An agent's counters (open, in its court, backlog, unread pings) are computed
+  by the daemon, for every agent, when something that moves them happens, and
+  come with the agent's state: a client shows them for an agent whose loop is
+  stopped too. The loop no longer asks for them every few seconds; it gets them
+  pushed. `consumer.counters` computes them on demand.
+
 - The project pickers show the active projects first, by activity: those where
   a loop runs, then the most recent. Active now means a loop, or activity in
   the last three days (a waiting count alone no longer keeps a project up), and
@@ -133,6 +139,9 @@ dates are YYYY-MM-DD.
   and a missing index made some per-ticket reads walk every comment.
 
 ### Fixed
+
+- A loop that comes back has its bar live again at once, rather than showing
+  stale until it pushes a different one.
 
 - A loop sees Claude Code compacting its conversation again: the progress
   bar is gone from that screen, and the spinner line alone is now recognised.

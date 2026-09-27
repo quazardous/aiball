@@ -238,6 +238,8 @@ test("an event that leaves a row as it was pushes nothing on the view", async ()
 
 test("#3070 an agent's state: each event is its whole consumer.list entry, only when it changed, null once deleted", async () => {
     upsertConsumer({ consumer_id: "watched", kind: "agent" });
+    // #3133 — its counters computed first: a first read would compute them and push them after.
+    (await import("../agent-counters.js")).refreshCounters("watched");
     const c = await open("boss");
     await c.call<Sub>("bus.subscribe", { subject: "agent.*.state" });
     const { presenceConnect, presenceDisconnect } = await import("../live-presence.js");

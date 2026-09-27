@@ -29,10 +29,19 @@ export type ControlEvent =
     | { action: "prompt"; text: string }
     | { action: string; [k: string]: unknown };
 
-/** Hello envelope sent by the daemon on first connect. */
+/** #3133 — the agent's counters, computed by the daemon and pushed when they change. */
+export interface CountersEvent {
+    open: number;
+    actionable: number;
+    backlog: number;
+    events: number;
+}
+
+/** Hello envelope sent by the daemon on first connect, with the counters as they are. */
 export interface HelloEvent {
     consumer_id: string;
     unread: number;
+    counters?: CountersEvent | null;
 }
 
 /** #2255 — an external signal, as the daemon pushes it. */
@@ -52,6 +61,7 @@ export interface WakeBusEvents {
     control: (event: ControlEvent) => void;
     hello: (event: HelloEvent) => void;
     signal: (signal: SignalHint) => void;
+    counters: (counters: CountersEvent) => void;
     error: (err: Error) => void;
 }
 
@@ -61,6 +71,7 @@ export class WakeBus {
     private pingListeners: WakeBusEvents["ping"][] = [];
     private controlListeners: WakeBusEvents["control"][] = [];
     private helloListeners: WakeBusEvents["hello"][] = [];
+    private countersListeners: WakeBusEvents["counters"][] = [];
     private signalListeners: WakeBusEvents["signal"][] = [];
     private errorListeners: WakeBusEvents["error"][] = [];
     private clientUnsubscribe: (() => void) | null = null;
@@ -99,6 +110,7 @@ export class WakeBus {
             onHello: (h) => this.emitHello(h),
             onControl: (c) => this.emitControl(c as ControlEvent),
             onSignal: (s) => this.emitSignal(s as SignalHint),
+            onCounters: (c) => this.emitCounters(c as CountersEvent),
             onError: (e) => {
                 this.emitError(e);
                 this.clientUnsubscribe = null;
@@ -120,6 +132,7 @@ export class WakeBus {
         this.pingListeners.length = 0;
         this.controlListeners.length = 0;
         this.helloListeners.length = 0;
+        this.countersListeners.length = 0;
         this.signalListeners.length = 0;
         this.errorListeners.length = 0;
     }
@@ -129,6 +142,7 @@ export class WakeBus {
             case "ping":    return this.pingListeners as WakeBusEvents[K][];
             case "control": return this.controlListeners as WakeBusEvents[K][];
             case "hello":   return this.helloListeners as WakeBusEvents[K][];
+            case "counters": return this.countersListeners as WakeBusEvents[K][];
             case "signal":  return this.signalListeners as WakeBusEvents[K][];
             case "error":   return this.errorListeners as WakeBusEvents[K][];
             default:        throw new Error(`WakeBus: unknown event '${String(event)}'`);
@@ -153,6 +167,11 @@ export class WakeBus {
     private emitHello(event: HelloEvent): void {
         for (const cb of [...this.helloListeners]) {
             try { cb(event); } catch { /* swallow */ }
+        }
+    }
+    private emitCounters(counters: CountersEvent): void {
+        for (const cb of [...this.countersListeners]) {
+            try { cb(counters); } catch { /* swallow */ }
         }
     }
     private emitError(err: Error): void {

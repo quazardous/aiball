@@ -217,46 +217,6 @@ function isBusyDeferActive(input: LoopStateInput): boolean {
 }
 
 /**
- * #1033 — pure derivation of the 3 bar counters from the `Promise.allSettled`
- * results of (pings / projects-detailed / backlog) fetches. A rejected fetch
- * yields `null` for that counter (fail-open : the caller preserves the last
- * known value rather than clearing the segment, #835). `open` is project-scoped
- * when `loopProject` is set, else summed across projects ; `backlog` counts the
- * non-cooled rows ; `events` is the unread ping count ; `actionableOpen`
- * (#1355) is the tier-1 in-my-court count (same scoping as `open`) that drives
- * the countdown-arming gate. Extracted so the SSE-ping / heartbeat /
- * connection-`hello` callers share ONE implementation.
- */
-export function deriveBarCounters(
-    pingsR: PromiseSettledResult<{ unread?: number }>,
-    projectsR: PromiseSettledResult<Array<{ name: string; open_count?: number; actionable_count?: number }>>,
-    backlogR: PromiseSettledResult<unknown[]>,
-    loopProject: string | undefined,
-): { open: number | null; backlog: number | null; events: number | null; actionableOpen: number | null } {
-    const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
-    const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
-        ? (loopProject
-            ? (projectsR.value.find((pr) => pr.name === loopProject)?.open_count ?? 0)
-            : projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0))
-        : null;
-    // #1355 — actionable (tier-1, in-my-court) count, same project-scoping as
-    // `open`. Feeds `recomputeNextWake`'s countdown-arming gate so the decount
-    // mirrors the `checkHasWork` delivery condition (pings || actionable>0)
-    // instead of the raw backlog counter (which counts non-deliverable
-    // tier-2/3/4 reminders → phantom loop).
-    const actionableOpen = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
-        ? (loopProject
-            ? (projectsR.value.find((pr) => pr.name === loopProject)?.actionable_count ?? 0)
-            : projectsR.value.reduce((acc, pr) => acc + (pr.actionable_count ?? 0), 0))
-        : null;
-    const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
-        ? (backlogR.value as Array<{ backlog_cooled_until?: string | null }>)
-            .filter((t) => !t.backlog_cooled_until).length
-        : null;
-    return { open, backlog, events, actionableOpen };
-}
-
-/**
  * #1355 / #1365 / #1377 — the "should the `📨 Ns` countdown be armed?"
  * predicate, extracted pure so it can be unit-tested (`recomputeNextWake` lives
  * in kernel.ts which runs `main()` at import → not directly testable).
@@ -266,7 +226,7 @@ export function deriveBarCounters(
  *  - `actionableOpen > 0 && backlog > 0` — BOTH conjuncts are required:
  *      · `actionableOpen > 0` is what `checkHasWork` gates on (`has = pings ||
  *        actionable>0`); without it the drain skips before even rendering.
- *      · `backlog > 0` is the NON-COOLED backlog count (`deriveBarCounters`
+ *      · `backlog > 0` is the NON-COOLED backlog count (the daemon's counters, #3133,
  *        filters `backlog_cooled_until`), i.e. "the picker has a head to take".
  *
  * Every leg tried and removed was unsound — each promised a wake the drain
