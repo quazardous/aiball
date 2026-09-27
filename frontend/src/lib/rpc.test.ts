@@ -83,3 +83,40 @@ test("a token that no longer counts: queued calls fail with 401 and the page is 
     await assert.rejects(r.call("project.list"), (e: unknown) => e instanceof RpcError && e.status === 401);
     assert.equal(told, 1);
 });
+
+const { broadcast } = await import("../../../src/ws.js");
+
+async function until(what: string, ok: () => boolean, ms = 5000): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (!ok()) {
+        if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
+        await new Promise((r) => setTimeout(r, 20));
+    }
+}
+
+test("#3068 — board.events: a broadcast reaches the subscriber; one missed while away comes after the reconnect", async () => {
+    const r = client(TOKEN);
+    const got: Array<{ type: string; data: unknown }> = [];
+    let active = false;
+    const sub = r.subscribe("board.events", (d) => got.push(d as { type: string; data: unknown }), { onActive: (a) => { active = a; } });
+    await until("subscribed", () => active);
+
+    broadcast({ type: "tag_changed", data: { id: 1 } });
+    await until("the first event", () => got.length === 1);
+    assert.deepEqual(got[0], { type: "tag_changed", data: { id: 1 } });
+
+    await down();
+    await until("the connection seen lost", () => !active);
+    // Published while no client is connected: held by the daemon, replayed on `since`.
+    broadcast({ type: "strategy_changed", data: { strategy: "manual" } });
+    await up();
+    await until("the missed event, replayed", () => got.length === 2, 8000);
+    assert.deepEqual(got[1], { type: "strategy_changed", data: { strategy: "manual" } });
+    await until("subscribed again", () => active);
+
+    sub.close();
+    await new Promise((res) => setTimeout(res, 100));
+    broadcast({ type: "tag_changed", data: { id: 2 } });
+    await new Promise((res) => setTimeout(res, 200));
+    assert.equal(got.length, 2, "nothing after close");
+});

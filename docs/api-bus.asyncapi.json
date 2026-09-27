@@ -42,6 +42,24 @@
         }
       }
     },
+    "board.events": {
+      "address": "board.events",
+      "parameters": {
+        "id": {
+          "description": "an id"
+        }
+      },
+      "messages": {
+        "value": {
+          "name": "value",
+          "summary": "null: the feed has no state of its own"
+        },
+        "event": {
+          "name": "event",
+          "summary": "a broadcast event, `{ type, data }`, as `/ws` sent it"
+        }
+      }
+    },
     "project.*.tickets": {
       "address": "project.{id}.tickets",
       "parameters": {

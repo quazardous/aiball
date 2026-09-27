@@ -10,6 +10,11 @@
  *
  * A browser cannot read why a WebSocket opening was refused, so a connection
  * that never opens asks `GET /api/auth/status` whether the token still counts.
+ *
+ * A subscription (`bus.subscribe`) is kept across connections: after a
+ * reconnect it is made again with `since`, the daemon's epoch and the last
+ * `seq` this connection received, so the events missed meanwhile come first.
+ * While a subscription is open the connection is kept, calls or not.
  */
 import { withBase } from "./base";
 
@@ -34,6 +39,34 @@ interface RpcErrorBody {
 }
 
 type Reply = { id: number; result?: unknown; error?: RpcErrorBody };
+
+type BusEvent = { subscription: string; subject: string; seq: number; data: unknown };
+
+interface SubscribeAnswer {
+    id: string;
+    seq: number;
+    epoch: string;
+    replayed: boolean;
+    value?: unknown;
+    events?: { subject: string; seq: number; data: unknown }[];
+}
+
+export interface RpcSubscribeOptions {
+    /** More parameters for `bus.subscribe` (`open`, `include_postponed`…). */
+    params?: Record<string, unknown>;
+    /** The subject's whole value: on the first subscription, and after a gap the daemon could not replay. */
+    onValue?: (value: unknown) => void;
+    /** Subscribed (true), or its connection lost (false). */
+    onActive?: (active: boolean) => void;
+}
+
+interface Sub {
+    subject: string;
+    onEvent: (data: unknown, subject: string) => void;
+    opts: RpcSubscribeOptions;
+    id: string | null;
+    closed: boolean;
+}
 
 interface Waiting {
     method: string;
@@ -82,6 +115,11 @@ export class Rpc {
     private timer: ReturnType<typeof setTimeout> | null = null;
     private failedOpenings = 0;
     private readonly WS: typeof WebSocket;
+    private readonly subs = new Set<Sub>();
+    private readonly subById = new Map<string, Sub>();
+    /** The daemon's epoch and the last `seq` received: where a subscription resumes. */
+    private epoch: string | null = null;
+    private lastSeq = 0;
 
     constructor(private readonly opts: RpcOptions = {}) {
         this.WS = opts.WebSocketImpl ?? WebSocket;
@@ -102,13 +140,61 @@ export class Rpc {
         });
     }
 
+    /**
+     * Subscribe to a subject: `onEvent` gets each event's data, in order. The
+     * subscription lives until `close()`, across reconnections.
+     */
+    subscribe(subject: string, onEvent: (data: unknown, subject: string) => void, opts: RpcSubscribeOptions = {}): { close(): void } {
+        const s: Sub = { subject, onEvent, opts, id: null, closed: false };
+        this.subs.add(s);
+        if (this.open) this.start(s);
+        else this.connect();
+        return {
+            close: () => {
+                s.closed = true;
+                this.subs.delete(s);
+                if (s.id) {
+                    this.subById.delete(s.id);
+                    if (this.open) this.call("bus.unsubscribe", { id: s.id }).catch(() => {});
+                }
+            },
+        };
+    }
+
     /** Reconnect now if the connection is down (a tab back in view). */
     wake(): void {
         if (this.open) return;
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
         this.retry = 500;
-        if (this.queue.length > 0) this.connect();
+        if (this.wanted()) this.connect();
+    }
+
+    /** Whether anything needs the connection: a call waiting, or a subscription. */
+    private wanted(): boolean {
+        return this.queue.length > 0 || this.subs.size > 0;
+    }
+
+    private start(s: Sub): void {
+        const since = this.epoch !== null && this.lastSeq > 0 ? { epoch: this.epoch, seq: this.lastSeq } : undefined;
+        this.call<SubscribeAnswer>("bus.subscribe", { ...(s.opts.params ?? {}), subject: s.subject, ...(since ? { since } : {}) })
+            .then((r) => {
+                if (s.closed) {
+                    this.call("bus.unsubscribe", { id: r.id }).catch(() => {});
+                    return;
+                }
+                s.id = r.id;
+                this.subById.set(r.id, s);
+                if (r.seq > this.lastSeq) this.lastSeq = r.seq;
+                if (r.replayed) {
+                    for (const e of r.events ?? []) s.onEvent(e.data, e.subject);
+                } else {
+                    s.opts.onValue?.(r.value);
+                }
+                s.opts.onActive?.(true);
+            })
+            // A connection lost meanwhile subscribes it again when it is back.
+            .catch(() => {});
     }
 
     close(): void {
@@ -131,11 +217,16 @@ export class Rpc {
             const msg = JSON.parse(String(m.data)) as Reply | Reply[] | { method?: string };
             if (!hello) {
                 // The daemon speaks first: until its hello, nothing is sent.
-                if ((msg as { method?: string }).method !== "bus.hello") return;
+                const h = msg as { method?: string; params?: { epoch?: string } };
+                if (h.method !== "bus.hello") return;
                 hello = true;
                 this.open = true;
                 this.retry = 500;
                 this.failedOpenings = 0;
+                // A daemon restarted: nothing of the old epoch can be replayed.
+                const epoch = h.params?.epoch ?? null;
+                if (epoch !== this.epoch) this.lastSeq = 0;
+                this.epoch = epoch;
                 const queued = this.queue;
                 this.queue = [];
                 for (const w of queued) {
@@ -143,6 +234,14 @@ export class Rpc {
                     this.sent.set(id, w);
                     ws.send(w.frame);
                 }
+                for (const s of this.subs) this.start(s);
+                return;
+            }
+            const n = msg as { method?: string; params?: BusEvent };
+            if (n.method === "bus.event" && n.params) {
+                const e = n.params;
+                if (e.seq > this.lastSeq) this.lastSeq = e.seq;
+                this.subById.get(e.subscription)?.onEvent(e.data, e.subject);
                 return;
             }
             for (const r of Array.isArray(msg) ? msg : [msg as Reply]) this.settle(r);
@@ -159,8 +258,13 @@ export class Rpc {
                 w.reject(new RpcError("UNAVAILABLE", 503, `${w.method} → the connection to the daemon closed before its answer`));
             }
             this.sent.clear();
+            this.subById.clear();
+            for (const s of this.subs) {
+                s.id = null;
+                s.opts.onActive?.(false);
+            }
             if (!hello) void this.openingFailed();
-            if (this.queue.length > 0) this.scheduleRetry();
+            if (this.wanted()) this.scheduleRetry();
         };
         ws.onclose = lost;
         ws.onerror = lost;
@@ -194,7 +298,7 @@ export class Rpc {
         if (this.timer) return;
         this.timer = setTimeout(() => {
             this.timer = null;
-            if (this.queue.length > 0) this.connect();
+            if (this.wanted()) this.connect();
         }, this.retry);
         this.retry = Math.min(this.retry * 2, 10_000);
     }

@@ -120,6 +120,7 @@ events, and the same epoch), the answer is `replayed: true` with the missed
 | `ticket.<id>` | what `ticket.get` gives with `full: true` | `{ type, message }`: `message_created`, `_edited`, `_decided`, `_noted`, `_tagged` | humans and agents |
 | `user.<id>.pings` | `{ unread }` | a ping, as the event stream carries it, and `message`: what it points at (`id`, `hashid`, `kind`, `status`, `by_agent`, `created_at`, `project`, `ticket_id`, `title`, `decision`) | oneself |
 | `session.<name>.state` | a session without an agent, as `session.list` gives it, or `null` | `{ name, session }`: started, clients, exited, and `session: null` once stopped | humans and agents |
+| `board.events` | `null` | every event the board broadcasts, `{ type, data }`, as the web UI read it on `/ws` | humans and agents |
 
 `*` stands for one level: `agent.*.bar`, `agent.*.state` and
 `project.*.tickets` give every agent's or project's, including the ones

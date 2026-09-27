@@ -300,6 +300,20 @@ defineSubject({
     },
 });
 
+// ---- board.events -------------------------------------------------------------
+
+/**
+ * #3068 — every event the board broadcasts, as it is: `{ type, data }`, the
+ * feed the web UI read on `/ws`. The subjects above give the same changes as
+ * rows and views; this one keeps a client's own patching as it is.
+ */
+defineSubject({
+    pattern: "board.events",
+    doc: { value: "null: the feed has no state of its own", event: "a broadcast event, `{ type, data }`, as `/ws` sent it" },
+    access: (caller) => consumers(caller),
+    value: () => null,
+});
+
 // ---- the sources --------------------------------------------------------------
 
 const MESSAGE_EVENTS = new Set(["message_created", "message_decided", "message_edited", "message_noted", "message_tagged"]);
@@ -313,6 +327,7 @@ function ticketOfEvent(ev: WsEvent): Message | null {
 }
 
 onBroadcast((ev) => {
+    publish("board.events", ev);
     const d = ev.data as Record<string, unknown> | null;
     if (ev.type === "agent_bar" && d && typeof d.consumer_id === "string") {
         publish(`agent.${d.consumer_id}.bar`, d);

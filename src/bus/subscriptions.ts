@@ -153,6 +153,8 @@ function specFor(parts: string[]): { spec: SubjectSpec; id: string } | null {
             if (pat[i] === "*") id = parts[i];
             else if (pat[i] !== parts[i]) { ok = false; break; }
         }
+        // #3068 — a subject may have no id (`board.events`): nothing to fill in.
+        if (ok && !pat.includes("*")) return { spec, id: "" };
         if (ok && id !== null && id !== "") return { spec, id };
     }
     return null;

@@ -1,7 +1,7 @@
 import { ref, onBeforeUnmount } from "vue";
 
 import type { Message, Strategy } from "./api";
-import { withBase } from "./base";
+import { subscribeBus } from "./api";
 
 export type WsEvent =
     | { type: "message_created"; data: Message }
@@ -24,71 +24,18 @@ export type WsEvent =
     // the message fallthrough by accident.
     | { type: "consumer_changed"; data: unknown };
 
+/**
+ * The board's live events, `{ type, data }`. #3068 — read from the bus subject
+ * `board.events` on the page's one connection, where the page used to open
+ * `/ws`: the events are the same. After a reconnect the missed ones come
+ * first, when the daemon still holds them; `connected` goes back to true once
+ * subscribed again.
+ */
 export function useWs(onEvent: (e: WsEvent) => void) {
     const connected = ref(false);
-    let ws: WebSocket | null = null;
-    let stopped = false;
-    let retry = 1000;
-
-    function connect() {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
-        // #3000 — the daemon now checks a token on /ws over TCP, like /api. A
-        // browser cannot set headers on a WebSocket, so it rides the query.
-        const token = localStorage.getItem("aiball.token");
-        const url = `${proto}://${location.host}${withBase("/ws")}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-        ws = new WebSocket(url);
-        ws.onopen = () => {
-            connected.value = true;
-            retry = 1000;
-        };
-        ws.onclose = () => {
-            connected.value = false;
-            ws = null;
-            if (!stopped) {
-                setTimeout(connect, retry);
-                retry = Math.min(retry * 2, 10_000);
-            }
-        };
-        ws.onerror = () => ws?.close();
-        ws.onmessage = (m) => {
-            try {
-                onEvent(JSON.parse(m.data) as WsEvent);
-            } catch {
-                /* ignore */
-            }
-        };
-    }
-
-    // Force-reconnect on tab visibility — mobile browsers freeze
-    // background tabs and the close event can be suppressed,
-    // leaving the socket zombie-OPEN. Don't wait for backoff (#B.191).
-    function onVisible() {
-        if (document.visibilityState !== "visible") return;
-        if (stopped) return;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            // Either we have no socket (reconnect in flight or
-            // backed off) or we have one in a non-OPEN state.
-            // Cancel the current one and reconnect immediately.
-            if (ws) {
-                try { ws.close(); } catch { /* noop */ }
-                ws = null;
-            }
-            retry = 1000;
-            connect();
-        }
-    }
-    if (typeof document !== "undefined") {
-        document.addEventListener("visibilitychange", onVisible);
-    }
-
-    connect();
-    onBeforeUnmount(() => {
-        stopped = true;
-        if (typeof document !== "undefined") {
-            document.removeEventListener("visibilitychange", onVisible);
-        }
-        ws?.close();
+    const sub = subscribeBus("board.events", (data) => onEvent(data as WsEvent), {
+        onActive: (active) => { connected.value = active; },
     });
-
+    onBeforeUnmount(() => sub.close());
     return { connected };
 }

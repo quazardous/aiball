@@ -1,7 +1,7 @@
 import type { DecisionKind } from "@shared/ticket-transitions";
 import type { WaitCreditMove, WaitCreditRow } from "./waitCredit";
 import { withBase } from "./base";
-import { Rpc } from "./rpc";
+import { Rpc, type RpcSubscribeOptions } from "./rpc";
 
 export interface Tag {
     id: number;
@@ -289,6 +289,11 @@ if (typeof document !== "undefined") {
 
 function call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     return rpc.call<T>(method, params);
+}
+
+/** #3068 — subscribe to a bus subject on the page's one connection; kept across reconnections. */
+export function subscribeBus(subject: string, onEvent: (data: unknown, subject: string) => void, opts: RpcSubscribeOptions = {}): { close(): void } {
+    return rpc.subscribe(subject, onEvent, opts);
 }
 
 /** #2074 — state of the enrolment switch. */
