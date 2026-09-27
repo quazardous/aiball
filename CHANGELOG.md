@@ -189,6 +189,8 @@ dates are YYYY-MM-DD.
   ticket views at once, instead of staying until something else touched it.
 - On the session host, resizing the terminal no longer reads as human typing,
   which kept the loop from waking its agent for ten minutes.
+- The loop no longer takes Claude quoting "Update installed · Restart to update"
+  for the real banner: it reads the banner below the input box only.
 
 - A loop that comes back has its bar live again at once, rather than showing
   stale until it pushes a different one.

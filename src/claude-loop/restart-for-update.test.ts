@@ -21,11 +21,24 @@ const { restartStartArgs } = await import("./cmds/manage.js");
 
 const CTX = { nowMs: 0 };
 
-test("the update banner in Claude's footer is seen; the words in the conversation are not", () => {
+const RULE = "─".repeat(60);
+/** A pane as Claude draws it: output above the input box, the footer below it. */
+const pane = (above: string[], footer: string[]) => [...above, RULE, "❯ ", RULE, ...footer].join("\n");
+
+test("the update banner in Claude's footer, below the input box, is seen", () => {
     const w = new UpdateInstalledWatcher();
-    assert.equal(w.observe("some output\n\n  ✓ Update installed · Restart to update\n  /rc", CTX).visible, true);
-    const quoted = ["I read that it says Update installed · Restart to update", ...Array.from({ length: 20 }, (_, i) => `line ${i}`), "❯ "].join("\n");
-    assert.equal(new UpdateInstalledWatcher().observe(quoted, CTX).visible, false, "far above the footer");
+    assert.equal(w.observe(pane(["some output"], ["  ? for shortcuts                  ✓ Update installed · Restart to update"]), CTX).visible, true);
+});
+
+test("#3164 — the words in Claude's reply, just above the box, are not", () => {
+    const quoted = pane(["● The footer says:", "  ✓ Update installed · Restart to update", "  so a restart is offered."], ["  ? for shortcuts"]);
+    assert.equal(new UpdateInstalledWatcher().observe(quoted, CTX).visible, false);
+    const far = pane(["I read that it says Update installed · Restart to update", ...Array.from({ length: 20 }, (_, i) => `line ${i}`)], []);
+    assert.equal(new UpdateInstalledWatcher().observe(far, CTX).visible, false, "far above the footer");
+});
+
+test("a pane with no input box: nothing to tell the footer from the conversation, so no banner", () => {
+    assert.equal(new UpdateInstalledWatcher().observe("some output\n\n  ✓ Update installed · Restart to update\n  /rc", CTX).visible, false);
 });
 
 test("the bar carries alerts.restart_needed; a bar without it (an older loop) reads false", () => {

@@ -51,3 +51,17 @@ export function isFrameRule(line: string): boolean {
 export function isPromptLine(line: string): boolean {
     return /^[>❯]\s/u.test(line);
 }
+
+/**
+ * #3164 — the lines below Claude's input box: what follows the last frame rule
+ * (the box's bottom edge). Claude's footer lives there (shortcuts, notices, the
+ * update banner); its output never does, it is written above the box. Empty
+ * when the pane shows no box: nothing there can be told from the conversation.
+ */
+export function belowPromptBox(text: string): string {
+    const lines = text.split("\n").map((l) => l.trimEnd());
+    let last = -1;
+    lines.forEach((l, i) => { if (isFrameRule(l)) last = i; });
+    if (last < 0) return "";
+    return lines.slice(last + 1).filter((l) => l.length > 0).join("\n");
+}

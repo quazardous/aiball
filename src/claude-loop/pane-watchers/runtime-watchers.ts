@@ -7,6 +7,7 @@
 import { BoolWatcher } from "./bool-watcher.js";
 import { paneFooterShowsBusy, paneShowsActivity, paneShowsInterrupted } from "../state.js";
 import { footerOf } from "../error-backoff.js";
+import { belowPromptBox } from "../pane-decor.js";
 import type { PaneScanCtx } from "./types.js";
 
 /** Claude prompt visible (= `Claude Code v`, `❯ `, `> ` at line start).
@@ -72,13 +73,15 @@ export class NotLoggedInWatcher extends BoolWatcher {
 /** #3074 — Claude Code installed an update of itself and says so in its
  *  footer: `✓ Update installed · Restart to update`. The loop publishes it in
  *  the bar (`alerts.restart_needed`) for a host to offer the restart; it never
- *  restarts on its own. Footer only, as the other banners: a conversation
- *  quoting the words cannot latch it. */
+ *  restarts on its own. #3164 — read below the input box only, where Claude
+ *  renders it (its prompt footer's notices): the last lines of the pane also
+ *  hold Claude's output while it writes, and a reply quoting the words latched
+ *  the flag. */
 export class UpdateInstalledWatcher extends BoolWatcher {
     readonly name = "update_installed";
     private static readonly BANNER = /Update installed\s*·\s*Restart to update/;
     protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
-        return UpdateInstalledWatcher.BANNER.test(footerOf(paneText, 8));
+        return UpdateInstalledWatcher.BANNER.test(belowPromptBox(paneText));
     }
 }
 

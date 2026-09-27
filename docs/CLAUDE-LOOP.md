@@ -1088,7 +1088,8 @@ Install symlinks `~/.local/bin/claude-loop` alongside `aiball` and
 ## A restart after Claude Code updates itself
 
 When Claude Code installs an update it says so in its footer (`✓ Update installed
-· Restart to update`). The loop sees it and publishes it in its bar as
+· Restart to update`), below the input box. The loop reads it there only, so a
+reply that quotes the words, written above the box, does not count. The loop sees it and publishes it in its bar as
 `alerts.restart_needed`, plus a `⟳ update installed, restart` word on the tmux
 line; it never restarts on its own. A host (tvty) offers the restart, which calls
 `consumer.restart_claude` on the bus: the loop waits until Claude is idle (never
