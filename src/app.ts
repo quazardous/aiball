@@ -69,9 +69,8 @@ export function createApp(): express.Express {
 
     // #394: proxy mode. When a `proxy:` block is configured, this daemon is a
     // transparent relay to the remote — forward /api + /uploads (raw stream, no
-    // body parsing, no local routers); SSE (/api/events) pipes through for free.
-    // (The /ws live-update socket stays local — B's own web UI isn't the use
-    // case; loops/MCP/CLI + SSE are what matter. WS proxying is a follow-up.)
+    // body parsing, no local routers). The bus (`/bus`) is relayed on its own
+    // (#3071): that is how the loops, the MCP server and the CLI reach A.
     const proxy = loadProxy();
     if (proxy) {
         // Local, never-relayed node probe: liveness of THIS daemon + whether
@@ -83,7 +82,7 @@ export function createApp(): express.Express {
         const fwd = proxyMiddleware(proxy);
         app.use("/api", fwd);
         app.use("/uploads", fwd);
-        // #394 (8c7xut): the browser UI is degraded in proxy mode (no local /ws),
+        // #394 (8c7xut): the browser UI is degraded in proxy mode (it mirrors A),
         // so instead of the SPA serve a tiny "I'm a proxy of <url>" landing page.
         app.get(/^\/(?!api|ws|uploads).*/, (_req, res) => {
             res.type("html").send(proxyLandingHtml(proxy.url));

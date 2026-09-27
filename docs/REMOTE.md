@@ -157,8 +157,8 @@ token-less over the UDS / `127.0.0.1`, as if A were local.
 ### How it works
 
 The B daemon becomes a **transparent relay**: it forwards `/api/*` and
-`/uploads/*` to A (injecting the bearer), pipes A's SSE (`/api/events`) back to
-local subscribers, and keeps no local DB. Local clients on B talk to the UDS /
+`/uploads/*` to A (injecting the bearer), relays each local bus connection (`/bus`)
+to A's, and keeps no local DB. Local clients on B talk to the UDS /
 `127.0.0.1` token-less, exactly as if A were local. If A is unreachable the proxy
 answers 502 and the local client spools the write for replay.
 
@@ -332,10 +332,10 @@ Then `Read` the saved file.
 
 ## Live pings
 
-The timer is transport-agnostic: it opens the SSE stream (`/api/events`, behind
-the bearer middleware, token attached over TCP) and a slow heartbeat re-checks
+The timer is transport-agnostic: it subscribes to its events on the bus
+(`agent.<id>.events`, token attached over TCP) and a slow heartbeat re-checks
 via the client as a safety net. So a remote loop is notified of work whether or
-not SSE-over-TCP connects cleanly; the heartbeat polling covers the gap.
+not the subscription connects cleanly; the heartbeat polling covers the gap.
 
 ## Caveats
 

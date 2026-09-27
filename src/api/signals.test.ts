@@ -25,6 +25,8 @@ const { getDb } = await import("../db/connection.js");
 const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
 const { onSignal } = await import("../event-bus.js");
+const { AiballClient } = await import("../client.js");
+const { attachBus } = await import("../bus/server.js");
 const schema = await import("../schema.js");
 const { eq } = await import("drizzle-orm");
 
@@ -42,6 +44,8 @@ const CODER = issueToken({ kind: "agent", consumer_id: "coder", label: "2255-c" 
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2255-h" }).token;
 
 const server = createApp().listen(0);
+// The loop's events come over the bus.
+attachBus(server);
 await new Promise<void>((r) => server.once("listening", () => r()));
 const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -164,26 +168,19 @@ test("a flood from one source gets 429", async () => {
     assert.equal(last, 429);
 });
 
-test("a posted signal is pushed to its recipient, and replayed on the SSE stream at connect", async () => {
+test("a posted signal is pushed to its recipient, and replayed to its loop at connect", async () => {
     let pushed: any = null;
     const off = onSignal("cto", (e) => { pushed = e; });
     const posted = await http("POST", "/signals", { target: { consumer: "cto" }, title: "push me" }, KEY);
     off();
     assert.equal(pushed?.id, posted.json.id);
 
-    const ctl = new AbortController();
-    const res = await fetch(`${BASE}/api/events?consumer_id=coder`, { headers: { authorization: `Bearer ${CODER}` }, signal: ctl.signal });
-    const reader = res.body!.getReader();
+    // #3068 — the loop reads its events on the bus: a signal still waiting comes at connect.
+    const client = new AiballClient({ url: BASE, token: CODER, agentId: "coder" });
+    let replayed: any = null;
+    const stop = client.subscribeEvents({ onPing: () => {}, onSignal: (s) => { replayed = s; } });
     const deadline = Date.now() + 3000;
-    let seen = "";
-    while (Date.now() < deadline && !seen.includes("event: signal")) {
-        const { value, done } = await Promise.race([
-            reader.read(),
-            new Promise<{ value: undefined; done: true }>((r) => setTimeout(() => r({ value: undefined, done: true }), 500)),
-        ]);
-        if (value) seen += new TextDecoder().decode(value);
-        if (done && !value) continue;
-    }
-    ctl.abort();
-    assert.match(seen, /event: signal/);
+    while (!replayed && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    stop();
+    assert.ok(replayed, "the waiting signal reached the loop");
 });

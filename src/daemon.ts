@@ -5,7 +5,6 @@ import { spawn } from "node:child_process";
 import { createApp, frontendDistDir } from "./app.js";
 import { DAEMON_PID_PATH } from "./paths.js";
 import { reloadConfig } from "./config-reload.js";
-import { attachWs } from "./ws.js";
 import { attachBus } from "./bus/server.js";
 import { attachBusRelay } from "./bus/relay.js";
 import { initSessions } from "./sessions/registry.js";
@@ -116,7 +115,6 @@ function main(): void {
     const dist = frontendDistDir();
 
     const server = createServer(app);
-    attachWs(server, "/ws");
     // #505 — canal inverse WS pour les proxy nodes. Le serveur monte la route
     // `/ws/proxy-node` en mode noServer + handleUpgrade pour pouvoir refuser
     // l'auth proprement (401/403 avant upgrade). Pas-op dans une instance qui
@@ -184,9 +182,6 @@ function main(): void {
             // The auth middleware reads this flag on req.socket.
             (sock as unknown as { __aiballUds: boolean }).__aiballUds = true;
         });
-        // #3000 — `/ws` on the local socket too, with the same trust as `/api`
-        // there: same user, no token. Local clients (tvty) no longer need TCP.
-        attachWs(udsServer, "/ws", { trusted: true });
         if (core) attachBus(udsServer, { trusted: true });
         else if (relay) attachBusRelay(udsServer, relay, relayTokens!);
         udsServer.listen(SOCK_PATH, () => {

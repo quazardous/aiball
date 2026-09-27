@@ -9,9 +9,8 @@
  * endpoint HTTP dédié — david `medh7z` : "ok pour A. et du coup ça simplifie le
  * heartbeat").
  *
- * La WS est SEPARÉE du `/ws` browser-live-update existant (`src/ws.ts`) :
- *  - `/ws` reste le canal upstream→browser pour les events de mutation DB.
- *  - `/ws/proxy-node` est le canal upstream↔node, auth-gated, bidirectionnel.
+ * This socket, `/ws/proxy-node`, is the upstream↔node channel: auth-gated and
+ * bidirectional. Clients hear the board's events on the bus.
  *
  * Authentification : `Authorization: Bearer <node-token>` à l'upgrade HTTP. Le
  * node-side client (Node.js `ws` lib) peut envoyer des headers librement. Une

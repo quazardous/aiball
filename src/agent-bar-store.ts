@@ -5,8 +5,8 @@
  *
  * A bar is `stale` once its loop is no longer present: the same signal as the
  * `running` flag (the loop's event stream closed, past the reconnect grace), so a
- * dead loop never shows as busy. A host is told on `/ws` when a bar changes or
- * goes stale.
+ * dead loop never shows as busy. A host is told on the bus (`agent.<id>.bar`)
+ * when a bar changes or goes stale.
  */
 import type { AgentBar } from "./agent-bar.js";
 import { isPresent, onPresenceStop } from "./live-presence.js";

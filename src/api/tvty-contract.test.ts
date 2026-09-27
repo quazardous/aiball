@@ -22,13 +22,11 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { matchCalls, readServerRoutes, tvtyCalls } from "../devtools/route-inventory-lib.js";
-import WebSocket from "ws";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3052-"));
 process.env.AIBALL_SOCK = "";
 
 const { createApp } = await import("../app.js");
-const { attachWs } = await import("../ws.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, insertUpload } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -68,7 +66,6 @@ const plan = submitMessage({ project: P, kind: "comment_added", ticket_id: main,
 const SOCK = join(process.env.AIBALL_HOME!, "sock");
 const uds = createServer(createApp());
 uds.on("connection", (s) => { (s as unknown as { __aiballUds: boolean }).__aiballUds = true; });
-attachWs(uds, "/ws", { trusted: true });
 await new Promise<void>((r) => uds.listen(SOCK, () => r()));
 const tcp = createApp().listen(0);
 await new Promise<void>((r) => tcp.once("listening", () => r()));
@@ -213,19 +210,6 @@ test("reads: an image by its API path, derived from the cited form", async () =>
     assert.equal(r.status, 200);
 });
 
-test("reads: /ws over the socket announces a change with its type and project", async () => {
-    const ws = new WebSocket(`ws+unix://${SOCK}:/ws`, { headers: { "x-aiball-consumer": HUMAN } });
-    await new Promise<void>((r, j) => { ws.once("open", () => r()); ws.once("error", j); });
-    const got = new Promise<{ type: string; data: { project?: string } }>((r) => ws.on("message", (m) => {
-        const e = JSON.parse(String(m)) as { type: string; data: { project?: string } };
-        if (e.data?.project === P) r(e);
-    }));
-    await call("POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: other, parent_id: other, body: "ping" });
-    const e = await got;
-    assert.equal(typeof e.type, "string");
-    ws.close();
-});
-
 test("writes: every body tvty sends is accepted", async () => {
     const r1 = await call("POST", "/api/messages", {
         project: P, kind: "ticket_created", title: "filed whole", body: "b", intent: "request",
@@ -338,6 +322,8 @@ function tvtyCertainRoutes(): { routes: string[]; source: string } {
 
 test("every route tvty calls (●) is covered here", () => {
     const { routes, source } = tvtyCertainRoutes();
-    assert.ok(routes.length > 20, `tvty's calls were read (${source})`);
+    // #3068 — tvty is on the bus; over HTTP it keeps its uploads. Their route
+    // among the ones read says the reading worked.
+    assert.ok(routes.includes("POST /api/uploads"), `tvty's calls were read (${source}): ${routes.join(", ") || "none"}`);
     assert.deepEqual(routes.filter((r) => !COVERED.has(r)).sort(), [], `tvty calls these (${source}) and no test here covers them`);
 });

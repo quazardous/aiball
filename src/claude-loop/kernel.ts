@@ -13,8 +13,8 @@
  * Detached child of the `start` command. Two operating modes:
  *
  *   - **SSE mode** (when CL_CHECK_CMD is the default aiball check):
- *     opens a long-lived SSE stream to the daemon's `/api/events`
- *     endpoint and wakes claude as soon as a `ping` event arrives. No
+ *     subscribes to its events on the daemon's bus (`agent.<id>.events`,
+ *     #3068) and wakes claude as soon as a `ping` event arrives. No
  *     polling lag. A slow heartbeat (every CL_INTERVAL) checks
  *     `wake-requested` and re-verifies in case SSE silently dropped.
  *

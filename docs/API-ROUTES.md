@@ -12,170 +12,167 @@ its checkout when present).
 ● the consumer calls the route. ◐ it may: its call builds a segment at run time
 (`/api/messages/{id}/{verb}`), which could be this route or a sibling.
 
-**165 routes** · 92 called by loop, mcp, cli or tvty · 54 by the web UI alone · 18 by no consumer in the code.
+**162 routes** · 5 called by loop, mcp, cli or tvty · 7 by the web UI alone · 138 by no consumer in the code.
 
 | Route | loop | mcp | cli | sim | web | tvty |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
 | `GET /` |  |  |  |  |  |  |
-| `POST /api/agents/:name/afk` |  |  |  |  | ● | ● |
+| `POST /api/agents/:name/afk` |  |  |  |  | ● |  |
 | `POST /api/agents/:name/pane/keys` |  |  |  |  | ● |  |
 | `GET /api/agents/:name/pane/stream` |  |  |  |  | ● |  |
 | `POST /api/auth/login` |  |  |  |  | ● |  |
 | `POST /api/auth/logout` |  |  |  |  | ● |  |
 | `POST /api/auth/setup` |  |  |  |  | ● |  |
 | `GET /api/auth/status` |  |  |  |  | ● |  |
-| `GET /api/automation/rules` |  |  | ● |  | ● |  |
-| `POST /api/automation/rules` |  |  | ● |  | ● |  |
-| `DELETE /api/automation/rules/:id` |  |  | ● |  | ● |  |
-| `PATCH /api/automation/rules/:id` |  |  | ● |  | ● |  |
-| `POST /api/backlog-wake` | ● |  |  | ● |  |  |
-| `GET /api/config` |  | ● |  |  | ● |  |
-| `GET /api/consumers` |  |  | ● |  | ● | ● |
-| `POST /api/consumers` | ● |  |  |  | ● |  |
-| `DELETE /api/consumers/:consumer_id` |  |  |  |  | ● |  |
-| `GET /api/consumers/:consumer_id` | ● | ● |  |  |  |  |
-| `PATCH /api/consumers/:consumer_id` | ● |  | ● |  | ● |  |
-| `GET /api/consumers/:consumer_id/backlog` |  |  |  |  |  | ● |
-| `GET /api/consumers/:consumer_id/bar` |  |  |  |  |  | ● |
-| `PUT /api/consumers/:consumer_id/bar` | ● |  |  |  |  |  |
-| `POST /api/consumers/:consumer_id/bar-host` |  |  |  |  |  | ● |
-| `POST /api/consumers/:consumer_id/loop-stop` |  |  |  |  | ● |  |
-| `POST /api/consumers/:consumer_id/prompt` |  |  |  |  | ● |  |
-| `PUT /api/consumers/:consumer_id/state` | ● |  |  |  |  |  |
-| `GET /api/consumers/:consumer_id/wait-credit` |  |  |  |  | ● |  |
-| `POST /api/daemon/reload` |  |  | ● |  |  |  |
+| `GET /api/automation/rules` |  |  |  |  |  |  |
+| `POST /api/automation/rules` |  |  |  |  |  |  |
+| `DELETE /api/automation/rules/:id` |  |  |  |  |  |  |
+| `PATCH /api/automation/rules/:id` |  |  |  |  |  |  |
+| `POST /api/backlog-wake` |  |  |  | ● |  |  |
+| `GET /api/config` |  |  |  |  |  |  |
+| `GET /api/consumers` |  |  |  |  |  |  |
+| `POST /api/consumers` |  |  |  |  |  |  |
+| `DELETE /api/consumers/:consumer_id` |  |  |  |  |  |  |
+| `GET /api/consumers/:consumer_id` |  |  |  |  |  |  |
+| `PATCH /api/consumers/:consumer_id` |  |  |  |  |  |  |
+| `GET /api/consumers/:consumer_id/backlog` |  |  |  |  |  |  |
+| `GET /api/consumers/:consumer_id/bar` |  |  |  |  |  |  |
+| `PUT /api/consumers/:consumer_id/bar` |  |  |  |  |  |  |
+| `POST /api/consumers/:consumer_id/bar-host` |  |  |  |  |  |  |
+| `POST /api/consumers/:consumer_id/loop-stop` |  |  |  |  |  |  |
+| `POST /api/consumers/:consumer_id/prompt` |  |  |  |  |  |  |
+| `PUT /api/consumers/:consumer_id/state` |  |  |  |  |  |  |
+| `GET /api/consumers/:consumer_id/wait-credit` |  |  |  |  |  |  |
+| `POST /api/daemon/reload` |  |  |  |  |  |  |
 | `GET /api/debug/requests` |  |  |  |  |  |  |
-| `GET /api/decisions/mine` |  | ● |  |  |  |  |
-| `GET /api/decisions/plans-to-execute` |  | ● |  |  |  |  |
-| `GET /api/events` | ● |  |  |  |  |  |
-| `GET /api/feed-path` |  | ● | ● |  |  |  |
-| `GET /api/graph/audit` |  | ● |  |  |  |  |
-| `GET /api/graph/neighbors` |  | ● |  |  |  |  |
+| `GET /api/decisions/mine` |  |  |  |  |  |  |
+| `GET /api/decisions/plans-to-execute` |  |  |  |  |  |  |
+| `GET /api/feed-path` |  |  |  |  |  |  |
+| `GET /api/graph/audit` |  |  |  |  |  |  |
+| `GET /api/graph/neighbors` |  |  |  |  |  |  |
 | `GET /api/health` | ● | ● | ● |  |  |  |
-| `GET /api/inbox` |  |  |  |  | ● | ● |
-| `GET /api/info` |  |  |  |  | ● |  |
-| `GET /api/launchers` |  |  |  |  | ● |  |
-| `POST /api/launchers/:id/run` |  |  |  |  | ● |  |
-| `POST /api/loops/message-all` |  |  |  |  | ● |  |
-| `POST /api/loops/release-all` |  |  |  |  | ● |  |
-| `GET /api/managed-config` |  |  |  |  | ● |  |
-| `DELETE /api/managed-config/:key` |  |  |  |  | ● |  |
-| `PUT /api/managed-config/:key` |  |  |  |  | ● |  |
-| `POST /api/mark-read` | ● |  | ● | ● | ● |  |
-| `GET /api/me` |  |  |  |  | ● |  |
-| `GET /api/mention-suggestions` |  |  |  |  | ● | ● |
-| `GET /api/messages` |  | ● | ● | ● | ● |  |
-| `POST /api/messages` |  | ● | ● | ● | ● | ● |
-| `GET /api/messages/:id` | ● | ● | ● | ● |  | ● |
-| `POST /api/messages/:id/accept-and-close` |  |  |  | ◐ | ● | ◐ |
-| `POST /api/messages/:id/approve` |  | ● |  | ◐ | ● | ◐ |
-| `POST /api/messages/:id/decide` |  |  |  | ● | ● | ● |
-| `POST /api/messages/:id/delete` |  |  |  | ◐ | ● | ● |
-| `POST /api/messages/:id/edit` |  | ● | ● | ◐ | ● | ● |
-| `POST /api/messages/:id/note` |  |  |  | ◐ | ● | ◐ |
-| `POST /api/messages/:id/promote` |  |  |  | ◐ | ● | ● |
-| `POST /api/messages/:id/questions/:qid/answer` |  |  |  |  | ● | ● |
-| `POST /api/messages/:id/reclassify` |  |  |  | ◐ | ● | ◐ |
-| `POST /api/messages/:id/reject` | ● | ● |  | ◐ | ● | ◐ |
-| `POST /api/messages/:id/resurface` |  |  |  | ◐ | ● | ● |
-| `POST /api/messages/:id/step` |  |  |  | ● | ● | ◐ |
-| `POST /api/messages/:id/summarize` |  |  |  | ◐ |  | ◐ |
+| `GET /api/inbox` |  |  |  |  |  |  |
+| `GET /api/info` |  |  |  |  |  |  |
+| `GET /api/launchers` |  |  |  |  |  |  |
+| `POST /api/launchers/:id/run` |  |  |  |  |  |  |
+| `POST /api/loops/message-all` |  |  |  |  |  |  |
+| `POST /api/loops/release-all` |  |  |  |  |  |  |
+| `GET /api/managed-config` |  |  |  |  |  |  |
+| `DELETE /api/managed-config/:key` |  |  |  |  |  |  |
+| `PUT /api/managed-config/:key` |  |  |  |  |  |  |
+| `POST /api/mark-read` |  |  |  | ● |  |  |
+| `GET /api/me` |  |  |  |  |  |  |
+| `GET /api/mention-suggestions` |  |  |  |  |  |  |
+| `GET /api/messages` |  |  |  | ● |  |  |
+| `POST /api/messages` |  |  |  | ● |  |  |
+| `GET /api/messages/:id` |  |  |  | ● |  |  |
+| `POST /api/messages/:id/accept-and-close` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/approve` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/decide` |  |  |  | ● |  |  |
+| `POST /api/messages/:id/delete` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/edit` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/note` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/promote` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/questions/:qid/answer` |  |  |  |  |  |  |
+| `POST /api/messages/:id/reclassify` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/reject` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/resurface` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/step` |  |  |  | ● |  |  |
+| `POST /api/messages/:id/summarize` |  |  |  | ◐ |  |  |
 | `GET /api/messages/:id/tags` |  |  |  |  |  |  |
-| `POST /api/messages/:id/tags` |  |  |  | ◐ |  | ● |
-| `PUT /api/messages/:id/tags` |  |  |  |  | ● |  |
-| `DELETE /api/messages/:id/tags/:tag` |  |  |  |  |  | ● |
-| `POST /api/messages/:id/unstep` |  |  |  | ◐ | ● | ◐ |
-| `POST /api/messages/:id/untag` |  |  |  | ◐ | ● | ● |
-| `POST /api/messages/:id/vote` |  |  |  | ◐ | ● | ● |
-| `GET /api/micro-status` |  | ● |  |  |  |  |
+| `POST /api/messages/:id/tags` |  |  |  | ◐ |  |  |
+| `PUT /api/messages/:id/tags` |  |  |  |  |  |  |
+| `DELETE /api/messages/:id/tags/:tag` |  |  |  |  |  |  |
+| `POST /api/messages/:id/unstep` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/untag` |  |  |  | ◐ |  |  |
+| `POST /api/messages/:id/vote` |  |  |  | ◐ |  |  |
+| `GET /api/micro-status` |  |  |  |  |  |  |
 | `GET /api/my-pending/count` |  |  |  |  |  |  |
 | `GET /api/node` |  |  | ● |  |  |  |
-| `GET /api/nodes` |  |  |  |  | ● |  |
-| `DELETE /api/nodes/:node_id` |  |  |  |  | ● |  |
+| `GET /api/nodes` |  |  |  |  |  |  |
+| `DELETE /api/nodes/:node_id` |  |  |  |  |  |  |
 | `POST /api/nodes/enroll` |  |  |  |  |  |  |
 | `GET /api/nodes/enroll/:id` |  |  |  |  |  |  |
-| `GET /api/nodes/enrollments` |  |  |  |  | ● |  |
-| `POST /api/nodes/enrollments/:id/:verdict` |  |  |  |  | ● |  |
-| `GET /api/nodes/pairing` |  |  |  |  | ● |  |
-| `POST /api/nodes/pairing/:verb` |  |  |  |  | ● |  |
-| `GET /api/pings` |  | ● | ● |  |  |  |
-| `GET /api/pings/count` | ● | ● | ● | ● |  |  |
+| `GET /api/nodes/enrollments` |  |  |  |  |  |  |
+| `POST /api/nodes/enrollments/:id/:verdict` |  |  |  |  |  |  |
+| `GET /api/nodes/pairing` |  |  |  |  |  |  |
+| `POST /api/nodes/pairing/:verb` |  |  |  |  |  |  |
+| `GET /api/pings` |  |  |  |  |  |  |
+| `GET /api/pings/count` |  |  |  | ● |  |  |
 | `POST /api/pings/mark-read` |  |  |  |  |  |  |
 | `POST /api/pings/purge-seen-closed` |  |  |  |  |  |  |
-| `GET /api/presence` |  | ● |  |  |  |  |
-| `GET /api/projects` | ● | ● | ● |  | ● |  |
-| `POST /api/projects` | ● |  | ● |  | ● |  |
-| `DELETE /api/projects/:name` |  |  | ● |  | ● |  |
-| `POST /api/projects/:name/launch` |  |  |  |  | ● |  |
-| `POST /api/projects/:name/purge` |  |  |  |  | ● |  |
-| `POST /api/projects/:name/rename` |  |  | ● |  |  |  |
-| `GET /api/projects/:name/signals` |  |  |  |  | ● |  |
-| `GET /api/projects/:name/stats` |  | ● |  |  |  |  |
-| `GET /api/projects/:name/stats-rich` |  |  |  |  | ● |  |
-| `GET /api/projects/:project/critical` |  | ● |  |  |  |  |
-| `GET /api/projects/:project/milestones` |  | ● | ● |  | ● | ● |
-| `GET /api/projects/:project/standing-prompt` | ● |  |  |  | ● |  |
-| `PATCH /api/projects/:project/standing-prompt` |  |  |  |  | ● |  |
-| `GET /api/projects/:project/strategy` |  |  |  |  | ● |  |
-| `PATCH /api/projects/:project/strategy` |  |  |  |  | ● |  |
-| `POST /api/projects/:project/token-usage` | ● |  |  |  |  |  |
-| `GET /api/search` |  | ● |  |  | ● |  |
+| `GET /api/presence` |  |  |  |  |  |  |
+| `GET /api/projects` |  |  |  |  |  |  |
+| `POST /api/projects` |  |  |  |  |  |  |
+| `POST /api/projects/:name/launch` |  |  |  |  |  |  |
+| `POST /api/projects/:name/purge` |  |  |  |  |  |  |
+| `GET /api/projects/:name/signals` |  |  |  |  |  |  |
+| `GET /api/projects/:name/stats` |  |  |  |  |  |  |
+| `GET /api/projects/:name/stats-rich` |  |  |  |  |  |  |
+| `GET /api/projects/:project/critical` |  |  |  |  |  |  |
+| `GET /api/projects/:project/milestones` |  |  |  |  |  |  |
+| `GET /api/projects/:project/standing-prompt` |  |  |  |  |  |  |
+| `PATCH /api/projects/:project/standing-prompt` |  |  |  |  |  |  |
+| `GET /api/projects/:project/strategy` |  |  |  |  |  |  |
+| `PATCH /api/projects/:project/strategy` |  |  |  |  |  |  |
+| `POST /api/projects/:project/token-usage` |  |  |  |  |  |  |
+| `GET /api/search` |  |  |  |  |  |  |
 | `GET /api/settings/upload-max-bytes` |  |  |  |  |  |  |
 | `PATCH /api/settings/upload-max-bytes` |  |  |  |  |  |  |
-| `GET /api/signal-keys` |  |  |  |  | ● |  |
-| `POST /api/signal-keys` |  |  |  |  | ● |  |
-| `DELETE /api/signal-keys/:key_id` |  |  |  |  | ● |  |
-| `PATCH /api/signal-keys/:key_id` |  |  |  |  | ● |  |
+| `GET /api/signal-keys` |  |  |  |  |  |  |
+| `POST /api/signal-keys` |  |  |  |  |  |  |
+| `DELETE /api/signal-keys/:key_id` |  |  |  |  |  |  |
+| `PATCH /api/signal-keys/:key_id` |  |  |  |  |  |  |
 | `GET /api/signals` |  |  |  |  |  |  |
 | `POST /api/signals` |  |  |  |  |  |  |
-| `POST /api/signals/:id/ack` | ● |  |  |  |  |  |
-| `GET /api/steps/timing` |  |  | ● |  |  |  |
+| `POST /api/signals/:id/ack` |  |  |  |  |  |  |
+| `GET /api/steps/timing` |  |  |  |  |  |  |
 | `POST /api/steps/trim` |  |  |  |  |  |  |
-| `GET /api/strategy` |  |  |  |  | ● |  |
-| `PATCH /api/strategy` |  |  |  |  | ● |  |
-| `DELETE /api/subscriptions` | ● | ● | ● |  |  |  |
-| `GET /api/subscriptions` | ● | ● | ● |  |  |  |
-| `POST /api/subscriptions` | ● | ● | ● |  |  |  |
-| `GET /api/tags` |  |  |  |  | ● | ● |
-| `POST /api/tags` |  |  |  |  | ● |  |
-| `DELETE /api/tags/:id` |  |  |  |  | ● |  |
-| `PATCH /api/tags/:id` |  |  |  |  | ● |  |
-| `PUT /api/tags/override` |  |  |  |  | ● |  |
-| `GET /api/ticket-subscriptions` |  | ● |  |  |  |  |
-| `POST /api/ticket-subscriptions` |  | ● |  |  | ● |  |
-| `DELETE /api/ticket-subscriptions/:ticket_id` |  | ● |  |  |  |  |
-| `GET /api/ticket-subscriptions/:ticket_id` |  |  |  |  | ● |  |
-| `GET /api/tickets` | ● | ● | ● | ● | ● |  |
+| `GET /api/strategy` |  |  |  |  |  |  |
+| `PATCH /api/strategy` |  |  |  |  |  |  |
+| `DELETE /api/subscriptions` |  |  |  |  |  |  |
+| `GET /api/subscriptions` |  |  |  |  |  |  |
+| `POST /api/subscriptions` |  |  |  |  |  |  |
+| `GET /api/tags` |  |  |  |  |  |  |
+| `POST /api/tags` |  |  |  |  |  |  |
+| `DELETE /api/tags/:id` |  |  |  |  |  |  |
+| `PATCH /api/tags/:id` |  |  |  |  |  |  |
+| `PUT /api/tags/override` |  |  |  |  |  |  |
+| `GET /api/ticket-subscriptions` |  |  |  |  |  |  |
+| `POST /api/ticket-subscriptions` |  |  |  |  |  |  |
+| `DELETE /api/ticket-subscriptions/:ticket_id` |  |  |  |  |  |  |
+| `GET /api/ticket-subscriptions/:ticket_id` |  |  |  |  |  |  |
+| `GET /api/tickets` |  |  |  | ● |  |  |
 | `POST /api/tickets` |  |  |  |  |  |  |
-| `GET /api/tickets/:id` | ● | ● | ● |  | ● | ● |
-| `POST /api/tickets/:id/approve-pending-children` |  |  | ● |  | ● |  |
-| `POST /api/tickets/:id/assign` |  | ● |  | ● | ● | ● |
-| `POST /api/tickets/:id/export` |  | ● | ● |  | ● |  |
-| `POST /api/tickets/:id/mark-read` |  | ● |  |  | ● | ● |
-| `POST /api/tickets/:id/mark-unread` |  |  |  |  | ● |  |
-| `POST /api/tickets/:id/milestone` |  | ● | ● |  | ● | ● |
-| `POST /api/tickets/:id/move` |  | ● | ● |  | ● | ● |
-| `POST /api/tickets/:id/owner` |  |  |  |  | ● | ● |
-| `DELETE /api/tickets/:id/payload` |  | ● | ● |  | ● |  |
-| `GET /api/tickets/:id/payload` |  | ● | ● |  | ● |  |
-| `PUT /api/tickets/:id/payload` |  | ● | ● |  |  |  |
-| `POST /api/tickets/:id/payload/dump` |  | ● | ● |  |  |  |
-| `GET /api/tickets/:id/pending-children` |  |  | ● |  | ● |  |
-| `POST /api/tickets/:id/postpone` |  |  |  | ● | ● | ● |
+| `GET /api/tickets/:id` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/approve-pending-children` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/assign` |  |  |  | ● |  |  |
+| `POST /api/tickets/:id/export` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/mark-read` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/mark-unread` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/milestone` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/move` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/owner` |  |  |  |  |  |  |
+| `DELETE /api/tickets/:id/payload` |  |  |  |  |  |  |
+| `GET /api/tickets/:id/payload` |  |  |  |  |  |  |
+| `PUT /api/tickets/:id/payload` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/payload/dump` |  |  |  |  |  |  |
+| `GET /api/tickets/:id/pending-children` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/postpone` |  |  |  | ● |  |  |
 | `GET /api/tickets/:id/relations` |  |  |  |  |  |  |
-| `POST /api/tickets/:id/relations` |  | ● |  |  | ● | ● |
-| `POST /api/tickets/:id/release` |  | ● |  |  | ● | ● |
-| `POST /api/tickets/:id/step` |  |  |  |  | ● |  |
-| `GET /api/tickets/:id/subscriptions` |  |  |  |  | ● |  |
-| `POST /api/tickets/:id/token-usage` | ● | ● |  |  |  |  |
-| `POST /api/tickets/:id/unsnooze` |  |  |  |  | ● | ● |
-| `POST /api/tickets/:id/unstep` |  |  |  |  | ● |  |
-| `GET /api/tickets/bookends` |  | ● |  |  |  |  |
-| `POST /api/tickets/import` |  | ● | ● |  | ● |  |
-| `POST /api/tickets/purge` |  |  |  |  | ● |  |
-| `GET /api/token-usage/timeseries` |  |  |  |  | ● |  |
-| `GET /api/unread` | ● | ● | ● | ● |  |  |
-| `GET /api/unread/count` |  | ● |  |  |  |  |
+| `POST /api/tickets/:id/relations` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/release` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/step` |  |  |  |  |  |  |
+| `GET /api/tickets/:id/subscriptions` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/token-usage` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/unsnooze` |  |  |  |  |  |  |
+| `POST /api/tickets/:id/unstep` |  |  |  |  |  |  |
+| `GET /api/tickets/bookends` |  |  |  |  |  |  |
+| `POST /api/tickets/import` |  |  |  |  |  |  |
+| `POST /api/tickets/purge` |  |  |  |  |  |  |
+| `GET /api/token-usage/timeseries` |  |  |  |  |  |  |
+| `GET /api/unread` |  |  |  | ● |  |  |
+| `GET /api/unread/count` |  |  |  |  |  |  |
 | `POST /api/uploads` |  | ● |  |  | ● | ● |
 | `POST /api/uploads/gc` |  |  |  |  |  | ◐ |
 | `GET /api/uploads/stats` |  |  |  |  |  | ◐ |

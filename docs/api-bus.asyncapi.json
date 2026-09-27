@@ -75,7 +75,7 @@
         },
         "event": {
           "name": "event",
-          "summary": "a broadcast event, `{ type, data }`, as `/ws` sent it"
+          "summary": "a broadcast event, `{ type, data }`"
         }
       }
     },

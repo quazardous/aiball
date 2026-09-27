@@ -972,7 +972,7 @@ boot window. Times are absolute dates, never countdowns.
 
 The loop pushes on change, at most once a second (a burst ends on its last value).
 A human, or the agent itself, reads it with `GET /api/consumers/<agent>/bar`, and
-`/ws` announces each change as an `agent_bar` event. A bar is `stale` once its loop
+the bus announces each change on the subject `agent.<id>.bar`. A bar is `stale` once its loop
 is gone. The daemon keeps only the latest bar, in memory.
 
 **Who draws it** is the bar's `host`: `tmux` (its status line) or `external`

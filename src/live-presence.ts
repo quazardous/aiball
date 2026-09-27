@@ -1,14 +1,14 @@
 /**
  * #395: live presence registry — near-realtime claude-loop running detection.
  *
- * The loop already holds a long-lived SSE connection to `/api/events`. Its
- * connect/disconnect IS the liveness signal — far sharper than the 120 s
+ * The loop already holds a long-lived subscription to its events on the bus
+ * (`agent.<id>.events`, #3068). Its opening and end ARE the liveness signal — far sharper than the 120 s
  * heartbeat poll (`db/projects.ts`), which detects a STOP only once the last
  * heartbeat goes stale (up to 120 s late) and never emits an event.
  *
- * So: SSE open → present → broadcast `running:true`; SSE close → (after a short
+ * So: subscribed → present → broadcast `running:true`; gone → (after a short
  * grace, to tolerate reconnect blips) absent → broadcast `running:false`. The UI
- * already refetches projects on any WS event, so this lights up live.
+ * already refetches projects on any board event, so this lights up live.
  *
  * **Presence is authoritative over heartbeat for any consumer this daemon has
  * seen connect** — otherwise a just-dead loop with a still-fresh heartbeat would

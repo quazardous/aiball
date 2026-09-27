@@ -353,12 +353,12 @@ defineSubject({
 
 /**
  * #3068 — every event the board broadcasts, as it is: `{ type, data }`, the
- * feed the web UI read on `/ws`. The subjects above give the same changes as
+ * feed the web UI patches its views from. The subjects above give the same changes as
  * rows and views; this one keeps a client's own patching as it is.
  */
 defineSubject({
     pattern: "board.events",
-    doc: { value: "null: the feed has no state of its own", event: "a broadcast event, `{ type, data }`, as `/ws` sent it" },
+    doc: { value: "null: the feed has no state of its own", event: "a broadcast event, `{ type, data }`" },
     access: (caller) => consumers(caller),
     value: () => null,
 });

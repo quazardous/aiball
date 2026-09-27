@@ -17,7 +17,7 @@ state are hand-rolled and small on purpose. All paths below are under `frontend/
 
 | Concern | File | Role |
 |---|---|---|
-| Build tool | `vite.config.ts` | Vite + `@vitejs/plugin-vue`. `base: "./"` (relative asset URLs so one build runs under any mount path). Injects `__AIBALL_VERSION__` from the repo-root `package.json`. Dev proxy: `/api`→daemon, `/ws`→websocket. Alias `@shared`→repo-root `src/`. |
+| Build tool | `vite.config.ts` | Vite + `@vitejs/plugin-vue`. `base: "./"` (relative asset URLs so one build runs under any mount path). Injects `__AIBALL_VERSION__` from the repo-root `package.json`. Dev proxy: `/api`→daemon, `/bus`→websocket. Alias `@shared`→repo-root `src/`. |
 | Build script | `package.json` | `build` = `vue-tsc --noEmit && vite build`, output `dist/`. `dev` = vite dev server. |
 | HTML entry | `index.html` | Loads `/src/main.ts`; carries a trailing-slash probe/redirect for sub-path mounts. |
 | JS entry | `src/main.ts` | Creates the app, registers PrimeVue (Aura preset, `darkModeSelector: ".aiball-dark"`), `ToastService`, `ConfirmationService`; imports `style.css` + `styles/theme-dark.css`; mounts `#app`. |
@@ -90,7 +90,7 @@ All are genuinely reused across the panels above; none is an orphan.
 ## State & data layer
 
 - **API client** — `src/lib/api.ts`: a single `api` object of typed REST calls to `/api/*` plus the shared TS interfaces. Owns the auth token (`localStorage["aiball.token"]`, `setAuthToken`/`clearAuthToken`/`setUnauthorizedHandler`); URLs go through `withBase()`.
-- **Live updates** — `src/lib/ws.ts` (`useWs`, typed `WsEvent` union, reconnect on visibility) → `src/lib/inbox-ws.ts` (`useInboxWs` relays WS events onto the bus). WebSocket, no SSE.
+- **Live updates** — `src/lib/ws.ts` (`useWs`, typed `WsEvent` union) subscribes to `board.events` on the page's bus connection (`src/lib/rpc.ts`, reconnect on visibility, missed events replayed) → `src/lib/inbox-ws.ts` (`useInboxWs` relays them onto the page's event bus).
 - **Event bus** — `src/lib/bus.ts`: a tiny typed pub/sub (`bus.emit` / `useBus`), deliberately chosen over a store. Cross-component reactions go through it; new events extend the `BusEvents` map (TS enforces the payload).
 - **Shared refs** — `src/lib/prefs.ts` (localStorage-synced preference refs); app-level state lives in `App.vue` refs.
 - **Composables** (`use*` in `lib/`) — `useRouting`, `useLoader`, `useNotifications`, `useBulkActions`, `useInboxWs`, `useThreadItems`, plus helpers (`autoMarkRead`, `now-ticker`, `node-liveness`, `mention-autocomplete`, …).

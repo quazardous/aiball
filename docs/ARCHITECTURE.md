@@ -12,7 +12,7 @@ wrong side of it.
 
 | Layer | What | Where |
 |---|---|---|
-| **Core** | the database and its migrations, the rules (actionable, decisions, backlog, wakes), the HTTP/UDS API, the live feed (`/ws`), authentication | `src/db*`, `src/schema.ts`, `src/messages.ts`, `src/api*`, `src/app.ts`, `src/daemon.ts`, `src/ws.ts` |
+| **Core** | the database and its migrations, the rules (actionable, decisions, backlog, wakes), the bus and the HTTP/UDS API, authentication | `src/db*`, `src/schema.ts`, `src/messages.ts`, `src/api*`, `src/app.ts`, `src/daemon.ts`, `src/ws.ts` |
 | **Shared vocabulary** | pure modules any layer may import: kinds, decision gestures, transitions, config parsing | `src/domain.ts`, `src/decisions.ts`, `src/ticket-transitions.ts`, `src/autopoll/config.ts`, … |
 | **Clients** | talk to the core through the API only | `src/client.ts` (the shared client), `src/claude-loop/`, `src/mcp/`, `src/cli/`, `src/sim/`, `tests/sim/`, the tvty terminal (its own repository) |
 | **Web UI** | a client of the same API | `frontend/` |

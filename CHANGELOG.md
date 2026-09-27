@@ -127,6 +127,10 @@ dates are YYYY-MM-DD.
 
 ### Removed
 
+- The `/ws` live feed and the `/api/events` stream. The web UI and the loops
+  hear the board's events on the bus (`board.events`, and a loop's own
+  `agent.<id>.events`). A remote machine updates aiball before it reconnects.
+
 - The Python PTY proxy and its fallback: the Rust `cl-pty-proxy` is the only
   proxy, on every platform, and a loop refuses to start without it. The
   `claude_loop.proxy_impl` option is gone; `CL_PROXY_BIN` names a proxy binary

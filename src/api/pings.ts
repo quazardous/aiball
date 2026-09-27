@@ -10,110 +10,11 @@
  */
 import { Router } from "express";
 import { serveMethod } from "../bus/http.js";
-import { listPendingSignals } from "../db/signals.js";
-import {
-    unreadPingCount,
-} from "../db.js";
-import { onPing, onControl, onSignal } from "../event-bus.js";
-import { drainPrompts } from "../loop-prompts.js";
-import { presenceConnect, presenceDisconnect } from "../live-presence.js";
-import { badRequest } from "./_helpers.js";
-import { wakeFocusHidesTicket } from "../db/backlog-rules.js";
 
 export const pingsRouter = Router();
 
 pingsRouter.get("/pings", serveMethod("ping.list"));
 
 pingsRouter.get("/pings/count", serveMethod("ping.count"));
-
-/**
- * Server-Sent Events stream for live ping notifications (#B.148
- * phase A). Long-lived connection per consumer; the daemon flushes a
- * `ping` event whenever `insertPing` fires for this consumer. Clients
- * (claude-loop timer, autopoll daemon, UI badge) react instantly
- * without polling.
- *
- * Wire format:
- *   event: hello
- *   data: {"consumer_id":"…","unread":N}
- *
- *   event: ping
- *   data: {"ticket_id":N,"intent":"request"}       // ticket ping
- *   data: {"ticket_id":N,"comment_id":N,"comment_hashid":"abcdef","intent":"panic"}
- *                              // comment ping — ticket_id is the
- *                              // parent ticket; comment_hashid is the
- *                              // public ref (`#<hashid>`); comment_id
- *                              // is the numeric `_messages.id` (kept
- *                              // for backward-compat — prefer hashid);
- *                              // intent is the PARENT ticket's intent
- *                              // (panic / request / question / fyi),
- *                              // so consumers can scale UI/wake-phrase
- *                              // urgency
- *
- *   :keepalive 30s              // SSE comment, ignored by parsers
- *
- * Keepalive every 30s prevents proxies/UDS buffers from killing the
- * idle stream. Client tears down the connection on its end.
- */
-pingsRouter.get("/events", (req, res) => {
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders?.();
-    res.write(`event: hello\ndata: ${JSON.stringify({
-        consumer_id: consumer,
-        unread: unreadPingCount(consumer),
-    })}\n\n`);
-    const off = onPing(consumer, (payload) => {
-        // #2525 — a ping on a ticket outside the project's wake focus stays
-        // unread and is not pushed: the loop wakes on this push directly.
-        if (payload.ticket_id !== undefined && wakeFocusHidesTicket(consumer, payload.ticket_id)) return;
-        res.write(`event: ping\ndata: ${JSON.stringify(payload)}\n\n`);
-    });
-    // #442: out-of-band control events (e.g. remote hard-kill) ride the same
-    // live SSE the loop already holds. The loop's timer acts on them.
-    const offControl = onControl(consumer, (payload) => {
-        res.write(`event: control\ndata: ${JSON.stringify(payload)}\n\n`);
-    });
-    // #2255 — external signals ride the same stream. On (re)connect, replay the
-    // ones still waiting for this consumer, so a loop that was down misses none.
-    const offSignal = onSignal(consumer, (payload) => {
-        res.write(`event: signal\ndata: ${JSON.stringify(payload)}\n\n`);
-    });
-    for (const pending of listPendingSignals(consumer)) {
-        res.write(`event: signal\ndata: ${JSON.stringify(pending)}\n\n`);
-    }
-    // #451: flush any prompts spooled while this loop was offline — its control
-    // SSE is live now, so write them straight onto the stream (drained == sent).
-    for (const text of drainPrompts(consumer)) {
-        res.write(`event: control\ndata: ${JSON.stringify({ action: "prompt", text })}\n\n`);
-    }
-    const ka = setInterval(() => {
-        res.write(`:keepalive ${new Date().toISOString()}\n\n`);
-    }, 30_000);
-    // #395: this live SSE connection IS the loop's liveness signal. Register it
-    // → near-realtime running detection (open→running, close→running:false after
-    // grace), broadcast from live-presence. `source` (#395 jvdxez) distinguishes
-    // a UI-launched loop from a terminal one. Disconnect must run exactly once
-    // (req fires both 'close' and 'error') — guard the decrement.
-    const source = req.query.source === "ui" ? "ui" : "terminal";
-    presenceConnect(consumer, source);
-    let cleaned = false;
-    const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        clearInterval(ka);
-        off();
-        offControl();
-        offSignal();
-        presenceDisconnect(consumer);
-        try { res.end(); } catch { /* already closed */ }
-    };
-    req.on("close", cleanup);
-    req.on("error", cleanup);
-});
 
 pingsRouter.post("/pings/mark-read", serveMethod("ping.mark_read"));

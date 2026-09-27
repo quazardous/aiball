@@ -13,8 +13,8 @@
  *
  * The relay is a pure stream forward: every `/api/*` and `/uploads/*` request
  * is piped to the remote with the bearer token injected; the local caller's
- * `x-aiball-consumer` header is preserved. Streaming covers SSE (`/api/events`)
- * for free — the chunked response just pipes through. No local DB in this mode.
+ * `x-aiball-consumer` header is preserved; a streamed response pipes through.
+ * The bus is relayed on its own (#3071). No local DB in this mode.
  *
  * Resilience comes for free: when the remote is unreachable the proxy answers
  * 502, and the local AiballClient spools the write for replay (#389: 5xx/
@@ -557,8 +557,8 @@ function esc(s: string): string {
 }
 
 /**
- * #394 (8c7xut): in proxy mode the web UI is degraded (the live `/ws` socket
- * stays local) and would only mirror the remote — so instead of the SPA we
+ * #394 (8c7xut): in proxy mode the web UI would only mirror the remote — so
+ * instead of the SPA we
  * serve this tiny self-contained landing page: "this daemon is a proxy of
  * <url>", with a link to the real UI. No build artifact needed.
  */

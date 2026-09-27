@@ -51,7 +51,7 @@ export default defineConfig({
         port: 5173,
         proxy: {
             "/api": { target, changeOrigin: true },
-            "/ws": { target: wsTarget, ws: true, changeOrigin: true },
+            "/bus": { target: wsTarget, ws: true, changeOrigin: true },
         },
     },
     build: {

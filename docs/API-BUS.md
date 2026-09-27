@@ -121,7 +121,7 @@ events, and the same epoch), the answer is `replayed: true` with the missed
 | `user.<id>.pings` | `{ unread }` | a ping, as the event stream carries it, and `message`: what it points at (`id`, `hashid`, `kind`, `status`, `by_agent`, `created_at`, `project`, `ticket_id`, `title`, `decision`) | oneself |
 | `session.<name>.state` | a session without an agent, as `session.list` gives it, or `null` | `{ name, session }`: started, clients, exited, and `session: null` once stopped | humans and agents |
 | `agent.<id>.events` | `{ consumer_id, unread }` | `{ event, data }`: a `ping` (not one outside the wake focus), a loop `control` (`kill`, `prompt`, `restart_claude`), a `signal`; the waiting signals and spooled prompts come right after the answer; the subscription is the loop's liveness; never replayed | the loop itself |
-| `board.events` | `null` | every event the board broadcasts, `{ type, data }`, as the web UI read it on `/ws` | humans and agents |
+| `board.events` | `null` | every event the board broadcasts, `{ type, data }`, the feed the web UI patches its views from | humans and agents |
 
 `*` stands for one level: `agent.*.bar`, `agent.*.state` and
 `project.*.tickets` give every agent's or project's, including the ones
