@@ -41,6 +41,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
+import { PhaseReport } from "./phase-report.js";
 import { appendFileSync, existsSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -2599,10 +2600,21 @@ async function mainSse(): Promise<void> {
         });
     process.on("exit", () => parentWatchdog.stop());
     const loopBus = new LoopStateBus();
+    // #3157 — the phase goes to the daemon the moment it changes (and `boot`
+    // at once on a fresh start), not only on the heartbeat: an agent's state
+    // never shows the previous run's `idle` through a boot.
+    const phaseReport = new PhaseReport((phase) => {
+        void (async () => {
+            try {
+                await client().pushState(phase as Parameters<AiballClient["pushState"]>[0], humanIsTyping(sd!) || humanPresentHold(sd!), humanPresence(sd), loopCwd, loopProject);
+            } catch { /* daemon down or transient — the heartbeat retries */ }
+        })();
+    }, { fresh: !reattachMode });
     // #862 Slice 5 — `repaintAfkState` retiré ; BarRenderer reads
     // `afkStateChunkStr` chaque tick (1s safety + onIpcChanged events).
     loopBus.on("transition", (_prev, next) => {
         loopServer.pushView(next);
+        phaseReport.onPhase(next.phase);
         // #1054 S3 — view/pane state changed (pane watchers → recompute →
         // transition). Surface it on the kernel bus.
         getKernelBus().emit("pane:changed", { presence: next.presence });
@@ -2883,11 +2895,7 @@ async function mainSse(): Promise<void> {
         // render `human` vs autonomous `loop` while the heartbeat is fresh.
         // The signal is now derived from the AFK SM only (NOT AFK 10m/∞ =
         // human present) instead of the deprecated user-grace.
-        try {
-            const human = humanIsTyping(sd!) || humanPresentHold(sd!);
-            const humanWord = humanPresence(sd);
-            await client().pushState(phase, human, humanWord, loopCwd, loopProject);
-        } catch { /* daemon down or transient — next tick retries */ }
+        phaseReport.onHeartbeat(phase);
         // #636 david — pytest harnesses spawn the loop with CL_RUN_ONCE=1, wait
         // for the inspect JSON to settle, then exit. Break after the first full
         // heartbeat cycle. claude + tmux stay alive ; the test cleans them up.

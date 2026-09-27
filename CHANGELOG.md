@@ -166,6 +166,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An agent's state follows its loop at once: `boot` as soon as a loop starts,
+  then each change of phase, instead of the previous run's `idle` until the
+  next heartbeat, with a date from that run.
+
 - A setting that lives only in `.aiball.yaml` no longer looks editable: each
   managed setting says where it can be set (`sources`), and the web settings
   page shows only those it can write.
