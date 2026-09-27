@@ -59,6 +59,8 @@ export interface ProjectContext {
         mouse: boolean;
         /** #3044 — who draws the bar: `tmux` or `external`. */
         bar: "tmux" | "external";
+        /** #3135: where Claude runs, `host` or `tmux` (the start flags win). */
+        session: "host" | "tmux";
         afk_key: string;
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */

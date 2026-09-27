@@ -44,3 +44,13 @@ test("#3044 — claude_loop.bar: tmux by default, set globally, overridden per p
     global("claude_loop:\n  bar: web\n");
     assert.equal(loadConfig(project("b-junk", null)).claude_loop.bar, "tmux");
 });
+
+test("#3135 — claude_loop.session: host by default, set globally, overridden per project, junk ignored", () => {
+    global("");
+    assert.equal(loadConfig(project("s-default", null)).claude_loop.session, "host");
+    global("claude_loop:\n  session: tmux\n");
+    assert.equal(loadConfig(project("s-global", "consumer:\n  project: s-global\n")).claude_loop.session, "tmux");
+    assert.equal(loadConfig(project("s-override", "claude_loop:\n  session: host\n")).claude_loop.session, "host");
+    global("claude_loop:\n  session: screen\n");
+    assert.equal(loadConfig(project("s-junk", "claude_loop:\n  session: nope\n")).claude_loop.session, "host");
+});

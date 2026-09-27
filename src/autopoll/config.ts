@@ -284,6 +284,12 @@ export interface AiballConfig {
          *  overridden per project; `start --bar` wins; `claude-loop bar`
          *  switches a running loop. */
         bar: BarHost;
+        /** #3135: where a loop's Claude runs — `host` (the daemon's session
+         *  host, the default) or `tmux` (a tmux session, with the loop's bar in
+         *  its status line). Global `claude_loop.session`, overridden per
+         *  project; `start --host` / `--tmux` wins; `restart` keeps a loop where
+         *  it runs unless one of them says otherwise. */
+        session: LoopSession;
         /** #351: key/combo that flags the human AFK (→ immediate redirect).
          *  VS Code notation: `+` joins modifiers, a space = a 2-combo
          *  sequence (e.g. "esc esc", "ctrl+a"). CL_AFK_KEY. */
@@ -474,6 +480,7 @@ const DEFAULTS: AiballConfig = {
         esc_takeover: true,
         mouse: true,
         bar: "tmux",
+        session: "host",
         // #351 / #381: AFK = a single ATOMIC combo that TOGGLES away/back —
         // #381 (david s4r9n8) dropped the 2-press timing sequence. Default
         // `f9` (david 9garjb) — the previous `alt+esc` was confirmed
@@ -567,6 +574,27 @@ function pickColors(block: unknown): Partial<AiballConfig["colors"]> {
 }
 
 /** Read a `colors:` block from a YAML file (the global config). Missing/malformed → {}. */
+/** #3135 — where a loop's Claude runs. */
+export type LoopSession = "host" | "tmux";
+
+/** #3135 — a `claude_loop.session` value: `host` or `tmux`; anything else, undefined. */
+export function parseLoopSession(value: unknown): LoopSession | undefined {
+    const v = typeof value === "string" ? value.trim().toLowerCase() : value;
+    return v === "host" || v === "tmux" ? v : undefined;
+}
+
+/** #3135 — `claude_loop.session` from the global config file; undefined when unset. */
+function readGlobalLoopSession(path: string): LoopSession | undefined {
+    if (!existsSync(path)) return undefined;
+    try {
+        const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;
+        const cl = raw.claude_loop;
+        return cl && typeof cl === "object" ? parseLoopSession((cl as Record<string, unknown>).session) : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
 /** #3044 — a `claude_loop.bar` value: `tmux` or `external`; anything else, undefined. */
 export function parseBarHost(value: unknown): BarHost | undefined {
     const v = typeof value === "string" ? value.trim().toLowerCase() : value;
@@ -773,6 +801,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     // #3044 — `claude_loop.bar`, same layers.
     const globalBar = readGlobalLoopBar(globalConfigPath());
     if (globalBar !== undefined) cfg.claude_loop.bar = globalBar;
+    // #3135 — `claude_loop.session`, same layers.
+    const globalSession = readGlobalLoopSession(globalConfigPath());
+    if (globalSession !== undefined) cfg.claude_loop.session = globalSession;
 
     // #160 Phase 1 — upstream bindings GLOBAL layer. Read AVANT le per-project
     // pour que celui-ci puisse override. Format YAML attendu (per-project map) :
@@ -864,6 +895,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #3044 — tmux / external; anything else keeps the global value.
             const bar = parseBarHost(cl.bar);
             if (bar !== undefined) cfg.claude_loop.bar = bar;
+            // #3135 — host / tmux; anything else keeps the global value.
+            const session = parseLoopSession(cl.session);
+            if (session !== undefined) cfg.claude_loop.session = session;
             // #351: AFK combo.
             if (typeof cl.afk_key === "string" && cl.afk_key.trim()) {
                 cfg.claude_loop.afk_key = cl.afk_key.trim();

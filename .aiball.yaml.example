@@ -125,6 +125,14 @@ claude_loop:
   # `claude-loop bar external|tmux` switches a running loop.
   bar: tmux
 
+  # Where the loop's Claude runs. `host`: the aiball daemon's session host
+  # (no tmux; attach with tvty or `claude-loop attach`). `tmux`: a tmux
+  # session, the loop's bar in its status line, for a workflow built on tmux.
+  # Also settable in the global config; `claude-loop start --host|--tmux`
+  # wins, and `restart` keeps a loop where it runs unless one of them says
+  # otherwise. tvty's start follows it too.
+  session: host
+
   # AFK key — F9 cycles 3 states: `AFK` (autonomous loop, dim) →
   # `NOT AFK 10m` (jaune countdown) → `NOT AFK ∞` (rouge indefinite)
   # → back to `AFK`. Typing also arms / refreshes the 10m hold

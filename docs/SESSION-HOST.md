@@ -112,7 +112,7 @@ host.
 
 | Method | Params | Result, or refusal |
 |---|---|---|
-| `session.start` | `{ cwd, project?, agent?, crew?, size?, env? }` for an agent's loop (with neither `agent` nor `crew`, the folder decides, as `claude-loop start` does), or `{ name, argv, cwd, size?, env? }` for a session without an agent | the session: `{ agent \| name, host: "daemon", attach: { socket } }`; `HOST_BUSY` when the agent (or the name) runs elsewhere |
+| `session.start` | `{ cwd, project?, agent?, crew?, size?, env?, mode? }` for an agent's loop (with neither `agent` nor `crew`, the folder decides, as `claude-loop start` does; `mode` `host` or `tmux`, the configured `claude_loop.session` by default), or `{ name, argv, cwd, size?, env? }` for a session without an agent | the session: `{ agent \| name, host: "daemon", attach: { socket } }`, or for a loop in tmux `{ agent, host: "tmux", tmux }`; `HOST_BUSY` when the agent (or the name) runs elsewhere |
 | `session.host` | `{ agent, argv, cwd, size?, env? }` — local callers only | `claude-loop start --host` runs the command it prepared in the agent's session; the answer adds `control`, the socket its kernel drives |
 | `session.stop` | `{ agent }` or `{ name }` | `{ agent \| name, exit_code }`: the command stopped, the host gone |
 | `session.list` | — | every session on this machine: `{ agent?, name?, argv, cwd, host, attach: { socket }, clients }` |

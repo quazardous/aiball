@@ -3170,7 +3170,7 @@
     },
     {
       "name": "session.start",
-      "description": "Start a session on this machine, in `cwd`. With `name`: a session without an agent running `argv`. Without: an agent's loop, started as `claude-loop start` would (`agent`, or `crew` with a crew agent's name, or neither and the folder decides), on this daemon's host; the answer names the agent. The login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs.",
+      "description": "Start a session on this machine, in `cwd`. With `name`: a session without an agent running `argv`. Without: an agent's loop, started as `claude-loop start` would (`agent`, or `crew` with a crew agent's name, or neither and the folder decides); the answer names the agent. The loop runs where `mode` says — `host` (this daemon's session host) or `tmux` (a tmux session, the loop's bar in its status line) — or, without it, where the project's `claude_loop.session` says (host by default). The login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -3217,6 +3217,17 @@
               "type": "string"
             },
             "additionalProperties": {}
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "host",
+              "tmux"
+            ]
           }
         },
         {

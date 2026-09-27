@@ -92,6 +92,14 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **`claude-loop start` runs Claude on the daemon's session host by default**,
+  no longer in tmux. `claude_loop.session: tmux` (in the global config or a
+  project's `.aiball.yaml`) or `start --tmux` keeps the tmux way, with the
+  loop's bar in the tmux status line. A restart keeps a loop where it runs;
+  `restart --tmux` moves a host loop back to tmux. Starting an agent from tvty
+  follows the same setting, and an agent's state says which mode its loop runs
+  in.
+
 - An agent's counters (open, in its court, backlog, unread pings) are computed
   by the daemon, for every agent, when something that moves them happens, and
   come with the agent's state: a client shows them for an agent whose loop is

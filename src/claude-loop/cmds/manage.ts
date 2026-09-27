@@ -493,7 +493,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
  * (`plate.pings_path` points into the state dir we're about to rm), so the
  * relaunch falls back to the default ping phrases.
  */
-export function restartStartArgs(name: string, plate: Plate, opts: { resume?: boolean; host?: boolean } = {}): string[] {
+export function restartStartArgs(name: string, plate: Plate, opts: { resume?: boolean; host?: boolean; tmux?: boolean } = {}): string[] {
     // #1576 — the launch identity, top-level, independent of `remote`. Falls
     // back to the remote block for plates written before the top-level fields
     // existed, so an older remote loop keeps replaying what it used to.
@@ -519,13 +519,16 @@ export function restartStartArgs(name: string, plate: Plate, opts: { resume?: bo
         "--no-attach",
         // #3074 — a restart for an update resumes the conversation.
         ...(opts.resume ? ["--resume"] : []),
-        // #3066 — onto the session host when asked; a loop already there stays.
-        ...(opts.host || plate.host_agent ? ["--host"] : []),
+        // #3066, #3135 — a loop stays where it runs (host or tmux, said
+        // explicitly: the configured default must not move it), unless
+        // --host or --tmux moves it.
+        (opts.host ? true : opts.tmux ? false : !!plate.host_agent) ? "--host" : "--tmux",
         ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),
     ];
 }
 
-export function cmdRestart(name: string, opts: { resume?: boolean; host?: boolean } = {}): void {
+export function cmdRestart(name: string, opts: { resume?: boolean; host?: boolean; tmux?: boolean } = {}): void {
+    if (opts.host && opts.tmux) die("--host or --tmux, not both");
     const sd = stateDirFor(name);
     if (!existsSync(platePath(sd))) {
         die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);

@@ -13,6 +13,9 @@ import { hostDirFor, SESSION_NAME } from "../../sessions/hosts.js";
 import { sessionEnv } from "../../sessions/env.js";
 import { listSessionViews, sessionFor, startSession, stopSession, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
+import { loadConfig } from "../../autopoll/config.js";
+import { listConsumers } from "../../db/consumers.js";
+import { tmuxSessionView } from "../../sessions/registry.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
@@ -26,9 +29,11 @@ const size = z.object({ rows: z.number().int().min(1).max(1000), cols: z.number(
  * Start a session on this machine, in `cwd`. With `name`: a session without an
  * agent running `argv`. Without: an agent's loop, started as `claude-loop
  * start` would (`agent`, or `crew` with a crew agent's name, or neither and
- * the folder decides), on this daemon's host; the answer names the agent. The
- * login environment and a local caller's allow-listed `env`. HOST_BUSY when it
- * already runs.
+ * the folder decides); the answer names the agent. The loop runs where `mode`
+ * says — `host` (this daemon's session host) or `tmux` (a tmux session, the
+ * loop's bar in its status line) — or, without it, where the project's
+ * `claude_loop.session` says (host by default). The login environment and a
+ * local caller's allow-listed `env`. HOST_BUSY when it already runs.
  */
 defineMethod({
     name: "session.start",
@@ -42,8 +47,11 @@ defineMethod({
         crew: z.string().regex(SESSION_NAME).optional(),
         size,
         env: z.record(z.string(), z.unknown()).optional(),
+        /** #3135 — an agent's loop: on the session host or in tmux; the configured mode by default. */
+        mode: z.enum(["host", "tmux"]).optional(),
     }),
     run: async (caller, p) => {
+        if (p.name && p.mode) throw new Refusal(400, "mode is an agent loop's: a named session runs on the host");
         if (p.name && (p.agent || p.crew)) throw new Refusal(400, "name is a session without an agent: not with agent or crew");
         if (p.agent && p.crew) throw new Refusal(400, "agent or crew, not both");
         if (!p.name) {
@@ -58,9 +66,12 @@ defineMethod({
             // state) as for tmux, then asks back for the host (session.host)
             // and starts the kernel on it: one way to prepare Claude, not two.
             const env = sessionEnv(p.env, caller.transport === "uds");
+            // #3135 — the caller's mode, else the project's configured one.
+            const mode = p.mode ?? loadConfig(p.cwd).claude_loop.session;
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
+            const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
             const child = spawn(CLAUDE_LOOP_BIN, [
-                "start", "--host", "--no-attach", "--cwd", p.cwd,
+                "start", mode === "host" ? "--host" : "--tmux", "--no-attach", "--cwd", p.cwd,
                 ...(p.agent ? ["--agent", p.agent] : []),
                 ...(p.crew ? ["--crew", p.crew] : []),
                 ...(p.project ? ["--project", p.project] : []),
@@ -68,13 +79,22 @@ defineMethod({
             child.unref();
             const deadline = Date.now() + 30_000;
             for (;;) {
-                // The named agent's session; or, when the folder decides, the new one started here.
-                const view = named
-                    ? listSessionViews().find((v) => v.agent === named)
-                    : listSessionViews().find((v) => v.agent && !before.has(v.agent) && v.cwd === p.cwd);
-                if (view) return view;
+                if (mode === "host") {
+                    // The named agent's session; or, when the folder decides, the new one started here.
+                    const view = named
+                        ? listSessionViews().find((v) => v.agent === named)
+                        : listSessionViews().find((v) => v.agent && !before.has(v.agent) && v.cwd === p.cwd);
+                    if (view) return view;
+                } else {
+                    // In tmux, the loop is up once its kernel is present.
+                    const agent = named
+                        ? (isPresent(named) ? named : null)
+                        : listConsumers().find((c) => c.cwd === p.cwd && isPresent(c.consumer_id) && !present.has(c.consumer_id))?.consumer_id ?? null;
+                    const view = agent ? tmuxSessionView(agent) : null;
+                    if (view) return view;
+                }
                 if (child.exitCode !== null && child.exitCode !== 0) {
-                    throw new Refusal(500, `claude-loop start --host exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
+                    throw new Refusal(500, `claude-loop start --${mode} exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
                 }
                 if (Date.now() > deadline) throw new Refusal(504, "the agent's session did not come up in 30 s", ERROR_CODES.INTERNAL);
                 await new Promise((r) => setTimeout(r, 200));

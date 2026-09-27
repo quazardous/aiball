@@ -68,7 +68,7 @@ echo "[agent] starting claude-loop '${NAME}' (scenario=${SCENARIO}) → ${DAEMON
 # The default empty check-cmd is the internal/SSE mode (`mainSse`) that the real
 # loop runs — that's the only mode worth full-stack testing.
 /app/bin/claude-loop start "$NAME" \
-    --interval 5 --no-wait --no-attach \
+    --tmux --interval 5 --no-wait --no-attach \
     --aiball-url "$DAEMON_URL" --aiball-token "$TOKEN" \
     --consumer "$CONSUMER" --project "$PROJECT"
 

@@ -232,7 +232,8 @@ interface StartOpts {
     wait?: boolean;
     /** Bypass the live-loop conflict check (#B.154). */
     force?: boolean;
-    /** #3066: Claude on the daemon's session host, not in tmux. */
+    /** #3066, #3135: true = the daemon's session host (`--host`), false = tmux
+     *  (`--tmux`), undefined = the configured `claude_loop.session`. */
     host?: boolean;
     /** #3017: `--mouse on|off`, over `claude_loop.mouse`. Undefined = the config. */
     mouse?: boolean;
@@ -571,6 +572,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         opts.project ??= localRemote.project;
     }
     const ctx = resolveProjectContext(startCwd ? { cwd: startCwd } : {});
+    // #3135 — where Claude runs: the flag, else the configured mode. A loop on a
+    // remote daemon has no host here (the session host is the local daemon's).
+    const onHost = opts.host ?? (ctx.claude_loop.session === "host" && !opts.aiballUrl);
     // #390: explicit flags override the resolved identity (the loop's
     // consumer/project are passed at launch, independent of any local
     // .aiball.yaml — David's "consumer_id pas propre au remote").
@@ -840,7 +844,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         role: opts.role ?? null,
         consumer: opts.consumer ?? null,
         project: opts.project ?? null,
-        host_agent: opts.host ? ctx.agent : null,
+        host_agent: onHost ? ctx.agent : null,
     };
     writePlate(sd, plate);
 
@@ -1202,7 +1206,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // tmux, no PTY proxy); the daemon runs the same prepared command there,
     // with CL_HOST_CONTROL in its environment for Claude's hooks, and the
     // kernel below drives the host through that socket.
-    if (opts.host) {
+    if (onHost) {
         const hostCmd = `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; source ${shQuote(trapPath)}; ${claudeCmd}`;
         const cols = process.stdout.columns, rows = process.stdout.rows;
         let hosted: { control: string; attach: { socket: string | null } };
@@ -2155,7 +2159,8 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--pings <yaml>", "Path to custom ping-phrases YAML")
         // Commander convention: `--no-foo` flips foo to false.
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
-        .option("--host", "#3066: run Claude on the aiball daemon's session host instead of tmux (docs/SESSION-HOST.md). Attach with tvty; the bar is data only.")
+        .option("--host", "#3066: run Claude on the aiball daemon's session host (docs/SESSION-HOST.md), whatever claude_loop.session says. Attach with tvty or 'claude-loop attach'; the bar is data only.")
+        .option("--tmux", "#3135: run Claude in a tmux session, with the loop's bar in its status line, whatever claude_loop.session says (host by default).")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
         .option("--no-resume", "#616: don't auto-inject `--resume` even when `.aiball.yaml claude.always_resume: true` says to. Per-invocation opt-out. Equivalent to `claude-loop start -- --no-resume`.")
         // #639 (david `uqdava`): explicit `--resume` flag forces
@@ -2216,7 +2221,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
-            attach: boolean; startupPing: boolean; force?: boolean; host?: boolean;
+            attach: boolean; startupPing: boolean; force?: boolean; host?: boolean; tmux?: boolean;
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             role?: string;
@@ -2239,7 +2244,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 noStartupPing: opts.startupPing === false,
                 runOnce: opts.once === true,
                 force: opts.force === true,
-                host: opts.host === true,
+                host: opts.host === true ? true : opts.tmux === true ? false : undefined,
                 mouse: opts.mouse === "on" ? true : opts.mouse === "off" ? false : undefined,
                 bar: isBarHost(opts.bar) ? opts.bar : undefined,
                 resumeMode: opts.resumeMode,
@@ -2385,8 +2390,9 @@ async function main(): Promise<void> {
     program.command("restart [name]")
         .description("HARD restart (#388): kill claude + the loop entirely, then relaunch fresh with the same start config (from the plate). Unlike `reload` (timer-only), this stops + starts. Detached + no-attach — reconnect with `attach`. Also the SIGHUP action: `kill -HUP <timer.pid>` self-restarts. Name optional — defaults to the current-cwd loop.")
         .option("--resume", "#3074: resume Claude's conversation on the relaunch, whatever the loop's start config says (a restart for an update).")
-        .option("--host", "#3066: relaunch on the aiball daemon's session host instead of tmux (with --resume: move a loop onto the host, its conversation kept). A loop already on the host stays there.")
-        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true, host: opts.host === true }));
+        .option("--host", "#3066: relaunch on the aiball daemon's session host (with --resume: move a tmux loop onto the host, its conversation kept). Without --host or --tmux, a loop stays where it runs.")
+        .option("--tmux", "#3135: relaunch in tmux (with --resume: move a loop off the host, its conversation kept).")
+        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true, host: opts.host === true, tmux: opts.tmux === true }));
     program.command("stop [name]")
         .description("Clean-STOP a loop: kill claude/tmux + exit the timer, but KEEP the state dir (loop shows dead, stays restart/prune-able — `rm` is the halt+delete). Also the SIGTERM action: `kill -TERM <timer.pid>` (#442 — convention HUP=restart, USR2=reload, TERM=stop). Remotely via the daemon: the Consumers-page stop button. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdStop(name ?? resolveCurrentLoopName()));

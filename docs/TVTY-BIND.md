@@ -125,13 +125,19 @@ foresees, is for later.
 ## Loops in claude-loop
 
 claude-loop's own proxy does not serve `attach.sock`: a loop gets its socket
-by moving onto the session host, and claude-loop goes away in the end.
+by running on the session host. Where a loop runs is a setting,
+`claude_loop.session` (`host` by default, `tmux` for a workflow built on tmux;
+global, then per project); tmux stays a choice, not a leftover.
 
-- A new loop: `claude-loop start --host`, or `session.start` (tvty's
-  "+ session").
-- A running one: `claude-loop restart --resume <loop> --host`. Claude stops
-  when idle and comes back on the host with the same conversation; the loop
-  stays there across later restarts, and `claude-loop rm` stops its session.
+- A new loop: `claude-loop start` (the configured mode; `--host` or `--tmux`
+  forces one), or `session.start` (tvty's "+ session"; the configured mode, or
+  its `mode`).
+- A running one moves with `claude-loop restart --resume <loop> --host` (or
+  `--tmux` back). Claude stops when idle and comes back with the same
+  conversation; a loop stays where it runs across later restarts, and
+  `claude-loop rm` stops it.
+- An agent's state says where its loop runs: `session.host` is `daemon` (on the
+  host, with its `attach.socket`) or `tmux` (with the `tmux` session name).
 
 Until then:
 

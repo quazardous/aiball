@@ -57,6 +57,8 @@ test("#1576 a plate written before the fix replays exactly what it used to", () 
         "--check-cmd", "aiball pings-count -q",
         "--force",
         "--no-attach",
+        // #3135 — said explicitly, so the host default does not move it.
+        "--tmux",
     ]);
 });
 
@@ -104,4 +106,13 @@ test("#3066 --host moves a loop onto the session host, and a loop already there 
     assert.ok(moved.indexOf("--host") < moved.indexOf("--") || !moved.includes("--"), "a start flag, before Claude's own arguments");
     const withArgs = restartStartArgs("n", plate({ claude_args: ["--model", "x"] }), { host: true });
     assert.ok(withArgs.indexOf("--host") < withArgs.indexOf("--"), "never passed to Claude");
+});
+
+test("#3135 a loop stays where it runs, whatever the configured default; --tmux moves it back", () => {
+    const tmux = restartStartArgs("n", plate());
+    assert.ok(tmux.includes("--tmux") && !tmux.includes("--host"), "a tmux loop says so: a host default must not move it");
+    const back = restartStartArgs("n", plate({ host_agent: "worker" }), { resume: true, tmux: true });
+    assert.ok(back.includes("--tmux") && !back.includes("--host") && back.includes("--resume"), "moved off the host, its conversation kept");
+    const withArgs = restartStartArgs("n", plate({ claude_args: ["--model", "x"] }));
+    assert.ok(withArgs.indexOf("--tmux") < withArgs.indexOf("--"), "never passed to Claude");
 });

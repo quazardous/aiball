@@ -145,6 +145,8 @@ def loop_runner(tmp_path: Path) -> Callable[..., LoopHandle]:
         env["CL_CLAUDE_CMD"] = f"{BIN_FAKE_CLAUDE} --probe-mode {scenario}"
         cmd = [
             str(BIN_CLAUDE_LOOP), "start", name,
+            # These scenarios read a tmux pane: tmux, whatever the default.
+            "--tmux",
             "--once",
             "--interval", str(interval_s),
             "--check-cmd", "false",

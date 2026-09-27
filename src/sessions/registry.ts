@@ -7,6 +7,10 @@
 import { discoverHosts, startHost, type HostLink, type StartHost } from "./hosts.js";
 import { broadcast } from "../ws.js";
 import { publish } from "../bus/subscriptions.js";
+import { getConsumer } from "../db/consumers.js";
+import { isPresent } from "../live-presence.js";
+import { resolveLoopName } from "../pane.js";
+import { tmuxName } from "../claude-loop/state.js";
 
 const byKey = new Map<string, HostLink>();
 
@@ -21,6 +25,29 @@ export interface SessionView {
     running: boolean;
     clients: number;
     attach: { socket: string };
+}
+
+/**
+ * #3135 — an agent's loop running in tmux, on this machine: what a client needs
+ * to tell it from a host session and reach it (`claude-loop attach`, or tmux
+ * itself). Null when no local loop answers for it.
+ */
+export interface TmuxSessionView {
+    agent: string;
+    name: null;
+    host: "tmux";
+    cwd: string;
+    running: true;
+    /** The tmux session the loop runs in. */
+    tmux: string;
+}
+
+export function tmuxSessionView(agent: string): TmuxSessionView | null {
+    if (!isPresent(agent) || byKey.has(keyOf({ agent }))) return null; // not running, or on the host: its own view
+    const c = getConsumer(agent);
+    if (!c?.cwd || c.last_seen_via === "node") return null;
+    const loop = resolveLoopName(c.cwd);
+    return loop ? { agent, name: null, host: "tmux", cwd: c.cwd, running: true, tmux: tmuxName(loop) } : null;
 }
 
 export function viewOf(link: HostLink): SessionView {
