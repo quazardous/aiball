@@ -1,7 +1,7 @@
 name: a long external wait after a step
 # Case 30 (pin down). The lead posts a step ("waiting for the test suite, about
 # 16 minutes") and nothing else. The step lifts the sink; the wake that follows
-# sinks the ticket for 5 minutes only (`tickets.sink_then_continue_minutes`), so
+# sinks the ticket for 5 minutes only (`tickets.backlog.after_step`), so
 # the ticket is named again every 5 minutes while the suite runs. Waiting on a
 # machine has no gesture of its own: a dated wait was not kept.
 steps:

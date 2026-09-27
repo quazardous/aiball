@@ -5,7 +5,7 @@
  *   is refused with how to fill it; from an older client it lands with a
  *   warning to reconnect (nothing blocked until it does);
  * - `null`, `"none"` and `[]` say "no commit" and are accepted;
- * - humans, close and reopen are exempt; `tickets.require_commits: false` lifts it.
+ * - humans, close and reopen are exempt; `tickets.rules.require_commits: false` lifts it.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -103,7 +103,7 @@ test("humans, close and reopen are exempt; the project setting lifts the rule", 
     createProject({ name: P2 });
     upsertSubscription("worker", P2, "owner");
     const t2 = submitMessage({ project: P2, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
-    setConfigOverride(P2, "tickets.require_commits", false);
+    setConfigOverride(P2, "tickets.rules.require_commits", false);
     const off = await post({}, { project: P2, ticket: t2 });
     assert.equal(off.status, 201, JSON.stringify(off.json));
     assert.equal(off.json.warnings, undefined);

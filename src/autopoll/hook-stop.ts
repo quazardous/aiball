@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     let maxId = 0;
     if (hasPings) {
         try {
-            const limit = Math.max(1, cfg.autopoll.include_recent_tickets);
+            const limit = Math.max(1, cfg.autopoll.recent_tickets);
             const r = (await client.listPings({ unreadOnly: true, limit })) as {
                 pings: Array<{
                     message_id: number;
@@ -193,7 +193,7 @@ async function main(): Promise<void> {
             for (const p of pings) {
                 if (typeof p.message_id === "number" && p.message_id > maxId) maxId = p.message_id;
             }
-            if (cfg.autopoll.include_recent_tickets > 0) {
+            if (cfg.autopoll.recent_tickets > 0) {
                 recent = pings.map((p) => ({
                     id: p.message.ticket_id ?? p.message.id,
                     title: p.message.title,
@@ -214,8 +214,8 @@ async function main(): Promise<void> {
     const newPing = maxId > state.last_max_ping_id;
     const newOpenTicket = cfg.autopoll.backlog && openCount > state.last_open_count;
     const throttleElapsed =
-        cfg.autopoll.throttle_seconds === 0 ||
-        nowSec - state.last_notified_at >= cfg.autopoll.throttle_seconds;
+        cfg.autopoll.throttle === 0 ||
+        nowSec - state.last_notified_at >= cfg.autopoll.throttle;
     let shouldNotify = false;
     if (newPing || newOpenTicket) {
         shouldNotify = true;

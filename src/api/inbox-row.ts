@@ -96,13 +96,14 @@ export interface InboxRowContext {
     claimHeldUntil?: Map<number, number | null>;
 }
 
-/** #2308 — `tickets.step_stale_hours`, read once per project for a whole page of rows. */
+/** #2308 — `tickets.steps.stale`, read once per project for a whole page of rows. */
 function stepStaleHoursByProject(): (project: string) => number {
     const byProject = new Map<string, number>();
     return (project) => {
         let hours = byProject.get(project);
         if (hours === undefined) {
-            hours = Number(getConfig("tickets.step_stale_hours", project));
+            // #3138 — a duration, in seconds; the row counts hours.
+            hours = Number(getConfig("tickets.steps.stale", project)) / 3600;
             if (!Number.isFinite(hours)) hours = 0;
             byProject.set(project, hours);
         }
@@ -269,7 +270,7 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
             return ticketDecision(t, null) && agg.commentCount === 0;
         })(),
         /** #2308 — a step (`then: continue`) nothing has followed for
-            `tickets.step_stale_hours`: the work it announced went quiet. */
+            `tickets.steps.stale`: the work it announced went quiet. */
         /** #2327 — the ticket’s last word is a step (`then: continue`); the
             list shows a discreet blue check. */
         latest_is_step: live && agg.lastStepId > 0 && agg.lastStepId === agg.lastSpeakerId,

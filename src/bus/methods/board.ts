@@ -45,7 +45,8 @@ import { purgeSeenPingsForClosedTickets } from "../../db/pings.js";
 import { setProjectWakeFocus } from "../../db/settings.js";
 import { listTicketIdsInProject } from "../../db/tickets.js";
 import { parseFocusTickets } from "../../wake-focus.js";
-import { allowsGlobalOverride, allowsProjectOverride, coerceConfigValue, getSchemaEntry } from "../../config/schema.js";
+import { formatDuration } from "../../config/duration.js";
+import { allowsGlobalOverride, allowsProjectOverride, coerceConfigValue, getSchemaEntry, renamedFrom } from "../../config/schema.js";
 import { AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "../../paths.js";
 import { AIBALL_VERSION } from "../../version.js";
 import { broadcast } from "../../ws.js";
@@ -251,7 +252,8 @@ defineMethod({
  * from `.aiball.yaml` would take an override the runtime never reads.
  */
 function editableEntry(key: string) {
-    const entry = getSchemaEntry(key);
+    // #3138 — an old name, for one version, stands for its renamed key.
+    const entry = getSchemaEntry(key) ?? renamedFrom(key)?.entry;
     if (!entry) throw new Refusal(404, `unknown config key '${key}'`);
     if (!(entry.sources ?? ["db"]).includes("db")) {
         throw new Refusal(400, `key '${key}' is file-sourced (.aiball.yaml) — not editable via the DB config manager`);
@@ -292,23 +294,27 @@ defineMethod({
     params: z.object({ key: z.string(), value: z.unknown().optional(), project: z.unknown().optional() }),
     run: (caller, p) => {
         const entry = editableEntry(p.key);
+        // #3138 — under an old name, a number is in the old unit: converted.
+        const renamed = renamedFrom(p.key);
+        const raw = renamed && typeof p.value === "number" ? Math.round(p.value * renamed.factor) : p.value;
         const proj = typeof p.project === "string" ? p.project.trim() : ""; // '' is the board's layer
         if (proj === "" && !allowsGlobalOverride(entry)) throw new Refusal(400, `key '${p.key}' has no global value (scope=${entry.scope}) — set it per project`);
         if (proj !== "" && !allowsProjectOverride(entry)) throw new Refusal(400, `key '${p.key}' is not project-overridable (scope=${entry.scope})`);
         const me = consumerIdOf(caller);
         if (entry.protected && !isHuman(me)) throw new Refusal(403, `config key '${p.key}' is protected (moderator-only)`, ERROR_CODES.MODERATOR_ONLY);
-        const value = coerceConfigValue(entry, p.value);
+        const value = coerceConfigValue(entry, raw);
         if (value === null) {
             throw new Refusal(400, `invalid value for '${p.key}' (type ${entry.type}${entry.options ? `, one of ${entry.options.join("|")}` : ""})`);
         }
         // #3137 — a number within its range: the one a client offers is the one refused.
         if (typeof value === "number" && ((entry.min !== undefined && value < entry.min) || (entry.max !== undefined && value > entry.max))) {
-            throw new Refusal(400, `'${p.key}' takes ${entry.min ?? "-∞"} to ${entry.max ?? "∞"}${entry.unit ? ` ${entry.unit}` : ""}, not ${value}`,
+            const shown = (n: number | undefined, none: string) => (n === undefined ? none : entry.type === "duration" ? formatDuration(n) : String(n));
+            throw new Refusal(400, `'${entry.key}' takes ${shown(entry.min, "-∞")} to ${shown(entry.max, "∞")}${entry.unit ? ` ${entry.unit}` : ""}, not ${shown(value, "")}`,
                 ERROR_CODES.CONFIG_OUT_OF_RANGE, { min: entry.min ?? null, max: entry.max ?? null, step: entry.step ?? null, unit: entry.unit ?? null });
         }
-        setConfigOverride(proj, p.key, value, me);
-        publish("config.changed", { op: "set", key: p.key, project: proj || null, value, by: me });
-        return { key: p.key, project: proj || null, value };
+        setConfigOverride(proj, entry.key, value, me);
+        publish("config.changed", { op: "set", key: entry.key, project: proj || null, value, by: me });
+        return { key: entry.key, project: proj || null, value, ...(renamed ? { renamed_from: p.key } : {}) };
     },
 });
 
@@ -322,9 +328,9 @@ defineMethod({
         if (entry.protected && !isHuman(consumerIdOf(caller))) {
             throw new Refusal(403, `config key '${p.key}' is protected (moderator-only)`, ERROR_CODES.MODERATOR_ONLY);
         }
-        deleteConfigOverride(p.project ?? "", p.key);
-        publish("config.changed", { op: "clear", key: p.key, project: p.project || null, value: null, by: consumerIdOf(caller) });
-        return { key: p.key, project: p.project || null, cleared: true };
+        deleteConfigOverride(p.project ?? "", entry.key);
+        publish("config.changed", { op: "clear", key: entry.key, project: p.project || null, value: null, by: consumerIdOf(caller) });
+        return { key: entry.key, project: p.project || null, cleared: true };
     },
 });
 

@@ -8,6 +8,7 @@
 import { computed, ref, watch } from "vue";
 import Select from "primevue/select";
 import InputText from "primevue/inputtext";
+import { formatDuration } from "../lib/duration";
 import Button from "primevue/button";
 import { api, type ConfigPrimitive, type ManagedConfigRow } from "../lib/api";
 import { useLoader } from "../lib/loader";
@@ -41,8 +42,13 @@ function hasOverride(r: ManagedConfigRow): boolean {
 }
 function inheritLabel(r: ManagedConfigRow): string {
     return isGlobalView.value
-        ? `Default (${r.default})`
-        : `Use global (currently: ${inheritedValue(r)})`;
+        ? `Default (${shown(r, r.default)})`
+        : `Use global (currently: ${shown(r, inheritedValue(r))})`;
+}
+/** A value as the page shows it: a duration in its notation, the rest as is. */
+function shown(r: ManagedConfigRow, v: ConfigPrimitive | null | undefined): string {
+    if (v === null || v === undefined) return "";
+    return r.type === "duration" && typeof v === "number" ? formatDuration(v) : String(v);
 }
 function selectModel(r: ManagedConfigRow): ConfigPrimitive | string {
     const v = layerValue(r);
@@ -66,7 +72,7 @@ const { loading, load } = useLoader(async () => {
     const d: Record<string, string> = {};
     for (const row of r.config) {
         const lv = isGlobalView.value ? row.global : row.project;
-        d[row.key] = lv === null || lv === undefined ? "" : String(lv);
+        d[row.key] = lv === null || lv === undefined ? "" : shown(row, lv);
     }
     drafts.value = d;
 }, { error, mountLoad: true });
@@ -133,7 +139,7 @@ watch(() => props.project, () => load());
                         <template v-else>
                             <InputText
                                 v-model="drafts[r.key]"
-                                :placeholder="String(inheritedValue(r))"
+                                :placeholder="shown(r, inheritedValue(r))"
                                 class="managed-config__input"
                                 @keyup.enter="saveText(r)"
                             />

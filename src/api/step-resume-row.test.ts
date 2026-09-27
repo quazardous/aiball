@@ -34,10 +34,10 @@ const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2456-w
 createProject({ name: P });
 // #2640 — this file is about the resume time, not the wait credit: enough credit
 // that a 90-minute step is not capped to the 60 an agent starts with.
-(await import("../db/config-overrides.js")).setConfigOverride(P, "tickets.wait_credit_start_minutes", 600);
+(await import("../db/config-overrides.js")).setConfigOverride(P, "tickets.wait_credit.start", 36000);
 upsertSubscription("worker", P, "owner");
 // A step stalls after one hour here — shorter than the wait declared below.
-setConfigOverride(P, "tickets.step_stale_hours", 1);
+setConfigOverride(P, "tickets.steps.stale", 3600);
 
 const server = createApp().listen(0);
 await new Promise<void>((r) => server.once("listening", () => r()));

@@ -150,7 +150,7 @@ export interface TicketFlagsContext {
      *  (a human's inbox) can leave it out and change nothing. */
     othersHot?: Set<number>;
     /** #2449 — tickets whose last action is this consumer's own step, still
-     *  inside `tickets.step_hot_minutes`. They rank as tier 0, like heat. */
+     *  inside `tickets.steps.hot`. They rank as tier 0, like heat. */
     freshOwnStepIds?: Set<number>;
     /** Per-ticket `(last_actor, last_actor_at)` denorm from the tickets
      *  table. Surfaced on the row for UI/agent introspection. */
@@ -389,7 +389,7 @@ export function buildTicketFlagsContext(args: {
     }
     // #2449 david — a step of mine RESTS its ticket until the resume I declared
     // (`resume_on`; none = resume at once), then LEADS my backlog
-    // for `tickets.step_hot_minutes` (tier 0 below). The rest holds whether or
+    // for `tickets.steps.hot` (tier 0 below). The rest holds whether or
     // not a backlog wake came before it: a step waiting on a build must not be
     // named every minute.
     const ownSteps = consumerId ? ownFreshSteps(consumerId, ticketIds, nowMs) : new Map<number, { at: string; restUntil: number; leadUntil: number }>();

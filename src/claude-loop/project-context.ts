@@ -42,6 +42,8 @@ export interface ProjectContext {
     mcp_json_deprecated: boolean;
     /** #3043 — `.aiball.yaml` keys that are ignored now (see loadConfig). */
     retired_keys: string[];
+    /** #3138 — keys the file spells the old way (`old → new`). */
+    renamed_keys: string[];
     /** Absolute path to the loaded `.aiball.yaml`, if any. */
     config_path: string | null;
     /** #565 — declared `project_type:` (welcome MCP kit selector). Null when
@@ -130,6 +132,7 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         role: cfg.consumer.role,
         mcp_json_deprecated: cfg.mcp_json_deprecated,
         retired_keys: [...cfg.retired_keys],
+        renamed_keys: [...cfg.renamed_keys],
         config_path: cfg.configPath,
         project_type: cfg.project_type,
         claude_loop: { ...cfg.claude_loop },
@@ -170,10 +173,13 @@ export function applyToProcessEnv(ctx: ProjectContext): void {
 let warnedOnce = false;
 export function warnIfDeprecated(ctx: ProjectContext): void {
     if (warnedOnce) return;
-    if (!ctx.mcp_json_deprecated && ctx.retired_keys.length === 0) return;
+    if (!ctx.mcp_json_deprecated && ctx.retired_keys.length === 0 && ctx.renamed_keys.length === 0) return;
     warnedOnce = true;
     for (const key of ctx.retired_keys) {
         process.stderr.write(`[claude-loop] ${ctx.config_path ?? ".aiball.yaml"}: \`${key}\` no longer does anything and is ignored; remove it.\n`);
+    }
+    for (const rename of ctx.renamed_keys) {
+        process.stderr.write(`[claude-loop] ${ctx.config_path ?? ".aiball.yaml"}: \`${rename}\` — the old name is still read for this version; rename it.\n`);
     }
     if (!ctx.mcp_json_deprecated) return;
     process.stderr.write(

@@ -175,7 +175,7 @@ export interface ReplyGesture {
     readonly keepsAuthorInPool: boolean;
     /** Only the agent holding the ticket (its live claim or its assignment) may post it. */
     readonly holderOnly: boolean;
-    /** Flagged in the inbox once nothing has followed it for `tickets.step_stale_hours`. */
+    /** Flagged in the inbox once nothing has followed it for `tickets.steps.stale`. */
     readonly flaggedWhenNothingFollows: boolean;
 }
 

@@ -1,7 +1,7 @@
 /**
  * #2377 — a blocked ticket must keep surfacing so it is not forgotten, but
  * nothing moves on it between two wakes: after a backlog wake it stays out of
- * the pool `tickets.blocked_cooldown_multiplier` times longer than any other
+ * the pool `tickets.backlog.blocked_multiplier` times longer than any other
  * ticket (twice, by default). What must hold, over the real routes:
  * - a ticket gated by an open blocker is cooled for twice the cooldown, while a
  *   plain ticket woken in the same pass is cooled for exactly the cooldown;
@@ -41,7 +41,7 @@ for (const p of [P, ONE]) {
     createProject({ name: p });
     upsertSubscription("worker", p, "owner");
 }
-setConfigOverride(ONE, "tickets.blocked_cooldown_multiplier", 1);
+setConfigOverride(ONE, "tickets.backlog.blocked_multiplier", 1);
 
 const server = createApp().listen(0);
 await new Promise<void>((r) => server.once("listening", () => r()));

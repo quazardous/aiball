@@ -153,7 +153,7 @@ wake_phrases:
 #   {head_wait_credit_low} + {head_credit_resolved} {head_credit_resolved_no_commit}
 #   {head_credit_wontfix} {head_credit_commit_lines} {head_credit_commit_max}
 #                      set when that credit is under the project's floor
-#                      (tickets.step_min_wait_minutes): how credit is earned
+#                      (tickets.wait_credit.floor): how credit is earned
 #                      back, in the project's amounts. "" otherwise. (#2646)
 #   {project_scope}    "`<project>`" or "your scope"
 prompts:

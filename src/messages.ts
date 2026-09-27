@@ -101,22 +101,23 @@ export function summaryOverBudget(length: number, max: number): string {
  */
 export function withoutDecisionRefusal(msg: NewMessage, caller: string): { error: string; code: ErrorCode } | null {
     if (msg.kind !== "comment_added") return null;
-    const required = !isHuman(caller) && getConfig("tickets.require_then", msg.project) !== false;
+    const required = !isHuman(caller) && getConfig("tickets.rules.require_then", msg.project) !== false;
     // #2449 david `wng7h4` — a step says when its author resumes, every time:
     // 0 for at once, N minutes when the next move waits on something. Required
     // like the handback, and by the same rule, so the refusal is where an agent
     // learns the gesture — at the moment it makes it.
     // #2481 david — "c'est 2h le max (modifiable par projet en conf)". For
     // everyone, humans included: the limit is the project's, not a requirement.
-    const rawMax = Number(getConfig("tickets.step_after_max_minutes", msg.project) ?? 120);
-    const maxAfter = Number.isFinite(rawMax) && rawMax >= 0 ? rawMax : 120;
+    // #3138 — a duration, in seconds; the step's timer is in minutes.
+    const rawMax = Number(getConfig("tickets.steps.max_wait", msg.project) ?? 7200) / 60;
+    const maxAfter = Number.isFinite(rawMax) && rawMax >= 0 ? Math.floor(rawMax) : 120;
     // #2765 david — `resume_on: { ticket?, timer? }`, whichever comes first: a
     // step says what it waits for, a ticket moving or a number of minutes.
     const resumeTicket = msg.step_resume_on_ticket;
     const stepRefusal: { error: string; code: ErrorCode } | null = required && msg.step === true && msg.step_after_minutes === undefined && resumeTicket === undefined
         ? { code: ERROR_CODES.STEP_RESUME_REQUIRED, error: "then: continue needs resume_on — { timer: 0 } if you carry on at once, { timer: N } (minutes: the soonest a look is worth it, not how long the job takes) if the next step waits on a job, { ticket: N } to resume when that ticket moves, or both: whichever comes first" }
         : msg.step === true && msg.step_after_minutes !== undefined && msg.step_after_minutes > maxAfter
-            ? { code: ERROR_CODES.STEP_TIMER_TOO_LONG, error: `resume_on.timer is at most ${maxAfter} on this project (tickets.step_after_max_minutes) — a longer wait is not one step waiting on a job: resume on the ticket you wait for, hand the ticket back, or propose a plan` }
+            ? { code: ERROR_CODES.STEP_TIMER_TOO_LONG, error: `resume_on.timer is at most ${maxAfter} on this project (tickets.steps.max_wait) — a longer wait is not one step waiting on a job: resume on the ticket you wait for, hand the ticket back, or propose a plan` }
             : resumeTicket !== undefined && getMessage(resumeTicket)?.kind !== "ticket_created"
                 ? { code: ERROR_CODES.STEP_RESUME_INVALID, error: `resume_on.ticket: #${resumeTicket} is not a ticket` }
                 : resumeTicket !== undefined && resumeTicket === msg.ticket_id
@@ -147,7 +148,7 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): { error
  */
 export function commitsRequirement(msg: NewMessage, caller: string, refuse: boolean): { refusal: string | null; warning: string | null } {
     if (msg.kind !== "comment_added" || isHuman(caller) || msg.commits !== undefined) return { refusal: null, warning: null };
-    if (getConfig("tickets.require_commits", msg.project) === false) return { refusal: null, warning: null };
+    if (getConfig("tickets.rules.require_commits", msg.project) === false) return { refusal: null, warning: null };
     const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit. If your ticket_reply tool has no commits parameter, the session kept its tool schema from before the field: /mcp does not refresh it, restart the loop (a new Claude Code session)";
     return refuse
         ? { refusal: reason, warning: null }
@@ -262,7 +263,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
         // The message carries the whole rule, because a session started before
         // this change still holds the old tool description ("no length cap").
         if (provided && !authorIsHuman) {
-            const max = Number(getConfig("tickets.summary_until_max", o.project));
+            const max = Number(getConfig("tickets.rules.summary_max", o.project));
             if (max > 0 && provided.length > max) {
                 // #2214 — a refusal is the one outcome that leaves nothing in the
                 // database (nothing is posted), so it is traced here or the
@@ -311,7 +312,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     if (o.step_after_minutes !== undefined && o.step_after_minutes !== null) {
         const n = o.step_after_minutes;
         if (!step) return { error: "step_after_minutes only goes with a step (then: continue)" };
-        // The upper bound is the project's (`tickets.step_after_max_minutes`),
+        // The upper bound is the project's (`tickets.steps.max_wait`),
         // checked where the project is known: `withoutDecisionRefusal`.
         if (typeof n !== "number" || !Number.isInteger(n) || n < 0) {
             return { error: "step_after_minutes must be a whole number of minutes, 0 or more" };
@@ -340,7 +341,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
             return { error: "commits must be a list of commit SHAs" };
         }
         if (kind !== "comment_added") return { error: "commits only go with a comment" };
-        // A payload guard only: how many earn is `tickets.wait_credit_max_commits_per_comment`.
+        // A payload guard only: how many earn is `tickets.wait_credit.earn.commits_per_comment`.
         if (o.commits.length > 100) return { error: "commits: at most 100 per comment" };
         commits = o.commits as string[];
     }

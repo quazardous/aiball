@@ -21,7 +21,7 @@ getDb();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 
-const KEY = "tickets.summary_until_max";
+const KEY = "tickets.rules.summary_max";
 const reply = (by: string, summary: string, project = "p1") =>
     validateNewMessage({ project, kind: "comment_added", ticket_id: 1, body: "x", by_agent: by, summary_until: summary });
 const errorOf = (r: unknown) => (r && typeof r === "object" && "error" in r ? String((r as { error: unknown }).error) : null);

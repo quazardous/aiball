@@ -17,7 +17,7 @@ function fixtureCwd(yaml: string): string {
 test("readFileValue: missing project file → undefined", () => {
     _resetFileCache();
     const empty = mkdtempSync(join(tmpdir(), "aiball-590-empty-"));
-    assert.equal(readFileValue("project", "tickets.default_priority", empty), undefined);
+    assert.equal(readFileValue("project", "tickets.defaults.priority", empty), undefined);
 });
 
 test("readFileValue: unknown key → undefined (not in schema)", () => {
@@ -27,25 +27,25 @@ test("readFileValue: unknown key → undefined (not in schema)", () => {
 
 test("readFileValue: key present but absent in YAML → undefined", () => {
     const cwd = fixtureCwd("autopoll:\n  tone: imperative\n");
-    // tickets.default_priority IS a schema key, but not in this YAML.
-    assert.equal(readFileValue("project", "tickets.default_priority", cwd), undefined);
+    // tickets.defaults.priority IS a schema key, but not in this YAML.
+    assert.equal(readFileValue("project", "tickets.defaults.priority", cwd), undefined);
 });
 
 test("readFileValue: dotted path walked, value coerced for schema-known key", () => {
-    // tickets.default_priority is the only schema-known key as of phase 1
+    // tickets.defaults.priority is the only schema-known key as of phase 1
     // (no FILE-source keys exist yet). The reader still walks the path and
     // coerces against the enum.
     const cwd = fixtureCwd("tickets:\n  default_priority: high\n");
-    assert.equal(readFileValue("project", "tickets.default_priority", cwd), "high");
+    assert.equal(readFileValue("project", "tickets.defaults.priority", cwd), "high");
 });
 
 test("readFileValue: invalid value (off-enum) → undefined", () => {
     const cwd = fixtureCwd("tickets:\n  default_priority: nope\n");
-    assert.equal(readFileValue("project", "tickets.default_priority", cwd), undefined);
+    assert.equal(readFileValue("project", "tickets.defaults.priority", cwd), undefined);
 });
 
 test("readFileValue: project layer no cwd → undefined (path can't resolve)", () => {
-    assert.equal(readFileValue("project", "tickets.default_priority"), undefined);
+    assert.equal(readFileValue("project", "tickets.defaults.priority"), undefined);
 });
 
 test("readFileValue: walks up from sub-dir to find .aiball.yaml", () => {
@@ -53,16 +53,16 @@ test("readFileValue: walks up from sub-dir to find .aiball.yaml", () => {
     const sub = join(root, "sub", "deep");
     mkdirSync(sub, { recursive: true });
     _resetFileCache();
-    assert.equal(readFileValue("project", "tickets.default_priority", sub), "urgent");
+    assert.equal(readFileValue("project", "tickets.defaults.priority", sub), "urgent");
 });
 
 test("readFileValue: re-read picks up mtime changes (cache invalidation)", () => {
     const cwd = fixtureCwd("tickets:\n  default_priority: low\n");
-    assert.equal(readFileValue("project", "tickets.default_priority", cwd), "low");
+    assert.equal(readFileValue("project", "tickets.defaults.priority", cwd), "low");
     // Wait a tick so mtime differs, then rewrite.
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     return sleep(20).then(() => {
         writeFileSync(join(cwd, ".aiball.yaml"), "tickets:\n  default_priority: urgent\n");
-        assert.equal(readFileValue("project", "tickets.default_priority", cwd), "urgent");
+        assert.equal(readFileValue("project", "tickets.defaults.priority", cwd), "urgent");
     });
 });

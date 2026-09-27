@@ -21,6 +21,7 @@ import { parse as parseYaml } from "yaml";
 import {
     coerceConfigValue,
     getSchemaEntry,
+    RENAMED_CONFIG_KEYS,
     type ConfigValue,
 } from "./schema.js";
 
@@ -89,12 +90,18 @@ export function readFileValue(
     if (!path) return undefined;
     if (layer === "global" && !existsSync(path)) return undefined;
     const raw = readYamlCached(path);
-    const value = walkDotted(raw, key);
-    if (value === undefined) return undefined;
     const entry = getSchemaEntry(key);
     if (!entry) return undefined;
-    const coerced = coerceConfigValue(entry, value);
-    return coerced ?? undefined;
+    const value = walkDotted(raw, key);
+    if (value !== undefined) return coerceConfigValue(entry, value) ?? undefined;
+    // #3138 — the name it had before, for one version: its value converted.
+    for (const [old, r] of Object.entries(RENAMED_CONFIG_KEYS)) {
+        if (r.key !== key) continue;
+        const legacy = walkDotted(raw, old);
+        if (typeof legacy === "number") return coerceConfigValue(entry, Math.round(legacy * r.factor)) ?? undefined;
+        if (legacy !== undefined) return coerceConfigValue(entry, legacy) ?? undefined;
+    }
+    return undefined;
 }
 
 /** Clear the file-read cache. Mainly for tests; production reads stat the

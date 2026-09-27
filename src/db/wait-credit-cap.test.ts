@@ -1,5 +1,5 @@
 /**
- * #3065 — a balance never goes over `tickets.wait_credit_max_minutes` (120 by
+ * #3065 — a balance never goes over `tickets.wait_credit.max` (120 by
  * default, per project, 0 = no cap): a gain is cut to what fits, a balance
  * already over is cut back once, and a commit earning nothing at the cap says
  * why.
@@ -63,12 +63,12 @@ test("a gain is cut to what fits under the cap, and at the cap it earns nothing,
 
 test("the cap is a per-project setting; 0 lifts it", () => {
     createProject({ name: "p-free" });
-    setConfigOverride("p-free", "tickets.wait_credit_max_minutes", 0);
+    setConfigOverride("p-free", "tickets.wait_credit.max", 0);
     legacyGain("p-free", 1000);
     assert.equal(waitCreditBalance("w", "p-free"), 1060);
     assert.equal(waitCreditRules("p-free").max, 0);
     createProject({ name: "p-low" });
-    setConfigOverride("p-low", "tickets.wait_credit_max_minutes", 30);
+    setConfigOverride("p-low", "tickets.wait_credit.max", 1800);
     assert.equal(waitCreditBalance("w", "p-low"), 30, "a cap under the start cuts the start too");
     assert.equal(waitCreditRules("p-low").max, 30);
 });

@@ -1188,21 +1188,21 @@ export function backlogCooldownExclusions(
     // #2365 — a ticket whose last action is a step (then: continue) is sunk only
     // briefly: a step says there is work to do now, and the wake that follows it
     // used to hide that work for the whole cooldown. The short window
-    // (`tickets.sink_then_continue_minutes`, 0 = none) only turns the queue over.
+    // (`tickets.backlog.after_step`, 0 = none) only turns the queue over.
     const nowMs = Date.now();
     for (const id of [...out.keys()].filter((id) => stepTickets.has(id))) {
-        const minutes = Number(getConfig("tickets.sink_then_continue_minutes", byTicket.get(id)?.project) ?? 5);
-        const windowSec = Math.min(cooldownSec, Math.max(0, Number.isFinite(minutes) ? minutes : 5) * 60);
+        const seconds = Number(getConfig("tickets.backlog.after_step", byTicket.get(id)?.project) ?? 300);
+        const windowSec = Math.min(cooldownSec, Math.max(0, Number.isFinite(seconds) ? seconds : 300));
         const wakeAtMs = Date.parse(wakeAtByTicket.get(id) ?? "");
         if (windowSec <= 0 || !Number.isFinite(wakeAtMs) || wakeAtMs + windowSec * 1000 <= nowMs) out.delete(id);
         else out.set(id, windowSec);
     }
     // #2377 david — a blocked ticket keeps surfacing so it is not forgotten, but
     // nothing moves on it between two wakes: it stays sunk
-    // `tickets.blocked_cooldown_multiplier` times longer than the rest.
+    // `tickets.backlog.blocked_multiplier` times longer than the rest.
     for (const id of [...out.keys()]) {
         if (!blockedIds.has(id)) continue;
-        const raw = Number(getConfig("tickets.blocked_cooldown_multiplier", byTicket.get(id)?.project) ?? 2);
+        const raw = Number(getConfig("tickets.backlog.blocked_multiplier", byTicket.get(id)?.project) ?? 2);
         const factor = Math.max(1, Number.isFinite(raw) ? raw : 2);
         if (factor > 1) out.set(id, out.get(id)! * factor);
     }
@@ -1212,13 +1212,13 @@ export function backlogCooldownExclusions(
     return out;
 }
 
-/** #2377 — the largest `tickets.blocked_cooldown_multiplier` in force anywhere. */
+/** #2377 — the largest `tickets.backlog.blocked_multiplier` in force anywhere. */
 function maxBlockedMultiplier(): number {
-    const globalValue = Number(getConfig("tickets.blocked_cooldown_multiplier") ?? 2);
+    const globalValue = Number(getConfig("tickets.backlog.blocked_multiplier") ?? 2);
     let max = Math.max(1, Number.isFinite(globalValue) ? globalValue : 2);
     for (const r of getDb().select({ value: schema.configOverrides.value })
         .from(schema.configOverrides)
-        .where(eq(schema.configOverrides.key, "tickets.blocked_cooldown_multiplier"))
+        .where(eq(schema.configOverrides.key, "tickets.backlog.blocked_multiplier"))
         .all()) {
         const v = Number(r.value);
         if (Number.isFinite(v) && v > max) max = v;
@@ -1237,7 +1237,7 @@ function maxBlockedMultiplier(): number {
  *   end yet. Until then the ticket stays out of the wake pool — waiting on a
  *   build is not a reason to be named every minute.
  * - `leadUntil`: from the resume, the ticket leads that agent's backlog
- *   (tier 0, right after the events) for `tickets.step_hot_minutes`.
+ *   (tier 0, right after the events) for `tickets.steps.hot`.
  * Only steps with a window still open are returned.
  */
 /** #2765 — the longest a step waiting on another ticket rests without a timer. */
@@ -1299,9 +1299,9 @@ export function ownFreshSteps(consumerId: string, ticketIds: readonly number[], 
         } else {
             restUntil = timer ?? atMs;
         }
-        const raw = Number(getConfig("tickets.step_hot_minutes", r.project) ?? 30);
-        const leadMinutes = Math.max(0, Number.isFinite(raw) ? raw : 30);
-        const leadUntil = restUntil + leadMinutes * 60_000;
+        const raw = Number(getConfig("tickets.steps.hot", r.project) ?? 1800);
+        const leadSeconds = Math.max(0, Number.isFinite(raw) ? raw : 1800);
+        const leadUntil = restUntil + leadSeconds * 1000;
         if (leadUntil > nowMs || restUntil > nowMs) out.set(m.ticketId!, { at: r.lastActorAt, restUntil, leadUntil });
     }
     return out;

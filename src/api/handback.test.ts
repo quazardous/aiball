@@ -144,15 +144,15 @@ test("a human is exempt, and naming a human in by_agent does not exempt an agent
     assert.equal(comments(t), 1);
 });
 
-test("tickets.require_then = false switches the requirement off for that project only, not the contradiction", async () => {
-    setConfigOverride("p-2331-off", "tickets.require_then", false);
+test("tickets.rules.require_then = false switches the requirement off for that project only, not the contradiction", async () => {
+    setConfigOverride("p-2331-off", "tickets.rules.require_then", false);
     try {
         const off = ticket("p-2331-off");
         assert.equal((await comment(AGENT, off, {}, "p-2331-off")).status, 201);
         assert.equal((await comment(AGENT, off, { decision_kind: "plan", handback: false }, "p-2331-off")).status, 400);
         assert.equal((await comment(AGENT, ticket())).status, 400);
     } finally {
-        deleteConfigOverride("p-2331-off", "tickets.require_then");
+        deleteConfigOverride("p-2331-off", "tickets.rules.require_then");
     }
 });
 

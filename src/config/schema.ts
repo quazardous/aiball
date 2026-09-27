@@ -15,6 +15,7 @@
  * Existing dedicated settings (moderation strategy, upload-max-bytes, tags) keep
  * their own storage for now; they migrate onto this framework incrementally.
  */
+import { parseDuration } from "./duration.js";
 
 /** Where a key may be overridden. */
 export type ConfigScope =
@@ -22,12 +23,14 @@ export type ConfigScope =
     | "global+project" // a global default that a project may override
     | "project"; // only meaningful per project (no global value)
 
-export type ConfigValueType = "string" | "number" | "boolean" | "enum";
+/** #3138 — `duration`: seconds on the wire; `config.set` also takes the
+ *  notation (`1h30m`, src/config/duration.ts). */
+export type ConfigValueType = "string" | "number" | "boolean" | "enum" | "duration";
 
 export type ConfigValue = string | number | boolean;
 
 /** #3137 — what a number counts, for a client to label it and step through it. */
-export type ConfigUnit = "characters" | "minutes" | "hours" | "seconds" | "count" | "lines" | "times";
+export type ConfigUnit = "characters" | "count" | "lines" | "times";
 
 /** #590 — where a key can be SET. `db` = SQLite `config_overrides` table
  *  (UI admin Settings). `file` = .aiball.yaml / global yaml. A key may
@@ -48,14 +51,11 @@ export interface ConfigSchemaEntry {
      * the public UI (#449). Default false (anyone with admin access can set it).
      */
     protected?: boolean;
-    /** #3137 — the section a settings screen puts it in, as a dotted path of
-     *  one to three levels (`tickets.wait_credit.earn`): a menu, not a flat
-     *  list. The display order is this list's order, a contract: a new key goes
-     *  where it reads well. */
-    group: string;
-    /** #3137 — number only: the accepted range (inclusive; `config.set`
-     *  refuses outside it, CONFIG_OUT_OF_RANGE), the step a client moves by,
-     *  and what the number counts. */
+    /** #3137, #3138 — number or duration: the accepted range (inclusive;
+     *  `config.set` refuses outside it, CONFIG_OUT_OF_RANGE) and the step a
+     *  client moves by, a duration's in seconds; and what a number counts. The
+     *  section is the key's path less its last segment (`groupOf`), and the
+     *  display order this list's order, a contract. */
     min?: number;
     max?: number;
     step?: number;
@@ -86,7 +86,6 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2586 — the daemon asks GitHub for the latest release when it starts.
     {
         key: "updates.check",
-        group: "updates",
         scope: "global",
         type: "boolean",
         default: true,
@@ -97,8 +96,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     // #449 — DB-source ticket defaults (admin Settings).
     {
-        key: "tickets.default_priority",
-        group: "tickets.defaults",
+        key: "tickets.defaults.priority",
         scope: "global+project",
         type: "enum",
         options: ["low", "normal", "high", "urgent"],
@@ -108,8 +106,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "Priority applied to a new ticket created without an explicit one. Set a global default; a project may override it.",
     },
     {
-        key: "tickets.auto_broadcast_new",
-        group: "tickets.defaults",
+        key: "tickets.defaults.broadcast_new",
         scope: "global+project",
         type: "boolean",
         default: false,
@@ -121,8 +118,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // its end, which is where the next step usually sits. Protected, so an agent
     // cannot loosen the budget it is held to.
     {
-        key: "tickets.summary_until_max",
-        group: "tickets.rules",
+        key: "tickets.rules.summary_max",
         min: 0,
         max: 5000,
         step: 50,
@@ -140,8 +136,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // switch off the rule it is held to; a moderator can, per project, for a
     // loop that cannot be reloaded to learn the new flag.
     {
-        key: "tickets.require_then",
-        group: "tickets.rules",
+        key: "tickets.rules.require_then",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -152,8 +147,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     // #2652 david — « il faut que le champ commit soit obligatoire ».
     {
-        key: "tickets.require_commits",
-        group: "tickets.rules",
+        key: "tickets.rules.require_commits",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -165,16 +159,14 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2308 — a step (`then: continue`) keeps a ticket in its author's pool; one
     // that nothing follows is flagged in the inbox after this many hours.
     {
-        key: "tickets.step_stale_hours",
-        group: "tickets.steps",
-        min: 1,
-        max: 720,
-        step: 1,
-        unit: "hours",
+        key: "tickets.steps.stale",
+        min: 3600,
+        max: 2592000,
+        step: 3600,
         scope: "global+project",
-        type: "number",
-        default: 24,
-        label: "Stalled step after (hours)",
+        type: "duration",
+        default: 86400,
+        label: "Stalled step after",
         description:
             "A step (then: continue) with nothing after it for this long is flagged in the inbox: the work it announced went quiet. 0 = never flag.",
     },
@@ -188,38 +180,33 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2449 david — a step (then: continue) says "I carry on": its ticket goes
     // to the top of its author's backlog for a while, right after the events.
     {
-        key: "tickets.step_hot_minutes",
-        group: "tickets.steps",
-        min: 1,
-        max: 1440,
-        step: 5,
-        unit: "minutes",
+        key: "tickets.steps.hot",
+        min: 60,
+        max: 86400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 30,
+        type: "duration",
+        default: 1800,
         label: "Minutes a step keeps its ticket at the top of its author's backlog",
         description:
             "After an agent posts a step (then: continue), its ticket leads that agent's backlog — right after the events, ahead of every other ticket — for this long, counted from the step. Past it, the ticket ranks like any other. It only changes the order; the visible 'hot' mark keeps its own rule. 0 = a step gets no priority.",
     },
     // #2481 david — "c'est 2h le max (modifiable par projet en conf)".
     {
-        key: "tickets.step_after_max_minutes",
-        group: "tickets.steps",
-        min: 1,
-        max: 1440,
-        step: 5,
-        unit: "minutes",
+        key: "tickets.steps.max_wait",
+        min: 60,
+        max: 86400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 120,
-        label: "Longest wait a step may declare (minutes)",
+        type: "duration",
+        default: 7200,
+        label: "Longest wait a step may declare",
         description:
             "The most an agent may put in resume_on.timer on a step (then: continue). A longer wait is refused with this limit in the reason — past it the work is not one step waiting on a job any more: hand the ticket back, or propose a plan.",
     },
     // #2640 david — the wait credit: « les minutes qu'on attend sont prises sur un budget temps qu'on doit gagner par preuve de travail ».
     {
-        key: "tickets.wait_credit_enabled",
-        group: "tickets.wait_credit",
+        key: "tickets.wait_credit.enabled",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -228,8 +215,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "true (default) = a step's resume_on.timer spends an agent's wait credit, earned by proof of work. false = waits are free and uncapped (still at most tickets.step_after_max_minutes), nothing is earned, spent or refunded, and replies and wakes say nothing about credit.",
     },
     {
-        key: "tickets.wait_credit_refund",
-        group: "tickets.wait_credit",
+        key: "tickets.wait_credit.refund",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -238,22 +224,19 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "true (default) = an agent speaking on a ticket again before its step's wait ends gets the rest of that wait back. false = a wait is spent in full once declared.",
     },
     {
-        key: "tickets.wait_credit_commit_max_age_hours",
-        group: "tickets.wait_credit.earn",
-        min: 1,
-        max: 720,
-        step: 1,
-        unit: "hours",
+        key: "tickets.wait_credit.earn.commit_max_age",
+        min: 3600,
+        max: 2592000,
+        step: 3600,
         scope: "global+project",
-        type: "number",
-        default: 48,
-        label: "Wait credit: oldest commit that still earns (hours)",
+        type: "duration",
+        default: 172800,
+        label: "Wait credit: oldest commit that still earns",
         description:
             "A cited commit whose commit date is older than this earns nothing: the credit rewards fresh work.",
     },
     {
-        key: "tickets.wait_credit_max_commits_per_comment",
-        group: "tickets.wait_credit.earn",
+        key: "tickets.wait_credit.earn.commits_per_comment",
         min: 1,
         max: 100,
         step: 1,
@@ -266,92 +249,79 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "The most commits one comment can cite for credit; the ones past it earn nothing and the answer says so.",
     },
     {
-        key: "tickets.wait_credit_start_minutes",
-        group: "tickets.wait_credit",
+        key: "tickets.wait_credit.start",
         min: 0,
-        max: 1440,
-        step: 5,
-        unit: "minutes",
+        max: 86400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 60,
-        label: "Wait credit an agent starts with (minutes)",
+        type: "duration",
+        default: 3600,
+        label: "Wait credit an agent starts with",
         description:
             "Every agent starts each project with this much wait credit, so a new agent can wait on a first build. The credit is spent by step timers (resume_on.timer) and earned by proof of work.",
     },
     {
-        key: "tickets.wait_credit_max_minutes",
-        group: "tickets.wait_credit",
-        min: 1,
-        max: 1440,
-        step: 5,
-        unit: "minutes",
+        key: "tickets.wait_credit.max",
+        min: 60,
+        max: 86400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 120,
-        label: "Most wait credit an agent holds (minutes)",
+        type: "duration",
+        default: 7200,
+        label: "Most wait credit an agent holds",
         description:
             "A balance never goes over this: what would take it over is not credited, and a balance already over it is cut back. 0 = no cap.",
     },
     {
-        key: "tickets.step_min_wait_minutes",
-        group: "tickets.wait_credit",
+        key: "tickets.wait_credit.floor",
         min: 0,
-        max: 120,
-        step: 1,
-        unit: "minutes",
+        max: 7200,
+        step: 60,
         scope: "global+project",
-        type: "number",
-        default: 5,
-        label: "Wait a step always gets, even without credit (minutes)",
+        type: "duration",
+        default: 300,
+        label: "Wait a step always gets, even without credit",
         description:
             "Short of credit, a step's wait is capped to the balance but never below this, so an agent with no credit does not come back in a loop. It never takes the balance below zero. A step asking 0 (carry on at once) is always granted.",
     },
     {
-        key: "tickets.wait_credit_resolved_minutes",
-        group: "tickets.wait_credit.earn",
+        key: "tickets.wait_credit.earn.resolved",
         min: 0,
-        max: 240,
-        step: 5,
-        unit: "minutes",
+        max: 14400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 30,
-        label: "Wait credit earned by a ticket closed resolved, with a commit (minutes)",
+        type: "duration",
+        default: 1800,
+        label: "Wait credit earned by a ticket closed resolved, with a commit",
         description:
             "Earned once per ticket by the agent whose resolution was accepted, when it cited a commit on that ticket (commits: [...]) before it closed.",
     },
     {
-        key: "tickets.wait_credit_resolved_no_commit_minutes",
-        group: "tickets.wait_credit.earn",
+        key: "tickets.wait_credit.earn.resolved_no_commit",
         min: 0,
-        max: 240,
-        step: 5,
-        unit: "minutes",
+        max: 14400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 10,
-        label: "Wait credit earned by a ticket closed resolved, without a commit (minutes)",
+        type: "duration",
+        default: 600,
+        label: "Wait credit earned by a ticket closed resolved, without a commit",
         description:
             "Earned once per ticket by the agent whose resolution was accepted when it cited no commit on that ticket: a resolution without code is worth less.",
     },
     {
-        key: "tickets.wait_credit_wontfix_minutes",
-        group: "tickets.wait_credit.earn",
+        key: "tickets.wait_credit.earn.wontfix",
         min: 0,
-        max: 240,
-        step: 1,
-        unit: "minutes",
+        max: 14400,
+        step: 60,
         scope: "global+project",
-        type: "number",
-        default: 5,
-        label: "Wait credit earned by a ticket closed wontfix (minutes)",
+        type: "duration",
+        default: 300,
+        label: "Wait credit earned by a ticket closed wontfix",
         description:
             "Earned once per ticket by the agent whose wontfix was accepted.",
     },
     {
-        key: "tickets.wait_credit_commit_lines_per_minute",
-        group: "tickets.wait_credit.earn",
+        key: "tickets.wait_credit.earn.lines_per_minute",
         min: 1,
         max: 1000,
         step: 5,
@@ -364,50 +334,43 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "A commit an agent cites on a reply (commits: [...]) earns one minute per this many changed lines, read in the agent's checkout. Once per commit.",
     },
     {
-        key: "tickets.wait_credit_commit_max_minutes",
-        group: "tickets.wait_credit.earn",
+        key: "tickets.wait_credit.earn.commit_max",
         min: 0,
-        max: 240,
-        step: 5,
-        unit: "minutes",
+        max: 14400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 30,
-        label: "Most wait credit one commit earns (minutes)",
+        type: "duration",
+        default: 1800,
+        label: "Most wait credit one commit earns",
         description:
             "The cap on what a single commit earns, however large its diff.",
     },
     {
-        key: "tickets.wait_credit_commit_min_minutes",
-        group: "tickets.wait_credit.earn",
+        key: "tickets.wait_credit.earn.commit_min",
         min: 0,
-        max: 60,
-        step: 1,
-        unit: "minutes",
+        max: 3600,
+        step: 60,
         scope: "global+project",
-        type: "number",
-        default: 2,
-        label: "Least wait credit one commit earns (minutes)",
+        type: "duration",
+        default: 120,
+        label: "Least wait credit one commit earns",
         description:
             "What a cited commit with at least one changed line earns, however small its diff: a short fix is work too. 0 = only the per-line rate counts.",
     },
     {
-        key: "tickets.claim_protect_minutes",
-        group: "tickets.backlog",
+        key: "tickets.backlog.claim_protect",
         min: 0,
-        max: 1440,
-        step: 5,
-        unit: "minutes",
+        max: 86400,
+        step: 300,
         scope: "global+project",
-        type: "number",
-        default: 60,
+        type: "duration",
+        default: 3600,
         label: "Minutes a working agent's claim is protected",
         description:
             "How long a claim holds against another agent's claim, counted from its holder's last action on the ticket — working on it keeps the protection alive. Another agent's claim inside that window is refused; past it the ticket can be taken over, and the thread records it. An assignment always wins over a claim. 0 = no protection.",
     },
     {
-        key: "tickets.blocked_cooldown_multiplier",
-        group: "tickets.backlog",
+        key: "tickets.backlog.blocked_multiplier",
         min: 1,
         max: 20,
         step: 0.5,
@@ -420,16 +383,14 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "How much longer a backlog wake keeps a BLOCKED ticket (gated by an open depends_on) out of the wake pool, compared with any other ticket. It must keep surfacing so it is not forgotten, but nothing moves on it between two wakes. 1 = same cooldown as the rest.",
     },
     {
-        key: "tickets.sink_then_continue_minutes",
-        group: "tickets.backlog",
+        key: "tickets.backlog.after_step",
         min: 0,
-        max: 1440,
-        step: 1,
-        unit: "minutes",
+        max: 86400,
+        step: 60,
         scope: "global+project",
-        type: "number",
-        default: 5,
-        label: "Backlog cooldown after a step (minutes)",
+        type: "duration",
+        default: 300,
+        label: "Backlog cooldown after a step",
         description:
             "How long a backlog wake keeps a ticket out of the wake pool when its last action is a step (then: continue), instead of the whole cooldown. Short on purpose: the step says there is work to do now, and the pause only lets the queue turn over. 0 = never sink it.",
     },
@@ -439,7 +400,6 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // presence) and is NOT modelled here — see #590 case #2.
     {
         key: "autopoll.volatile",
-        group: "autopoll",
         scope: "project",
         type: "boolean",
         default: false,
@@ -449,23 +409,20 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "true = notify only when a strictly newer ping arrives (no time-based reminders). false (default) = persistent reminder re-fires after throttle_seconds.",
     },
     {
-        key: "autopoll.throttle_seconds",
-        group: "autopoll",
+        key: "autopoll.throttle",
         min: 10,
         max: 86400,
         step: 10,
-        unit: "seconds",
         scope: "project",
-        type: "number",
+        type: "duration",
         default: 120,
         sources: ["file"],
-        label: "Autopoll: reminder cadence (s)",
+        label: "Autopoll: reminder cadence",
         description:
             "Reminder cadence in seconds, ignored when volatile=true. 0 = every Stop (spammy). New pings / new open tickets bypass the throttle.",
     },
     {
-        key: "autopoll.include_recent_tickets",
-        group: "autopoll",
+        key: "autopoll.recent_tickets",
         min: 0,
         max: 20,
         step: 1,
@@ -480,7 +437,6 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "autopoll.backlog",
-        group: "autopoll",
         scope: "project",
         type: "boolean",
         default: true,
@@ -491,7 +447,6 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "autopoll.tone",
-        group: "autopoll",
         scope: "project",
         type: "enum",
         options: ["hint", "directive", "imperative"],
@@ -504,6 +459,55 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
 ];
 
 const BY_KEY = new Map(CONFIG_SCHEMA.map((e) => [e.key, e] as const));
+
+/** #3137, #3138 — the section a setting sits in: its key less the last segment
+ *  (`tickets.wait_credit.earn.resolved` → `tickets.wait_credit.earn`). */
+export function groupOf(key: string): string {
+    const i = key.lastIndexOf(".");
+    return i > 0 ? key.slice(0, i) : key;
+}
+
+/**
+ * #3138 — the keys renamed once, in paths without a unit suffix, and what a
+ * value under the old name is worth in the new one (a minute is 60 seconds).
+ * An old name is still read, and written, for one version: a file's value
+ * converted, `config.set` answering which key it meant.
+ */
+export const RENAMED_CONFIG_KEYS: Readonly<Record<string, { key: string; factor: number }>> = {
+    "tickets.default_priority": { key: "tickets.defaults.priority", factor: 1 },
+    "tickets.auto_broadcast_new": { key: "tickets.defaults.broadcast_new", factor: 1 },
+    "tickets.summary_until_max": { key: "tickets.rules.summary_max", factor: 1 },
+    "tickets.require_then": { key: "tickets.rules.require_then", factor: 1 },
+    "tickets.require_commits": { key: "tickets.rules.require_commits", factor: 1 },
+    "tickets.step_stale_hours": { key: "tickets.steps.stale", factor: 3600 },
+    "tickets.step_hot_minutes": { key: "tickets.steps.hot", factor: 60 },
+    "tickets.step_after_max_minutes": { key: "tickets.steps.max_wait", factor: 60 },
+    "tickets.wait_credit_enabled": { key: "tickets.wait_credit.enabled", factor: 1 },
+    "tickets.wait_credit_refund": { key: "tickets.wait_credit.refund", factor: 1 },
+    "tickets.wait_credit_start_minutes": { key: "tickets.wait_credit.start", factor: 60 },
+    "tickets.wait_credit_max_minutes": { key: "tickets.wait_credit.max", factor: 60 },
+    "tickets.step_min_wait_minutes": { key: "tickets.wait_credit.floor", factor: 60 },
+    "tickets.wait_credit_resolved_minutes": { key: "tickets.wait_credit.earn.resolved", factor: 60 },
+    "tickets.wait_credit_resolved_no_commit_minutes": { key: "tickets.wait_credit.earn.resolved_no_commit", factor: 60 },
+    "tickets.wait_credit_wontfix_minutes": { key: "tickets.wait_credit.earn.wontfix", factor: 60 },
+    "tickets.wait_credit_commit_max_age_hours": { key: "tickets.wait_credit.earn.commit_max_age", factor: 3600 },
+    "tickets.wait_credit_max_commits_per_comment": { key: "tickets.wait_credit.earn.commits_per_comment", factor: 1 },
+    "tickets.wait_credit_commit_lines_per_minute": { key: "tickets.wait_credit.earn.lines_per_minute", factor: 1 },
+    "tickets.wait_credit_commit_max_minutes": { key: "tickets.wait_credit.earn.commit_max", factor: 60 },
+    "tickets.wait_credit_commit_min_minutes": { key: "tickets.wait_credit.earn.commit_min", factor: 60 },
+    "tickets.claim_protect_minutes": { key: "tickets.backlog.claim_protect", factor: 60 },
+    "tickets.blocked_cooldown_multiplier": { key: "tickets.backlog.blocked_multiplier", factor: 1 },
+    "tickets.sink_then_continue_minutes": { key: "tickets.backlog.after_step", factor: 60 },
+    "autopoll.throttle_seconds": { key: "autopoll.throttle", factor: 1 },
+    "autopoll.include_recent_tickets": { key: "autopoll.recent_tickets", factor: 1 },
+};
+
+/** The entry an old name stands for, with its factor; undefined for a current or unknown key. */
+export function renamedFrom(key: string): { entry: ConfigSchemaEntry; old: string; factor: number } | undefined {
+    const r = RENAMED_CONFIG_KEYS[key];
+    const entry = r ? BY_KEY.get(r.key) : undefined;
+    return r && entry ? { entry, old: key, factor: r.factor } : undefined;
+}
 
 /** The schema entry for a key, or undefined if the key is unknown. */
 export function getSchemaEntry(key: string): ConfigSchemaEntry | undefined {
@@ -545,6 +549,8 @@ export function coerceConfigValue(entry: ConfigSchemaEntry, raw: unknown): Confi
             const n = typeof raw === "number" ? raw : Number(raw);
             return Number.isFinite(n) ? n : null;
         }
+        case "duration":
+            return parseDuration(raw);
         case "enum": {
             const s = String(raw);
             return entry.options?.includes(s) ? s : null;

@@ -298,7 +298,7 @@ tier it qualifies for** (`backlog_tier`, computed per consumer in
   An open ticket merely LINKED to the closed one — lineage, or a cross-reference
   — gets `related_closed` instead: nothing changes for it, but the close is news
   it would otherwise never hear. A blocked ticket also sinks longer than the rest
-  after a wake (`tickets.blocked_cooldown_multiplier`, twice by default): it must
+  after a wake (`tickets.backlog.blocked_multiplier`, twice by default): it must
   keep surfacing, but nothing moves on it between two wakes.
 
 A triage comment (§ in `skills/aiball/SKILL.md` → "`look #N: TITLE.` + the tier's ask")
@@ -343,18 +343,18 @@ is an answer, not news: it leaves the ticket cooled, and the thread comes back
 when the window runs out. Anyone else's word lifts it at once.
 
 A ticket whose last action is the agent's own step **leads that agent's
-backlog** (tier 0, right after the events) for `tickets.step_hot_minutes`, 30 by
+backlog** (tier 0, right after the events) for `tickets.steps.hot`, 30 by
 default. The agent must say when that starts, with every step:
 `resume_on: { timer: 0 }` for at once, or N minutes — until then the ticket
 stays out of its wake pool, however the wakes around it went. N is at most
-`tickets.step_after_max_minutes` (120 by default, set per project): a longer
+`tickets.steps.max_wait` (120 by default, set per project): a longer
 wait is refused, since it is not one step waiting on a job any more. N asks for
 the soonest a look is worth it, not how long the job takes: an early look costs
 one more step, a late one leaves finished work waiting. `aiball steps` shows,
 per delay, how many steps came back early, on time or late.
 
 That wait is drawn from the agent's **wait credit** on the project, its start
-(`tickets.wait_credit_start_minutes`, 60) plus what it earned by proof of work
+(`tickets.wait_credit.start`, 60) plus what it earned by proof of work
 minus what it waited:
 
 | Movement | Minutes | Once per |
@@ -367,20 +367,20 @@ minus what it waited:
 | coming back on the ticket before that wait ends | + what was left | step |
 
 Short of credit the wait is capped to the balance, never under
-`tickets.step_min_wait_minutes` (5), and that floor costs nothing past zero; a
+`tickets.wait_credit.floor` (5), and that floor costs nothing past zero; a
 step asking 0 is always granted. The balance never goes over
-`tickets.wait_credit_max_minutes` (120, 0 for no cap): a gain that would take
+`tickets.wait_credit.max` (120, 0 for no cap): a gain that would take
 it over is cut to what fits, and a balance already over it (the cap lowered)
 is cut back. Humans have no credit. The whole scheme is
-per-project settings: `tickets.wait_credit_enabled` (off = free, uncapped
-waits and nothing said), `tickets.wait_credit_refund`, every amount
-(`tickets.wait_credit_*_minutes`, `tickets.step_min_wait_minutes`), and for
+per-project settings: `tickets.wait_credit.enabled` (off = free, uncapped
+waits and nothing said), `tickets.wait_credit.refund`, every amount
+(`tickets.wait_credit.earn.*`, `tickets.wait_credit.floor`), and for
 commits the lines per minute, the cap per commit, the oldest commit that still
 earns and how many count per comment. `aiball steps` lists every balance.
 
 An agent's comment must carry `commits`: the SHAs it delivers, or `null` /
 `"none"` for none, said explicitly. Without it the comment is refused
-(`tickets.require_commits`, per project); a client that does not declare the
+(`tickets.rules.require_commits`, per project); a client that does not declare the
 field (`x-aiball-client: commits`) is warned instead, so a loop started before
 it is not blocked. Humans, close and reopen are exempt.
 
@@ -400,7 +400,7 @@ a step that said "at once" while it was waiting on a job. Each backlog row
 carries `backlog_last_wake_at`, the asking agent's own previous wake on it.
 
 A ticket whose last action is a step (`then: continue`) is cooled only briefly,
-5 minutes by default (`tickets.sink_then_continue_minutes`, 0 = not at all): a
+5 minutes by default (`tickets.backlog.after_step`, 0 = not at all): a
 step says there is work to do now, so the pause only turns the queue over.
 
 **Why keep the waiting tiers, not drop them:** a ball-in-their-court ticket

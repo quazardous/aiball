@@ -50,7 +50,7 @@ or misdirect a working loop.
 | 22 — A human "up" on an agent's ticket with no decision: actionable, unread, the human its last actor | `creation-human-up` |
 | 23 — A blocker filed with `then: plan` behaves like any plan: whoever files it, a human files it and a human accepts it — nothing auto-accepts. It reads as follow-up for the project's other owner where an ordinary pending plan shows nowhere; decided: harmless, a project may carry tickets of its own shape | `creation-blocker-as-plan` |
 | 24, 32 — A ticket waiting on another (`depends_on`) is blocked and gets `dependency_closed` the moment the blocker closes; a ticket merely linked to it gets `related_closed`, news rather than a gate | `dependency-closed` |
-| 25 — A blocked ticket keeps surfacing while nothing moves, but only after twice the cooldown (`tickets.blocked_cooldown_multiplier`): not forgotten, and not nagging | `dependency-blocked-wake-repeats` |
+| 25 — A blocked ticket keeps surfacing while nothing moves, but only after twice the cooldown (`tickets.backlog.blocked_multiplier`): not forgotten, and not nagging | `dependency-blocked-wake-repeats` |
 | 26 — A plan accepted while the ticket's dependency is still open leaves it blocked. Decided: no extra gate in the UI; an umbrella may be accepted with its children unfinished | `dependency-plan-accepted-while-blocked` |
 | 27 — A dependency written only in a plan's prose is invisible: the ticket is actionable while the other is open | `dependency-in-prose-only` |
 | 28 — Work carried on a recap ticket leaves the older one coming back as "Triage". Decided: a piloting matter — the agent says so on the older ticket | `dependency-work-on-recap-ticket` |

@@ -12,18 +12,19 @@ autopoll:
   # the per-project opt-in.
   enabled: true
 
-  # false = persistent reminder (re-fires after throttle_seconds);
+  # false = persistent reminder (re-fires after throttle);
   # true  = one-shot (only notify when a strictly newer ping arrives).
   volatile: false
 
-  # Reminder cadence (ignored when volatile). 0 = every Stop (spammy).
-  throttle_seconds: 120
+  # Reminder cadence (ignored when volatile), a duration: 90s, 2m, 1h30m…
+  # (a bare integer is seconds). 0 = every Stop (spammy).
+  throttle: 2m
 
   # Reminder tone: hint | directive | imperative.
   tone: directive
 
   # Up to N recent unread ticket titles in the hook reason. 0 = count only.
-  include_recent_tickets: 3
+  recent_tickets: 3
 
   # When true, the open-tickets count is itself a trigger (notify even
   # without unread pings). false = display only.

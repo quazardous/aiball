@@ -98,6 +98,14 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- **The managed settings are renamed once, as dotted paths without a unit**
+  (`tickets.step_after_max_minutes` → `tickets.steps.max_wait`,
+  `autopoll.throttle_seconds` → `autopoll.throttle`; the table is in the
+  configuration documentation), and every time is a **duration**: seconds on
+  the wire, written `90s`, `15m`, `1h30m`, `2d`. Stored values are moved and
+  converted; an old name in a file, or given to `config.set`, still works for
+  this version, converted, with a warning to rename it.
+
 - **`claude-loop start` runs Claude on the daemon's session host by default**,
   no longer in tmux. `claude_loop.session: tmux` (in the global config or a
   project's `.aiball.yaml`) or `start --tmux` keeps the tmux way, with the

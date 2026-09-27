@@ -6,16 +6,16 @@
  * up by posting: a ticket closed on its accepted resolution or wontfix, and a
  * commit it posted (the diff is the currency).
  *
- * The balance is per agent x project: `tickets.wait_credit_start_minutes` plus
+ * The balance is per agent x project: `tickets.wait_credit.start` plus
  * the movements. A step (`then: continue`) spends what it waits; the agent
  * coming back on the ticket before the end gets the rest back, which is what
  * makes looking early pay. Short of credit the wait is capped to the balance,
- * never below `tickets.step_min_wait_minutes` (david: « on peut mettre 5
+ * never below `tickets.wait_credit.floor` (david: « on peut mettre 5
  * minutes pour éviter le flood »), and that floor never takes the balance
  * below zero. `0` — carry on at once — is always granted and costs nothing.
  *
  * #3065 david — « le crédit en minutes max ne doit pas dépasser un seuil » :
- * the balance never exceeds `tickets.wait_credit_max_minutes` (0 = no cap).
+ * the balance never exceeds `tickets.wait_credit.max` (0 = no cap).
  * What would take it over is not credited, and a balance already over (the cap
  * lowered, or credit earned before it existed) is cut back by a `cap` move.
  */
@@ -66,21 +66,26 @@ function num(key: string, project: string, fallback: number): number {
     return Number.isFinite(v) && v >= 0 ? v : fallback;
 }
 
+/** #3138 — a duration setting (seconds) in the ledger's unit, `per` seconds (60: minutes, 3600: hours). */
+function dur(key: string, project: string, fallback: number, per: number): number {
+    return num(key, project, fallback * per) / per;
+}
+
 export function waitCreditConfig(project: string) {
     return {
-        enabled: bool("tickets.wait_credit_enabled", project, true),
-        refund: bool("tickets.wait_credit_refund", project, true),
-        commitMaxAgeHours: num("tickets.wait_credit_commit_max_age_hours", project, 48),
-        maxCommitsPerComment: num("tickets.wait_credit_max_commits_per_comment", project, 20),
-        start: num("tickets.wait_credit_start_minutes", project, 60),
-        max: num("tickets.wait_credit_max_minutes", project, 120),
-        floor: num("tickets.step_min_wait_minutes", project, 5),
-        resolved: num("tickets.wait_credit_resolved_minutes", project, 30),
-        resolvedNoCommit: num("tickets.wait_credit_resolved_no_commit_minutes", project, 10),
-        wontfix: num("tickets.wait_credit_wontfix_minutes", project, 5),
-        linesPerMinute: num("tickets.wait_credit_commit_lines_per_minute", project, 20),
-        maxPerCommit: num("tickets.wait_credit_commit_max_minutes", project, 30),
-        minPerCommit: num("tickets.wait_credit_commit_min_minutes", project, 2),
+        enabled: bool("tickets.wait_credit.enabled", project, true),
+        refund: bool("tickets.wait_credit.refund", project, true),
+        commitMaxAgeHours: dur("tickets.wait_credit.earn.commit_max_age", project, 48, 3600),
+        maxCommitsPerComment: num("tickets.wait_credit.earn.commits_per_comment", project, 20),
+        start: dur("tickets.wait_credit.start", project, 60, 60),
+        max: dur("tickets.wait_credit.max", project, 120, 60),
+        floor: dur("tickets.wait_credit.floor", project, 5, 60),
+        resolved: dur("tickets.wait_credit.earn.resolved", project, 30, 60),
+        resolvedNoCommit: dur("tickets.wait_credit.earn.resolved_no_commit", project, 10, 60),
+        wontfix: dur("tickets.wait_credit.earn.wontfix", project, 5, 60),
+        linesPerMinute: num("tickets.wait_credit.earn.lines_per_minute", project, 20),
+        maxPerCommit: dur("tickets.wait_credit.earn.commit_max", project, 30, 60),
+        minPerCommit: dur("tickets.wait_credit.earn.commit_min", project, 2, 60),
     };
 }
 

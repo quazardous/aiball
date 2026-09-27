@@ -11,8 +11,8 @@
  * ```yaml
  * autopoll:
  *   enabled: true
- *   throttle_seconds: 0
- *   include_recent_tickets: 3
+ *   throttle: 0          # a duration: 90s, 15m, 1h30m… (bare integer = seconds)
+ *   recent_tickets: 3
  *   tone: directive
  * consumer:
  *   agent: skybot-claude
@@ -25,6 +25,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { parseDuration } from "../config/duration.js";
 import { loadPromptsFromYaml, loadPromptsFromYamlBlock, mergePrompts, type PromptMap } from "../prompt-templates.js";
 
 export const CONFIG_FILENAME = ".aiball.yaml";
@@ -167,7 +168,7 @@ export interface AiballConfig {
         enabled: boolean;
         /**
          * `false` (default) — reminders persist: re-notify when
-         * `throttle_seconds` elapses even if you didn't drain. New
+         * `throttle` elapses even if you didn't drain. New
          * pings (max_id moves) always notify immediately, bypassing
          * the throttle.
          * `true` — one-shot: notify only when max_id moves. No
@@ -175,8 +176,9 @@ export interface AiballConfig {
          * leave me alone".
          */
         volatile: boolean;
-        throttle_seconds: number;
-        include_recent_tickets: number;
+        /** #3138 — seconds; the yaml takes the duration notation. */
+        throttle: number;
+        recent_tickets: number;
         /**
          * Include the open-tickets count for the consumer's project
          * in the notify reason. Default true — gives the agent
@@ -229,6 +231,8 @@ export interface AiballConfig {
      * not stop a loop from starting — and `claude-loop` warns about them.
      */
     retired_keys: string[];
+    /** #3138 — keys the file still spells the old way (`old → new`): read, and to be renamed. */
+    renamed_keys: string[];
     /**
      * #B.180 david: all claude-loop timeouts are yaml-configurable.
      * CLI flags (`--interval`, `--user-grace`) still win when passed;
@@ -446,8 +450,8 @@ const DEFAULTS: AiballConfig = {
         // 120s so fast back-and-forth doesn't re-fire the standing
         // reminder every turn; new-ping/new-open triggers still
         // bypass the throttle (#B.192).
-        throttle_seconds: 120,
-        include_recent_tickets: 3,
+        throttle: 120,
+        recent_tickets: 3,
         backlog: true,
         tone: "directive",
     },
@@ -461,6 +465,7 @@ const DEFAULTS: AiballConfig = {
     },
     mcp_json_deprecated: false,
     retired_keys: [],
+        renamed_keys: [],
     claude_loop: {
         // Heartbeat 30s, grace windows 60s — coherent order of
         // magnitude, all yaml-overridable (#B.180, #B.185).
@@ -785,6 +790,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         claude: { ...DEFAULTS.claude },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         retired_keys: [],
+        renamed_keys: [],
         project_type: DEFAULTS.project_type,
         configPath,
         prompts: {},
@@ -829,11 +835,15 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof a.enabled === "boolean") cfg.autopoll.enabled = a.enabled;
             if (typeof a.volatile === "boolean") cfg.autopoll.volatile = a.volatile;
             if (typeof a.backlog === "boolean") cfg.autopoll.backlog = a.backlog;
-            if (typeof a.throttle_seconds === "number" && a.throttle_seconds >= 0) {
-                cfg.autopoll.throttle_seconds = a.throttle_seconds;
-            }
-            if (typeof a.include_recent_tickets === "number" && a.include_recent_tickets >= 0) {
-                cfg.autopoll.include_recent_tickets = Math.min(20, a.include_recent_tickets);
+            // #3138 — the names since the rename, and for one version the old
+            // ones (`throttle_seconds`, `include_recent_tickets`) when the new
+            // is absent; a renamed key is reported, to be updated.
+            const throttle = parseDuration("throttle" in a ? a.throttle : a.throttle_seconds);
+            if (throttle !== null) cfg.autopoll.throttle = throttle;
+            const recent = "recent_tickets" in a ? a.recent_tickets : a.include_recent_tickets;
+            if (typeof recent === "number" && recent >= 0) cfg.autopoll.recent_tickets = Math.min(20, recent);
+            for (const [old, now] of [["throttle_seconds", "throttle"], ["include_recent_tickets", "recent_tickets"]] as const) {
+                if (old in a) cfg.renamed_keys.push(`autopoll.${old} → autopoll.${now}`);
             }
             if (typeof a.tone === "string" && (VALID_TONES as string[]).includes(a.tone)) {
                 cfg.autopoll.tone = a.tone as AutopollTone;

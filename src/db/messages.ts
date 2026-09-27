@@ -126,11 +126,11 @@ export function insertMessage(m: NewMessage): Message {
             // For ticket_created, NewMessage.parent_id (when set) is the
             // parent TICKET id (sub-ticket lineage, per #B.61 follow-up).
             // For non-ticket kinds, parent_id is the parent message id.
-            // #449: default priority is now config-driven — tickets.default_priority
+            // #449: default priority is now config-driven — tickets.defaults.priority
             // (global default + per-project override via the config manager),
             // falling back to 'normal'. First real consumer of the config schema.
             const defaultPriority =
-                (getConfig("tickets.default_priority", m.project) as Priority | undefined) ?? "normal";
+                (getConfig("tickets.defaults.priority", m.project) as Priority | undefined) ?? "normal";
             // #803 — `ticket_new({then:"plan"})` ships a pending plan
             // decision in the meta of the ticket_created itself. Only `plan`
             // is allowed (validator enforces). decisionGateByTicket replays

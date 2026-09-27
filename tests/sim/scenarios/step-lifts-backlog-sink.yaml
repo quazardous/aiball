@@ -4,7 +4,7 @@ critical: true
 # again for the cooldown) while the thread does not move. Any gesture on the
 # thread moves it, including the agent's own `then: continue`: the ticket can
 # be named again at the very next wake. That next wake sinks it again, but only
-# for `tickets.sink_then_continue_minutes` (5 by default), not the whole hour.
+# for `tickets.backlog.after_step` (5 by default), not the whole hour.
 steps:
   - alpha-lead: ticket_new
     args:

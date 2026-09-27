@@ -10,6 +10,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatDuration, parseDuration } from "../config/duration.js";
 import type { Command } from "commander";
 import {
     die,
@@ -19,7 +20,7 @@ import {
     userCwd,
 } from "./_helpers.js";
 
-async function setAutopollField(key: string, value: unknown): Promise<void> {
+async function setAutopollField(key: string, value: unknown, replaces: string[] = []): Promise<void> {
     const { findConfigUpwards, CONFIG_FILENAME } = await import("../autopoll/config.js");
     const yamlMod = await import("yaml");
     let path = findConfigUpwards(userCwd());
@@ -34,6 +35,8 @@ async function setAutopollField(key: string, value: unknown): Promise<void> {
     const doc = yamlMod.parseDocument(src);
     if (!doc.has("autopoll")) doc.set("autopoll", { [key]: value });
     else doc.setIn(["autopoll", key], value);
+    // #3138 — the key it renamed goes: two spellings would disagree.
+    for (const old of replaces) if (doc.hasIn(["autopoll", old])) doc.deleteIn(["autopoll", old]);
     writeFileSync(path, doc.toString());
     process.stdout.write(`${path}: autopoll.${key} = ${JSON.stringify(value)}\n`);
 }
@@ -92,14 +95,12 @@ export function registerAutopollCommands(program: Command): void {
         });
 
     autopoll
-        .command("throttle <seconds>")
-        .description("Set autopoll.throttle_seconds (integer ≥ 0)")
-        .action(async (seconds: string) => {
-            const n = Number.parseInt(seconds, 10);
-            if (!Number.isFinite(n) || n < 0) {
-                die(`throttle must be a non-negative integer, got '${seconds}'`);
-            }
-            await setAutopollField("throttle_seconds", n);
+        .command("throttle <duration>")
+        .description("Set autopoll.throttle: a duration (90s, 15m, 1h30m; a bare integer is seconds; 0 = off)")
+        .action(async (duration: string) => {
+            const n = parseDuration(duration);
+            if (n === null) die(`throttle is a duration (90s, 15m, 1h30m…), got '${duration}'`);
+            await setAutopollField("throttle", formatDuration(n), ["throttle_seconds"]);
         });
 
     autopoll

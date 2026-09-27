@@ -380,9 +380,9 @@ program
                 enabled: cfg.autopoll.enabled,
                 volatile: cfg.autopoll.volatile,
                 backlog: cfg.autopoll.backlog,
-                throttle_seconds: cfg.autopoll.throttle_seconds,
+                throttle: cfg.autopoll.throttle,
                 tone: cfg.autopoll.tone,
-                include_recent_tickets: cfg.autopoll.include_recent_tickets,
+                recent_tickets: cfg.autopoll.recent_tickets,
                 reason: cfg.configPath
                     ? cfg.autopoll.enabled
                         ? "enabled via .aiball.yaml"
@@ -436,7 +436,7 @@ program
         if (payload.autopoll.enabled) {
             const mode = payload.autopoll.volatile ? "volatile (one-shot)" : "persistent";
             const backlog = payload.autopoll.backlog ? "backlog-trigger" : "pings-only";
-            process.stdout.write(`     mode=${mode}, ${backlog}, throttle=${payload.autopoll.throttle_seconds}s, tone=${payload.autopoll.tone}, recent=${payload.autopoll.include_recent_tickets}\n`);
+            process.stdout.write(`     mode=${mode}, ${backlog}, throttle=${payload.autopoll.throttle}s, tone=${payload.autopoll.tone}, recent=${payload.autopoll.recent_tickets}\n`);
         } else if (!payload.config.found) {
             // #B.154 david: when the Stop hook is wired but no
             // .aiball.yaml exists, the project is half-set-up.

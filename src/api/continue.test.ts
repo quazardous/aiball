@@ -124,10 +124,10 @@ test("a step may wait up to the project's limit, 120 minutes by default, and not
 
     const over = await step(t, { step_after_minutes: 121 });
     assert.equal(over.status, 400);
-    assert.match(over.json.error ?? "", /at most 120 on this project \(tickets\.step_after_max_minutes\)/);
+    assert.match(over.json.error ?? "", /at most 120 on this project \(tickets\.steps\.max_wait\)/);
     assert.equal(commentsOn(t).length, 1, "the refused step left nothing");
 
-    setConfigOverride("p-2308", "tickets.step_after_max_minutes", 240);
+    setConfigOverride("p-2308", "tickets.steps.max_wait", 14400);
     const raised = await step(t, { step_after_minutes: 200 });
     assert.equal(raised.status, 201, "the project raised its limit");
 });

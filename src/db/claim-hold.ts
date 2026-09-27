@@ -10,7 +10,8 @@ import { getConfig } from "./config-overrides.js";
 import { ticketSelfLastActivity } from "./tickets.js";
 
 function protectMinutes(project: string): number {
-    const raw = Number(getConfig("tickets.claim_protect_minutes", project) ?? 60);
+    // #3138 — a duration, in seconds; the protection counts minutes.
+    const raw = Number(getConfig("tickets.backlog.claim_protect", project) ?? 3600) / 60;
     return Number.isFinite(raw) ? raw : 60;
 }
 

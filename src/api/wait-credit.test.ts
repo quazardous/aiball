@@ -44,7 +44,7 @@ const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2640-w
 const BOSS = issueToken({ kind: "agent", consumer_id: "boss", label: "2640-b" }).token;
 createProject({ name: P });
 // #3065 — the cap has its own test (db/wait-credit-cap.test.ts); here, on every project, the amounts are summed free of it.
-(await import("../db/config-overrides.js")).setConfigOverride("", "tickets.wait_credit_max_minutes", 0);
+(await import("../db/config-overrides.js")).setConfigOverride("", "tickets.wait_credit.max", 0);
 upsertSubscription("worker", P, "owner");
 upsertSubscription("boss", P, "owner");
 
@@ -316,7 +316,7 @@ test("#2640 every part of the scheme is a per-project setting: off, no refund, c
     const t = submitMessage({ project: PO, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
     await call(WORKER, "POST", `/api/tickets/${t}/assign`, {});
 
-    setConfigOverride(PO, "tickets.wait_credit_enabled", false);
+    setConfigOverride(PO, "tickets.wait_credit.enabled", false);
     const off = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 100 });
     assert.equal(off.json.wait_credit, undefined, "off: the reply says nothing about credit");
     const meta = JSON.parse(String(off.json.meta)) as { step_resume_at: string };
@@ -325,8 +325,8 @@ test("#2640 every part of the scheme is a per-project setting: off, no refund, c
     const rows = (await call(WORKER, "GET", `/api/tickets?project=${PO}&backlog=1&limit=50`)).json as unknown as Array<{ wait_credit_minutes: number | null }>;
     assert.ok(rows.every((r) => r.wait_credit_minutes === null), "off: wakes say nothing");
 
-    setConfigOverride(PO, "tickets.wait_credit_enabled", true);
-    setConfigOverride(PO, "tickets.wait_credit_refund", false);
+    setConfigOverride(PO, "tickets.wait_credit.enabled", true);
+    setConfigOverride(PO, "tickets.wait_credit.refund", false);
     const s = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 30 });
     assert.equal((s.json.wait_credit as Credit).balance, 30);
     const back = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", handback: true });
@@ -338,13 +338,13 @@ test("#2640 every part of the scheme is a per-project setting: off, no refund, c
     const bl = (await call(WORKER, "GET", `/api/tickets?project=${PO}&backlog=1&limit=50`)).json as unknown as Array<{ backlog_tier: number | null; wait_credit_rules: Record<string, unknown> | null }>;
     assert.ok(bl.filter((x) => x.backlog_tier !== null).every((x) => x.wait_credit_rules?.refund === false), "and so do backlog rows");
 
-    setConfigOverride(PO, "tickets.wait_credit_resolved_no_commit_minutes", 7);
+    setConfigOverride(PO, "tickets.wait_credit.earn.resolved_no_commit", 420);
     const res = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", decision_kind: "resolution" });
     assert.equal((await call(BOSS, "POST", `/api/messages/${res.json.id}/decide`, { status: "accepted" })).status, 200);
     assert.equal(waitCreditBalance("worker", PO), 37, "the amounts are the project's");
 
-    setConfigOverride(PO, "tickets.wait_credit_max_commits_per_comment", 1);
-    setConfigOverride(PO, "tickets.wait_credit_commit_max_age_hours", 1);
+    setConfigOverride(PO, "tickets.wait_credit.earn.commits_per_comment", 1);
+    setConfigOverride(PO, "tickets.wait_credit.earn.commit_max_age", 3600);
     const t2 = submitMessage({ project: PO, kind: "ticket_created", title: "t2", body: "x", by_agent: "boss" }).id;
     const c = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t2, body: "b", summary_until: "s", handback: true, commits: ["deadbeef", "cafebabe"] });
     const [first, second] = (c.json.wait_credit as Credit).commits!;

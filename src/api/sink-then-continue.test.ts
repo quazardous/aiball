@@ -3,7 +3,7 @@
  * ticket only briefly. It used to sink it for the whole cooldown, hiding the
  * work the step announced (seen live: a loop showing b:0 with six actionable
  * tickets). What must hold, over the real routes:
- * - a wake after a step cools the ticket for `tickets.sink_then_continue_minutes`
+ * - a wake after a step cools the ticket for `tickets.backlog.after_step`
  *   (5 by default), a wake after any other last action for the whole cooldown;
  * - once that short window has passed the step's ticket is a candidate again,
  *   while a ticket whose last action is a comment is still cooled;
@@ -40,7 +40,7 @@ for (const p of ["p-2365", "p-2365-zero"]) {
     createProject({ name: p });
     upsertSubscription("worker", p, "owner");
 }
-setConfigOverride("p-2365-zero", "tickets.sink_then_continue_minutes", 0);
+setConfigOverride("p-2365-zero", "tickets.backlog.after_step", 0);
 
 const server = createApp().listen(0);
 await new Promise<void>((r) => server.once("listening", () => r()));

@@ -385,7 +385,7 @@ export const configOverrides = sqliteTable("config_overrides", {
     id: integer("id").primaryKey({ autoIncrement: true }),
     /** '' = global layer; otherwise the project name (project layer). */
     project: text("project").notNull().default(""),
-    /** A schema key, e.g. 'tickets.default_priority'. */
+    /** A schema key, e.g. 'tickets.defaults.priority'. */
     key: text("key").notNull(),
     /** JSON-encoded value (number / boolean / string / enum share one column). */
     value: text("value").notNull(),
@@ -1031,7 +1031,7 @@ export const ticketPayloads = sqliteTable("ticket_payloads", {
 
 /**
  * #2640 — one movement of an agent's wait credit (see migration 0073). The
- * balance is `tickets.wait_credit_start_minutes` plus the sum of `minutes`
+ * balance is `tickets.wait_credit.start` plus the sum of `minutes`
  * for one consumer x project. The once-only guards are partial unique indexes
  * in the migration.
  */

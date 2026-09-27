@@ -38,7 +38,7 @@ Different blocks merge differently — that's the "russian doll" part.
 ### Autopoll — `autopoll:` — *per-project only*
 Read from `.aiball.yaml` (defaults when the file/block is absent). Pilot
 from the CLI: `aiball autopoll enable|disable|tone <t>|throttle <n>`.
-Keys: `enabled`, `volatile`, `throttle_seconds`, `include_recent_tickets`,
+Keys: `enabled`, `volatile`, `throttle` (a duration, see below), `recent_tickets`,
 `backlog`, `tone` (`hint`|`directive`|`imperative`).
 
 ### claude-loop timeouts — `claude_loop:` — *defaults → yaml → CLI/env*
@@ -132,6 +132,52 @@ Set it up with `aiball init tailscale [--http] [--port N]`; manage from the CLI:
 > (`systemd/aiball.service`). An existing install picks it up after a re-run
 > of `install.sh` (regenerates the unit + `daemon-reload`); then a daemon
 > (re)start brings the provider up.
+
+## Durations and renamed keys
+
+A setting that is a time is a **duration**: seconds on the wire (`config.managed`
+gives its value, default and range in seconds), written by a person in a
+notation: `d h m s`, in that order, each unit at most once, spaces allowed
+between parts — `90s`, `15m`, `1h30m`, `1h 30m`, `2d`. A bare integer is
+seconds, `0` is zero. `config.set` takes either; a file takes either. A client
+that shows one writes it back largest units first (`5400` → `1h30m`); the
+grammar is the one in `src/config/duration.ts`, to reproduce as is.
+
+The managed keys are dotted paths without a unit suffix; a setting's section
+is its key less the last segment (`tickets.wait_credit.earn.resolved` →
+`tickets.wait_credit.earn`). The keys renamed to this shape still work under
+their old name for one version — a file's value converted from the old unit,
+`config.set` answering `renamed_from` — and claude-loop warns about a file
+that still spells one the old way:
+
+| Old key | New key |
+| --- | --- |
+| `tickets.default_priority` | `tickets.defaults.priority` |
+| `tickets.auto_broadcast_new` | `tickets.defaults.broadcast_new` |
+| `tickets.summary_until_max` | `tickets.rules.summary_max` |
+| `tickets.require_then` | `tickets.rules.require_then` |
+| `tickets.require_commits` | `tickets.rules.require_commits` |
+| `tickets.step_stale_hours` | `tickets.steps.stale` |
+| `tickets.step_hot_minutes` | `tickets.steps.hot` |
+| `tickets.step_after_max_minutes` | `tickets.steps.max_wait` |
+| `tickets.wait_credit_enabled` | `tickets.wait_credit.enabled` |
+| `tickets.wait_credit_refund` | `tickets.wait_credit.refund` |
+| `tickets.wait_credit_start_minutes` | `tickets.wait_credit.start` |
+| `tickets.wait_credit_max_minutes` | `tickets.wait_credit.max` |
+| `tickets.step_min_wait_minutes` | `tickets.wait_credit.floor` |
+| `tickets.wait_credit_resolved_minutes` | `tickets.wait_credit.earn.resolved` |
+| `tickets.wait_credit_resolved_no_commit_minutes` | `tickets.wait_credit.earn.resolved_no_commit` |
+| `tickets.wait_credit_wontfix_minutes` | `tickets.wait_credit.earn.wontfix` |
+| `tickets.wait_credit_commit_max_age_hours` | `tickets.wait_credit.earn.commit_max_age` |
+| `tickets.wait_credit_max_commits_per_comment` | `tickets.wait_credit.earn.commits_per_comment` |
+| `tickets.wait_credit_commit_lines_per_minute` | `tickets.wait_credit.earn.lines_per_minute` |
+| `tickets.wait_credit_commit_max_minutes` | `tickets.wait_credit.earn.commit_max` |
+| `tickets.wait_credit_commit_min_minutes` | `tickets.wait_credit.earn.commit_min` |
+| `tickets.claim_protect_minutes` | `tickets.backlog.claim_protect` |
+| `tickets.blocked_cooldown_multiplier` | `tickets.backlog.blocked_multiplier` |
+| `tickets.sink_then_continue_minutes` | `tickets.backlog.after_step` |
+| `autopoll.throttle_seconds` | `autopoll.throttle` |
+| `autopoll.include_recent_tickets` | `autopoll.recent_tickets` |
 
 ## State / data dirs (not config, but related)
 
