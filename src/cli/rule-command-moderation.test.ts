@@ -19,7 +19,7 @@ const { upsertConsumer } = await import("../db/consumers.js");
 const { issueToken } = await import("../db/tokens.js");
 const { evaluate } = await import("../rules.js");
 const { AiballClient } = await import("../client.js");
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { attachBus } = await import("../bus/server.js");
 
 getDb();

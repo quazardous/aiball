@@ -1,12 +1,12 @@
 /**
- * Benchmark the two surfaces an agent and the UI actually go through: the HTTP
- * API over the Unix socket, and the MCP boundary.
+ * Benchmark the two surfaces an agent and the UI actually go through: the
+ * bus over the Unix socket, and the MCP boundary.
  *
- * Why both, and why they differ: an MCP call is the API call PLUS the JSON-RPC
- * round-trip, the `_status` counters stamped onto every response, and the
+ * Why both, and why they differ: an MCP call is the bus call PLUS another
+ * JSON-RPC round-trip, the `_status` counters stamped onto every response, and the
  * serialisation of a much larger payload. Measuring only the route hides the
  * half the agent actually waits for; measuring only MCP hides where the time
- * went. So each row of the API table has its MCP counterpart below it.
+ * went. So each row of the bus table has its MCP counterpart below it.
  *
  * Method, stated so a number can be argued with:
  *  - WARMUP runs are discarded. The first read of a cold cache is a different
@@ -20,7 +20,7 @@
  *
  * Usage:  npx tsx scripts/bench-surfaces.ts [--runs 9] [--warmup 3] [--api-only]
  */
-import { request } from "node:http";
+import { BusClient } from "../src/bus-client.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -73,36 +73,23 @@ function table(title: string, rows: Stat[]): void {
 const fmtBytes = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(0)} kB` : `${n} B`);
 
 // ---------------------------------------------------------------------------
-//  API over the Unix socket
+//  The bus over the Unix socket: one connection, kept, as a loop keeps it
 // ---------------------------------------------------------------------------
 
-function apiGet(path: string): Promise<number> {
-    return new Promise((resolve, reject) => {
-        const req = request(
-            { socketPath: SOCK, path, method: "GET", headers: { "x-aiball-consumer": CONSUMER } },
-            (res) => {
-                let size = 0;
-                res.on("data", (c: Buffer) => { size += c.length; });
-                res.on("end", () => {
-                    // A 404 answers fast and would look like a great score;
-                    // an earlier bench on this board recorded exactly that.
-                    if (res.statusCode !== 200) reject(new Error(`HTTP ${res.statusCode} on ${path}`));
-                    else resolve(size);
-                });
-            },
-        );
-        req.on("error", reject);
-        req.end();
-    });
+let bus: BusClient;
+
+async function busCall(method: string, params: Record<string, unknown>): Promise<number> {
+    // A refusal answers fast and would look like a great score: it throws.
+    return JSON.stringify(await bus.call(method, params)).length;
 }
 
-async function benchApi(label: string, path: string): Promise<Stat> {
-    for (let i = 0; i < WARMUP; i++) await apiGet(path);
+async function benchBus(label: string, method: string, params: Record<string, unknown> = {}): Promise<Stat> {
+    for (let i = 0; i < WARMUP; i++) await busCall(method, params);
     const samples: number[] = [];
     let bytes = 0;
     for (let i = 0; i < RUNS; i++) {
         const t0 = performance.now();
-        bytes = await apiGet(path);
+        bytes = await busCall(method, params);
         samples.push(performance.now() - t0);
     }
     return summarise(label, samples, bytes);
@@ -175,36 +162,34 @@ async function benchMcp(client: McpClient, label: string, tool: string, args: Re
 
 // ---------------------------------------------------------------------------
 
-const enc = encodeURIComponent;
-
 async function main(): Promise<void> {
     console.log(`aiball bench — socket ${SOCK}`);
     console.log(`consumer ${CONSUMER}, project ${PROJECT}, ${RUNS} runs after ${WARMUP} warmup, sequential`);
 
+    bus = await BusClient.connect({ socket: SOCK, consumer: CONSUMER });
     const api: Stat[] = [];
-    api.push(await benchApi("health", "/api/health"));
-    api.push(await benchApi("micro-status", `/api/micro-status?consumer_id=${enc(CONSUMER)}&project=${enc(PROJECT)}`));
-    api.push(await benchApi("tickets actionable/10", `/api/tickets?project=${enc(PROJECT)}&actionable=1&limit=10`));
-    api.push(await benchApi("tickets open/30", `/api/tickets?project=${enc(PROJECT)}&open=1&limit=30`));
-    api.push(await benchApi("tickets open/30 x-proj", "/api/tickets?open=1&limit=30"));
-    api.push(await benchApi("tickets open, no limit", `/api/tickets?project=${enc(PROJECT)}&open=1`));
-    api.push(await benchApi("inbox", `/api/inbox?project=${enc(PROJECT)}`));
-    api.push(await benchApi("projects detailed", "/api/projects?detailed=1"));
-    table("API over the Unix socket", api);
+    api.push(await benchBus("micro-status", "consumer.micro_status", { consumer_id: CONSUMER, project: PROJECT }));
+    api.push(await benchBus("tickets actionable/10", "ticket.list", { project: PROJECT, actionable: "1", limit: 10 }));
+    api.push(await benchBus("tickets open/30", "ticket.list", { project: PROJECT, open: "1", limit: 30 }));
+    api.push(await benchBus("tickets open/30 x-proj", "ticket.list", { open: "1", limit: 30 }));
+    api.push(await benchBus("tickets open, no limit", "ticket.list", { project: PROJECT, open: "1" }));
+    api.push(await benchBus("inbox", "inbox.list", { project: PROJECT }));
+    api.push(await benchBus("projects detailed", "project.list", { detailed: "1" }));
+    table("the bus over the Unix socket", api);
 
     // #2171 — what `poll` is made of. It fires these in a `Promise.all`, which
     // parallelises nothing against a daemon that serves one caller at a time,
     // so the tool's cost is very nearly their SUM. Measuring the parts is what
     // turns "poll is slow" into a decision about which part to attack.
     const parts: Stat[] = [];
-    parts.push(await benchApi("health", "/api/health"));
-    parts.push(await benchApi("projects detailed", "/api/projects?detailed=1"));
-    parts.push(await benchApi("my pending tickets", `/api/messages?kind=ticket_created&status=pending&by_agent=${enc(CONSUMER)}`));
-    parts.push(await benchApi("my pending comments", `/api/messages?kind=comment_added&status=pending&by_agent=${enc(CONSUMER)}`));
-    parts.push(await benchApi("pings count", `/api/pings/count?consumer_id=${enc(CONSUMER)}`));
-    parts.push(await benchApi("plans to execute", "/api/decisions/plans-to-execute"));
+    parts.push(await benchBus("projects detailed", "project.list", { detailed: "1" }));
+    parts.push(await benchBus("my pending tickets", "message.list", { kind: "ticket_created", status: "pending", by_agent: CONSUMER }));
+    parts.push(await benchBus("my pending comments", "message.list", { kind: "comment_added", status: "pending", by_agent: CONSUMER }));
+    parts.push(await benchBus("pings count", "ping.count", { consumer_id: CONSUMER }));
+    parts.push(await benchBus("plans to execute", "decision.plans_to_execute"));
     table("what `poll` is made of (fired together, served one at a time)", parts);
     console.log(`  ${"sum of the parts".padEnd(20)}  ${parts.reduce((a, r) => a + r.median, 0).toFixed(1).padStart(6)} ms`);
+    bus.close();
 
     if (API_ONLY) return;
 

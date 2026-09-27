@@ -5,8 +5,7 @@
  * The read is the bus method `config.get`; this route serves it.
  */
 import { Router } from "express";
-import { serveMethod } from "../bus/http.js";
 
 export const configRouter = Router();
 
-configRouter.get("/config", serveMethod("config.get"));
+

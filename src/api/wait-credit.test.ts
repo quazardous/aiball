@@ -22,7 +22,7 @@ import type { AddressInfo } from "node:net";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2640-"));
 process.env.AIBALL_SOCK = "";
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { attachBus } = await import("../bus/server.js");
 const { BusClient } = await import("../bus-client.js");
 const { issueToken } = await import("../db/tokens.js");

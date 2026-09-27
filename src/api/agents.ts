@@ -24,7 +24,6 @@
  * session cookie, agent callers with a bearer — both work without any
  * additional path.
  */
-import { serveMethod } from "../bus/http.js";
 import { Router, type Request, type Response } from "express";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -514,4 +513,4 @@ export function sendAfkToLoop(
     return { ok: true, loop: loopName };
 }
 
-agentsRouter.post("/agents/:name/afk", serveMethod("consumer.afk", undefined, { status: 202 }));
+

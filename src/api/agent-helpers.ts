@@ -4,9 +4,8 @@
  * helper). Carved out of api.ts on 2026-05-19 — behavior-preserving
  * move.
  */
-import { serveMethod } from "../bus/http.js";
 import { Router } from "express";
 
 export const agentHelpersRouter = Router();
 
-agentHelpersRouter.get("/feed-path", serveMethod("project.feed_path"));
+

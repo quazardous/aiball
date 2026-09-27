@@ -16,7 +16,7 @@ process.env.AIBALL_SOCK = "";
 const { getDb } = await import("../db/connection.js");
 const { upsertConsumer } = await import("../db/consumers.js");
 const { issueToken } = await import("../db/tokens.js");
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 
 getDb();
 upsertConsumer({ consumer_id: "mod2718", kind: "human" });

@@ -12,7 +12,7 @@
 // d'interférence avec le daemon que les autres scénarios attaquent.
 // (#328 checklist : bus lifecycle #321)
 import type { AddressInfo } from "node:net";
-import { createApp } from "../src/app.js";
+import { createTestApp as createApp } from "../src/tests/test-app.js";
 import { onLifecycle, type LifecycleEvent } from "../src/event-bus.js";
 import { provision, provisionProject, provisionHuman, metaDecision, ok, fail } from "./lib.js";
 

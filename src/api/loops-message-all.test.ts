@@ -20,7 +20,7 @@ process.env.AIBALL_SOCK = "";
 const LOOPS = mkdtempSync(join(tmpdir(), "cl-2333-"));
 process.env.CLAUDE_LOOP_STATE_ROOT = LOOPS;
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, setConsumerState } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");

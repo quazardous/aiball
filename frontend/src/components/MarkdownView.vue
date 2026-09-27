@@ -4,7 +4,8 @@ import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
 import { markedInstance } from "../lib/formatting";
-import { withBase, stripBase, pushRoute } from "../lib/base";
+import { stripBase, pushRoute } from "../lib/base";
+import { api } from "../lib/api";
 import { BUILT_IN_BODY_DECORATORS, renderBody } from "../lib/body-decorators";
 import { wireAttachmentCards } from "../lib/attachment-card";
 
@@ -91,23 +92,12 @@ async function onClick(ev: MouseEvent) {
     const match = /^\/b\/([^/?#]+)(.*)$/.exec(internal);
     if (match && !/^\d+$/.test(match[1])) {
         try {
-            // #B.94: hashid → numeric id resolution lives under the
-            // bearer-auth middleware. Send the stored token; the SPA
-            // shell handles 401 globally via setUnauthorizedHandler.
-            const tok = localStorage.getItem("aiball.token");
-            const headers: Record<string, string> = {};
-            if (tok) headers["authorization"] = `Bearer ${tok}`;
-            const res = await fetch(
-                withBase(`/api/tickets/${encodeURIComponent(match[1])}`),
-                { headers },
-            );
-            if (res.ok) {
-                const data = await res.json();
-                if (data?.ticket?.id) {
-                    pushRoute(`/b/${data.ticket.id}${match[2]}`);
-                    window.dispatchEvent(new PopStateEvent("popstate"));
-                    return;
-                }
+            // hashid → numeric id: `ticket.get` on the bus (#3068).
+            const data = await api.getTicketHeader(match[1]);
+            if (data?.ticket?.id) {
+                pushRoute(`/b/${data.ticket.id}${match[2]}`);
+                window.dispatchEvent(new PopStateEvent("popstate"));
+                return;
             }
         } catch {
             /* fall through to default navigation */

@@ -4,7 +4,7 @@
 // (src/db/assignment-flow.test.ts); here we audit the HTTP surface those can't
 // reach: the claim/assign/release endpoints, push authority (an agent pushing
 // onto ANOTHER consumer is moderator-only → 403), and auto-release on close.
-import { provision, provisionProject, provisionHuman, post, tickets, assign, release, ok, fail, BASE } from "./lib.js";
+import { provision, provisionProject, provisionHuman, post, tickets, assign, release, busRaw, ok, fail } from "./lib.js";
 
 const project = "assignment";
 
@@ -39,12 +39,8 @@ async function main(): Promise<void> {
     ok(`#${id} claimed by agent-a → out of agent-b's pool, still open (anti-collision)`);
 
     // agent-b cannot PUSH it onto another consumer (moderator-only) → 403.
-    const pushByAgent = await fetch(`${BASE}/api/tickets/${id}/assign`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${tokB}` },
-        body: JSON.stringify({ assignee: "agent-a" }),
-    });
-    if (pushByAgent.status !== 403) fail(`an agent pushing onto another consumer should be 403, got ${pushByAgent.status}`);
+    const pushByAgent = await busRaw(tokB, "ticket.assign", { id, assignee: "agent-a" });
+    if (pushByAgent.code !== 403) fail(`an agent pushing onto another consumer should be 403, got ${pushByAgent.code}`);
     ok(`agent → push onto another consumer rejected (403, moderator-only)`);
 
     // david (human) PUSHES it onto agent-b → now agent-b's, not agent-a's.

@@ -9,10 +9,10 @@ Every refusal the API answers is JSON:
 - `error` is a sentence for a human. Its wording may change; don't match on it.
 - `code` is the contract. A client branches on it. A code, once shipped, keeps
   its meaning.
-- Some refusals carry more fields; they are listed with the code below. A
-  route that serves a bus method ([`API-BUS.md`](./API-BUS.md)) puts them
-  under `details` (`details.access`, `details.existing_ticket_id`), as the bus
-  does; the others still put them next to these two (`hint`, `max_bytes`).
+- Some refusals carry more fields; they are listed with the code below. A bus
+  method ([`API-BUS.md`](./API-BUS.md)) puts them under `details`
+  (`details.access`, `details.existing_ticket_id`); an HTTP route puts them
+  next to these two (`hint`, `max_bytes`).
 
 The codes live in `ERROR_CODES` (`src/domain.ts`). A refusal that no client has
 needed to tell apart yet carries the **generic code of its HTTP status**; a

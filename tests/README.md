@@ -44,7 +44,8 @@ Exit code = 0 only if all scenarios pass.
 
 ### Conventions (the discipline, #cta34j)
 
-- **Drive the business API only** (`POST /api/messages`, `GET /api/unread`, …).
+- **Drive the business API only**, on the bus (`message.post`, `unread.list`, …:
+  `bus()` / `busRaw()` in `tests/lib.ts`, one connection per call).
   If a scenario needs CRUD gymnastics to progress, that's the signal a **business
   operation is missing** — the stack *audits* that the API is business, not CRUD.
 - The **only** non-API touch allowed is **provisioning**: agents (`provision()` in
@@ -85,12 +86,12 @@ auto-discovers it. Run it with `npm run test:docker -- e2e`.
 - **Assert**: the ticket starts **in** `agent-a`'s actionable pool, **leaves** it while
   the decision is pending, a later **human** comment makes it **re-enter** (recency
   #358 — the ball comes back to the agent), and a fresh `plan:pending` re-gates it
-  (**last-signal-per-ticket-wins**). Drives `GET /api/tickets?actionable=1`.
+  (**last-signal-per-ticket-wins**). Drives `ticket.list` with `actionable`.
 - **Note**: pure logic also covered in unit (`src/db/decision-gate.test.ts`, 14 cases).
 
 ### ✅ bus lifecycle (#321) — `scenario-bus-lifecycle.ts`
 - **Setup**: the lifecycle bus (`src/event-bus.ts`) is an **in-process** EventEmitter,
-  so it can't be observed over HTTP from the shared daemon (another process). This
+  so it can't be observed from the shared daemon (another process). This
   scenario instead mounts the **real app in-process** (`createApp`, the affordance
   `src/app.ts` was extracted for) on an ephemeral port and subscribes `onLifecycle`
   in the **same** process, then drives the business API against that local instance.
@@ -101,18 +102,18 @@ auto-discovers it. Run it with `npm run test:docker -- e2e`.
 
 ### ✅ decision-on-comment (#B.129) — `scenario-decision.ts`
 - **Setup**: `agent-b` proposes a plan (`comment_added` + `decision_kind=plan` → a
-  pending decision); `agent-a` (reporter) accepts it via `POST /api/messages/:id/decide`.
+  pending decision); `agent-a` (reporter) accepts it via `message.decide`.
 - **Assert**: `meta.decision` goes `pending` → `accepted` (kind stays `plan`).
 
 ### ✅ move cross-project (#294) — `scenario-move.ts`
 - **Setup**: `agent-a` opens a ticket in `move-src`; the reporter moves it to `move-dst`
-  via `POST /api/tickets/:id/move`.
+  via `ticket.move`.
 - **Assert**: the head's `project` flips `move-src` → `move-dst`.
 
 ### ✅ delete comment (#309) — `scenario-delete-comment.ts`
 - **Setup**: human `human-mod` opens a ticket; `agent-a` comments (gets deleted),
   `agent-b` comments (stays). Addresses comments by id → `seedCounters()`.
-- **Assert** (`POST /api/messages/:id/delete`):
+- **Assert** (`message.delete`):
   - **guards** — an agent's delete → `403` (human-moderator only); deleting the
     ticket head → `400` (only comments can be deleted).
   - **soft-delete** — the response is `status=rejected` + `meta.deleted={by,at}`.
@@ -125,10 +126,10 @@ auto-discovers it. Run it with `npm run test:docker -- e2e`.
 - **Setup**: two project-scoped rules — `R_auto` (pos 0, match `by_agent=agent-auto`
   → `auto`) and `R_review` (pos 10, match `kind=comment_added` → `review`). A human
   `human-mod` (`provisionHuman`) opens the parent ticket.
-- The rules are automation rules (`POST /api/automation/rules`, trigger
+- The rules are automation rules (`automation.create_rule`, trigger
   `message_posted`, action `decision`): that is what moderation reads.
 - **Assert** (engine: `src/rules.ts evaluate()`), reading `status` + `matched_rule_id`
-  off the `POST /api/messages` response:
+  off the `message.post` answer:
   - **human bypass** — human-mod's `ticket_created` is `approved` despite the default.
   - **review** — `agent-a`'s comment matches `R_review` (kind) → `pending` (the rule
     overrides the permissive `auto-reply` default).
@@ -143,7 +144,7 @@ auto-discovers it. Run it with `npm run test:docker -- e2e`.
 ### ✅ tags consumers / state_human_word (#310) — `scenario-tags-consumers.ts`
 - **Setup**: a loop agent `tagscons-agent` (kind=agent) and a human `tagscons-human`.
   Consumer state is **global** (not project-scoped) → scenario-unique consumer ids.
-- **Assert** (`PUT /api/consumers/:id/state` → `GET /api/consumers`):
+- **Assert** (`consumer.push_state` → `consumer.list`):
   - each presence word `stop`/`wait`/`loop` pushed (`human_word`) is reflected on the
     consumers page (`state_human_word`); an unknown word is ignored (last value stays).
   - **guards** — a human pushing state → `403` (badges are for loop agents); an agent
@@ -153,7 +154,7 @@ auto-discovers it. Run it with `npm run test:docker -- e2e`.
 
 - **intent=feature branch hint (#319)** — the hint is composed by `buildWakePhrase()`
   in `src/claude-loop/state.ts` and pasted into the tmux session at wake; it's **never
-  serialized over HTTP**, so it can't be asserted by this daemon stack. Belongs to the
+  serialized by the daemon**, so it can't be asserted by this daemon stack. Belongs to the
   claude-loop / tier-2 layer (or a pure-logic unit on `buildWakePhrase`).
 - **claude-loop / tier-2** (typing→wait #315, the stop/wait/loop bar #302/#305) —
   covered separately (david).

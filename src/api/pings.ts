@@ -9,12 +9,9 @@
  *   POST /pings/mark-read    — ack pings (up-to-id or all)
  */
 import { Router } from "express";
-import { serveMethod } from "../bus/http.js";
 
 export const pingsRouter = Router();
 
-pingsRouter.get("/pings", serveMethod("ping.list"));
 
-pingsRouter.get("/pings/count", serveMethod("ping.count"));
 
-pingsRouter.post("/pings/mark-read", serveMethod("ping.mark_read"));
+

@@ -1,18 +1,18 @@
 # The bus
 
-> **Status: clients are moving onto it.** Calls, batches, subscriptions and
-> revocation are in place, and the operations tvty uses are methods (see
-> *Methods*). aiball's own clients (the MCP server, the CLI, claude-loop)
-> call every operation that is a method over the bus, and the rest over HTTP
-> until it becomes one. Until a client has moved, it keeps using the HTTP API
-> ([`API.md`](./API.md)); a route that has become a method answers exactly as
-> the method does.
+> **Status: every client is on it.** Calls, batches, subscriptions and
+> revocation are in place, and every operation of the board is a method (see
+> *Methods*). The web UI, the MCP server, the CLI, claude-loop and tvty call
+> them over the bus. The HTTP routes that served them are gone; what HTTP
+> still does is listed below.
 
 The bus is how a client talks to aiball: **one permanent connection** per
 client, JSON-RPC 2.0 over a WebSocket. The core is a table of **methods**,
 functions of the caller and their parameters; the bus calls them directly.
 HTTP stays for what a browser fetches by URL: the web UI's files, and uploaded
-files. It also stays for the probes that answer for the daemon you reach and
+files; for logging in; for the intake a script posts to with a key (a ticket,
+a signal), a node's pairing, and the project list the GNOME indicator reads.
+It also stays for the probes that answer for the daemon you reach and
 need no token: `/api/health`, `/api/node`, `/api/version` and
 `/api/auth/status`. A proxy node answers these itself, where the bus would
 relay the question upstream.
@@ -75,8 +75,8 @@ on its own: one refused does not stop the others.
 
 ## Errors
 
-A method's refusal is the refusal the matching HTTP route gives: its JSON-RPC
-`code` is the HTTP status, and `data.code` is aiball's error code
+A method's refusal carries an HTTP status and an error code: its JSON-RPC
+`code` is the status, and `data.code` is aiball's error code
 ([`API-ERRORS.md`](./API-ERRORS.md)), which is what a client reacts on.
 
 ```json
@@ -182,9 +182,9 @@ them; a test fails when they are stale.
 
 ## Methods
 
-Parameters are the fields the HTTP route took — its path, query and body
-fields, under the same names — as one object; a query's yes/no flag is a
-boolean, and its "1" is accepted too. Results are the route's body.
+Parameters are the fields the HTTP route took, when there was one — its path,
+query and body fields, under the same names — as one object; a yes/no flag is
+a boolean, and "1" is accepted too. Results are what the route answered.
 
 | Method | Callers | Replaces |
 |---|---|---|

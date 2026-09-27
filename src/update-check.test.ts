@@ -138,7 +138,7 @@ test("/api/version is public, names the mode and not the source; updates.check: 
         return new Response(JSON.stringify({ tag_name: "v99.0.0", html_url: "https://gh/rel" }), { status: 200 });
     }) as typeof fetch;
 
-    const { createApp } = await import("./app.js");
+    const { createTestApp: createApp } = await import("./tests/test-app.js");
     const { setConfigOverride } = await import("./db/config-overrides.js");
     const server = createApp().listen(0, "127.0.0.1");
     await new Promise((r) => server.once("listening", r));

@@ -17,7 +17,7 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3030-"));
 process.env.AIBALL_SOCK = "";
 process.env.AIBALL_PRESENCE_GRACE_MS = "20";
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { presenceConnect, presenceDisconnect } = await import("../live-presence.js");

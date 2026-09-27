@@ -14,7 +14,7 @@ import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-1477-"));
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, ensureConsumer, getConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");

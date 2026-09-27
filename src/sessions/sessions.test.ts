@@ -18,7 +18,7 @@ const built = ["release", "debug"].map((b) => resolve(import.meta.dirname, "..",
 process.env.CL_SESSION_HOST_BIN = process.env.CL_SESSION_HOST_BIN ?? built;
 const skip = existsSync(process.env.CL_SESSION_HOST_BIN) ? false : `no cl-session-host at ${process.env.CL_SESSION_HOST_BIN} (cargo build --manifest-path windows/cl-pty-proxy/Cargo.toml)`;
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { attachBus } = await import("../bus/server.js");
 const { upsertConsumer } = await import("../db.js");
 const { issueToken } = await import("../db/tokens.js");

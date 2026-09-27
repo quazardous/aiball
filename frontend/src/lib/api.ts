@@ -1344,6 +1344,9 @@ export const api = {
     /** #398: operator-approved command launchers (declared in the global
      *  config `launchers:` list; the API only ever takes an id). */
     listLaunchers: () => call<Launcher[]>("launcher.list"),
+    /** #747 — hold or release an agent's loop (AFK), as its own keys would. */
+    agentAfk: (name: string, action: "toggle" | "off" | "arm_10m" | "arm_inf") =>
+        call<{ consumer_id: string; action: string; queued: boolean }>("consumer.afk", { name, action }),
     /** #398: run a launcher by id (human-only; detached spawn on the host). */
     runLauncher: (id: string) =>
         call<{ ok: boolean; id: string; label: string; pid: number }>("launcher.run", { id }),

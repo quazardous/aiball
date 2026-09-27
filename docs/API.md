@@ -3,7 +3,7 @@
 aiball's core is the bus ([`API-BUS.md`](./API-BUS.md)): methods and
 subscriptions over one connection per client, on TCP and on the local Unix
 socket. HTTP keeps the web UI's files, uploads, login and a few routes for
-peripheral clients, and the routes that still serve a method until they go. The web UI, claude-loop, the MCP server, the `aiball` CLI and tvty
+peripheral clients (probes, a script's intake, node pairing). The web UI, claude-loop, the MCP server, the `aiball` CLI and tvty
 are its clients. This page says where the contract is written, and what a client
 may rely on.
 

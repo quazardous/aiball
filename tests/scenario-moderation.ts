@@ -5,8 +5,8 @@
 // src/rules.ts `evaluate()` (human bypass → first matching enabled rule → else
 // the project's strategy default).
 //
-// Unlike the in-process lifecycle bus of #364, moderation IS observable over
-// HTTP from the shared daemon: the POST /api/messages response carries the
+// Unlike the in-process lifecycle bus of #364, moderation IS observable from
+// the shared daemon: the `message.post` answer carries the
 // resolved `status` ("approved" | "pending") and `matched_rule_id` (the rule
 // that fired, or null for a bypass / strategy default). So this is a normal
 // shared-daemon scenario. Distinct project "moderation" + every rule scoped with

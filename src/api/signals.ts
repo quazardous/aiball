@@ -8,7 +8,6 @@
  * itself — otherwise any local process could wake the agents. The source is the
  * key's label, never a field of the body, so a caller cannot speak as another.
  */
-import { serveMethod } from "../bus/http.js";
 import { Router, type Request, type Response } from "express";
 import { readBearerToken, type AuthenticatedRequest } from "../auth.js";
 import { getTokenAndTouch } from "../db/tokens.js";
@@ -67,8 +66,5 @@ signalsRouter.post("/signals", (req: Request, res: Response) => {
     res.json({ ...posted.signal, recipients: posted.recipients, refreshed: posted.refreshed });
 });
 
-/** Signals waiting for the caller. A human may look at another consumer's. */
-signalsRouter.get("/signals", serveMethod("signal.list"));
 
-/** The caller's loop injected the signal: stop delivering it. */
-signalsRouter.post("/signals/:id/ack", serveMethod("signal.ack"));
+

@@ -1703,7 +1703,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
  * the stream with simple backoff (no aggressive reconnect storm).
  */
 async function mainSse(): Promise<void> {
-    log(`kernel started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd || "(internal SDK)"}`);
+    log(`kernel started — bus events (heartbeat ${interval}s), check-cmd: ${checkCmd || "(internal SDK)"}`);
     // #B.225: log the install-root SHA so `--log` shows what version
     // of the timer is actually running. `cmdList` / `cmdCheck` diff
     // this against the live HEAD to flag a ghost daemon.
@@ -1742,7 +1742,7 @@ async function mainSse(): Promise<void> {
         setIpcSseConnected(true);
         // #1039 follow-up — daemon link (re)established → clear the RED overlay.
         daemonLinkGrace.clear();
-        log(`SSE hello: unread=${h.unread}`);
+        log(`events hello: unread=${h.unread}`);
         getKernelBus().emit("daemon:hello", { unread: h.unread });
         // #1033 — aiball connection established (boot OR reconnect) : refresh the
         // bar counters eagerly so `o:N b:N e:N` appears as soon as we can talk to
@@ -1840,7 +1840,7 @@ async function mainSse(): Promise<void> {
         log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
     });
     wakeBus.connect();
-    log("SSE subscribed");
+    log("events subscribed (bus)");
     // #B.148 bug: SSE only fires on NEW pings — existing unread at
     // boot would never trigger a wake until a fresh ping arrives.
     // Immediate tryWake covers the case where pings already exist

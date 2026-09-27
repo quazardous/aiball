@@ -18,7 +18,6 @@
  * Local helper `enrichRelationStages` is kept private — only the GET
  * /tickets/:id thread builder uses it.
  */
-import { serveMethod } from "../bus/http.js";
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
 import { Router, type Request } from "express";
@@ -95,12 +94,6 @@ export const ticketsRouter = Router();
 // keeps its import path.
 export { ticketDecision, hotWindowSec } from "./inbox-row.js";
 
-/**
- * #352: change a ticket's owner (= its `by_agent` / reporter — no model
- * change). Human-moderator only. Subscribes the new owner so they get the
- * thread's pings; owner-bypass (close/reopen) follows `by_agent`.
- */
-ticketsRouter.post("/tickets/:id/owner", serveMethod("ticket.set_owner"));
 
 /**
  * #418: assign / claim a ticket.
@@ -112,47 +105,10 @@ ticketsRouter.post("/tickets/:id/owner", serveMethod("ticket.set_owner"));
  * out of OTHER consumers' actionable pool until it expires (assign_window_sec),
  * is released, or the ticket closes. The assignee's own gating is unchanged.
  */
-/** #2379 — when the claim of `holder` stops protecting this ticket (epoch ms), or null. */
 
-ticketsRouter.post("/tickets/:id/assign", serveMethod("ticket.assign"));
 
-/**
- * #418: release a ticket's assignment / claim — back to the shared pool. The
- * current assignee or a human moderator can release.
- */
-ticketsRouter.post("/tickets/:id/release", serveMethod("ticket.release"));
 
-/**
- * #404: push a turn's token-usage delta onto a ticket (called by the claude-loop
- * Stop-hook once the capture side lands). Additive — accumulates. Body:
- * `{ in?, out?, cache_w?, cache_r? }`. Silently no-ops on an unknown ticket id
- * (the FK on the table rejects it) so a stale marker never errors the hook.
- *
- * #439: the `:id` from the loop-side capture is the volatile `active-ticket`
- * MARKER — but that flips on any incidental ticket-scoped write within the turn.
- * So we RE-ANCHOR server-side onto the caller's most-recently-claimed LIVE claim
- * (the durable focus), and fall back to the passed marker only when the caller
- * holds no live claim. Policy lives here, where the claim does; the loop side
- * stays dumb (keeps posting the marker).
- */
-ticketsRouter.post("/tickets/:id/token-usage", serveMethod("ticket.add_token_usage"));
 
-/**
- * #352: list a ticket's EXPLICIT subscriptions (follows + mutes), for the
- * moderator's inline manage panel. Moderator-only — it manages who else gets
- * pinged. Owners pinged by project role aren't listed (explicit-only, david).
- */
-ticketsRouter.get("/tickets/:id/subscriptions", serveMethod("ticket.subscribers"));
-/**
- * Inbox bookends: oldest + newest non-rejected ticket matching the
- * scope. Used by the slim `poll()` (per #B.68) so agents see the
- * inbox edges without paying for the full subscriptions/projects blob.
- *
- * Query:
- *   - project=NAME    (optional) restrict to a project; otherwise cross-project.
- *   - include_snoozed=1  include snoozed tickets in the scope.
- */
-ticketsRouter.get("/tickets/bookends", serveMethod("ticket.bookends"));
 
 /**
  * Unified inbox view: one row per ticket, decorated with the latest activity
@@ -171,14 +127,6 @@ ticketsRouter.get("/tickets/bookends", serveMethod("ticket.bookends"));
  */
 export const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
 
-ticketsRouter.get("/inbox", serveMethod("inbox.list", undefined, {
-    // #2071 — the total in a header, the body a plain array: what HTTP clients read.
-    respond: (res, out) => {
-        const { total, rows } = out as { total: number; rows: unknown[] };
-        res.setHeader("X-Total-Count", String(total));
-        res.json(rows);
-    },
-}));
 
 /**
  * #3031 — the ticket list as `agentId` sees it: the whole computation of
@@ -743,52 +691,13 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
     return result;
 }
 
-ticketsRouter.get("/tickets", serveMethod("ticket.list"));
 
-ticketsRouter.post("/tickets/:id/mark-read", serveMethod("ticket.mark_read"));
 
-ticketsRouter.post("/tickets/:id/mark-unread", serveMethod("ticket.mark_unread"));
-/**
- * Snooze a ticket (per #B.329). Body: `{ until: ISO8601 }` — the ticket
- * is hidden from the open inbox until that timestamp. The daemon's
- * reveal cron clears the field at the deadline and posts a synthetic
- * `ticket_reopened` so it bounces back.
- *
- * Owner / human-bypass is enforced: only the ticket reporter or the
- * human moderator can snooze. Other agents get a 403 to avoid surprise
- * "where did my ticket go" moments.
- */
-ticketsRouter.post("/tickets/:id/postpone", serveMethod("ticket.postpone"));
 
-ticketsRouter.post("/tickets/:id/unsnooze", serveMethod("ticket.unsnooze"));
 
-/**
- * Move a ticket (whole thread) to another project (#294). Reporter-or-human
- * only — same authority as postpone/close. The project lives only on the
- * head, so the move is a head update (project + fresh display_seq) plus an
- * in-thread audit comment; broadcast lets both project views update live.
- */
-ticketsRouter.post("/tickets/:id/move", serveMethod("ticket.move"));
 
-/**
- * #2180 — a ticket's pending children, one level, each with who attached it and
- * when. What the moderator reads before sweeping. A read, open like the other
- * ticket reads.
- */
-ticketsRouter.get("/tickets/:id/pending-children", serveMethod("ticket.pending_children"));
 
-/**
- * #2180 — approve a ticket's pending children in one gesture. Human only: this
- * is moderation, and an agent able to approve what it hung under an objective
- * would be approving its own work.
- *
- * The body names the ids; there is no "approve all". The moderator approves what
- * they were shown, each id is re-checked here as still a pending child of this
- * ticket, and anything else comes back in `skipped` untouched — so a child
- * attached after the listing, or an unrelated id slipped into the list, is
- * never approved.
- */
-ticketsRouter.post("/tickets/:id/approve-pending-children", serveMethod("ticket.approve_pending_children"));
+
 
 // ---- Typed inter-ticket relations (#B.123 phase B) ------------------------
 //
@@ -798,42 +707,12 @@ ticketsRouter.post("/tickets/:id/approve-pending-children", serveMethod("ticket.
 // — acts as a tombstone in the replay. No PATCH/DELETE endpoint; the event
 // log is the source of truth.
 
-/**
- * Upstream coupling (GitHub / GitLab), phase 2 — Slice 0: manual import.
- * Fetch an external issue and create a coupled aiball ticket from it. Manual
- * only; nothing here runs automatically. Body: { project?, ref } where `ref`
- * is a bare `gh#123` (needs a default binding) or explicit `gh:owner/repo#123`.
- */
-ticketsRouter.post("/tickets/import", serveMethod("ticket.import", undefined, { status: 201 }));
 
-/**
- * Upstream coupling phase 2 — Slice 1: manual export. Create a NEW external
- * issue from an existing aiball ticket and couple it. WRITES to the remote —
- * surfaces gate it behind an explicit confirmation. Body: { kind?, repo? }.
- */
-ticketsRouter.post("/tickets/:id/export", serveMethod("ticket.export", undefined, { status: 201 }));
 
-/**
- * #2383 — mark a ticket as a step from the ticket itself (a button in the
- * thread, a bulk action in the list). It tags the ticket's LATEST comment,
- * which must be an agent's, as a step — the tagging itself is #2369's.
- * Refused when the thread's last word is a human's: only the last action
- * decides whose pool the ticket sits in, so tagging an older comment would
- * change nothing.
- */
-ticketsRouter.post("/tickets/:id/step", serveMethod("ticket.step"));
-ticketsRouter.post("/tickets/:id/unstep", serveMethod("ticket.unstep"));
 
-/**
- * #2910 — put a ticket in a milestone, move it to another, or take it out
- * (`milestone_id: null`). Planning: a human's gesture or a cto agent's (one that
- * works on the milestone level); a coder reads milestones but does not set them.
- */
-ticketsRouter.post("/tickets/:id/milestone", serveMethod("ticket.set_milestone"));
 
-ticketsRouter.post("/tickets/:id/relations", serveMethod("ticket.relate"));
 
-ticketsRouter.get("/tickets/:id", serveMethod("ticket.get"));
+
 
 /**
  * Decorate ticket_referenced / ticket_sub_added pseudo-comments with the

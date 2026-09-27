@@ -26,7 +26,7 @@ writeFileSync(join(home, "xdg", "aiball", "config.yaml"), [
     "",
 ].join("\n"));
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer, getConsumer } = await import("../db.js");
 const { createProject } = await import("../db/projects.js");

@@ -15,12 +15,11 @@
  * `readTicketPayloadRaw()`.
  */
 import { Router } from "express";
-import { serveMethod } from "../bus/http.js";
 
 // #3067 — the payload methods (src/bus/methods/misc.ts) hold the rules.
 export const payloadsRouter = Router();
 
-payloadsRouter.get("/tickets/:id/payload", serveMethod("ticket.payload"));
-payloadsRouter.put("/tickets/:id/payload", serveMethod("ticket.set_payload"));
-payloadsRouter.post("/tickets/:id/payload/dump", serveMethod("ticket.dump_payload"));
-payloadsRouter.delete("/tickets/:id/payload", serveMethod("ticket.revoke_payload"));
+
+
+
+

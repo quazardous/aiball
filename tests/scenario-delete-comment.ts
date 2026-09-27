@@ -4,25 +4,20 @@
 // counts, and only re-surfaces (body-stripped) under ?include_deleted=1. Agents
 // can't delete (403); non-comments can't be deleted (400).
 //
-// Driven over HTTP against the shared daemon. Addresses a comment BY ID
-// (POST /api/messages/:id/delete). Distinct project "deletecomment".
-import { provision, provisionProject, provisionHuman, post, unread, ok, fail, BASE } from "./lib.js";
+// Driven over the bus against the shared daemon. Addresses a comment BY ID
+// (`message.delete`). Distinct project "deletecomment".
+import { provision, provisionProject, provisionHuman, post, unread, bus, busRaw, ok, fail } from "./lib.js";
 
 const project = "deletecomment";
 
 async function getTicket(token: string, id: number, query: Record<string, string> = {}): Promise<Record<string, unknown>> {
-    const qs = new URLSearchParams(query).toString();
-    const r = await fetch(`${BASE}/api/tickets/${id}${qs ? `?${qs}` : ""}`, { headers: { authorization: `Bearer ${token}` } });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`GET /api/tickets/${id} → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "ticket.get", { id, ...query });
 }
 
-/** Raw delete — returns the HTTP code so the negative cases (403/400) can assert it. */
+/** Raw delete — returns the refusal's status so the negative cases (403/400) can assert it. */
 async function attemptDelete(token: string, id: number): Promise<{ code: number; body: Record<string, unknown> | null }> {
-    const r = await fetch(`${BASE}/api/messages/${id}/delete`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
-    const text = await r.text();
-    return { code: r.status, body: text ? (JSON.parse(text) as Record<string, unknown>) : null };
+    const r = await busRaw(token, "message.delete", { id });
+    return { code: r.code, body: r.body as Record<string, unknown> };
 }
 
 function parseMetaField(m: Record<string, unknown>): Record<string, unknown> {

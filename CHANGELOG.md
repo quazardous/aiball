@@ -131,6 +131,13 @@ dates are YYYY-MM-DD.
 
 ### Removed
 
+- The HTTP routes that served an operation the bus now carries. Every client
+  calls the bus; HTTP keeps the web UI's files, uploads, login, the probes
+  (health, node, version, auth status), the ticket and signal intake for
+  scripts, node pairing, and the project list the GNOME indicator reads.
+  A script that still calls one of the removed routes gets a 404: call the
+  bus method that replaced it instead (the bus documentation lists them).
+
 - HTTP routes nothing called any more: a message's tags and a ticket's
   relations (both come with the ticket), and three settings moved to the bus
   (the upload cap, trimming the agents' waits, purging read pings of closed

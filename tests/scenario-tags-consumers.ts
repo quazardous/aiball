@@ -1,33 +1,25 @@
 // #324 e2e — tags consumers / state_human_word (#310, #328 checklist q:7f72a3):
 // a loop agent pushes its 3-state presence word (stop/wait/loop) via
-// PUT /api/consumers/:id/state → it's reflected on the consumers page
-// (GET /api/consumers, field state_human_word). Plus the auth guards: a human
+// `consumer.push_state` → it's reflected on the consumers page
+// (`consumer.list`, field state_human_word). Plus the auth guards: a human
 // can't push state (state badges are for loop agents), and an agent can only
 // push its OWN consumer_id.
 //
-// Driven over HTTP against the shared daemon. NB: consumer state is GLOBAL (not
+// Driven over the bus against the shared daemon. NB: consumer state is GLOBAL (not
 // project-scoped), so this scenario uses consumer ids unique to it
 // ("tagscons-*") to avoid clobbering / being clobbered by other scenarios.
-import { provision, provisionHuman, ok, fail, BASE } from "./lib.js";
+import { provision, provisionHuman, bus, busRaw, ok, fail } from "./lib.js";
 
 const AGENT = "tagscons-agent";
 const HUMAN = "tagscons-human";
 
 async function putState(token: string, consumerId: string, body: Record<string, unknown>): Promise<{ code: number; body: Record<string, unknown> | null }> {
-    const r = await fetch(`${BASE}/api/consumers/${encodeURIComponent(consumerId)}/state`, {
-        method: "PUT",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-    });
-    const text = await r.text();
-    return { code: r.status, body: text ? (JSON.parse(text) as Record<string, unknown>) : null };
+    const r = await busRaw(token, "consumer.push_state", { ...body, consumer_id: consumerId });
+    return { code: r.code, body: r.body as Record<string, unknown> };
 }
 
 async function consumerWord(token: string, consumerId: string): Promise<unknown> {
-    const r = await fetch(`${BASE}/api/consumers`, { headers: { authorization: `Bearer ${token}` } });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`GET /api/consumers → ${r.status}: ${text}`);
-    const list = JSON.parse(text) as Array<Record<string, unknown>>;
+    const list = await bus<Array<Record<string, unknown>>>(token, "consumer.list");
     const me = list.find((c) => c.consumer_id === consumerId);
     if (!me) fail(`consumer ${consumerId} not found on the consumers page`);
     return me.state_human_word;

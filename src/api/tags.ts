@@ -4,7 +4,6 @@
  * helper `resolveTagRef` moved verbatim, mounted as a sub-router from
  * the top-level api router.
  */
-import { serveMethod } from "../bus/http.js";
 import { Router } from "express";
 import {
     getTag,
@@ -87,22 +86,11 @@ export function tagCatalog(project: string | null): CatalogTag[] {
     return out;
 }
 
-// `GET /tags` (no param) stays DB-only — the TagPicker applies tags by
-// numeric id and would choke on config tags' null id. The merged catalog
-// (config ⊕ DB, each annotated with `source`) is opt-in via `?project=`,
-// where `_global` / empty selects the cross-project view (project=null).
-tagsRouter.get("/tags", serveMethod("tag.list"));
 
-tagsRouter.post("/tags", serveMethod("tag.create", undefined, { status: 201 }));
 
-tagsRouter.put("/tags/override", serveMethod("tag.override"));
 
-tagsRouter.patch("/tags/:id", serveMethod("tag.update"));
 
-tagsRouter.delete("/tags/:id", serveMethod("tag.delete", undefined, { status: 204, respond: (res) => { res.end(); } }));
 
-tagsRouter.put("/messages/:id/tags", serveMethod("message.set_tags"));
 
-tagsRouter.post("/messages/:id/tags", serveMethod("message.add_tag", undefined, { status: 201 }));
 
-tagsRouter.delete("/messages/:id/tags/:tag", serveMethod("message.remove_tag"));
+

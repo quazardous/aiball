@@ -29,6 +29,7 @@ import "@xterm/xterm/css/xterm.css";
 // la barre du terminal — même rendu, pas de nouvelle barre.
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import { withBase } from "../lib/base";
+import { api } from "../lib/api";
 
 const props = defineProps<{
     /** Consumer/agent id — the daemon constructs `cl-<name>` to target the
@@ -226,26 +227,14 @@ async function postKeys(data: string) {
 }
 
 // #747 — AFK toggle on the loop, bypassing the keystroke layer (F9
-// inaccessible on touch / mobile). POSTs to the daemon's dedicated
-// endpoint which writes <sd>/afk directly ; claude-loop picks it up
-// via heartbeat within ~1s.
+// inaccessible on touch / mobile): `consumer.afk` on the bus; claude-loop
+// picks it up within ~1s.
 async function postAfkAction(action: "toggle" | "off" | "arm_10m" | "arm_inf") {
     try {
-        const token = localStorage.getItem("aiball.token");
-        const headers: Record<string, string> = { "content-type": "application/json" };
-        if (token) headers.authorization = `Bearer ${token}`;
-        const res = await fetch(
-            `/api/agents/${encodeURIComponent(props.agentName)}/afk`,
-            { method: "POST", headers, body: JSON.stringify({ action }) },
-        );
-        if (!res.ok) {
-            const text = await res.text();
-            sendError.value = `afk ${res.status} : ${text}`;
-        } else {
-            sendError.value = null;
-        }
+        await api.agentAfk(props.agentName, action);
+        sendError.value = null;
     } catch (e) {
-        sendError.value = (e as Error).message;
+        sendError.value = `afk : ${(e as Error).message}`;
     }
 }
 

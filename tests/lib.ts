@@ -9,6 +9,7 @@ import { ensureConsumer, getDb } from "../src/db.js";
 import * as schema from "../src/schema.js";
 import { createProject, getProject } from "../src/db/projects.js";
 import { upsertSubscription } from "../src/db/subscriptions.js";
+import { BusClient, BusError } from "../src/bus-client.js";
 
 export const BASE = "http://127.0.0.1:7777";
 
@@ -44,64 +45,60 @@ export function provisionHuman(consumer: string): string {
     return issueToken({ kind: "auth", consumer_id: consumer, label: "e2e" }).token;
 }
 
+/**
+ * #3068 — a call to the core, on the bus, as the token's consumer: one
+ * connection per call. A refusal throws `method → status: {"error","code"}`,
+ * the shape the HTTP helpers threw.
+ */
+export async function bus<T = Record<string, unknown>>(token: string, method: string, params: Record<string, unknown> = {}): Promise<T> {
+    const r = await busRaw<T>(token, method, params);
+    if (r.code >= 400) throw new Error(`${method} → ${r.code}: ${JSON.stringify(r.body)}`);
+    return r.body as T;
+}
+
+/** The same, returning the refusal's status instead of throwing: for the scenarios that assert it (403, 400…). */
+export async function busRaw<T = Record<string, unknown>>(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ code: number; body: T | { error: string; code: string } }> {
+    const c = await BusClient.connect({ url: BASE, token });
+    try {
+        return { code: 200, body: await c.call<T>(method, params) };
+    } catch (e) {
+        if (e instanceof BusError) return { code: e.status, body: { error: e.message, code: e.code } };
+        throw e;
+    } finally {
+        c.close();
+    }
+}
+
 export async function post(token: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const r = await fetch(`${BASE}/api/messages`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/messages → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "message.post", body);
 }
 
 export async function unread(token: string, consumer: string, project: string): Promise<Record<string, unknown>> {
-    const r = await fetch(
-        `${BASE}/api/unread?consumer_id=${encodeURIComponent(consumer)}&project=${encodeURIComponent(project)}&limit=100`,
-        { headers: { authorization: `Bearer ${token}` } },
-    );
-    const text = await r.text();
-    if (!r.ok) throw new Error(`GET /api/unread → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "unread.list", { consumer_id: consumer, project, limit: 100 });
 }
 
 /**
  * List tickets for a project as the token's consumer (per-consumer flags).
- * `actionable: true` → `GET /api/tickets?actionable=1` (the candidate pool the
- * decision/last-actor gates carve out); `open: true` → the broader open set.
+ * `actionable: true` → the candidate pool the decision/last-actor gates carve
+ * out; `open: true` → the broader open set.
  */
 export async function tickets(
     token: string,
     project: string,
     opts: { actionable?: boolean; open?: boolean } = {},
 ): Promise<Array<Record<string, unknown>>> {
-    const params = new URLSearchParams({ project });
-    if (opts.actionable) params.set("actionable", "1");
-    if (opts.open) params.set("open", "1");
-    const r = await fetch(`${BASE}/api/tickets?${params.toString()}`, {
-        headers: { authorization: `Bearer ${token}` },
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`GET /api/tickets → ${r.status}: ${text}`);
-    return JSON.parse(text) as Array<Record<string, unknown>>;
+    return bus(token, "ticket.list", { project, ...(opts.actionable ? { actionable: "1" } : {}), ...(opts.open ? { open: "1" } : {}) });
 }
 
-/** Accept/reject a decision-on-comment (#B.129): POST /api/messages/:id/decide. */
+/** Accept/reject a decision-on-comment (#B.129). */
 export async function decide(token: string, messageId: number, status: "accepted" | "rejected"): Promise<Record<string, unknown>> {
-    const r = await fetch(`${BASE}/api/messages/${messageId}/decide`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status }),
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/messages/${messageId}/decide → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "message.decide", { id: messageId, status });
 }
 
 /**
- * Create a moderation rule (#B.213): POST /api/rules. Returns the inserted
- * Rule (carries `id`, used to assert `matched_rule_id` on routed messages).
- * Auth is bearer-only (no role gate) — any provisioned token can post one.
+ * Create a moderation rule: an automation rule on `message_posted` with a
+ * `decision` action (moderation reads only those). Returns the inserted rule
+ * (its `id`, to assert `matched_rule_id` on routed messages).
  */
 export async function createRule(
     token: string,
@@ -114,67 +111,31 @@ export async function createRule(
         note?: string;
     },
 ): Promise<Record<string, unknown>> {
-    // Moderation reads the automation engine's `message_posted` rules; a rule
-    // posted to the older /api/rules table is never consulted.
     const { decision, ...match } = rule;
-    const r = await fetch(`${BASE}/api/automation/rules`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ triggers: ["message_posted"], action: { kind: "decision", decision }, ...match }),
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/automation/rules → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "automation.create_rule", { triggers: ["message_posted"], action: { kind: "decision", decision }, ...match });
 }
 
-/** Move a ticket to another project (#294): POST /api/tickets/:id/move. */
+/** Move a ticket to another project (#294). */
 export async function move(token: string, ticketId: number, project: string): Promise<Record<string, unknown>> {
-    const r = await fetch(`${BASE}/api/tickets/${ticketId}/move`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ project }),
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/tickets/${ticketId}/move → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "ticket.move", { id: ticketId, project });
 }
 
-/** #418: assign/claim a ticket. Omit `assignee` to self-claim. POST /api/tickets/:id/assign. */
+/** #418: assign/claim a ticket. Omit `assignee` to self-claim. */
 export async function assign(token: string, ticketId: number, assignee?: string): Promise<Record<string, unknown>> {
-    const r = await fetch(`${BASE}/api/tickets/${ticketId}/assign`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify(assignee ? { assignee } : {}),
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/tickets/${ticketId}/assign → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "ticket.assign", { id: ticketId, ...(assignee ? { assignee } : {}) });
 }
 
-/** #418: release a ticket's assignment / claim. POST /api/tickets/:id/release. */
+/** #418: release a ticket's assignment / claim. */
 export async function release(token: string, ticketId: number): Promise<Record<string, unknown>> {
-    const r = await fetch(`${BASE}/api/tickets/${ticketId}/release`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: "{}",
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/tickets/${ticketId}/release → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
+    return bus(token, "ticket.release", { id: ticketId });
+}
+
+/** A moderator approves a pending ticket or comment. */
+export async function approve(token: string, messageId: number): Promise<Record<string, unknown>> {
+    return bus(token, "message.approve", { id: messageId });
 }
 
 /** Parse a message's `meta` (JSON string or object) to read `.decision`. */
-/** A moderator approves a pending ticket or comment (`POST /api/messages/:id/approve`). */
-export async function approve(token: string, messageId: number): Promise<Record<string, unknown>> {
-    const r = await fetch(`${BASE}/api/messages/${messageId}/approve`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-    });
-    const text = await r.text();
-    if (!r.ok) throw new Error(`POST /api/messages/${messageId}/approve → ${r.status}: ${text}`);
-    return JSON.parse(text) as Record<string, unknown>;
-}
-
 export function metaDecision(m: Record<string, unknown>): { kind?: string; status?: string } | null {
     const raw = m.meta;
     if (!raw) return null;

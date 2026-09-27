@@ -12,7 +12,7 @@ import type { AddressInfo } from "node:net";
 // Throwaway DB BEFORE any module that reads paths.
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-457-slice4-"));
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { issueToken } = await import("../db/tokens.js");
 const { ensureConsumer } = await import("../db.js");
 

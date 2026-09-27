@@ -14,10 +14,9 @@
  *   DELETE /managed-config/:key[?project=X]  → clear an override (revert to layer below)
  */
 import { Router } from "express";
-import { serveMethod } from "../bus/http.js";
 
 export const managedConfigRouter = Router();
 
-managedConfigRouter.get("/managed-config", serveMethod("config.managed"));
-managedConfigRouter.put("/managed-config/:key", serveMethod("config.set"));
-managedConfigRouter.delete("/managed-config/:key", serveMethod("config.clear", undefined, { status: 204, respond: (res) => { res.end(); } }));
+
+
+

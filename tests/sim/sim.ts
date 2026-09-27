@@ -24,7 +24,6 @@
  * by `run --shards`) gets its own project, port (17780 + k) and state file.
  */
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { request as httpRequest } from "node:http";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -33,6 +32,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { formatView, nextWake, type ViewRow } from "../../src/sim/view.js";
+import { BusClient } from "../../src/bus-client.js";
 import { sanitizeCopy } from "../../src/sim/sanitize.js";
 import { DEFAULT_COOLDOWN_SEC, matchSeat, parseDuration, parseScenario, pick, scenarioCohort, scenarioIsCritical, substitute, type Seat, type Step, type UnreadEvent } from "../../src/sim/scenario.js";
 
@@ -79,37 +79,21 @@ function loadState(): SimState {
 }
 
 /**
- * #3016 — one connection per call, never a pooled one. With boards playing side
- * by side, a call reused a keep-alive connection the daemon had just closed and
- * died with `fetch failed (UND_ERR_SOCKET other side closed)` — seen mid-scenario,
- * the daemon up and well. A request on a connection of its own cannot meet a
- * closed one, and on loopback a new connection costs nothing.
+ * #3068 — a call to the core, on the bus. #3016 — one connection per call,
+ * never a pooled one: with boards playing side by side, a reused connection
+ * the daemon had just closed failed mid-scenario, the daemon up and well. A
+ * call on a connection of its own cannot meet a closed one, and on loopback a
+ * new connection costs nothing.
  */
-function api<T>(token: string, method: string, path: string, body?: unknown): Promise<T> {
-    const payload = body ? JSON.stringify(body) : undefined;
-    return new Promise<T>((resolveCall, rejectCall) => {
-        const req = httpRequest(`${BASE}${path}`, {
-            method,
-            agent: false,
-            headers: {
-                authorization: `Bearer ${token}`,
-                ...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
-            },
-        }, (res) => {
-            let text = "";
-            res.setEncoding("utf8");
-            res.on("data", (c: string) => { text += c; });
-            res.on("end", () => {
-                const status = res.statusCode ?? 0;
-                if (status < 200 || status >= 300) return rejectCall(new Error(`${method} ${path} → ${status}: ${text}`));
-                try { resolveCall(JSON.parse(text) as T); } catch (e) { rejectCall(e as Error); }
-            });
-        });
-        // A network failure says what it was, not a bare "fetch failed".
-        req.on("error", (e: NodeJS.ErrnoException) => rejectCall(new Error(`${method} ${path}: ${e.code ?? "network error"} ${e.message}`)));
-        if (payload) req.write(payload);
-        req.end();
-    });
+async function call<T>(token: string, method: string, params: Record<string, unknown> = {}): Promise<T> {
+    const bus = await BusClient.connect({ url: BASE, token });
+    try {
+        return await bus.call<T>(method, params);
+    } catch (e) {
+        throw new Error(`${method} ${JSON.stringify(params)}: ${(e as Error).message}`);
+    } finally {
+        bus.close();
+    }
 }
 
 async function waitHealthy(): Promise<void> {
@@ -303,19 +287,18 @@ function mcpGesture(agent: string, tool: string, args: Record<string, unknown>):
 async function fetchSeat(state: SimState, agent: string, cooldownSec = DEFAULT_COOLDOWN_SEC): Promise<Seat> {
     const seat = state.agents[agent];
     if (!seat) throw new Error(`no agent ${agent} in the cohort`);
-    const project = encodeURIComponent(seat.project);
     // Scoped to the agent's project, as its MCP tools and its loop are: unscoped,
     // another project's ticket reads as actionable to an agent that never sees it.
-    const rows = await api<ViewRow[]>(seat.token, "GET", `/api/tickets?project=${project}&open=1&limit=500`);
-    const pings = await api<{ unread: number }>(seat.token, "GET", `/api/pings/count?consumer_id=${encodeURIComponent(agent)}`);
+    const rows = await call<ViewRow[]>(seat.token, "ticket.list", { project: seat.project, open: "1", limit: "500" });
+    const pings = await call<{ unread: number }>(seat.token, "ping.count", { consumer_id: agent });
     // The loop's own pick (src/claude-loop/state.ts): its project's backlog, the
     // first row neither in cooldown nor actionable-but-not-claimable — a head the
     // agent could not claim never gets a "Triage" wake.
-    const backlog = await api<(ViewRow & { backlog_cooled_until?: string | null })[]>(
-        seat.token, "GET", `/api/tickets?project=${project}&backlog=1&limit=500&cooldown_sec=${cooldownSec}`);
+    const backlog = await call<(ViewRow & { backlog_cooled_until?: string | null })[]>(
+        seat.token, "ticket.list", { project: seat.project, backlog: "1", limit: "500", cooldown_sec: String(cooldownSec) });
     const head = backlog.find((r) => !r.backlog_cooled_until && !(r.actionable === true && r.claimable === false)) ?? null;
     // The queue an event wake is picked from, oldest first.
-    const queued = await api<{ messages?: UnreadEvent[] } | UnreadEvent[]>(seat.token, "GET", `/api/unread?consumer_id=${encodeURIComponent(agent)}&limit=500`);
+    const queued = await call<{ messages?: UnreadEvent[] } | UnreadEvent[]>(seat.token, "unread.list", { consumer_id: agent, limit: 500 });
     const unread = (Array.isArray(queued) ? queued : queued.messages ?? [])
         .map((m) => ({ id: m.id, kind: m.kind, ticket_id: m.ticket_id ?? null }));
     return { rows, unreadPings: pings.unread, head, unread };
@@ -332,8 +315,8 @@ async function view(agents: string[]): Promise<void> {
 
 async function pending(): Promise<void> {
     const state = loadState();
-    const rows = await api<{ id: number; kind: string; ticket_id: number | null; by_agent: string; title: string | null }[]>(
-        state.moderator.token, "GET", "/api/messages?status=pending&summary=1");
+    const rows = await call<{ id: number; kind: string; ticket_id: number | null; by_agent: string; title: string | null }[]>(
+        state.moderator.token, "message.list", { status: "pending", summary: true });
     if (rows.length === 0) return void console.log("nothing waits for the moderator");
     for (const m of rows) {
         const what = m.kind === "ticket_created" ? `ticket "${m.title}"` : `${m.kind} on #${m.ticket_id}`;
@@ -341,7 +324,7 @@ async function pending(): Promise<void> {
     }
 }
 
-/** The moderator's gestures, through the same routes as the web UI. */
+/** The moderator's gestures, through the same methods as the web UI. */
 async function moderatorGesture(state: SimState, action: string, target: unknown, arg: string | null, body: string | null): Promise<string> {
     const id = Number(target);
     if (!Number.isInteger(id) || id <= 0) throw new Error(`moderator: ${action} needs a numeric id, got ${String(target)}`);
@@ -349,17 +332,17 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
     switch (action) {
         case "approve":
         case "reject": {
-            const m = await api<{ status: string }>(token, "POST", `/api/messages/${id}/${action}`);
+            const m = await call<{ status: string }>(token, `message.${action}`, { id });
             return `${id} is ${m.status}`;
         }
         case "accept":
         case "refuse": {
-            await api(token, "POST", `/api/messages/${id}/decide`, { status: action === "accept" ? "accepted" : "rejected" });
+            await call(token, "message.decide", { id, status: action === "accept" ? "accepted" : "rejected" });
             return `decision on ${id} ${action === "accept" ? "accepted" : "rejected"}`;
         }
         case "comment": {
-            const ticket = await api<{ project: string }>(token, "GET", `/api/messages/${id}`);
-            const m = await api<{ id: number }>(token, "POST", "/api/messages", {
+            const ticket = await call<{ project: string }>(token, "message.get", { id });
+            const m = await call<{ id: number }>(token, "message.post", {
                 // The author is the moderator the token names (a human: no summary_until needed).
                 project: ticket.project, kind: "comment_added", ticket_id: id, body,
             });
@@ -367,8 +350,8 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
         }
         case "close":
         case "reopen": {
-            const ticket = await api<{ project: string }>(token, "GET", `/api/messages/${id}`);
-            await api(token, "POST", "/api/messages", {
+            const ticket = await call<{ project: string }>(token, "message.get", { id });
+            await call(token, "message.post", {
                 project: ticket.project, kind: action === "close" ? "ticket_closed" : "ticket_reopened", ticket_id: id,
             });
             return `#${id} ${action === "close" ? "closed" : "reopened"}`;
@@ -377,15 +360,15 @@ async function moderatorGesture(state: SimState, action: string, target: unknown
             const seconds = parseDuration(arg ?? "");
             if (seconds === null) throw new Error(`moderator: snooze needs a duration, got ${String(arg)}`);
             const until = new Date(Date.now() + seconds * 1000).toISOString();
-            await api(token, "POST", `/api/tickets/${id}/postpone`, { until });
+            await call(token, "ticket.postpone", { id, until });
             return `#${id} snoozed until ${until}`;
         }
         case "step": {
-            await api(token, "POST", `/api/messages/${id}/step`);
+            await call(token, "message.step", { id });
             return `comment ${id} tagged as a step`;
         }
         case "assign": {
-            await api(token, "POST", `/api/tickets/${id}/assign`, { assignee: arg });
+            await call(token, "ticket.assign", { id, assignee: arg });
             return `#${id} assigned to ${String(arg)}`;
         }
         default:
@@ -404,10 +387,10 @@ async function wakeAgent(state: SimState, agent: string, cooldownSec = DEFAULT_C
     if (seat.unreadPings > 0 && seat.unread.length > 0) {
         const key = seat.unread[0]!.ticket_id ?? seat.unread[0]!.id;
         const delivered = seat.unread.filter((e) => (e.ticket_id ?? e.id) === key);
-        for (const e of delivered) await api(token, "POST", "/api/mark-read", { consumer_id: agent, message_id: e.id });
+        for (const e of delivered) await call(token, "unread.mark_read", { consumer_id: agent, message_id: e.id });
         return ` by events on #${key}: ${delivered.map((e) => e.kind).join(", ")}`;
     }
-    if (seat.head) await api(token, "POST", "/api/backlog-wake", { consumer_id: agent, ticket_id: seat.head.id });
+    if (seat.head) await call(token, "backlog.record_wake", { consumer_id: agent, ticket_id: seat.head.id });
     return `: ${nextWake(0, seat.head)}`;
 }
 

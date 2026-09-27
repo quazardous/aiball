@@ -8,12 +8,9 @@
  * is just the subscriptions table CRUD.
  */
 import { Router } from "express";
-import { serveMethod } from "../bus/http.js";
 
 export const subscriptionsRouter = Router();
 
-subscriptionsRouter.post("/subscriptions", serveMethod("project.subscribe", undefined, { status: 201 }));
 
-subscriptionsRouter.get("/subscriptions", serveMethod("project.subscriptions"));
 
-subscriptionsRouter.delete("/subscriptions", serveMethod("project.unsubscribe", undefined, { status: 204, respond: (res) => { res.end(); } }));
+

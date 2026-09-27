@@ -55,7 +55,7 @@ test("each call gets its own copy, with landscape only when asked", () => {
 });
 
 test("the route narrows to one project with &project=", async () => {
-    const { createApp } = await import("../app.js");
+    const { createTestApp: createApp } = await import("../tests/test-app.js");
     const server = createApp().listen(0);
     await new Promise<void>((r) => server.once("listening", () => r()));
     const port = (server.address() as { port: number }).port;

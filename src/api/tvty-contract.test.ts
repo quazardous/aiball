@@ -26,7 +26,7 @@ import { matchCalls, readServerRoutes, tvtyCalls } from "../devtools/route-inven
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3052-"));
 process.env.AIBALL_SOCK = "";
 
-const { createApp } = await import("../app.js");
+const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, insertUpload } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
