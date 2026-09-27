@@ -187,6 +187,8 @@ dates are YYYY-MM-DD.
   first, as a closing terminal does, then sends the stop signal a second later.
 - A ticket closed by an accepted resolution or wontfix now leaves the bus's open
   ticket views at once, instead of staying until something else touched it.
+- On the session host, resizing the terminal no longer reads as human typing,
+  which kept the loop from waking its agent for ten minutes.
 
 - A loop that comes back has its bar live again at once, rather than showing
   stale until it pushes a different one.

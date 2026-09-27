@@ -101,6 +101,7 @@ import {
     writeBarHost,
     type LoopServer,
 } from "./state.js";
+import { paneDiffGuessesTyping } from "./typing-fallback.js";
 import { compareScreens, recordScreenComparison, type ScreenReading } from "./screen-compare.js";
 import { isBarHost } from "../agent-bar.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
@@ -1277,7 +1278,9 @@ function detectHumanTyping(): void {
         // ("can't be stat-ed like a file, so callers gate on proxyIsAlive()"),
         // and it is stricter on Unix too: a stale `loop.sock` left by a dead
         // proxy used to suppress the fallback that should have taken over.
-        if (proxyIsAlive(sd!)) return;
+        // #3165 — nor on the session host, which reports the keys itself
+        // (`host.keys`): a resize reflowing the pane read as typing, and armed NOT AFK.
+        if (!paneDiffGuessesTyping({ hostControl, proxyAlive: () => proxyIsAlive(sd!) })) return;
         if (readIdleSinceMs(sd!) === null) {
             // Mid-turn / streaming → reset baseline so the post-busy
             // prompt isn't diffed against a stale pre-busy capture.
