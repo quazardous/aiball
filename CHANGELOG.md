@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- Restarting an agent's Claude while it works: `consumer.restart_claude` with
+  `when_idle` is held by the loop until Claude's next idle, however long, and
+  its bar says a restart is pending, so every client sees it.
+
 - The managed settings say their section (`group`), and each number its range,
   step and unit; a value outside the range is refused with the range, so a
   client can offer a bounded control and validate the same way. A client can

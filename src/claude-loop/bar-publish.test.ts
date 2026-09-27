@@ -15,7 +15,7 @@ const base = (): AgentBar => ({
     prompt: { visible: true, has_input: false },
     human_typing: false,
     marker: { info: null, health_prompt: false, resume_picker: false, resume_mode_picker: false },
-    alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false },
+    alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false, restart_pending: false },
     proxy_alive: true,
     zen: false,
     counters: null,
@@ -107,4 +107,17 @@ test("#3066 attach is checked, and a loop older than the field reports no_socket
     assert.deepEqual((parseAgentBar({ ...base(), attach: { socket: "/s" } }) as AgentBar).attach, { socket: "/s" });
     assert.ok("error" in parseAgentBar({ ...base(), attach: { socket: null, reason: "elsewhere" } }));
     assert.ok("error" in parseAgentBar({ ...base(), attach: { socket: "" } }));
+});
+
+test("#3117 a restart waiting for idle is in the bar every client reads, and leaves it once done", async () => {
+    const { setIpcRestartPending, resetIpcStateForTests } = await import("./ipc-state.js");
+    const sd = mkdtempSync(join(tmpdir(), "aiball-3117-sd-"));
+    resetIpcStateForTests();
+    assert.equal(computeAgentBar(sd).alerts.restart_pending, false);
+    setIpcRestartPending(true);
+    const pending = computeAgentBar(sd);
+    assert.equal(pending.alerts.restart_pending, true);
+    assert.ok(!("error" in parseAgentBar(pending)), "the daemon accepts it");
+    setIpcRestartPending(false);
+    assert.equal(computeAgentBar(sd).alerts.restart_pending, false);
 });

@@ -983,7 +983,7 @@
     },
     {
       "name": "consumer.restart_claude",
-      "description": "Restart an agent's Claude after it installed an update of itself (the bar says `alerts.restart_needed`). A loop control. Refused while Claude works (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts Claude resuming its conversation, and tells the agent once it is back.",
+      "description": "Restart an agent's Claude after it installed an update of itself (the bar says `alerts.restart_needed`). A loop control. Refused while Claude works (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts Claude resuming its conversation, and tells the agent once it is back. `when_idle`: ordered while Claude works, the restart is held by the loop until its next idle, however long; its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -991,6 +991,13 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "when_idle",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         }
       ],

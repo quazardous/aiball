@@ -168,7 +168,7 @@ import {
     setIpcSseConnected,
     setIpcLinkDown,
     setIpcDaemonDown,
-    setIpcNotLoggedIn, setIpcRestartNeeded, setIpcTrustDialog,
+    setIpcNotLoggedIn, setIpcRestartNeeded, setIpcRestartPending, setIpcTrustDialog,
     setIpcApiUnreachable,
     refreshIpcApiUnreachableSeen,
     setIpcLastWakeAtMs,
@@ -1730,7 +1730,7 @@ async function mainSse(): Promise<void> {
         // session exactly like a wake (sendKeys sets the wake-in-flight +
         // coalesce markers so the timer doesn't auto-wake on top of it).
         // #3074 — restart Claude for an update, on a human's order (idle first).
-        else if (c.action === "restart_claude") void restartClaudeForUpdate();
+        else if (c.action === "restart_claude") void restartClaudeForUpdate(c.when_idle === true);
         else if (c.action === "prompt" && typeof c.text === "string") {
             const preview = c.text.length > 80 ? c.text.slice(0, 80) + "…" : c.text;
             log(`SSE control: prompt injection (${c.text.length} chars): ${preview}`);
@@ -2981,11 +2981,16 @@ let restartPending = false;
  * state dir (a restart deletes the dir itself), then hard-restart resuming the
  * conversation. The new loop reads the note once Claude is live and tells the
  * agent the session was restarted (`post_restart_reminder`).
+ *
+ * #3117 — `whenIdle`: the order came while Claude worked, so the wait has no
+ * end; the bar says a restart is pending meanwhile. A second order while one
+ * waits changes nothing, so two clients arming the same agent restart it once.
  */
-async function restartClaudeForUpdate(): Promise<void> {
+async function restartClaudeForUpdate(whenIdle: boolean): Promise<void> {
     if (restartPending || !name) return;
     restartPending = true;
-    const until = Date.now() + RESTART_IDLE_WAIT_MS;
+    if (whenIdle) setIpcRestartPending(true);
+    const until = whenIdle ? Infinity : Date.now() + RESTART_IDLE_WAIT_MS;
     while (getIpcState().paneBusy !== false) {
         if (Date.now() > until) {
             log("restart_claude: Claude never went idle within the wait — not restarted");

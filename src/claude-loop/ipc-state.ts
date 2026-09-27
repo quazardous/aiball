@@ -204,6 +204,10 @@ export interface IpcState {
      *  the UpdateInstalledWatcher; a fresh process (the restart) starts false.
      *  Published in the bar for a host to offer the restart. Default false. */
     restartNeeded: boolean;
+    /** #3117 — a restart ordered `when_idle` waits for Claude to go idle. Set
+     *  and cleared by the kernel; the bar publishes it so every client sees the
+     *  restart is on its way. Default false. */
+    restartPending: boolean;
     /** #2230 — Claude Code's folder trust dialog is on screen. Set and cleared
      *  by the TrustDialogWatcher (the dialog gone IS the answer). While true the
      *  bar paints ORANGE and the wake gate blocks ALL wakes: a wake typed into
@@ -284,6 +288,7 @@ const state: IpcState = {
     daemonDown: false,
     notLoggedIn: false,
     restartNeeded: false,
+    restartPending: false,
     trustDialog: false,
     apiUnreachable: false,
     apiUnreachableSeenMs: null,
@@ -481,6 +486,13 @@ export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
 export function setIpcRestartNeeded(needed: boolean): void {
     if (state.restartNeeded === needed) return;
     state.restartNeeded = needed;
+    notifyIpcChanged();
+}
+
+/** #3117 — a restart waits for Claude to go idle (true), or no longer does. */
+export function setIpcRestartPending(pending: boolean): void {
+    if (state.restartPending === pending) return;
+    state.restartPending = pending;
     notifyIpcChanged();
 }
 
@@ -714,6 +726,7 @@ export function resetIpcStateForTests(): void {
     state.daemonDown = false;
     state.notLoggedIn = false;
     state.restartNeeded = false;
+    state.restartPending = false;
     state.trustDialog = false;
     state.apiUnreachable = false;
     state.apiUnreachableSinceMs = null;

@@ -1092,7 +1092,10 @@ When Claude Code installs an update it says so in its footer (`✓ Update instal
 `alerts.restart_needed`, plus a `⟳ update installed, restart` word on the tmux
 line; it never restarts on its own. A host (tvty) offers the restart, which calls
 `consumer.restart_claude` on the bus: the loop waits until Claude is idle (never
-mid-turn, up to 5 minutes), hard-restarts resuming the conversation, and once
+mid-turn, up to 5 minutes; with `when_idle`, ordered while Claude works, however
+long, the bar saying `alerts.restart_pending` and the tmux line `⟳ restart when
+idle` meanwhile, a second order changing nothing), hard-restarts resuming the
+conversation, and once
 Claude is live again tells the agent so — the `post_restart_reminder` entry of the
 pings template. The note that carries this across the restart sits beside the
 state dir (`<state root>/<name>.after-restart`), since a restart deletes the dir.

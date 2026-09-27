@@ -1,6 +1,7 @@
 /** #3063 — consumers: the list, an agent's backlog and bar, the loop controls on it. */
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
+import { flag } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { deleteConsumer, getConsumer, isHuman, listConsumers, pingCountsByConsumer, updateConsumer, upsertConsumer, type Consumer, type ConsumerKind } from "../../db.js";
 import { spoolPrompt, drainPrompts } from "../../loop-prompts.js";
@@ -167,20 +168,25 @@ const MAX_NAME_LEN = 64;
  * says `alerts.restart_needed`). A loop control. Refused while Claude works
  * (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts
  * Claude resuming its conversation, and tells the agent once it is back.
+ *
+ * #3117 — `when_idle`: ordered while Claude works, the restart is held by the
+ * loop until its next idle, however long; its bar says `alerts.restart_pending`
+ * meanwhile, and a second order changes nothing.
  */
 defineMethod({
     name: "consumer.restart_claude",
     ...LOOP_CONTROL,
-    params: z.object({ name: z.string() }),
+    params: z.object({ name: z.string(), when_idle: flag }),
     run: (_c, p) => {
         if (!p.name || p.name.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(p.name)) throw new Refusal(400, "bad consumer id");
         if (!isPresent(p.name)) throw new Refusal(404, `no running claude-loop answers for ${p.name}`, ERROR_CODES.LOOP_NOT_FOUND);
+        const whenIdle = p.when_idle === true;
         const phase = getAgentBar(p.name)?.bar.phase;
-        if (phase !== "idle") {
-            throw new Refusal(409, `Claude is ${phase ?? "in an unknown state"}: a restart waits until it is idle`, ERROR_CODES.NOT_IDLE);
+        if (!whenIdle && phase !== "idle") {
+            throw new Refusal(409, `Claude is ${phase ?? "in an unknown state"}: a restart waits until it is idle (or pass when_idle)`, ERROR_CODES.NOT_IDLE);
         }
-        emitControl(p.name, { action: "restart_claude" });
-        return { consumer_id: p.name, queued: true };
+        emitControl(p.name, { action: "restart_claude", ...(whenIdle ? { when_idle: true } : {}) });
+        return { consumer_id: p.name, queued: true, ...(whenIdle ? { when_idle: true } : {}) };
     },
 });
 

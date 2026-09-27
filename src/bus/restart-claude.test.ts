@@ -65,3 +65,17 @@ test("Claude idle: the loop gets the order", () => {
     off();
     presenceDisconnect("worker");
 });
+
+upsertConsumer({ consumer_id: "idler", kind: "agent" });
+
+test("#3117 when_idle: while Claude works the order goes through, marked when_idle; without a loop still refused", () => {
+    const got: unknown[] = [];
+    const off = onControl("idler", (c) => got.push(c));
+    assert.equal(refusal(() => m.run(human, { name: "idler", when_idle: true })).code, "LOOP_NOT_FOUND");
+    presenceConnect("idler", "terminal");
+    setAgentBar("idler", bar("busy"));
+    assert.deepEqual(m.run(human, { name: "idler", when_idle: true }), { consumer_id: "idler", queued: true, when_idle: true });
+    assert.deepEqual(got, [{ action: "restart_claude", when_idle: true }]);
+    off();
+    presenceDisconnect("idler");
+});

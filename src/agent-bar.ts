@@ -59,7 +59,7 @@ export interface AgentBar {
      */
     marker: { info: string | null; health_prompt: boolean; resume_picker: boolean; resume_mode_picker: boolean };
     /** Conditions a host should show loudly. */
-    alerts: { link_down: boolean; daemon_down: boolean; not_logged_in: boolean; trust_dialog: boolean; api_unreachable: boolean; restart_needed: boolean };
+    alerts: { link_down: boolean; daemon_down: boolean; not_logged_in: boolean; trust_dialog: boolean; api_unreachable: boolean; restart_needed: boolean; restart_pending: boolean };
     /** The PTY proxy fronting claude is alive. */
     proxy_alive: boolean;
     /** Zen mode is on. */
@@ -103,8 +103,10 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     const a = b.alerts;
     if (!isObj(a) || !isBool(a.link_down) || !isBool(a.daemon_down) || !isBool(a.not_logged_in) || !isBool(a.trust_dialog) || !isBool(a.api_unreachable)
         // #3074 — optional: a loop started before it existed does not send it.
-        || (a.restart_needed !== undefined && !isBool(a.restart_needed))) {
-        return { error: "alerts must be { link_down, daemon_down, not_logged_in, trust_dialog, api_unreachable, restart_needed? } booleans" };
+        || (a.restart_needed !== undefined && !isBool(a.restart_needed))
+        // #3117 — optional too, for the same reason.
+        || (a.restart_pending !== undefined && !isBool(a.restart_pending))) {
+        return { error: "alerts must be { link_down, daemon_down, not_logged_in, trust_dialog, api_unreachable, restart_needed?, restart_pending? } booleans" };
     }
     if (!isBool(b.proxy_alive) || !isBool(b.zen)) return { error: "proxy_alive and zen must be booleans" };
     const c = b.counters;
@@ -133,7 +135,7 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         prompt: { visible: b.prompt.visible as boolean, has_input: b.prompt.has_input as boolean },
         human_typing: b.human_typing,
         marker: { info: m.info as string | null, health_prompt: m.health_prompt as boolean, resume_picker: m.resume_picker as boolean, resume_mode_picker: m.resume_mode_picker as boolean },
-        alerts: { link_down: a.link_down as boolean, daemon_down: a.daemon_down as boolean, not_logged_in: a.not_logged_in as boolean, trust_dialog: a.trust_dialog as boolean, api_unreachable: a.api_unreachable as boolean, restart_needed: a.restart_needed === true },
+        alerts: { link_down: a.link_down as boolean, daemon_down: a.daemon_down as boolean, not_logged_in: a.not_logged_in as boolean, trust_dialog: a.trust_dialog as boolean, api_unreachable: a.api_unreachable as boolean, restart_needed: a.restart_needed === true, restart_pending: a.restart_pending === true },
         proxy_alive: b.proxy_alive,
         zen: b.zen,
         counters: c === null ? null : { open: (c as Record<string, number | null>).open!, backlog: (c as Record<string, number | null>).backlog!, events: (c as Record<string, number | null>).events! },

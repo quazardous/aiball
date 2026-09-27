@@ -208,7 +208,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `consumer.bar` | human, or the agent itself | `GET /api/consumers/:consumer_id/bar` |
 | `consumer.set_bar_host` | human, not relayed | `POST /api/consumers/:consumer_id/bar-host` |
 | `consumer.afk` | human, not relayed | `POST /api/agents/:name/afk` |
-| `consumer.restart_claude` | human, not relayed | — restarts an agent's Claude after it installed an update (its bar's `alerts.restart_needed`): refused `NOT_IDLE` while Claude works; the loop resumes the conversation and tells the agent once it is back |
+| `consumer.restart_claude` | human, not relayed | — restarts an agent's Claude after it installed an update (its bar's `alerts.restart_needed`): refused `NOT_IDLE` while Claude works, unless `when_idle`: then the loop holds the order until Claude's next idle, however long, its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing; the loop resumes the conversation and tells the agent once it is back |
 | `consumer.counters` | human, or the agent itself | — an agent's counters computed now: `open`, `actionable`, `backlog` (cooled-down threads left out), `events`; a changed number is pushed on `agent.<id>.state` too. The daemon computes them on the events that move them (a ticket's lifecycle, a ping written or read); this is for what moves with time alone |
 | `agent.pane_keys` | human | `POST /api/agents/:name/pane/keys` — on the session host, through the caller's `agent.<id>.screen` opened with `typing` (`CONFLICT` without one); in tmux or on a node, straight to the pane |
 | `agent.pane_resize` | human | — the size a typing viewer would like, for a session on the host; applied while it owns the size |
