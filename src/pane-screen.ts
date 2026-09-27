@@ -72,7 +72,7 @@ export function screenSourceOf(agent: string): ScreenSourceKind | { error: strin
     if (!consumer) return { error: `no consumer ${agent}` };
     if (consumer.last_seen_via === "node") return "node";
     if (!consumer.cwd) return { error: "the agent has no loop running: no cwd yet" };
-    if (!resolveLoopName(consumer.cwd)) return { error: `no claude-loop runs in ${consumer.cwd}` };
+    if (!resolveLoopName(consumer.cwd, agent)) return { error: `no claude-loop runs in ${consumer.cwd}` };
     return "tmux";
 }
 
@@ -205,7 +205,7 @@ function tmuxScreen(agent: string, emit: (e: ScreenEvent) => void): Screen {
         busy = true;
         try {
             const cwd = getConsumer(agent)?.cwd;
-            const loop = cwd ? resolveLoopName(cwd) : null;
+            const loop = cwd ? resolveLoopName(cwd, agent) : null;
             if (!loop) {
                 if (lastError !== "gone") emit({ kind: "error", error: "the loop is not running" });
                 lastError = "gone";
@@ -250,7 +250,7 @@ function tmuxScreen(agent: string, emit: (e: ScreenEvent) => void): Screen {
  */
 async function tmuxKeys(agent: string, keys: string): Promise<void> {
     const cwd = getConsumer(agent)?.cwd;
-    const loop = cwd ? resolveLoopName(cwd) : null;
+    const loop = cwd ? resolveLoopName(cwd, agent) : null;
     if (!loop) throw new Error("the loop is not running");
     const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop");
     void sendEventOnce(loopSockPath(join(stateRoot, loop)), {

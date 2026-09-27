@@ -46,7 +46,7 @@ export function tmuxSessionView(agent: string): TmuxSessionView | null {
     if (!isPresent(agent) || byKey.has(keyOf({ agent }))) return null; // not running, or on the host: its own view
     const c = getConsumer(agent);
     if (!c?.cwd || c.last_seen_via === "node") return null;
-    const loop = resolveLoopName(c.cwd);
+    const loop = resolveLoopName(c.cwd, agent);
     return loop ? { agent, name: null, host: "tmux", cwd: c.cwd, running: true, tmux: tmuxName(loop) } : null;
 }
 

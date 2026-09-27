@@ -277,6 +277,11 @@ export interface Plate {
      */
     host_agent?: string | null;
     /**
+     * #3168 — the agent this loop runs as, always (`consumer` is only what was
+     * passed): who, among a folder's loops, is whose.
+     */
+    agent?: string | null;
+    /**
      * #3166 — that session's folder, as the daemon answered it (its control
      * socket's folder): where its `host.json` and `attach.sock` are, in the
      * daemon's home, whatever the loop's own home is.

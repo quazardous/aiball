@@ -869,6 +869,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         consumer: opts.consumer ?? null,
         project: opts.project ?? null,
         host_agent: onHost ? ctx.agent : null,
+        agent: ctx.agent,
     };
     writePlate(sd, plate);
 

@@ -37,7 +37,7 @@ export function localLoopDir(
     if (consumer.last_seen_via === "node") {
         return { ok: false, status: 501, error: "loop control over a node-relayed pane is not implemented yet", code: ERROR_CODES.NOT_IMPLEMENTED };
     }
-    const loopName = resolveLoopName(consumer.cwd);
+    const loopName = resolveLoopName(consumer.cwd, consumerId);
     if (!loopName) {
         return { ok: false, status: 404, error: `no claude-loop dir matches cwd ${consumer.cwd}`, code: ERROR_CODES.LOOP_NOT_FOUND };
     }

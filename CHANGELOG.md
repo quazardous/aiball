@@ -178,6 +178,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- With several loops in one folder (a lead and its crew), an agent's tmux
+  session, web screen, keys and loop controls reach its own loop, never
+  another agent's: a loop's plate names its agent.
 - A read-only copy of a loop on the session host also leaves on Ctrl-C or
   Ctrl-D, not only Ctrl-B D.
 - A second `claude-loop start` no longer kills a loop on the session host when

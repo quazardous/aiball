@@ -443,8 +443,8 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
         } catch { /* watch unsupported / file missing — connect-time push covers it */ }
     }
 
-    function startStream(requestId: string, cwd: string): void {
-        const loopName = resolveLoopName(cwd);
+    function startStream(requestId: string, cwd: string, agent?: string): void {
+        const loopName = resolveLoopName(cwd, agent);
         if (!loopName) {
             send({ kind: "pane.error", request_id: requestId, error: `no claude-loop dir matches cwd ${cwd}` });
             return;
@@ -487,8 +487,8 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
         if (iv) { clearInterval(iv); activeStreams.delete(requestId); }
     }
 
-    async function doKeys(requestId: string, cwd: string, keys: string): Promise<void> {
-        const loopName = resolveLoopName(cwd);
+    async function doKeys(requestId: string, cwd: string, keys: string, agent?: string): Promise<void> {
+        const loopName = resolveLoopName(cwd, agent);
         if (!loopName) {
             send({ kind: "pane.ack", request_id: requestId, ok: false, error: `no claude-loop dir matches cwd ${cwd}` });
             return;
@@ -498,20 +498,20 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
     }
 
     function handleServerFrame(raw: string): void {
-        let frame: { kind?: string; request_id?: string; cwd?: string; keys?: string };
+        let frame: { kind?: string; request_id?: string; consumer_id?: string; cwd?: string; keys?: string };
         try { frame = JSON.parse(raw); } catch { return; }
         if (typeof frame.request_id !== "string") return;
         const rid = frame.request_id;
         switch (frame.kind) {
             case "pane.stream.open":
-                if (typeof frame.cwd === "string") startStream(rid, frame.cwd);
+                if (typeof frame.cwd === "string") startStream(rid, frame.cwd, frame.consumer_id);
                 break;
             case "pane.stream.close":
                 stopStream(rid);
                 break;
             case "pane.keys":
                 if (typeof frame.cwd === "string" && typeof frame.keys === "string") {
-                    void doKeys(rid, frame.cwd, frame.keys);
+                    void doKeys(rid, frame.cwd, frame.keys, frame.consumer_id);
                 }
                 break;
             default:
