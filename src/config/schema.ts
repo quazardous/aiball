@@ -26,6 +26,9 @@ export type ConfigValueType = "string" | "number" | "boolean" | "enum";
 
 export type ConfigValue = string | number | boolean;
 
+/** #3137 — what a number counts, for a client to label it and step through it. */
+export type ConfigUnit = "characters" | "minutes" | "hours" | "seconds" | "count" | "lines" | "times";
+
 /** #590 — where a key can be SET. `db` = SQLite `config_overrides` table
  *  (UI admin Settings). `file` = .aiball.yaml / global yaml. A key may
  *  declare either, both, or (rare) none. */
@@ -45,6 +48,18 @@ export interface ConfigSchemaEntry {
      * the public UI (#449). Default false (anyone with admin access can set it).
      */
     protected?: boolean;
+    /** #3137 — the section a settings screen puts it in, as a dotted path of
+     *  one to three levels (`tickets.wait_credit.earn`): a menu, not a flat
+     *  list. The display order is this list's order, a contract: a new key goes
+     *  where it reads well. */
+    group: string;
+    /** #3137 — number only: the accepted range (inclusive; `config.set`
+     *  refuses outside it, CONFIG_OUT_OF_RANGE), the step a client moves by,
+     *  and what the number counts. */
+    min?: number;
+    max?: number;
+    step?: number;
+    unit?: ConfigUnit;
     /** Human label + one-line help for the settings UI. */
     label: string;
     description: string;
@@ -71,6 +86,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2586 — the daemon asks GitHub for the latest release when it starts.
     {
         key: "updates.check",
+        group: "updates",
         scope: "global",
         type: "boolean",
         default: true,
@@ -82,6 +98,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #449 — DB-source ticket defaults (admin Settings).
     {
         key: "tickets.default_priority",
+        group: "tickets.defaults",
         scope: "global+project",
         type: "enum",
         options: ["low", "normal", "high", "urgent"],
@@ -92,6 +109,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.auto_broadcast_new",
+        group: "tickets.defaults",
         scope: "global+project",
         type: "boolean",
         default: false,
@@ -104,6 +122,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // cannot loosen the budget it is held to.
     {
         key: "tickets.summary_until_max",
+        group: "tickets.rules",
+        min: 0,
+        max: 5000,
+        step: 50,
+        unit: "characters",
         scope: "global+project",
         type: "number",
         default: 500,
@@ -118,6 +141,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // loop that cannot be reloaded to learn the new flag.
     {
         key: "tickets.require_then",
+        group: "tickets.rules",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -129,6 +153,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2652 david — « il faut que le champ commit soit obligatoire ».
     {
         key: "tickets.require_commits",
+        group: "tickets.rules",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -141,6 +166,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // that nothing follows is flagged in the inbox after this many hours.
     {
         key: "tickets.step_stale_hours",
+        group: "tickets.steps",
+        min: 1,
+        max: 720,
+        step: 1,
+        unit: "hours",
         scope: "global+project",
         type: "number",
         default: 24,
@@ -159,6 +189,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // to the top of its author's backlog for a while, right after the events.
     {
         key: "tickets.step_hot_minutes",
+        group: "tickets.steps",
+        min: 1,
+        max: 1440,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 30,
@@ -169,6 +204,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2481 david — "c'est 2h le max (modifiable par projet en conf)".
     {
         key: "tickets.step_after_max_minutes",
+        group: "tickets.steps",
+        min: 1,
+        max: 1440,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 120,
@@ -179,6 +219,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // #2640 david — the wait credit: « les minutes qu'on attend sont prises sur un budget temps qu'on doit gagner par preuve de travail ».
     {
         key: "tickets.wait_credit_enabled",
+        group: "tickets.wait_credit",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -188,6 +229,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_refund",
+        group: "tickets.wait_credit",
         scope: "global+project",
         type: "boolean",
         default: true,
@@ -197,6 +239,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_commit_max_age_hours",
+        group: "tickets.wait_credit.earn",
+        min: 1,
+        max: 720,
+        step: 1,
+        unit: "hours",
         scope: "global+project",
         type: "number",
         default: 48,
@@ -206,6 +253,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_max_commits_per_comment",
+        group: "tickets.wait_credit.earn",
+        min: 1,
+        max: 100,
+        step: 1,
+        unit: "count",
         scope: "global+project",
         type: "number",
         default: 20,
@@ -215,6 +267,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_start_minutes",
+        group: "tickets.wait_credit",
+        min: 0,
+        max: 1440,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 60,
@@ -224,6 +281,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_max_minutes",
+        group: "tickets.wait_credit",
+        min: 1,
+        max: 1440,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 120,
@@ -233,6 +295,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.step_min_wait_minutes",
+        group: "tickets.wait_credit",
+        min: 0,
+        max: 120,
+        step: 1,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 5,
@@ -242,6 +309,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_resolved_minutes",
+        group: "tickets.wait_credit.earn",
+        min: 0,
+        max: 240,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 30,
@@ -251,6 +323,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_resolved_no_commit_minutes",
+        group: "tickets.wait_credit.earn",
+        min: 0,
+        max: 240,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 10,
@@ -260,6 +337,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_wontfix_minutes",
+        group: "tickets.wait_credit.earn",
+        min: 0,
+        max: 240,
+        step: 1,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 5,
@@ -269,6 +351,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_commit_lines_per_minute",
+        group: "tickets.wait_credit.earn",
+        min: 1,
+        max: 1000,
+        step: 5,
+        unit: "lines",
         scope: "global+project",
         type: "number",
         default: 20,
@@ -278,6 +365,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_commit_max_minutes",
+        group: "tickets.wait_credit.earn",
+        min: 0,
+        max: 240,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 30,
@@ -287,6 +379,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.wait_credit_commit_min_minutes",
+        group: "tickets.wait_credit.earn",
+        min: 0,
+        max: 60,
+        step: 1,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 2,
@@ -296,6 +393,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.claim_protect_minutes",
+        group: "tickets.backlog",
+        min: 0,
+        max: 1440,
+        step: 5,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 60,
@@ -305,6 +407,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.blocked_cooldown_multiplier",
+        group: "tickets.backlog",
+        min: 1,
+        max: 20,
+        step: 0.5,
+        unit: "times",
         scope: "global+project",
         type: "number",
         default: 2,
@@ -314,6 +421,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "tickets.sink_then_continue_minutes",
+        group: "tickets.backlog",
+        min: 0,
+        max: 1440,
+        step: 1,
+        unit: "minutes",
         scope: "global+project",
         type: "number",
         default: 5,
@@ -327,6 +439,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     // presence) and is NOT modelled here — see #590 case #2.
     {
         key: "autopoll.volatile",
+        group: "autopoll",
         scope: "project",
         type: "boolean",
         default: false,
@@ -337,6 +450,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "autopoll.throttle_seconds",
+        group: "autopoll",
+        min: 10,
+        max: 86400,
+        step: 10,
+        unit: "seconds",
         scope: "project",
         type: "number",
         default: 120,
@@ -347,6 +465,11 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "autopoll.include_recent_tickets",
+        group: "autopoll",
+        min: 0,
+        max: 20,
+        step: 1,
+        unit: "count",
         scope: "project",
         type: "number",
         default: 3,
@@ -357,6 +480,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "autopoll.backlog",
+        group: "autopoll",
         scope: "project",
         type: "boolean",
         default: true,
@@ -367,6 +491,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
     },
     {
         key: "autopoll.tone",
+        group: "autopoll",
         scope: "project",
         type: "enum",
         options: ["hint", "directive", "imperative"],

@@ -21,6 +21,7 @@
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { globalConfigPath } from "./autopoll/config.js";
+import { publish } from "./bus/subscriptions.js";
 
 export interface ConfigReloadResult {
     global_config: string;
@@ -41,5 +42,7 @@ export function reloadConfig(): ConfigReloadResult {
         `[reload] config reloaded (most config is read fresh per request; `
         + `global=${gp}, hot_window_sec=${hotWin ?? "default"})`,
     );
+    // #3137 — a settings screen left open reads the config again.
+    try { publish("config.changed", { op: "reload" }); } catch { /* never takes the reload down */ }
     return { global_config: gp, hot_window_sec: hotWin ?? null };
 }

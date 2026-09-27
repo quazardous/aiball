@@ -4832,6 +4832,7 @@
             "BAD_GATEWAY",
             "BAD_REQUEST",
             "COMMITS_REQUIRED",
+            "CONFIG_OUT_OF_RANGE",
             "CONFLICT",
             "CONSUMER_NOT_FOUND",
             "DECISION_SUPERSEDED",

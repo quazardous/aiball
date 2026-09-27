@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The managed settings say their section (`group`), and each number its range,
+  step and unit; a value outside the range is refused with the range, so a
+  client can offer a bounded control and validate the same way. A client can
+  also subscribe to `config.changed` to hear a setting set or cleared, or the
+  config files reloaded.
+
 - `claude-loop attach` also attaches to a loop running on the daemon's session
   host, from any terminal: its screen, your keys and your terminal's size, as
   with tmux. Ctrl-B D detaches, and Claude carries on.

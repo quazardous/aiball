@@ -11,6 +11,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
+import { defineSubject, publish } from "../subscriptions.js";
 import { standingPromptView } from "./project.js";
 import {
     captureTokenSnapshotIfDue,
@@ -260,6 +261,19 @@ function editableEntry(key: string) {
 
 const layer = z.preprocess((v) => (typeof v === "string" ? v.trim() : v), z.string().optional());
 
+/**
+ * #3137 — a change to the managed config, for a settings screen left open:
+ * `{ op: "set" | "clear", key, project, value, by }` on each `config.set` /
+ * `config.clear`, and `{ op: "reload" }` when a config file was reloaded (read
+ * `config.managed` again: a reload does not say which keys moved).
+ */
+defineSubject({
+    pattern: "config.changed",
+    doc: { value: "null: `config.managed` is the whole read", event: "`{ op: \"set\" | \"clear\", key, project, value, by }`, or `{ op: \"reload\" }` after a config file was reloaded" },
+    access: (caller) => (["human", "agent"].includes(caller.kind) ? null : new Refusal(403, "a consumer's subject")),
+    value: () => null,
+});
+
 /** #449 — the config as resolved (schema, layers, effective value), for a project or the whole board. */
 defineMethod({
     name: "config.managed",
@@ -287,7 +301,13 @@ defineMethod({
         if (value === null) {
             throw new Refusal(400, `invalid value for '${p.key}' (type ${entry.type}${entry.options ? `, one of ${entry.options.join("|")}` : ""})`);
         }
+        // #3137 — a number within its range: the one a client offers is the one refused.
+        if (typeof value === "number" && ((entry.min !== undefined && value < entry.min) || (entry.max !== undefined && value > entry.max))) {
+            throw new Refusal(400, `'${p.key}' takes ${entry.min ?? "-∞"} to ${entry.max ?? "∞"}${entry.unit ? ` ${entry.unit}` : ""}, not ${value}`,
+                ERROR_CODES.CONFIG_OUT_OF_RANGE, { min: entry.min ?? null, max: entry.max ?? null, step: entry.step ?? null, unit: entry.unit ?? null });
+        }
         setConfigOverride(proj, p.key, value, me);
+        publish("config.changed", { op: "set", key: p.key, project: proj || null, value, by: me });
         return { key: p.key, project: proj || null, value };
     },
 });
@@ -303,6 +323,7 @@ defineMethod({
             throw new Refusal(403, `config key '${p.key}' is protected (moderator-only)`, ERROR_CODES.MODERATOR_ONLY);
         }
         deleteConfigOverride(p.project ?? "", p.key);
+        publish("config.changed", { op: "clear", key: p.key, project: p.project || null, value: null, by: consumerIdOf(caller) });
         return { key: p.key, project: p.project || null, cleared: true };
     },
 });

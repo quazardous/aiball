@@ -183,6 +183,7 @@ export const ERROR_CODES = {
     STEP_TIMER_TOO_LONG: "STEP_TIMER_TOO_LONG",
     /** #3039 — `resume_on.ticket` names no ticket, or this very one. */
     STEP_RESUME_INVALID: "STEP_RESUME_INVALID",
+    CONFIG_OUT_OF_RANGE: "CONFIG_OUT_OF_RANGE",
     /** #3039 — a lineage relation that would close a cycle. */
     RELATION_CYCLE: "RELATION_CYCLE",
     /** #3039 — importing an upstream issue a ticket already mirrors (`existing_ticket_id`). */

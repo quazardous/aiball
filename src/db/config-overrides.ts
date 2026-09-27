@@ -112,6 +112,12 @@ export interface ResolvedConfig {
     protected: boolean;
     label: string;
     description: string;
+    /** #3137 — its section, and for a number its range, step and unit (null when none). */
+    group: string;
+    min: number | null;
+    max: number | null;
+    step: number | null;
+    unit: string | null;
     default: ConfigValue;
     /** The global-layer override, or null when unset / not applicable. */
     global: ConfigValue | null;
@@ -149,6 +155,11 @@ export function getResolvedConfig(project?: string | null): ResolvedConfig[] {
             protected: !!entry.protected,
             label: entry.label,
             description: entry.description,
+            group: entry.group,
+            min: entry.min ?? null,
+            max: entry.max ?? null,
+            step: entry.step ?? null,
+            unit: entry.unit ?? null,
             default: entry.default,
             global: g ?? null,
             project: p ?? null,

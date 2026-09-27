@@ -98,6 +98,24 @@
         }
       }
     },
+    "config.changed": {
+      "address": "config.changed",
+      "parameters": {
+        "id": {
+          "description": "an id"
+        }
+      },
+      "messages": {
+        "value": {
+          "name": "value",
+          "summary": "null: `config.managed` is the whole read"
+        },
+        "event": {
+          "name": "event",
+          "summary": "`{ op: \"set\" | \"clear\", key, project, value, by }`, or `{ op: \"reload\" }` after a config file was reloaded"
+        }
+      }
+    },
     "project.*.tickets": {
       "address": "project.{id}.tickets",
       "parameters": {
