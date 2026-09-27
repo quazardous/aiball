@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { liveHostAgent } from "./host-alive.js";
+import { liveHostAgent, loopAlive } from "./host-alive.js";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3066-hostalive-"));
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -39,4 +39,12 @@ test("a host that is gone, a tmux loop, or no plate: not alive on a host", () =>
     assert.equal(liveHostAgent(loop("tmux", { host_agent: null }), home), null);
     assert.equal(liveHostAgent(loop("no-plate", null), home), null);
     assert.equal(liveHostAgent(loop("no-host-file", { host_agent: "never-started" }), home), null);
+});
+
+test("a loop is alive in tmux or on the host: prune, start and list never take a host loop for dead", () => {
+    host("kept-claude", process.pid);
+    const onHost = loop("kept", { host_agent: "kept-claude" });
+    assert.equal(loopAlive(onHost, () => false, home), true, "no tmux session, but its host runs");
+    assert.equal(loopAlive(loop("in-tmux", { host_agent: null }), () => true, home), true);
+    assert.equal(loopAlive(loop("gone", { host_agent: null }), () => false, home), false);
 });

@@ -33,3 +33,12 @@ export function liveHostAgent(sd: string, home: string = AIBALL_HOME): string | 
 export function hostAttachSocket(agent: string, home: string = AIBALL_HOME): string {
     return join(home, "hosts", agent, "attach.sock");
 }
+
+/**
+ * A loop is alive in its tmux session, or on the daemon's session host (no
+ * tmux session there: its host still runs). Every "is it dead?" that deletes,
+ * reuses or prunes a loop's state asks this, never tmux alone.
+ */
+export function loopAlive(sd: string, tmuxAlive: () => boolean, home: string = AIBALL_HOME): boolean {
+    return tmuxAlive() || liveHostAgent(sd, home) !== null;
+}

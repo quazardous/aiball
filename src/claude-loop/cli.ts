@@ -91,7 +91,7 @@ import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
-import { hostAttachSocket, liveHostAgent } from "./host-alive.js";
+import { hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { attachHost } from "./host-attach.js";
 
 function die(msg: string): never {
@@ -175,6 +175,11 @@ function collectShellOverrideLines(): string[] {
 function tmuxAlive(name: string): boolean {
     const r = spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" });
     return r.status === 0;
+}
+
+/** #3066 — alive in tmux or on the daemon's session host (host-alive.ts). */
+function loopAlive(name: string): boolean {
+    return isLoopAlive(stateDirFor(name), () => tmuxAlive(name));
 }
 
 function selfRoot(): string {
@@ -305,7 +310,7 @@ function pruneDeadStateDirs(): void {
         // #403: skip dotfiles — `.start-lock-*` lives here; a concurrent start's
         // prune must NOT delete a live lock (that would re-open the race).
         if (name.startsWith(".")) continue;
-        if (tmuxAlive(name)) continue;
+        if (loopAlive(name)) continue;
         try { rmSync(stateDirFor(name), { recursive: true, force: true }); }
         catch { /* ignore */ }
     }
@@ -402,7 +407,7 @@ function findLiveLoopForCwdAgent(cwd: string, agent: string | undefined): { name
     const wantCwd = canonicalCwd(cwd);
     for (const name of readdirSync(STATE_ROOT)) {
         if (name.startsWith(".")) continue; // #403 lock dotfiles aren't loops
-        if (!tmuxAlive(name)) continue;
+        if (!loopAlive(name)) continue;
         let plate: Plate | null = null;
         try { plate = readPlate(stateDirFor(name)); } catch { /* skip */ }
         if (!plate) continue;
@@ -442,7 +447,7 @@ function loopsForCwd(): { name: string; alive: boolean }[] {
         let plate: Plate | null = null;
         try { plate = readPlate(sd); } catch { continue; }
         if (canonicalCwd(plate.cwd) !== cwd) continue;
-        matches.push({ name, alive: tmuxAlive(name) });
+        matches.push({ name, alive: loopAlive(name) });
     }
     return matches;
 }
@@ -1497,8 +1502,8 @@ function cmdList(): void {
         if (!existsSync(platePath(sd))) continue;
         let plate: Plate;
         try { plate = readPlate(sd); } catch { continue; }
-        const alive = tmuxAlive(name);
-        const aliveStr = alive ? "alive" : "dead";
+        const alive = loopAlive(name);
+        const aliveStr = alive ? (tmuxAlive(name) ? "alive" : "alive (host)") : "dead";
         // #793 — idle-since file removed. The bus value lives in the
         // timer process; this CLI subprocess can't read it without a
         // loop.sock query. Show alive / dead / stale here and route

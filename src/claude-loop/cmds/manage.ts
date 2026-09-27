@@ -46,6 +46,7 @@ import {
 import { isBarHost } from "../../agent-bar.js";
 import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
+import { liveHostAgent, loopAlive as isLoopAlive } from "../host-alive.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -55,6 +56,11 @@ function die(msg: string): never {
 function tmuxAlive(name: string): boolean {
     const r = spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" });
     return r.status === 0;
+}
+
+/** #3066 — alive in tmux, or on the daemon's session host (no tmux session there). */
+function loopAlive(name: string): boolean {
+    return isLoopAlive(stateDirFor(name), () => tmuxAlive(name));
 }
 
 /**
@@ -235,7 +241,7 @@ export function cmdStop(name: string): void {
 }
 
 export function cmdWake(name: string): void {
-    if (!tmuxAlive(name)) die(`loop '${name}' not alive`);
+    if (!loopAlive(name)) die(`loop '${name}' not alive`);
     const sd = stateDirFor(name);
     // Don't clear idle-since: the timer's first check is
     // `if (!idle-since) continue` — wiping it would make the next
@@ -327,6 +333,9 @@ export function cmdZen(name: string, opts?: { on?: boolean; off?: boolean }): vo
 
 export async function cmdReload(name: string, opts?: { set?: string[] }): Promise<void> {
     if (!tmuxAlive(name)) {
+        if (liveHostAgent(stateDirFor(name))) {
+            die(`loop '${name}' runs on the daemon's session host: reload respawns a tmux loop's timer — use 'restart --resume ${name} --host'`);
+        }
         die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);
     }
     const sd = stateDirFor(name);
@@ -558,7 +567,7 @@ export async function cmdPrune(): Promise<void> {
     }
     const orphans: string[] = [];
     for (const name of readdirSync(STATE_ROOT)) {
-        if (!tmuxAlive(name)) orphans.push(name);
+        if (!loopAlive(name)) orphans.push(name);
     }
     if (orphans.length === 0) {
         process.stdout.write("nothing to prune\n");
