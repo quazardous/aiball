@@ -185,8 +185,9 @@ that typed or pasted (see above: not a mouse or focus report) or took focus
 `window-size latest`.
 
 - A `readonly` client never resizes, and never becomes the owner.
-- When the owner disconnects, the size stays as it is until another
-  interactive client types or takes focus.
+- When the owner disconnects, the size passes to the interactive client left
+  that was active last (it attached, typed or took focus last), as tmux sizes a
+  window to the clients it has; with none left, the size stays as it is.
 - A client smaller than the size in force still receives the whole screen; it
   is up to the client to crop or scroll.
 

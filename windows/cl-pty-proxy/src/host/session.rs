@@ -8,6 +8,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,6 +37,8 @@ pub struct Client {
     pub stream: bool,
     pub screen_opts: Value,
     pub want_size: Mutex<Option<(u16, u16)>>,
+    /// #3169 — when it last attached or took the size: who takes it when its owner leaves.
+    active: AtomicU64,
     q: Mutex<Queue>,
     cv: Condvar,
 }
@@ -130,6 +133,8 @@ struct Inner {
     clients: HashMap<u64, Arc<Client>>,
     next_client: u64,
     owner: Option<u64>,
+    /// #3169 — a counter, bumped at each attach and each taking of the size.
+    activity: u64,
     pty: Option<Pty>,
     claude: ClaudeState,
     /// The next exit is a restart the controller asked for: clients stay attached.
@@ -178,6 +183,7 @@ impl Session {
                 clients: HashMap::new(),
                 next_client: 1,
                 owner: None,
+                activity: 0,
                 pty: None,
                 claude: ClaudeState { running: false, pid: None, started_at: None, exit_code: None },
                 restarting: false,
@@ -438,6 +444,8 @@ impl Session {
             return;
         }
         inner.owner = Some(client.id);
+        inner.activity += 1;
+        client.active.store(inner.activity, Ordering::Relaxed);
         let want = *client.want_size.lock().unwrap();
         if let Some(size) = want {
             apply_size(inner, size);
@@ -487,6 +495,7 @@ impl Session {
             stream,
             screen_opts: hello["screen"].clone(),
             want_size: Mutex::new(if interactive { want } else { None }),
+            active: AtomicU64::new(0),
             q: Mutex::new(Queue { frames: VecDeque::new(), bytes: 0, closed: false }),
             cv: Condvar::new(),
         });
@@ -508,6 +517,8 @@ impl Session {
         } else {
             client.push(screen_frame(&inner, &client.screen_opts));
         }
+        inner.activity += 1;
+        client.active.store(inner.activity, Ordering::Relaxed);
         inner.clients.insert(id, client.clone());
         // The first interactive client of an unowned session takes its size,
         // and hears it with the others (its welcome carried the old one).
@@ -524,8 +535,17 @@ impl Session {
         let mut inner = self.inner.lock().unwrap();
         inner.clients.remove(&client.id);
         if inner.owner == Some(client.id) {
-            // The size stays as it is until another interactive client takes it.
             inner.owner = None;
+            // #3169 — the size passes to the interactive client left that was
+            // active last, as tmux sizes a session to the clients it has; with
+            // none left, it stays as it is.
+            let next = inner.clients.values()
+                .filter(|c| c.interactive)
+                .max_by_key(|c| c.active.load(Ordering::Relaxed))
+                .cloned();
+            if let Some(next) = next {
+                self.take_size(&mut inner, &next);
+            }
         }
         drop(inner);
         self.tell_clients();

@@ -178,6 +178,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- On the session host, when the client that set the size leaves, the size
+  passes to the interactive client left, as in tmux, instead of staying the
+  departed one's until someone types.
 - With several loops in one folder (a lead and its crew), an agent's tmux
   session, web screen, keys and loop controls reach its own loop, never
   another agent's: a loop's plate names its agent.

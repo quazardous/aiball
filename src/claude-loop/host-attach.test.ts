@@ -129,3 +129,29 @@ test("#3166 — a read-only copy also leaves on Ctrl-C or Ctrl-D; with the contr
     stdin.write("\x02d");
     await ended;
 });
+
+test("#3169 — when the size's owner leaves, the size passes to the interactive client left, without it typing", { skip }, async () => {
+    const link = await startHost({ name: "sizes", argv: ["cat"], cwd: home, size: { rows: 20, cols: 70 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+    cleanups.push(async () => { await link.call("host.shutdown").catch(() => {}); link.close(); });
+    const sock = join(link.info.dir, "attach.sock");
+    const term = (rows: number, columns: number) => Object.assign(new EventEmitter(), { rows, columns, write() { return true; } });
+    const size = async () => ((await link.call("host.hello")) as { size: { rows: number; cols: number } }).size;
+
+    const aIn = new PassThrough();
+    const a = attachHost(sock, { stdin: aIn, stdout: term(39, 80) as never });
+    await until("a attached", async () => ((await link.call("host.hello")) as { clients: number }).clients === 1);
+    const bIn = new PassThrough();
+    const b = attachHost(sock, { stdin: bIn, stdout: term(40, 120) as never });
+    await until("b attached", async () => ((await link.call("host.hello")) as { clients: number }).clients === 2);
+    aIn.write("x");
+    await until("a owns the size", async () => { const s = await size(); return s.rows === 39 && s.cols === 80; });
+
+    aIn.write("\x02d");
+    assert.deepEqual(await a, { reason: "detached" });
+    await until("the size passed to b", async () => { const s = await size(); return s.rows === 40 && s.cols === 120; });
+
+    bIn.write("\x02d");
+    await b;
+    const left = await size();
+    assert.deepEqual([left.rows, left.cols], [40, 120], "no interactive client left: the size stays");
+});
