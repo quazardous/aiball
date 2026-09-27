@@ -6,7 +6,7 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createServer } from "node:http";
 
@@ -138,6 +138,27 @@ test("a socket path too long is refused before anything starts", { skip }, async
 
 test("the environment a caller may give: an allow-list", () => {
     assert.deepEqual(allowedEnv({ PATH: "/x", LANG: "fr_FR.UTF-8", LC_ALL: "C", LD_PRELOAD: "/evil.so", NODE_OPTIONS: "--require x", HOME: "/elsewhere", n: 3 }), { PATH: "/x", LANG: "fr_FR.UTF-8", LC_ALL: "C" });
+});
+
+test("#3125 — the keys the host watches for a loop pass the allow-list; nothing else new does", () => {
+    const keys = { CL_AFK_SPEC: "[]", CL_AFK_WINDOW_MS: "400", CL_ESC_TAKEOVER: "1", CL_RELOAD_KEY: "0e" };
+    assert.deepEqual(allowedEnv({ ...keys, CL_HOST_CONTROL: "/elsewhere.sock", CL_OTHER: "x" }), keys);
+});
+
+test("#3125 — a session on the host gets a terminal that renders colours, and the AFK key the loop gives", { skip }, async () => {
+    const worker = await as("worker");
+    const out = join(home, "env-seen");
+    const argv = ["sh", "-c", `printf '%s|%s|%s' "$TERM" "$COLORTERM" "$CL_AFK_SPEC" > '${out}'; exec cat`];
+    await worker.call("session.host", { agent: "hosted", argv, cwd: home, env: { CL_AFK_SPEC: "[[27,91,50,48,126]]" } });
+    try {
+        const deadline = Date.now() + 5000;
+        while (!existsSync(out) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+        await new Promise((r) => setTimeout(r, 50));
+        assert.equal(readFileSync(out, "utf8"), "xterm-256color|truecolor|[[27,91,50,48,126]]");
+    } finally {
+        // Stopped whatever happens: the next test starts the same agent.
+        await (await as("hosted")).call("session.stop", { agent: "hosted" });
+    }
 });
 
 test("the loop's parameters: a name is a session without an agent, not with agent or crew", { skip }, async () => {

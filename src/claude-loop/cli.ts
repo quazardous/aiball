@@ -1205,6 +1205,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 agent: ctx.agent,
                 argv: [resolveBashCmd(), "-lc", hostCmd],
                 cwd,
+                // #3125 — the host watches the keys itself (AFK, ESC, reload): it
+                // reads them from its own environment, not the shell's inside.
+                env: {
+                    [CL_ENV.AFK_SPEC]: afkSpecJson,
+                    [CL_ENV.AFK_WINDOW_MS]: String(ctx.claude_loop.afk_window_ms),
+                    [CL_ENV.ESC_TAKEOVER]: escTakeover ? "1" : "0",
+                    ...(process.env.TERM ? { TERM: process.env.TERM } : {}),
+                    ...(process.env.COLORTERM ? { COLORTERM: process.env.COLORTERM } : {}),
+                },
                 ...(cols && rows ? { size: { rows, cols } } : {}),
             });
         } catch (e) {

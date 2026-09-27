@@ -10,7 +10,7 @@ import { defineMethod, Refusal } from "../methods.js";
 import { defineSubject } from "../subscriptions.js";
 import { ERROR_CODES } from "../../domain.js";
 import { hostDirFor, SESSION_NAME } from "../../sessions/hosts.js";
-import { allowedEnv, loginEnv } from "../../sessions/env.js";
+import { sessionEnv } from "../../sessions/env.js";
 import { listSessionViews, sessionFor, startSession, stopSession, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
 
@@ -57,7 +57,7 @@ defineMethod({
             // #3066 3c — the loop's own start prepares Claude (settings, hooks,
             // state) as for tmux, then asks back for the host (session.host)
             // and starts the kernel on it: one way to prepare Claude, not two.
-            const env = { ...loginEnv(), ...(caller.transport === "uds" ? allowedEnv(p.env) : {}) };
+            const env = sessionEnv(p.env, caller.transport === "uds");
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const child = spawn(CLAUDE_LOOP_BIN, [
                 "start", "--host", "--no-attach", "--cwd", p.cwd,
@@ -85,7 +85,7 @@ defineMethod({
         }
         if (!p.argv) throw new Refusal(400, "argv: the command a session without an agent runs");
         // A local caller's variables, allow-listed, over the login environment.
-        const env = { ...loginEnv(), ...(caller.transport === "uds" ? allowedEnv(p.env) : {}) };
+        const env = sessionEnv(p.env, caller.transport === "uds");
         try {
             const link = await startSession({ name: p.name, argv: p.argv, cwd: p.cwd, size: p.size, env });
             return viewOf(link);
@@ -122,7 +122,7 @@ defineMethod({
             throw new Refusal(409, `${p.agent} runs on this daemon's host already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
         }
         const control = join(hostDirFor({ agent: p.agent }), "control.sock");
-        const env = { ...loginEnv(), ...allowedEnv(p.env), CL_HOST_CONTROL: control };
+        const env = { ...sessionEnv(p.env, true), CL_HOST_CONTROL: control };
         try {
             const link = await startSession({ agent: p.agent, argv: p.argv, cwd: p.cwd, size: p.size, env });
             return { ...viewOf(link), control };

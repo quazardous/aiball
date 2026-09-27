@@ -26,8 +26,16 @@ export function loginEnv(): Record<string, string> {
     return login;
 }
 
-/** The variables a local caller may set for the command it starts. */
-const ALLOWED = [/^PATH$/, /^LANG$/, /^LC_[A-Z_]+$/, /^TERM$/, /^COLORTERM$/, /^(HTTP|HTTPS|NO|ALL)_PROXY$/i, /^NVM_[A-Z_]+$/, /^BUN_INSTALL$/, /^EDITOR$/, /^VISUAL$/, /^TZ$/];
+/**
+ * The variables a local caller may set for the command it starts. #3125 — and
+ * the keys the session host watches for a loop (the AFK key and its window,
+ * ESC taking over, the reload key): the host reads them from its own
+ * environment, so they must reach it rather than only the shell inside.
+ */
+const ALLOWED = [
+    /^PATH$/, /^LANG$/, /^LC_[A-Z_]+$/, /^TERM$/, /^COLORTERM$/, /^(HTTP|HTTPS|NO|ALL)_PROXY$/i, /^NVM_[A-Z_]+$/, /^BUN_INSTALL$/, /^EDITOR$/, /^VISUAL$/, /^TZ$/,
+    /^CL_AFK_SPEC$/, /^CL_AFK_WINDOW_MS$/, /^CL_ESC_TAKEOVER$/, /^CL_RELOAD_KEY$/,
+];
 
 export function allowedEnv(given: Record<string, unknown> | undefined): Record<string, string> {
     const out: Record<string, string> = {};
@@ -35,6 +43,20 @@ export function allowedEnv(given: Record<string, unknown> | undefined): Record<s
         if (typeof v === "string" && ALLOWED.some((re) => re.test(k))) out[k] = v;
     }
     return out;
+}
+
+/**
+ * #3125 — the environment of a session on the host: the user's login
+ * environment, what a local caller may set, and a terminal that renders
+ * colours. The daemon runs without a terminal, so `TERM` would be missing and
+ * everything in the session black and white; the host's clients (tvty, a
+ * terminal attached to it) render 256 colours and true colour.
+ */
+export function sessionEnv(given: Record<string, unknown> | undefined, local: boolean): Record<string, string> {
+    const env: Record<string, string> = { ...loginEnv(), ...(local ? allowedEnv(given) : {}) };
+    if (!env.TERM || env.TERM === "dumb") env.TERM = "xterm-256color";
+    if (!env.COLORTERM) env.COLORTERM = "truecolor";
+    return env;
 }
 
 /** Tests only. */
