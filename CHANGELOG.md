@@ -25,6 +25,16 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- Claude can start with Remote Control, to pick an agent's session up from
+  claude.ai or the Claude app: `claude.remote_control` in `.aiball.yaml` for a
+  project, `--remote-control [name]` / `--no-remote-control` on `claude-loop
+  start` and `restart` for one loop (kept across its restarts), and
+  `remote_control` on the bus's `session.start` and `loop.restart`;
+  `loop.list` says which loops have it.
+- `project.settings` and `project.settings_set` on the bus: a client shows and
+  changes a project's settings (first, Remote Control) in the `.aiball.yaml`
+  its loops read, patched in place, without writing the folder itself. A
+  human's gesture, on this machine only.
 - `loop.list` and `loop.restart` on the bus: a client lists the loops of the
   machine, stopped ones included, and restarts one where it ran or moves it
   between the session host and tmux, its conversation resumed, without the
@@ -43,6 +53,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An idle loop whose kernel reloaded itself (after an update) no longer stops
+  waking: the drain tempo starts again after the reload, and the heartbeat
+  takes over when an announced drain never comes.
 - A proposal (plan, resolution, wontfix, escalation) can no longer be decided
   while its ticket waits for moderation, as it could not be posted there:
   approve the ticket first (`PARENT_PENDING_MODERATION`).

@@ -1451,7 +1451,7 @@
     },
     {
       "name": "loop.list",
-      "description": "The loops of this machine, stopped ones included, from their plates: each one's folder, agent, project and role, where it runs (the session host or tmux), whether it does, and what to open (the tmux session, or the host's attach socket).",
+      "description": "The loops of this machine, stopped ones included, from their plates: each one's folder, agent, project and role, where it runs (the session host or tmux), whether it does, whether Claude has Remote Control (off, or the session's name), and what to open (the tmux session, or the host's attach socket).",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -1465,7 +1465,7 @@
     },
     {
       "name": "loop.restart",
-      "description": "Restart a loop from its plate, its conversation resumed: where it ran, or in `mode` (the session host or tmux) to move it. `fresh` starts a fresh conversation instead. A loop that runs is stopped first, so it is refused while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view once it is back.",
+      "description": "Restart a loop from its plate, its conversation resumed: where it ran, or in `mode` (the session host or tmux) to move it. `fresh` starts a fresh conversation instead. `remote_control` changes Claude's Remote Control (on, off, or on under a name) for this start and the next; without it the loop keeps its own. A loop that runs is stopped first, so it is refused while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view once it is back.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1505,6 +1505,23 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "remote_control",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^[^-]"
+              }
+            ]
           }
         }
       ],
@@ -3002,6 +3019,74 @@
       ]
     },
     {
+      "name": "project.settings",
+      "description": "The settings a client may show for a folder's project, as a loop started there would get them: each one's value and whether the folder's `.aiball.yaml` sets it or it is the default, and `file`, the `.aiball.yaml` that loop reads (the nearest one up the tree; null without one). Today: `remote_control`, Claude's Remote Control. A human's gesture, on this machine only.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "project.settings_set",
+      "description": "Change settings of a folder's project, in the `.aiball.yaml` a loop started there reads, patched in place (its other keys and its comments stay), and answer them as `project.settings` does. `remote_control`: true, false or a name; null removes it, and the default applies again. The next start reads it; a loop that runs keeps what it started with. A folder without a `.aiball.yaml` is refused (`CONFLICT`: set it up with `project.init`). A human's gesture, on this machine only.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "remote_control",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[^-]"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "project.signals",
       "description": "The signals a project received.",
       "paramStructure": "by-name",
@@ -3320,7 +3405,7 @@
     },
     {
       "name": "session.start",
-      "description": "Start a session on this machine, in `cwd`. With `name`: a session without an agent running `argv`. Without: an agent's loop, started as `claude-loop start` would (`agent`, or `crew` with a crew agent's name, or neither and the folder decides); the answer names the agent. The loop runs where `mode` says — `host` (this daemon's session host) or `tmux` (a tmux session, the loop's bar in its status line) — or, without it, where the project's `claude_loop.session` says (host by default). The login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs.",
+      "description": "Start a session on this machine, in `cwd`. With `name`: a session without an agent running `argv`. Without: an agent's loop, started as `claude-loop start` would (`agent`, or `crew` with a crew agent's name, or neither and the folder decides); the answer names the agent. The loop runs where `mode` says — `host` (this daemon's session host) or `tmux` (a tmux session, the loop's bar in its status line) — or, without it, where the project's `claude_loop.session` says (host by default). `remote_control` starts Claude with Remote Control (`true`: the session named after the agent, a string: that name, `false`: without it), over the project's `claude.remote_control`, and the loop keeps it for its restarts. The login environment and a local caller's allow-listed `env`. HOST_BUSY when it already runs.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -3393,6 +3478,23 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "remote_control",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^[^-]"
+              }
+            ]
           }
         },
         {

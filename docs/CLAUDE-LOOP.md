@@ -83,6 +83,33 @@ The list is read when the session is spawned, so a change applies to the next
 spawn. Leave it absent (the default) and the settings file carries no permission
 block at all — the session starts exactly as before.
 
+---
+
+### Remote Control
+
+Claude Code can start a session with Remote Control (`claude --remote-control
+[name]`), so it can be picked up from claude.ai or the Claude app. A project
+turns it on for its loops in `.aiball.yaml`:
+
+```yaml
+claude:
+  remote_control: true      # the session is named after the agent
+  # remote_control: phone   # or under this name
+```
+
+One loop can differ from its project: `claude-loop start --remote-control
+[name]` or `--no-remote-control`. The loop keeps that choice, and `restart`
+replays it; `restart --remote-control [name]` or `--no-remote-control` changes
+it. A loop without a choice of its own reads the setting again at each start.
+If Claude's own arguments (after `--`) already carry `--remote-control`,
+claude-loop adds nothing.
+
+On the bus, `session.start` and `loop.restart` take `remote_control` (`true`,
+`false` or a name) with the same meaning, and `loop.list` says what each loop
+started with: `false`, or the session's name. A client that must not write the
+folder itself reads and changes the setting with `project.settings` and
+`project.settings_set`, which patch the `.aiball.yaml` that folder's loops read.
+
 `claude-loop start --init --deny-code` writes that list for you (every file and
 shell tool) into the tree's `.aiball.yaml`, keeping whatever is already there.
 
@@ -181,7 +208,7 @@ for the checks that keep a wake off a human at the keyboard.
 | Live notification | a panic ping or signal pushed to the loop | immediate |
 | Presence hold released | F9, or the hold's timeout | immediate |
 | `claude-loop wake` | manual trigger; skips the work check | next heartbeat |
-| Heartbeat | every `CL_INTERVAL` s, only when no `turn:settled` is scheduled (anti-stuck) | up to `CL_INTERVAL` s |
+| Heartbeat | every `CL_INTERVAL` s, only when no `turn:settled` is scheduled, or the scheduled one is overdue by more than a tempo (anti-stuck) | up to `CL_INTERVAL` s |
 The Stop hook is the tightest drain: as soon as claude returns to
 the prompt with new work waiting, it re-fires without waiting for
 the timer.

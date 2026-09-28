@@ -195,10 +195,10 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `bus.subjects` | human, agent | — this bus's subjects, as AsyncAPI |
 | `bus.subscribe` | human, agent | — see *Subscriptions* |
 | `bus.unsubscribe` | human, agent | — see *Subscriptions* |
-| `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY`. An agent's loop in tmux answers `{ agent, host: "tmux", tmux }`: `tmux` is the session to attach |
+| `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY`. An agent's loop in tmux answers `{ agent, host: "tmux", tmux }`: `tmux` is the session to attach. `remote_control` (`true`, `false` or a name) starts Claude with Remote Control or without, over the project's `claude.remote_control`; the loop keeps it for its restarts |
 | `session.stop` | human; an agent its own session, locally (its loop's `rm`); not relayed | — ends a session and its host |
-| `loop.list` | human, local only, not relayed | — the loops of this machine, stopped ones included, from their plates: `{ name, cwd, agent, project, role, mode: host\|tmux, running, tmux?, attach? }` |
-| `loop.restart` | human, local only, not relayed | — restarts a loop from its plate, its conversation resumed (`fresh`: a fresh one): where it ran, or in `mode` to move it between the session host and tmux; answers its `loop.list` view once it is back. A running loop whose Claude works is refused (`NOT_IDLE`) unless `force` |
+| `loop.list` | human, local only, not relayed | — the loops of this machine, stopped ones included, from their plates: `{ name, cwd, agent, project, role, mode: host\|tmux, running, remote_control, tmux?, attach? }`; `remote_control` is what Claude started with: `false`, or the session's name |
+| `loop.restart` | human, local only, not relayed | — restarts a loop from its plate, its conversation resumed (`fresh`: a fresh one): where it ran, or in `mode` to move it between the session host and tmux; answers its `loop.list` view once it is back. A running loop whose Claude works is refused (`NOT_IDLE`) unless `force`. `remote_control` changes Claude's Remote Control for this start and the next; without it the loop keeps its own |
 | `session.list` | human, agent | — every session this daemon hosts |
 | `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
 | `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |
@@ -274,6 +274,8 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `project.delete` | human, agent | `DELETE /api/projects/:name` |
 | `project.add_token_usage` | human, agent | `POST /api/projects/:project/token-usage` |
 | `project.init` | human, local only, not relayed | — sets a folder up as a project, as `claude-loop init` does: its `.mcp.json` and `.aiball.yaml` (`cwd`, `project`, `agent`, `role`, `private`, `no_claim`, `force`, `dry_run`); answers each file's step (`created`, `added`, `patched`, `overwrote`, `kept`…), whether the project is already on the board, and whether the aiball skill is installed. Refusals: a folder absent (`NOT_FOUND`), not writable (`FORBIDDEN`), a malformed name (`BAD_REQUEST`), a file there that cannot be parsed (`CONFLICT`) |
+| `project.settings` | human, local only, not relayed | — the settings a client may show for a folder's project (`cwd`), as a loop started there would get them: `{ file, remote_control: { value, from: file\|default } }`; `file` is the `.aiball.yaml` that loop reads (the nearest one up the tree), null without one |
+| `project.settings_set` | human, local only, not relayed | — changes them in that `.aiball.yaml`, patched in place (its other keys and comments stay): `remote_control` true, false or a name, `null` to remove it; answers as `project.settings`. The next start reads it. Refusals: a folder absent (`NOT_FOUND`), no `.aiball.yaml` to patch (`CONFLICT`: `project.init` first), a file that cannot be parsed (`CONFLICT`), not writable (`FORBIDDEN`) |
 | `consumer.presence` | human, agent | `GET /api/presence` |
 | `consumer.get` | human, agent | `GET /api/consumers/:consumer_id` |
 | `consumer.push_state` | agent, its own | `PUT /api/consumers/:consumer_id/state` |

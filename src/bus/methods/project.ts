@@ -7,7 +7,7 @@
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
-import { flag } from "../params.js";
+import { flag, remoteControl } from "../params.js";
 import {
     addProjectTokenUsage,
     createProject,
@@ -30,6 +30,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { ERROR_CODES } from "../../domain.js";
 import { initFolder, InitRefusal } from "../../project-init.js";
+import { readSettings, writeSettings } from "../../project-settings.js";
 
 /** #2525 — the standing prompt, and the wake focus beside it. */
 export function standingPromptView(project: string) {
@@ -205,24 +206,16 @@ defineMethod({
         dry_run: z.boolean().optional(),
     }),
     run: (caller, p) => {
-        if (caller.transport !== "uds") throw new Refusal(403, "a folder of this machine: local callers only", ERROR_CODES.FORBIDDEN);
-        if (!isAbsolute(p.cwd)) throw new Refusal(400, `cwd must be an absolute path (got '${p.cwd}')`, ERROR_CODES.BAD_REQUEST);
-        let steps;
-        try {
-            steps = initFolder({
-                cwd: p.cwd,
-                project: p.project,
-                agent: p.agent,
-                role: p.role,
-                private: p.private,
-                noClaim: p.no_claim,
-                force: p.force,
-                dryRun: p.dry_run,
-            });
-        } catch (e) {
-            if (e instanceof InitRefusal) throw new Refusal(e.status, e.message, ERROR_CODES[e.code]);
-            throw e;
-        }
+        const steps = inFolder(caller, p.cwd, () => initFolder({
+            cwd: p.cwd,
+            project: p.project,
+            agent: p.agent,
+            role: p.role,
+            private: p.private,
+            noClaim: p.no_claim,
+            force: p.force,
+            dryRun: p.dry_run,
+        }));
         return {
             cwd: p.cwd,
             dry_run: p.dry_run === true,
@@ -233,4 +226,49 @@ defineMethod({
             skill: existsSync(join(homedir(), ".claude", "skills", "aiball", "SKILL.md")) ? "installed" : "missing",
         };
     },
+});
+
+/** #3208 / #3256 — a folder of this machine: local callers only, an absolute path; a refusal of the folder's own as the bus says it. */
+function inFolder<T>(caller: { transport: string }, cwd: string, f: () => T): T {
+    if (caller.transport !== "uds") throw new Refusal(403, "a folder of this machine: local callers only", ERROR_CODES.FORBIDDEN);
+    if (!isAbsolute(cwd)) throw new Refusal(400, `cwd must be an absolute path (got '${cwd}')`, ERROR_CODES.BAD_REQUEST);
+    try {
+        return f();
+    } catch (e) {
+        if (e instanceof InitRefusal) throw new Refusal(e.status, e.message, ERROR_CODES[e.code]);
+        throw e;
+    }
+}
+
+/**
+ * The settings a client may show for a folder's project, as a loop started
+ * there would get them: each one's value and whether the folder's
+ * `.aiball.yaml` sets it or it is the default, and `file`, the `.aiball.yaml`
+ * that loop reads (the nearest one up the tree; null without one). Today:
+ * `remote_control`, Claude's Remote Control. A human's gesture, on this
+ * machine only.
+ */
+defineMethod({
+    name: "project.settings",
+    who: ["human"],
+    relayed: false,
+    params: z.object({ cwd: z.string() }),
+    run: (caller, p) => inFolder(caller, p.cwd, () => readSettings(p.cwd)),
+});
+
+/**
+ * Change settings of a folder's project, in the `.aiball.yaml` a loop started
+ * there reads, patched in place (its other keys and its comments stay), and
+ * answer them as `project.settings` does. `remote_control`: true, false or a
+ * name; null removes it, and the default applies again. The next start reads
+ * it; a loop that runs keeps what it started with. A folder without a
+ * `.aiball.yaml` is refused (`CONFLICT`: set it up with `project.init`). A
+ * human's gesture, on this machine only.
+ */
+defineMethod({
+    name: "project.settings_set",
+    who: ["human"],
+    relayed: false,
+    params: z.object({ cwd: z.string(), remote_control: remoteControl.nullable().optional() }),
+    run: (caller, p) => inFolder(caller, p.cwd, () => writeSettings(p.cwd, { remote_control: p.remote_control })),
 });
