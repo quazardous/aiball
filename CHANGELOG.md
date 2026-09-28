@@ -26,6 +26,9 @@ dates are YYYY-MM-DD.
 ### Added
 
 - In the web board, hovering a `#NNN` link shows the ticket's title.
+- `daemon.info` on the bus: the daemon's version and where its web UI
+  answers, locally and, when a tailscale serve is declared, publicly — so a
+  client opens the board without guessing the address.
 - Claude can start with Remote Control, to pick an agent's session up from
   claude.ai or the Claude app: `claude.remote_control` in `.aiball.yaml` for a
   project, `--remote-control [name]` / `--no-remote-control` on `claude-loop

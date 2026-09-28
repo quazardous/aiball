@@ -18,6 +18,7 @@ import { canReadPayloadSecrets, payloadAccessState } from "../../db/ticket-paylo
 import { ackSignal, listPendingSignals } from "../../db/signals.js";
 import { applyModeration } from "../../api/moderation.js";
 import { outboxPath } from "../../paths.js";
+import { daemonInfo } from "../../daemon-info.js";
 import { ERROR_CODES } from "../../domain.js";
 import { findConfigUpwards, globalConfigPath, loadConfig } from "../../autopoll/config.js";
 import { defaultPingsPath } from "../../claude-loop/state.js";
@@ -314,6 +315,20 @@ defineMethod({
             throw new Refusal(500, (e as Error).message, ERROR_CODES.INTERNAL, { reloaded: false });
         }
     },
+});
+
+/**
+ * Where this daemon's web UI answers: `web_url`, the address it listens on
+ * (a wildcard bind is given on loopback), and `public_url`, the address of
+ * the tailscale serve the aiball config declares for it (null without one, or
+ * when tailscale does not answer); with the daemon's `version`. Nothing
+ * secret: any caller may ask.
+ */
+defineMethod({
+    name: "daemon.info",
+    who: ["human", "agent"],
+    params: z.object({}),
+    run: () => daemonInfo(),
 });
 
 /** Mark a ticket unread again for the caller; the answer carries its row. */

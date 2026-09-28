@@ -1196,6 +1196,20 @@
       ]
     },
     {
+      "name": "daemon.info",
+      "description": "Where this daemon's web UI answers: `web_url`, the address it listens on (a wildcard bind is given on loopback), and `public_url`, the address of the tailscale serve the aiball config declares for it (null without one, or when tailscale does not answer); with the daemon's `version`. Nothing secret: any caller may ask.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "daemon.reload",
       "description": "Reload the daemon's config in place (`aiball reload`). Local-trust, not moderator: it replaces a signal to the pidfile, which any process of the same uid could send, and the Unix socket is that same boundary. It re-reads a config file and says what it read; a failure leaves the daemon up.",
       "paramStructure": "by-name",

@@ -305,6 +305,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `ticket.import` | human, agent | `POST /api/tickets/import` — an issue a ticket already mirrors is a 409 whose `details.existing_ticket_id` names it |
 | `ticket.export` | human, agent | `POST /api/tickets/:id/export` — same 409 |
 | `daemon.reload` | human or agent, local only | `POST /api/daemon/reload` |
+| `daemon.info` | human, agent | — where the web UI answers: `{ version, web_url, public_url }`; `web_url` is the address the daemon listens on (a wildcard bind on loopback), `public_url` the tailscale serve its config declares, null without one |
 | `strategy.get` | human, agent | `GET /api/strategy` |
 | `strategy.set` | human, agent | `PATCH /api/strategy` |
 | `project.strategy` | human, agent | `GET /api/projects/:project/strategy` |
