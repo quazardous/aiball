@@ -63,7 +63,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 
 | Code | Status | When |
 |---|---|---|
-| `PARENT_PENDING_MODERATION` | 409 | The ticket is not approved yet. Also on `POST /api/messages`: a proposal on a ticket still pending. |
+| `PARENT_PENDING_MODERATION` | 409 | The ticket is not approved yet. Also on `POST /api/messages`: a proposal on a ticket still pending; and on `message.decide` / `message.accept_and_close`: deciding a proposal whose ticket is still pending. |
 | `TICKET_ASSIGNED` | 409 | The ticket is assigned to someone else. |
 | `TICKET_HELD` | 409 | Another agent holds it, still protected. |
 | `LEVEL_READ_ONLY` | 403 | The ticket is above the levels this agent works on. Also on `POST /api/messages` and `POST /api/tickets/:id/milestone`. |

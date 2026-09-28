@@ -344,6 +344,25 @@ for (const [name, tag] of [["message.step", true], ["message.unstep", false]] as
 }
 
 /**
+ * #3195 — a proposal (plan, resolution, wontfix, escalation) is decided only on
+ * a ticket the moderator has approved, as one is posted only there: until
+ * then the ticket itself is what is pending. A ticket filed with its plan is
+ * that proposal, so its own status counts.
+ */
+function refuseWhileTicketAwaitsModeration(messageId: number): void {
+    const m = getMessage(messageId);
+    if (!m) return;
+    const ticket = m.kind === "ticket_created" ? m : m.ticket_id != null ? getMessage(m.ticket_id) : null;
+    if (ticket && ticket.status !== "approved") {
+        throw new Refusal(
+            409,
+            `approve the ticket first (it is ${ticket.status}), then decide its proposal`,
+            ERROR_CODES.PARENT_PENDING_MODERATION,
+        );
+    }
+}
+
+/**
  * #618 — accept a pending resolution and close its ticket in one gesture, so
  * no client sees the state in between. The close pings no one: the accepted
  * decision already did (#921). Not one transaction: when the close fails
@@ -363,6 +382,7 @@ defineMethod({
     if (!existing.ticket_id) {
         throw new Refusal(400, "message has no parent ticket to close");
     }
+    refuseWhileTicketAwaitsModeration(id);
     // Step 1 : approve the pending decision message. Inline mirror of
     // message.approve minus its answer — we want to ship
     // the combined response below.
@@ -547,6 +567,7 @@ defineMethod({
         }
         newKind = body.new_kind;
     }
+    refuseWhileTicketAwaitsModeration(id);
     // #2376 david `dvqfvt` (case 4) — only the LATEST decision of a thread can
     // be accepted or rejected. A replaced one is moot: deciding it sent the
     // agent a `plan_accepted` for a plan nobody works on any more, while the

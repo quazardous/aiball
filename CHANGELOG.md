@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- A proposal (plan, resolution, wontfix, escalation) can no longer be decided
+  while its ticket waits for moderation, as it could not be posted there:
+  approve the ticket first (`PARENT_PENDING_MODERATION`).
+
 ## [0.49.0] — 2026-09-28
 
 ### Added
