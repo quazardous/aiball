@@ -1450,6 +1450,74 @@
       ]
     },
     {
+      "name": "loop.list",
+      "description": "The loops of this machine, stopped ones included, from their plates: each one's folder, agent, project and role, where it runs (the session host or tmux), whether it does, and what to open (the tmux session, or the host's attach socket).",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
+      "name": "loop.restart",
+      "description": "Restart a loop from its plate, its conversation resumed: where it ran, or in `mode` (the session host or tmux) to move it. `fresh` starts a fresh conversation instead. A loop that runs is stopped first, so it is refused while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view once it is back.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "force",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "fresh",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "host",
+              "tmux"
+            ]
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "loops.message_all",
       "description": "A message to every agent loop running here (or the ones named), typed into each session at once; with `hold`, each loop is then held (NOT AFK ∞) so no wake starts new work while the operator is away. One line per loop in the daemon's log and in the answer.",
       "paramStructure": "by-name",

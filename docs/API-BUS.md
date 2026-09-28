@@ -195,8 +195,10 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `bus.subjects` | human, agent | — this bus's subjects, as AsyncAPI |
 | `bus.subscribe` | human, agent | — see *Subscriptions* |
 | `bus.unsubscribe` | human, agent | — see *Subscriptions* |
-| `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY` |
+| `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY`. An agent's loop in tmux answers `{ agent, host: "tmux", tmux }`: `tmux` is the session to attach |
 | `session.stop` | human; an agent its own session, locally (its loop's `rm`); not relayed | — ends a session and its host |
+| `loop.list` | human, local only, not relayed | — the loops of this machine, stopped ones included, from their plates: `{ name, cwd, agent, project, role, mode: host\|tmux, running, tmux?, attach? }` |
+| `loop.restart` | human, local only, not relayed | — restarts a loop from its plate, its conversation resumed (`fresh`: a fresh one): where it ran, or in `mode` to move it between the session host and tmux; answers its `loop.list` view once it is back. A running loop whose Claude works is refused (`NOT_IDLE`) unless `force` |
 | `session.list` | human, agent | — every session this daemon hosts |
 | `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
 | `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |

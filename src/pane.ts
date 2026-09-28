@@ -26,35 +26,64 @@ export const MAX_KEYS_BYTES = 4_096;
  * stocke son propre cwd (pushé via le state heartbeat), on bridge les deux par
  * la cwd canonique.
  */
-export function resolveLoopName(cwd: string, agent?: string | null): string | null {
+/** What the daemon reads of a loop's plate. */
+export interface LoopPlate {
+    cwd?: string;
+    agent?: string | null;
+    consumer?: string | null;
+    host_agent?: string | null;
+    project?: string | null;
+    role?: string | null;
+    created_at?: string;
+}
+
+/** A loop the state root holds, running or not: its name (its state dir), its plate, when that was written. */
+export interface LoopEntry { name: string; plate: LoopPlate; at: number }
+
+/**
+ * #3227 — the loops of this machine, from their plates under the state root:
+ * the one reader the daemon has (`resolveLoopName`, `loop.list`,
+ * `loop.restart`). A dir without a readable plate is skipped.
+ */
+export function listLoopPlates(): LoopEntry[] {
     const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
         ?? join(homedir(), ".claude-loop");
-    if (!existsSync(stateRoot)) return null;
+    if (!existsSync(stateRoot)) return [];
     let entries: string[];
-    try { entries = readdirSync(stateRoot); } catch { return null; }
-    // #3168 — a folder may hold several loops (a lead and its crew): the one
-    // of `agent`, never another agent's. A plate says its agent (`agent`; a
-    // plate from before it, `consumer` when one was passed, or `host_agent`);
-    // one that names none is the folder's own agent from before the field.
-    // Several: the latest started.
-    const mine: Array<{ dir: string; at: number }> = [];
-    const unnamed: Array<{ dir: string; at: number }> = [];
-    for (const dir of entries) {
-        const platePath = join(stateRoot, dir, "plate.json");
+    try { entries = readdirSync(stateRoot); } catch { return []; }
+    const out: LoopEntry[] = [];
+    for (const name of entries) {
+        if (name.startsWith(".")) continue;
+        const platePath = join(stateRoot, name, "plate.json");
         if (!existsSync(platePath)) continue;
         try {
-            const plate = JSON.parse(readFileSync(platePath, "utf8")) as { cwd?: string; agent?: string | null; consumer?: string | null; host_agent?: string | null };
-            if (plate.cwd !== cwd) continue;
-            const named = plate.agent ?? plate.consumer ?? plate.host_agent ?? null;
-            const at = statSync(platePath).mtimeMs;
-            if (!agent || named === agent) mine.push({ dir, at });
-            else if (named === null) unnamed.push({ dir, at });
+            out.push({ name, plate: JSON.parse(readFileSync(platePath, "utf8")) as LoopPlate, at: statSync(platePath).mtimeMs });
         } catch {
             /* ignore malformed plate */
         }
     }
+    return out;
+}
+
+/** #3168 — the agent a plate names: `agent`; before that field, `consumer` when one was passed, or `host_agent`. */
+export function plateAgent(plate: LoopPlate): string | null {
+    return plate.agent ?? plate.consumer ?? plate.host_agent ?? null;
+}
+
+export function resolveLoopName(cwd: string, agent?: string | null): string | null {
+    // #3168 — a folder may hold several loops (a lead and its crew): the one
+    // of `agent`, never another agent's. A plate that names none is the
+    // folder's own agent from before the field. Several: the latest started.
+    const mine: LoopEntry[] = [];
+    const unnamed: LoopEntry[] = [];
+    for (const e of listLoopPlates()) {
+        if (e.plate.cwd !== cwd) continue;
+        const named = plateAgent(e.plate);
+        if (!agent || named === agent) mine.push(e);
+        else if (named === null) unnamed.push(e);
+    }
     const pick = mine.length ? mine : unnamed;
-    return pick.length ? pick.sort((a, b) => b.at - a.at)[0]!.dir : null;
+    return pick.length ? pick.sort((a, b) => b.at - a.at)[0]!.name : null;
 }
 
 /** Tmux target pour le pane 0 du loop. */

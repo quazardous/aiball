@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `loop.list` and `loop.restart` on the bus: a client lists the loops of the
+  machine, stopped ones included, and restarts one where it ran or moves it
+  between the session host and tmux, its conversation resumed, without the
+  claude-loop command. A human's gesture, on this machine only.
 - `project.init` on the bus sets a folder up as a project, as `claude-loop
   init` does, and answers what it wrote, whether the project is already on the
   board, and whether the skill is installed; `dry_run` answers without writing.
