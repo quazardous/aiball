@@ -25,6 +25,8 @@ legacyRoutes.get("/projects/:project/milestones", serveMethod("project.milestone
 legacyRoutes.patch("/projects/:project/standing-prompt", serveMethod("project.set_standing_prompt"));
 legacyRoutes.post("/projects/:project/token-usage", serveMethod("project.add_token_usage"));
 legacyRoutes.post("/projects", serveMethod("project.create", undefined, { status: 201 }));
+// #3129 — the GNOME extension reads the projects on the bus now.
+legacyRoutes.get("/projects", serveMethod("project.list"));
 legacyRoutes.get("/steps/timing", serveMethod("step.timing"));
 legacyRoutes.get("/projects/:name/stats", serveMethod("project.stats"));
 legacyRoutes.get("/projects/:name/stats-rich", serveMethod("project.stats_rich"));

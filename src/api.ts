@@ -1,4 +1,3 @@
-import { serveMethod } from "./bus/http.js";
 import { Router } from "express";
 import { bearerAuth } from "./auth.js";
 import { schedulerStatus } from "./cron/index.js";
@@ -83,9 +82,6 @@ api.get("/health", (_req, res) => {
 // (#B.213 phase 1.F).
 api.use(messagesRouter);
 
-// -------- tickets (derived view) -------------------------------------------
-
-api.get("/projects", serveMethod("project.list"));
 
 
 
