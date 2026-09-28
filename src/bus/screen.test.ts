@@ -6,6 +6,7 @@
  * needs it built (cargo); skipped, and says so, without it.
  */
 import { test, after } from "node:test";
+import { until } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -48,14 +49,6 @@ after(async () => {
     uds.close();
     rmSync(home, { recursive: true, force: true });
 });
-
-async function until(what: string, ok: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
-    const deadline = Date.now() + ms;
-    while (!(await ok())) {
-        if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
-        await new Promise((r) => setTimeout(r, 25));
-    }
-}
 
 type ScreenEvent = { kind: string; data?: string; rows?: number; cols?: number; size?: { rows: number; cols: number } | null; error?: string };
 

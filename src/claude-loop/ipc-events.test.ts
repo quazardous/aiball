@@ -3,6 +3,7 @@
  * (temp dir). node:test, no docker, no daemon, no extra deps.
  */
 import { test } from "node:test";
+import { sleep } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,10 +25,6 @@ function withTmpSocketPath<T>(fn: (path: string) => Promise<T>): Promise<T> {
     return fn(sockPath).finally(() => {
         try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     });
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 t("listenEvents + sendEventOnce : single event delivery", async () => {

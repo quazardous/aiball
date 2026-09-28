@@ -6,6 +6,7 @@
  * and says so, without it.
  */
 import { test, after } from "node:test";
+import { testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { sessionHostSkip } from "../tests/session-host-bin.js";
@@ -23,7 +24,7 @@ after(() => {
     rmSync(home, { recursive: true, force: true });
 });
 const stop = getMethod("session.stop")!;
-const boss = { consumer_id: "boss", kind: "human", transport: "uds", relayed: false } as never;
+const boss = testCaller("boss", { kind: "human" });
 const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", TERM: "xterm-256color" };
 
 test("an interactive shell: the answer at once, and the session gone within the second", { skip, timeout: 20_000 }, async () => {

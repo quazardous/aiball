@@ -4,6 +4,7 @@
  * missed; nothing left behind when a connection or subscription goes.
  */
 import { test, after } from "node:test";
+import { testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -110,14 +111,14 @@ test("a project's rows: the list's, and each change pushed is the row the list g
     const t1 = ticket("one");
     const c = await open("worker");
     const s = await c.call<Sub>("bus.subscribe", { subject: "project.p-subs.tickets", open: true });
-    const list = (await getMethod("inbox.list")!.run({ consumer_id: "worker", kind: "agent", relayed: false, token_kind: "agent", transport: "uds", token: null } as never,
+    const list = (await getMethod("inbox.list")!.run(testCaller("worker"),
         { project: "p-subs", view: "turn", open: true })) as { rows: unknown[] };
     assert.deepEqual(s.value, list.rows);
     submitMessage({ project: "p-subs", kind: "comment_added", ticket_id: t1, parent_id: t1, body: "c", by_agent: "boss" });
     await c.settle();
     const up = c.events.at(-1)!.data as { op: string; row: { id: number } };
     assert.equal(up.op, "upsert");
-    const one = (await getMethod("inbox.list")!.run({ consumer_id: "worker", kind: "agent", relayed: false, token_kind: "agent", transport: "uds", token: null } as never,
+    const one = (await getMethod("inbox.list")!.run(testCaller("worker"),
         { project: "p-subs", view: "turn", open: true, ids: String(t1) })) as { rows: unknown[] };
     assert.deepEqual(JSON.parse(JSON.stringify(up.row)), JSON.parse(JSON.stringify(one.rows[0])), "the pushed row is the list's row");
     submitMessage({ project: "p-subs", kind: "ticket_closed", ticket_id: t1, parent_id: t1, by_agent: "boss" });
@@ -202,7 +203,7 @@ test("since: what was missed is replayed while the daemon holds it; another epoc
 });
 
 test("subscribing needs a bus connection", () => {
-    assert.throws(() => getMethod("bus.subscribe")!.run({ consumer_id: "worker", kind: "agent", relayed: false } as never, { subject: "agent.worker.bar" }), /bus connection/);
+    assert.throws(() => getMethod("bus.subscribe")!.run(testCaller("worker"), { subject: "agent.worker.bar" }), /bus connection/);
 });
 
 test("project.*.tickets: every project's rows by project, and a project created later is heard", async () => {

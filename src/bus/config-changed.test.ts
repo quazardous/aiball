@@ -5,6 +5,7 @@
  * moved (set, clear) or that the files were reloaded.
  */
 import { test, after } from "node:test";
+import { until } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,14 +38,6 @@ after(() => {
     uds.close();
     rmSync(home, { recursive: true, force: true });
 });
-
-async function until(what: string, ok: () => boolean, ms = 2000): Promise<void> {
-    const deadline = Date.now() + ms;
-    while (!ok()) {
-        if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
-        await new Promise((r) => setTimeout(r, 10));
-    }
-}
 
 test("every number has a range its default sits in, a step and a unit; every setting a group", () => {
     for (const e of CONFIG_SCHEMA) {

@@ -1,5 +1,6 @@
 // #3227 — loop.list and loop.restart's refusals, on plates in an isolated state root and an isolated tmux server.
 import { test, after } from "node:test";
+import { refused, testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,14 +31,9 @@ plate("cl-t1", { agent: "t-one", project: "demo", role: "crew" });
 plate("cl-h1", { agent: "h-one", host_agent: "h-one", project: "demo" });
 plate("cl-old", { consumer: "old-crew" });
 
-const human = { consumer_id: "boss", kind: "human", transport: "uds", relayed: false, token: null } as never;
+const human = testCaller("boss", { kind: "human" });
 const list = () => getMethod("loop.list")!.run(human, {}) as Array<Record<string, unknown>>;
 const restart = getMethod("loop.restart")!;
-async function refused(f: () => unknown): Promise<{ status: number; code?: string; message: string }> {
-    try { await f(); } catch (e) { return e as { status: number; code?: string; message: string }; }
-    return assert.fail("not refused");
-}
-
 test("loop.list: every loop of the machine, stopped ones included, with its agent, mode and what to open", () => {
     const byName = Object.fromEntries(list().map((l) => [l.name, l]));
     assert.deepEqual(Object.keys(byName).sort(), ["cl-h1", "cl-old", "cl-t1"]);
@@ -57,7 +53,7 @@ test("loop.restart refuses: a loop not here, both or neither of name/agent, over
     assert.equal((await refused(() => restart.run(human, { agent: "nobody" }))).code, "NOT_FOUND");
     assert.equal((await refused(() => restart.run(human, { name: "cl-t1", agent: "t-one" }))).code, "BAD_REQUEST");
     assert.equal((await refused(() => restart.run(human, {}))).code, "BAD_REQUEST");
-    const tcp = { consumer_id: "boss", kind: "human", transport: "tcp", relayed: false, token: null } as never;
+    const tcp = testCaller("boss", { kind: "human", transport: "tcp" });
     assert.equal((await refused(() => restart.run(tcp, { name: "cl-t1" }))).status, 403);
     setAgentBar("t-one", { v: 1, phase: "busy" } as never);
     const busy = await refused(() => restart.run(human, { agent: "t-one" }));

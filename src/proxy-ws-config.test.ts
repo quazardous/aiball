@@ -3,6 +3,7 @@
 // token, pushes a config payload, and asserts both the store and the
 // derived `consumers.can_claim` row.
 import { test, after } from "node:test";
+import { sleep } from "./tests/lib.js";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -42,10 +43,6 @@ function openNodeWs(token: string): Promise<WebSocket> {
         ws.on("unexpected-response", (_req, res) => { clearTimeout(t); reject(new Error(`status ${res.statusCode}`)); });
         ws.on("error", (e) => { clearTimeout(t); reject(e); });
     });
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((r) => setTimeout(r, ms));
 }
 
 test("#775: push frame upserts the row + derives consumers.can_claim", async () => {

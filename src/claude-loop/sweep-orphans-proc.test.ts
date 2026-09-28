@@ -20,6 +20,7 @@
  * Run: `npx tsx --test src/claude-loop/sweep-orphans-proc.test.ts`
  */
 import { test } from "node:test";
+import { sleep } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -30,7 +31,6 @@ import { sweepOrphans } from "./cmds/manage.js";
 // `/proc` exists nowhere else — the branch under test is unreachable there.
 const tt = process.platform === "linux" ? test : test.skip;
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 const isAlive = (pid: number): boolean => {
     try { process.kill(pid, 0); return true; } catch { return false; }
 };

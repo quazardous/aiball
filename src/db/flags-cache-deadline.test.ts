@@ -3,6 +3,7 @@
 // and expects the next read to see it at once: without the deadline or the
 // invalidation under test, the stale answer would be served for up to a minute.
 import { test } from "node:test";
+import { sleep } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +38,6 @@ function seed(project = P): number {
     return id;
 }
 const actionable = (c: string) => computeActionableTicketIds(c).actionableIds;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test("a snooze comes due with no write: the next read sees the ticket back", async () => {
     upsertConsumer({ consumer_id: "snz", kind: "agent" });

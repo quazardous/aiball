@@ -4,6 +4,7 @@
  * the loop gets the order on its control stream.
  */
 import { test, after } from "node:test";
+import { testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +25,7 @@ const { onControl } = await import("../event-bus.js");
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const m = getMethod("consumer.restart_claude")!;
-const human = { consumer_id: "boss", kind: "human", relayed: false } as never;
+const human = testCaller("boss", { kind: "human" });
 const bar = (phase: string) => ({
     phase, presence: "loop", afk: { mode: "off", expires_at: null }, prompt: { visible: true, has_input: false }, human_typing: false,
     marker: { info: null, health_prompt: false, resume_picker: false, resume_mode_picker: false },
@@ -38,8 +39,8 @@ function refusal(fn: () => unknown): { status: number; code: string } {
 }
 
 test("a human's gesture, never through a proxy node", () => {
-    assert.equal(accessRefusal(m, { consumer_id: "worker", kind: "agent", relayed: false } as never)?.code, "MODERATOR_ONLY");
-    assert.equal(accessRefusal(m, { consumer_id: "boss", kind: "human", relayed: true } as never)?.code, "FORBIDDEN");
+    assert.equal(accessRefusal(m, testCaller("worker"))?.code, "MODERATOR_ONLY");
+    assert.equal(accessRefusal(m, testCaller("boss", { kind: "human", relayed: true }))?.code, "FORBIDDEN");
     assert.equal(accessRefusal(m, human), null);
 });
 

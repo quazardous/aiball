@@ -5,6 +5,7 @@
  * The host part needs it built (cargo); skipped, and says so, without it.
  */
 import { test, after } from "node:test";
+import { until } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -35,14 +36,6 @@ test("the detach keys: Ctrl-B D leaves, Ctrl-B Ctrl-B is one Ctrl-B, anything el
     assert.equal(k.feed(Buffer.from("D")).detach, true);
     assert.equal(new DetachKeys().feed(Buffer.from("\x02d")).detach, true);
 });
-
-async function until(what: string, ok: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
-    const deadline = Date.now() + ms;
-    while (!(await ok())) {
-        if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
-        await new Promise((r) => setTimeout(r, 25));
-    }
-}
 
 test("a real host: the screen shown, keys typed, the size followed, and a detach that stops nothing", { skip }, async () => {
     const link = await startHost({ name: "attach", argv: ["cat"], cwd: home, size: { rows: 20, cols: 70 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });

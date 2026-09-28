@@ -9,6 +9,7 @@
 // shortcut le pane handler du node-side (proxy.ts) en gérant manuellement les
 // frames côté test.
 import { test, after } from "node:test";
+import { until } from "./tests/lib.js";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -117,14 +118,6 @@ operator.onNotification((method, params) => {
     if (!heard.has(p.subscription)) heard.set(p.subscription, []);
     heard.get(p.subscription)!.push(p.data);
 });
-async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> {
-    const deadline = Date.now() + ms;
-    while (!ok()) {
-        if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
-        await new Promise((r) => setTimeout(r, 20));
-    }
-}
-
 test("agent.pane_keys, node-relayed: routed over the node's connection, acknowledged", async () => {
     const node = await startFakeNode();
     const r = await operator.call<{ sent: number }>("agent.pane_keys", { agent: "graphite-loop", keys: "echo hello\n" });

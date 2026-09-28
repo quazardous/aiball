@@ -9,6 +9,7 @@
  * path for `ws` there).
  */
 import { test } from "node:test";
+import { sleep } from "../../tests/lib.js";
 import assert from "node:assert/strict";
 import { createServer as createHttpServer } from "node:http";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
@@ -17,7 +18,6 @@ import { join } from "node:path";
 import { listenEvents, openEventChannel, sendEventOnce, type Event } from "../ipc-events.js";
 import { udsTransport, win32Transport, type Transport } from "./index.js";
 
-function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
 
 function withTmpSock<T>(name: string, fn: (sock: string) => Promise<T>): Promise<T> {
     const dir = mkdtempSync(join(tmpdir(), `transport-${name}-`));

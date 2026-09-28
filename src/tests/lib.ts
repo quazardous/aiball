@@ -23,10 +23,10 @@ export async function until(what: string, ok: () => boolean | Promise<boolean>, 
 /** A refusal as the bus throws it (`Refusal`) or a client reports it. */
 export interface Refused { status: number; code?: string; message: string; details?: unknown }
 
-/** Run `f` (sync or async) and return what it threw; fail if it did not. */
-export async function refused(f: () => unknown): Promise<Refused> {
+/** Run `f` (sync or async), or await a call, and return what it threw; fail if it did not. */
+export async function refused(f: (() => unknown) | Promise<unknown>): Promise<Refused> {
     try {
-        await f();
+        await (typeof f === "function" ? f() : f);
     } catch (e) {
         return e as Refused;
     }

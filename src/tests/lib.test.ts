@@ -11,9 +11,10 @@ test("until waits for the condition, and fails with its name past the deadline",
     await assert.rejects(until("never", () => false, 30, 5), /timed out waiting for never/);
 });
 
-test("refused returns what was thrown, sync or async, and fails on an answer", async () => {
+test("refused returns what was thrown, sync, async or a call, and fails on an answer", async () => {
     assert.equal((await refused(() => { throw new Refusal(409, "no", "CONFLICT"); })).code, "CONFLICT");
     assert.equal((await refused(async () => { throw new Refusal(404, "gone", "NOT_FOUND"); })).status, 404);
+    assert.equal((await refused(Promise.reject(new Refusal(403, "not you", "FORBIDDEN")))).code, "FORBIDDEN");
     await assert.rejects(refused(() => 1), /expected a refusal/);
 });
 

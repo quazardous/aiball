@@ -5,6 +5,7 @@
  * built (cargo); skipped, and says so, without it.
  */
 import { test, after } from "node:test";
+import { refused } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -59,11 +60,6 @@ after(async () => {
     tcp.closeAllConnections(); tcp.close();
     rmSync(home, { recursive: true, force: true });
 });
-
-async function refused(p: Promise<unknown>): Promise<{ status: number; code: string; message: string }> {
-    try { await p; } catch (e) { return e as { status: number; code: string; message: string }; }
-    assert.fail("expected a refusal");
-}
 
 test("a named session: started detached, listed, one per name, stopped with its files", { skip }, async () => {
     const boss = await as("boss");

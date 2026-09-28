@@ -5,6 +5,7 @@
  * mutates `ipcState`, opens an `openEventChannel`, requests, asserts.
  */
 import { test } from "node:test";
+import { sleep } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,10 +21,6 @@ import {
     setIpcPaneCompacting,
     setIpcPaneReady,
 } from "./ipc-state.js";
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 test("queryLoopState: round-trips a populated ipcState snapshot", async () => {
     resetIpcStateForTests();

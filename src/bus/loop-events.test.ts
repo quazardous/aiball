@@ -6,6 +6,7 @@
  * reconnect.
  */
 import { test, after } from "node:test";
+import { until } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,14 +42,6 @@ after(() => {
     tcp.close();
     rmSync(home, { recursive: true, force: true });
 });
-
-async function until(what: string, ok: () => boolean, ms = 5000): Promise<void> {
-    const deadline = Date.now() + ms;
-    while (!ok()) {
-        if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
-        await new Promise((r) => setTimeout(r, 20));
-    }
-}
 
 test("hello, the waiting signal and prompt first, then pings and controls; the subscription is the loop's liveness", async () => {
     postSignal({ source: "ci", target: { consumer: "worker" }, title: "build red" });

@@ -1,5 +1,6 @@
 // #3195 — a proposal is decided only on a ticket the moderator approved, as one is posted only there.
 import { test, after } from "node:test";
+import { refused, testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +21,7 @@ after(() => rmSync(home, { recursive: true, force: true }));
 ensureConsumer("boss");
 ensureConsumer("worker");
 createProject({ name: "p-3195" });
-const boss = { consumer_id: "boss", kind: "human", transport: "uds", relayed: false, token: null } as never;
+const boss = testCaller("boss", { kind: "human" });
 const decide = getMethod("message.decide")!;
 const acceptAndClose = getMethod("message.accept_and_close")!;
 
@@ -31,15 +32,10 @@ function pendingTicketWithPlan(): number {
     return t.id;
 }
 
-function refused(f: () => unknown): { status: number; code?: string; message: string } {
-    try { f(); } catch (e) { return e as { status: number; code?: string; message: string }; }
-    return assert.fail("not refused");
-}
-
-test("a plan on a ticket still waiting for moderation: neither accepted nor rejected", () => {
+test("a plan on a ticket still waiting for moderation: neither accepted nor rejected", async () => {
     const t = pendingTicketWithPlan();
     for (const status of ["accepted", "rejected"]) {
-        const r = refused(() => decide.run(boss, { id: t, status }));
+        const r = await refused(() => decide.run(boss, { id: t, status }));
         assert.equal(r.status, 409, status);
         assert.equal(r.code, "PARENT_PENDING_MODERATION");
         assert.match(r.message, /approve the ticket first \(it is pending\)/);
@@ -54,12 +50,12 @@ test("once the ticket is approved, its plan is decided", () => {
     assert.match(String(getMessage(t)?.meta), /"status":"accepted"/);
 });
 
-test("a proposal on a comment of a pending ticket, and accept_and_close, are refused too", () => {
+test("a proposal on a comment of a pending ticket, and accept_and_close, are refused too", async () => {
     const t = submitMessage({ project: "p-3195", kind: "ticket_created", title: "T2", body: "b", by_agent: "boss" } as never).id;
     updateMessageStatus(t, "approved", "human", null, "ticket_created"); // a proposal is posted only on an approved ticket
     const c = submitMessage({ project: "p-3195", kind: "comment_added", ticket_id: t, parent_id: t, body: "done", decision_kind: "resolution", summary_until: "s", commits: null, by_agent: "worker" } as never).id;
     updateMessageStatus(t, "pending", "human", null, "ticket_created");
-    assert.equal(refused(() => decide.run(boss, { id: c, status: "accepted" })).code, "PARENT_PENDING_MODERATION");
+    assert.equal((await refused(() => decide.run(boss, { id: c, status: "accepted" }))).code, "PARENT_PENDING_MODERATION");
     updateMessageStatus(c, "pending", "human", null, "comment_added");
-    assert.equal(refused(() => acceptAndClose.run(boss, { id: c })).code, "PARENT_PENDING_MODERATION");
+    assert.equal((await refused(() => acceptAndClose.run(boss, { id: c }))).code, "PARENT_PENDING_MODERATION");
 });

@@ -5,6 +5,7 @@
  * from tvty's checkout next door, or AIBALL_TVTY_DIR; skipped without it).
  */
 import { test } from "node:test";
+import { testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,7 +36,7 @@ test("every method and every subject says what it is", () => {
 });
 
 test("rpc.discover serves the document the code produces", async () => {
-    const out = await getMethod("rpc.discover")!.run({ consumer_id: "x", kind: "agent", relayed: false } as never, {});
+    const out = await getMethod("rpc.discover")!.run(testCaller("x"), {});
     assert.deepEqual(out, openRpcDocument());
 });
 

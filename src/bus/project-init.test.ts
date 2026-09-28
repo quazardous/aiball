@@ -1,5 +1,6 @@
 // #3208 — project.init: a folder set up as a project over the bus, as `claude-loop init` does, with its steps and its refusals as data.
 import { test, after } from "node:test";
+import { refused, testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,13 +15,9 @@ const { createProject } = await import("../db/projects.js");
 after(() => rmSync(home, { recursive: true, force: true }));
 
 const init = getMethod("project.init")!;
-const human = { consumer_id: "boss", kind: "human", transport: "uds", relayed: false, token: null } as never;
+const human = testCaller("boss", { kind: "human" });
 type Result = { steps: Array<{ file: string; action: string }>; written: string[]; kept: string[]; project_exists: boolean | null; skill: string };
 const run = (p: Record<string, unknown>, caller = human) => init.run(caller, p) as Result;
-function refused(f: () => unknown): { status: number; code?: string; message: string } {
-    try { f(); } catch (e) { return e as { status: number; code?: string; message: string }; }
-    return assert.fail("not refused");
-}
 let n = 0;
 const folder = () => { const d = join(home, `f${n++}`); mkdirSync(d); return d; };
 
@@ -46,28 +43,28 @@ test("dry_run: the same answer, nothing written", () => {
     assert.equal(existsSync(join(d, ".mcp.json")) || existsSync(join(d, ".aiball.yaml")), false);
 });
 
-test("refusals, with their code: no folder, a relative path, a malformed name, a file that cannot be parsed", () => {
-    assert.equal(refused(() => run({ cwd: join(home, "none") })).code, "NOT_FOUND");
-    assert.equal(refused(() => run({ cwd: "relative/dir" })).code, "BAD_REQUEST");
-    assert.equal(refused(() => run({ cwd: folder(), project: "bad name!" })).code, "BAD_REQUEST");
+test("refusals, with their code: no folder, a relative path, a malformed name, a file that cannot be parsed", async () => {
+    assert.equal((await refused(() => run({ cwd: join(home, "none") }))).code, "NOT_FOUND");
+    assert.equal((await refused(() => run({ cwd: "relative/dir" }))).code, "BAD_REQUEST");
+    assert.equal((await refused(() => run({ cwd: folder(), project: "bad name!" }))).code, "BAD_REQUEST");
     const d = folder();
     writeFileSync(join(d, ".mcp.json"), "{nope");
-    const r = refused(() => run({ cwd: d }));
+    const r = await refused(() => run({ cwd: d }));
     assert.deepEqual([r.status, r.code], [409, "CONFLICT"]);
 });
 
-test("a folder the daemon may not write in: 403", { skip: process.getuid?.() === 0 ? "root writes everywhere" : false }, () => {
+test("a folder the daemon may not write in: 403", { skip: process.getuid?.() === 0 ? "root writes everywhere" : false }, async () => {
     const d = folder();
     chmodSync(d, 0o555);
     try {
-        const r = refused(() => run({ cwd: d }));
+        const r = await refused(() => run({ cwd: d }));
         assert.deepEqual([r.status, r.code], [403, "FORBIDDEN"]);
     } finally {
         chmodSync(d, 0o755);
     }
 });
 
-test("a human's gesture on this machine: not over TCP", () => {
-    const tcp = { consumer_id: "boss", kind: "human", transport: "tcp", relayed: false, token: null } as never;
-    assert.equal(refused(() => run({ cwd: folder() }, tcp)).status, 403);
+test("a human's gesture on this machine: not over TCP", async () => {
+    const tcp = testCaller("boss", { kind: "human", transport: "tcp" });
+    assert.equal((await refused(() => run({ cwd: folder() }, tcp))).status, 403);
 });

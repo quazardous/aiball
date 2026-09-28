@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { sleep } from "./tests/lib.js";
 import assert from "node:assert/strict";
 import {
     presenceConnect,
@@ -9,7 +10,6 @@ import {
     __resetPresence,
 } from "./live-presence.js";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // #395: presence registry — near-realtime loop liveness.
 test("#395 presence: connect → live edge, refcount, disconnect after grace → stop", async () => {
