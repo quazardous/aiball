@@ -149,10 +149,10 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): { error
 export function commitsRequirement(msg: NewMessage, caller: string, refuse: boolean): { refusal: string | null; warning: string | null } {
     if (msg.kind !== "comment_added" || isHuman(caller) || msg.commits !== undefined) return { refusal: null, warning: null };
     if (getConfig("tickets.rules.require_commits", msg.project) === false) return { refusal: null, warning: null };
-    const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit. If your ticket_reply tool has no commits parameter, the session kept its tool schema from before the field: /mcp does not refresh it, restart the loop (a new Claude Code session)";
+    const reason = "commits is required on an agent's comment: the SHAs this comment delivers, e.g. commits: [\"9e32067\"], or commits: null (or \"none\") when it delivers no commit. If your ticket_reply tool has no commits parameter, the conversation kept its tool schema from before the field: /mcp does not refresh it, and a restart resumes the same conversation. A fresh one does: `claude-loop restart <loop> --fresh`. Meanwhile, post from the CLI: `aiball ticket comment --id <ticket> --body <text> --commits <shas|none> --summary <state> --handback|--keep`";
     return refuse
         ? { refusal: reason, warning: null }
-        : { refusal: null, warning: `${reason}. Your client does not declare the field yet: restart the loop (a new Claude Code session) — posts without it will be refused.` };
+        : { refusal: null, warning: `${reason}. Your client does not declare the field yet: start a fresh conversation (\`claude-loop restart <loop> --fresh\`; a resumed one keeps its old tools) — posts without it will be refused.` };
 }
 
 /**
@@ -253,7 +253,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
         // "ça devrait être un champ comme body".
         const provided = typeof o.summary_until === "string" ? o.summary_until.trim() : "";
         if (!provided && !authorIsHuman) {
-            return { error: "summary_until is required on comment_added for agent authors (one-line TLDR of the thread state up to this comment). Humans skip the requirement." };
+            return { error: "summary_until is required on comment_added for agent authors (one-line TLDR of the thread state up to this comment; `aiball ticket comment --summary <text>` from the CLI). Humans skip the requirement." };
         }
         // #2203 — the budget is back, as a REFUSAL. The caps removed above
         // truncated mid-word; this one never cuts anything: the write is refused

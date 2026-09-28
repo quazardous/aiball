@@ -196,6 +196,13 @@ export interface SessionResolveInput {
      * loop has its own session, or when this one is gone.
      */
     forkFrom?: string | null;
+    /**
+     * #3174 — start a fresh conversation instead of resuming the recorded one
+     * (`claude-loop start --no-resume`, `restart --fresh`): a resumed one keeps
+     * the tool list it was started with. `auto` only; the SessionStart hook
+     * records the new id, which later starts resume.
+     */
+    fresh?: boolean;
 }
 
 export interface SessionResolvePlan {
@@ -279,7 +286,13 @@ export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
     }
 
     if (mode === "auto") {
+        if (input.fresh) return { mode: "auto", sessionId: null, args: [], warning: null };
         return resolveAuto(readPersistedId, sessionExists, input.forkFrom ?? null);
+    }
+    if (input.fresh) {
+        const plan = resolveSession({ ...input, fresh: false });
+        const why = `a fresh conversation is asked, but claude.session_mode=${mode} ties the loop to one session id — resuming it`;
+        return { ...plan, warning: plan.warning ? `${plan.warning} ; ${why}` : why };
     }
 
     let id: string;

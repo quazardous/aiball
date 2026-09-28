@@ -724,6 +724,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         sessionExists: (id) => sessionExists(cwd, id),
         readPersistedId: () => readPersistedSessionId(cwd, sessionKey),
         forkFrom: opts.fork && ctx.role === "crew" ? readPersistedSessionId(cwd, "default") : null,
+        fresh: opts.noResume === true,
     });
     if (sessionPlan.warning) {
         process.stderr.write(`claude-loop: ${sessionPlan.warning}\n`);
@@ -2218,7 +2219,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--host", "#3066: run Claude on the aiball daemon's session host (docs/SESSION-HOST.md), whatever claude_loop.session says. Attach with tvty or 'claude-loop attach'; the bar is data only.")
         .option("--tmux", "#3135: run Claude in a tmux session, with the loop's bar in its status line, whatever claude_loop.session says (host by default).")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
-        .option("--no-resume", "#616: don't auto-inject `--resume` even when `.aiball.yaml claude.always_resume: true` says to. Per-invocation opt-out. Equivalent to `claude-loop start -- --no-resume`.")
+        .option("--no-resume", "#616: don't auto-inject `--resume` even when `.aiball.yaml claude.always_resume: true` says to. Per-invocation opt-out. Equivalent to `claude-loop start -- --no-resume`. #3174: with claude.session_mode auto (the default), start a fresh conversation instead of resuming the recorded one.")
         // #639 (david `uqdava`): explicit `--resume` flag forces
         // `claude.always_resume` to true, regardless of what the per-project
         // .aiball.yaml says.
@@ -2449,7 +2450,8 @@ async function main(): Promise<void> {
         .option("--resume", "#3074: resume Claude's conversation on the relaunch, whatever the loop's start config says (a restart for an update).")
         .option("--host", "#3066: relaunch on the aiball daemon's session host (with --resume: move a tmux loop onto the host, its conversation kept). Without --host or --tmux, a loop stays where it runs.")
         .option("--tmux", "#3135: relaunch in tmux (with --resume: move a loop off the host, its conversation kept).")
-        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true, host: opts.host === true, tmux: opts.tmux === true }));
+        .option("--fresh", "#3174: relaunch with a fresh conversation instead of resuming the recorded one (a resumed conversation keeps the tools it started with)")
+        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true, host: opts.host === true, tmux: opts.tmux === true, fresh: opts.fresh === true }));
     program.command("stop [name]")
         .description("Clean-STOP a loop: kill claude/tmux + exit the timer, but KEEP the state dir (loop shows dead, stays restart/prune-able — `rm` is the halt+delete). Also the SIGTERM action: `kill -TERM <timer.pid>` (#442 — convention HUP=restart, USR2=reload, TERM=stop). Remotely via the daemon: the Consumers-page stop button. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdStop(name ?? resolveCurrentLoopName()));

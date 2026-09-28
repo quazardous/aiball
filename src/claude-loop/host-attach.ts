@@ -100,13 +100,13 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
     const label = opts.label ?? "the session";
     // #3166 — a copy says so: the bar on the last row, drawn again after
     // whatever Claude writes, and the terminal's title (pushed, popped on leaving).
-    const bar = () => { if (readonly) io.stdout.write(copyBar(io.stdout.rows ?? 24, io.stdout.columns ?? 80, label)); };
+    const bar = () => { if (readonly) io.stdout.write(copyBar(io.stdout.rows || 24, io.stdout.columns || 80, label)); };
     return new Promise((resolve) => {
         const sock: Socket = connect(socketPath);
         const reader = new FrameReader();
         const keys = new DetachKeys();
         let done = false;
-        const size = () => ({ rows: io.stdout.rows ?? 24, cols: io.stdout.columns ?? 80 });
+        const size = () => ({ rows: io.stdout.rows || 24, cols: io.stdout.columns || 80 });
         const onResize = () => sock.write(frame(FRAME.resize, JSON.stringify(size())));
         const onKeys = (chunk: Buffer | string) => {
             const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;

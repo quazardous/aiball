@@ -116,3 +116,8 @@ test("#3135 a loop stays where it runs, whatever the configured default; --tmux 
     const withArgs = restartStartArgs("n", plate({ claude_args: ["--model", "x"] }));
     assert.ok(withArgs.indexOf("--tmux") < withArgs.indexOf("--"), "never passed to Claude");
 });
+
+test("#3174 — restart --fresh starts with --no-resume (a fresh conversation); a plain one does not", () => {
+    assert.ok(restartStartArgs("cl-x", plate(), { fresh: true }).includes("--no-resume"));
+    assert.ok(!restartStartArgs("cl-x", plate()).includes("--no-resume"));
+});

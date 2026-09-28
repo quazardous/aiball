@@ -343,6 +343,7 @@ claude-loop attach <name> [--read-only] # attach in tmux or on the session host;
 claude-loop wake <name>                # force the next tick (bypass check-cmd)
 claude-loop reload [name]              # respawn the timer in place (keeps claude)
 claude-loop restart [name] --resume    # hard restart, resuming Claude's conversation whatever the start config says
+claude-loop restart [name] --fresh     # hard restart with a fresh conversation (a resumed one keeps the tools it started with)
 claude-loop restart [name]            # hard restart: kill + relaunch from the plate
 claude-loop stop [name]               # clean stop: kill claude/tmux + exit, KEEP state
 claude-loop rm <name> [--force]        # stop + DELETE the state dir

@@ -81,7 +81,7 @@ test("null, \"none\" and [] say no commit; a list of SHAs is taken as before", a
 test("a client from before the field is warned, not refused", async () => {
     const r = await post({}, { knowsCommits: false });
     assert.equal(r.status, 201, JSON.stringify(r.json));
-    assert.match(String((r.json.warnings as string[])[0]), /restart the loop \(a new Claude Code session\)/);
+    assert.match(String((r.json.warnings as string[])[0]), /claude-loop restart <loop> --fresh/);
 });
 
 test("humans, close and reopen are exempt; the project setting lifts the rule", async () => {
@@ -131,7 +131,7 @@ test("#2653 the comment keeps its commits in meta: each with its credit, null fo
 test("#2662 no body-line fallback: only the field counts", async () => {
     const declared = await post({ body: "x\ncommits: [deadbeef]" });
     assert.equal(declared.status, 400, "a line in the body is not the field");
-    assert.match(String(declared.json.error), /restart the loop \(a new Claude Code session\)/);
+    assert.match(String(declared.json.error), /claude-loop restart <loop> --fresh/);
     const old = await post({ body: "x\ncommits: [deadbeef]" }, { knowsCommits: false });
     assert.equal(old.status, 201);
     assert.equal("commits" in (JSON.parse(String(old.json.meta)) as object), false, "an undeclared client's body line is not read either");

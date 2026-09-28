@@ -185,3 +185,16 @@ test("the fixed fallback and auto agree, given the same inputs", () => {
         assert.equal(viaFixed.mode, "auto");
     }
 });
+
+test("#3174 — a fresh conversation: auto resumes nothing, even with a recorded session", () => {
+    const plan = resolveSession(inp({ mode: "auto", readPersistedId: persisted(UUID), sessionExists: always, fresh: true }));
+    assert.deepEqual([plan.sessionId, plan.args, plan.warning], [null, [], null]);
+    const again = resolveSession(inp({ mode: "auto", readPersistedId: persisted(UUID), sessionExists: always }));
+    assert.deepEqual(again.args, ["--resume", UUID], "without it, the recorded one is resumed");
+});
+
+test("#3174 — a fresh conversation in managed mode: the loop's one id is kept, and it says so", () => {
+    const plan = resolveSession(inp({ mode: "managed", sessionExists: always, fresh: true }));
+    assert.equal(plan.args[0], "--resume");
+    assert.match(plan.warning ?? "", /fresh conversation is asked/);
+});
