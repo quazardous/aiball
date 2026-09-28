@@ -200,6 +200,7 @@ import { CL_ENV } from "./env-vars.js";
 import { fetchWakeContext, pingIsDeliverable } from "./wake-context.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 import { resolveBashCmd } from "./resolve-bash.js";
+import { heartbeatShouldWake } from "./heartbeat-fallback.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
@@ -2855,7 +2856,13 @@ async function mainSse(): Promise<void> {
         // idle-settled, e.g. a lost Stop hook left it wedged, OR nothing to
         // drain in which case this no-ops via the work gate). When turn:settled
         // owns the cadence, the heartbeat stays out of the wake path entirely.
-        const woke = getIpcState().nextWakeAtMs === null
+        // #3257 — …and when the countdown is overdue: a drain announced and
+        // never made (the turn machine stopped settling) must not keep the
+        // fallback out, or pending events wait for good.
+        const nextWakeAtMs = getIpcState().nextWakeAtMs;
+        const fallback = heartbeatShouldWake(nextWakeAtMs, Date.now(), wakeTempoSec * 1000);
+        if (fallback === "overdue") log(`heartbeat: countdown overdue by ${Math.round((Date.now() - nextWakeAtMs!) / 1000)}s — no turn:settled honoured it, trying a wake`);
+        const woke = fallback !== null
             ? await tryWake("heartbeat-fallback")
             : false;
         if (!woke && readIdleSinceMs(sd!) !== null) {

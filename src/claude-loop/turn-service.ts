@@ -28,6 +28,8 @@ export class TurnService {
             snapshot,
         });
         this.actor.start();
+        // #3257 — a snapshot restored in `no_turn` has no timer running.
+        if (snapshot && this.actor.getSnapshot().matches("no_turn")) this.actor.send({ type: "RESUMED" });
     }
 
     getActor(): ActorRefFrom<typeof turnMachine> {

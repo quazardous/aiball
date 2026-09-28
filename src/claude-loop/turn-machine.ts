@@ -59,7 +59,8 @@ export const turnMachine = setup({
         events: {} as
             | { type: "SESSION_START"; atMs: number }
             | { type: "TURN_STARTED"; atMs: number }
-            | { type: "TURN_ENDED"; atMs: number },
+            | { type: "TURN_ENDED"; atMs: number }
+            | { type: "RESUMED" },
         emitted: {} as TurnEmittedEvent,
         input: {} as TurnMachineInput,
     },
@@ -145,6 +146,12 @@ export const turnMachine = setup({
                     target: ".fresh",
                     actions: ["emitNoTurnSinceTurnEnded", "stampIdleAt"],
                 },
+                // #3257 — restored from a respawn snapshot: XState does not
+                // re-arm the `after` timer of a restored state, so a machine
+                // restored in `settled` never emitted again until a real turn,
+                // and an idle loop went deaf. Back to `fresh`, same idle
+                // anchor: the tempo starts again.
+                RESUMED: { target: ".fresh" },
             },
             states: {
                 fresh: {
