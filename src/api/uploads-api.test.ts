@@ -9,7 +9,7 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -83,4 +83,38 @@ test("a single message and each thread comment list the uploads their text cites
     const byId = new Map(thread.comments.map((c) => [c.id, c]));
     assert.equal(byId.get(withPic)?.attachments?.length, 1, "the comment carries its own upload");
     assert.equal(byId.get(plain)?.attachments, undefined, "a comment without one carries no list");
+});
+
+/** An upload whose row exists, with `make` shaping what sits at its path. */
+function brokenUpload(label: string, make: (path: string) => void): string {
+    const b = Buffer.from(`broken ${label}`);
+    const s = createHash("sha256").update(b).digest("hex");
+    make(join(UPLOADS_DIR, `${s}.png`));
+    insertUpload({ sha: s, ext: "png", content_type: "image/png", bytes: b.length, original_name: null });
+    return s;
+}
+
+async function stillServes(): Promise<void> {
+    const r = await fetch(`${BASE}/api/uploads/${sha}`, { headers: auth });
+    assert.equal(r.status, 200, "the server still answers the next request");
+    await r.arrayBuffer();
+}
+
+test("#3185 — a read that fails once streaming (a directory where the file was) ends that response, not the server", async () => {
+    const s = brokenUpload("dir", (p) => mkdirSync(p));
+    await fetch(`${BASE}/api/uploads/${s}`, { headers: auth }).then((r) => r.arrayBuffer()).catch(() => null);
+    await stillServes();
+});
+
+test("#3185 — a file gone since its row: 404, and the server goes on", async () => {
+    const s = brokenUpload("gone", () => {});
+    assert.equal((await fetch(`${BASE}/api/uploads/${s}`, { headers: auth })).status, 404);
+    await stillServes();
+});
+
+test("#3185 — a file the daemon may not read: 403, and the server goes on", { skip: process.getuid?.() === 0 ? "root reads every file: EACCES cannot happen" : false }, async () => {
+    const s = brokenUpload("mode", (p) => { writeFileSync(p, "x"); chmodSync(p, 0o000); });
+    const r = await fetch(`${BASE}/api/uploads/${s}`, { headers: auth });
+    assert.equal(r.status, 403);
+    await stillServes();
 });

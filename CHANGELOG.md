@@ -184,6 +184,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An upload the daemon cannot read (its mode, gone, a disk error) no longer
+  takes the daemon down: it answers 403, 404 or 500, and a read that fails
+  mid-stream ends that response only. The same for a proxied response whose
+  upstream fails mid-body.
 - A read-only copy on a terminal that reports no size (0×0) still draws its
   bar, at 80 columns.
 - `claude-loop start` from inside another loop's shell no longer takes that

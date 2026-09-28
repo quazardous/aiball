@@ -14,7 +14,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import express from "express";
-import { createReadStream, existsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, fstatSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { createHash } from "node:crypto";
 import {
@@ -221,7 +221,20 @@ function sendUpload(sha: string, ext: string | null, req: Request, res: Response
         res.status(304).end();
         return;
     }
-    const stat = statSync(path);
+    // #3185 — open first: a file the daemon cannot read (its mode, gone since
+    // the check, a disk error) is refused here, before any header, rather than
+    // failing inside a stream nobody listens to, which took the daemon down.
+    let fd: number;
+    try {
+        fd = openSync(path, "r");
+    } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        console.error(`[uploads] cannot open ${sha}.${row.ext}: ${(e as Error).message}`);
+        const status = code === "EACCES" || code === "EPERM" ? 403 : code === "ENOENT" ? 404 : 500;
+        res.status(status).type("text/plain").send(status === 404 ? "not found" : "cannot read this upload");
+        return;
+    }
+    const stat = fstatSync(fd);
     const disposition = pickDisposition(row.content_type, req.query);
     const fallbackName = `${sha}.${row.ext}`;
     const displayName = row.original_name
@@ -231,10 +244,18 @@ function sendUpload(sha: string, ext: string | null, req: Request, res: Response
     res.setHeader("Content-Length", String(stat.size));
     res.setHeader("Content-Disposition", buildContentDisposition(disposition, displayName));
     if (req.method === "HEAD") {
+        closeSync(fd);
         res.end();
         return;
     }
-    createReadStream(path).pipe(res);
+    // A read that fails once streaming (a directory, a disk error) ends this
+    // response, never the process.
+    const stream = createReadStream("", { fd });
+    stream.on("error", (e) => {
+        console.error(`[uploads] reading ${sha}.${row.ext} failed: ${e.message}`);
+        res.destroy(e);
+    });
+    stream.pipe(res);
 }
 
 /**

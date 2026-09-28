@@ -275,6 +275,11 @@ export function proxyMiddleware(cfg: ProxyConfig, tokens?: ProxyTokenStore): Req
             },
             (up) => {
                 res.writeHead(up.statusCode ?? 502, up.headers);
+                // #3185 — an upstream that fails mid-body ends this response, not the proxy.
+                up.on("error", (e) => {
+                    console.error(`[proxy] upstream response failed: ${e.message}`);
+                    res.destroy(e);
+                });
                 up.pipe(res);
             },
         );
