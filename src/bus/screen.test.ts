@@ -7,16 +7,15 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:http";
+import { sessionHostSkip } from "../tests/session-host-bin.js";
 
 const home = mkdtempSync("/tmp/aiball-3128-");
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
-const built = ["release", "debug"].map((b) => resolve(import.meta.dirname, "..", "..", "windows", "cl-pty-proxy", "target", b, "cl-session-host")).find(existsSync);
-process.env.CL_SESSION_HOST_BIN = process.env.CL_SESSION_HOST_BIN ?? built ?? "";
-const skip = existsSync(process.env.CL_SESSION_HOST_BIN) ? false : "no cl-session-host built (cargo build --manifest-path windows/cl-pty-proxy/Cargo.toml)";
+const skip = sessionHostSkip();
 
 const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { attachBus } = await import("./server.js");

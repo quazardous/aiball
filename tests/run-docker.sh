@@ -6,7 +6,10 @@
 #   bash tests/run-docker.sh sim [scenario...] the board simulator's scenarios (tests/sim/scenarios)
 #   bash tests/run-docker.sh fullstack         a real claude-loop driving fake-claude against a real
 #                                              daemon (tests/integration/fullstack): the loop kernel
-#   bash tests/run-docker.sh critical          before every deploy: unit, e2e, fullstack, and the
+#   bash tests/run-docker.sh checks            what CI checks besides the tests: typecheck, lint, the
+#                                              frontend's unit tests, and the frontend build in an
+#                                              install of the frontend's dependencies alone
+#   bash tests/run-docker.sh critical          before every deploy: checks, unit, e2e, fullstack, and the
 #                                              simulator's scenarios marked `critical: true`;
 #                                              exit code = worst
 #   bash tests/run-docker.sh full              before a release or after a large change: unit, e2e,
@@ -75,6 +78,19 @@ run_fullstack() {
     return $code
 }
 
+# #3240 — CI's other checks, before a deploy rather than after a push: the
+# typecheck, the lint and the frontend's tests in the unit image; the frontend
+# build in an image that has the frontend's dependencies only, as CI does.
+run_checks() {
+    echo "=== checks (typecheck, lint, frontend tests, frontend build) ==="
+    compose build tests frontend || return 1
+    local code=0
+    nice -n 10 docker compose -p aiball-tests -f tests/docker-compose.yml --profile tests run --rm tests \
+        sh -c "npm run typecheck && npm run lint && npm run test:frontend" || code=1
+    nice -n 10 docker compose -p aiball-tests -f tests/docker-compose.yml --profile tests run --rm frontend || code=1
+    return $code
+}
+
 run_sim() {
     local shards="${AIBALL_SIM_SHARDS:-4}"
     local src="${AIBALL_TEST_SRC:-$PWD}"
@@ -103,8 +119,10 @@ case "$what" in
     e2e) run_e2e ;;
     sim) run_sim "$@" ;;
     fullstack) run_fullstack ;;
+    checks) run_checks ;;
     critical)
         code=0
+        timed run_checks || code=1
         timed run_unit || code=1
         timed run_e2e || code=1
         timed run_fullstack || code=1
@@ -114,6 +132,7 @@ case "$what" in
         ;;
     full|all)
         code=0
+        timed run_checks || code=1
         timed run_unit || code=1
         timed run_e2e || code=1
         timed run_fullstack || code=1

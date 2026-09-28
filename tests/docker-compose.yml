@@ -26,10 +26,43 @@ services:
       NODE_ENV: test
       AIBALL_HOME: /tmp/aiball-unit
       AIBALL_SOCK: ""
+      # #3240 — this image builds cl-session-host: a suite that needs it fails
+      # when it is missing, instead of passing on tests it skipped.
+      AIBALL_TEST_REQUIRE_HOST: "1"
     volumes:
       - ${AIBALL_TEST_SRC:-..}:/app:ro
       - /app/node_modules
+      - /app/frontend/node_modules
     command: ["npm", "test"]
+
+  # #3240 — the frontend's own checks, as CI's frontend-build job runs them: an
+  # install of the frontend's dependencies ALONE. The root node_modules is
+  # masked by an empty volume, so an import that reaches the backend fails here
+  # as it does in CI, instead of being resolved by the root's packages. The
+  # build writes to /tmp: the source stays read-only.
+  frontend:
+    profiles: ["tests"]
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile.frontend
+    cpus: ${AIBALL_TEST_CPUS:-4}
+    network_mode: none
+    working_dir: /app/frontend
+    volumes:
+      - ${AIBALL_TEST_SRC:-..}:/app:ro
+      - /app/node_modules
+      - /app/frontend/node_modules
+    # Vite writes a temporary file next to its config, so the build runs on a
+    # copy under /tmp: src/ (the @shared alias), frontend/ and package.json, and
+    # no root node_modules, as in CI.
+    command:
+      - sh
+      - -c
+      - >-
+        mkdir -p /tmp/w && cd /app
+        && tar --exclude=frontend/node_modules --exclude=frontend/dist -cf - package.json src frontend | tar -xf - -C /tmp/w
+        && ln -s /app/frontend/node_modules /tmp/w/frontend/node_modules
+        && cd /tmp/w/frontend && npx vue-tsc --noEmit && npx vite build --outDir /tmp/frontend-dist --emptyOutDir
 
   daemon:
     build:

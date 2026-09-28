@@ -6,8 +6,9 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { sessionHostSkip } from "../tests/session-host-bin.js";
 
 const base = mkdtempSync("/tmp/aiball-3141d-");
 // Deep enough that `hosts/term-<a 40-char name>/control.sock` passes 100 bytes.
@@ -15,9 +16,7 @@ const home = join(base, "a-rather-deep-aiball-home-for-this-test");
 mkdirSync(home, { recursive: true });
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
-const built = ["release", "debug"].map((b) => resolve(import.meta.dirname, "..", "..", "windows", "cl-pty-proxy", "target", b, "cl-session-host")).find(existsSync);
-process.env.CL_SESSION_HOST_BIN = process.env.CL_SESSION_HOST_BIN ?? built ?? "";
-const skip = existsSync(process.env.CL_SESSION_HOST_BIN) ? false : "no cl-session-host built (cargo build --manifest-path windows/cl-pty-proxy/Cargo.toml)";
+const skip = sessionHostSkip();
 
 const { hostDirName, MAX_SOCKET_PATH } = await import("../session-dir.js");
 const { hostDirFor, hostsDir } = await import("./hosts.js");

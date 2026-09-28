@@ -1,0 +1,7 @@
+# #3240 — the frontend's checks, as CI runs them: only the frontend's own
+# dependencies are installed (no root node_modules), so the build fails here on
+# an import that reaches the backend, as it does in CI's frontend-build job.
+FROM node:22-slim
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci

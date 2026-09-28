@@ -385,14 +385,23 @@ aiball uses Node's native test runner (`vitest`-style suites under
 - Run the suite in Docker, not on your machine — the dev checkout is
   usually the live runtime, and a full run on the host starves the
   daemon and loops sharing it. Two profiles:
-  - `npm run test:docker -- critical` **before every deploy**: unit,
-    e2e, and the board simulator's scenarios marked `critical: true`
-    (the ones that guard the loops' contract);
+  - `npm run test:docker -- critical` **before every deploy**: the
+    checks CI runs (typecheck, lint, the frontend's tests, and the
+    frontend build in an install of the frontend's dependencies alone),
+    unit, e2e, fullstack, and the board simulator's scenarios marked
+    `critical: true` (the ones that guard the loops' contract);
   - `npm run test:docker -- full` (or `all`) **before a release or
     after a large change**: everything.
 
-  Measured here: `critical` ~6 min, `full` ~10 min; each phase prints
-  its time.
+  Measured here: `critical` ~12 min (checks ~1, unit ~4, fullstack ~5,
+  simulator ~2); `full` runs every simulator scenario on top. Each phase
+  prints its time.
+
+  The test image builds `cl-session-host`, so the suites that drive a
+  real session host run there; a suite that needs one and does not find
+  it fails in Docker instead of skipping (`AIBALL_TEST_REQUIRE_HOST`).
+  On your machine it is skipped, and says how to build it
+  (`src/tests/session-host-bin.ts`).
 
   A suite that grows past 10 minutes gets split the same way rather
   than skipped. The containers are capped at `AIBALL_TEST_CPUS` cores

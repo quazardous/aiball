@@ -34,6 +34,13 @@ dates are YYYY-MM-DD.
   board, and whether the skill is installed; `dry_run` answers without writing.
   A human's gesture, on this machine only.
 
+### Changed
+
+- The Docker test profiles run what CI runs besides the tests (typecheck,
+  lint, the frontend's tests and its build as CI builds it), and the suites
+  that drive a real session host, which the test image now builds; a
+  missing host fails the run instead of skipping.
+
 ### Fixed
 
 - A proposal (plan, resolution, wontfix, escalation) can no longer be decided
