@@ -121,3 +121,13 @@ test("#3174 — restart --fresh starts with --no-resume (a fresh conversation); 
     assert.ok(restartStartArgs("cl-x", plate(), { fresh: true }).includes("--no-resume"));
     assert.ok(!restartStartArgs("cl-x", plate()).includes("--no-resume"));
 });
+
+test("#3254 — the loop's Remote Control choice is replayed; a new one replaces it; none leaves the setting", () => {
+    const flags = (args: string[]) => args.filter((a, i) => a.includes("remote-control") || args[i - 1] === "--remote-control");
+    assert.deepEqual(flags(restartStartArgs("n", plate())), [], "no choice: the setting decides again");
+    assert.deepEqual(flags(restartStartArgs("n", plate({ remote_control_override: "phone" }))), ["--remote-control", "phone"]);
+    assert.deepEqual(flags(restartStartArgs("n", plate({ remote_control_override: false }))), ["--no-remote-control"]);
+    assert.deepEqual(flags(restartStartArgs("n", plate({ remote_control_override: false }), { remoteControl: true })), ["--remote-control"]);
+    const withArgs = restartStartArgs("n", plate({ remote_control_override: true, claude_args: ["--model", "x"] }));
+    assert.ok(withArgs.indexOf("--remote-control") < withArgs.indexOf("--"), "a start flag, never passed to Claude as such");
+});

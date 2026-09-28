@@ -61,3 +61,19 @@ test("a tree that declares nothing spawns with no permissions block at all", () 
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test("#3254 — claude.remote_control: off by default, true or a name from the yaml, anything else ignored", () => {
+    for (const [yaml, want] of [
+        ["project: p-rc\n", false],
+        ["project: p-rc\nclaude:\n  remote_control: true\n", true],
+        ["project: p-rc\nclaude:\n  remote_control: \" phone \"\n", "phone"],
+        ["project: p-rc\nclaude:\n  remote_control: 3\n", false],
+    ] as const) {
+        const dir = treeWith(yaml);
+        try {
+            assert.equal(withoutAmbientIdentity(() => loadConfig(dir)).claude.remote_control, want, yaml);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }
+});

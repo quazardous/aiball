@@ -249,6 +249,14 @@ export interface Plate {
         project?: string;
     } | null;
     /**
+     * #3254 — the loop's own Remote Control choice (the start flags), which
+     * `restart` replays; null = the project's `claude.remote_control`, read
+     * again at each start.
+     */
+    remote_control_override?: boolean | string | null;
+    /** #3254 — the Remote Control the loop started with: off, or the session's name (`true`: Claude named it). */
+    remote_control?: boolean | string;
+    /**
      * #1576 — the identity the loop was LAUNCHED with, when it wasn't the one
      * the cwd resolves to on its own.
      *

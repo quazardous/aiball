@@ -86,6 +86,8 @@ export interface ProjectContext {
         session_id: string;
         /** #2201 — tool names denied to this agent's claude session (see config). */
         deny_tools: string[];
+        /** #3254 — Remote Control (see config). */
+        remote_control: boolean | string;
     };
     /** #385: tmux bar colour profile (layered defaults → global → project). */
     colors: {

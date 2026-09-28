@@ -35,6 +35,8 @@ export interface LoopPlate {
     project?: string | null;
     role?: string | null;
     created_at?: string;
+    /** #3254 — Claude's Remote Control as the loop started: off, or the session's name. */
+    remote_control?: boolean | string;
 }
 
 /** A loop the state root holds, running or not: its name (its state dir), its plate, when that was written. */

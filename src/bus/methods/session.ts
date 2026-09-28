@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { defineMethod, Refusal } from "../methods.js";
+import { remoteControl } from "../params.js";
 import { defineSubject } from "../subscriptions.js";
 import { ERROR_CODES } from "../../domain.js";
 import { hostDirFor, SESSION_NAME } from "../../sessions/hosts.js";
@@ -16,6 +17,7 @@ import { isPresent } from "../../live-presence.js";
 import { loadConfig } from "../../autopoll/config.js";
 import { listConsumers } from "../../db/consumers.js";
 import { tmuxSessionView } from "../../sessions/registry.js";
+import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
@@ -32,8 +34,11 @@ const size = z.object({ rows: z.number().int().min(1).max(1000), cols: z.number(
  * the folder decides); the answer names the agent. The loop runs where `mode`
  * says — `host` (this daemon's session host) or `tmux` (a tmux session, the
  * loop's bar in its status line) — or, without it, where the project's
- * `claude_loop.session` says (host by default). The login environment and a
- * local caller's allow-listed `env`. HOST_BUSY when it already runs.
+ * `claude_loop.session` says (host by default). `remote_control` starts Claude
+ * with Remote Control (`true`: the session named after the agent, a string: that
+ * name, `false`: without it), over the project's `claude.remote_control`, and
+ * the loop keeps it for its restarts. The login environment and a local
+ * caller's allow-listed `env`. HOST_BUSY when it already runs.
  */
 defineMethod({
     name: "session.start",
@@ -49,9 +54,12 @@ defineMethod({
         env: z.record(z.string(), z.unknown()).optional(),
         /** #3135 — an agent's loop: on the session host or in tmux; the configured mode by default. */
         mode: z.enum(["host", "tmux"]).optional(),
+        /** #3254 — Claude with Remote Control: on, off, or on under a name. */
+        remote_control: remoteControl.optional(),
     }),
     run: async (caller, p) => {
         if (p.name && p.mode) throw new Refusal(400, "mode is an agent loop's: a named session runs on the host");
+        if (p.name && p.remote_control !== undefined) throw new Refusal(400, "remote_control is an agent loop's: a named session runs no Claude");
         if (p.name && (p.agent || p.crew)) throw new Refusal(400, "name is a session without an agent: not with agent or crew");
         if (p.agent && p.crew) throw new Refusal(400, "agent or crew, not both");
         if (!p.name) {
@@ -75,6 +83,7 @@ defineMethod({
                 ...(p.agent ? ["--agent", p.agent] : []),
                 ...(p.crew ? ["--crew", p.crew] : []),
                 ...(p.project ? ["--project", p.project] : []),
+                ...remoteControlFlags(p.remote_control),
             ], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
             child.unref();
             const deadline = Date.now() + 30_000;

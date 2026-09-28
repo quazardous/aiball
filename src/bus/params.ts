@@ -17,3 +17,6 @@ export const id = z.coerce.number().int().positive();
 
 /** An optional non-empty string; an empty one reads as absent. */
 export const text = z.preprocess((v) => (v === "" ? undefined : v), z.string().optional());
+
+/** #3254 — Claude's Remote Control: on (the session named after the agent), off, or on under a name. */
+export const remoteControl = z.union([z.boolean(), z.string().trim().min(1).max(100).regex(/^[^-]/, "a name, not a flag")]);

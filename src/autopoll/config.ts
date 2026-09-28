@@ -20,6 +20,7 @@
  * ```
  */
 import { parseMouse } from "../claude-loop/mouse-setup.js";
+import { parseRemoteControl, type RemoteControl } from "../claude-loop/remote-control.js";
 import { isBarHost, type BarHost } from "../agent-bar.js";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -377,6 +378,9 @@ export interface AiballConfig {
          *  steers from the board and must not read code. A guard, not a hint —
          *  without file and shell tools there is no path to the disk. */
         deny_tools: string[];
+        /** #3254 — start Claude with Remote Control: `true` names the session
+         *  after the agent, a string names it. Default false. */
+        remote_control: RemoteControl;
     };
     /**
      * #160 Phase 1 (david `f9agk3` + `#552 b4y2yx`) — upstream provider
@@ -537,6 +541,8 @@ const DEFAULTS: AiballConfig = {
         session_id: "",
         // #2201 — no tool is denied unless a tree says so.
         deny_tools: [],
+        // #3254 — Remote Control only where a tree asks for it.
+        remote_control: false,
     },
     // #160 Phase 1: no upstream bindings by default — opt-in per-project via
     // `.aiball.yaml upstream: { <project>: [...] }`. Without a binding,
@@ -975,6 +981,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
                         .filter(Boolean),
                 )];
             }
+            // #3254 — false, true or a session name; anything else is dropped.
+            const rc = parseRemoteControl(cb.remote_control);
+            if (rc !== null) cfg.claude.remote_control = rc;
             // #565 david : per-project `project_type:` — picked up by the
             // MCP `welcome` tool. Free-string ; absent = null (welcome
             // applies its own `public` default + validates against the

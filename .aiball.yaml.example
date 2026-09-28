@@ -220,6 +220,13 @@ claude:
   # and shell tools and it has no way to the disk. Absent or empty = no restriction.
   # deny_tools: [Read, Edit, Write, Bash, Glob, Grep, NotebookEdit]
 
+  # Start Claude with Remote Control, so the agent's session can be picked up
+  # from claude.ai or the Claude app. `true` names the session after the agent;
+  # a string names it. `claude-loop start --remote-control [name]` or
+  # `--no-remote-control` overrides it for one loop, and its restarts keep that
+  # choice. Default false.
+  # remote_control: true
+
 # --- project type -------------------------------------------------------------
 # Picked up by the MCP `welcome` tool to choose the onboarding kit. Out of
 # the box: `public` (strict scrubbing) and `private`. Validated at call

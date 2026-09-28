@@ -96,6 +96,7 @@ import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
 import { dropInheritedLoopEnv } from "./inherited-env.js";
 import { COPY_MARK } from "./bar-render.js";
+import { parseRemoteControl, remoteControlPlan, type RemoteControl } from "./remote-control.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -326,6 +327,9 @@ interface StartOpts {
      *  the existing detection at the always_resume site sees the sentinel
      *  and skips the auto-inject. */
     noResume?: boolean;
+    /** #3254 — this loop's Remote Control, over `claude.remote_control`:
+     *  false, true (named after the agent) or a name. Undefined = the setting. */
+    remoteControl?: RemoteControl;
     /** #639 (david `uqdava`) : --resume → force `claude.always_resume` to true
      *  for this invocation, regardless of `.aiball.yaml`. Mirror of `noResume`
      *  for the positive case. */
@@ -848,6 +852,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         );
     }
 
+    // #3254 — Remote Control: the loop's choice, else the project's setting.
+    const remoteControl = remoteControlPlan(ctx.claude.remote_control, opts.remoteControl, ctx.agent, opts.claudeArgs);
     const plate: Plate = {
         name,
         created_at: new Date().toISOString(),
@@ -865,6 +871,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // re-derived, not sourced, from this).
         session_id: sessionPlan.sessionId,
         session_mode: sessionPlan.mode,
+        // #3254 — the choice, replayed by `restart`; and what it made.
+        remote_control_override: opts.remoteControl ?? null,
+        remote_control: remoteControl.value,
         // #390: persist the remote connection so `restart` replays it.
         remote: opts.aiballUrl
             ? {
@@ -1147,6 +1156,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             process.stdout.write(`claude-loop: session_mode=${sessionPlan.mode} → ${what}\n`);
         }
     }
+    effectiveClaudeArgs = [...remoteControl.args, ...effectiveClaudeArgs];
     const passthrough = effectiveClaudeArgs.map(shQuote).join(" ");
     // CL_CLAUDE_CMD lets you swap the binary+flags (everything before
     // --settings) for debugging: see what the inner command receives
@@ -1769,6 +1779,9 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 process.stdout.write(`    pings_path   : ${plate.pings_path}\n`);
                 process.stdout.write(`    cwd          : ${plate.cwd}\n`);
                 process.stdout.write(`    claude_args  : ${plate.claude_args.length === 0 ? "(none)" : plate.claude_args.join(" ")}\n`);
+                // #3254
+                const rc = plate.remote_control ?? false;
+                process.stdout.write(`    remote_ctrl  : ${rc === false ? "off" : rc === true ? "on" : rc}${plate.remote_control_override != null ? " (the loop's choice)" : ""}\n`);
                 // #1549 — which claude session this loop is bound to.
                 const sMode = plate.session_mode ?? "auto";
                 process.stdout.write(
@@ -2234,6 +2247,8 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // `claude.always_resume` to true, regardless of what the per-project
         // .aiball.yaml says.
         .option("--resume", "#639: force resume mode for this invocation — overrides `claude.always_resume` to true, regardless of yaml config. Mirror of `--no-resume` for the positive case.")
+        .option("--remote-control [name]", "#3254: start Claude with Remote Control (pick the session up from claude.ai or the phone), named after the agent or <name>, whatever claude.remote_control says. Kept for restarts.")
+        .option("--no-remote-control", "#3254: start Claude without Remote Control, whatever claude.remote_control says. Kept for restarts.")
         .option("--force", "#3166: where the loop already runs, attach with the controls instead of a read-only copy (never starts a second loop)")
         .addOption(new Option(
             "--mouse <on|off>",
@@ -2297,6 +2312,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
             once?: boolean; zen?: boolean; mouse?: string; bar?: string;
+            remoteControl?: boolean | string;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -2336,6 +2352,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 noResume: opts.resume === false,
                 forceResume: opts.resume === true && command.getOptionValueSource?.("resume") === "cli",
                 zen: opts.zen === true,
+                // #3254 — only when passed: `--no-remote-control` defaults it to true.
+                remoteControl: command.getOptionValueSource?.("remoteControl") === "cli"
+                    ? parseRemoteControl(opts.remoteControl) ?? undefined
+                    : undefined,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
@@ -2461,7 +2481,12 @@ async function main(): Promise<void> {
         .option("--host", "#3066: relaunch on the aiball daemon's session host (with --resume: move a tmux loop onto the host, its conversation kept). Without --host or --tmux, a loop stays where it runs.")
         .option("--tmux", "#3135: relaunch in tmux (with --resume: move a loop off the host, its conversation kept).")
         .option("--fresh", "#3174: relaunch with a fresh conversation instead of resuming the recorded one (a resumed conversation keeps the tools it started with)")
-        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean }) => cmdRestart(name ?? resolveCurrentLoopName(), { resume: opts.resume === true, host: opts.host === true, tmux: opts.tmux === true, fresh: opts.fresh === true }));
+        .option("--remote-control [name]", "#3254: relaunch with Remote Control, named after the agent or <name>; kept for the next restarts.")
+        .option("--no-remote-control", "#3254: relaunch without Remote Control; kept for the next restarts.")
+        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; remoteControl?: boolean | string }, command: Command) => cmdRestart(name ?? resolveCurrentLoopName(), {
+            resume: opts.resume === true, host: opts.host === true, tmux: opts.tmux === true, fresh: opts.fresh === true,
+            remoteControl: command.getOptionValueSource?.("remoteControl") === "cli" ? parseRemoteControl(opts.remoteControl) ?? undefined : undefined,
+        }));
     program.command("stop [name]")
         .description("Clean-STOP a loop: kill claude/tmux + exit the timer, but KEEP the state dir (loop shows dead, stays restart/prune-able — `rm` is the halt+delete). Also the SIGTERM action: `kill -TERM <timer.pid>` (#442 — convention HUP=restart, USR2=reload, TERM=stop). Remotely via the daemon: the Consumers-page stop button. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdStop(name ?? resolveCurrentLoopName()));

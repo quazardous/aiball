@@ -10,6 +10,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
+import { remoteControl } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
 import { MUX_CMD, tmuxName } from "../../claude-loop/state.js";
@@ -17,6 +18,7 @@ import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js"
 import { isPresent } from "../../live-presence.js";
 import { getConsumer } from "../../db/consumers.js";
 import { getAgentBar } from "../../agent-bar-store.js";
+import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
@@ -37,6 +39,8 @@ export interface LoopView {
     role: string | null;
     mode: "host" | "tmux";
     running: boolean;
+    /** Claude's Remote Control as the loop last started: off, or the session's name (`true`: Claude named it). */
+    remote_control: boolean | string;
     /** The tmux session to attach, for a loop in tmux. */
     tmux?: string;
     /** The host's attach socket, for a loop on the host that runs. */
@@ -60,6 +64,7 @@ function loopView(e: LoopEntry): LoopView {
         role: e.plate.role ?? null,
         mode,
         running,
+        remote_control: e.plate.remote_control ?? false,
         ...(mode === "tmux" ? { tmux: tmuxName(e.name) } : {}),
         ...(link && running ? { attach: viewOf(link).attach } : {}),
     };
@@ -78,8 +83,9 @@ function findLoop(p: { name?: string; agent?: string }): LoopEntry {
 /**
  * The loops of this machine, stopped ones included, from their plates: each
  * one's folder, agent, project and role, where it runs (the session host or
- * tmux), whether it does, and what to open (the tmux session, or the host's
- * attach socket).
+ * tmux), whether it does, whether Claude has Remote Control (off, or the
+ * session's name), and what to open (the tmux session, or the host's attach
+ * socket).
  */
 defineMethod({
     name: "loop.list",
@@ -94,7 +100,9 @@ defineMethod({
 /**
  * Restart a loop from its plate, its conversation resumed: where it ran, or
  * in `mode` (the session host or tmux) to move it. `fresh` starts a fresh
- * conversation instead. A loop that runs is stopped first, so it is refused
+ * conversation instead. `remote_control` changes Claude's Remote Control (on,
+ * off, or on under a name) for this start and the next; without it the loop
+ * keeps its own. A loop that runs is stopped first, so it is refused
  * while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view
  * once it is back.
  */
@@ -107,6 +115,7 @@ defineMethod({
         mode: z.enum(["host", "tmux"]).optional(),
         fresh: z.boolean().optional(),
         force: z.boolean().optional(),
+        remote_control: remoteControl.optional(),
     }),
     run: async (caller, p) => {
         localOnly(caller);
@@ -122,6 +131,7 @@ defineMethod({
         const mode = p.mode ?? before.mode;
         const child = spawn(CLAUDE_LOOP_BIN, [
             "restart", loop.name, p.fresh ? "--fresh" : "--resume", `--${mode}`,
+            ...remoteControlFlags(p.remote_control),
         ], { cwd: loop.plate.cwd ?? undefined, detached: true, stdio: "ignore" });
         child.unref();
         // Back once a new plate is written (the restart removes the state dir

@@ -30,14 +30,16 @@ function plate(name: string, fields: Record<string, unknown>): void {
 plate("cl-t1", { agent: "t-one", project: "demo", role: "crew" });
 plate("cl-h1", { agent: "h-one", host_agent: "h-one", project: "demo" });
 plate("cl-old", { consumer: "old-crew" });
+plate("cl-rc", { agent: "rc-one", remote_control: "phone" });
 
 const human = testCaller("boss", { kind: "human" });
 const list = () => getMethod("loop.list")!.run(human, {}) as Array<Record<string, unknown>>;
 const restart = getMethod("loop.restart")!;
 test("loop.list: every loop of the machine, stopped ones included, with its agent, mode and what to open", () => {
     const byName = Object.fromEntries(list().map((l) => [l.name, l]));
-    assert.deepEqual(Object.keys(byName).sort(), ["cl-h1", "cl-old", "cl-t1"]);
-    assert.deepEqual(byName["cl-t1"], { name: "cl-t1", cwd: "/w/cl-t1", agent: "t-one", project: "demo", role: "crew", mode: "tmux", running: false, tmux: tmuxName("cl-t1") });
+    assert.deepEqual(Object.keys(byName).sort(), ["cl-h1", "cl-old", "cl-rc", "cl-t1"]);
+    assert.deepEqual(byName["cl-t1"], { name: "cl-t1", cwd: "/w/cl-t1", agent: "t-one", project: "demo", role: "crew", mode: "tmux", running: false, remote_control: false, tmux: tmuxName("cl-t1") });
+    assert.equal(byName["cl-rc"].remote_control, "phone", "#3254 — Claude's Remote Control, as the loop started");
     assert.equal(byName["cl-h1"].mode, "host");
     assert.equal(byName["cl-h1"].running, false, "no host runs for it");
     assert.equal(byName["cl-old"].agent, "old-crew", "an older plate names its agent by consumer");

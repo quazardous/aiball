@@ -47,6 +47,7 @@ import { isBarHost } from "../../agent-bar.js";
 import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
 import { liveHostAgent, loopAlive as isLoopAlive } from "../host-alive.js";
+import { remoteControlFlags, type RemoteControl } from "../remote-control.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -481,6 +482,9 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
  * timer traps SIGHUP and spawns THIS detached, so it survives killing its own
  * session.
  */
+/** How a restart differs from the loop's start: see `claude-loop restart --help`. */
+export interface RestartOpts { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; remoteControl?: RemoteControl }
+
 /**
  * Rebuild the `start` invocation a restart must replay, from the plate alone.
  *
@@ -493,7 +497,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
  * (`plate.pings_path` points into the state dir we're about to rm), so the
  * relaunch falls back to the default ping phrases.
  */
-export function restartStartArgs(name: string, plate: Plate, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean } = {}): string[] {
+export function restartStartArgs(name: string, plate: Plate, opts: RestartOpts = {}): string[] {
     // #1576 — the launch identity, top-level, independent of `remote`. Falls
     // back to the remote block for plates written before the top-level fields
     // existed, so an older remote loop keeps replaying what it used to.
@@ -525,11 +529,13 @@ export function restartStartArgs(name: string, plate: Plate, opts: { resume?: bo
         // explicitly: the configured default must not move it), unless
         // --host or --tmux moves it.
         (opts.host ? true : opts.tmux ? false : !!plate.host_agent) ? "--host" : "--tmux",
+        // #3254 — the loop's Remote Control choice, or the new one.
+        ...remoteControlFlags(opts.remoteControl ?? plate.remote_control_override),
         ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),
     ];
 }
 
-export function cmdRestart(name: string, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean } = {}): void {
+export function cmdRestart(name: string, opts: RestartOpts = {}): void {
     if (opts.host && opts.tmux) die("--host or --tmux, not both");
     if (opts.resume && opts.fresh) die("--resume or --fresh, not both");
     const sd = stateDirFor(name);

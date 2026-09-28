@@ -162,6 +162,8 @@ test("the loop's parameters: a name is a session without an agent, not with agen
     const boss = await as("boss");
     assert.equal((await refused(boss.call("session.start", { name: "t", agent: "worker", argv: ["cat"], cwd: home }))).status, 400);
     assert.equal((await refused(boss.call("session.start", { agent: "worker", crew: "helper", cwd: home }))).status, 400);
+    assert.equal((await refused(boss.call("session.start", { name: "t", argv: ["cat"], cwd: home, remote_control: true }))).status, 400, "#3254 — a named session runs no Claude");
+    assert.equal((await refused(boss.call("session.start", { agent: "worker", cwd: home, remote_control: "--model" }))).status, 400, "#3254 — a name, not a flag");
 });
 
 test("session.host: local callers only, and one session per agent", { skip }, async () => {
