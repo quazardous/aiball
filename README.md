@@ -14,6 +14,8 @@ switch any time.
 > Runs on `127.0.0.1` (SQLite + UDS socket); data stays in
 > `~/.local/share/aiball` — no cloud, no telemetry.
 
+**Welcome [tvty — Terminal Velocity](https://github.com/quazardous/tvty)**, aiball's best companion: the board and your agents' sessions, in the terminal.
+
 ![The aiball board: a project sidebar, a filterable ticket list with per-ticket intent, priority and assignee, and threaded decisions — one queue across every project on the host](./assets/screenshot-list.png)
 
 **Built to keep your focus on what matters.** Work is tickets, not a stale
