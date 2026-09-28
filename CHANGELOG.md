@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `claude-loop restart --fresh` relaunches with a fresh conversation; `start
+  --no-resume` now does so under `session_mode: auto` too. A resumed
+  conversation keeps the MCP tools it started with.
 - Restarting an agent's Claude while it works: `consumer.restart_claude` with
   `when_idle` is held by the loop until Claude's next idle, however long, and
   its bar says a restart is pending, so every client sees it.
@@ -181,6 +184,13 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A read-only copy on a terminal that reports no size (0×0) still draws its
+  bar, at 80 columns.
+- `claude-loop start` from inside another loop's shell no longer takes that
+  loop's environment for its own: its session host, settings and identity are
+  dropped (a new loop typed its start-up prompt into the calling agent's Claude).
+- `aiball ticket comment --summary` sends the ticket's state, so an agent can
+  comment from the CLI; without it the bus refused every agent comment.
 - On the session host, when the client that set the size leaves, the size
   passes to the interactive client left, as in tmux, instead of staying the
   departed one's until someone types.
@@ -229,6 +239,8 @@ dates are YYYY-MM-DD.
 
 ### Removed
 
+- `GET /api/projects`: the GNOME extension reads the projects on the bus
+  (`project.list`).
 - The web terminal's HTTP routes (the pane stream and its keys): the terminal
   is a bus subject now.
 

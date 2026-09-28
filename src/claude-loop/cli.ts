@@ -94,6 +94,7 @@ import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
+import { dropInheritedLoopEnv } from "./inherited-env.js";
 import { COPY_MARK } from "./bar-render.js";
 
 function die(msg: string): never {
@@ -144,6 +145,9 @@ const IDENTITY_ENV_KEYS = new Set<string>([
     CL_ENV.STATE_DIR,
     CL_ENV.TMUX,
     CL_ENV.PINGS,
+    // #3175 — a session host's control socket is the loop's own: set by the
+    // start for a host loop, never taken from the shell.
+    CL_ENV.HOST_CONTROL,
 ]);
 
 /**
@@ -541,6 +545,12 @@ function startKernel(sd: string, root: string, tsxBin: string, extraEnv: Record<
 
 async function cmdStart(opts: StartOpts): Promise<void> {
     need(MUX_CMD);
+    // #3175 — started from inside another loop: none of that loop's
+    // environment is this one's (inherited-env.ts). Before anything reads it.
+    const inherited = dropInheritedLoopEnv(process.env);
+    if (inherited) {
+        process.stdout.write(`claude-loop: started from inside the loop at ${inherited.from}: its CL_* and AIBALL_* identity are not carried over\n`);
+    }
 
     // #B.154: ProjectContext resolves cwd + AIBALL_AGENT +
     // AIBALL_PROJECT from .mcp.json once, then writes them back to

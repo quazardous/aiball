@@ -617,6 +617,16 @@ so the volatile one wins):
 To turn a volatile override off without a full restart: `reload --set CL_X=`
 clears `CL_X` from **both** files.
 
+**Started from inside another loop** (an agent starting a crew from its own
+shell): that shell carries the calling loop's environment, which is not this
+loop's. Its `CL_*` and its identity (`AIBALL_AGENT`, `AIBALL_PROJECT`,
+`AIBALL_CWD`…) are dropped before anything reads them, and the start says so.
+A value the calling loop recorded in its own `env` / `env.local` is its own; a
+value it never set, or set differently, was meant and stays an override. A
+session host's control socket (`CL_HOST_CONTROL`) is never taken from the
+shell. The way to the daemon (`AIBALL_SOCK`, `AIBALL_URL`, `AIBALL_TOKEN`,
+`AIBALL_HOME`) stays.
+
 ### Satellite lifecycle — kill-on-exit, watchdog, orphan sweep
 
 `claude-loop` spawns two background processes per loop alongside the
