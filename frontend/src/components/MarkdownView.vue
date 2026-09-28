@@ -8,6 +8,7 @@ import { stripBase, pushRoute } from "../lib/base";
 import { api } from "../lib/api";
 import { BUILT_IN_BODY_DECORATORS, renderBody } from "../lib/body-decorators";
 import { wireAttachmentCards } from "../lib/attachment-card";
+import { ticketTitle, ticketTooltip } from "../lib/ticketTitles";
 
 /**
  * `messageId` + `questionsClickable` opt the body into the #B.104
@@ -140,8 +141,24 @@ function onContextMenu(ev: MouseEvent) {
     bus.emit("ticket-ref.promote", { ticket_id: hit.ticketId, event: ev, target: hit.target });
 }
 
+// #3258 — a `#NNN` link says which ticket it is: its title as the tooltip,
+// asked on the first hover (not for every link a body renders), then kept.
+// Self-references included: this one is about naming, not promoting.
+function titleRefLink(ev: MouseEvent): void {
+    const el = (ev.target as HTMLElement | null)?.closest("a.ticket-ref");
+    if (!el || el.hasAttribute("title")) return;
+    const match = /^\/b\/(\d+)/.exec(stripBase(el.getAttribute("href") ?? ""));
+    if (!match) return;
+    const id = Number(match[1]);
+    el.setAttribute("title", `#${id}`);
+    void ticketTitle(id).then((title) => {
+        if (title) el.setAttribute("title", ticketTooltip(id, title));
+    });
+}
+
 let hoverTimer: number | null = null;
 function onMouseOver(ev: MouseEvent) {
+    titleRefLink(ev);
     if (promoteTrigger.value !== "hover") return;
     // #361 : pas de hover-promote sur les appareils sans survol réel
     // (tactile). Là le tap émule un mouseover qui ouvrirait le popover

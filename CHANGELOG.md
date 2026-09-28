@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- In the web board, hovering a `#NNN` link shows the ticket's title.
 - Claude can start with Remote Control, to pick an agent's session up from
   claude.ai or the Claude app: `claude.remote_control` in `.aiball.yaml` for a
   project, `--remote-control [name]` / `--no-remote-control` on `claude-loop

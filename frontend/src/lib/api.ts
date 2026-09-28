@@ -972,6 +972,8 @@ export const api = {
     getTicket: (id: number) => call<ThreadView>("ticket.get", { id, full: true, include_deleted: true }),
     /** A ticket's header alone (by id or hashid): where it lives, for jumping to it. */
     getTicketHeader: (id: number | string) => call<{ ticket: { id: number; project: string } }>("ticket.get", { id }),
+    /** #3258 — the header alone (no thread): a link's tooltip needs the title only. */
+    getTicketTitle: (id: number) => call<{ ticket: { id: number; title: string } }>("ticket.get", { id }),
     /** #235 — the board's configuration: formatting patterns and upstream bindings. */
     getConfig: () => call<{ formatting?: unknown; upstream?: unknown }>("config.get"),
     /**

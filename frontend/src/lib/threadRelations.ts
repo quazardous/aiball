@@ -16,6 +16,7 @@ import { useToast } from "primevue/usetoast";
 import type Popover from "primevue/popover";
 import { api, type ThreadView as ThreadViewData } from "./api";
 import { useBus } from "./bus";
+import { cachedTicketTitle, ticketTitle } from "./ticketTitles";
 import { RELATION_KINDS, RELATION_LABELS, isLineageRelationKind, type RelationKind } from "./relations";
 
 interface UseThreadRelationsArgs {
@@ -86,26 +87,17 @@ export function useThreadRelations({ data, load }: UseThreadRelationsArgs) {
     // number. Null while loading (or unfetched). Cached in-memory
     // across pop-overs in the same session.
     const menuTargetTitle = ref<string | null>(null);
-    const titleCache = new Map<number, string>();
 
+    // #3258 — the titles the `#NNN` tooltips use: one request per ticket,
+    // its header only, instead of this popover's own cache of whole threads.
     async function loadMenuTargetTitle(ticketId: number): Promise<void> {
-        const cached = titleCache.get(ticketId);
-        if (cached !== undefined) {
-            menuTargetTitle.value = cached;
-            return;
-        }
-        menuTargetTitle.value = null;
-        try {
-            const resp = await api.getTicket(ticketId);
-            const title = resp?.ticket?.title ?? "";
-            titleCache.set(ticketId, title);
-            // Only update if the popover still targets this id (user
-            // might have closed + re-opened on a different ref).
-            if (menuTarget.value?.target_ticket_id === ticketId) {
-                menuTargetTitle.value = title;
-            }
-        } catch {
-            /* silent — popover just shows the number alone */
+        menuTargetTitle.value = cachedTicketTitle(ticketId) ?? null;
+        const title = await ticketTitle(ticketId);
+        // Only update if the popover still targets this id (user
+        // might have closed + re-opened on a different ref). A ticket the
+        // board cannot name leaves the number alone.
+        if (menuTarget.value?.target_ticket_id === ticketId) {
+            menuTargetTitle.value = title;
         }
     }
 
