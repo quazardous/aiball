@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `loop.wake` on the bus wakes a loop now, as `claude-loop wake` does: a
+  client's way out of a loop that stays asleep with events waiting.
 - In the web board, hovering a `#NNN` link shows the ticket's title.
 - `daemon.info` on the bus: the daemon's version and where its web UI
   answers, locally and, when a tailscale serve is declared, publicly — so a

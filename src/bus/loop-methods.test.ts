@@ -62,3 +62,17 @@ test("loop.restart refuses: a loop not here, both or neither of name/agent, over
     assert.deepEqual([busy.status, busy.code], [409, "NOT_IDLE"]);
     assert.match(busy.message, /pass force/);
 });
+
+test("#3259 loop.wake: asks a running idle loop to wake; refuses a loop not here, a stopped one, a busy one (unless force), and TCP", async () => {
+    const wake = getMethod("loop.wake")!;
+    assert.equal((await refused(() => wake.run(human, { name: "cl-nope" }))).code, "NOT_FOUND");
+    assert.equal((await refused(() => wake.run(human, {}))).code, "BAD_REQUEST");
+    assert.equal((await refused(() => wake.run(human, { name: "cl-h1" }))).code, "LOOP_NOT_FOUND", "a loop that does not run");
+    assert.equal((await refused(() => wake.run(testCaller("boss", { kind: "human", transport: "tcp" }), { name: "cl-t1" }))).status, 403);
+    setAgentBar("t-one", { v: 1, phase: "busy" } as never);
+    assert.equal((await refused(() => wake.run(human, { name: "cl-t1" }))).code, "NOT_IDLE");
+    setAgentBar("t-one", { v: 1, phase: "idle" } as never);
+    assert.deepEqual(await wake.run(human, { agent: "t-one" }), { name: "cl-t1", requested: true });
+    setAgentBar("t-one", { v: 1, phase: "busy" } as never);
+    assert.deepEqual(await wake.run(human, { name: "cl-t1", force: true }), { name: "cl-t1", requested: true }, "force: queued until Claude is idle");
+});

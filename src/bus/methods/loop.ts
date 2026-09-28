@@ -155,5 +155,43 @@ defineMethod({
     },
 });
 
+/**
+ * Wake a loop now, as `claude-loop wake` does: the loop tries a wake at its
+ * next heartbeat (within its interval), without waiting for its drain tempo,
+ * for the events waiting for it. The human's way out of a loop that stays
+ * asleep with work waiting. A loop that does not run is `LOOP_NOT_FOUND`; one
+ * whose Claude works is refused (`NOT_IDLE`), unless `force`.
+ */
+defineMethod({
+    name: "loop.wake",
+    ...HUMAN_HERE,
+    params: z.object({
+        name: z.string().optional(),
+        agent: z.string().optional(),
+        force: z.boolean().optional(),
+    }),
+    run: async (caller, p) => {
+        localOnly(caller);
+        if (!p.name === !p.agent) throw new Refusal(400, "name or agent: one of them", ERROR_CODES.BAD_REQUEST);
+        const loop = findLoop(p);
+        const view = loopView(loop);
+        if (!view.running) throw new Refusal(404, `the loop ${loop.name} does not run`, ERROR_CODES.LOOP_NOT_FOUND);
+        if (!p.force && view.agent) {
+            const phase = getAgentBar(view.agent)?.bar.phase;
+            if (phase !== "idle") {
+                throw new Refusal(409, `Claude is ${phase ?? "in an unknown state"}: it will take its events when it is idle (or pass force)`, ERROR_CODES.NOT_IDLE);
+            }
+        }
+        // Not spawnSync: the CLI starts in a second or two, which must not hold the daemon.
+        const failure = await new Promise<string | null>((resolve) => {
+            const child = spawn(CLAUDE_LOOP_BIN, ["wake", loop.name], { stdio: "ignore", timeout: 10_000 });
+            child.on("error", (e) => resolve(e.message));
+            child.on("exit", (code, signal) => resolve(code === 0 ? null : `exit ${code ?? signal}`));
+        });
+        if (failure) throw new Refusal(500, `claude-loop wake failed: ${failure}`, ERROR_CODES.INTERNAL);
+        return { name: loop.name, requested: true };
+    },
+});
+
 /** The loop's launcher, next to the daemon's source. */
 const CLAUDE_LOOP_BIN = resolve(import.meta.dirname, "..", "..", "..", "bin", "claude-loop");

@@ -57,7 +57,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `MESSAGE_NOT_FOUND` | 404 | The message named in `/api/messages/:id/…`. |
 | `CONSUMER_NOT_FOUND` | 404 | The agent or human named. |
 | `PROJECT_NOT_FOUND` | 400 | The `project` of a new ticket or comment. |
-| `LOOP_NOT_FOUND` | 404 | No running claude-loop answers for this agent (`consumer.afk`, `consumer.set_bar_host`, `consumer.restart_claude`). |
+| `LOOP_NOT_FOUND` | 404 | No running claude-loop answers for this agent (`consumer.afk`, `consumer.set_bar_host`, `consumer.restart_claude`, `loop.wake`). |
 
 **Claiming a ticket** (`POST /api/tickets/:id/assign`):
 
@@ -104,7 +104,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | Code | Status | When |
 |---|---|---|
 | `HOST_BUSY` | 409 | `session.start`: the agent's session already runs elsewhere (claude-loop, or a host), or a session of that name already runs; `details.host` says where. |
-| `NOT_IDLE` | 409 | `consumer.restart_claude`: Claude works; the restart waits until it is idle (or pass `when_idle`). |
+| `NOT_IDLE` | 409 | `consumer.restart_claude`: Claude works; the restart waits until it is idle (or pass `when_idle`). `loop.restart` and `loop.wake`: Claude works (or pass `force`). |
 
 ## Writing a refusal
 

@@ -1549,6 +1549,42 @@
       "x-relayed": false
     },
     {
+      "name": "loop.wake",
+      "description": "Wake a loop now, as `claude-loop wake` does: the loop tries a wake at its next heartbeat (within its interval), without waiting for its drain tempo, for the events waiting for it. The human's way out of a loop that stays asleep with work waiting. A loop that does not run is `LOOP_NOT_FOUND`; one whose Claude works is refused (`NOT_IDLE`), unless `force`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "force",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "loops.message_all",
       "description": "A message to every agent loop running here (or the ones named), typed into each session at once; with `hold`, each loop is then held (NOT AFK ∞) so no wake starts new work while the operator is away. One line per loop in the daemon's log and in the answer.",
       "paramStructure": "by-name",
