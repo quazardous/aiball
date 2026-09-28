@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.49.0] — 2026-09-28
+
 ### Added
 
 - `claude-loop restart --fresh` relaunches with a fresh conversation; `start
@@ -93,9 +95,8 @@ dates are YYYY-MM-DD.
 - A moderator can read a given agent's backlog, as that agent sees it,
   without sending its identity: `GET /api/consumers/<agent>/backlog`, with the
   agent's unread events and wait credit.
-- A loop's bar is also available as data for other hosts:
-  `GET /api/consumers/<agent>/bar`, and an `agent_bar` event on `/ws` when it
-  changes or its loop stops.
+- A loop's bar is also available as data for other hosts, on the bus
+  (`agent.<id>.bar`), pushed when it changes or its loop stops.
 - Every API refusal carries a stable `code` next to its sentence
   (`{ error, code }`): the generic code of its HTTP status, or a precise one
   where a client may react on it — see `docs/API-ERRORS.md`.
@@ -147,9 +148,10 @@ dates are YYYY-MM-DD.
   the last three days (a waiting count alone no longer keeps a project up), and
   the group never shows fewer than five. The rest folds behind "More", by name.
 
-- The GNOME indicator reads its counters on the bus and refreshes them when the
-  board's events say they moved, instead of every 30 seconds. Refresh it with
-  `aiball init gnome-extension --overwrite`, then log out and back in.
+- The GNOME indicator reads the projects and their counters on the bus, and
+  refreshes them when the board's events say they moved, instead of every 30
+  seconds. Refresh it with `aiball init gnome-extension --overwrite`, then log
+  out and back in.
 
 - The web terminal follows an agent running on the session host: its screen,
   then Claude's output as it comes, and the keys typed go through the host,
@@ -168,9 +170,6 @@ dates are YYYY-MM-DD.
   that names someone else (`by_agent`, `set_by`, `answered_by`,
   `decided_by`) is refused, and the MCP write tools no longer offer
   `by_agent`. `aiball ticket … --by <agent>` now sets the identity sent.
-- The live feed (`/ws`) asks for a token over TCP, like the rest of the API,
-  and is also served on the local socket. A client that falls too far behind
-  is disconnected instead of piling up in the daemon's memory.
 - Listing a project's open tickets is several times faster.
 - The Docker test run has two profiles: `critical` (unit, e2e and the
   simulator scenarios that guard the loops' contract, ~6 min) before every
@@ -251,7 +250,7 @@ dates are YYYY-MM-DD.
 - The HTTP routes that served an operation the bus now carries. Every client
   calls the bus; HTTP keeps the web UI's files, uploads, login, the probes
   (health, node, version, auth status), the ticket and signal intake for
-  scripts, node pairing, and the project list the GNOME indicator reads.
+  scripts, and node pairing.
   A script that still calls one of the removed routes gets a 404: call the
   bus method that replaced it instead (the bus documentation lists them).
 
