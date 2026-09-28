@@ -22,6 +22,10 @@ services:
       dockerfile: tests/Dockerfile
     cpus: ${AIBALL_TEST_CPUS:-4}
     network_mode: none
+    # #3241 — not root: root reads and writes everywhere, so the tests of a
+    # file the daemon may not read or a folder it may not write in skipped
+    # here. The image's `node` user runs them as a user would.
+    user: node
     environment:
       NODE_ENV: test
       AIBALL_HOME: /tmp/aiball-unit
