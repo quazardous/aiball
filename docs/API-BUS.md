@@ -271,6 +271,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `project.rename` | human, agent | `POST /api/projects/:name/rename` |
 | `project.delete` | human, agent | `DELETE /api/projects/:name` |
 | `project.add_token_usage` | human, agent | `POST /api/projects/:project/token-usage` |
+| `project.init` | human, local only, not relayed | — sets a folder up as a project, as `claude-loop init` does: its `.mcp.json` and `.aiball.yaml` (`cwd`, `project`, `agent`, `role`, `private`, `no_claim`, `force`, `dry_run`); answers each file's step (`created`, `added`, `patched`, `overwrote`, `kept`…), whether the project is already on the board, and whether the aiball skill is installed. Refusals: a folder absent (`NOT_FOUND`), not writable (`FORBIDDEN`), a malformed name (`BAD_REQUEST`), a file there that cannot be parsed (`CONFLICT`) |
 | `consumer.presence` | human, agent | `GET /api/presence` |
 | `consumer.get` | human, agent | `GET /api/consumers/:consumer_id` |
 | `consumer.push_state` | agent, its own | `PUT /api/consumers/:consumer_id/state` |

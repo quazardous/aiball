@@ -2646,6 +2646,81 @@
       ]
     },
     {
+      "name": "project.init",
+      "description": "Set a folder up as a project, as `claude-loop init` does: its `.mcp.json` and its `.aiball.yaml`, each patched in place when it exists. Answers what happened to each file (`steps`, and `written` / `kept`), whether the project is already on the board (not a refusal: a second folder or a crew joins a known project), and whether the aiball skill is installed for Claude Code (the method never installs it: it writes in the folder only). `dry_run` answers the same without writing. A human's gesture, on this machine only: the daemon writes in a folder the caller names, and a `.mcp.json` chooses what Claude will run.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dry_run",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "force",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "no_claim",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "private",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "role",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "lead",
+              "crew"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "project.launch",
       "description": "Start a claude-loop for a project, at one of the roots it has run at (never an arbitrary path), on this daemon's host, detached. It spawns a process: a human's gesture. One loop per root.",
       "paramStructure": "by-name",

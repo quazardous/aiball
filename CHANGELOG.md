@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- `project.init` on the bus sets a folder up as a project, as `claude-loop
+  init` does, and answers what it wrote, whether the project is already on the
+  board, and whether the skill is installed; `dry_run` answers without writing.
+  A human's gesture, on this machine only.
+
 ### Fixed
 
 - A proposal (plan, resolution, wontfix, escalation) can no longer be decided

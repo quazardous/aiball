@@ -29,6 +29,7 @@ import { collectPendingPairing } from "../node-pairing-collect.js";
 import { restartViaSupervisor, supervisorHint } from "../supervisor-restart.js";
 import { writeProxyConfig } from "../proxy-config-write.js";
 import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
+import { CODE_TOOLS, denyCodeYamlBlock, initFolder, InitRefusal, patchDenyToolsStep, patchIdentityStep, type InitStep } from "../project-init.js";
 
 /**
  * Shared `mcp init` body so both `aiball mcp init` and the combined
@@ -120,39 +121,6 @@ async function runMigrateFrom(oldName: string, projectFlag: string | undefined):
     } catch (e) {
         const msg = (e as Error).message ?? String(e);
         die(`init --migrate-from: rename failed — ${msg}`);
-    }
-}
-
-async function mcpInitAction(force: boolean): Promise<void> {
-    const path = join(userCwd(), ".mcp.json");
-    type McpFile = { mcpServers?: Record<string, unknown> };
-    let json: McpFile = { mcpServers: {} };
-    let existed = false;
-    if (existsSync(path)) {
-        existed = true;
-        try {
-            json = JSON.parse(readFileSync(path, "utf8")) as McpFile;
-        } catch {
-            die(`${path} exists but is invalid JSON — fix it by hand, then re-run`);
-        }
-        if (!json.mcpServers || typeof json.mcpServers !== "object") {
-            json.mcpServers = {};
-        }
-    }
-    const servers = json.mcpServers as Record<string, unknown>;
-    const had = "aiball" in servers;
-    if (had && !force) {
-        process.stdout.write(`${path}: aiball entry already present — re-run with --force to overwrite (drops legacy env block)\n`);
-        return;
-    }
-    servers.aiball = { command: "aiball-mcp" };
-    writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
-    if (!existed) {
-        process.stdout.write(`created ${path} with the aiball MCP entry\n`);
-    } else if (!had) {
-        process.stdout.write(`${path}: added aiball MCP entry (other servers preserved)\n`);
-    } else {
-        process.stdout.write(`${path}: aiball entry rewritten to canonical form (legacy env block dropped if any)\n`);
     }
 }
 
@@ -261,68 +229,24 @@ export async function bootstrapInit(opts: {
     if (opts.migrateFrom) {
         await runMigrateFrom(opts.migrateFrom, opts.project);
     }
-    await mcpInitAction(force);
-    // Inline minimal .aiball.yaml — the verbose annotated template lives at
-    // .aiball.yaml.example; the bootstrap stays tight.
-    const yamlPath = join(userCwd(), ".aiball.yaml");
-    const yamlExists = existsSync(yamlPath);
-    const hasIdentity = !!opts.consumer || !!opts.project || opts.noClaim !== undefined
-        || opts.role !== undefined;
-    const hasProjectType = opts.private === true;
-    const hasDenyCode = opts.denyCode === true;
-    if (yamlExists && !force) {
-        // #603 (4dzxp2) + #612 : even when the yaml exists, patch in
-        // --consumer / --project / --no-claim so subsequent inits actually
-        // persist new flags. Preserves existing keys + comments via the
-        // yaml Document API (`init respecte les param déjà posés sauf si
-        // dans la ligne de flag` — david #612).
-        if (hasIdentity) {
-            patchIdentity(yamlPath, opts.consumer, opts.project, opts.noClaim, opts.role);
-        }
-        // #685 — `--private` was silently ignored on existing yaml (only the
-        // FRESH-create branch honored it). Mirror patchIdentity : patch
-        // `project_type: private` in place. Without this, `claude-loop init
-        // --private` is a no-op after the first init.
-        if (hasProjectType) {
-            patchProjectType(yamlPath, "private");
-        }
-        if (hasDenyCode) {
-            patchDenyTools(yamlPath);
-        }
-        if (!hasIdentity && !hasProjectType && !hasDenyCode) {
-            process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
-        }
-    } else {
-        // #593 — `--private` seeds `project_type: private` so the MCP `welcome`
-        // tool serves the private kit (relaxed conventions : internal refs OK,
-        // French in comments OK, LICENSE optional…). Default = public (the
-        // welcome tool's fail-safe applies the strict public conventions when
-        // unset, so a project that's actually private should declare it).
-        const projectTypeLine = opts.private === true ? "project_type: private\n" : "";
-        const consumerLines = hasIdentity
-            ? "consumer:\n"
-                + (opts.consumer ? `  agent: ${opts.consumer}\n` : "")
-                + (opts.project ? `  project: ${opts.project}\n` : "")
-                + (opts.noClaim !== undefined ? `  no_claim: ${opts.noClaim}\n` : "")
-                + (opts.role !== undefined ? `  role: ${opts.role}\n` : "")
-            : "";
-        const body =
-            "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
-            projectTypeLine +
-            consumerLines +
-            (hasDenyCode ? denyCodeYamlBlock() : "") +
-            "autopoll:\n" +
-            "  enabled: true\n";
-        writeFileSync(yamlPath, body);
-        const tags: string[] = ["autopoll enabled"];
-        if (opts.private === true) tags.push("project_type: private");
-        if (opts.consumer) tags.push(`consumer.agent: ${opts.consumer}`);
-        if (opts.project) tags.push(`consumer.project: ${opts.project}`);
-        if (opts.noClaim !== undefined) tags.push(`consumer.no_claim: ${opts.noClaim}`);
-        if (opts.role !== undefined) tags.push(`consumer.role: ${opts.role}`);
-        if (hasDenyCode) tags.push("claude.deny_tools: file and shell tools");
-        process.stdout.write(`${yamlExists && force ? "overwrote" : "created"} ${yamlPath} (${tags.join(", ")})\n`);
+    // #3208 — the folder's files are written by the core (project-init.ts),
+    // the same body the bus's project.init runs; here, its steps are printed.
+    let steps: InitStep[];
+    try {
+        steps = initFolder({
+            cwd: userCwd(),
+            agent: opts.consumer,
+            project: opts.project,
+            noClaim: opts.noClaim,
+            role: opts.role,
+            private: opts.private,
+            denyCode: opts.denyCode,
+            force,
+        });
+    } catch (e) {
+        die(e instanceof InitRefusal ? e.message : `init: ${(e as Error).message}`);
     }
+    for (const step of steps) process.stdout.write(`${step.message}\n`);
     // #651 david `fzsqeg` — drop the aiball Claude Code skill into the
     // GLOBAL ~/.claude/skills/aiball/ on first init. Idempotent : skipped
     // if already present (the user gets a one-liner pointing to
@@ -342,66 +266,23 @@ export async function bootstrapInit(opts: {
     process.stdout.write(`Run \`aiball check\` to verify the config, hooks and daemon resolve.\n`);
 }
 
-/**
- * #603 + #612 — merge `consumer.agent` / `consumer.project` / `consumer.no_claim`
- * into an existing `.aiball.yaml`. Document API so comments + unrelated keys
- * survive. Each field is only touched when explicitly passed (undefined → keep
- * whatever was there) — `init est respectueux des param déjà posés sauf si
- * dans la ligne de flag` (david #612).
- */
-/**
- * #685 — set top-level `project_type:` on an existing `.aiball.yaml`,
- * preserving comments + unrelated keys via the Document API. Same
- * preservation contract as `patchIdentity`. Idempotent : no rewrite if
- * the value is already the requested one.
- */
-function patchProjectType(path: string, value: string): void {
-    let doc;
+/** #3208 — the printing face of project-init.ts's patches, for this CLI. */
+function printStep(f: () => InitStep): void {
     try {
-        doc = parseDocument(readFileSync(path, "utf8"));
-    } catch {
-        die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
+        process.stdout.write(`${f().message}\n`);
+    } catch (e) {
+        die(e instanceof InitRefusal ? e.message : `init: ${(e as Error).message}`);
     }
-    const prev = doc.get("project_type");
-    if (prev === value) {
-        process.stdout.write(`${path}: project_type already '${value}' (no change)\n`);
-        return;
-    }
-    doc.set("project_type", value);
-    writeFileSync(path, String(doc));
-    process.stdout.write(`${path}: patched project_type='${value}'${prev ? ` (was '${prev}')` : ""}\n`);
 }
 
-/** #2180 — the tools `--deny-code` withholds: every way to read or change the
- *  disk. What remains is the aiball MCP surface, which never touches code. */
-export const CODE_TOOLS = ["Read", "Edit", "Write", "Bash", "Glob", "Grep", "NotebookEdit"] as const;
+export { CODE_TOOLS, denyCodeYamlBlock };
 
-/** #2180 — the `claude:` block a fresh `.aiball.yaml` gets with `--deny-code`. */
-export function denyCodeYamlBlock(): string {
-    return `claude:\n  deny_tools: [${CODE_TOOLS.join(", ")}]\n`;
-}
-
-/** #2180 — set `claude.deny_tools` in an existing `.aiball.yaml`, keeping every
- *  other key and comment (yaml Document API, like patchIdentity). */
+/** #2180 — set `claude.deny_tools` in an existing `.aiball.yaml` (project-init.ts). */
 export function patchDenyTools(path: string): void {
-    let doc;
-    try {
-        doc = parseDocument(readFileSync(path, "utf8"));
-    } catch {
-        die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
-    }
-    // #2180 — createNode: a plain `{}` is stored as a raw value with no `.set`, so
-    // a file WITHOUT a claude block (the common case) died here.
-    if (!doc.has("claude")) doc.set("claude", doc.createNode({}));
-    const claude = doc.get("claude") as { set: (k: string, v: unknown) => void } | undefined;
-    if (!claude || typeof (claude as { set?: unknown }).set !== "function") {
-        die(`init: ${path} has a non-mapping 'claude' value — fix by hand, then re-run`);
-    }
-    claude.set("deny_tools", doc.createNode([...CODE_TOOLS], { flow: true }));
-    writeFileSync(path, String(doc));
-    process.stdout.write(`${path}: patched claude.deny_tools (${CODE_TOOLS.join(", ")})\n`);
+    printStep(() => patchDenyToolsStep(path));
 }
 
+/** #603 + #612 — set the given consumer fields in an existing `.aiball.yaml` (project-init.ts). */
 export function patchIdentity(
     path: string,
     agent: string | undefined,
@@ -409,25 +290,7 @@ export function patchIdentity(
     noClaim: boolean | undefined,
     role: "lead" | "crew" | undefined,
 ): void {
-    let doc;
-    try {
-        doc = parseDocument(readFileSync(path, "utf8"));
-    } catch {
-        die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
-    }
-    // #2180 — same trap as patchDenyTools: a plain `{}` has no `.set`.
-    if (!doc.has("consumer")) doc.set("consumer", doc.createNode({}));
-    const consumer = doc.get("consumer") as { set: (k: string, v: unknown) => void } | undefined;
-    if (!consumer || typeof (consumer as { set?: unknown }).set !== "function") {
-        die(`init: ${path} has a non-mapping 'consumer' value — fix by hand, then re-run`);
-    }
-    const changed: string[] = [];
-    if (agent) { consumer.set("agent", agent); changed.push(`agent=${agent}`); }
-    if (project) { consumer.set("project", project); changed.push(`project=${project}`); }
-    if (noClaim !== undefined) { consumer.set("no_claim", noClaim); changed.push(`no_claim=${noClaim}`); }
-    if (role !== undefined) { consumer.set("role", role); changed.push(`role=${role}`); }
-    writeFileSync(path, String(doc));
-    process.stdout.write(`${path}: patched consumer (${changed.join(", ")})\n`);
+    printStep(() => patchIdentityStep(path, { agent, project, noClaim, role }));
 }
 
 /**

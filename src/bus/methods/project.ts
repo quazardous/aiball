@@ -26,6 +26,10 @@ import { focusRelatives } from "../../db/focus-relatives.js";
 import { projectCriticalTicket } from "../../db/critical-ticket.js";
 import { outboxPath } from "../../paths.js";
 import { broadcast } from "../../ws.js";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
+import { ERROR_CODES } from "../../domain.js";
+import { initFolder, InitRefusal } from "../../project-init.js";
 
 /** #2525 — the standing prompt, and the wake focus beside it. */
 export function standingPromptView(project: string) {
@@ -173,4 +177,60 @@ defineMethod({
     who: ["human", "agent"],
     params: z.object({ project: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()) }),
     run: (caller, p) => getPresenceFacts(consumerIdOf(caller), p.project),
+});
+
+/**
+ * Set a folder up as a project, as `claude-loop init` does: its `.mcp.json`
+ * and its `.aiball.yaml`, each patched in place when it exists. Answers what
+ * happened to each file (`steps`, and `written` / `kept`), whether the project
+ * is already on the board (not a refusal: a second folder or a crew joins a
+ * known project), and whether the aiball skill is installed for Claude Code
+ * (the method never installs it: it writes in the folder only). `dry_run`
+ * answers the same without writing. A human's gesture, on this machine only:
+ * the daemon writes in a folder the caller names, and a `.mcp.json` chooses
+ * what Claude will run.
+ */
+defineMethod({
+    name: "project.init",
+    who: ["human"],
+    relayed: false,
+    params: z.object({
+        cwd: z.string(),
+        project: z.string().optional(),
+        agent: z.string().optional(),
+        role: z.enum(["lead", "crew"]).optional(),
+        private: z.boolean().optional(),
+        no_claim: z.boolean().optional(),
+        force: z.boolean().optional(),
+        dry_run: z.boolean().optional(),
+    }),
+    run: (caller, p) => {
+        if (caller.transport !== "uds") throw new Refusal(403, "a folder of this machine: local callers only", ERROR_CODES.FORBIDDEN);
+        if (!isAbsolute(p.cwd)) throw new Refusal(400, `cwd must be an absolute path (got '${p.cwd}')`, ERROR_CODES.BAD_REQUEST);
+        let steps;
+        try {
+            steps = initFolder({
+                cwd: p.cwd,
+                project: p.project,
+                agent: p.agent,
+                role: p.role,
+                private: p.private,
+                noClaim: p.no_claim,
+                force: p.force,
+                dryRun: p.dry_run,
+            });
+        } catch (e) {
+            if (e instanceof InitRefusal) throw new Refusal(e.status, e.message, ERROR_CODES[e.code]);
+            throw e;
+        }
+        return {
+            cwd: p.cwd,
+            dry_run: p.dry_run === true,
+            steps,
+            written: [...new Set(steps.filter((s) => s.action !== "kept").map((s) => s.file))],
+            kept: [...new Set(steps.filter((s) => s.action === "kept").map((s) => s.file))],
+            project_exists: p.project ? getProject(p.project) !== undefined : null,
+            skill: existsSync(join(homedir(), ".claude", "skills", "aiball", "SKILL.md")) ? "installed" : "missing",
+        };
+    },
 });
