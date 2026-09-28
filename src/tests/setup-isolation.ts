@@ -35,3 +35,24 @@ process.env.USERPROFILE = isolatedHome;
 // when set, else `$HOME/.config`. Pin both so the global config lookup
 // lands in the empty isolated dir.
 process.env.XDG_CONFIG_HOME = join(isolatedHome, ".config");
+
+// #3241 — the rest of what reaches a live daemon or a live loop, for every
+// test run through this setup (`npm test`, Docker):
+// - AIBALL_SOCK empty: a client call can never reach the live daemon's socket
+//   (an exported one used to win over a test's own AIBALL_HOME);
+// - a fresh AIBALL_HOME, CLAUDE_LOOP_STATE_ROOT and TMUX_TMPDIR by default (a
+//   suite may still set its own): no test reads or writes the live board, the
+//   live loops' state, or the user's tmux server;
+// - the identity a loop's shell exports (CL_*, AIBALL_AGENT/PROJECT/CWD…)
+//   dropped: a test run from an agent's Bash is not that agent. What a run
+//   sets on purpose stays: the binaries to use and the test switches.
+const KEEP = new Set(["CL_SESSION_HOST_BIN", "CL_PROXY_BIN", "CL_CLAUDE_CMD"]);
+const INHERITED = ["AIBALL_AGENT", "AIBALL_PROJECT", "AIBALL_CWD", "AIBALL_PROJECT_CWD", "AIBALL_SESSION_KEY", "AIBALL_SESSION_MODE", "AIBALL_URL", "AIBALL_TOKEN"];
+for (const k of Object.keys(process.env)) {
+    if ((k.startsWith("CL_") && !KEEP.has(k)) || INHERITED.includes(k)) delete process.env[k];
+}
+process.env.AIBALL_SOCK = "";
+process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-test-home-"));
+process.env.CLAUDE_LOOP_STATE_ROOT = mkdtempSync(join(tmpdir(), "aiball-test-loops-"));
+process.env.TMUX_TMPDIR = mkdtempSync(join(tmpdir(), "aiball-test-tmux-"));
+delete process.env.TMUX;

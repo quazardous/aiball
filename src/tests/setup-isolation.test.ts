@@ -32,3 +32,13 @@ test("#738 isolation: no leaked .aiball.yaml in the global config dir", () => {
     const globalConfig = join(xdg, "aiball", "config.yaml");
     assert.equal(existsSync(globalConfig), false);
 });
+
+test("#3241 isolation: nothing points at the live daemon, the live loops or the user's tmux", () => {
+    assert.equal(process.env.AIBALL_SOCK, "", "a client call cannot reach a live socket");
+    assert.match(process.env.CLAUDE_LOOP_STATE_ROOT ?? "", /aiball-test-loops-/);
+    assert.match(process.env.TMUX_TMPDIR ?? "", /aiball-test-tmux-/);
+    assert.equal(process.env.TMUX, undefined);
+    for (const k of ["CL_HOST_CONTROL", "CL_STATE_DIR", "CL_NAME", "AIBALL_AGENT", "AIBALL_PROJECT", "AIBALL_CWD", "AIBALL_URL"]) {
+        assert.equal(process.env[k], undefined, `${k} inherited from the shell`);
+    }
+});

@@ -14,6 +14,8 @@ import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-1477-"));
 
+process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
+
 const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, ensureConsumer, getConsumer } = await import("../db.js");

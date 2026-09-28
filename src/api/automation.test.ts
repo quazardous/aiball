@@ -11,6 +11,7 @@ import type { AddressInfo } from "node:net";
 
 // Throwaway DB BEFORE any module that reads paths.
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-457-slice4-"));
+process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
 
 const { createTestApp: createApp } = await import("../tests/test-app.js");
 const { issueToken } = await import("../db/tokens.js");
