@@ -17,5 +17,8 @@
     "noEmit": true,
     "useDefineForClassFields": true
   },
-  "include": ["src/**/*", "src/**/*.vue", "vite.config.ts"]
+  "include": ["src/**/*", "src/**/*.vue", "vite.config.ts"],
+  // rpc.test.ts runs the frontend's client against the real daemon: it imports
+  // the backend, whose dependencies a frontend-only install does not have.
+  "exclude": ["src/lib/rpc.test.ts"]
 }
