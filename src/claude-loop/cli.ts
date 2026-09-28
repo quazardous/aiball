@@ -94,6 +94,7 @@ import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
+import { COPY_MARK } from "./bar-render.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -1468,7 +1469,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     seedOpt("@cl_afk_glyph", ` #[fg=colour238,bg=colour16]웃`);
     seedOpt(
         "status-left",
-        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+        `${COPY_MARK}#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
     );
 
     startKernel(sd, root, tsxBin);
@@ -1614,7 +1615,7 @@ async function attachLoop(resolved: string, opts: { readonly: boolean }): Promis
     if (!hostedByDaemon) await readHostedByDaemon(null);
     const agent = liveHostAgent(sd) ?? daemonHostAgent(sd);
     if (!agent) die(`loop '${resolved}' not alive`);
-    const end = await attachHost(hostedByDaemon?.get(agent) ?? hostAttachSocket(sd, agent), { stdin: process.stdin, stdout: process.stdout }, { readonly: opts.readonly });
+    const end = await attachHost(hostedByDaemon?.get(agent) ?? hostAttachSocket(sd, agent), { stdin: process.stdin, stdout: process.stdout }, { readonly: opts.readonly, label: resolved });
     const why = end.reason === "detached" ? `detached from '${resolved}' — Claude carries on on the host`
         : end.reason === "exited" ? `the session of '${resolved}' ended (code ${end.code ?? "?"})`
         : `the host of '${resolved}' ${end.reason === "error" ? "refused" : "closed"} the attach${end.message ? `: ${end.message}` : ""}`;

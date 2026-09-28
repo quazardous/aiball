@@ -102,6 +102,9 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A read-only copy of a loop says so: on the session host, a reverse-video bar
+  on the terminal's last row and the terminal's title; in tmux, `👁 COPY` at
+  the head of the status line, for the read-only client only.
 - `claude-loop` where the agent's loop already runs (in tmux or on the session
   host) attaches to it instead of refusing: as a read-only copy, or with the
   controls under `--force`. `--force` never starts a second loop any more.

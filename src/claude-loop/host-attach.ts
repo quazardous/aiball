@@ -66,6 +66,24 @@ export class DetachKeys {
     }
 }
 
+/**
+ * #3166 — the bar a read-only copy shows on its terminal's last row, in reverse
+ * video: saved cursor, the bar, cursor back, so Claude's screen is untouched
+ * where it does not reach that row. Cut to the width; an emoji counts two.
+ */
+export function copyBar(rows: number, cols: number, label: string): string {
+    const text = ` 👁 COPY · read-only · ${label} · Ctrl-C or Ctrl-B D to leave · --force for the controls `;
+    let cells = 0;
+    let out = "";
+    for (const ch of text) {
+        const w = /\p{Extended_Pictographic}/u.test(ch) ? 2 : 1;
+        if (cells + w > cols) break;
+        out += ch;
+        cells += w;
+    }
+    return `\x1b7\x1b[${rows};1H\x1b[0;7m${out}${" ".repeat(Math.max(0, cols - cells))}\x1b[0m\x1b8`;
+}
+
 /** Modes a session may have left on the terminal, turned back off on leaving. */
 const RESTORE = "\x1b[0m\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\r\n";
 
@@ -77,8 +95,12 @@ export interface AttachIo {
 /** Why the attach ended: the user detached, the session ended, or the host refused or went away. */
 export type AttachEnd = { reason: "detached" } | { reason: "exited"; code: number | null } | { reason: "closed" | "error"; message: string };
 
-export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: boolean } = {}): Promise<AttachEnd> {
+export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: boolean; label?: string } = {}): Promise<AttachEnd> {
     const readonly = opts.readonly === true;
+    const label = opts.label ?? "the session";
+    // #3166 — a copy says so: the bar on the last row, drawn again after
+    // whatever Claude writes, and the terminal's title (pushed, popped on leaving).
+    const bar = () => { if (readonly) io.stdout.write(copyBar(io.stdout.rows ?? 24, io.stdout.columns ?? 80, label)); };
     return new Promise((resolve) => {
         const sock: Socket = connect(socketPath);
         const reader = new FrameReader();
@@ -100,7 +122,9 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
             io.stdout.off?.("resize", onResize);
             if (io.stdin.isTTY) io.stdin.setRawMode?.(false);
             io.stdin.pause();
+            io.stdout.off?.("resize", bar);
             io.stdout.write(RESTORE);
+            if (readonly) io.stdout.write("\x1b[23;0t");
             sock.destroy();
             resolve(end);
         };
@@ -110,6 +134,10 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
             io.stdin.on("data", onKeys);
             io.stdin.resume();
             if (!readonly) io.stdout.on("resize", onResize);
+            if (readonly) {
+                io.stdout.write(`\x1b[22;0t\x1b]0;👁 COPY — ${label}\x07`);
+                io.stdout.on("resize", bar);
+            }
         });
         sock.on("data", (chunk: Buffer) => {
             for (const f of reader.push(chunk)) {
@@ -117,8 +145,10 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
                     // A fresh screen, then the host's repaint of it.
                     io.stdout.write("\x1b[H\x1b[2J");
                     io.stdout.write(f.payload.subarray(8));
+                    bar();
                 } else if (f.type === FRAME.output) {
                     io.stdout.write(f.payload.subarray(8));
+                    bar();
                 } else if (f.type === FRAME.exited) {
                     const e = JSON.parse(f.payload.toString("utf8")) as { code?: number | null; restarting?: boolean };
                     if (!e.restarting) finish({ reason: "exited", code: e.code ?? null });

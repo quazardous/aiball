@@ -35,7 +35,7 @@ import {
     type LoopStatus,
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
-import { afkState } from "./bar-render.js";
+import { afkState, COPY_MARK } from "./bar-render.js";
 import { attachFor, type AgentBar, type BarHost } from "../agent-bar.js";
 import { CL_ENV } from "./env-vars.js";
 
@@ -602,7 +602,7 @@ export class BarRenderer {
             // coloré à droite.
             setOpt(
                 "status-left",
-                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+                `${COPY_MARK}#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
             );
         }
         if (changedSet.has("zenActive")) {

@@ -95,3 +95,10 @@ export function renderAfkChunk(input: LoopStateInput): AfkChunk {
     }
     return { label: "AFK", prefix: null, color: "dim" };
 }
+
+/**
+ * #3166 — a read-only client of the loop's tmux session (`claude-loop` as a
+ * copy, `attach --read-only`) sees it at the head of the status line. tmux
+ * evaluates it per client: a client with the controls sees nothing new.
+ */
+export const COPY_MARK = "#{?client_readonly,#[fg=colour16#,bg=colour226#,bold] 👁 COPY · read-only #[default],}";

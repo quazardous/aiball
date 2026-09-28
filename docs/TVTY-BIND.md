@@ -26,7 +26,10 @@ one place at a time, and a client arriving never moves it or restarts it.
 
 - **A copy** watches: it types nothing and never resizes the session. Detach
   with Ctrl-B D, as from any attach; a copy on the session host also leaves on
-  Ctrl-C or Ctrl-D, which would reach nothing anyway.
+  Ctrl-C or Ctrl-D, which would reach nothing anyway. claude-loop shows a copy
+  plainly: on the host, a reverse-video bar on the terminal's last row and the
+  terminal's title; in tmux, `👁 COPY` at the head of the status line, which
+  tmux draws for the read-only client alone. tvty shows it its own way.
 - **The controls** are shared, as tmux shares them: every interactive client
   types, and the session's size follows the last one that typed, pasted or
   took focus ([`LOOP-HOST.md`](./LOOP-HOST.md), *Size*). Taking them demotes
