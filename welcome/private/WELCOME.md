@@ -37,10 +37,10 @@ type):
 
 Private-only relaxations:
 
-- **Comments / docstrings / commit messages can be in the team's
-  usual language.** Code stays English ; the prose around it does
-  not have to. A team that thinks in French keeps the friction low
-  by writing comments in French.
+- **Comments / docstrings / commit messages can be in the user's
+  language.** Code stays English ; the prose around it does not have
+  to. Writing comments in the language the team thinks in keeps the
+  friction low.
 - **References to internal tools are fine.** Private tracker IDs
   (`PROJ-NNN`, internal-only board hashids), VPN-only URLs
   (`*.internal.*`, Tailscale hostnames), on-call dashboards,
@@ -54,8 +54,8 @@ Private-only relaxations:
 ## Watch the migration debt
 
 Choosing `private` is a deliberate trade-off : if this project ever
-goes public later, expect a scrub pass — French comments to
-translate, internal references to remove, README to rewrite. The
+goes public later, expect a scrub pass — comments to translate
+into English, internal references to remove, README to rewrite. The
 cost grows with the codebase, so the decision to keep a project
 private should be a real one, not a default.
 
