@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
 import { notifyTokenRevoked, tokenHandle } from "./tokens.js";
+import { consumersRelayedBy } from "../relayed-by.js";
 
 export interface RelayedConsumer {
     consumer_id: string;
@@ -53,33 +54,16 @@ export function nodeId(token: string): string {
     return tokenHandle(token);
 }
 
-/**
- * Match the node-relayed consumers to a node by its peer IP. Pure (no DB) so it
- * unit-tests. A node with no recorded IP relays nobody we can attribute yet.
- */
-export function relayedFor(
-    nodeIp: string | null,
-    relayed: { consumer_id: string; last_seen_ip: string | null; last_seen_at: string | null }[],
-): RelayedConsumer[] {
-    if (!nodeIp) return [];
-    return relayed
-        .filter((c) => c.last_seen_ip === nodeIp)
-        .map((c) => ({ consumer_id: c.consumer_id, last_seen_at: c.last_seen_at }));
-}
 
 export function listNodes(): NodeView[] {
     const db = getDb();
     const nodes = db.select().from(schema.tokens).where(eq(schema.tokens.kind, "node")).all();
-    const relayed = db.select({
-        consumer_id: schema.consumers.consumerId,
-        last_seen_ip: schema.consumers.lastSeenIp,
-        last_seen_at: schema.consumers.lastSeenAt,
-    })
-        .from(schema.consumers)
-        .where(eq(schema.consumers.lastSeenVia, "node"))
-        .all();
+    const seenAt = new Map(db.select({ id: schema.consumers.consumerId, at: schema.consumers.lastSeenAt }).from(schema.consumers)
+        .where(eq(schema.consumers.lastSeenVia, "node")).all().map((c) => [c.id, c.at ?? null] as const));
     return nodes.map((n) => {
-        const rel = relayedFor(n.lastSeenIp ?? null, relayed);
+        // #3349 — the consumers whose calls came through this node's token, not
+        // an address match: behind tailscale serve every node is the loopback.
+        const rel: RelayedConsumer[] = consumersRelayedBy(nodeId(n.token)).map((consumer_id) => ({ consumer_id, last_seen_at: seenAt.get(consumer_id) ?? null }));
         return {
             node_id: nodeId(n.token),
             label: n.label,

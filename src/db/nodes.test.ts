@@ -9,9 +9,11 @@ import { join } from "node:path";
 // Throwaway DB before importing anything that reads paths.
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-424-"));
 
-const { nodeId, relayedFor, listNodes, revokeNode } = await import("./nodes.js");
+const { nodeId, listNodes, revokeNode } = await import("./nodes.js");
+const { noteRelayed } = await import("../relayed-by.js");
 const { getDb, nowIso } = await import("./connection.js");
 const schema = await import("../schema.js");
+const { eq } = await import("drizzle-orm");
 
 test("nodeId: deterministic, 16 hex, never the token value", () => {
     assert.equal(nodeId("aiball-deadbeef"), nodeId("aiball-deadbeef"));
@@ -20,30 +22,31 @@ test("nodeId: deterministic, 16 hex, never the token value", () => {
     assert.notEqual(nodeId("aiball-a"), nodeId("aiball-b"));
 });
 
-test("relayedFor: groups consumers by the node's ip; none when ip null", () => {
-    const cs = [
-        { consumer_id: "alice", last_seen_ip: "100.64.0.3", last_seen_at: "t1" },
-        { consumer_id: "bob", last_seen_ip: "100.64.0.9", last_seen_at: "t2" },
-        { consumer_id: "carol", last_seen_ip: "100.64.0.3", last_seen_at: "t3" },
-    ];
-    assert.deepEqual(relayedFor("100.64.0.3", cs).map((c) => c.consumer_id).sort(), ["alice", "carol"]);
-    assert.equal(relayedFor(null, cs).length, 0);
-    assert.equal(relayedFor("10.0.0.1", cs).length, 0);
-});
-
 const db = getDb();
 db.insert(schema.tokens).values({ token: "aiball-node1", kind: "node", label: "macbook", createdAt: nowIso(), lastSeenIp: "100.64.0.3" }).run();
 db.insert(schema.tokens).values({ token: "aiball-agent1", kind: "agent", createdAt: nowIso() }).run();
 db.insert(schema.consumers).values({ consumerId: "alice", kind: "agent", enabled: 1, createdAt: nowIso(), updatedAt: nowIso(), lastSeenVia: "node", lastSeenIp: "100.64.0.3", lastSeenAt: nowIso() }).run();
 db.insert(schema.consumers).values({ consumerId: "local", kind: "agent", enabled: 1, createdAt: nowIso(), updatedAt: nowIso(), lastSeenVia: "uds" }).run();
 
-test("listNodes: only node tokens, relayed consumers grouped by ip, token hidden", () => {
+test("listNodes: only node tokens, relayed consumers by the node their calls came through, token hidden", () => {
+    // #3349 — attributed by the node's token, not its address: a second node at
+    // the same address (both behind tailscale serve), and one with none, relay nobody.
+    db.insert(schema.tokens).values({ token: "aiball-node2", kind: "node", label: "same-ip", createdAt: nowIso(), lastSeenIp: "100.64.0.3" }).run();
+    db.insert(schema.tokens).values({ token: "aiball-node3", kind: "node", label: "never", createdAt: nowIso() }).run();
+    db.insert(schema.consumers).values({ consumerId: "no-ip", kind: "agent", enabled: 1, createdAt: nowIso(), updatedAt: nowIso(), lastSeenVia: "node", lastSeenAt: nowIso() }).run();
+    noteRelayed("alice", nodeId("aiball-node1"));
+    noteRelayed("no-ip", nodeId("aiball-node1"));
+    const all = listNodes();
+    assert.equal(all.length, 3);
+    assert.deepEqual(all.find((n) => n.label === "same-ip")!.relayed, [], "the same address is not the same node");
+    assert.deepEqual(all.find((n) => n.label === "never")!.relayed, [], "no address matches no agent either");
+    for (const t of ["aiball-node2", "aiball-node3"]) db.delete(schema.tokens).where(eq(schema.tokens.token, t)).run();
     const nodes = listNodes();
     assert.equal(nodes.length, 1); // the agent token is excluded
     assert.equal(nodes[0].label, "macbook");
     assert.equal(nodes[0].last_seen_ip, "100.64.0.3");
-    assert.deepEqual(nodes[0].relayed.map((r) => r.consumer_id), ["alice"]); // 'local' (uds) excluded
-    assert.equal(nodes[0].relayed_count, 1);
+    assert.deepEqual(nodes[0].relayed.map((r) => r.consumer_id).sort(), ["alice", "no-ip"], "even an agent whose address was never recorded");
+    assert.equal(nodes[0].relayed_count, 2);
     assert.doesNotMatch(JSON.stringify(nodes[0]), /aiball-node1/); // token value never exposed
 });
 

@@ -23,13 +23,13 @@ import { captureOnce, MAX_KEYS_BYTES, paneTarget, resolveLoopName, sendLoopKeys,
 import { getConsumer } from "./db.js";
 import { sessionFor } from "./sessions/registry.js";
 import {
-    getNodeSocketForConsumerIp,
-    listConnectedNodeIds,
+    getNodeSocketForConsumer,
     newRequestId,
     registerResponseHandler,
     unregisterResponseHandler,
 } from "./proxy-ws.js";
 import { listNodes } from "./db/nodes.js";
+import { nodeOfConsumer } from "./relayed-by.js";
 
 export { MAX_KEYS_BYTES };
 
@@ -254,20 +254,22 @@ async function tmuxKeys(agent: string, keys: string): Promise<void> {
 
 // ---- on a proxy node ------------------------------------------------------------
 
-/** Why a node-relayed agent's node cannot be reached, for the viewer. */
-function nodeUnreachable(lastSeenIp: string | null): string {
-    const connected = listConnectedNodeIds();
-    const node = listNodes().find((n) => n.last_seen_ip === lastSeenIp);
-    if (connected.length === 0) return "no proxy node is connected to this daemon: restart the daemon on the node that runs this agent";
-    if (!node) return `no node matches the agent's last address (${lastSeenIp ?? "none"}); connected: ${connected.join(", ")}`;
-    return `node ${node.node_id} (${node.label}) is registered but not connected right now: restart the proxy daemon on it`;
+/**
+ * Why a node-relayed agent's node cannot be reached, for the viewer. #3349 —
+ * the node the agent's calls came through, never one guessed from an address.
+ */
+function nodeUnreachable(agent: string): string {
+    const nodeId = nodeOfConsumer(agent);
+    if (!nodeId) return `${agent} has not called this daemon through a proxy node since it started: its node is not known yet (it will be at its next call)`;
+    const node = listNodes().find((n) => n.node_id === nodeId);
+    return `node ${nodeId}${node?.label ? ` (${node.label})` : ""} is not connected right now: restart the proxy daemon on it`;
 }
 
 function nodeScreen(agent: string, emit: (e: ScreenEvent) => void): Screen | null {
     const consumer = getConsumer(agent)!;
-    const ws = getNodeSocketForConsumerIp(consumer.last_seen_ip ?? null);
+    const ws = getNodeSocketForConsumer(agent);
     if (!ws) {
-        emit({ kind: "unavailable", error: nodeUnreachable(consumer.last_seen_ip ?? null) });
+        emit({ kind: "unavailable", error: nodeUnreachable(agent) });
         return null;
     }
     if (!consumer.cwd) {
@@ -316,8 +318,8 @@ function nodeScreen(agent: string, emit: (e: ScreenEvent) => void): Screen | nul
 /** Keys into a node-relayed agent's pane: one request, one acknowledgement. */
 async function nodeKeys(agent: string, keys: string): Promise<void> {
     const consumer = getConsumer(agent);
-    const ws = consumer ? getNodeSocketForConsumerIp(consumer.last_seen_ip ?? null) : undefined;
-    if (!consumer || !ws) throw new Error(nodeUnreachable(consumer?.last_seen_ip ?? null));
+    const ws = consumer ? getNodeSocketForConsumer(agent) : undefined;
+    if (!consumer || !ws) throw new Error(nodeUnreachable(agent));
     if (!consumer.cwd) throw new Error("the agent has no loop running: no cwd yet");
     const requestId = newRequestId();
     const ack = new Promise<{ ok: boolean; error?: string }>((resolve) => {

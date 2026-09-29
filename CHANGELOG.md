@@ -50,6 +50,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The web terminal reaches an agent on a proxy node through the node its calls
+  come through. It matched them by address, which fails behind tailscale serve
+  (every node is the loopback) and named a node that was never connected; the
+  node list now counts each node's agents the same way.
 - `claude-loop stop` on Windows ends Claude's session too. It used to end the
   loop's kernel only, and leave the psmux session and Claude running.
 - `POST /api/tickets` with a key scoped to a project deleted since answers

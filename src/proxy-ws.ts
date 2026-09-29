@@ -26,7 +26,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
 import { randomBytes } from "node:crypto";
 import { getToken } from "./db/tokens.js";
-import { nodeId as computeNodeId, listNodes } from "./db/nodes.js";
+import { nodeId as computeNodeId } from "./db/nodes.js";
+import { nodeOfConsumer } from "./relayed-by.js";
 import { setTokenLastSeenIp, setTokenDisplayHost } from "./db/tokens.js";
 import { nowIso } from "./db/connection.js";
 import { getDb } from "./db/connection.js";
@@ -72,18 +73,13 @@ export function getProxyNodeSocket(nodeId: string): WebSocket | null {
 }
 
 /**
- * #505 phase 2 — résout le node qui héberge un consumer donné, via le matching
- * IP (consumer.last_seen_ip == tokens.last_seen_ip pour kind=node), même
- * heuristique que `src/db/nodes.ts::relayedFor`. Renvoie le WS si le node est
- * actuellement connecté, sinon null. Le caller (agents.ts) doit fallback sur
- * `event:unavailable` dans ce cas (le node n'écoute pas, on ne peut pas livrer
- * la requête).
+ * #3349 — the socket of the node `consumer` comes through: the node its last
+ * relayed call authenticated as (relayed-by.ts). Null when that node is not
+ * connected, or when the agent has not come through one since the daemon started.
  */
-export function getNodeSocketForConsumerIp(consumerIp: string | null): WebSocket | null {
-    if (!consumerIp) return null;
-    const node = listNodes().find((n) => n.last_seen_ip === consumerIp);
-    if (!node) return null;
-    return getProxyNodeSocket(node.node_id);
+export function getNodeSocketForConsumer(consumer: string): WebSocket | null {
+    const node = nodeOfConsumer(consumer);
+    return node ? getProxyNodeSocket(node) : null;
 }
 
 // --- envelope d'ordres : tracking par request_id -----------------------------

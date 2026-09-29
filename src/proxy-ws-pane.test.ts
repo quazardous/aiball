@@ -27,8 +27,7 @@ const { attachBus } = await import("./bus/server.js");
 const { BusClient } = await import("./bus-client.js");
 const { attachProxyWs, PROXY_WS_PATH, listConnectedNodeIds } = await import("./proxy-ws.js");
 const { issueToken } = await import("./db/tokens.js");
-const { listNodes } = await import("./db/nodes.js");
-const { ensureConsumer, touchLastSeen, setConsumerState, upsertConsumer } = await import("./db.js");
+const { ensureConsumer, setConsumerState, touchLastSeen, upsertConsumer } = await import("./db.js");
 
 // Setup : un consumer "graphite-loop" + un node-token. Le matching IP entre le
 // node et le consumer se fait au runtime (le serveur bumpe last_seen_ip à la
@@ -49,17 +48,19 @@ const WS_URL = `ws://127.0.0.1:${port}${PROXY_WS_PATH}`;
 // Connecte le fake-node + attache le handler pane AVANT que open ne resolve,
 // pour ne pas perdre le `hello` du serveur dans la fenêtre entre open et le
 // attach (le ws lib ne buffer pas les events sans listener).
+/** A call of `agent` relayed by the node, as its loop's calls are. */
+async function relayedCall(agent: string): Promise<void> {
+    await fetch(`http://127.0.0.1:${port}/api/uploads/none`, { headers: { authorization: `Bearer ${NODE_TOKEN}`, "x-aiball-consumer": agent } });
+}
+
 function startFakeNode(): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
         const ws = new WebSocket(WS_URL, { headers: { authorization: `Bearer ${NODE_TOKEN}` } });
         attachPaneHandler(ws);
-        ws.on("open", () => {
-            // Reconcilie l'IP : le serveur a bumpé tokens.last_seen_ip à
-            // l'IP réelle du peer (loopback). On bump le consumer avec la même.
-            const nodeRow = listNodes().find((n) => n.label === "fake-node");
-            if (nodeRow?.last_seen_ip) {
-                touchLastSeen("graphite-loop", "node", nodeRow.last_seen_ip);
-            }
+        ws.on("open", async () => {
+            // #3349 — the agent's calls come through the node's token: that is
+            // how the daemon knows which node to reach it through (no address).
+            await relayedCall("graphite-loop");
             resolve(ws);
         });
         ws.on("error", reject);
@@ -154,6 +155,21 @@ test("agent.<id>.screen, node-relayed: unavailable, with the reason, when the no
     const e = heard.get(s.id)![0]!;
     assert.equal(e.kind, "unavailable");
     assert.match(e.error ?? "", /no proxy node|no node matches|not connected/);
+});
+
+// #3349 — an agent never seen through a node: said so, never a node guessed.
+test("agent.pane_keys: an agent not seen through a node since the start is told so, not given another node", async () => {
+    // Relayed before this daemon started (its row says so), not seen since.
+    ensureConsumer("never-relayed");
+    setConsumerState("never-relayed", "idle", false, undefined, "/fake/cwd/never");
+    touchLastSeen("never-relayed", "node", null);
+    const node = await startFakeNode();
+    try {
+        await assert.rejects(operator.call("agent.pane_keys", { agent: "never-relayed", keys: "x" }),
+            (e: { message: string }) => /has not called this daemon through a proxy node/.test(e.message));
+    } finally {
+        node.close();
+    }
 });
 
 after(() => {

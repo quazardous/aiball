@@ -21,6 +21,8 @@ import {
     type Token,
 } from "./db.js";
 import { keyProjects, keyScopes } from "./db/signal-keys.js";
+import { nodeId } from "./db/nodes.js";
+import { noteRelayed } from "./relayed-by.js";
 import { refuse } from "./api/_helpers.js";
 import { ERROR_CODES, type ErrorCode } from "./domain.js";
 import { isLoopback, isMachineSecret, looksLikeMachineSecret } from "./machine-secret.js";
@@ -305,7 +307,10 @@ export function authenticate(input: AuthInput): AuthOutcome {
         const ctx: CallerContext = { consumer_id: explicit ?? "human", token_kind: "node", transport: "tcp", token };
         // Auto-register a relayed agent we haven't seen yet (the loop on B has
         // no token of its own — the node vouches for it). Never touches humans.
-        if (explicit && !isHuman(ctx.consumer_id!)) ensureConsumer(ctx.consumer_id!);
+        if (explicit && !isHuman(ctx.consumer_id!)) {
+            ensureConsumer(ctx.consumer_id!);
+            noteRelayed(ctx.consumer_id!, nodeId(token)); // #3349 — the node it comes through, by the node's own token
+        }
         touchLastSeen(ctx.consumer_id!, "node", input.ip); // #422: proxy-relayed → remote
         setTokenLastSeenIp(token, input.ip); // #424: stamp the node's address for the Nodes panel
         // #463 — proxy node advertises its current label on every request.
