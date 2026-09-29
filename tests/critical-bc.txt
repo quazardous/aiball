@@ -1,0 +1,26 @@
+# #3380 — the unit tests the critical profile runs before every deploy: what a
+# client already relies on (backward compatibility). The whole suite is CI's;
+# `tests/select-critical.ts` adds the tests of the code that changed.
+#
+# tvty's contract, and the tests it names for what needs a loop or a host
+src/api/tvty-contract.test.ts
+src/bus/config-changed.test.ts
+src/bus/counters.test.ts
+src/bus/loop-methods.test.ts
+src/bus/loops-admin.test.ts
+src/bus/project-init.test.ts
+src/bus/project-settings.test.ts
+src/bus/restart-claude.test.ts
+src/sessions/sessions.test.ts
+src/sessions/stop-hup.test.ts
+# the bus's published contract (OpenRPC, AsyncAPI), the layers' import rule
+src/bus/contract.test.ts
+src/architecture.test.ts
+# the MCP tools as an agent calls them
+src/mcp/*.test.ts
+# the loop's client: its transport, the spool that replays its writes
+src/client*.test.ts
+src/spool*.test.ts
+src/claude-loop/transport/*.test.ts
+# config: old names are still read
+src/config/*.test.ts

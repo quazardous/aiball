@@ -30,10 +30,12 @@ NOT yet wired (loudly SKIPPED, never silently — #984 next layer):
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import subprocess
 import sys
 import time
+_T0 = time.monotonic()
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -54,7 +56,17 @@ COMPOSE = REPO / "tests" / "docker-compose.yml"
 
 
 def _compose(*args: str, env: dict | None = None, capture: bool = False) -> subprocess.CompletedProcess:
-    cmd = ["docker", "compose", "-f", str(COMPOSE), *args]
+    cmd = ["docker", "compose", "-f", str(COMPOSE)]
+    # #3380 — the run's shared node_modules volumes, when run-docker.sh made them.
+    if os.environ.get("AIBALL_TEST_NM"):
+        cmd += ["-f", str(REPO / "tests" / "docker-compose.nm.yml")]
+        net = f"{os.environ.get('COMPOSE_PROJECT_NAME', 'tests')}-net"
+        os.environ["AIBALL_TEST_NET"] = net
+        if env is not None:
+            env = {**env, "AIBALL_TEST_NET": net}
+        if subprocess.run(["docker", "network", "inspect", net], capture_output=True).returncode != 0:
+            subprocess.run(["docker", "network", "create", net], capture_output=True)
+    cmd += list(args)
     return subprocess.run(cmd, env=env, text=True, capture_output=capture)
 
 
@@ -124,9 +136,9 @@ def _wait_daemon_ready(timeout_s: float = 60.0) -> None:
 def _dump_loop(loop_name: str, lines: int = 80) -> None:
     """The loop's inspect snapshot and the tail of its log, for a failed run."""
     r = _agent_exec(["/app/bin/claude-loop", "inspect", loop_name])
-    print(f"[fullstack] inspect {loop_name}: {r.stdout.strip() or r.stderr.strip()}")
+    print(f"[fullstack +{time.monotonic() - _T0:.0f}s] inspect {loop_name}: {r.stdout.strip() or r.stderr.strip()}")
     log = _agent_exec(["sh", "-c", f"tail -n {lines} \"$HOME/.claude-loop/{loop_name}/loop.log\""])
-    print(f"[fullstack] loop.log (last {lines} lines):\n{log.stdout or log.stderr}")
+    print(f"[fullstack +{time.monotonic() - _T0:.0f}s] loop.log (last {lines} lines):\n{log.stdout or log.stderr}")
 
 
 def _wait_agent_daemon_ready(timeout_s: float = 90.0) -> None:
@@ -185,6 +197,31 @@ def _eval_expect(step: ExpectStep, snapshot: dict) -> list[str]:
     return fails
 
 
+def _expect_once(step: ExpectStep, loop_name: str, handles: dict) -> list[str] | None:
+    """One look at an expectation: its failures, [] when it holds, None for a target not wired."""
+    if step.assert_target == "inspect":
+        return _eval_expect(step, _inspect(loop_name))
+    if step.assert_target == "daemon":
+        fails = []
+        for path, want in step.assertions.items():
+            got = _daemon_ctl("query", _resolve_path(path, handles))
+            if got != want:
+                fails.append(f"{path}: want {want!r}, got {got!r}")
+        return fails
+    return None
+
+
+def _expect_by(step: ExpectStep, deadline: float, loop_name: str, handles: dict) -> list[str] | None:
+    """#3380 — look every second until the expectation holds or `deadline` passes.
+    A scenario's expectations are states that stay once reached (a ping read, a
+    wake delivered), so passing early means the same as passing at `at`."""
+    while True:
+        fails = _expect_once(step, loop_name, handles)
+        if not fails or time.monotonic() >= deadline:
+            return fails
+        time.sleep(1)
+
+
 def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
     sc = parse_scenario(scenario_path)
     if only is not None:
@@ -203,13 +240,13 @@ def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
 
     passed = failed = skipped = 0
     handles: dict = {}
-    print(f"[fullstack] scenario={sc.name} fake_claude={spawn.fake_claude} fixture={sc.fixture}")
+    print(f"[fullstack +{time.monotonic() - _T0:.0f}s] scenario={sc.name} fake_claude={spawn.fake_claude} fixture={sc.fixture}")
 
     # Bring up the daemon FIRST and seed the fixture BEFORE the agent starts —
     # the loop drains its unread/actionable at boot, so the seed must already be
     # in the daemon when the loop wakes (else the startup wake finds nothing and
     # the WakeMachine gates further wakes). #985.
-    print("[fullstack] compose up -d daemon ...")
+    print(f"[fullstack +{time.monotonic() - _T0:.0f}s] compose up -d daemon ...")
     up = _compose("up", "-d", "daemon", env=env, capture=True)
     if up.returncode != 0:
         print(f"FATAL: compose up daemon failed:\n{up.stderr}", file=sys.stderr)
@@ -220,11 +257,13 @@ def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
         _wait_daemon_ready()
         if sc.fixture and not spawn.host:
             handles = _daemon_ctl("seed", sc.fixture) or {}
-            print(f"[fullstack] seeded fixture '{sc.fixture}' → handles {handles}")
-        print("[fullstack] compose up -d agent ...")
+            print(f"[fullstack +{time.monotonic() - _T0:.0f}s] seeded fixture '{sc.fixture}' → handles {handles}")
+        print(f"[fullstack +{time.monotonic() - _T0:.0f}s] compose up -d agent ...")
         # --build: the agent image carries built binaries (the proxy, the host);
         # an image cached from before a Dockerfile change would lack them.
-        up2 = _compose("up", "-d", "--build", "agent", env=env, capture=True)
+        # #3380 — AIBALL_TEST_PREBUILT: built once for the whole run, before the scenarios.
+        build = "--no-build" if os.environ.get("AIBALL_TEST_PREBUILT") else "--build"
+        up2 = _compose("up", "-d", build, "agent", env=env, capture=True)
         if up2.returncode != 0:
             raise RuntimeError(f"compose up agent failed: {up2.stderr}")
         if spawn.host:
@@ -232,14 +271,29 @@ def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
             _wait_agent_daemon_ready()
             if sc.fixture:
                 handles = _daemon_ctl("seed", sc.fixture) or {}
-                print(f"[fullstack] seeded fixture '{sc.fixture}' (agent's daemon) → handles {handles}")
+                print(f"[fullstack +{time.monotonic() - _T0:.0f}s] seeded fixture '{sc.fixture}' (agent's daemon) → handles {handles}")
             _agent_exec(["touch", "/agent-daemon/go"])
-            print("[fullstack] host mode: the loop starts on the session host")
+            print(f"[fullstack +{time.monotonic() - _T0:.0f}s] host mode: the loop starts on the session host")
         _wait_loop_ready(loop_name)
-        print("[fullstack] loop ready — playing timeline")
+        print(f"[fullstack +{time.monotonic() - _T0:.0f}s] loop ready — playing timeline")
         t0 = time.monotonic()
         for step in sc.steps[1:]:
             at = getattr(step, "at_seconds", 0.0)
+            # #3380 — an expectation holds BY its `at`: polled from now until then,
+            # it passes as soon as it is true. An action still waits for its `at`.
+            if isinstance(step, ExpectStep):
+                fails = _expect_by(step, t0 + at, loop_name, handles)
+                label = "inspect" if step.assert_target == "inspect" else "daemon"
+                if fails is None:
+                    print(f"[t={at}] SKIP expect target '{step.assert_target}'")
+                    skipped += 1
+                elif fails:
+                    failed += 1
+                    print(f"[t={at}] EXPECT({label}) FAIL: {'; '.join(fails)}")
+                else:
+                    passed += 1
+                    print(f"[t={at}] EXPECT({label}) ok after {time.monotonic() - t0:.0f} s")
+                continue
             delay = (t0 + at) - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
@@ -253,26 +307,6 @@ def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
                 else:
                     print(f"[t={at}] SKIP human action '{step.action}' (not wired)")
                     skipped += 1
-            elif isinstance(step, ExpectStep) and step.assert_target == "inspect":
-                fails = _eval_expect(step, _inspect(loop_name))
-                if fails:
-                    failed += 1
-                    print(f"[t={at}] EXPECT(inspect) FAIL: {'; '.join(fails)}")
-                else:
-                    passed += 1
-                    print(f"[t={at}] EXPECT(inspect) ok")
-            elif isinstance(step, ExpectStep) and step.assert_target == "daemon":
-                fails = []
-                for path, want in step.assertions.items():
-                    got = _daemon_ctl("query", _resolve_path(path, handles))
-                    if got != want:
-                        fails.append(f"{path}: want {want!r}, got {got!r}")
-                if fails:
-                    failed += 1
-                    print(f"[t={at}] EXPECT(daemon) FAIL: {'; '.join(fails)}")
-                else:
-                    passed += 1
-                    print(f"[t={at}] EXPECT(daemon) ok")
             elif isinstance(step, AiballStep):
                 spec = _resolve({step.action: step.payload[step.action]}, handles)
                 _daemon_ctl("mutate", json.dumps(spec))
@@ -289,12 +323,12 @@ def run(scenario_path: Path, only: set[str] | None, keep: bool = False) -> int:
         if failed:
             _dump_loop(loop_name)
         if keep:
-            print("[fullstack] --keep: stack left up (docker compose -f tests/docker-compose.yml down -v)")
+            print(f"[fullstack +{time.monotonic() - _T0:.0f}s] --keep: stack left up (docker compose -f tests/docker-compose.yml down -v)")
         else:
-            print("[fullstack] compose down -v ...")
+            print(f"[fullstack +{time.monotonic() - _T0:.0f}s] compose down -v ...")
             _compose("down", "-v", env=env, capture=True)
 
-    print(f"[fullstack] result: {passed} passed, {failed} failed, {skipped} skipped")
+    print(f"[fullstack +{time.monotonic() - _T0:.0f}s] result: {passed} passed, {failed} failed, {skipped} skipped")
     # Non-zero if anything failed OR anything was skipped (incomplete coverage).
     return 0 if (failed == 0 and skipped == 0) else 1
 

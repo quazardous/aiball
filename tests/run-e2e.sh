@@ -5,12 +5,20 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-compose() { docker compose -f tests/docker-compose.yml "$@"; }
+# #3380 — with the run's shared node_modules volumes when run-docker.sh made them.
+if [ -n "${AIBALL_TEST_NM:-}" ]; then
+    export AIBALL_TEST_NET="${COMPOSE_PROJECT_NAME:-tests}-net"
+    docker network inspect "$AIBALL_TEST_NET" >/dev/null 2>&1 || docker network create "$AIBALL_TEST_NET" >/dev/null
+    compose() { docker compose -f tests/docker-compose.yml -f tests/docker-compose.nm.yml "$@"; }
+else
+    compose() { docker compose -f tests/docker-compose.yml "$@"; }
+fi
 # The compose file publishes the daemon on AIBALL_TEST_PORT; wait on that same port.
 PORT="${AIBALL_TEST_PORT:-17777}"
 
 # Only the daemon: the scenarios run inside it and never talk to the agent service.
-compose up -d --build daemon
+# #3380 — AIBALL_TEST_PREBUILT: the images were built once for the whole run.
+if [ -n "${AIBALL_TEST_PREBUILT:-}" ]; then compose up -d --no-build daemon; else compose up -d --build daemon; fi
 
 # wait for the daemon to be healthy (public /api/health)
 ok=0
@@ -27,6 +35,8 @@ fi
 
 # scenarios run INSIDE the daemon container (shared DB + localhost daemon).
 # Each uses a distinct project, so they don't interfere on the shared daemon.
+# One after another: the scenarios run inside the daemon's container and write its
+# database file directly, so side by side they lock each other out (#3380).
 code=0
 for s in tests/scenario-*.ts; do
     echo "=== $(basename "$s") ==="

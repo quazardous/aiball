@@ -1,0 +1,31 @@
+# #3380 — the node_modules of the test images, filled once per lockfile and
+# Dockerfile (tests/run-docker.sh `build_images`) and mounted by every container
+# of the run. Without it, each new container copied the image's node_modules
+# into an anonymous volume at start (~60 s) and deleted it at `down -v`.
+# The volume names come from run-docker.sh; the simulator already shares the
+# first one (AIBALL_SIM_NM, same name).
+services:
+  tests:
+    volumes:
+      - nm-node:/app/node_modules
+  daemon:
+    stop_grace_period: 2s
+    volumes:
+      - nm-node:/app/node_modules
+  agent:
+    stop_grace_period: 2s
+    volumes:
+      - nm-agent:/app/node_modules
+volumes:
+  nm-node:
+    external: true
+    name: ${AIBALL_TEST_NM:-aiball-test-nm-unset}
+  nm-agent:
+    external: true
+    name: ${AIBALL_TEST_NM_AGENT:-aiball-test-nm-agent-unset}
+# #3380 — the project's network, created once and kept: on this kind of host a
+# network is ~70 s to create and ~30 s to remove, against 2 s for the stack in it.
+networks:
+  default:
+    name: ${AIBALL_TEST_NET:-aiball-test-net-unset}
+    external: true

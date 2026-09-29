@@ -16,6 +16,8 @@ services:
   # or the internet. The source is mounted READ-ONLY; AIBALL_TEST_SRC points it
   # at another checkout (e.g. a scratch copy of an undeployed change).
   tests:
+    # #3380 — one image, built once per run and shared by every project
+    image: aiball-test-node:local
     profiles: ["tests"]
     build:
       context: ..
@@ -45,6 +47,8 @@ services:
   # as it does in CI, instead of being resolved by the root's packages. The
   # build writes to /tmp: the source stays read-only.
   frontend:
+    # #3380 — one image, built once per run and shared by every project
+    image: aiball-test-frontend:local
     profiles: ["tests"]
     build:
       context: ..
@@ -69,6 +73,8 @@ services:
         && cd /tmp/w/frontend && npx vue-tsc --noEmit && npx vite build --outDir /tmp/frontend-dist --emptyOutDir
 
   daemon:
+    # #3380 — one image, built once per run and shared by every project
+    image: aiball-test-node:local
     build:
       context: ..
       dockerfile: tests/Dockerfile
@@ -105,6 +111,8 @@ services:
   # send-keys into its pane (proxy = human keystroke) ; daemon data (timeline 3)
   # is seeded over the API. Headless tmux = naturally detached (covers #971).
   agent:
+    # #3380 — one image, built once per run and shared by every project
+    image: aiball-test-agent:local
     build:
       context: ..
       dockerfile: tests/Dockerfile.agent

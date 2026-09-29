@@ -385,17 +385,24 @@ aiball uses Node's native test runner (`vitest`-style suites under
 - Run the suite in Docker, not on your machine — the dev checkout is
   usually the live runtime, and a full run on the host starves the
   daemon and loops sharing it. Two profiles:
-  - `npm run test:docker -- critical` **before every deploy**: the
-    checks CI runs (typecheck, lint, the frontend's tests, and the
-    frontend build in an install of the frontend's dependencies alone),
-    unit, e2e, fullstack, and the board simulator's scenarios marked
-    `critical: true` (the ones that guard the loops' contract);
+  - `npm run test:docker -- critical` **before every deploy**, its
+    phases side by side: the checks CI runs (typecheck, lint, the
+    frontend's tests, and the frontend build in an install of the
+    frontend's dependencies alone), the unit tests of backward
+    compatibility (`tests/critical-bc.txt`) and of what changed since
+    `AIBALL_TEST_BASE` (default `origin/main`; set it to what is
+    deployed), e2e, fullstack, and the board simulator's scenarios
+    marked `critical: true` (the ones that guard the loops' contract);
   - `npm run test:docker -- full` (or `all`) **before a release or
-    after a large change**: everything.
+    after a large change**, and in CI: everything, the whole unit suite
+    included.
 
-  Measured here: `critical` ~12 min (checks ~1, unit ~4, fullstack ~5,
-  simulator ~2); `full` runs every simulator scenario on top. Each phase
-  prints its time.
+  Measured here: `critical` ~3 min, its longest phase the unit
+  selection; `full` runs every simulator scenario on top. Each phase
+  prints its time. The first run on a machine is longer: it creates the
+  test stacks' Docker networks and `node_modules` volumes, which are
+  kept (a network is ~70 s to create on some hosts, against 2 s for the
+  stack in it).
 
   The test image builds `cl-session-host`, so the suites that drive a
   real session host run there; a suite that needs one and does not find

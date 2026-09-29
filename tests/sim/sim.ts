@@ -45,6 +45,8 @@ const PORT = process.env.AIBALL_SIM_PORT ?? String(BASE_PORT + (SHARD ? Number(S
 const BASE = `http://127.0.0.1:${PORT}`;
 const STATE_FILE = join(HERE, ".state", SHARD ? `cohort-${SHARD}.json` : "cohort.json");
 const SCENARIOS = join(HERE, "scenarios");
+/** #3380 — the images were built once for the whole run: no board rebuilds them. */
+const PREBUILT = !!process.env.AIBALL_TEST_PREBUILT;
 const COMPOSE = ["compose", "-p", SHARD ? `aiball-sim-${SHARD}` : "aiball-sim", "-f", join(ROOT, "tests/docker-compose.yml"), "-f", join(ROOT, "tests/docker-compose.sim.yml")];
 /** #3016 — the shared node_modules volume: named after what fills it, so it is never stale. */
 const NM_VOLUME = `aiball-sim-nm-${createHash("sha256")
@@ -132,7 +134,7 @@ function cohortPath(cohortArg: string | undefined): string {
 function ensureNodeModulesVolume(): void {
     const has = spawnSync("docker", ["volume", "inspect", NM_VOLUME], { stdio: "ignore" }).status === 0;
     if (has) return;
-    docker(["build", "daemon"]);
+    if (!PREBUILT) docker(["build", "daemon"]);
     spawnSync("docker", ["volume", "create", NM_VOLUME], { stdio: "ignore" });
     docker(["run", "--rm", "--no-deps", "daemon", "true"]);
     const old = spawnSync("docker", ["volume", "ls", "-q", "--filter", "name=aiball-sim-nm-"], { encoding: "utf8" }).stdout
@@ -143,7 +145,7 @@ function ensureNodeModulesVolume(): void {
 async function up(cohortArg: string | undefined): Promise<void> {
     const cohort = cohortPath(cohortArg);
     ensureNodeModulesVolume();
-    docker(["up", "-d", "--build", "daemon"]);
+    docker(["up", "-d", PREBUILT ? "--no-build" : "--build", "daemon"]);
     await waitHealthy();
     provision([cohort]);
 }
