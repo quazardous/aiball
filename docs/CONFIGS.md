@@ -134,6 +134,24 @@ Set it up with `aiball init tailscale [--http] [--port N]`; manage from the CLI:
 > of `install.sh` (regenerates the unit + `daemon-reload`); then a daemon
 > (re)start brings the provider up.
 
+### Serving under a path — `server.base_path` — *global only (host-level)*
+To serve aiball under a path (`https://host/aiball/`) behind a reverse proxy
+that forwards the path as it is (nginx, traefik without a strip middleware),
+declare it in the **global** config:
+
+```yaml
+# ~/.config/aiball/config.yaml
+server:
+  base_path: /aiball
+```
+
+The daemon removes the path from each request before its routes and the bus
+see it; a request without it is served as before, so a proxy that strips the
+path works with the same setting. Unset, it takes the tailscale provider's
+`path` (tailscale strips it, so nothing changes there); neither = served at
+the root. Read at daemon start: `aiball restart` to apply a change. The web UI
+and a proxy node's `url` (`https://host/aiball`) need nothing more.
+
 ## Durations and renamed keys
 
 A setting that is a time is a **duration**: seconds on the wire (`config.managed`

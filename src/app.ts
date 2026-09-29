@@ -14,6 +14,7 @@ import { errorCodeDefaults } from "./api/error-codes.js";
 import { loadProxy, proxyMiddleware, proxyLandingHtml } from "./proxy.js";
 import { mountVersionRoutes } from "./api/version-routes.js";
 import { refuse } from "./api/_helpers.js";
+import { basePathMiddleware, resolveBasePath } from "./base-path.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -59,8 +60,11 @@ export function jsonErrorHandler(
  * fallback when present. No server bind here — see daemon.ts (HTTP/UDS/WS) and
  * the test stack (in-process mount). #324.
  */
-export function createApp(): express.Express {
+export function createApp(opts: { basePath?: string } = {}): express.Express {
     const app = express();
+    // #1179 — served under a path by a proxy that forwards it: the routes below see the url without it.
+    const base = "basePath" in opts ? opts.basePath : resolveBasePath();
+    if (base) app.use(basePathMiddleware(base));
     // #2682 — per-route request counts and durations (GET /api/debug/requests).
     app.use(requestStatsMiddleware);
     // #3039 — every JSON refusal carries a code, the generic one of its status at least.

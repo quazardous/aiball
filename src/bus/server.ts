@@ -13,6 +13,7 @@ import { touchLastSeen } from "../db/consumers.js";
 import { BUS_PATH, BUS_VERSION } from "../bus-protocol.js";
 import { callerOf, type Caller } from "./methods.js";
 import { handleFrame } from "./rpc.js";
+import { resolveBasePath, stripBasePath } from "../base-path.js";
 import { BUS_EPOCH, dropSession, type BusSession } from "./subscriptions.js";
 import "./register.js";
 
@@ -83,11 +84,13 @@ export function authenticateUpgrade(req: IncomingMessage, trusted: boolean): Aut
  * Serve the bus on `server`. `trusted` is the local socket: same-user trust,
  * the identity from `x-aiball-consumer`, as for `/api` there.
  */
-export function attachBus(server: Server, opts: { trusted?: boolean } = {}): WebSocketServer {
+export function attachBus(server: Server, opts: { trusted?: boolean; basePath?: string } = {}): WebSocketServer {
     const trusted = opts.trusted === true;
+    // #1179 — `/aiball/bus` behind a proxy that forwards the path the daemon is served under.
+    const base = "basePath" in opts ? opts.basePath : resolveBasePath();
     const wss = new WebSocketServer({ noServer: true, maxPayload: BUS_MAX_FRAME });
     server.on("upgrade", (req, socket, head) => {
-        if (new URL(req.url ?? "/", "http://localhost").pathname !== BUS_PATH) return;
+        if (new URL(stripBasePath(req.url ?? "/", base), "http://localhost").pathname !== BUS_PATH) return;
         const out = authenticateUpgrade(req, trusted);
         if (!out.ok) {
             refuseUpgrade(socket, out);
