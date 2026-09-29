@@ -1,5 +1,6 @@
 /** #3063 — a ticket read: its header, and its thread in the shape asked. */
 import { z } from "zod";
+import { isMachineLocal } from "../../machine-secret.js";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { flag } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
@@ -501,7 +502,7 @@ defineMethod({
     // path; remote/browser callers get the HTTP ref. Only scan the bodies
     // actually present in the response (brief mode collapses pre-pivot ones).
     const ticketBody = t.body;
-    const localTrust = caller.transport === "uds";
+    const localTrust = isMachineLocal(caller);
     const attachments = resolveAttachments(
         [ticketBody, ...outComments.map((c) => c.body)],
         localTrust,

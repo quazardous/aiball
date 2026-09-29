@@ -25,7 +25,12 @@ The WebSocket is at **`/bus`**:
   there, the same user, no token. Who you are is the `x-aiball-consumer`
   header, `human` without it;
 - over TCP: a token, as for `/api` — `Authorization: Bearer <token>`, or
-  `?token=` where headers cannot be set (a browser).
+  `?token=` where headers cannot be set (a browser);
+- over TCP **from this machine** (the loopback), the **machine secret** read
+  from `<AIBALL_HOME>/machine-secret` as the bearer: the socket's trust, where
+  there is no socket (Windows). Who you are is the `x-aiball-consumer` header
+  again, `human` without it, and the methods that act on this machine accept
+  you ([`SECURITY.md`](./SECURITY.md)).
 
 **Through a proxy node** ([`REMOTE.md`](./REMOTE.md)), `/bus` is on the node's
 socket and port too: the node relays each connection to its upstream's `/bus`,

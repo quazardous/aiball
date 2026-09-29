@@ -4,6 +4,7 @@
  * `consumer_id` as the routes did, and defaults it to the caller.
  */
 import { z } from "zod";
+import { isMachineLocal } from "../../machine-secret.js";
 import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { flag } from "../params.js";
 import {
@@ -97,7 +98,7 @@ defineMethod({
     }),
     run: (caller, p) => {
         const consumer_id = whose(caller, p.consumer_id);
-        const human = caller.transport === "uds" || caller.kind === "human";
+        const human = isMachineLocal(caller) || caller.kind === "human";
         if ((consumer_id !== caller.consumer_id || p.delete === true) && !human) {
             throw new Refusal(403, "targeting another consumer or delete requires a human moderator (local CLI or the web UI)", ERROR_CODES.MODERATOR_ONLY);
         }

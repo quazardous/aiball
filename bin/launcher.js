@@ -79,6 +79,20 @@ function isSocket(path) {
  *
  * @param {string} entryRel Path to the entry, relative to the install root.
  */
+/**
+ * Will the client authenticate with the machine secret? It does when the daemon
+ * is on this machine (a loopback AIBALL_URL, or none) and the daemon wrote the
+ * secret — the TCP counterpart of the socket (Windows has no socket). The
+ * client (src/client.ts) reads it itself; this only keeps `cli-env` from
+ * taking precedence, as the socket does.
+ */
+function usesMachineSecret(home) {
+    let host = "127.0.0.1";
+    try { if (process.env.AIBALL_URL) host = new URL(process.env.AIBALL_URL).hostname.replace(/^\[|\]$/g, ""); } catch { return false; }
+    const loopback = host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+    return loopback && existsSync(join(home, "machine-secret"));
+}
+
 export async function launch(entryRel) {
     // The caller's cwd, captured before we move into the install root: every
     // subcommand that walks up from the user's project (autopoll, check, the
@@ -93,7 +107,7 @@ export async function launch(entryRel) {
     // socket isn't there — an older daemon, or a remote box over an SSH tunnel.
     const sock = join(home, "sock");
     if (!process.env.AIBALL_SOCK && isSocket(sock)) process.env.AIBALL_SOCK = sock;
-    if (!process.env.AIBALL_SOCK && !process.env.AIBALL_TOKEN) {
+    if (!process.env.AIBALL_SOCK && !process.env.AIBALL_TOKEN && !usesMachineSecret(home)) {
         const cliEnv = join(home, "cli-env");
         if (existsSync(cliEnv)) loadCliEnv(cliEnv);
     }

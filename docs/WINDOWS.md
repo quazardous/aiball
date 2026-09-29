@@ -45,18 +45,26 @@ The global config says which: `%USERPROFILE%\.config\aiball\config.yaml`.
 
 1. **Find the daemon**: `AIBALL_URL` if set, else `http://127.0.0.1:7777`
    (the daemon's `-Port` at install; the clients read `AIBALL_URL`, not the port).
-2. **Find the token**: `AIBALL_TOKEN` if set, else the `export AIBALL_TOKEN=…`
-   line of `%USERPROFILE%\.local\share\aiball\cli-env`. The CLI does exactly
-   this in `bin/launcher.js`. Better, give the client a token of its own: see
-   [Tokens](#tokens) below.
-3. **Send it**: `Authorization: Bearer <token>`, or `?token=` where headers
-   cannot be set. The bus authenticates once, on the request that opens the
-   connection: see [`API-BUS.md` — Connecting](./API-BUS.md#connecting).
+2. **Authenticate as this machine's user**, when the daemon is on this machine
+   (a loopback address): read `%USERPROFILE%\.local\share\aiball\machine-secret`
+   and send it as the bearer, with who you are in `x-aiball-consumer`. It is the
+   TCP counterpart of the Unix socket: the calls that act on this machine
+   (`loop.*`, `session.*`, `project.init`, `daemon.reload`) accept it, and a
+   token does not. The daemon writes the file at start; send it to a loopback
+   address only. See [`SECURITY.md`](./SECURITY.md) and
+   [`API-BUS.md` — Connecting](./API-BUS.md#connecting).
+3. **Otherwise, a token**: `AIBALL_TOKEN` if set, else the `export
+   AIBALL_TOKEN=…` line of `%USERPROFILE%\.local\share\aiball\cli-env`, sent as
+   `Authorization: Bearer <token>` (or `?token=` where headers cannot be set).
+   A token proves a consumer, not this machine: see [Tokens](#tokens) below.
 
-On a **proxy node**, step 2 is optional: a client with no token is relayed with
-the node's token and the identity it declares in `x-aiball-consumer` — unless
-the node is `strict`, which requires a token per client. That is why loops on a
-node work with no `cli-env` at all.
+The aiball CLI, its MCP server and claude-loop do step 2 by themselves
+(`src/client.ts`), and prefer it to `cli-env` for a daemon on this machine.
+
+On a **proxy node**, the node checks the machine secret itself and relays with
+its own token, so the hub never sees the secret. A client with no credential at
+all is also relayed with the node's token and the identity it declares — unless
+the node is `strict`.
 
 A client that shares an agent with claude-loop also needs
 [`TVTY-BIND.md`](./TVTY-BIND.md): which of the two holds the agent's Claude.
@@ -119,9 +127,6 @@ Windows they are protected only by the user profile's permissions.
 
 ## Not working on Windows yet
 
-- **`aiball reload`** is refused: it is reserved for the local socket, which
-  Windows does not have. The same restriction applies to the bus's loop
-  controls (`loop.list`, `loop.restart`, `loop.wake`). `aiball restart` works.
 - **Session host mode** (`session: host`) relies on Unix sockets, so loops run
   in tmux mode (psmux): that is the default on Windows for now. A config that
   sets `session: host` explicitly fails to start a loop (`session.host` refused).

@@ -10,6 +10,7 @@ import { attachBusRelay } from "./bus/relay.js";
 import { initSessions } from "./sessions/registry.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
+import { ensureMachineSecret } from "./machine-secret.js";
 import { drainSpool, watchSpool } from "./spool.js";
 import { backfillParentTicketRelations } from "./db.js";
 import { startScheduler, CRON_TASKS } from "./cron/index.js";
@@ -97,6 +98,9 @@ const SOCK_PATH = (() => {
 
 function main(): void {
     ensureDirs(); // make sure UPLOADS_DIR etc. exist before serving them
+    // What proves a client of this machine over TCP, where the socket is not
+    // used (Windows): created once, kept across restarts.
+    ensureMachineSecret();
     getDb(); // open + migrate
 
     // #457 slice 2 : attach the automation engine to the lifecycle bus once

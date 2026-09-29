@@ -4,6 +4,7 @@
  * human's gesture, never through a proxy node.
  */
 import { spawn } from "node:child_process";
+import { isMachineLocal } from "../../machine-secret.js";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { defineMethod, Refusal } from "../methods.js";
@@ -86,7 +87,7 @@ defineMethod({
             // #3066 3c — the loop's own start prepares Claude (settings, hooks,
             // state) as for tmux, then asks back for the host (session.host)
             // and starts the kernel on it: one way to prepare Claude, not two.
-            const env = sessionEnv(p.env, caller.transport === "uds");
+            const env = sessionEnv(p.env, isMachineLocal(caller));
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
             const args = loopStartArgs(p);
@@ -129,7 +130,7 @@ defineMethod({
         }
         if (!p.argv) throw new Refusal(400, "argv: the command a session without an agent runs");
         // A local caller's variables, allow-listed, over the login environment.
-        const env = sessionEnv(p.env, caller.transport === "uds");
+        const env = sessionEnv(p.env, isMachineLocal(caller));
         try {
             const link = await startSession({ name: p.name, argv: p.argv, cwd: p.cwd, size: p.size, env });
             return viewOf(link);
@@ -179,7 +180,7 @@ defineMethod({
         env: z.record(z.string(), z.unknown()).optional(),
     }),
     run: async (caller, p) => {
-        if (caller.transport !== "uds") throw new Refusal(403, "a session runs on this machine: local callers only", ERROR_CODES.FORBIDDEN);
+        if (!isMachineLocal(caller)) throw new Refusal(403, "a session runs on this machine: local callers only", ERROR_CODES.FORBIDDEN);
         if (await busySession(p.agent)) {
             throw new Refusal(409, `${p.agent} runs on this daemon's host already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
         }
@@ -210,7 +211,7 @@ defineMethod({
     params: z.object({ agent: z.string().optional(), name: z.string().optional(), wait: z.boolean().optional() }),
     run: async (caller, p) => {
         if (!p.agent === !p.name) throw new Refusal(400, "one of agent or name");
-        if (caller.kind !== "human" && (caller.transport !== "uds" || p.agent !== caller.consumer_id)) {
+        if (caller.kind !== "human" && (!isMachineLocal(caller) || p.agent !== caller.consumer_id)) {
             throw new Refusal(403, "stopping a session is a human's gesture, or an agent's own loop on this machine", ERROR_CODES.MODERATOR_ONLY);
         }
         const link = sessionFor(p);

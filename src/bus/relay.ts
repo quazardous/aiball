@@ -25,6 +25,7 @@ import { ERROR_CODES } from "../domain.js";
 import { getMethod, type Caller, type CallerKind } from "./methods.js";
 import { dropSession, subjectSpecOf, type BusSession } from "./subscriptions.js";
 import { runOne } from "./rpc.js";
+import { isLoopback, isMachineSecret, looksLikeMachineSecret } from "../machine-secret.js";
 // The table the node looks machine methods up in.
 import "./register.js";
 
@@ -108,7 +109,7 @@ export async function nodeAnswer(text: string, caller: () => Promise<Caller>, su
 }
 
 /** The caller the upstream's hello names, as the node's local methods see it. */
-export function callerOfHello(params: unknown, trusted: boolean): Caller {
+export function callerOfHello(params: unknown, trusted: boolean, machineLocal: boolean = trusted): Caller {
     const p = (params ?? {}) as { consumer?: unknown; kind?: unknown };
     const kind: CallerKind = p.kind === "human" || p.kind === "agent" || p.kind === "key" ? p.kind : "agent";
     return {
@@ -119,7 +120,21 @@ export function callerOfHello(params: unknown, trusted: boolean): Caller {
         token: null,
         relayed: false,
         node: true,
+        // The socket, or the machine secret over the loopback: a caller of this machine.
+        ...(machineLocal ? { machine: "local" } : {}),
     };
+}
+
+/**
+ * The bearer a node relays upstream, and whether the caller is of this machine.
+ * The machine secret proves a local caller of the node: checked here, and never
+ * relayed — the hub does not know it, and the node vouches with its own token,
+ * as for any caller without one.
+ */
+export function relayedBearer(bearer: string | null, peer: string | null | undefined): { ok: true; bearer: string | null; machineLocal: boolean } | { ok: false } {
+    if (!bearer || !looksLikeMachineSecret(bearer)) return { ok: true, bearer, machineLocal: false };
+    if (!isLoopback(peer) || !isMachineSecret(bearer)) return { ok: false };
+    return { ok: true, bearer: null, machineLocal: true };
 }
 
 function refuse(socket: Duplex, status: number, body: string): void {
@@ -141,7 +156,13 @@ export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTok
             return Array.isArray(v) ? v[0] : v;
         };
         const query = new URL(req.url ?? "/", "http://localhost").searchParams.get("token");
-        const bearer = bearerFrom(header, query);
+        const given = relayedBearer(bearerFrom(header, query), req.socket?.remoteAddress);
+        if (!given.ok) {
+            refuse(socket, 401, JSON.stringify({ error: "invalid machine secret, or not from this machine", code: "TOKEN_INVALID" }));
+            return;
+        }
+        const machineLocal = trusted || given.machineLocal;
+        const bearer = given.bearer;
         const auth = relayAuthorization(cfg, store, bearer ? `Bearer ${bearer}` : undefined);
         if (!auth.ok) {
             refuse(socket, 401, JSON.stringify({ error: auth.error, code: "AUTH_REQUIRED" }));
@@ -185,7 +206,7 @@ export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTok
                     if (!greeted && !binary) {
                         try {
                             const m = JSON.parse(data.toString()) as { method?: unknown; params?: unknown };
-                            if (m.method === "bus.hello") { greeted = true; hello(callerOfHello(m.params, trusted)); }
+                            if (m.method === "bus.hello") { greeted = true; hello(callerOfHello(m.params, trusted, machineLocal)); }
                         } catch { /* not JSON: relayed as it is */ }
                     }
                     if (local.readyState === WebSocket.OPEN) local.send(data, { binary });

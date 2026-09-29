@@ -5,6 +5,7 @@
  * before committing to something.
  */
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { isMachineLocal } from "../../machine-secret.js";
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { flag, remoteControl } from "../params.js";
@@ -230,7 +231,7 @@ defineMethod({
 
 /** #3208 / #3256 — a folder of this machine: local callers only, an absolute path; a refusal of the folder's own as the bus says it. */
 function inFolder<T>(caller: { transport: string }, cwd: string, f: () => T): T {
-    if (caller.transport !== "uds") throw new Refusal(403, "a folder of this machine: local callers only", ERROR_CODES.FORBIDDEN);
+    if (!isMachineLocal(caller)) throw new Refusal(403, "a folder of this machine: local callers only", ERROR_CODES.FORBIDDEN);
     if (!isAbsolute(cwd)) throw new Refusal(400, `cwd must be an absolute path (got '${cwd}')`, ERROR_CODES.BAD_REQUEST);
     try {
         return f();

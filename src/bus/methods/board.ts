@@ -7,6 +7,7 @@
  * a moderator may start on the daemon's host: a project's loop, a launcher.
  */
 import { spawn } from "node:child_process";
+import { isMachineLocal } from "../../machine-secret.js";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -453,7 +454,7 @@ defineMethod({
     who: ["human", "agent"],
     params: z.object({}),
     run: (caller) => {
-        if (caller.transport !== "uds" && caller.kind !== "human") {
+        if (!isMachineLocal(caller) && caller.kind !== "human") {
             throw new Refusal(403, "human moderator only (local CLI or the web UI)", ERROR_CODES.MODERATOR_ONLY);
         }
         return purgeSeenPingsForClosedTickets();

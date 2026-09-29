@@ -23,6 +23,7 @@ import {
 import { keyProjects, keyScopes } from "./db/signal-keys.js";
 import { refuse } from "./api/_helpers.js";
 import { ERROR_CODES, type ErrorCode } from "./domain.js";
+import { isLoopback, isMachineSecret, looksLikeMachineSecret } from "./machine-secret.js";
 
 // The options overload of `crypto.scrypt` doesn't survive `promisify`'s
 // type inference, so we keep the callback form behind a typed helper.
@@ -219,6 +220,27 @@ export type AuthOutcome =
     | { ok: true; ctx: CallerContext }
     | { ok: false; status: number; error: string; code: ErrorCode; hint?: string };
 
+/**
+ * A caller of this machine: over the Unix socket, or bearing the machine secret
+ * from the loopback. Both prove the same user, so both get the socket's trust:
+ * the identity is the `x-aiball-consumer` header, "human" when absent.
+ */
+function localCaller(input: AuthInput): CallerContext {
+    const override = input.header("x-aiball-consumer");
+    const explicit = typeof override === "string" && override.trim() ? override.trim() : null;
+    // #386: an anonymous local call (no X-Aiball-Consumer header) still
+    // RESOLVES to the local owner ("human") for authorization, but must NOT
+    // refresh that consumer's last_seen — otherwise the literal "human"
+    // consumer keeps "resurfacing" as active on the consumers page even when
+    // the human only ever uses a named identity. Only an EXPLICIT identity
+    // (header present) touches last_seen.
+    const ctx: CallerContext = { consumer_id: explicit ?? "human", token_kind: "agent", transport: input.transport, token: null };
+    ctx.machine = "local";
+    if (explicit) touchLastSeen(ctx.consumer_id!, "uds"); // #B.177 / #386 / #422 (local same-uid)
+    readHints(input, ctx);
+    return ctx;
+}
+
 export function authenticate(input: AuthInput): AuthOutcome {
     // Unix-socket local-trust bypass (per #B.94 follow-up). The daemon
     // tags every UDS-borne socket with __aiballUds at connection time;
@@ -226,22 +248,16 @@ export function authenticate(input: AuthInput): AuthOutcome {
     // socket file) so no bearer is needed. Identity is read from the
     // X-Aiball-Consumer header — defaults to "human" if omitted, since
     // a same-uid caller is the local owner of this aiball instance.
-    if (input.transport === "uds") {
-        const override = input.header("x-aiball-consumer");
-        const explicit = typeof override === "string" && override.trim() ? override.trim() : null;
-        // #386: an anonymous local call (no X-Aiball-Consumer header) still
-        // RESOLVES to the local owner ("human") for authorization, but must NOT
-        // refresh that consumer's last_seen — otherwise the literal "human"
-        // consumer keeps "resurfacing" as active on the consumers page even when
-        // the human only ever uses a named identity. Only an EXPLICIT identity
-        // (header present) touches last_seen.
-        const ctx: CallerContext = { consumer_id: explicit ?? "human", token_kind: "agent", transport: "uds", token: null };
-        ctx.machine = "local";
-        if (explicit) touchLastSeen(ctx.consumer_id!, "uds"); // #B.177 / #386 / #422 (local same-uid)
-        readHints(input, ctx);
-        return { ok: true, ctx };
-    }
+    if (input.transport === "uds") return { ok: true, ctx: localCaller(input) };
     const token = input.token;
+    // The machine secret: the same user, over TCP where the socket is unavailable
+    // (Windows). Valid only from the loopback; never looked up as a token.
+    if (token && looksLikeMachineSecret(token)) {
+        if (!isLoopback(input.ip) || !isMachineSecret(token)) {
+            return { ok: false, status: 401, error: "invalid machine secret, or not from this machine", code: ERROR_CODES.TOKEN_INVALID };
+        }
+        return { ok: true, ctx: localCaller(input) };
+    }
     if (!token) {
         return {
             ok: false,
