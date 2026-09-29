@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The daemon can be served under a path by a reverse proxy that forwards the
+  path instead of stripping it (nginx, traefik): `server.base_path: /aiball`
+  in the global config. It defaults to the tailscale provider's `path`; a
+  request without the path is served as before.
 - A change of a project's standing prompt or wake focus is broadcast
   (`project_standing_changed` on `board.events`, with the new values), and a
   detailed `project.list` carries `standing_prompt`, `focus_active` and

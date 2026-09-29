@@ -82,6 +82,10 @@ daemon restarts. (Caveat: `aiball providers down` runs `tailscale serve reset`,
 which clears the node's whole serve config — re-add any coexisting handler
 after a manual down.)
 
+The daemon also accepts the path itself (`/aiball/api/…`), so another proxy
+that forwards it without stripping it can front the same daemon: see
+[`CONFIGS.md` — `server.base_path`](./CONFIGS.md#serving-under-a-path--serverbase_path--global-only-host-level).
+
 ## Security model
 
 - aiball auth (password for humans, bearer for agents) is unchanged
