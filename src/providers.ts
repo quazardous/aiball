@@ -114,7 +114,7 @@ function tailscaleReady(): { ok: boolean; reason: string } {
     }
     const st = spawnSync("tailscale", ["status"], { encoding: "utf8" });
     if (st.status !== 0) {
-        return { ok: false, reason: "tailscale not logged in — run: sudo tailscale up" };
+        return { ok: false, reason: `tailscale not logged in — run: ${process.platform === "win32" ? "" : "sudo "}tailscale up` };
     }
     return { ok: true, reason: "" };
 }
