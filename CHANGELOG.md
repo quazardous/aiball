@@ -60,6 +60,11 @@ dates are YYYY-MM-DD.
 
 - `autopoll.throttle` may be 0 (a reminder at every Stop), as its description
   said and the loop did; the settings page refused it (at least 10).
+- A loop is started in the folder it is asked for (`--cwd`, else the shell's),
+  never in one taken from an inherited `AIBALL_CWD`: a loop restarted from a
+  program launched in another loop's shell ran in that loop's folder, on its
+  conversation. A restart keeps its folder, and a start refuses another agent in
+  a folder that names its own, or a conversation another agent's loop is on.
 - The web terminal reaches an agent on a proxy node through the node its calls
   come through. It matched them by address, which fails behind tailscale serve
   (every node is the loopback) and named a node that was never connected; the

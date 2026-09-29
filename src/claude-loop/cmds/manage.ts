@@ -544,6 +544,8 @@ export function restartStartArgs(name: string, plate: Plate, opts: RestartOpts =
     return [
         "start",
         "--name", name,
+        // #3360 — where it ran, said: never a folder taken from the environment.
+        ...(plate.cwd ? ["--cwd", plate.cwd] : []),
         "--interval", String(plate.interval),
         "--check-cmd", plate.check_cmd,
         // #390: replay the remote-daemon connection so a hard restart of a

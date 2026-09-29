@@ -93,6 +93,7 @@ import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { loopName } from "./loop-name.js";
+import { conversationHolder, foreignAgentRefusal } from "./start-guards.js";
 import { afterTmuxAttach, type LoopWhereabouts } from "./attach-end.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
@@ -592,7 +593,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         opts.consumer ??= localRemote.consumer;
         opts.project ??= localRemote.project;
     }
-    const ctx = resolveProjectContext(startCwd ? { cwd: startCwd } : {});
+    // #3360 — the folder is `--cwd`, else this process's: never an inherited
+    // AIBALL_CWD. That variable is for the hooks and the MCP INSIDE a loop; a
+    // process started from a loop's shell (tvty, a restart) carried it, and a
+    // loop started in the other loop's folder, on its conversation.
+    const ctx = resolveProjectContext({ cwd: startCwd ?? process.cwd() });
     // #3135 — where Claude runs: the flag, else the configured mode. A loop on a
     // remote daemon has no host here (the session host is the local daemon's).
     const onHost = opts.host ?? (ctx.claude_loop.session === "host" && !opts.aiballUrl);
@@ -615,6 +620,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             + `edits to the same files collide. For an isolated worktree: claude-loop crew create ${opts.crew} --start\n`,
         );
     }
+    // #3360 — a folder whose .aiball.yaml names its agent runs that agent, or a
+    // crew of it: another agent here would take its conversation.
+    const foreign = foreignAgentRefusal({ agent: opts.consumer, folderAgent: mainAgent, agentSource: ctx.agent_source, role: opts.role, cwd: ctx.cwd });
+    if (foreign) die(foreign);
     if (opts.consumer) ctx.agent = opts.consumer;
     if (opts.project) ctx.project = opts.project;
     // #1435 slice 1 — `--role lead|crew` overrides the resolved role. A crew
@@ -719,6 +728,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     });
     if (sessionPlan.warning) {
         process.stderr.write(`claude-loop: ${sessionPlan.warning}\n`);
+    }
+    // #3360 — never two Claudes on one conversation: one another agent's loop
+    // runs on is not resumed here.
+    if (sessionPlan.sessionId) {
+        const holder = conversationHolder(sessionPlan.sessionId, ctx.agent, loopAlive);
+        if (holder) die(`the conversation ${sessionPlan.sessionId} is ${holder.agent}'s: its loop ${holder.name} runs on it. Start ${ctx.agent} in its own folder, or with --no-resume for a fresh conversation.`);
     }
 
     // #B.216 david (979632): auto-register the project with the aiball

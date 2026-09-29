@@ -53,6 +53,8 @@ test("#1576 a plate written before the fix replays exactly what it used to", () 
     assert.deepEqual(args, [
         "start",
         "--name", "cl-aiball-abc123",
+        // #3360 — where it ran, said: never a folder taken from the environment.
+        "--cwd", "/repo",
         "--interval", "60",
         "--check-cmd", "aiball pings-count -q",
         "--force",
