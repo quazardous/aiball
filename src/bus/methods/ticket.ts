@@ -219,11 +219,11 @@ defineMethod({
     // pré-déléguer un pending à un agent, qui sera notifié à l'approve.
     // Couvre aussi MCP `ticket_claim` qui delegate via
     // `client.assignTicket(head.id)` (cf. src/mcp/ticket-write.ts).
+    // #3237 — a refusal, as everywhere else: it used to come back as a 200
+    // carrying `{ error }`, which a client (the MCP's ticket_claim) reported as
+    // a claim made.
     if (isClaim && t.status !== "approved" && !isHuman(caller)) {
-        return {
-            error: `cannot claim a ticket in status "${t.status}" — the reporter must moderate (approve) the ticket first`,
-            code: ERROR_CODES.PARENT_PENDING_MODERATION,
-        };
+        throw new Refusal(409, `cannot claim a ticket in status "${t.status}" — the reporter must moderate (approve) the ticket first`, ERROR_CODES.PARENT_PENDING_MODERATION);
     }
     // #2241 — an agent claims only within its scope: a cto agent `roadmap` and
     // `milestone` tickets, a coder agent tasks. Same claim, different scope. A

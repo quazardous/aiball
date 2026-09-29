@@ -59,3 +59,12 @@ test("a proposal on a comment of a pending ticket, and accept_and_close, are ref
     updateMessageStatus(c, "pending", "human", null, "comment_added");
     assert.equal((await refused(() => acceptAndClose.run(boss, { id: c }))).code, "PARENT_PENDING_MODERATION");
 });
+
+test("#3237 — an agent claiming a ticket still waiting for moderation is refused (409), not answered 200 with an error", async () => {
+    const t = pendingTicketWithPlan();
+    const assign = getMethod("ticket.assign")!;
+    const r = await refused(() => assign.run(testCaller("worker"), { id: t }));
+    assert.deepEqual([r.status, r.code], [409, "PARENT_PENDING_MODERATION"]);
+    assert.match(r.message, /moderate \(approve\) the ticket first/);
+    assert.equal((getMessage(t) as { claimant?: string | null }).claimant ?? null, null, "and nothing was claimed");
+});
