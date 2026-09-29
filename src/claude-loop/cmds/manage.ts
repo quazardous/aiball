@@ -51,6 +51,7 @@ import { remoteControlFlags, type RemoteControl } from "../remote-control.js";
 // A bare `bash` can resolve to WSL's launcher on Windows (#1584): reload and
 // restart then failed silently, with an empty log.
 import { resolveBashCmd } from "../resolve-bash.js";
+import { dropInheritedLoopEnv } from "../inherited-env.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -335,6 +336,25 @@ export function cmdZen(name: string, opts?: { on?: boolean; off?: boolean }): vo
     }
 }
 
+/**
+ * #3236 — the respawned kernel's environment: the caller's, WITHOUT the
+ * identity of a loop the caller runs inside (`dropInheritedLoopEnv`, as
+ * `start` does since #3175). A reload typed in a host loop's shell otherwise
+ * handed that loop's `CL_HOST_CONTROL` to the reloaded kernel, which then
+ * drove the caller's Claude. The kernel gets its own from its env file.
+ */
+export function reloadSpawnEnv(
+    env: NodeJS.ProcessEnv,
+    snapshotsJson: string | null,
+    readRecord?: Parameters<typeof dropInheritedLoopEnv>[1],
+): NodeJS.ProcessEnv {
+    const own = { ...env };
+    dropInheritedLoopEnv(own, readRecord);
+    return snapshotsJson
+        ? { ...own, [RESPAWN_STATE_ENV_VAR]: snapshotsJson, [REATTACH_ENV_VAR]: "1" }
+        : { ...own, [REATTACH_ENV_VAR]: "1" };
+}
+
 export async function cmdReload(name: string, opts?: { set?: string[] }): Promise<void> {
     if (!tmuxAlive(name)) {
         if (liveHostAgent(stateDirFor(name))) {
@@ -451,9 +471,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     // in afk-service.ts etc.). Null = nothing to preserve, cold boot.
     // #1059 — REATTACH marks the new kernel as resuming a live claude (no
     // bootstrap re-inject ; seed NOT-AFK-10min if the AFK snapshot is lost).
-    const spawnEnv = snapshotsJson
-        ? { ...process.env, [RESPAWN_STATE_ENV_VAR]: snapshotsJson, [REATTACH_ENV_VAR]: "1" }
-        : { ...process.env, [REATTACH_ENV_VAR]: "1" };
+    const spawnEnv = reloadSpawnEnv(process.env, snapshotsJson);
     const child = spawn(resolveBashCmd(), [
         "-lc",
         // #991 — preserve + re-source the volatile env.local across a reload

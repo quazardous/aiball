@@ -131,3 +131,20 @@ test("#3254 — the loop's Remote Control choice is replayed; a new one replaces
     const withArgs = restartStartArgs("n", plate({ remote_control_override: true, claude_args: ["--model", "x"] }));
     assert.ok(withArgs.indexOf("--remote-control") < withArgs.indexOf("--"), "a start flag, never passed to Claude as such");
 });
+
+test("#3236 — a reload typed in another loop's shell does not hand the reloaded kernel that loop's host or identity", async () => {
+    const { reloadSpawnEnv } = await import("./manage.js");
+    const { REATTACH_ENV_VAR } = await import("../respawn-state.js");
+    const caller = {
+        PATH: "/usr/bin",
+        CL_STATE_DIR: "/loops/cl-caller", CL_NAME: "cl-caller", CL_HOST_CONTROL: "/hosts/caller/control.sock",
+        AIBALL_AGENT: "caller-agent", CL_LOG_LEVEL: "debug",
+    };
+    const record = { CL_STATE_DIR: "/loops/cl-caller", CL_NAME: "cl-caller", AIBALL_AGENT: "caller-agent" };
+    const env = reloadSpawnEnv(caller, null, () => record);
+    for (const k of ["CL_STATE_DIR", "CL_NAME", "CL_HOST_CONTROL", "AIBALL_AGENT"]) assert.equal(env[k], undefined, `${k} is the caller's, not the reloaded loop's`);
+    assert.equal(env.CL_LOG_LEVEL, "debug", "a value the caller set itself is kept");
+    assert.equal(env.PATH, "/usr/bin");
+    assert.equal(env[REATTACH_ENV_VAR], "1", "the reattach mark");
+    assert.equal(caller.CL_HOST_CONTROL, "/hosts/caller/control.sock", "the caller's own environment is not touched");
+});
