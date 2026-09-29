@@ -12,7 +12,7 @@
  * comes from (`from`), so what is not the default can be shown as such.
  */
 import { readFileSync, statSync, writeFileSync } from "node:fs";
-import { parseDocument } from "yaml";
+import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 import { defaultLoopSession, findConfigUpwards, globalConfigPath, loadConfig, parseLoopSession, readGlobalLoopSession, type ConsumerRole, type ConsumerSource, type LoopSession } from "./autopoll/config.js";
 import { parseRemoteControl, type RemoteControl } from "./claude-loop/remote-control.js";
 import { InitRefusal } from "./project-init.js";
@@ -155,16 +155,12 @@ function readResolved(cwd: string): ProjectSettings {
  * written `{}` (what `yaml` prints for an empty map): the comments that opened
  * the file stay, and nothing else — an empty file when there were none.
  */
-function textOf(doc: Doc, file: string): string {
+function textOf(doc: Doc): string {
     const items = (doc.contents as { items?: unknown[] } | null)?.items;
     if (!Array.isArray(items) || items.length > 0) return String(doc);
-    let head = "";
-    try {
-        const lines = readFileSync(file, "utf8").split("\n");
-        const n = lines.findIndex((l) => l.trim() !== "" && !l.trimStart().startsWith("#"));
-        head = (n < 0 ? lines : lines.slice(0, n)).join("\n").trim();
-    } catch { /* unreadable: nothing kept */ }
-    return head ? head + "\n" : "";
+    // #3327 — the comments the removed keys carried went to the document: they stay.
+    if (!doc.commentBefore) return "";
+    return doc.commentBefore.split("\n").map((l) => `#${l}`).join("\n") + "\n";
 }
 
 /** Set `path` (a key under one block) to `value`, or remove it with null; an emptied block goes too. */
@@ -174,14 +170,37 @@ function patchKey(doc: Doc, file: string, block: string, key: string, value: unk
         throw new InitRefusal(409, "CONFLICT", `${file} has a non-mapping '${block}' value — fix it by hand first`);
     }
     if (value === null) {
-        doc.deleteIn([block, key]);
+        if (node && isMap(node)) removePair(node, key, () => { /* a key's own comment goes with the block's next key */ });
         // An emptied block says nothing: drop it rather than leave `block: {}`.
         const left = doc.get(block) as { items?: unknown[] } | undefined;
-        if (left && Array.isArray(left.items) && left.items.length === 0) doc.delete(block);
+        if (left && Array.isArray(left.items) && left.items.length === 0 && isMap(doc.contents)) {
+            removePair(doc.contents, block, (comment) => {
+                // No key left after it: the comment is the file's own, above whatever stays.
+                doc.commentBefore = doc.commentBefore ? `${doc.commentBefore}\n${comment}` : comment;
+            });
+        }
     } else {
         if (node === undefined || node === null) doc.set(block, doc.createNode({}));
         doc.setIn([block, key], value);
     }
+}
+
+/**
+ * #3327 — remove `key` from `map`, keeping the comment written above it. `yaml`
+ * attaches the comment above a key to that key — the file's header too, when
+ * the first block follows it with no blank line — so deleting the key deleted
+ * the comment. It goes above the next key instead; with none, to `orphan`.
+ */
+function removePair(map: YAMLMap, key: string, orphan: (comment: string) => void): void {
+    const i = map.items.findIndex((p) => isScalar(p.key) ? p.key.value === key : p.key === key);
+    if (i < 0) return;
+    const keyNode = map.items[i]!.key as { commentBefore?: string | null } | null;
+    const comment = keyNode && typeof keyNode === "object" ? keyNode.commentBefore : null;
+    map.items.splice(i, 1);
+    if (!comment) return;
+    const next = map.items[i]?.key as { commentBefore?: string | null } | undefined;
+    if (next && typeof next === "object" && isScalar(next as never)) next.commentBefore = next.commentBefore ? `${comment}\n${next.commentBefore}` : comment;
+    else orphan(comment);
 }
 
 /**
@@ -197,7 +216,7 @@ export function writeSettings(cwd: string, patch: SettingsPatch): ProjectSetting
     if (patch.remote_control !== undefined) patchKey(doc, file, "claude", "remote_control", patch.remote_control);
     if (patch.session !== undefined) patchKey(doc, file, "claude_loop", "session", patch.session);
     try {
-        writeFileSync(file, textOf(doc, file));
+        writeFileSync(file, textOf(doc));
     } catch (e) {
         throw new InitRefusal(403, "FORBIDDEN", `cannot write ${file}: ${(e as Error).message}`);
     }

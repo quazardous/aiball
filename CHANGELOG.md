@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- Removing a setting from `.aiball.yaml` (the board's project settings, or
+  `settings_set`) no longer takes the comment written above it: the file's
+  header stays at the top, and a key's own comment moves to the next key.
+
 ## [0.50.0] — 2026-09-29
 
 ### Added

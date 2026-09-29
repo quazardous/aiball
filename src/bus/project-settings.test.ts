@@ -180,3 +180,19 @@ test("set by key writes what the named field writes; an unknown key or a value o
     assert.throws(() => set({ cwd: b, key: "claude.model", value: "x" }), (e: { code: string }) => e.code === "BAD_REQUEST");
     assert.throws(() => set({ cwd: b, key: "claude_loop.session", value: "screen" }), (e: { code: string }) => e.code === "BAD_REQUEST");
 });
+
+// #3327 — removing a block no longer takes the comment written above it (yaml attaches the file's header to the first key).
+test("removing the first block keeps the file's header, above what stays", () => {
+    const d = folder("# header one\n# header two\nclaude_loop:\n  session: tmux\nconsumer:\n  agent: a-3327\n");
+    set({ cwd: d, session: null });
+    assert.equal(readFileSync(join(d, ".aiball.yaml"), "utf8"), "# header one\n# header two\nconsumer:\n  agent: a-3327\n");
+});
+
+test("a file emptied keeps its header glued to the removed block; a key's own comment moves to the block's next key", () => {
+    const glued = folder("# only header\nclaude_loop:\n  session: tmux\n");
+    set({ cwd: glued, session: null });
+    assert.equal(readFileSync(join(glued, ".aiball.yaml"), "utf8"), "# only header\n");
+    const keyed = folder("claude:\n  # the phone\n  remote_control: phone\n  deny_tools: [Bash]\n");
+    set({ cwd: keyed, remote_control: null });
+    assert.match(readFileSync(join(keyed, ".aiball.yaml"), "utf8"), /# the phone\n {2}deny_tools/);
+});
