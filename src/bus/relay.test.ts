@@ -11,11 +11,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
+import { WebSocket } from "ws";
 import type { AddressInfo } from "node:net";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3071-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
+// #3284 — the loops a node lists are its machine's: an empty root of the test's own.
+process.env.CLAUDE_LOOP_STATE_ROOT = join(home, "loops");
 
 const { createApp } = await import("../app.js");
 const { attachBus, busConnectionCountForTests } = await import("./server.js");
@@ -36,10 +39,10 @@ const hubBus = attachBus(hub);
 await new Promise<void>((r) => hub.listen(0, "127.0.0.1", () => r()));
 const hubUrl = `http://127.0.0.1:${(hub.address() as AddressInfo).port}`;
 
-async function node(cfg: { strict?: boolean } = {}) {
+async function node(cfg: { strict?: boolean; trusted?: boolean } = {}) {
     const sock = join(home, `node-${Math.random().toString(36).slice(2, 8)}.sock`);
     const srv = createServer((_q, r) => { r.statusCode = 404; r.end(); });
-    attachBusRelay(srv, { url: hubUrl, token: NODE, strict: cfg.strict, nodeLabel: "node-b" }, new Map());
+    attachBusRelay(srv, { url: hubUrl, token: NODE, strict: cfg.strict, nodeLabel: "node-b" }, new Map(), { trusted: cfg.trusted });
     await new Promise<void>((r) => srv.listen(sock, () => r()));
     return { sock, srv };
 }
@@ -74,7 +77,52 @@ test("a caller with its own token keeps it: the hub sees that consumer, not the 
 
 test("a loop control through the node is refused, whoever it names", async () => {
     const c = await through("boss");
-    await assert.rejects(c.call("consumer.afk", { name: "worker", action: "off" }), (e: { code: string; message: string }) => e.code === "FORBIDDEN" && /proxy node/.test(e.message));
+    await assert.rejects(c.call("consumer.stop_loop", { consumer_id: "worker" }), (e: { code: string; message: string }) => e.code === "FORBIDDEN" && /proxy node/.test(e.message));
+});
+
+// #3284 — what acts on a machine, a node answers for its own.
+const local = await node({ trusted: true });
+after(() => { local.srv.closeAllConnections(); local.srv.close(); });
+
+test("a machine method through the node is answered by the node, not refused by the hub", async () => {
+    const c = await through("boss", local.sock);
+    assert.deepEqual(await c.call("loop.list"), [], "the node's own loops: none on this test machine");
+    assert.ok(Array.isArray(await c.call("session.list")));
+    const info = await c.call<{ version: string }>("daemon.info");
+    assert.equal(typeof info.version, "string");
+    // The board still goes to the hub.
+    assert.deepEqual((await c.call<{ consumer: string; relayed: boolean }>("bus.whoami")).relayed, true);
+});
+
+test("the node answers as the caller the hub named: an agent is still refused a human's gesture", async () => {
+    const c = await through("worker", local.sock);
+    await assert.rejects(c.call("loop.list"), (e: { code: string }) => e.code === "MODERATOR_ONLY");
+});
+
+test("a batch that mixes the machine's methods and the board's is refused, call by call", async () => {
+    const ws = new WebSocket(`ws+unix:${local.sock}:/bus`, { headers: { "x-aiball-consumer": "boss" } });
+    const frames: unknown[] = [];
+    await new Promise<void>((resolve, reject) => {
+        ws.on("message", (d) => {
+            const m = JSON.parse(String(d));
+            if (m.method === "bus.hello") {
+                ws.send(JSON.stringify([{ jsonrpc: "2.0", id: 1, method: "loop.list" }, { jsonrpc: "2.0", id: 2, method: "bus.whoami" }]));
+                return;
+            }
+            frames.push(m);
+            resolve();
+        });
+        ws.on("error", reject);
+    });
+    ws.close();
+    const answers = frames[0] as { id: number; error?: { data: { code: string } } }[];
+    assert.deepEqual(answers.map((a) => [a.id, a.error?.data.code]), [[1, "BAD_REQUEST"], [2, "BAD_REQUEST"]]);
+});
+
+test("the hub itself refuses a machine method to a relayed caller: it would act on the hub's machine", async () => {
+    const c = await BusClient.connect({ url: hubUrl, token: NODE, headers: { "x-aiball-consumer": "boss" } });
+    clients.push(c);
+    await assert.rejects(c.call("loop.list"), (e: { code: string; message: string }) => e.code === "FORBIDDEN" && /machine that answers/.test(e.message));
 });
 
 test("a subscription through the node gets its events", async () => {

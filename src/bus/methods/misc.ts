@@ -303,7 +303,7 @@ defineMethod({
 defineMethod({
     name: "daemon.reload",
     who: ["human", "agent"],
-    relayed: false,
+    machine: true,
     params: z.object({}),
     run: (caller) => {
         if (caller.transport !== "uds") {
@@ -327,6 +327,8 @@ defineMethod({
 defineMethod({
     name: "daemon.info",
     who: ["human", "agent"],
+    // #3284 — the daemon a client talks to: through a node, the node.
+    machine: true,
     params: z.object({}),
     run: () => daemonInfo(),
 });

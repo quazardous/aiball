@@ -22,7 +22,7 @@ import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
-    relayed: false,
+    machine: true,
     denied: { message: "starting or moving a loop is a human's gesture", code: ERROR_CODES.MODERATOR_ONLY },
 };
 

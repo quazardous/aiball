@@ -79,7 +79,9 @@ export function openRpcDocument(): Record<string, unknown> {
                 params: paramsOf(m.params),
                 result: { name: "result", schema: {} },
                 "x-callers": m.who,
-                ...(m.relayed === false ? { "x-relayed": false } : {}),
+                ...(m.relayed === false && !m.machine ? { "x-relayed": false } : {}),
+                // #3284 — acts on the machine that answers: a proxy node answers it itself.
+                ...(m.machine ? { "x-machine": true } : {}),
                 ...(m.scope ? { "x-scope": m.scope } : {}),
             };
         }),

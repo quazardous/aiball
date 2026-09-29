@@ -35,6 +35,15 @@ in strict mode). Messages pass as they are; the `bus.hello` is the upstream's;
 either side closing closes the other. The upstream sees the caller relayed
 (see *Who may call a method*).
 
+The methods that act on **a machine** — its loops (`loop.*`, `consumer.afk`), its
+session hosts (`session.*`), its folders (`project.init`, `project.settings`,
+`project.settings_set`) and the daemon itself (`daemon.info`, `daemon.reload`) — are
+not relayed: the node answers them, for its own machine, as the caller the
+upstream's `bus.hello` names (its kind included). They are marked *this machine's*
+in the tables below. The upstream refuses them to a relayed caller: they would act
+on the upstream's machine. A batch goes one way whole; one that mixes this
+machine's methods with the board's is refused, call by call.
+
 The caller is authenticated **once**, on this opening request, by the same code
 as an HTTP request, and every call on the connection runs as that caller. An
 opening that fails is answered in HTTP with `{ error, code }` (401
@@ -154,7 +163,9 @@ before running it (403 otherwise; `MODERATOR_ONLY` for a human's gesture):
 **Relayed.** A caller that comes through a proxy node is the consumer the node
 names, with `relayed: true`. The node's token is the weak point
 ([`SECURITY.md`](./SECURITY.md)): a method that must not be reached that way
-(the loop controls) refuses a relayed caller, whoever it names.
+(the loop controls through the board: `consumer.stop_loop`, `consumer.prompt`,
+`consumer.restart_claude`, the all-loops gestures) refuses a relayed caller, whoever
+it names.
 
 ## Revocation
 
@@ -195,12 +206,12 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `bus.subjects` | human, agent | — this bus's subjects, as AsyncAPI |
 | `bus.subscribe` | human, agent | — see *Subscriptions* |
 | `bus.unsubscribe` | human, agent | — see *Subscriptions* |
-| `session.start` | human, not relayed | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY`. An agent's loop in tmux answers `{ agent, host: "tmux", tmux }`: `tmux` is the session to attach. `remote_control` (`true`, `false` or a name) starts Claude with Remote Control or without, over the project's `claude.remote_control`; the loop keeps it for its restarts |
-| `session.stop` | human; an agent its own session, locally (its loop's `rm`); not relayed | — ends a session and its host |
-| `loop.list` | human, local only, not relayed | — the loops of this machine, stopped ones included, from their plates: `{ name, cwd, agent, project, role, mode: host\|tmux, running, remote_control, model, tmux?, attach? }`; `remote_control` is what Claude started with: `false`, or the session's name; `model` is the running loop's, as its bar says (`{ id, name }`, else null) |
-| `loop.restart` | human, local only, not relayed | — restarts a loop from its plate, its conversation resumed (`fresh`: a fresh one): where it ran, or in `mode` to move it between the session host and tmux; answers its `loop.list` view once it is back. A running loop whose Claude works is refused (`NOT_IDLE`) unless `force`. `remote_control` changes Claude's Remote Control for this start and the next; without it the loop keeps its own |
-| `loop.wake` | human, local only, not relayed | — wakes a loop now, as `claude-loop wake` does: it tries a wake at its next heartbeat for the events waiting, without waiting for its tempo; `{ name, requested: true }`. A loop that does not run is `LOOP_NOT_FOUND`; a loop whose Claude works is refused (`NOT_IDLE`) unless `force` |
-| `session.list` | human, agent | — every session this daemon hosts |
+| `session.start` | human, this machine's | — a session on this machine ([`SESSION-HOST.md`](./SESSION-HOST.md)); `HOST_BUSY`. An agent's loop in tmux answers `{ agent, host: "tmux", tmux }`: `tmux` is the session to attach. `remote_control` (`true`, `false` or a name) starts Claude with Remote Control or without, over the project's `claude.remote_control`; the loop keeps it for its restarts |
+| `session.stop` | human; an agent its own session, locally (its loop's `rm`); this machine's | — ends a session and its host |
+| `loop.list` | human, local only, this machine's | — the loops of this machine, stopped ones included, from their plates: `{ name, cwd, agent, project, role, mode: host\|tmux, running, remote_control, model, tmux?, attach? }`; `remote_control` is what Claude started with: `false`, or the session's name; `model` is the running loop's, as its bar says (`{ id, name }`, else null) |
+| `loop.restart` | human, local only, this machine's | — restarts a loop from its plate, its conversation resumed (`fresh`: a fresh one): where it ran, or in `mode` to move it between the session host and tmux; answers its `loop.list` view once it is back. A running loop whose Claude works is refused (`NOT_IDLE`) unless `force`. `remote_control` changes Claude's Remote Control for this start and the next; without it the loop keeps its own |
+| `loop.wake` | human, local only, this machine's | — wakes a loop now, as `claude-loop wake` does: it tries a wake at its next heartbeat for the events waiting, without waiting for its tempo; `{ name, requested: true }`. A loop that does not run is `LOOP_NOT_FOUND`; a loop whose Claude works is refused (`NOT_IDLE`) unless `force` |
+| `session.list` | human, agent, this machine's | — every session this daemon hosts |
 | `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
 | `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |
 | `tag.list` | human, agent | `GET /api/tags` |
@@ -210,7 +221,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `consumer.backlog` | human, or the agent itself | `GET /api/consumers/:consumer_id/backlog` |
 | `consumer.bar` | human, or the agent itself | `GET /api/consumers/:consumer_id/bar` |
 | `consumer.set_bar_host` | human, not relayed | `POST /api/consumers/:consumer_id/bar-host` |
-| `consumer.afk` | human, not relayed | `POST /api/agents/:name/afk` |
+| `consumer.afk` | human, this machine's | `POST /api/agents/:name/afk` |
 | `consumer.restart_claude` | human, not relayed | — restarts an agent's Claude after it installed an update (its bar's `alerts.restart_needed`): refused `NOT_IDLE` while Claude works, unless `when_idle`: then the loop holds the order until Claude's next idle, however long, its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing; the loop resumes the conversation and tells the agent once it is back |
 | `consumer.counters` | human, or the agent itself | — an agent's counters computed now: `open`, `actionable`, `backlog` (cooled-down threads left out), `events`; a changed number is pushed on `agent.<id>.state` too. The daemon computes them on the events that move them (a ticket's lifecycle, a ping written or read); this is for what moves with time alone |
 | `agent.pane_keys` | human | `POST /api/agents/:name/pane/keys` — on the session host, through the caller's `agent.<id>.screen` opened with `typing` (`CONFLICT` without one); in tmux or on a node, straight to the pane |
@@ -274,9 +285,9 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `project.rename` | human, agent | `POST /api/projects/:name/rename` |
 | `project.delete` | human, agent | `DELETE /api/projects/:name` |
 | `project.add_token_usage` | human, agent | `POST /api/projects/:project/token-usage` |
-| `project.init` | human, local only, not relayed | — sets a folder up as a project, as `claude-loop init` does: its `.mcp.json` and `.aiball.yaml` (`cwd`, `project`, `agent`, `role`, `private`, `no_claim`, `force`, `dry_run`); answers each file's step (`created`, `added`, `patched`, `overwrote`, `kept`…), whether the project is already on the board, and whether the aiball skill is installed. Refusals: a folder absent (`NOT_FOUND`), not writable (`FORBIDDEN`), a malformed name (`BAD_REQUEST`), a file there that cannot be parsed (`CONFLICT`) |
-| `project.settings` | human, local only, not relayed | — the settings a client may show for a folder's project (`cwd`), as a loop started there would get them: `{ file, remote_control: { value, from: file\|default } }`; `file` is the `.aiball.yaml` that loop reads (the nearest one up the tree), null without one |
-| `project.settings_set` | human, local only, not relayed | — changes them in that `.aiball.yaml`, patched in place (its other keys and comments stay): `remote_control` true, false or a name, `null` to remove it; answers as `project.settings`. The next start reads it. Refusals: a folder absent (`NOT_FOUND`), no `.aiball.yaml` to patch (`CONFLICT`: `project.init` first), a file that cannot be parsed (`CONFLICT`), not writable (`FORBIDDEN`) |
+| `project.init` | human, local only, this machine's | — sets a folder up as a project, as `claude-loop init` does: its `.mcp.json` and `.aiball.yaml` (`cwd`, `project`, `agent`, `role`, `private`, `no_claim`, `force`, `dry_run`); answers each file's step (`created`, `added`, `patched`, `overwrote`, `kept`…), whether the project is already on the board, and whether the aiball skill is installed. Refusals: a folder absent (`NOT_FOUND`), not writable (`FORBIDDEN`), a malformed name (`BAD_REQUEST`), a file there that cannot be parsed (`CONFLICT`) |
+| `project.settings` | human, local only, this machine's | — the settings a client may show for a folder's project (`cwd`), as a loop started there would get them: `{ file, remote_control: { value, from: file\|default } }`; `file` is the `.aiball.yaml` that loop reads (the nearest one up the tree), null without one |
+| `project.settings_set` | human, local only, this machine's | — changes them in that `.aiball.yaml`, patched in place (its other keys and comments stay): `remote_control` true, false or a name, `null` to remove it; answers as `project.settings`. The next start reads it. Refusals: a folder absent (`NOT_FOUND`), no `.aiball.yaml` to patch (`CONFLICT`: `project.init` first), a file that cannot be parsed (`CONFLICT`), not writable (`FORBIDDEN`) |
 | `consumer.presence` | human, agent | `GET /api/presence` |
 | `consumer.get` | human, agent | `GET /api/consumers/:consumer_id` |
 | `consumer.push_state` | agent, its own | `PUT /api/consumers/:consumer_id/state` |
@@ -284,7 +295,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `ticket.add_token_usage` | human, agent | `POST /api/tickets/:id/token-usage` |
 | `message.list` | human, agent | `GET /api/messages` — `summary`, `open` are booleans |
 | `ticket.bookends` | human, agent | `GET /api/tickets/bookends` |
-| `session.host` | human or agent, local only | — `claude-loop start --host` runs its prepared command in the agent's session on this daemon's host; the answer carries `control`, the socket the kernel drives |
+| `session.host` | human or agent, local only, this machine's | — `claude-loop start --host` runs its prepared command in the agent's session on this daemon's host; the answer carries `control`, the socket the kernel drives |
 | `ticket.payload` | human, agent | `GET /api/tickets/:id/payload` |
 | `ticket.set_payload` | the reporter, the assignee, a human | `PUT /api/tickets/:id/payload` |
 | `ticket.dump_payload` | the reporter, the assignee, a human | `POST /api/tickets/:id/payload/dump` — a closed ticket (409) or a revoked payload (410) says which in `details.access` |
@@ -305,8 +316,8 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `step.timing` | human, agent | `GET /api/steps/timing` |
 | `ticket.import` | human, agent | `POST /api/tickets/import` — an issue a ticket already mirrors is a 409 whose `details.existing_ticket_id` names it |
 | `ticket.export` | human, agent | `POST /api/tickets/:id/export` — same 409 |
-| `daemon.reload` | human or agent, local only | `POST /api/daemon/reload` |
-| `daemon.info` | human, agent | — where the web UI answers: `{ version, web_url, public_url }`; `web_url` is the address the daemon listens on (a wildcard bind on loopback), `public_url` the tailscale serve its config declares, null without one |
+| `daemon.reload` | human or agent, local only, this machine's | `POST /api/daemon/reload` |
+| `daemon.info` | human, agent, this machine's | — where the web UI answers: `{ version, web_url, public_url }`; `web_url` is the address the daemon listens on (a wildcard bind on loopback), `public_url` the tailscale serve its config declares, null without one |
 | `strategy.get` | human, agent | `GET /api/strategy` |
 | `strategy.set` | human, agent | `PATCH /api/strategy` |
 | `project.strategy` | human, agent | `GET /api/projects/:project/strategy` |

@@ -9,6 +9,10 @@
  *   `bus.hello` a client gets is the upstream's, with its epoch.
  * - Either side closing closes the other: a client never keeps a connection
  *   whose subscriptions died upstream.
+ * - #3284 — a call to a method that acts on the machine (`machine: true`: its
+ *   loops, session hosts, folders, the daemon) is not relayed: the node runs
+ *   it, for its own machine, as the caller the upstream's `bus.hello` named.
+ *   Everything else, the board, passes as before, unread.
  */
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
@@ -16,6 +20,12 @@ import type { Duplex } from "node:stream";
 import { BUS_PATH } from "../bus-protocol.js";
 import { relayAuthorization, type ProxyConfig, type ProxyTokenStore } from "../proxy.js";
 import { bearerFrom } from "../auth.js";
+import { RPC_ERRORS } from "../bus-protocol.js";
+import { ERROR_CODES } from "../domain.js";
+import { getMethod, type Caller, type CallerKind } from "./methods.js";
+import { runOne } from "./rpc.js";
+// The table the node looks machine methods up in.
+import "./register.js";
 
 /** The request headers a relayed opening carries upstream: who, and what client. */
 const FORWARDED = ["x-aiball-consumer", "x-aiball-platform", "x-aiball-client", "x-aiball-no-claim", "x-aiball-role"];
@@ -23,6 +33,66 @@ const FORWARDED = ["x-aiball-consumer", "x-aiball-platform", "x-aiball-client", 
 /** A close code the other side may be sent (1005/1006 are reserved: they say "none"). */
 function sendable(code: number): number {
     return code === 1005 || code === 1006 || code < 1000 ? 1011 : code;
+}
+
+/** The method a request names, or null for a frame that is not one call. */
+function methodOf(msg: unknown): string | null {
+    const m = (msg as { method?: unknown } | null)?.method;
+    return msg && typeof msg === "object" && !Array.isArray(msg) && typeof m === "string" ? m : null;
+}
+
+const isMachine = (msg: unknown): boolean => {
+    const name = methodOf(msg);
+    return name !== null && getMethod(name)?.machine === true;
+};
+
+/**
+ * #3284 — what the node does with a frame from its client: relay it (the
+ * board), or answer it itself (a machine method). A batch goes one way whole;
+ * one that mixes both is answered with an error per call, as its two halves
+ * would answer on two frames.
+ */
+export async function nodeAnswer(text: string, caller: () => Promise<Caller>): Promise<{ relay: true } | { relay: false; answer: string | null }> {
+    let msg: unknown;
+    try { msg = JSON.parse(text); } catch { return { relay: true }; }
+    if (Array.isArray(msg)) {
+        const machine = msg.filter(isMachine).length;
+        if (machine === 0) return { relay: true };
+        if (machine < msg.length) {
+            const id = (m: unknown) => (m as { id?: unknown } | null)?.id ?? null;
+            return {
+                relay: false,
+                answer: JSON.stringify(msg.filter((m) => m && typeof m === "object" && "id" in (m as object)).map((m) => ({
+                    jsonrpc: "2.0", id: id(m),
+                    error: { code: RPC_ERRORS.INVALID_REQUEST, message: "a batch mixes this machine's methods with the board's: send them apart", data: { code: ERROR_CODES.BAD_REQUEST, status: 400 } },
+                }))),
+            };
+        }
+        const who = await caller();
+        const out = [];
+        for (const one of msg) {
+            const r = await runOne(who, one);
+            if (r) out.push(r);
+        }
+        return { relay: false, answer: out.length ? JSON.stringify(out) : null };
+    }
+    if (!isMachine(msg)) return { relay: true };
+    const r = await runOne(await caller(), msg);
+    return { relay: false, answer: r ? JSON.stringify(r) : null };
+}
+
+/** The caller the upstream's hello names, as the node's local methods see it. */
+export function callerOfHello(params: unknown, trusted: boolean): Caller {
+    const p = (params ?? {}) as { consumer?: unknown; kind?: unknown };
+    const kind: CallerKind = p.kind === "human" || p.kind === "agent" || p.kind === "key" ? p.kind : "agent";
+    return {
+        ...(typeof p.consumer === "string" && p.consumer ? { consumer_id: p.consumer } : {}),
+        kind,
+        token_kind: kind === "key" ? "signal" : "agent",
+        transport: trusted ? "uds" : "tcp",
+        token: null,
+        relayed: false,
+    };
 }
 
 function refuse(socket: Duplex, status: number, body: string): void {
@@ -33,7 +103,8 @@ function refuse(socket: Duplex, status: number, body: string): void {
     socket.destroy();
 }
 
-export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTokenStore): WebSocketServer {
+export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTokenStore, opts: { trusted?: boolean } = {}): WebSocketServer {
+    const trusted = opts.trusted === true;
     const wss = new WebSocketServer({ noServer: true });
     const upstreamUrl = `${cfg.url.replace(/\/$/, "").replace(/^http/, "ws")}${BUS_PATH}`;
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -70,11 +141,35 @@ export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTok
             // back synchronously), so the upstream's first message, its hello,
             // cannot arrive before the relay below is in place.
             wss.handleUpgrade(req, socket, head, (local) => {
+                // #3284 — who the upstream says the caller is: its hello, the first frame.
+                let hello: (c: Caller) => void = () => {};
+                const helloCaller = new Promise<Caller>((resolve) => { hello = resolve; });
+                let greeted = false;
                 up.on("message", (data, binary) => {
+                    if (!greeted && !binary) {
+                        try {
+                            const m = JSON.parse(data.toString()) as { method?: unknown; params?: unknown };
+                            if (m.method === "bus.hello") { greeted = true; hello(callerOfHello(m.params, trusted)); }
+                        } catch { /* not JSON: relayed as it is */ }
+                    }
                     if (local.readyState === WebSocket.OPEN) local.send(data, { binary });
                 });
+                // In order, as the core answers one connection's calls.
+                let queue = Promise.resolve();
                 local.on("message", (data, binary) => {
-                    if (up.readyState === WebSocket.OPEN) up.send(data, { binary });
+                    if (binary) {
+                        if (up.readyState === WebSocket.OPEN) up.send(data, { binary });
+                        return;
+                    }
+                    const text = data.toString();
+                    queue = queue.then(async () => {
+                        const d = await nodeAnswer(text, () => helloCaller);
+                        if (d.relay) {
+                            if (up.readyState === WebSocket.OPEN) up.send(text);
+                        } else if (d.answer !== null && local.readyState === WebSocket.OPEN) {
+                            local.send(d.answer);
+                        }
+                    }).catch(() => { /* one frame's failure never stops the relay */ });
                 });
                 up.on("close", (code, reason) => {
                     if (local.readyState === WebSocket.OPEN) local.close(sendable(code), reason);

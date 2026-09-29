@@ -57,6 +57,10 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- Behind a proxy node, the methods that act on a machine (its loops, session hosts,
+  folders, the daemon itself) are answered by the node for its own machine,
+  instead of being refused or, for `session.list` and `daemon.info`, answered by
+  the upstream about the upstream's machine.
 - `src/api/` holds only the HTTP routes production keeps; the composed reads the
   bus and the core share moved to `src/queries/`, the bus's own helpers next to
   its methods.

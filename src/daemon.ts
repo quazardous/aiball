@@ -129,8 +129,9 @@ function main(): void {
     const relay = loadProxy();
     const relayTokens = relay ? loadProxyTokens() : null;
     if (relay) attachBusRelay(server, relay, relayTokens!);
-    // #3066 — the session hosts still running from before this start.
-    if (core) {
+    // #3066 — the session hosts still running from before this start. #3284 —
+    // a proxy node too: it answers its own machine's sessions.
+    if (core || relay) {
         void initSessions()
             .then((n) => { if (n > 0) console.log(`took back ${n} session host(s)`); })
             .catch((e) => console.error("session hosts:", e));
@@ -183,7 +184,7 @@ function main(): void {
             (sock as unknown as { __aiballUds: boolean }).__aiballUds = true;
         });
         if (core) attachBus(udsServer, { trusted: true });
-        else if (relay) attachBusRelay(udsServer, relay, relayTokens!);
+        else if (relay) attachBusRelay(udsServer, relay, relayTokens!, { trusted: true });
         udsServer.listen(SOCK_PATH, () => {
             try { chmodSync(SOCK_PATH, 0o600); } catch { /* best effort */ }
             console.log(`aiball daemon listening on unix:${SOCK_PATH} (local-trust)`);

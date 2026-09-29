@@ -194,6 +194,9 @@ defineMethod({
 defineMethod({
     name: "consumer.afk",
     ...LOOP_CONTROL,
+    // #3284 — through the loop's local socket: the machine the loop runs on.
+    relayed: true,
+    machine: true,
     params: z.object({ name: z.string(), action: z.unknown().optional(), durationSec: z.unknown().optional() }),
     run: (_c, p) => {
         const consumerId = p.name;

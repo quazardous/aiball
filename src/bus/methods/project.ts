@@ -194,7 +194,7 @@ defineMethod({
 defineMethod({
     name: "project.init",
     who: ["human"],
-    relayed: false,
+    machine: true,
     params: z.object({
         cwd: z.string(),
         project: z.string().optional(),
@@ -251,7 +251,7 @@ function inFolder<T>(caller: { transport: string }, cwd: string, f: () => T): T 
 defineMethod({
     name: "project.settings",
     who: ["human"],
-    relayed: false,
+    machine: true,
     params: z.object({ cwd: z.string() }),
     run: (caller, p) => inFolder(caller, p.cwd, () => readSettings(p.cwd)),
 });
@@ -268,7 +268,7 @@ defineMethod({
 defineMethod({
     name: "project.settings_set",
     who: ["human"],
-    relayed: false,
+    machine: true,
     params: z.object({ cwd: z.string(), remote_control: remoteControl.nullable().optional() }),
     run: (caller, p) => inFolder(caller, p.cwd, () => writeSettings(p.cwd, { remote_control: p.remote_control })),
 });

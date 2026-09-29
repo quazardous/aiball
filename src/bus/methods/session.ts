@@ -21,7 +21,7 @@ import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
-    relayed: false,
+    machine: true,
     denied: { message: "starting or stopping a session is a human's gesture", code: ERROR_CODES.MODERATOR_ONLY },
 };
 
@@ -157,7 +157,7 @@ const CLAUDE_LOOP_BIN = resolve(import.meta.dirname, "..", "..", "..", "bin", "c
 defineMethod({
     name: "session.host",
     who: ["human", "agent"],
-    relayed: false,
+    machine: true,
     params: z.object({
         agent: z.string().regex(SESSION_NAME),
         argv: z.array(z.string()).min(1),
@@ -193,7 +193,7 @@ defineMethod({
     name: "session.stop",
     // A human's gesture; and an agent's own loop stops its own session (`claude-loop rm`), locally.
     who: ["human", "agent"],
-    relayed: false,
+    machine: true,
     params: z.object({ agent: z.string().optional(), name: z.string().optional(), wait: z.boolean().optional() }),
     run: async (caller, p) => {
         if (!p.agent === !p.name) throw new Refusal(400, "one of agent or name");
@@ -214,6 +214,7 @@ defineMethod({
 /** Every session this daemon hosts: agent or name, cwd, running, clients, and the socket clients attach to. */
 defineMethod({
     name: "session.list",
+    machine: true,
     who: ["human", "agent"],
     params: z.object({}),
     run: () => listSessionViews(),

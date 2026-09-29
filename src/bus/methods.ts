@@ -68,6 +68,13 @@ export interface MethodSpec<S extends z.ZodType, R> {
     scope?: string;
     /** false: refused to a caller relayed by a proxy node. Default true. */
     relayed?: boolean;
+    /**
+     * #3284 — acts on the machine that answers: its loops, its session hosts,
+     * its folders, the daemon itself. A proxy node answers it itself, for its
+     * own machine, instead of relaying it; the core refuses it relayed, as it
+     * would act on the core's machine.
+     */
+    machine?: boolean;
     /** The refusal a caller outside `who` gets, when a precise one exists. */
     denied?: { message: string; code: ErrorCode };
     params: S;
@@ -105,6 +112,9 @@ export function getMethod(name: string): AnyMethod | undefined {
 /** Why `caller` may not call `m`, or null when it may. */
 export function accessRefusal(m: AnyMethod, caller: Caller): Refusal | null {
     // Before the kind: a node may name a human, and must not reach what nodes may not.
+    if (caller.relayed && m.machine) {
+        return new Refusal(403, `${m.name} acts on the machine that answers: a proxy node answers it for its own machine, the core does not answer it for a node`, ERROR_CODES.FORBIDDEN);
+    }
     if (caller.relayed && m.relayed === false) {
         return new Refusal(403, `${m.name} is not open through a proxy node`, ERROR_CODES.FORBIDDEN);
     }
