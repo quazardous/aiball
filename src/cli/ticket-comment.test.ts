@@ -30,8 +30,15 @@ test("--summary goes out as summary_until", async () => {
     const b = await run("--by", "worker", "--summary", "shipped; awaiting review");
     assert.equal(b.summary_until, "shipped; awaiting review");
     assert.equal(b.kind, "comment_added");
-    assert.equal(b.commits, null);
+    assert.equal(b.commits, "none", "the daemon reads \"none\"");
     assert.equal(b.handback, true);
+});
+
+// #3252 — the daemon files it in the ticket's project and knows its author.
+test("neither the project nor the author goes out", async () => {
+    const b = await run("--by", "worker", "--summary", "s");
+    assert.equal("project" in b, false);
+    assert.equal("by_agent" in b, false);
 });
 
 test("without --summary, nothing is invented: the bus says what is missing", async () => {

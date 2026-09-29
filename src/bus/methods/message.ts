@@ -247,6 +247,19 @@ defineMethod({
 });
 
 /**
+ * #3252 — a post on a ticket belongs to the ticket's project: the daemon reads
+ * it, a client need not send it, and a project that says otherwise is not kept.
+ */
+function onItsTicket(p: Record<string, unknown>): Record<string, unknown> {
+    if (p.kind === "ticket_created" || typeof p.ticket_id !== "number") return p;
+    const ticket = getMessage(p.ticket_id);
+    if (!ticket || ticket.kind !== "ticket_created") {
+        throw new Refusal(404, `ticket #${p.ticket_id} does not exist`, ERROR_CODES.TICKET_NOT_FOUND);
+    }
+    return { ...p, project: ticket.project };
+}
+
+/**
  * Post a message: a ticket (with its extras, #3037), a comment, a decision or
  * a lifecycle event. #3036 — the author is the caller. #830 — the decision
  * events (plan_accepted…) are the daemon's own: `message.decide` makes them.
@@ -270,7 +283,7 @@ defineMethod({
         const prior = made !== null ? getMessage(made) : null;
         if (prior) return { ...withTagsOne(prior), replayed: true };
     }
-    const v = validateNewMessage(p, author);
+    const v = validateNewMessage(onItsTicket(p), author);
     if ("error" in v) throw new Refusal(400, v.error, v.code);
     // #830 — decision-event kinds (plan_accepted / plan_rejected / …) are
     // emitted server-side by the /decide handler ONLY. External callers

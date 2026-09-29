@@ -100,3 +100,13 @@ test("#2652 the MCP client declares commits, and a reply sends null as null", as
     assert.equal(msg.commits, null);
     assert.equal((await reply({ handback: true, commits: "none" })).commits, "none");
 });
+
+// #3252 — the daemon files a reply or a close in the ticket's project and knows its author.
+test("a reply and a close send neither the project nor the author", async () => {
+    const msg = await reply({ handback: true, project: "elsewhere" });
+    assert.equal("project" in msg, false);
+    assert.equal("by_agent" in msg, false);
+    sent.length = 0;
+    await handlers.ticket_close({ ticket_id: 7 });
+    assert.deepEqual(sent, [{ kind: "ticket_closed", ticket_id: 7, parent_id: 7 }]);
+});

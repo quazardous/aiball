@@ -24,6 +24,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import type { ControlEvent } from "./event-bus.js"; // #451: typed control payload
 import { BusClient, BusError } from "./bus-client.js";
+import { apiErrorOf } from "./api-error.js";
 
 /** #2586 — `GET /api/version`; see src/update-check.ts. */
 export interface VersionInfo {
@@ -185,7 +186,7 @@ export class AiballClient {
         return withRetry(async () => {
             const bus = await this.bus().catch((e: Error & { code?: string }) => {
                 // The daemon answered the opening, and refused it (a token it does not know…).
-                if (e instanceof BusError) throw httpError("bus", method, e.status, JSON.stringify({ error: e.message, code: e.code }));
+                if (e instanceof BusError) throw apiErrorOf(e.status, JSON.stringify({ error: e.message, code: e.code }), `bus ${method}`);
                 throw transportError(e, "bus", method, this.socketPath ? `unix:${this.socketPath}` : this.url);
             });
             let timer: NodeJS.Timeout | undefined;
@@ -205,7 +206,7 @@ export class AiballClient {
                     throw Object.assign(new Error(`bus ${method}: ${e.message}, while the call was in flight`), { code: "EBUSCLOSED" });
                 }
                 const body = { error: e.message, code: e.code, ...(e.details ? { details: e.details } : {}) };
-                throw httpError("bus", method, e.status, JSON.stringify(body));
+                throw apiErrorOf(e.status, JSON.stringify(body), `bus ${method}`);
             } finally {
                 clearTimeout(timer);
             }
@@ -217,99 +218,100 @@ export class AiballClient {
         path: string,
         body?: unknown,
     ): Promise<T> {
-        const headers = this.identityHeaders();
-        if (body) headers["content-type"] = "application/json";
-        // Bearer is irrelevant over UDS (server bypasses auth there).
-        if (!this.socketPath && this.token) {
-            headers["authorization"] = `Bearer ${this.token}`;
-        }
-        const payload = body ? JSON.stringify(body) : undefined;
-        // #855 — retry-with-backoff on transient daemon-down errors so
-        // an `aiball restart` (or tsx-watch reload) doesn't kill in-flight
-        // tool calls in cascade. Retriable = the request never reached or
-        // wasn't processed by the daemon (ECONNREFUSED / ENOENT / 502-504
-        // / pre-response socket hang up). NOT retried : 4xx (deterministic),
-        // 5xx ≠ 502-504 (logic error), or timeout once bytes have flown
-        // (risk of double-write on POST).
-        return withRetry(() => {
-            if (this.socketPath) {
-                return this.httpUds<T>(method, path, headers, payload);
-            }
-            return this.httpTcp<T>(method, path, headers, payload);
-        });
+        const res = await this.request(method, path, body === undefined
+            ? {}
+            : { body: JSON.stringify(body), contentType: "application/json" });
+        if (!res.contentType.includes("application/json")) return undefined as unknown as T;
+        return JSON.parse(res.body.toString("utf8")) as T;
     }
 
-    private async httpTcp<T>(
+    /**
+     * #3252 — every HTTP request of this client, JSON or raw bytes: over its
+     * socket or TCP with its token, with its identity headers. #855 — retried
+     * while the daemon is being restarted: the request never reached it or was
+     * not processed (ECONNREFUSED / ENOENT / 502-504 / a socket hang up before
+     * the answer). Not retried: a 4xx (deterministic), another 5xx (a logic
+     * error), a timeout once the bytes have gone (a POST may have written).
+     * A refusal is an ApiError; a transport failure names the request.
+     */
+    private request(
+        method: string,
+        path: string,
+        opts: { body?: string | Buffer; contentType?: string; headers?: Record<string, string>; timeoutMs?: number } = {},
+    ): Promise<{ body: Buffer; contentType: string }> {
+        const headers = { ...this.identityHeaders(), ...opts.headers };
+        if (opts.contentType) headers["content-type"] = opts.contentType;
+        // Bearer is irrelevant over UDS (server bypasses auth there).
+        if (!this.socketPath && this.token) headers["authorization"] = `Bearer ${this.token}`;
+        const timeoutMs = opts.timeoutMs ?? this.timeoutMs;
+        return withRetry(() => this.socketPath
+            ? this.requestUds(method, path, headers, opts.body, timeoutMs)
+            : this.requestTcp(method, path, headers, opts.body, timeoutMs));
+    }
+
+    private async requestTcp(
         method: string,
         path: string,
         headers: Record<string, string>,
-        payload: string | undefined,
-    ): Promise<T> {
+        payload: string | Buffer | undefined,
+        timeoutMs: number,
+    ): Promise<{ body: Buffer; contentType: string }> {
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), this.timeoutMs);
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
         try {
             const res = await fetch(this.url + path, {
                 method,
                 headers,
-                body: payload,
+                body: typeof payload === "string" || payload === undefined ? payload : new Uint8Array(payload),
                 signal: ctrl.signal,
+            }).catch((e: Error & { code?: string; cause?: { code?: string } }) => {
+                // fetch hides the socket's code under `cause`: the retry policy reads it.
+                if (!e.code && e.cause?.code) e.code = e.cause.code;
+                throw transportError(e, method, path, this.url);
             });
             if (!res.ok) {
                 const txt = await res.text().catch(() => "");
-                throw httpError(method, path, res.status, txt);
+                throw apiErrorOf(res.status, txt, `${method} ${path}`);
             }
-            const ct = res.headers.get("content-type") ?? "";
-            if (ct.includes("application/json")) return (await res.json()) as T;
-            return undefined as unknown as T;
+            return {
+                body: Buffer.from(await res.arrayBuffer()),
+                contentType: res.headers.get("content-type") ?? "application/octet-stream",
+            };
         } finally {
             clearTimeout(t);
         }
     }
 
-    private httpUds<T>(
+    private requestUds(
         method: string,
         path: string,
         headers: Record<string, string>,
-        payload: string | undefined,
-    ): Promise<T> {
+        payload: string | Buffer | undefined,
+        timeoutMs: number,
+    ): Promise<{ body: Buffer; contentType: string }> {
         return new Promise((resolve, reject) => {
             const req = httpRequest(
-                {
-                    socketPath: this.socketPath!,
-                    path,
-                    method,
-                    headers,
-                    timeout: this.timeoutMs,
-                },
+                { socketPath: this.socketPath!, path, method, headers, timeout: timeoutMs },
                 (res: IncomingMessage) => {
                     const chunks: Buffer[] = [];
                     res.on("data", (c) => chunks.push(c as Buffer));
                     res.on("end", () => {
-                        const text = Buffer.concat(chunks).toString("utf8");
+                        const body = Buffer.concat(chunks);
                         const status = res.statusCode ?? 0;
                         if (status < 200 || status >= 300) {
-                            reject(httpError(method, path, status, text));
+                            reject(apiErrorOf(status, body.toString("utf8"), `${method} ${path}`));
                             return;
                         }
-                        const ct = res.headers["content-type"] ?? "";
-                        if (typeof ct === "string" && ct.includes("application/json")) {
-                            try {
-                                resolve(JSON.parse(text) as T);
-                            } catch (e) {
-                                reject(e);
-                            }
-                            return;
-                        }
-                        resolve(undefined as unknown as T);
+                        resolve({ body, contentType: String(res.headers["content-type"] ?? "application/octet-stream") });
                     });
                     res.on("error", reject);
                 },
             );
             req.on("error", (e: Error & { code?: string }) => reject(transportError(e, method, path, `unix:${this.socketPath}`)));
             req.on("timeout", () => {
-                req.destroy(new Error(`${method} ${path} → timeout after ${this.timeoutMs}ms`));
+                req.destroy(new Error(`${method} ${path} → timeout after ${timeoutMs}ms`));
             });
-            if (payload) req.write(payload);
+            if (payload !== undefined) req.write(payload);
             req.end();
         });
     }
@@ -393,145 +395,38 @@ export class AiballClient {
     /**
      * Upload raw file bytes to /api/uploads (#387, generalised #694 for
      * text/code/binary in addition to images). Content-addressable: the
-     * daemon dedupes by sha256 and returns `{ url, sha256, bytes, content_type }`.
-     * Goes over the SAME transport as every other call — UDS (token-less
-     * local-trust) when `socketPath` is set, else TCP+token. `name` is an
-     * optional original filename (stored as upload metadata). Distinct from
-     * `http()` because the body is raw bytes with an arbitrary content-type,
-     * not JSON. Roomier timeout than the 2 s probe budget (a 10 MB write
-     * can outlast it).
+     * daemon dedupes by sha256 and returns `{ url, sha256, bytes, content_type }`,
+     * so a retried upload stores nothing twice. `name` is an optional original
+     * filename (stored as upload metadata). Roomier timeout than the 2 s probe
+     * budget (a 10 MB write can outlast it).
      */
-    uploadFile(
+    async uploadFile(
         bytes: Buffer,
         contentType: string,
         name?: string,
     ): Promise<{ url: string; sha256: string; bytes: number; content_type: string }> {
-        const headers: Record<string, string> = { "content-type": contentType };
-        if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
-        if (name) headers["x-aiball-upload-name"] = name;
-        // #508 phase A2 — propagate the no-claim hint on uploads too (cosmetic
-        // but consistent — auth middleware reads the same header in any path).
-        if (this.noClaim) headers["x-aiball-no-claim"] = "1";
-        if (this.role) headers["x-aiball-role"] = this.role;
-        const path = "/api/uploads";
-        const timeoutMs = Math.max(this.timeoutMs, 15000);
-        type UploadResult = { url: string; sha256: string; bytes: number; content_type: string };
-        if (this.socketPath) {
-            return new Promise<UploadResult>((resolve, reject) => {
-                const req = httpRequest(
-                    { socketPath: this.socketPath!, path, method: "POST", headers, timeout: timeoutMs },
-                    (res: IncomingMessage) => {
-                        const chunks: Buffer[] = [];
-                        res.on("data", (c) => chunks.push(c as Buffer));
-                        res.on("end", () => {
-                            const text = Buffer.concat(chunks).toString("utf8");
-                            const status = res.statusCode ?? 0;
-                            if (status < 200 || status >= 300) {
-                                reject(new Error(`POST ${path} → ${status}: ${text}`));
-                                return;
-                            }
-                            try {
-                                resolve(JSON.parse(text) as UploadResult);
-                            } catch (e) {
-                                reject(e);
-                            }
-                        });
-                        res.on("error", reject);
-                    },
-                );
-                req.on("error", reject);
-                req.on("timeout", () => {
-                    req.destroy(new Error(`POST ${path} → timeout after ${timeoutMs}ms`));
-                });
-                req.write(bytes);
-                req.end();
-            });
-        }
-        const headersTcp = { ...headers };
-        if (this.token) headersTcp["authorization"] = `Bearer ${this.token}`;
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), timeoutMs);
-        return fetch(this.url + path, {
-            method: "POST",
-            headers: headersTcp,
-            body: new Uint8Array(bytes),
-            signal: ctrl.signal,
-        })
-            .then(async (res) => {
-                if (!res.ok) {
-                    const txt = await res.text().catch(() => "");
-                    throw new Error(`POST ${path} → ${res.status}: ${txt}`);
-                }
-                return (await res.json()) as UploadResult;
-            })
-            .finally(() => clearTimeout(t));
+        const res = await this.request("POST", "/api/uploads", {
+            body: bytes,
+            contentType,
+            headers: name ? { "x-aiball-upload-name": name } : {},
+            timeoutMs: Math.max(this.timeoutMs, 15000),
+        });
+        return JSON.parse(res.body.toString("utf8")) as { url: string; sha256: string; bytes: number; content_type: string };
     }
 
     /**
      * Download a content-addressed upload by its `<sha>.<ext>` filename
-     * (#390). GETs `/uploads/<filename>` over the SAME transport as the rest
-     * of the client — UDS (local-trust) when `socketPath` is set, else
-     * TCP+token. Returns the raw bytes + content-type so a REMOTE loop can
-     * read a ticket's attached images, which it can't open as a local
-     * `file://`. (`/uploads` is a static mount outside `/api`, so it isn't
-     * behind the bearer middleware — the sha256 path is the capability — but
-     * we still send the token over TCP; it's ignored there and harmless.)
-     * Roomy timeout: an image read can outlast the 2 s probe budget.
+     * (#390), so a REMOTE loop can read a ticket's attached images, which it
+     * can't open as a local `file://`. (`/uploads` is a static mount outside
+     * `/api`, so it isn't behind the bearer middleware — the sha256 path is
+     * the capability — but the token goes over TCP anyway; it's ignored there
+     * and harmless.) Roomy timeout: an image read can outlast the 2 s probe budget.
      */
-    downloadUpload(
+    async downloadUpload(
         filename: string,
     ): Promise<{ bytes: Buffer; contentType: string }> {
-        const path = `/uploads/${filename}`;
-        const timeoutMs = Math.max(this.timeoutMs, 15000);
-        const headers: Record<string, string> = {};
-        if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
-        type Dl = { bytes: Buffer; contentType: string };
-        if (this.socketPath) {
-            return new Promise<Dl>((resolve, reject) => {
-                const req = httpRequest(
-                    { socketPath: this.socketPath!, path, method: "GET", headers, timeout: timeoutMs },
-                    (res: IncomingMessage) => {
-                        const chunks: Buffer[] = [];
-                        res.on("data", (c) => chunks.push(c as Buffer));
-                        res.on("end", () => {
-                            const status = res.statusCode ?? 0;
-                            const body = Buffer.concat(chunks);
-                            if (status < 200 || status >= 300) {
-                                reject(httpError("GET", path, status, body.toString("utf8")));
-                                return;
-                            }
-                            resolve({
-                                bytes: body,
-                                contentType: String(res.headers["content-type"] ?? "application/octet-stream"),
-                            });
-                        });
-                        res.on("error", reject);
-                    },
-                );
-                req.on("error", reject);
-                req.on("timeout", () => {
-                    req.destroy(new Error(`GET ${path} → timeout after ${timeoutMs}ms`));
-                });
-                req.end();
-            });
-        }
-        const headersTcp = { ...headers };
-        if (this.token) headersTcp["authorization"] = `Bearer ${this.token}`;
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), timeoutMs);
-        return fetch(this.url + path, { method: "GET", headers: headersTcp, signal: ctrl.signal })
-            .then(async (res) => {
-                if (!res.ok) {
-                    const txt = await res.text().catch(() => "");
-                    throw httpError("GET", path, res.status, txt);
-                }
-                const ab = await res.arrayBuffer();
-                return {
-                    bytes: Buffer.from(ab),
-                    contentType: res.headers.get("content-type") ?? "application/octet-stream",
-                };
-            })
-            .finally(() => clearTimeout(t));
+        const res = await this.request("GET", `/uploads/${filename}`, { timeoutMs: Math.max(this.timeoutMs, 15000) });
+        return { bytes: res.body, contentType: res.contentType };
     }
 
     private spoolDrop(msg: Record<string, unknown>): SpoolResult {
@@ -794,7 +689,7 @@ export class AiballClient {
      * daemon holds the write-scoped token. `repo` overrides the project's
      * default binding; omit to use it.
      */
-    exportUpstream(ticket_id: number, opts: { kind?: string; repo?: string; by_agent?: string } = {}) {
+    exportUpstream(ticket_id: number, opts: { kind?: string; repo?: string } = {}) {
         return this.call<{
             ticket: { id: number; title: string | null; tags: unknown[] };
             external: { num: number; title: string; state: string; url: string; labels: string[] };
@@ -803,7 +698,6 @@ export class AiballClient {
             id: ticket_id,
             ...(opts.kind ? { kind: opts.kind } : {}),
             ...(opts.repo ? { repo: opts.repo } : {}),
-            ...(opts.by_agent ? { by_agent: opts.by_agent } : {}),
         });
     }
     /**
@@ -1451,25 +1345,6 @@ export function transportError(e: Error & { code?: string }, method: string, pat
     if (e.code) wrapped.code = e.code;
     wrapped.cause = e;
     return wrapped;
-}
-
-/**
- * Build an Error carrying the HTTP `status`, so callers (notably
- * postMessage's spool fallback, #389) can tell a deterministic client
- * error (4xx — retrying won't help) from a transport/server failure
- * (connection refused, timeout, 5xx — worth spooling for replay).
- */
-function httpError(
-    method: string,
-    path: string,
-    status: number,
-    body: string,
-): Error {
-    const err = new Error(`${method} ${path} → ${status}: ${body}`) as Error & {
-        status?: number;
-    };
-    err.status = status;
-    return err;
 }
 
 /** A filter's fields as a method's params: an unset or empty one is left out, as a query string did. */

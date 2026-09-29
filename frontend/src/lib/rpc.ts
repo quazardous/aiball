@@ -16,21 +16,11 @@
  * `seq` this connection received, so the events missed meanwhile come first.
  * While a subscription is open the connection is kept, calls or not.
  */
+import { ApiError } from "@shared/api-error";
 import { withBase } from "./base";
 
-/** A call the daemon refused, or could not run. */
-export class RpcError extends Error {
-    constructor(
-        /** aiball's error code (docs/API-ERRORS.md). */
-        readonly code: string,
-        /** The HTTP status it matches. */
-        readonly status: number,
-        message: string,
-        readonly details?: Record<string, unknown>,
-    ) {
-        super(message);
-    }
-}
+/** A call the daemon refused, or could not run: the same ApiError as every client's (#3252). */
+export class RpcError extends ApiError {}
 
 interface RpcErrorBody {
     code: number;

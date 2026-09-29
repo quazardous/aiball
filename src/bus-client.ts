@@ -5,21 +5,20 @@
  */
 import type { Socket } from "node:net";
 import { WebSocket } from "ws";
+import { ApiError } from "./api-error.js";
 import { BUS_PATH, type RpcErrorData, type RpcResponse } from "./bus-protocol.js";
 
-/** A call the daemon refused, or could not run. */
-export class BusError extends Error {
+/** A call the daemon refused, or could not run: an ApiError that also says JSON-RPC's own code. */
+export class BusError extends ApiError {
     constructor(
-        /** aiball's error code (docs/API-ERRORS.md). */
-        readonly code: string,
-        /** The HTTP status it matches. */
-        readonly status: number,
+        code: string,
+        status: number,
         message: string,
         /** JSON-RPC's own code: the status for a refusal, -32xxx for a protocol error. */
         readonly rpcCode: number,
-        readonly details?: Record<string, unknown>,
+        details?: Record<string, unknown>,
     ) {
-        super(message);
+        super(code, status, message, details);
     }
 }
 

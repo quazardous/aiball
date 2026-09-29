@@ -75,7 +75,6 @@ export function registerTicketCommands(program: Command): void {
                 kind: "ticket_created",
                 title: opts.title,
                 ...(opts.body ? { body: opts.body } : {}),
-                by_agent: client.agentId,
                 ...(opts.plan ? { decision_kind: "plan" } : {}),
             });
             out(res, globalOpts, (v) => fmtPostReceipt(v, "ticket"));
@@ -86,7 +85,7 @@ export function registerTicketCommands(program: Command): void {
         .description("Post a comment on a ticket")
         .requiredOption("--id <id>", "Ticket id")
         .requiredOption("--body <body>", "Comment body")
-        .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
+        .option("--project <project>", "Ignored: the daemon files it in the ticket's project")
         .option("--parent <id>", "Parent message id (default: ticket id)")
         .option("--by <agent>", "Post as this consumer (the identity sent)")
         .option("--handback", "Hand the ticket back: a question, you wait for an answer (an agent's comment needs --handback or --keep)")
@@ -96,35 +95,18 @@ export function registerTicketCommands(program: Command): void {
         .action(async (opts, cmd) => {
             const client = buildClient(gOpts(cmd), opts.by);
             const ticketId = Number(opts.id);
-            let project = opts.project as string | undefined;
-            if (!project) {
-                try {
-                    const m = (await client.getMessage(ticketId)) as { project?: string };
-                    project = m?.project;
-                } catch {
-                    /* fall through */
-                }
-                project ??= process.env.AIBALL_PROJECT;
-                if (!project) {
-                    die(
-                        "ticket comment: --project required (daemon down, can't infer; or set AIBALL_PROJECT)",
-                    );
-                }
-            }
             const parent = opts.parent ? Number(opts.parent) : ticketId;
             const res = await client.postMessage({
-                project,
                 kind: "comment_added",
                 body: opts.body,
-                by_agent: client.agentId,
                 ticket_id: ticketId,
                 parent_id: parent,
                 ...(opts.keep ? { handback: false } : opts.handback ? { handback: true } : {}),
                 // #3174 — the bus refuses an agent's comment without it; a human may leave it out.
                 ...(typeof opts.summary === "string" ? { summary_until: opts.summary } : {}),
-                // #2652 — "none" says it explicitly; absent, the daemon warns or refuses.
+                // #2652 — "none" says it explicitly (the daemon reads it); absent, the daemon warns or refuses.
                 ...(typeof opts.commits === "string"
-                    ? { commits: opts.commits.trim() === "none" ? null : opts.commits.split(",").map((c: string) => c.trim()).filter(Boolean) }
+                    ? { commits: opts.commits.trim() === "none" ? "none" : opts.commits.split(",").map((c: string) => c.trim()).filter(Boolean) }
                     : {}),
             });
             out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "comment"));
@@ -134,30 +116,13 @@ export function registerTicketCommands(program: Command): void {
         .command("close")
         .description("Close a ticket")
         .requiredOption("--id <id>", "Ticket id")
-        .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
+        .option("--project <project>", "Ignored: the daemon files it in the ticket's project")
         .option("--by <agent>", "Post as this consumer (the identity sent)")
         .action(async (opts, cmd) => {
             const client = buildClient(gOpts(cmd), opts.by);
             const ticketId = Number(opts.id);
-            let project = opts.project as string | undefined;
-            if (!project) {
-                try {
-                    const m = (await client.getMessage(ticketId)) as { project?: string };
-                    project = m?.project;
-                } catch {
-                    /* fall through */
-                }
-                project ??= process.env.AIBALL_PROJECT;
-                if (!project) {
-                    die(
-                        "ticket close: --project required (daemon down, can't infer; or set AIBALL_PROJECT)",
-                    );
-                }
-            }
             const res = await client.postMessage({
-                project,
                 kind: "ticket_closed",
-                by_agent: client.agentId,
                 ticket_id: ticketId,
                 parent_id: ticketId,
             });

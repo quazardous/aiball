@@ -58,6 +58,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Uploads and downloads go through the client's one transport: retried while
+  the daemon restarts, sent with the identity headers, and a refusal says its
+  status and code, apart from a transport failure. Every client reads a
+  refusal as the same `ApiError` (`code`, `status`, `details`).
+- A comment or a close is filed in its ticket's project by the daemon: the
+  CLI and the MCP tools no longer look it up or send the author.
 - A ticket's state reads the same everywhere: the ticket header, the inbox,
   the search's open filter and the counts replay one history, so a resolution
   accepted on a comment or a reopen no longer shows differently from one place

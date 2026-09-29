@@ -13,7 +13,7 @@ import { z } from "zod";
 import { MESSAGE_SCOPES } from "../domain.js";
 import { type DecisionKind } from "../decisions.js";
 import { STEP_VERB, kindForVerb, verbsAllowedOn } from "../ticket-transitions.js";
-import { asText, client, effectiveBy, markActiveTicket } from "./_helpers.js";
+import { asText, client, markActiveTicket } from "./_helpers.js";
 
 // #2308 — each decision's `then` verb, where it may be posted and what posting
 // it does come from the transition table (src/ticket-transitions.ts). Only the
@@ -105,7 +105,6 @@ export function registerTicketWriteTools(server: McpServer): void {
                 body,
                 intent,
                 priority,
-                by_agent: effectiveBy(),
                 parent_id,
                 scope,
                 from_project,
@@ -163,10 +162,6 @@ export function registerTicketWriteTools(server: McpServer): void {
                         "Either a ticket id (to comment on the ticket itself) or a comment id (to reply to that specific comment within the thread).",
                     ),
                 body: z.string().describe("Reply body"),
-                project: z
-                    .string()
-                    .optional()
-                    .describe("Project name. Required for offline (spool) mode."),
                 summary_until: z
                     .string()
                     .min(1)
@@ -230,7 +225,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ target_id, body, project, summary_until, then, handback, resume_on, commits, scope }) => {
+        async ({ target_id, body, summary_until, then, handback, resume_on, commits, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -275,14 +270,12 @@ export function registerTicketWriteTools(server: McpServer): void {
                 : then === "reopen" ? "ticket_reopened"
                 : "comment_added";
             const decision_kind: DecisionKind | undefined = kindForVerb(then) ?? undefined;
-            const proj = project ?? target.project;
+            // #3252 — the daemon files the post in the ticket's project.
             const res = await client.postMessage({
-                project: proj,
                 kind,
                 ticket_id: ticketId,
                 parent_id: parentId,
                 body,
-                by_agent: effectiveBy(),
                 decision_kind,
                 // Only forward summary_until for comment_added kinds —
                 // close/reopen are lifecycle rows where the field has no
@@ -334,31 +327,15 @@ export function registerTicketWriteTools(server: McpServer): void {
             description: "Close a ticket (the thread stays accessible, but ticket_list --open hides it).",
             inputSchema: {
                 ticket_id: z.number().int(),
-                project: z.string().optional(),
             },
         },
-        async ({ ticket_id, project }) => {
+        async ({ ticket_id }) => {
             markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
-            let proj = project;
-            if (!proj) {
-                try {
-                    const t = (await client.getMessage(ticket_id)) as { project: string };
-                    proj = t.project;
-                } catch {
-                    proj = client.defaultProject ?? undefined;
-                    if (!proj) {
-                        throw new Error(
-                            "project required (daemon unreachable; set AIBALL_PROJECT or pass project)",
-                        );
-                    }
-                }
-            }
+            // #3252 — the daemon files the close in the ticket's project.
             const res = await client.postMessage({
-                project: proj,
                 kind: "ticket_closed",
                 ticket_id,
                 parent_id: ticket_id,
-                by_agent: effectiveBy(),
             });
             return asText(res);
         },

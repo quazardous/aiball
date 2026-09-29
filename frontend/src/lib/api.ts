@@ -1,5 +1,6 @@
 import type { DecisionKind } from "@shared/ticket-transitions";
 import type { WaitCreditMove, WaitCreditRow } from "./waitCredit";
+import { apiErrorOf } from "@shared/api-error";
 import { withBase } from "./base";
 import { Rpc, type RpcSubscribeOptions } from "./rpc";
 
@@ -265,8 +266,7 @@ async function rawReq(method: string, path: string, body?: unknown): Promise<Res
         onUnauthorized();
     }
     if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`${method} ${path} → ${res.status}: ${text}`);
+        throw apiErrorOf(res.status, await res.text(), `${method} ${path}`);
     }
     return res;
 }

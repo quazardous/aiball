@@ -111,6 +111,19 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `HOST_BUSY` | 409 | `session.start`: the agent's session already runs elsewhere (claude-loop, or a host), or a session of that name already runs; `details.host` says where. |
 | `NOT_IDLE` | 409 | `consumer.restart_claude`: Claude works; the restart waits until it is idle (or pass `when_idle`). `loop.restart` and `loop.wake`: Claude works (or pass `force`). |
 
+## On the client side
+
+aiball's own clients read a refusal as one type, `ApiError` (`src/api-error.ts`):
+`code`, `status`, a message for a human, and `details`. The CLI and the MCP
+server (`AiballClient`) raise it for a bus call and for an HTTP request alike,
+uploads and downloads included. The bus client's `BusError` and the web's
+`RpcError` are ApiErrors too. A body that is not a refusal (a proxy's error
+page) keeps its text and takes the status's generic code.
+
+A failure to reach the daemon is not an ApiError: it has no `status`, keeps
+the socket's code (`ECONNREFUSED`, `ENOENT`…) and names the request and the
+transport.
+
 ## Writing a refusal
 
 In a route, `refuse(res, status, sentence, ERROR_CODES.X)` (`src/api/_helpers.ts`),
