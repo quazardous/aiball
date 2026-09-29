@@ -61,6 +61,9 @@ dates are YYYY-MM-DD.
   `aiball update` and the tray still refuse to run the update, but now give the
   exact command for that checkout instead of a generic "re-run the installer",
   and the tray offers to copy it to the clipboard.
+- On Windows, loops run in tmux (psmux) by default, for now: the session host
+  is Unix-only, and every `claude-loop start` without `--tmux` failed there. An
+  explicit `claude_loop.session: host` is still honoured.
 
 ### Fixed
 

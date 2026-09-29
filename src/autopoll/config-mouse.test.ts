@@ -8,7 +8,7 @@ import { join } from "node:path";
 const root = mkdtempSync(join(tmpdir(), "aiball-3017-"));
 process.env.XDG_CONFIG_HOME = join(root, "xdg");
 mkdirSync(join(root, "xdg", "aiball"), { recursive: true });
-const { loadConfig } = await import("./config.js");
+const { loadConfig, defaultLoopSession } = await import("./config.js");
 after(() => rmSync(root, { recursive: true, force: true }));
 
 function project(name: string, yaml: string | null): string {
@@ -45,12 +45,20 @@ test("#3044 — claude_loop.bar: tmux by default, set globally, overridden per p
     assert.equal(loadConfig(project("b-junk", null)).claude_loop.bar, "tmux");
 });
 
-test("#3135 — claude_loop.session: host by default, set globally, overridden per project, junk ignored", () => {
+test("#3135 — claude_loop.session: the platform default, set globally, overridden per project, junk ignored", () => {
     global("");
-    assert.equal(loadConfig(project("s-default", null)).claude_loop.session, "host");
+    assert.equal(loadConfig(project("s-default", null)).claude_loop.session, defaultLoopSession());
     global("claude_loop:\n  session: tmux\n");
     assert.equal(loadConfig(project("s-global", "consumer:\n  project: s-global\n")).claude_loop.session, "tmux");
     assert.equal(loadConfig(project("s-override", "claude_loop:\n  session: host\n")).claude_loop.session, "host");
     global("claude_loop:\n  session: screen\n");
-    assert.equal(loadConfig(project("s-junk", "claude_loop:\n  session: nope\n")).claude_loop.session, "host");
+    assert.equal(loadConfig(project("s-junk", "claude_loop:\n  session: nope\n")).claude_loop.session, defaultLoopSession());
+});
+
+test("the session defaults to tmux on Windows, where the session host does not run yet — host elsewhere", () => {
+    // Temporary: the session host is built on Unix sockets. An explicit
+    // `session: host` is still honoured (s-override above), on every platform.
+    assert.equal(defaultLoopSession("win32"), "tmux");
+    assert.equal(defaultLoopSession("linux"), "host");
+    assert.equal(defaultLoopSession("darwin"), "host");
 });
