@@ -56,10 +56,24 @@ test("every kind of write keeps the cached aggregate equal to a cold rebuild", a
     await afterWrite("a step tagged", t, () => m.tagMessageAsStep(stepped, "boss"));
     await afterWrite("a step untagged", t, () => m.untagMessageStep(stepped));
     await afterWrite("a status flip", t, () => m.updateMessageStatus(plain, "rejected", "human", null, "comment_added"));
+    const waiting = await comment(t);
+    m.updateMessageStatus(waiting, "pending", "human", null, "comment_added");
+    await afterWrite("a pending comment approved", t, () => m.updateMessageStatus(waiting, "approved", "human", null, "comment_added"));
+    await afterWrite("a ticket approved", t, () => m.updateMessageStatus(t, "approved", "human", null, "ticket_created"));
     await afterWrite("an edit", t, () => m.editMessage(plain, { body: "edited" } as never));
     await afterWrite("a deleted comment", t, () => m.deleteComment(plain, "boss"));
     await afterWrite("a relation event", other, () => m.insertRelationEvent({ target_ticket_id: other, source_ticket_id: t, kind: "ticket_referenced", by_agent: "boss" }));
     await afterWrite("a typed relation", t, () => m.insertTypedRelation({ source_ticket_id: t, target_ticket_id: other, relation_kind: "relates_to", by_agent: "boss" }));
     await afterWrite("a moved ticket, in its new project", t, () => m.moveTicket(t, "writers-2", "boss"), "writers-2");
     assert.equal(getInboxAgg("writers").get(t), buildInboxAgg("writers").get(t), "and gone from the old one");
+});
+
+// #3331 — a post is auto-approved through a status change: it repairs its one
+// thread, and the project's map is kept, not dropped for a full rebuild.
+test("a post repairs the cached map in place instead of dropping it", async () => {
+    const t = await ticket("in place");
+    const before = getInboxAgg("writers");
+    await comment(t);
+    assert.equal(getInboxAgg("writers"), before, "the same map, repaired");
+    assert.deepEqual(before.get(t), buildInboxAgg("writers").get(t));
 });

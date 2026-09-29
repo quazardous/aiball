@@ -534,11 +534,15 @@ export function updateMessageStatus(
     matchedRuleId: number | null = null,
     kind?: MessageKind | "ticket_created" | null,
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — status flip may change closed/resolved/pending flags
     const out = applyMessageStatus(id, status, decidedBy, matchedRuleId, kind);
     // #2165 — AFTER the write: the repair reads the database, so running it
     // first would recompute the state this call is about to replace and hand
     // it back to every reader for the rest of the TTL.
+    // #3331 — the one thread repaired, not the whole map cleared: nearly every
+    // post is auto-approved through here, and a cleared map made the next read
+    // rebuild the whole project's aggregate (~180 ms).
+    if (out) invalidateInboxAgg(out.project, out.kind === "ticket_created" ? out.id : out.ticket_id ?? undefined);
+    else invalidateInboxAgg();
     invalidateFlagsCache(touchedTicketIds(out));
     return out;
 }
