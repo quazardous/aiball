@@ -181,3 +181,15 @@ test("assignee: a consumer of the project gets the ticket, is subscribed and pin
         .where(and(eq(schema.ticketSubscriptions.consumerId, "crewbee"), eq(schema.ticketSubscriptions.ticketId, r.json.id))).all();
     assert.equal(subs.length, 1);
 });
+
+// #3248 — a key whose project was deleted since: a clean refusal, never a 500.
+test("a key's project that no longer exists is refused cleanly", async () => {
+    const { deleteProject } = await import("../db/projects.js");
+    createProject({ name: "gone-3248" });
+    const minted = (await mint("gone-src")).json as { key: { key_id: string }; token: string };
+    await asToken(HUMAN, "signal_key.update", { key_id: minted.key.key_id, scopes: ["tickets:create"], projects: ["gone-3248"] });
+    deleteProject("gone-3248");
+    const r = await http("POST", "/tickets", { project: "gone-3248", title: "t" }, minted.token);
+    assert.ok(r.status >= 400 && r.status < 500, `a refusal, not ${r.status}: ${JSON.stringify(r.json)}`);
+    assert.equal(typeof r.json.code, "string", "with a code a client can branch on");
+});

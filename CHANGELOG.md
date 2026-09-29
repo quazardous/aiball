@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A client taking the controls of a loop in tmux can make its other clients
+  read-only copies (`loop.clients_readonly`) or detach them
+  (`loop.clients_detach`). A copy's mark says how to leave it (the tmux prefix,
+  then `d`), and a terminal whose `claude-loop` attach ends says where the loop
+  went: still in tmux, moved to the session host, or stopped.
 - A loop in tmux says who is attached to it, as the session host does: an
   agent's session and `loop.list` carry `clients` and `interactive` (those with
   the controls), and a change is broadcast. A client can open a loop another
@@ -47,6 +52,8 @@ dates are YYYY-MM-DD.
   with the machine secret (Windows, a daemon on this machine): the secret is
   this machine's user, not a token the daemon can name. An empty
   `AIBALL_TOKEN=` no longer hides the secret either.
+- `POST /api/tickets` with a key scoped to a project deleted since answers
+  `400 PROJECT_NOT_FOUND`, as the bus does, instead of a 500.
 - `claude-loop start` names a loop after the folder it runs in: started from a
   shell carrying another folder's `AIBALL_CWD`, it gave the agent a second loop
   under another name.

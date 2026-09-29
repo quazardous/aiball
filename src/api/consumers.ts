@@ -16,6 +16,7 @@ import {
 import { broadcast } from "../ws.js";
 import { notFound, refuse } from "./_helpers.js";
 import { ERROR_CODES } from "../domain.js";
+import { slidingLimiter } from "../rate-limit.js";
 
 export const consumersRouter = Router();
 
@@ -56,18 +57,10 @@ export const consumersRouter = Router();
  */
 const ENROLL_WINDOW_MS = 60_000;
 const ENROLL_MAX_PER_WINDOW = 5;
-const enrollHits = new Map<string, number[]>();
+const enrollHits = slidingLimiter({ windowMs: ENROLL_WINDOW_MS, max: ENROLL_MAX_PER_WINDOW, countRefused: true });
 
 function enrollRateLimited(ip: string): boolean {
-    const now = Date.now();
-    const hits = (enrollHits.get(ip) ?? []).filter((t) => now - t < ENROLL_WINDOW_MS);
-    hits.push(now);
-    enrollHits.set(ip, hits);
-    // Bounded: one entry per active IP, pruned as it is read.
-    if (enrollHits.size > 500) {
-        for (const [k, v] of enrollHits) if (v.every((t) => now - t >= ENROLL_WINDOW_MS)) enrollHits.delete(k);
-    }
-    return hits.length > ENROLL_MAX_PER_WINDOW;
+    return !enrollHits.hit(ip);
 }
 
 consumersRouter.post("/nodes/enroll", (req: Request, res: Response) => {

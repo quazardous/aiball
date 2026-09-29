@@ -164,3 +164,25 @@ export function fileTicket(v: NewMessage, extras: TicketExtras, caller: string, 
         beforeAnnounce: (msg) => applyExtras(msg, extras, caller),
     }));
 }
+
+/**
+ * #3039 — the refusals `submitMessage` throws, by code, and their HTTP status;
+ * the answer carries the code. Anything else it throws is a 500. #3248 —
+ * here, beside `fileTicket`, for every door that files: `message.post` and
+ * POST /api/tickets.
+ */
+export const SUBMIT_REFUSAL_STATUS: Partial<Record<string, number>> = {
+    [ERROR_CODES.FORBIDDEN_CLOSE]: 403,
+    // #561 — 400 (not 500): the client can say which project does not exist.
+    [ERROR_CODES.PROJECT_NOT_FOUND]: 400,
+    // #569 — the agent waits for the ticket's approval, or posts a plain comment.
+    [ERROR_CODES.PARENT_PENDING_MODERATION]: 409,
+    // #2308 — a step (`then: continue`) from an agent not holding the ticket.
+    [ERROR_CODES.STEP_NOT_HOLDER]: 409,
+    // #2910 — a milestone still holding open tickets is not released.
+    [ERROR_CODES.MILESTONE_HAS_OPEN]: 409,
+    // #2910 — a ticket above the levels the agent works on is read-only to it.
+    [ERROR_CODES.LEVEL_READ_ONLY]: 403,
+    // #2215 — the parent ticket does not exist.
+    [ERROR_CODES.TICKET_NOT_FOUND]: 404,
+};

@@ -84,3 +84,17 @@ for (const client of CLIENTS) {
 test("every named exception still exists (a stale one hides nothing)", () => {
     for (const rel of Object.keys(EXCEPTIONS)) assert.ok(existsSync(join(SRC, rel)), `${rel} is gone: drop its exception`);
 });
+
+// #3248 — the bus is the core's own surface: its methods call the domain
+// (db/, queries/, the write path), never an HTTP router's code in api/, which
+// is only routes now. A method that needs something from api/ moves it out.
+test("bus/ does not import api/", () => {
+    const leaks: string[] = [];
+    for (const file of sources(join(SRC, "bus"))) {
+        for (const dep of importsOf(file)) {
+            const rel = relative(SRC, dep);
+            if (/^api\//.test(rel) || rel === "api.ts") leaks.push(`${relative(SRC, file)} → ${rel}`);
+        }
+    }
+    assert.deepEqual(leaks, [], `the bus imports api/:\n  ${leaks.join("\n  ")}`);
+});
