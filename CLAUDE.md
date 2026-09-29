@@ -77,6 +77,7 @@ Root:
 - [`SIGNALS.md`](./docs/SIGNALS.md) — external signals: how a system outside the board wakes an agent with a signal key, without a ticket.
 - [`REMOTE.md`](./docs/REMOTE.md) — run a local `claude-loop` against a remote daemon: the two types (direct / agent-token vs proxy / node-token).
 - [`SECURITY.md`](./docs/SECURITY.md) — trust model & limits (local UDS / direct / proxy-node), with diagrams; the proxy node token is the weak point.
+- [`WINDOWS.md`](./docs/WINDOWS.md) — start here on Windows: how it differs from Linux, where each part is documented, how a new client gets its token, what does not work yet, and the helpers Windows-safe code uses.
 - [`WIN-INSTALL.md`](./docs/WIN-INSTALL.md) — Windows install.
 - [`WORKFLOW.md`](./docs/WORKFLOW.md) — `feature` vs mainstream dev workflow (intent-driven; never switch the runtime checkout's branch).
 - [`MIGRATIONS.md`](./docs/MIGRATIONS.md) — drizzle/SQLite migration conventions.
