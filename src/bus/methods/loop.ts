@@ -8,13 +8,14 @@
  */
 import { spawn } from "node:child_process";
 import { isMachineLocal } from "../../machine-secret.js";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { statSync } from "node:fs";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { remoteControl } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
-import { tmuxAlive, tmuxName } from "../../claude-loop/state.js";
+import { loopStateRoot, tmuxAlive, tmuxName } from "../../claude-loop/state.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
 import { getConsumer } from "../../db/consumers.js";
@@ -48,9 +49,33 @@ export interface LoopView {
     tmux?: string;
     /** The host's attach socket, for a loop on the host that runs. */
     attach?: { socket: string | null };
+    /** #3338 — when the loop last started (its plate's `created_at`: a restart writes it again). */
+    started_at: string | null;
+    /** #3338 — the loop's last sign of life: when its log was last written. */
+    last_seen_at: string | null;
+    /** #3338 — a stopped loop whose agent has a loop that runs, or a later one: the others show that one. */
+    superseded: boolean;
 }
 
-function loopView(e: LoopEntry): LoopView {
+function lastSeenAt(name: string): string | null {
+    try { return statSync(join(loopStateRoot(), name, "loop.log")).mtime.toISOString(); } catch { return null; }
+}
+
+/**
+ * #3338 — an agent's stopped loop is superseded by one of its loops that runs,
+ * or by a later one (its start, else its plate). Loops with no agent are
+ * never superseded: nothing ties them together.
+ */
+export function markSuperseded(loops: Array<Omit<LoopView, "superseded"> & { at: number }>): LoopView[] {
+    const when = (l: { started_at: string | null; at: number }) => (l.started_at ? Date.parse(l.started_at) : NaN) || l.at;
+    return loops.map((l, i) => {
+        const superseded = !l.running && !!l.agent
+            && loops.some((o, j) => j !== i && o.agent === l.agent && (o.running || when(o) > when(l)));
+        return { ...withoutAt(l), superseded };
+    });
+}
+
+function loopView(e: LoopEntry): Omit<LoopView, "superseded"> & { at: number } {
     const agent = plateAgent(e.plate);
     const mode = e.plate.host_agent ? "host" : "tmux";
     const link = mode === "host" && agent ? sessionFor({ agent }) : undefined;
@@ -67,7 +92,20 @@ function loopView(e: LoopEntry): LoopView {
         model: running && agent ? getAgentBar(agent)?.bar.model ?? null : null,
         ...(mode === "tmux" ? { tmux: tmuxName(e.name) } : {}),
         ...(link && running ? { attach: viewOf(link).attach } : {}),
+        started_at: e.plate.created_at ?? null,
+        last_seen_at: lastSeenAt(e.name),
+        at: e.at,
     };
+}
+
+/** Every loop of this machine as a client shows it, the latest first. */
+function loopViews(): LoopView[] {
+    return markSuperseded(listLoopPlates().sort((a, b) => b.at - a.at).map(loopView));
+}
+
+function withoutAt<T extends { at: number }>(v: T): Omit<T, "at"> {
+    const { at: _at, ...rest } = v;
+    return rest;
 }
 
 /** The loop a caller names: by its name, or the latest of an agent. */
@@ -84,8 +122,9 @@ function findLoop(p: { name?: string; agent?: string }): LoopEntry {
  * The loops of this machine, stopped ones included, from their plates: each
  * one's folder, agent, project and role, where it runs (the session host or
  * tmux), whether it does, whether Claude has Remote Control (off, or the
- * session's name), and what to open (the tmux session, or the host's attach
- * socket).
+ * session's name), what to open (the tmux session, or the host's attach
+ * socket), when it last started and was last seen, and whether another loop
+ * of its agent supersedes it.
  */
 defineMethod({
     name: "loop.list",
@@ -93,7 +132,7 @@ defineMethod({
     params: z.object({}),
     run: (caller) => {
         localOnly(caller);
-        return listLoopPlates().sort((a, b) => b.at - a.at).map(loopView);
+        return loopViews();
     },
 });
 
@@ -145,7 +184,7 @@ defineMethod({
                 const up = view.mode === "host"
                     ? view.running
                     : view.running && !!view.agent && isPresent(view.agent) && !!tmuxSessionView(view.agent);
-                if (view.mode === mode && up) return view;
+                if (view.mode === mode && up) return loopViews().find((v) => v.name === now.name) ?? { ...withoutAt(view), superseded: false };
             }
             if (child.exitCode !== null && child.exitCode !== 0) {
                 throw new Refusal(500, `claude-loop restart exited ${child.exitCode}`, ERROR_CODES.INTERNAL);

@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `loop.list` dates each loop (`started_at`, `last_seen_at`) and marks a
+  stopped loop another loop of its agent replaces (`superseded`).
 - A change of a project's standing prompt or wake focus is broadcast
   (`project_standing_changed` on `board.events`, with the new values), and a
   detailed `project.list` carries `standing_prompt`, `focus_active` and
@@ -33,6 +35,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `claude-loop start` names a loop after the folder it runs in: started from a
+  shell carrying another folder's `AIBALL_CWD`, it gave the agent a second loop
+  under another name.
 - A loop's bar no longer shows a backlog whose tickets are all resting after a
   backlog wake, with a countdown to a wake that never comes: the count drops at
   the wake and comes back when the rest ends.

@@ -1493,7 +1493,7 @@
     },
     {
       "name": "loop.list",
-      "description": "The loops of this machine, stopped ones included, from their plates: each one's folder, agent, project and role, where it runs (the session host or tmux), whether it does, whether Claude has Remote Control (off, or the session's name), and what to open (the tmux session, or the host's attach socket).",
+      "description": "The loops of this machine, stopped ones included, from their plates: each one's folder, agent, project and role, where it runs (the session host or tmux), whether it does, whether Claude has Remote Control (off, or the session's name), what to open (the tmux session, or the host's attach socket), when it last started and was last seen, and whether another loop of its agent supersedes it.",
       "paramStructure": "by-name",
       "params": [],
       "result": {

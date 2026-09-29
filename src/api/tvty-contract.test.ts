@@ -320,7 +320,7 @@ test("the rest of tvty's calls: its settings, its loops, its pings, its counters
         ["config.managed", {}, { config: [CONFIG_ENTRY] }],
         ["config.managed", { project: P }, { project: "string?", config: [CONFIG_ENTRY] }],
         ["ping.list", { unread: true, limit: 20 }, { pings: [{ message: {} }] }],
-        ["loop.list", {}, [{ name: "string", cwd: "string" }]],
+        ["loop.list", {}, [{ name: "string", cwd: "string", started_at: "string?", last_seen_at: "string?", superseded: "boolean" }]],
         ["session.list", {}, [{ agent: "string?", running: "boolean?" }]],
         ["bus.whoami", {}, {}],
         // #3305 — what tvty's new-project assistant starts from: every value with where it comes from.

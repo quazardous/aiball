@@ -24,7 +24,6 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { mouseSetupCommands } from "./mouse-setup.js";
 import { isBarHost, type BarHost } from "../agent-bar.js";
@@ -93,6 +92,7 @@ import { resolveBashCmd } from "./resolve-bash.js";
 import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
+import { loopName } from "./loop-name.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
 import { dropInheritedLoopEnv } from "./inherited-env.js";
@@ -218,28 +218,6 @@ function selfRoot(): string {
     return resolve(here, "..", "..");
 }
 
-/**
- * #594 — single-shot loop name format : `cl-<project>-<hash6>` where
- * `hash6 = sha256(canonicalCwd + ':' + agent).slice(0, 6)`.
- *
- * Stable (same cwd + agent → same hash → same loop retrieved), distinct
- * by default (no fallback chain), aligned with `tmuxName` (identity) +
- * `stateDirFor` (uses the name as-is) so the 3 derived strings match.
- *
- * Older loops (pre-#594) carry the legacy `cl-<project>` shape ; voie A
- * migration (david `nndjjb`) — no rename, the legacy loops survive until
- * `claude-loop rm` and the next start uses the new format.
- */
-function shortHash(cwd: string, agent: string | undefined): string {
-    const input = `${cwd}:${agent ?? ""}`;
-    return createHash("sha256").update(input).digest("hex").slice(0, 6);
-}
-
-function defaultName(project: string | undefined, agent: string | undefined, cwd: string): string {
-    const slug = (s: string): string => s.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-    const p = project ? slug(project) : "loop";
-    return `cl-${p}-${shortHash(canonicalCwd(cwd), agent)}`;
-}
 
 interface StartOpts {
     name?: string;
@@ -648,8 +626,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #420: resolve the loop name AFTER the agent is known, so an omitted --name
     // defaults to a per-agent slug → two loops in the same dir under different
     // agents auto-get distinct names. Explicit --name still wins.
-    // #594 — pass cwd so the hash is stable per (cwd, agent).
-    const name = opts.name ?? defaultName(ctx.project, ctx.agent, startCwd ?? process.cwd());
+    // #594 — pass cwd so the hash is stable per (cwd, agent). #3338 — the
+    // loop's own folder (ctx.cwd, which the plate records), not the shell's:
+    // a start from a shell carrying another folder's AIBALL_CWD ran the loop
+    // there but named it after the shell's folder, a second name for the agent.
+    const name = opts.name ?? loopName(ctx);
     // The proxy gate runs HERE, before the state-dir is touched, and
     // not next to the launch-string it feeds (l. ~1000). A refusal must leave
     // the machine exactly as it found it: further down we would already have

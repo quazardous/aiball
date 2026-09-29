@@ -38,7 +38,7 @@ const restart = getMethod("loop.restart")!;
 test("loop.list: every loop of the machine, stopped ones included, with its agent, mode and what to open", () => {
     const byName = Object.fromEntries(list().map((l) => [l.name, l]));
     assert.deepEqual(Object.keys(byName).sort(), ["cl-h1", "cl-old", "cl-rc", "cl-t1"]);
-    assert.deepEqual(byName["cl-t1"], { name: "cl-t1", cwd: "/w/cl-t1", agent: "t-one", project: "demo", role: "crew", mode: "tmux", running: false, remote_control: false, model: null, tmux: tmuxName("cl-t1") });
+    assert.deepEqual(byName["cl-t1"], { name: "cl-t1", cwd: "/w/cl-t1", agent: "t-one", project: "demo", role: "crew", mode: "tmux", running: false, remote_control: false, model: null, tmux: tmuxName("cl-t1"), started_at: "2026-09-28T00:00:00Z", last_seen_at: null, superseded: false });
     assert.equal(byName["cl-rc"].remote_control, "phone", "#3254 — Claude's Remote Control, as the loop started");
     assert.equal(byName["cl-h1"].mode, "host");
     assert.equal(byName["cl-h1"].running, false, "no host runs for it");
@@ -76,3 +76,34 @@ test("#3259 loop.wake: asks a running idle loop to wake; refuses a loop not here
     setAgentBar("t-one", { v: 1, phase: "busy" } as never);
     assert.deepEqual(await wake.run(human, { name: "cl-t1", force: true }), { name: "cl-t1", requested: true }, "force: queued until Claude is idle");
 });
+
+// #3338 — an agent with two loops: dates to choose the latest, and the stopped
+// one that another loop of its agent replaces marked as such.
+test("loop.list dates each loop and marks a stopped loop its agent has replaced", async () => {
+    const { markSuperseded } = await import("./methods/loop.js");
+    plate("cl-dup-old", { agent: "dup", created_at: "2026-09-29T14:59:59Z" });
+    plate("cl-dup-new", { agent: "dup", host_agent: "dup", created_at: "2026-09-29T15:03:33Z" });
+    const byName = Object.fromEntries(list().map((l) => [l.name, l]));
+    assert.equal(byName["cl-dup-old"].started_at, "2026-09-29T14:59:59Z");
+    assert.equal(byName["cl-dup-new"].started_at, "2026-09-29T15:03:33Z");
+    assert.equal(byName["cl-dup-old"].last_seen_at, null, "no log: never seen");
+    assert.equal(byName["cl-dup-old"].superseded, true, "a later loop of its agent");
+    assert.equal(byName["cl-dup-new"].superseded, false, "the latest");
+    assert.equal(byName["cl-t1"].superseded, false, "an agent with one loop");
+
+    const row = (name: string, agent: string | null, running: boolean, started_at: string) => ({
+        name, cwd: "/w", agent, project: null, role: null, mode: "tmux" as const, running, remote_control: false,
+        model: null, started_at, last_seen_at: null, at: 0,
+    });
+    const marked = markSuperseded([
+        row("later-stopped", "a", false, "2026-09-29T16:00:00Z"),
+        row("earlier-running", "a", true, "2026-09-29T15:00:00Z"),
+        row("orphan-1", null, false, "2026-09-29T15:00:00Z"),
+        row("orphan-2", null, false, "2026-09-29T16:00:00Z"),
+    ]);
+    assert.deepEqual(marked.map((l) => [l.name, l.superseded]), [
+        ["later-stopped", true], ["earlier-running", false], ["orphan-1", false], ["orphan-2", false],
+    ], "a running loop wins over a later stopped one; loops without an agent stand alone");
+    assert.equal("at" in marked[0]!, false, "the internal plate time stays inside");
+});
+
