@@ -18,12 +18,8 @@
  * screen cannot be followed: nothing more comes).
  */
 import { connect, type Socket } from "node:net";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { FRAME, FrameReader, frame } from "./claude-loop/host-attach.js";
-import { loopSockPath } from "./claude-loop/state.js";
-import { sendEventOnce } from "./claude-loop/ipc-events.js";
-import { captureOnce, MAX_KEYS_BYTES, paneTarget, resolveLoopName, sendKeys, type PaneGeometry } from "./pane.js";
+import { captureOnce, MAX_KEYS_BYTES, paneTarget, resolveLoopName, sendLoopKeys, type PaneGeometry } from "./pane.js";
 import { getConsumer } from "./db.js";
 import { sessionFor } from "./sessions/registry.js";
 import {
@@ -252,12 +248,7 @@ async function tmuxKeys(agent: string, keys: string): Promise<void> {
     const cwd = getConsumer(agent)?.cwd;
     const loop = cwd ? resolveLoopName(cwd, agent) : null;
     if (!loop) throw new Error("the loop is not running");
-    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop");
-    void sendEventOnce(loopSockPath(join(stateRoot, loop)), {
-        kind: "proxyEvent",
-        data: { event: "marker", name: "touch_marker", now_ms: Date.now() },
-    }, { timeoutMs: 200 });
-    const r = await sendKeys(paneTarget(loop), keys);
+    const r = await sendLoopKeys(loop, keys);
     if (!r.ok) throw new Error(r.error ?? "send-keys failed");
 }
 

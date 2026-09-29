@@ -37,6 +37,9 @@ dates are YYYY-MM-DD.
   assigned to it. It used to wake only on an unread ping, so once the
   assignment was read the ticket stayed in its backlog: the bar counted down
   to a wake that was skipped every time.
+- Keys typed from the web terminal into a loop running on a proxy node tell
+  that loop a human is typing, as they already did on the hub: a wake no
+  longer injects a prompt over them.
 - Removing a setting from `.aiball.yaml` (the board's project settings, or
   `settings_set`) no longer takes the comment written above it: the file's
   header stays at the top, and a key's own comment moves to the next key.

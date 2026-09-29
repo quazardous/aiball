@@ -9,7 +9,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { MUX_CMD, tmuxName } from "./claude-loop/state.js";
+import { MUX_CMD, loopSockPath, tmuxName } from "./claude-loop/state.js";
+import { sendEventOnce } from "./claude-loop/ipc-events.js";
 
 /** Soft cap sur une capture de pane — quelques KB en pratique, on borne pour
  *  ne pas spammer le canal sortant. */
@@ -48,8 +49,7 @@ export interface LoopEntry { name: string; plate: LoopPlate; at: number }
  * `loop.restart`). A dir without a readable plate is skipped.
  */
 export function listLoopPlates(): LoopEntry[] {
-    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
-        ?? join(homedir(), ".claude-loop");
+    const stateRoot = loopStateRoot();
     if (!existsSync(stateRoot)) return [];
     let entries: string[];
     try { entries = readdirSync(stateRoot); } catch { return []; }
@@ -65,6 +65,11 @@ export function listLoopPlates(): LoopEntry[] {
         }
     }
     return out;
+}
+
+/** Where this machine's loops keep their state (`CLAUDE_LOOP_STATE_ROOT`, else `~/.claude-loop`), read at each call. */
+export function loopStateRoot(): string {
+    return process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop");
 }
 
 /** #3168 — the agent a plate names: `agent`; before that field, `consumer` when one was passed, or `host_agent`. */
@@ -296,7 +301,7 @@ function captureContent(target: string): Promise<CaptureResult | { error: string
  * #472 — spawn `${MUX_CMD} send-keys -l -t <target> -- <keys>`. `-l` (literal)
  * passe chaque byte tel quel (un `\x03` reste un Ctrl-C). Async non-bloquant.
  */
-export function sendKeys(target: string, keys: string): Promise<{ ok: boolean; error?: string }> {
+function sendKeys(target: string, keys: string): Promise<{ ok: boolean; error?: string }> {
     return new Promise((resolve) => {
         const child = spawn(MUX_CMD, ["send-keys", "-l", "-t", target, "--", keys], { stdio: ["ignore", "ignore", "pipe"] });
         const errChunks: Buffer[] = [];
@@ -307,4 +312,19 @@ export function sendKeys(target: string, keys: string): Promise<{ ok: boolean; e
             else resolve({ ok: false, error: `send-keys exited ${code}: ${Buffer.concat(errChunks).toString("utf8").trim()}` });
         });
     });
+}
+
+/**
+ * #3247 — keys typed by a human into a tmux loop's pane: the loop is told a
+ * human is typing (the `touch_marker` its PTY proxy would have sent, since
+ * `send-keys` goes around it), then the keys go. Its wake gate then does not
+ * inject a prompt over them. The one path for the web terminal on this
+ * machine and for the relay on a proxy node, which used to skip the marker.
+ */
+export async function sendLoopKeys(loop: string, keys: string): Promise<{ ok: boolean; error?: string }> {
+    await sendEventOnce(loopSockPath(join(loopStateRoot(), loop)), {
+        kind: "proxyEvent",
+        data: { event: "marker", name: "touch_marker", now_ms: Date.now() },
+    }, { timeoutMs: 200 });
+    return sendKeys(paneTarget(loop), keys);
 }

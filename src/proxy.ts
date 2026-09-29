@@ -29,7 +29,7 @@ import { parse as parseYaml } from "yaml";
 import type { RequestHandler } from "express";
 import { WebSocket } from "ws";
 import { globalConfigPath } from "./autopoll/config.js";
-import { resolveLoopName, paneTarget, captureOnce, sendKeys } from "./pane.js";
+import { resolveLoopName, paneTarget, captureOnce, sendLoopKeys } from "./pane.js";
 import { AIBALL_VERSION, AIBALL_COMMIT } from "./version.js";
 import { resolveDisplayHost } from "./proxy-host-providers.js";
 import { isLoopback, isMachineSecret, looksLikeMachineSecret } from "./machine-secret.js";
@@ -509,7 +509,7 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
             send({ kind: "pane.ack", request_id: requestId, ok: false, error: `no claude-loop dir matches cwd ${cwd}` });
             return;
         }
-        const r = await sendKeys(paneTarget(loopName), keys);
+        const r = await sendLoopKeys(loopName, keys); // #3247 — with the typing marker, as on the hub
         send({ kind: "pane.ack", request_id: requestId, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
     }
 
