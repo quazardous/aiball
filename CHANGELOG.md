@@ -130,6 +130,9 @@ dates are YYYY-MM-DD.
 - Removing a setting from `.aiball.yaml` (the board's project settings, or
   `settings_set`) no longer takes the comment written above it: the file's
   header stays at the top, and a key's own comment moves to the next key.
+- On Windows, `aiball restore` refusing under a running daemon says to quit
+  the tray and how to start it again, not `systemctl`: stopped alone, the
+  daemon would be restarted by the tray in the middle of the restore.
 
 ## [0.50.0] — 2026-09-29
 

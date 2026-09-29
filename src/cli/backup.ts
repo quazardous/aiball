@@ -23,6 +23,21 @@ async function daemonUp(): Promise<boolean> {
     }
 }
 
+/**
+ * #3299 — how to stop and start the daemon around a restore, on this platform.
+ * On Windows the tray supervises the daemon: stopped alone, it would be started
+ * again in the middle of the restore, so the tray is quit instead.
+ */
+export function daemonStopStart(platform: NodeJS.Platform = process.platform): { stop: string; start: string } {
+    if (platform === "win32") {
+        return {
+            stop: "quit the tray: right-click the aiball icon, \"Quit aiball\" (it stops the daemon)",
+            start: "Start-ScheduledTask -TaskName aiball-daemon   (or relaunch the tray from the Start menu)",
+        };
+    }
+    return { stop: "systemctl --user stop aiball", start: "systemctl --user start aiball" };
+}
+
 export function registerBackupCommands(program: Command): void {
     program
         .command("backup <dir>")
@@ -87,11 +102,12 @@ export function registerBackupCommands(program: Command): void {
             if (await daemonUp()) {
                 // Stopping the daemon cuts loop.sock and every connected loop: the
                 // operator does it, knowingly — not a side effect of a restore.
+                const steps = daemonStopStart();
                 die(
                     "restore: the daemon is running — stop it first, then restore, then start it:\n"
-                    + "    systemctl --user stop aiball\n"
+                    + `    ${steps.stop}\n`
                     + `    aiball restore ${dir}\n`
-                    + "    systemctl --user start aiball\n"
+                    + `    ${steps.start}\n`
                     + "  Stopping it disconnects every running loop.",
                 );
             }
@@ -104,7 +120,7 @@ export function registerBackupCommands(program: Command): void {
                 `restored ${src}: ${manifest.row_counts.tickets ?? "?"} tickets, created ${manifest.created_at}\n`
                 + (r.setAside.home ? `  previous data set aside: ${r.setAside.home}\n` : "")
                 + (r.setAside.config ? `  previous config set aside: ${r.setAside.config}\n` : "")
-                + `  start the daemon: systemctl --user start aiball (an older schema migrates at start)\n`,
+                + `  start the daemon: ${daemonStopStart().start} (an older schema migrates at start)\n`,
             );
         });
 }
