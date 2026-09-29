@@ -70,6 +70,10 @@ dates are YYYY-MM-DD.
 - A proposal (plan, resolution, wontfix, escalation) can no longer be decided
   while its ticket waits for moderation, as it could not be posted there:
   approve the ticket first (`PARENT_PENDING_MODERATION`).
+- On a proxy node, `aiball auth` no longer works on the node's own database,
+  where `list` showed no tokens and `issue` minted tokens no daemon accepted.
+  It refuses and explains: tokens live on the hub, and `aiball proxy token add`
+  gives a local client its own identity.
 - Windows fixes:
   - `install.ps1` runs under Windows PowerShell 5.1 again, so `aiball update`
     can update a Windows install.

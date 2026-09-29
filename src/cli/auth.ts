@@ -25,6 +25,7 @@ import {
     listTokens,
     upsertConsumer,
 } from "../db.js";
+import { loadProxy } from "../proxy.js";
 
 const URL = process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
 
@@ -33,8 +34,30 @@ function die(msg: string): never {
     process.exit(1);
 }
 
+/**
+ * Why `aiball auth <what>` refuses on a proxy node, and what to do instead.
+ * These commands work on this machine's database, but a node relays to its
+ * hub: the accounts and tokens that count live there. Left to run, `list`
+ * printed "(no tokens)" on a working node and `issue` minted a token no daemon
+ * would ever accept.
+ */
+export function proxyNodeRefusal(hubUrl: string, what: string): string {
+    return [
+        `auth ${what}: this daemon is a proxy node for ${hubUrl} — accounts and tokens live on that hub, not in this machine's database.`,
+        `  - a token for a client: mint it on the hub (\`aiball auth issue --consumer <id>\` there, or from its web UI),`,
+        `    then map it here: \`aiball proxy token add --consumer <id> --remote <that token>\` prints the local token the client uses;`,
+        `  - \`aiball proxy token list\` / \`revoke\` manage those mappings;`,
+        `  - a client with no token is relayed with this node's token and the identity it declares (refused if proxy.strict).`,
+    ].join("\n");
+}
+
 export function registerAuthCommands(program: Command): void {
     const auth = program.command("auth").description("Bootstrap + token management");
+    // Every subcommand reads or writes the local database: none of it applies on a node.
+    auth.hook("preAction", (_group, sub) => {
+        const proxy = loadProxy();
+        if (proxy) die(proxyNodeRefusal(proxy.url, sub.name()));
+    });
 
     auth.command("init")
         .description(

@@ -30,27 +30,47 @@ documented, what a new client needs to connect, and what does not work yet.
 - [`REMOTE.md`](./REMOTE.md): minting a per-consumer token
   (`aiball auth issue --consumer <id>`) and pointing a loop at a daemon with it.
 
+## Standalone daemon, or proxy node?
+
+The local daemon runs in one of two modes, and tokens work differently in each.
+The global config says which: `%USERPROFILE%\.config\aiball\config.yaml`.
+
+- **Standalone**: no `proxy:` block. The board (its database, accounts and
+  tokens) is on this machine.
+- **Proxy node**: a `proxy:` block with the `url` of a **hub**, another aiball
+  (typically a Linux machine), and the node's own token. This daemon keeps no
+  board: it relays every call to the hub. See [`REMOTE.md`](./REMOTE.md).
+
 ## Connecting a new client (a GUI, a script)
 
-Without a Unix socket, a client authenticates with a bearer token, the same way
-the CLI does:
-
-1. **Find the token**: `AIBALL_TOKEN` if set, else the `export AIBALL_TOKEN=…`
+1. **Find the daemon**: `AIBALL_URL` if set, else `http://127.0.0.1:7777`
+   (the daemon's `-Port` at install; the clients read `AIBALL_URL`, not the port).
+2. **Find the token**: `AIBALL_TOKEN` if set, else the `export AIBALL_TOKEN=…`
    line of `%USERPROFILE%\.local\share\aiball\cli-env`. The CLI does exactly
    this in `bin/launcher.js`. Better, give the client a token of its own: see
-   [Tokens](#tokens-who-creates-them-where-they-live) below.
-2. **Find the daemon**: `AIBALL_URL` if set, else `http://127.0.0.1:7777`
-   (the daemon's `-Port` at install; the clients read `AIBALL_URL`, not the port).
+   [Tokens](#tokens) below.
 3. **Send it**: `Authorization: Bearer <token>`, or `?token=` where headers
    cannot be set. The bus authenticates once, on the request that opens the
    connection: see [`API-BUS.md` — Connecting](./API-BUS.md#connecting).
 
+On a **proxy node**, step 2 is optional: a client with no token is relayed with
+the node's token and the identity it declares in `x-aiball-consumer` — unless
+the node is `strict`, which requires a token per client. That is why loops on a
+node work with no `cli-env` at all.
+
 A client that shares an agent with claude-loop also needs
 [`TVTY-BIND.md`](./TVTY-BIND.md): which of the two holds the agent's Claude.
 
-## Tokens: who creates them, where they live
+## Tokens
 
-**The first one is created by the daemon**, once: when the human account is
+**Any number of tokens can be active at once**, each independent: give each
+client its own token, bound to its own consumer (a GUI such as tvty one, each
+claude-loop agent another). Revoking or rotating one then never breaks the
+others, and the board tells them apart. Where they are made depends on the mode.
+
+### On a standalone daemon
+
+**The first token is created by the daemon**, once: when the human account is
 set up (the `/setup` page the installer opens). It issues an **agent-kind
 token bound to that human account** and writes it to
 `%USERPROFILE%\.local\share\aiball\cli-env` as `export AIBALL_TOKEN=…` —
@@ -58,7 +78,7 @@ token bound to that human account** and writes it to
 missing `cli-env` after the first setup stays missing until someone writes it.
 Every client that falls back to `cli-env` acts as that human.
 
-**Any number of tokens can be active at once.** Each one is independent:
+More tokens:
 
 ```powershell
 aiball auth issue --consumer <id> --label "<what it is for>"   # prints a new token, writes nothing
@@ -66,14 +86,27 @@ aiball auth list                                               # every active to
 aiball auth revoke <token-or-prefix>                           # deletes one; the others keep working
 ```
 
-Give each client its own token, bound to its own consumer: a GUI such as tvty
-gets one, each claude-loop agent another. Revoking or rotating one then never
-breaks the others, and the board tells them apart. Sharing `cli-env` works, but
-ties every client to the human's identity and to one credential.
+### On a proxy node
 
-**Where claude-loop keeps a token** it was given
-(`claude-loop init --aiball-url <url> --aiball-token <token>`, or the same flags
-on `start`):
+The tokens live on the **hub**, and `aiball auth` refuses to run on the node
+(it would work on a local database the node does not use). To give a local
+client its own identity:
+
+1. On the hub, mint a token for the client: `aiball auth issue --consumer <id>`,
+   or from the hub's web UI.
+2. On the node, map it: `aiball proxy token add --consumer <id> --remote <that token>`.
+   It prints a **local** token: that is the one the client sends. The node swaps
+   it for the hub token on the way out, so the hub sees `<id>`, proved by its
+   own token.
+3. `aiball restart`: the node reads its mappings at start.
+
+`aiball proxy token list` and `aiball proxy token revoke <local-or-consumer>`
+manage the mappings; they live in `%USERPROFILE%\.config\aiball\proxy-tokens.yaml`.
+
+### Where claude-loop keeps a token
+
+A token claude-loop was given (`claude-loop init --aiball-url <url>
+--aiball-token <token>`, or the same flags on `start`) is kept in two places:
 
 - `<project>\.aiball.local.yaml`, under `remote:` (`url`, `token`, `consumer`,
   `project`). Git-ignored; read by every later `claude-loop start` in that
