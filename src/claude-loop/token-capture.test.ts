@@ -26,19 +26,19 @@ test("#404 projectTranscriptDir: encodes / and . to -", () => {
 });
 
 test("#517 projectTranscriptDir: encodes Windows \\ and : to -", () => {
-    // aiball-win cwd = `C:\\Users\\david\\dev\\aiball` ; sans le fix les `:` et
-    // `\` restaient intacts → mismatch dir Claude Code → latestSessionFile
-    // null → token-push jamais déclenché. Le fix replace les 4 séparateurs
+    // aiball-win cwd = `C:\\Users\\david\\dev\\aiball`; without the fix the `:` and
+    // `\` stayed intact → dir mismatch with Claude Code → latestSessionFile
+    // null → token-push never fired. The fix replaces the 4 separators
     // (/.\\:) → `C` + `:` + `\` + `Users` etc. = "C--Users-david-dev-aiball"
-    // (2 tirets après C : un pour `:` un pour `\`). À vérifier côté graphite
-    // que Claude Code utilise la même convention (cf. #517 vb9umt diag).
+    // (2 dashes after C: one for `:` one for `\`). To check on the graphite
+    // side that Claude Code uses the same convention (see #517 vb9umt diag).
     const d = projectTranscriptDir("C:\\Users\\david\\dev\\aiball");
     assert.ok(d.endsWith("C--Users-david-dev-aiball"), d);
 });
 
 test("#517 projectTranscriptDir: mixed POSIX + Windows separators tolerated", () => {
-    // Au cas où un cwd passe en forme mixte (rare mais possible si normalisé
-    // partiellement quelque part dans la chaîne). `:` puis `/` = 2 tirets.
+    // In case a cwd comes in mixed form (rare but possible if partially
+    // normalized somewhere along the chain). `:` then `/` = 2 dashes.
     const d = projectTranscriptDir("C:/Users/david/dev/aiball");
     assert.ok(d.endsWith("C--Users-david-dev-aiball"), d);
 });

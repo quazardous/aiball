@@ -103,7 +103,7 @@ test("#1470 tier-4 head (open dependency) → asks to re-check the chain", async
     assert.doesNotMatch(res.phrase, /Not triaged/i);
 });
 
-// #2764 david « si on fait rien on répond rien » — a ticket waiting on someone
+// #2764 david "if we do nothing, we reply nothing" — a ticket waiting on someone
 // else comes back by design; the wake no longer asks for a reply when nothing
 // changed, so the thread stops filling with "still waiting".
 test("#2764 tier-3 head (I spoke last) → nothing new means no reply", async () => {
@@ -453,7 +453,7 @@ test("#2722 a run of closures and their cascades is one wake; work stays out", a
     assert.match(res.phrase, /2 tickets closed:/);
     assert.match(res.phrase, /#2688 resolution ACCEPTED/);
     assert.match(res.phrase, /#2714 wontfix ACCEPTED/);
-    // #2722 david « le wording est pas clair » — a cascade reads under its cause,
+    // #2722 david "the wording is not clear" — a cascade reads under its cause,
     // never as a line that says the linked ticket itself was closed.
     assert.match(res.phrase, /#2688 resolution ACCEPTED[^\n]*\n  still open, linked to #2688: #2711\n  waiting on #2688, now unblocked: #2683/);
     assert.doesNotMatch(res.phrase, /#2711 linked ticket closed/);
@@ -664,25 +664,25 @@ test("#2310 hint on another ticket while the FIFO head is a bundle → the bundl
     assert.equal(res.headMessageId, 1019205, "the acked head is the hint's own comment, not one of the bundle's");
 });
 
-// #1169 — un decision-event (body vide) arrivé par HINT alors que le FIFO ne
-// l'a pas comme head ne doit PAS se rendre en refs nues « (#N / #hashid) ».
-// Le hint porte maintenant `commentKind` ; la branche comment-centrique est
-// désactivée pour un decision-event → skip propre (l'event ressurgit via FIFO).
-test("#1169 hint decision-event (empty FIFO) → PAS de refs nues, tombe sur backlog", async () => {
+// #1169 — a decision-event (empty body) arriving by HINT while the FIFO does
+// not have it as head must NOT render as bare refs "(#N / #hashid)".
+// The hint now carries `commentKind`; the comment-centric branch is
+// disabled for a decision-event → clean skip (the event resurfaces via FIFO).
+test("#1169 hint decision-event (empty FIFO) → NO bare refs, falls to backlog", async () => {
     const res = await buildContextPhrase(stubClient(), null, PINGS_YAML, {
         ticketId: 1166,
         commentHashid: "48c3kp",
-        commentBody: "", // decision-event = body vide
+        commentBody: "", // decision-event = empty body
         commentKind: "resolution_accepted",
     });
-    // surtout PAS « (#1166 / #48c3kp) » nu
-    assert.doesNotMatch(res.phrase, /#48c3kp/, `refs nues rendues : ${JSON.stringify(res.phrase)}`);
-    // le FIFO étant vide, on retombe sur la branche backlog (comportement sain)
-    // — l'important est l'absence de la ref-comment nue.
+    // above all NOT a bare "(#1166 / #48c3kp)"
+    assert.doesNotMatch(res.phrase, /#48c3kp/, `bare refs rendered: ${JSON.stringify(res.phrase)}`);
+    // the FIFO being empty, we fall back to the backlog branch (sane behaviour)
+    // — what matters is the absence of the bare comment ref.
 });
 
-test("#1169 hint comment_added réel (empty FIFO) → toujours comment-centric", async () => {
-    // garde-fou anti-régression : un vrai comment continue de rendre body+ref.
+test("#1169 real comment_added hint (empty FIFO) → still comment-centric", async () => {
+    // regression guard: a real comment keeps rendering body+ref.
     const res = await buildContextPhrase(stubClient(), null, PINGS_YAML, {
         ticketId: 920,
         commentHashid: "qctwhw",
@@ -857,7 +857,7 @@ test("#2344 a bundle that opens on the ticket's creation renders once, not glued
     assert.equal((res.phrase.match(/#920: shared ticket/g) ?? []).length, 1, res.phrase);
 });
 
-// #2767 david « un wake devrait pas être une doc complète, ça doit lead » — each
+// #2767 david "a wake should not be a full doc, it must lead" — each
 // backlog ending is one line that says what to do; the rules live in the skill.
 test("#2767 every backlog ending is its one line, in every shipped tone and in the fallback", async () => {
     const { readFileSync } = await import("node:fs");
@@ -885,8 +885,8 @@ test("#2767 every backlog ending is its one line, in every shipped tone and in t
     assert.match(res.phrase, /look #977: backlog ticket\. Your `then:` awaits an accept: confirm or amend it\./);
 });
 
-// #2770 david — "un wake à part après les events et avant le backlog, avec un
-// sink : c'est un nouveau tier". The critical ticket is the head at tier -1 and
+// #2770 david — "a separate wake after the events and before the backlog, with a
+// sink: it is a new tier". The critical ticket is the head at tier -1 and
 // its wake ends on what it holds back; no other wake carries a critical line.
 test("#2770 a critical head gets its own ending, with what it holds back", async () => {
     const row = { id: 2725, title: "the old blocker", backlog_tier: -1, critical: { holds: 12, quiet: "3 d" } };

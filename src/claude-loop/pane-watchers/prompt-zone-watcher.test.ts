@@ -1,9 +1,9 @@
 /**
  * #953 — PromptZoneWatcher tests. node:test, no I/O.
  *
- * Pin la regex structurelle (2 lignes `─{20,}` qui encadrent un `❯`)
- * + transitions begin/end + le helper `findPromptZone` exporté pour
- * lecture des indices.
+ * Pins the structural regex (2 `─{20,}` lines framing a `❯`)
+ * + begin/end transitions + the `findPromptZone` helper exported for
+ * reading the indices.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";

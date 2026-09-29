@@ -76,7 +76,7 @@ test("DEADLINE_REACHED : booting → sealed", () => {
 });
 
 
-test("sealed terminal : MODULE_SEEN suivants no-op", () => {
+test("sealed terminal : later MODULE_SEEN are no-ops", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     actor.send({ type: "DEADLINE_REACHED" });
     const before = Object.keys(actor.getSnapshot().context.moduleSeen).length;
@@ -85,7 +85,7 @@ test("sealed terminal : MODULE_SEEN suivants no-op", () => {
     assert.equal("compacting" in actor.getSnapshot().context.moduleSeen, false);
 });
 
-test("emit boot:sealed (reason=deadline) sur DEADLINE_REACHED", () => {
+test("emit boot:sealed (reason=deadline) on DEADLINE_REACHED", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     const events: { reason: string }[] = [];
     actor.on("boot:sealed", (ev) => events.push(ev));
@@ -96,25 +96,25 @@ test("emit boot:sealed (reason=deadline) sur DEADLINE_REACHED", () => {
 
 // Scenarios — the decay model.
 
-test("scénario : cold clean (seul le seed) → deadline = floor → seal au floor", () => {
+test("scenario : cold clean (seed only) → deadline = floor → seal at the floor", () => {
     const actor = mkActor({ loopStartMs: 1_000_000, bootMinMs: 30_000 }).start();
     assert.equal(actor.getSnapshot().context.deadlineMs, 1_030_000);
     actor.send({ type: "DEADLINE_REACHED" });
     assert.equal(actor.getSnapshot().matches("sealed"), true);
 });
 
-test("scénario : un module re-signalé puis lâché → deadline = dernier signal + remanence", () => {
+test("scenario : a module re-signalled then dropped → deadline = last signal + remanence", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
-    // resuming visible et re-signalé jusqu'à 1_045_000, puis plus rien
+    // resuming visible and re-signalled until 1_045_000, then nothing
     actor.send({ type: "MODULE_SEEN", name: "resuming", nowMs: 1_030_000 });
     actor.send({ type: "MODULE_SEEN", name: "resuming", nowMs: 1_045_000 });
-    // falls at 1_055_000 ; le seed (1_030_000) est déjà tombé → deadline = 1_055_000
+    // falls at 1_055_000 ; the seed (1_030_000) has already fallen → deadline = 1_055_000
     assert.equal(actor.getSnapshot().context.deadlineMs, 1_055_000);
-    // à 1_056_000 plus aucun module live (resuming non re-signalé)
+    // at 1_056_000 no module is live any more (resuming not re-signalled)
     assert.deepEqual(liveBootModules(actor.getSnapshot().context.moduleSeen, 1_056_000), []);
 });
 
-test("snapshot observable : subscribe fires sur transitions", () => {
+test("snapshot observable : subscribe fires on transitions", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     let sawSealed = false;
     actor.subscribe((snap) => { if (snap.matches("sealed")) sawSealed = true; });
@@ -122,7 +122,7 @@ test("snapshot observable : subscribe fires sur transitions", () => {
     assert.ok(sawSealed);
 });
 
-test("DEFAULT_REMANENCE_MS appliqué quand remanenceMs absent", () => {
+test("DEFAULT_REMANENCE_MS applied when remanenceMs is absent", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     actor.send({ type: "MODULE_SEEN", name: "x", nowMs: 1_025_000 });
     assert.equal(actor.getSnapshot().context.deadlineMs, 1_025_000 + DEFAULT_REMANENCE_MS);
@@ -130,7 +130,7 @@ test("DEFAULT_REMANENCE_MS appliqué quand remanenceMs absent", () => {
 
 // #848 — sealed.fresh → sealed.settled after 10s + emit loop:start
 
-test("emit loop:start 10s après boot:sealed", async () => {
+test("emit loop:start 10s after boot:sealed", async () => {
     const SETTLE_DELAY = 10_000;
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     const events: { loopStartMs: number }[] = [];

@@ -72,7 +72,7 @@ function fakeSchedulers(): {
     return { setIntervalFn, clearIntervalFn, timers };
 }
 
-test("watchdog: alive session → onDead PAS appelé sur tick", () => {
+test("watchdog: alive session → onDead NOT called on tick", () => {
     const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
     const spawn = mockSpawn({ status: 0 });
     let deadCalls = 0;
@@ -89,7 +89,7 @@ test("watchdog: alive session → onDead PAS appelé sur tick", () => {
     assert.equal(deadCalls, 0);
 });
 
-test("watchdog: dead session → onDead appelé une seule fois (latch)", () => {
+test("watchdog: dead session → onDead called only once (latch)", () => {
     const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
     const spawn = mockSpawn({ status: 1 });
     let deadCalls = 0;
@@ -108,7 +108,7 @@ test("watchdog: dead session → onDead appelé une seule fois (latch)", () => {
     assert.equal(deadCalls, 1);
 });
 
-test("watchdog: spawn error → assume-alive (pas d'onDead)", () => {
+test("watchdog: spawn error → assume-alive (no onDead)", () => {
     const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
     const spawn = mockSpawn({ error: new Error("ENOENT"), status: null });
     let deadCalls = 0;
@@ -143,7 +143,7 @@ test("watchdog.stop(): clearInterval idempotent", () => {
 
 // #866 Slice 4 — sibling timer sweep tests.
 
-test("sweepSiblingTimers: process avec CL_STATE_DIR matching → killed", () => {
+test("sweepSiblingTimers: process with matching CL_STATE_DIR → killed", () => {
     if (process.platform !== "linux") return; // no-op on other platforms
     const sd = "/home/david/.claude-loop/cl-test-fake";
     const killed: number[] = [];
@@ -158,7 +158,7 @@ test("sweepSiblingTimers: process avec CL_STATE_DIR matching → killed", () => 
     assert.deepEqual(killed, [1234]);
 });
 
-test("sweepSiblingTimers: self pid exclu", () => {
+test("sweepSiblingTimers: self pid excluded", () => {
     if (process.platform !== "linux") return;
     const sd = "/sd";
     const killed: number[] = [];
@@ -172,7 +172,7 @@ test("sweepSiblingTimers: self pid exclu", () => {
     assert.deepEqual(killed, []);
 });
 
-test("sweepSiblingTimers: env non-readable (process disparu race) → skip", () => {
+test("sweepSiblingTimers: env not readable (process-gone race) → skip", () => {
     if (process.platform !== "linux") return;
     const sd = "/sd";
     const killed: number[] = [];
@@ -186,7 +186,7 @@ test("sweepSiblingTimers: env non-readable (process disparu race) → skip", () 
     assert.deepEqual(killed, []);
 });
 
-test("sweepSiblingTimers: match au début du env buffer (sans \\0 leading)", () => {
+test("sweepSiblingTimers: match at the start of the env buffer (no leading \\0)", () => {
     if (process.platform !== "linux") return;
     const sd = "/sd";
     const killed: number[] = [];
@@ -216,7 +216,7 @@ test("sweepSiblingTimers: #1059 — CL_STATE_DIR match but NON-kernel cmdline (p
     assert.deepEqual(killed, []);
 });
 
-test("sweepSiblingTimers: substring match évité (CL_STATE_DIR_BACKUP → no kill)", () => {
+test("sweepSiblingTimers: substring match avoided (CL_STATE_DIR_BACKUP → no kill)", () => {
     if (process.platform !== "linux") return;
     const sd = "/sd";
     const killed: number[] = [];

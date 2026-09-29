@@ -4,14 +4,14 @@ import assert from "node:assert/strict";
 
 import { formatAfkGlyph } from "./state.js";
 
-test("AFK off (autonomous, color dim) → gris foncé, no suffix", () => {
+test("AFK off (autonomous, color dim) → dark grey, no suffix", () => {
     assert.equal(
         formatAfkGlyph({ color: "dim", prefix: null }),
         " #[fg=colour238,bg=colour16]웃",
     );
 });
 
-test("NOT AFK ∞ (held indef, color red) → rouge + ∞", () => {
+test("NOT AFK ∞ (held indef, color red) → red + ∞", () => {
     assert.equal(
         formatAfkGlyph({ color: "red", prefix: "∞" }),
         " #[fg=colour196,bg=colour16]웃∞",
@@ -26,8 +26,8 @@ test("NOT AFK 10m (held countdown, color yellow) → orange + Ns", () => {
 });
 
 test("leading space included so the glyph stays compact in the template", () => {
-    // Le caller (`@cl_afk_glyph`) interpole directement la string sans
-    // padding — le leading space évite qu'elle colle au précédent token
+    // The caller (`@cl_afk_glyph`) interpolates the string as is, with no
+    // padding — the leading space keeps it from sticking to the previous token
     // (`#{@cl_state}`).
     assert.ok(formatAfkGlyph({ color: "dim", prefix: null }).startsWith(" "));
 });

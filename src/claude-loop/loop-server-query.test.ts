@@ -150,8 +150,8 @@ test("LOOP_SOCK_KIND.SHUTDOWN: handler fires onShutdownRequest once", async () =
     try {
         await sleep(60);
         await sendShutdownToTimer(dir, 300);
-        // server.close() est fire-and-forget côté send. Laisse passer
-        // le nextTick + le serveur traiter le frame.
+        // server.close() is fire-and-forget on the send side. Let the
+        // nextTick pass + the server handle the frame.
         await sleep(150);
         assert.equal(shutdownCalls, 1);
     } finally {
@@ -202,7 +202,7 @@ test("sendShutdownToTimer: a loop that does not listen is reported, not assumed 
     }
 });
 
-test("LOOP_SOCK_KIND enum: kinds canoniques", () => {
+test("LOOP_SOCK_KIND enum: canonical kinds", () => {
     assert.equal(LOOP_SOCK_KIND.VIEW, "view");
     assert.equal(LOOP_SOCK_KIND.PROXY_EVENT, "proxyEvent");
     assert.equal(LOOP_SOCK_KIND.INJECT, "inject");
@@ -274,9 +274,9 @@ test("LOOP_SOCK_KIND.LOG: malformed payload (no .line) is silently ignored", asy
     }
 });
 
-test("sendShutdownToTimer: socket absent → no-op silencieux", async () => {
+test("sendShutdownToTimer: socket absent → silent no-op", async () => {
     const dir = mkdtempSync(join(tmpdir(), "loop-shutdown-noop-"));
-    // No server bound → sendShutdownToTimer doit résoudre sans throw.
+    // No server bound → sendShutdownToTimer must resolve without throwing.
     await sendShutdownToTimer(dir, 200);
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

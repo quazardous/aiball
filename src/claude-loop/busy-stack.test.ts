@@ -75,37 +75,37 @@ test("custom remanence per proof is honoured", () => {
 });
 
 // =====================================================================
-// #1580 — le prédicat qui garde le release autoritaire
+// #1580 — the predicate that guards the authoritative release
 // =====================================================================
 
-test("mechanicalProofsLive: une preuve esc qui a clignoté tient encore pendant sa rémanence", () => {
-    // Le coeur du bug : `esc to interrupt` est un hint INTERMITTENT (mesuré
-    // 6 captures sur 46 pendant que claude travaillait sans pause). Tester
-    // l'instant faisait vider toute la pile 4 ticks sur 5, en plein turn.
+test("mechanicalProofsLive: an esc proof that flickered still holds during its remanence", () => {
+    // The heart of the bug: `esc to interrupt` is an INTERMITTENT hint (measured
+    // on 6 captures out of 46 while claude worked without a pause). Testing
+    // the instant emptied the whole stack 4 ticks out of 5, mid-turn.
     const p = seenProof(new Map(), PROOF_ESC, T0);
-    assert.equal(mechanicalProofsLive(p, T0 + 1), true, "juste après");
-    assert.equal(mechanicalProofsLive(p, T0 + R - 1), true, "toujours dans la fenêtre");
-    assert.equal(mechanicalProofsLive(p, T0 + R + 1), false, "fenêtre écoulée : ne retient plus rien");
+    assert.equal(mechanicalProofsLive(p, T0 + 1), true, "right after");
+    assert.equal(mechanicalProofsLive(p, T0 + R - 1), true, "still inside the window");
+    assert.equal(mechanicalProofsLive(p, T0 + R + 1), false, "window elapsed: holds nothing any more");
 });
 
-test("mechanicalProofsLive: compacting compte, turn NON", () => {
-    // `turn` vient des hooks, pas du pane. S'il bloquait le release, un Stop
-    // hook manqué collerait le busy pour toujours — précisément ce que le
-    // release existe pour éviter (#1012).
+test("mechanicalProofsLive: compacting counts, turn does NOT", () => {
+    // `turn` comes from the hooks, not the pane. If it blocked the release, a
+    // missed Stop hook would stick busy forever — exactly what the release
+    // exists to prevent (#1012).
     assert.equal(mechanicalProofsLive(seenProof(new Map(), PROOF_COMPACTING, T0), T0 + 1), true);
     assert.equal(mechanicalProofsLive(seenProof(new Map(), PROOF_TURN, T0), T0 + 1), false,
-        "turn seul ne doit PAS retenir le release");
+        "turn alone must NOT hold the release");
 });
 
-test("mechanicalProofsLive: pile vide ou entièrement tombée ⇒ le release peut tirer", () => {
+test("mechanicalProofsLive: empty or fully fallen stack ⇒ the release can fire", () => {
     assert.equal(mechanicalProofsLive(new Map(), T0), false);
     const stale = seenProof(seenProof(new Map(), PROOF_ESC, T0), PROOF_COMPACTING, T0);
     assert.equal(mechanicalProofsLive(stale, T0 + R + 1), false,
-        "le garde-fou anti-busy-collé de #992 reste entier, juste décalé d'une rémanence");
+        "the stuck-busy guard of #992 stays whole, just delayed by one remanence");
 });
 
-test("mechanicalProofsLive: releaseAll vide bien tout, y compris le mécanique", () => {
+test("mechanicalProofsLive: releaseAll really empties everything, mechanical included", () => {
     const p = seenProof(seenProof(new Map(), PROOF_ESC, T0), PROOF_TURN, T0);
     assert.equal(mechanicalProofsLive(releaseAll(), T0 + 1), false);
-    assert.equal(mechanicalProofsLive(p, T0 + 1), true, "(témoin : sans release, ça tient)");
+    assert.equal(mechanicalProofsLive(p, T0 + 1), true, "(control: without release, it holds)");
 });

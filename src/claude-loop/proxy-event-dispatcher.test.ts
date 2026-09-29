@@ -30,13 +30,13 @@ function tmp(): string {
     return mkdtempSync(join(tmpdir(), "proxy-event-test-"));
 }
 
-// #915 — stop the surviving AfkService singleton at end-of-suite. Le dernier
-// reset crée un fresh actor avec son `after(...)` armé ; sans `getAfkService().stop()`
-// le setTimeout pingue le test runner jusqu'au timeout 30s.
+// #915 — stop the surviving AfkService singleton at end-of-suite. The last
+// reset creates a fresh actor with its `after(...)` armed; without `getAfkService().stop()`
+// the setTimeout keeps the test runner alive until the 30s timeout.
 after(() => getAfkService().stop());
 
 /** Mark boot as settled : floor elapsed + paneReady + bootComplete sealed.
- *  #840 `4z59jt` — IPC seul. */
+ *  #840 `4z59jt` — IPC only. */
 function seedPostBoot(sd: string): void {
     // loopStartTs far enough in the past that the 30s floor is over.
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
@@ -84,7 +84,7 @@ test("#834 dispatch typing while NOT AFK ∞ (committed) → skipped, ∞ preser
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("régression ∞ (david 2026-06-15) typing during pending_inf debounce → skipped (NOT downgraded to 10m)", () => {
+test("regression ∞ (david 2026-06-15) typing during pending_inf debounce → skipped (NOT downgraded to 10m)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
@@ -288,7 +288,7 @@ test("#840 — set_afk_inf stamps ipc afkMode wait_inf (no file)", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-// #893 Slices C+D — hook events migrés HookService → HookWatcher.
+// #893 Slices C+D — hook events moved HookService → HookWatcher.
 import { getHookWatcher, resetHookWatcherForTests, type HookWatcherEvent } from "./hook-watcher.js";
 
 test("dispatch hook SessionStart → HookWatcher.emit, verdict carries the event", () => {

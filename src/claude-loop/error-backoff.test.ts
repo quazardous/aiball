@@ -1,11 +1,11 @@
 // #332 — pane-error detection + dumb exponential backoff.
 // node:test + tsx (zero deps). Run: `npm test`.
 //
-// #750 Slice 2 — les cas pure `matchPaneError(str)` sont migrés vers
-// `tests/integration/scenarios/error-backoff-match.yaml`. Les tests
-// restants ici nécessitent du runtime non-exprimable dans le runner yaml :
-// fillers multi-lignes (footer-scoping), monotonic asserts sur
-// nextBackoffMs (comparaisons), mkdtemp fixture pour armErrorBackoff.
+// #750 Slice 2 — the pure `matchPaneError(str)` cases moved to
+// `tests/integration/scenarios/error-backoff-match.yaml`. The tests left
+// here need runtime the yaml runner cannot express: multi-line fillers
+// (footer-scoping), monotonic asserts on nextBackoffMs (comparisons), a
+// mkdtemp fixture for armErrorBackoff.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

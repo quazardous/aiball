@@ -1,5 +1,5 @@
 // #884 — RespawnSnapshots unit tests (legacy whitelist API retired
-// dans `Go D`).
+// in `Go D`).
 // Run: `npx tsx --test src/claude-loop/respawn-state.test.ts`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -31,14 +31,14 @@ test("parseRespawnSnapshots: malformed JSON → null", () => {
     assert.equal(parseRespawnSnapshots("not-json"), null);
 });
 
-test("buildRespawnEnvFromSnapshots: empty snapshots → baseEnv inchangé", () => {
+test("buildRespawnEnvFromSnapshots: empty snapshots → baseEnv unchanged", () => {
     const baseEnv: NodeJS.ProcessEnv = { FOO: "bar" };
     const env = buildRespawnEnvFromSnapshots({}, baseEnv);
     assert.equal(env, baseEnv);
     assert.equal(env[RESPAWN_STATE_ENV_VAR], undefined);
 });
 
-test("buildRespawnEnvFromSnapshots: 1 snapshot → env contient swap", () => {
+test("buildRespawnEnvFromSnapshots: 1 snapshot → env contains swap", () => {
     const env = buildRespawnEnvFromSnapshots(
         { boot: { value: "sealed", context: {} } },
         { FOO: "bar" } as NodeJS.ProcessEnv,

@@ -1,10 +1,11 @@
 // #652 Slice 2 + Slice 4 — hook-verdict unit tests.
 // Run: `npx tsx --test src/claude-loop/hook-verdict.test.ts`.
 //
-// #840 `4z59jt` — david "vire tout marker fichier". On simule l'état
-// loop côté IPC directement (setIpcAfk/setIpcBootComplete/...). UDS
-// down ⇒ queryLoopState retombe sur l'ipcState local (= ce qu'on a
-// posé). Plus de writeFileSync(afkPath/bootCompletePath/humanTypingPath).
+// #840 `4z59jt` — david "drop every marker file".
+// We simulate the loop state on the IPC side directly
+// (setIpcAfk/setIpcBootComplete/...). UDS down ⇒ queryLoopState falls back
+// on the local ipcState (= what we set). No more
+// writeFileSync(afkPath/bootCompletePath/humanTypingPath).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";

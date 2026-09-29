@@ -1,9 +1,9 @@
 // #649 Slice 4 — afk-service-sync unit tests.
 // Run: `npx tsx --test src/claude-loop/afk-service-sync.test.ts`.
 //
-// #840 `4z59jt` — david "vire tout marker fichier". afk-service-sync ne
-// touche plus aucun fichier. On vérifie uniquement que les helpers
-// *ViaService propagent à AfkService observable + ipcState.
+// #840 `4z59jt` — david "drop every marker file".
+// afk-service-sync no longer touches any file. We only check that the
+// *ViaService helpers propagate to the AfkService observable + ipcState.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {

@@ -1,28 +1,28 @@
-// #345 B — détecteur de pane interrompu (décoration `[idle:interrupted]`).
+// #345 B — interrupted-pane detector (`[idle:interrupted]` decoration).
 // node:test + tsx. Run: `npm test`.
 //
-// NB : la chaîne exacte de Claude Code reste à confirmer (#345 / #360) ; ces
-// tests verrouillent la LOGIQUE (fenêtre de scope + insensibilité casse +
-// exclusion du busy) contre le marqueur supposé « interrupted by user ».
+// NB: Claude Code's exact string is still to be confirmed (#345 / #360); these
+// tests lock the LOGIC (scope window + case-insensitivity + busy exclusion)
+// against the assumed "interrupted by user" marker.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classifyPaneSpecial, paneShowsInterrupted, snapshotPane } from "./state.js";
 
 const prompt = "────────────\n❯ \n────────────\n  ⏵⏵ auto mode on";
 
-test("détecte « Interrupted by user » près du prompt", () => {
+test("detects 'Interrupted by user' near the prompt", () => {
     assert.equal(paneShowsInterrupted(`● doing stuff\n  ⎿ Interrupted by user\n${prompt}`), true);
 });
 
-test("détecte « Request interrupted by user » (contient le marqueur)", () => {
+test("detects 'Request interrupted by user' (contains the marker)", () => {
     assert.equal(paneShowsInterrupted(`[Request interrupted by user]\n${prompt}`), true);
 });
 
-test("insensible à la casse", () => {
+test("case-insensitive", () => {
     assert.equal(paneShowsInterrupted(`INTERRUPTED BY USER\n${prompt}`), true);
 });
 
-test("pane busy (esc to interrupt) n'est PAS interrompu", () => {
+test("pane busy (esc to interrupt) is NOT interrupted", () => {
     assert.equal(paneShowsInterrupted("✽ Working…\n  ⏵⏵ auto mode on · esc to interrupt"), false);
 });
 
@@ -30,70 +30,70 @@ test("pane idle normal → false", () => {
     assert.equal(paneShowsInterrupted(prompt), false);
 });
 
-test("marqueur trop loin dans le scrollback (hors fenêtre) → false", () => {
+test("marker too far up the scrollback (out of the window) → false", () => {
     const old = "  ⎿ Interrupted by user";
     const filler = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
     assert.equal(paneShowsInterrupted(`${old}\n${filler}\n${prompt}`), false);
 });
 
-test("fenêtre compte les lignes NON vides", () => {
-    // 12 lignes non vides par défaut : le marqueur en 11e position non vide
-    // (en remontant) reste vu malgré des lignes blanches intercalées.
+test("window counts NON-empty lines", () => {
+    // 12 non-empty lines by default: the marker at the 11th non-empty position
+    // (going up) stays seen despite interleaved blank lines.
     const blanks = "\n\n\n\n\n";
     assert.equal(paneShowsInterrupted(`  ⎿ Interrupted by user${blanks}\na\nb\nc\nd\ne\nf\ng`), true);
 });
 
-// #577 — classifyPaneSpecial doit être footer-scoped (#B.185 fix appliqué).
-// Sans ça, un `✶ Compacting conversation… (42s)` qui traîne dans le scrollback
-// après `/compact` terminé reste matché et bloque tous les wakes pour toujours.
+// #577 — classifyPaneSpecial must be footer-scoped (#B.185 fix applied).
+// Without that, a `✶ Compacting conversation… (42s)` lingering in the scrollback
+// after a finished `/compact` stays matched and blocks every wake forever.
 
-// #650 david `tjab9e` — la classification exige texte "Compacting
-// conversation" + au moins un signal "live" parmi : progress bar
-// Unicode (▰/▱), percentage (NN%), ou `esc to interrupt`. La capture
-// réelle du UI Claude montre progress + % (parfois sans esc-to-
-// interrupt visible). Le stale "✶ Compacting conversation… (42s)" sans
-// progress ni % est filtré. Premier essai (esc-to-interrupt only) cassé
-// car les nouveaux formats compact n'ont PAS esc-to-interrupt au footer.
+// #650 david `tjab9e` — the classification requires the text "Compacting
+// conversation" + at least one "live" signal among: Unicode progress bar
+// (▰/▱), percentage (NN%), or `esc to interrupt`. The real capture of the
+// Claude UI shows progress + % (sometimes with no esc-to-interrupt
+// visible). The stale "✶ Compacting conversation… (42s)" with neither
+// progress nor % is filtered out. First attempt (esc-to-interrupt only) broke
+// because the new compact formats have NO esc-to-interrupt in the footer.
 
-test("classifyPaneSpecial: live compacting avec NN% → 'compacting'", () => {
+test("classifyPaneSpecial: live compacting with NN% → 'compacting'", () => {
     const live = "● earlier output\n✶ Compacting conversation… 42%\n  ⏵⏵ auto mode on · esc to interrupt";
     assert.equal(classifyPaneSpecial(live), "compacting");
 });
 
-test("classifyPaneSpecial: format réel David (progress bar + %, sans esc to interrupt) → 'compacting'", () => {
-    // #650 david `tjab9e` capture : progress bar Unicode + percent au
-    // footer, pas de esc-to-interrupt. Doit matcher.
+test("classifyPaneSpecial: David's real format (progress bar + %, no esc to interrupt) → 'compacting'", () => {
+    // #650 david `tjab9e` capture: Unicode progress bar + percent in the
+    // footer, no esc-to-interrupt. Must match.
     const real = "✽ Compacting conversation… (1m 12s)\n  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 55%";
     assert.equal(classifyPaneSpecial(real), "compacting");
 });
 
-test("classifyPaneSpecial: format minimal (texte + progress bar seule, pas de %) → 'compacting'", () => {
-    // Variant intermédiaire : le progress bar Unicode suffit comme live
-    // signal même si le pourcentage n'est pas encore rendu (frame initial).
+test("classifyPaneSpecial: minimal format (text + progress bar only, no %) → 'compacting'", () => {
+    // Intermediate variant: the Unicode progress bar is enough as a live
+    // signal even if the percentage is not rendered yet (initial frame).
     const initial = "Compacting conversation… \n  ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱";
     assert.equal(classifyPaneSpecial(initial), "compacting");
 });
 
-test("classifyPaneSpecial: 'Compacting' + esc to interrupt seul (sans progress/%) → null", () => {
-    // #678 david `y3s6a8` : `esc to interrupt` retiré du live signal car
-    // c'est le marqueur busy-générique (présent au footer de TOUTE turn
-    // normale via `⏵⏵ auto mode on … · esc to interrupt`). Pairé à un
-    // `Compacting` traînant dans le scrollback, ça mis-classifierait chaque
-    // turn normale post-/compact. Seul progress bar (`▰▱`) ou `NN%`
-    // discriminent le live compact. Ce format legacy isolé (sans progress
-    // ni %) n'est plus détecté — acceptable, pas observé dans le UI claude
-    // actuel.
+test("classifyPaneSpecial: 'Compacting' + esc to interrupt alone (no progress/%) → null", () => {
+    // #678 david `y3s6a8`: `esc to interrupt` removed from the live signal
+    // because it is the generic busy marker (in the footer of EVERY normal
+    // turn via `⏵⏵ auto mode on … · esc to interrupt`). Paired with a
+    // `Compacting` lingering in the scrollback, it would misclassify every
+    // normal turn after /compact. Only the progress bar (`▰▱`) or `NN%`
+    // tell a live compact apart. This isolated legacy format (no progress
+    // nor %) is no longer detected — acceptable, not seen in the current
+    // claude UI.
     const legacyIsolated = "● earlier output\n✶ Compacting conversation… (12s)\n  esc to interrupt";
     assert.equal(classifyPaneSpecial(legacyIsolated), null);
 });
 
-test("classifyPaneSpecial: format réel #678 — Compacting hors footer-5, progress bar dedans → 'compacting'", () => {
-    // #678 david `y3s6a8` : capture réelle d'un /compact actif où la boîte
-    // de séparateurs autour du prompt + la ligne auto-mode aval poussent le
-    // texte "Compacting conversation" au-delà du footer-5 lignes. Le live
-    // signal (progress bar `▰▱` + percentage `28%`) reste juste au footer.
-    // Le détecteur DOIT trouver le texte sur le pane complet et le live
-    // signal au footer.
+test("classifyPaneSpecial: real format #678 — Compacting outside footer-5, progress bar inside → 'compacting'", () => {
+    // #678 david `y3s6a8`: real capture of an active /compact where the
+    // separator box around the prompt + the auto-mode line below push the
+    // text "Compacting conversation" beyond the 5-line footer. The live
+    // signal (progress bar `▰▱` + percentage `28%`) stays right in the footer.
+    // The detector MUST find the text on the whole pane and the live
+    // signal in the footer.
     const realCapture = [
         "● Nettoyé (hack retiré du repo + de la box).",
         "",
@@ -115,28 +115,28 @@ test("classifyPaneSpecial: format réel #678 — Compacting hors footer-5, progr
     assert.equal(classifyPaneSpecial(realCapture), "compacting");
 });
 
-test("classifyPaneSpecial: % et 'Compacting' sur lignes différentes → 'compacting'", () => {
+test("classifyPaneSpecial: % and 'Compacting' on different lines → 'compacting'", () => {
     const multiline = "✶ Compacting conversation…\n  progress: 42%\n  esc to interrupt";
     assert.equal(classifyPaneSpecial(multiline), "compacting");
 });
 
-test("classifyPaneSpecial: stale 'Compacting' dans le scrollback (prompt revenu) → null", () => {
-    // Reproduit le scénario #577 : /compact terminé, le prompt est de retour.
-    // Le `prompt` helper n'a ni %, ni progress bar Unicode, ni esc-to-
-    // interrupt → tous les live signals échouent → null.
+test("classifyPaneSpecial: stale 'Compacting' in the scrollback (prompt back) → null", () => {
+    // Reproduces the #577 scenario: /compact finished, the prompt is back.
+    // The `prompt` helper has no %, no Unicode progress bar, no esc-to-
+    // interrupt → every live signal fails → null.
     const stale = "✶ Compacting conversation… (42s)";
     const filler = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
     assert.equal(classifyPaneSpecial(`${stale}\n${filler}\n${prompt}`), null);
 });
 
-test("classifyPaneSpecial: stale 'Compacting' avec (42s) seul dans footer → null", () => {
-    // Même cas mais le stale lui-même est dans le footer (juste lui +
-    // prompt). Aucun live signal → null.
+test("classifyPaneSpecial: stale 'Compacting' with (42s) alone in the footer → null", () => {
+    // Same case but the stale line itself is in the footer (just it +
+    // prompt). No live signal → null.
     const stale = "✶ Compacting conversation… (42s)\n────\n❯ \n  ⏵⏵ auto mode on";
     assert.equal(classifyPaneSpecial(stale), null);
 });
 
-test("classifyPaneSpecial: % sans 'Compacting' (progress bar quelconque) → null", () => {
+test("classifyPaneSpecial: % without 'Compacting' (some other progress bar) → null", () => {
     const other = "Downloading model… 42%\n  esc to interrupt";
     assert.equal(classifyPaneSpecial(other), null);
 });
@@ -146,8 +146,8 @@ test("classifyPaneSpecial: pane idle normal → null", () => {
 });
 
 test("snapshotPane: stale 'Compacting' scrollback + prompt → busy:false special:null", () => {
-    // Cas exact du timer.log du #577 : `pane=busy:false special=compacting`
-    // figé sur true à cause du scrollback. Après fix : special:null.
+    // Exact case from the #577 timer.log: `pane=busy:false special=compacting`
+    // stuck on true because of the scrollback. After the fix: special:null.
     const stale = "✶ Compacting conversation… (42s)";
     const filler = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
     const snap = snapshotPane(`${stale}\n${filler}\n${prompt}`);
@@ -155,7 +155,7 @@ test("snapshotPane: stale 'Compacting' scrollback + prompt → busy:false specia
     assert.equal(snap.special, null);
 });
 
-test("snapshotPane: live compacting (esc to interrupt + Compacting NN% au footer) → busy:true special:'compacting'", () => {
+test("snapshotPane: live compacting (esc to interrupt + Compacting NN% in the footer) → busy:true special:'compacting'", () => {
     const live = "● earlier\n✶ Compacting conversation… 42%\n  ⏵⏵ auto mode on · esc to interrupt";
     const snap = snapshotPane(live);
     assert.equal(snap.busy, true);

@@ -49,7 +49,7 @@ function mkSd(): string {
 }
 
 /** Seed `loop-start-ts` far enough in the past for `bootMinMs` to be
- *  past — sinon `isInBootGrace` retourne true même avec bootComplete. */
+ *  past — otherwise `isInBootGrace` returns true even with bootComplete. */
 function seedLoopStartOld(sd: string): void {
     writeFileSync(join(sd, "loop-start-ts"), String(Date.now() - 5 * 60_000));
 }
@@ -81,25 +81,25 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
     };
 }
 
-test("diffSnapshots: prev=null → tous les champs marqués changed (initial)", () => {
+test("diffSnapshots: prev=null → every field marked changed (initial)", () => {
     assert.deepEqual(
         diffSnapshots(null, snap()),
         ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkGlyph", "promptGlyph", "typingGlyph"],
     );
 });
 
-test("diffSnapshots: snapshots identiques → liste vide (no-op)", () => {
+test("diffSnapshots: identical snapshots → empty list (no-op)", () => {
     const s = snap();
     assert.deepEqual(diffSnapshots(s, { ...s }), []);
 });
 
-test("diffSnapshots: humanWord diff seul", () => {
+test("diffSnapshots: humanWord diff alone", () => {
     const prev = snap({ humanWord: "loop" });
     const next = snap({ humanWord: "boot" });
     assert.deepEqual(diffSnapshots(prev, next), ["humanWord"]);
 });
 
-test("diffSnapshots: 3 champs diff en même temps", () => {
+test("diffSnapshots: 3 fields diff at once", () => {
     const prev = snap({ humanWord: "loop", loopStatus: LOOP_STATUS.IDLE, stateTag: "idle" });
     const next = snap({ humanWord: "stop", loopStatus: LOOP_STATUS.BUSY, stateTag: "busy" });
     assert.deepEqual(
@@ -108,7 +108,7 @@ test("diffSnapshots: 3 champs diff en même temps", () => {
     );
 });
 
-test("computeBarSnapshot: cold boot (ipc vide) → status=boot", () => {
+test("computeBarSnapshot: cold boot (empty ipc) → status=boot", () => {
     const sd = mkSd();
     const s = computeBarSnapshot(sd);
     assert.equal(s.loopStatus, LOOP_STATUS.BOOT);
@@ -126,7 +126,7 @@ test("computeBarSnapshot: post-boot idle (bootComplete + paneReady) → status=i
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("#1041 computeBarSnapshot: nextWakeInSec lit ipc.nextWakeAtMs (idle)", () => {
+test("#1041 computeBarSnapshot: nextWakeInSec reads ipc.nextWakeAtMs (idle)", () => {
     const sd = mkSd();
     seedLoopStartOld(sd);
     setIpcBootComplete(true);
@@ -162,49 +162,49 @@ test("computeBarSnapshot: busy (paneBusy=true) → status=busy", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("BarRenderer.start: initial tick + subscribe ; stop: unsubscribe propre", () => {
+test("BarRenderer.start: initial tick + subscribe ; stop: clean unsubscribe", () => {
     const sd = mkSd();
     const r = new BarRenderer(sd, "cl-test");
     r.start();
-    // Initial tick a tourné — vérifie qu'on n'a pas planté.
+    // Initial tick ran — checks we did not crash.
     r.stop();
-    // start/stop répétés doivent être idempotents (pas de leak setTimeout).
+    // Repeated start/stop must be idempotent (no setTimeout leak).
     r.start();
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("BarRenderer.tick: idempotent quand l'état ne change pas", () => {
+test("BarRenderer.tick: idempotent when the state does not change", () => {
     const sd = mkSd();
     const r = new BarRenderer(sd, "cl-test");
-    r.tick(); // initial — log tout
-    r.tick(); // 2e — no-op (rien changé)
+    r.tick(); // initial — logs everything
+    r.tick(); // 2nd — no-op (nothing changed)
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });
 
-// #862 Slice 2 — setIpcCounters + counters/zen/afkGlyph champs.
+// #862 Slice 2 — setIpcCounters + counters/zen/afkGlyph fields.
 
-test("setIpcCounters: stocke un object normalisé dans ipcState", () => {
+test("setIpcCounters: stores a normalized object in ipcState", () => {
     resetIpcStateForTests();
     setIpcCounters({ open: 3, backlog: 2, events: 0 });
     assert.deepEqual(getIpcState().counters, { open: 3, backlog: 2, events: 0 });
 });
 
-test("setIpcCounters: champs absents → normalisés à null", () => {
+test("setIpcCounters: missing fields → normalized to null", () => {
     resetIpcStateForTests();
     setIpcCounters({ open: 5 });
     assert.deepEqual(getIpcState().counters, { open: 5, backlog: null, events: null });
 });
 
-test("setIpcCounters(null): clear le segment", () => {
+test("setIpcCounters(null): clears the segment", () => {
     resetIpcStateForTests();
     setIpcCounters({ open: 3 });
     setIpcCounters(null);
     assert.equal(getIpcState().counters, null);
 });
 
-test("computeBarSnapshot: lit ipc.counters", () => {
+test("computeBarSnapshot: reads ipc.counters", () => {
     const sd = mkSd();
     setIpcCounters({ open: 4, backlog: 1, events: 2 });
     const s = computeBarSnapshot(sd);
@@ -212,7 +212,7 @@ test("computeBarSnapshot: lit ipc.counters", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("computeBarSnapshot: zen file présent → zenActive=true", () => {
+test("computeBarSnapshot: zen file present → zenActive=true", () => {
     const sd = mkSd();
     writeFileSync(join(sd, "zen"), "");
     const s = computeBarSnapshot(sd);
@@ -220,25 +220,25 @@ test("computeBarSnapshot: zen file présent → zenActive=true", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("diffSnapshots: counters diff via deep-equal (= changement réel)", () => {
+test("diffSnapshots: counters diff via deep-equal (= real change)", () => {
     const prev = snap({ counters: { open: 1, backlog: 0, events: 0 } });
     const next = snap({ counters: { open: 2, backlog: 0, events: 0 } });
     assert.deepEqual(diffSnapshots(prev, next), ["counters"]);
 });
 
-test("diffSnapshots: counters identiques (objects refs différentes) → no diff", () => {
+test("diffSnapshots: identical counters (different object refs) → no diff", () => {
     const prev = snap({ counters: { open: 1, backlog: 0, events: 0 } });
     const next = snap({ counters: { open: 1, backlog: 0, events: 0 } });
     assert.deepEqual(diffSnapshots(prev, next), []);
 });
 
-test("diffSnapshots: counters null vs {0,0,0} → diff (sémantique distinguée)", () => {
+test("diffSnapshots: counters null vs {0,0,0} → diff (distinct semantics)", () => {
     const prev = snap({ counters: null });
     const next = snap({ counters: { open: 0, backlog: 0, events: 0 } });
     assert.deepEqual(diffSnapshots(prev, next), ["counters"]);
 });
 
-// #862 Slice 3 — paint effectif via spawnSync spy.
+// #862 Slice 3 — actual paint via spawnSync spy.
 
 // #1180 — clearing a glyph must UNSET the option, never assign "".
 // `psmux set-option <opt> ""` silently keeps the previous value on Windows:
@@ -273,27 +273,27 @@ test("BarRenderer.paint: an empty value clears via -u, never by assigning \"\"",
     }
 });
 
-test("BarRenderer.paint: initial tick → spawn set-option pour tous les fields", () => {
+test("BarRenderer.paint: initial tick → spawn set-option for every field", () => {
     const sd = mkSd();
     const { spawn, calls } = makeSpawnSpy();
     const r = new BarRenderer(sd, "cl-test", spawn);
     r.tick();
-    // Initial : tous les fields → on attend au moins 1 setOpt par field
-    // touché. Le mapping concret est tested ailleurs ; ici on assert
-    // qu'il y a EU des spawn (= paint a tourné).
+    // Initial: every field → we expect at least 1 setOpt per field
+    // touched. The concrete mapping is tested elsewhere; here we assert
+    // that there WERE spawns (= paint ran).
     assert.ok(calls.length > 0, `expected paint to spawn at least one set-option, got ${calls.length}`);
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("BarRenderer.paint: tick idempotent (state inchangé) → 0 spawn", () => {
+test("BarRenderer.paint: tick idempotent (state unchanged) → 0 spawn", () => {
     const sd = mkSd();
     const { spawn, calls } = makeSpawnSpy();
     const r = new BarRenderer(sd, "cl-test", spawn);
     r.tick();
     const initialCount = calls.length;
-    r.tick(); // 2e tick : rien n'a changé
-    assert.equal(calls.length, initialCount, "2e tick devrait être no-op");
+    r.tick(); // 2nd tick: nothing changed
+    assert.equal(calls.length, initialCount, "2nd tick should be a no-op");
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });
@@ -410,7 +410,7 @@ test("#1039 BarRenderer.paint: daemonDown also paints RED (loop↔daemon link)",
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec token info", () => {
+test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state with token info", () => {
     const sd = mkSd();
     const { spawn, calls } = makeSpawnSpy();
     const r = new BarRenderer(sd, "cl-test", spawn);
@@ -420,7 +420,7 @@ test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec token inf
     r.tick();
     const st = calls.find((c) => c.args.includes("@cl_state"));
     assert.ok(st, "expected @cl_state setOpt");
-    // #950 : tokens space-separated, statut → symbole, words après. Sd cold = boot → `🚀`, info plain `wait` reste en queue.
+    // #950: tokens space-separated, status → symbol, words after. Cold sd = boot → `🚀`, plain info `wait` stays at the tail.
     assert.ok(st!.args.some((a) => /🚀 wait/.test(a)), "rendered marker carries '🚀 wait' tokens (#950)");
     r.stop();
     rmSync(sd, { recursive: true, force: true });
@@ -428,12 +428,12 @@ test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec token inf
 
 test("BarRenderer.paint: humanWord change + proxy dead → setOpt @cl_human ; proxy alive → SKIP @cl_human", () => {
     const sd = mkSd();
-    // proxy dead = proxy-alive marker absent (default for fresh sd) → BarRenderer doit peindre
+    // proxy dead = proxy-alive marker absent (default for fresh sd) → BarRenderer must paint
     const { spawn, calls } = makeSpawnSpy();
     const r = new BarRenderer(sd, "cl-test", spawn);
     r.tick();
     const humanCalls = calls.filter((c) => c.args.includes("@cl_human"));
-    // Initial sans proxy → on s'attend à voir @cl_human peint.
+    // Initial without proxy → we expect @cl_human to be painted.
     assert.ok(humanCalls.length > 0, "expected @cl_human to be painted when proxy is dead");
     r.stop();
     rmSync(sd, { recursive: true, force: true });

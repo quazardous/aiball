@@ -1,10 +1,10 @@
-// #647 Slice 2 — david `sr9kqw` : claude --resume montre 2 écrans
-// distincts (session-list puis summary-mode). Avant, le setter unique
-// `setResumePicker(sd, true)` ne disait pas lequel était à l'écran — un
-// boot bloqué ne révélait pas la cause via les markers.
+// #647 Slice 2 — david `sr9kqw`: claude --resume shows 2 distinct
+// screens (session-list then summary-mode). Before, the single setter
+// `setResumePicker(sd, true)` did not say which one was on screen — a
+// stuck boot did not reveal its cause through the markers.
 //
-// #840 `4z59jt` — david "vire tout marker fichier". Les pickers sont IPC
-// seul ; on assert sur ipcState au lieu de existsSync(...path).
+// #840 `4z59jt` — david "drop every marker file".
+// The pickers are IPC only; we assert on ipcState instead of existsSync(...path).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

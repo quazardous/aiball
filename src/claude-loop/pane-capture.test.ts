@@ -1,13 +1,14 @@
-// #969/#1588 — rotation des pane-captures. Le nom est `<ISO>.txt` (`:` → `-`),
-// string-orderable, donc trier les noms les trie par date sans un seul `stat`.
+// #969/#1588 — pane-capture rotation. The name is `<ISO>.txt` (`:` → `-`),
+// string-orderable, so sorting the names sorts them by date without a single
+// `stat`.
 //
-// #1588 : la rotation est passée d'une fenêtre en TEMPS à un nombre de FRAMES,
-// parce que le cache est devenu permanent. Une fenêtre en minutes gardait des
-// quantités de preuve très différentes selon que la loop bossait ou dormait ;
-// « les N derniers écrans » est ce que veut quelqu'un qui lit le corpus.
-// La propriété qui compte ici est donc « les N plus récents survivent » — un
-// off-by-one y tronque en silence le corpus contre lequel on règle les
-// détecteurs de pane.
+// #1588: the rotation moved from a TIME window to a number of FRAMES,
+// because the cache became permanent. A window in minutes kept very different
+// amounts of evidence depending on whether the loop was working or sleeping;
+// "the last N screens" is what someone reading the corpus wants.
+// So the property that matters here is "the N most recent survive" — an
+// off-by-one there silently truncates the corpus the pane detectors are tuned
+// against.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from "node:fs";
@@ -16,7 +17,7 @@ import { join } from "node:path";
 
 const { prunePaneCaptures } = await import("./state.js");
 
-/** Frames nommées comme en vrai : ISO trié = ordre chronologique. */
+/** Frames named as in real life: sorted ISO = chronological order. */
 function seed(dir: string, count: number): string[] {
     mkdirSync(dir, { recursive: true });
     const names: string[] = [];
@@ -33,7 +34,7 @@ function withDir(fn: (dir: string) => void): void {
     try { fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
-test("prunePaneCaptures garde les N frames les PLUS RÉCENTES", () => {
+test("prunePaneCaptures keeps the N MOST RECENT frames", () => {
     withDir((dir) => {
         const all = seed(dir, 10);
         prunePaneCaptures(dir, 3);
@@ -41,7 +42,7 @@ test("prunePaneCaptures garde les N frames les PLUS RÉCENTES", () => {
     });
 });
 
-test("prunePaneCaptures ne touche à rien sous la limite", () => {
+test("prunePaneCaptures touches nothing under the limit", () => {
     withDir((dir) => {
         const all = seed(dir, 3);
         prunePaneCaptures(dir, 10);
@@ -49,8 +50,8 @@ test("prunePaneCaptures ne touche à rien sous la limite", () => {
     });
 });
 
-test("prunePaneCaptures : garder exactement le nombre présent ne drop rien", () => {
-    // L'off-by-one : `slice(0, len - keep)` doit rendre [] quand len === keep.
+test("prunePaneCaptures : keeping exactly the present count drops nothing", () => {
+    // The off-by-one: `slice(0, len - keep)` must return [] when len === keep.
     withDir((dir) => {
         const all = seed(dir, 5);
         prunePaneCaptures(dir, 5);
@@ -58,10 +59,9 @@ test("prunePaneCaptures : garder exactement le nombre présent ne drop rien", ()
     });
 });
 
-test("prunePaneCaptures : un budget nul vide le cache", () => {
-    // `pane_cache_frames: 0` veut dire éteint. Laisser les vieilles frames
-    // derrière, ce serait un corpus que plus personne ne rafraîchit — pire
-    // que pas de corpus du tout.
+test("prunePaneCaptures : a zero budget empties the cache", () => {
+    // `pane_cache_frames: 0` means off. Leaving the old frames behind would
+    // be a corpus nobody refreshes any more — worse than no corpus at all.
     withDir((dir) => {
         seed(dir, 4);
         prunePaneCaptures(dir, 0);
@@ -69,12 +69,12 @@ test("prunePaneCaptures : un budget nul vide le cache", () => {
     });
 });
 
-test("prunePaneCaptures tolère un dir absent (no throw)", () => {
+test("prunePaneCaptures tolerates a missing dir (no throw)", () => {
     assert.doesNotThrow(() => prunePaneCaptures(join(tmpdir(), "panecap-1588-absent-xyz"), 5));
 });
 
-test("prunePaneCaptures ignore les fichiers non-.txt", () => {
-    // Le state dir est partagé : seules les frames `.txt` appartiennent au cache.
+test("prunePaneCaptures ignores non-.txt files", () => {
+    // The state dir is shared: only the `.txt` frames belong to the cache.
     withDir((dir) => {
         seed(dir, 4);
         writeFileSync(join(dir, "notes.log"), "keep");

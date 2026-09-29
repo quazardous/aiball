@@ -143,12 +143,12 @@ test("LoopStateBus: second update with same view → no emit", () => {
     assert.equal(calls, 0);
 });
 
-// #877 Slice A — `afkArmed10m`/`afkArmedInf`/`afkCleared` retirés du
-// LoopStateBus. Ces "locus" events sont désormais émis par l'AfkMachine
-// acteur (cf. afk-machine.test.ts pour la couverture).
+// #877 Slice A — `afkArmed10m`/`afkArmedInf`/`afkCleared` removed from the
+// LoopStateBus. These "locus" events are now emitted by the AfkMachine
+// actor (see afk-machine.test.ts for the coverage).
 
-// #888 — `pickerOpened`/`pickerClosed` test retiré : events migrés vers
-// les watchers PaneWatcher direct (pickerSessionW/pickerModeW).
+// #888 — `pickerOpened`/`pickerClosed` test removed: events moved to
+// the direct PaneWatcher watchers (pickerSessionW/pickerModeW).
 
 test("LoopStateBus: unsubscribe stops further calls", () => {
     const bus = new LoopStateBus();
@@ -217,7 +217,7 @@ test("boot phase: typing in resume picker → no stop, no AFK arming", () => {
 //  Post-boot transitions — --wait arms 10m, --no-wait stays loop
 // ---------------------------------------------------------------------------
 
-test("post-boot --wait + NOT AFK 10m armed → wait jaune + wake skip", () => {
+test("post-boot --wait + NOT AFK 10m armed → wait yellow + wake skip", () => {
     const start = T0;
     const now = start + 61 * SEC;
     const v = computeLoopView(baseInput({
@@ -236,7 +236,7 @@ test("post-boot --wait + NOT AFK 10m armed → wait jaune + wake skip", () => {
     assert.match(v.wakeSkipReason ?? "", /NOT AFK/);
 });
 
-test("post-boot --no-wait + AFK off → loop vert + wake allowed", () => {
+test("post-boot --no-wait + AFK off → loop green + wake allowed", () => {
     const start = T0;
     const now = start + 61 * SEC;
     const v = computeLoopView(baseInput({
@@ -257,7 +257,7 @@ test("post-boot --no-wait + AFK off → loop vert + wake allowed", () => {
 //  AFK tristate — F9 cycle behaviour (callers mutate file, service reads it)
 // ---------------------------------------------------------------------------
 
-test("F9 from AFK → NOT AFK 10m → bar wait jaune", () => {
+test("F9 from AFK → NOT AFK 10m → bar wait yellow", () => {
     const start = T0;
     const now = start + 2 * MIN;
     const v = computeLoopView(baseInput({
@@ -272,7 +272,7 @@ test("F9 from AFK → NOT AFK 10m → bar wait jaune", () => {
     assert.equal(v.afkChunk.color, "yellow");
 });
 
-test("F9 from NOT AFK 10m → NOT AFK ∞ → bar wait rouge", () => {
+test("F9 from NOT AFK 10m → NOT AFK ∞ → bar wait red", () => {
     const start = T0;
     const now = start + 2 * MIN;
     const v = computeLoopView(baseInput({
@@ -287,7 +287,7 @@ test("F9 from NOT AFK 10m → NOT AFK ∞ → bar wait rouge", () => {
     assert.equal(v.afkChunk.prefix, "∞");
 });
 
-test("F9 from NOT AFK ∞ → AFK → bar loop vert", () => {
+test("F9 from NOT AFK ∞ → AFK → bar loop green", () => {
     const start = T0;
     const now = start + 2 * MIN;
     const v = computeLoopView(baseInput({
@@ -330,7 +330,7 @@ test("AFK 10m countdown 30s left → `30s NOT AFK:F9`", () => {
     assert.equal(v.afkChunk.prefix, "30s");
 });
 
-test("AFK 10m auto-expires → bar loop vert + wake allowed", () => {
+test("AFK 10m auto-expires → bar loop green + wake allowed", () => {
     const start = T0;
     const now = start + 15 * MIN; // past 10m expiry
     const v = computeLoopView(baseInput({
@@ -441,19 +441,19 @@ test("#1072 not logged in → wake skipped", () => {
     assert.match(v.wakeSkipReason ?? "", /not logged in/);
 });
 
-test("#1116 API unreachable (dans le TTL) → wake skipped", () => {
+test("#1116 API unreachable (within the TTL) → wake skipped", () => {
     const now = T0 + 5 * MIN;
     const v = computeLoopView(baseInput({
         nowMs: now,
         loopStartMs: T0,
         idleSinceMs: now,
-        apiUnreachableSinceMs: now - 30 * SEC, // armé il y a 30s, TTL 120s
+        apiUnreachableSinceMs: now - 30 * SEC, // armed 30s ago, TTL 120s
     }));
     assert.equal(v.wakeAllowed, false);
     assert.match(v.wakeSkipReason ?? "", /API unreachable/);
 });
 
-test("#1116 API unreachable bloque aussi le wake manuel (dans le TTL)", () => {
+test("#1116 API unreachable also blocks the manual wake (within the TTL)", () => {
     const now = T0 + 5 * MIN;
     const v = computeLoopView(baseInput({
         nowMs: now,
@@ -466,15 +466,15 @@ test("#1116 API unreachable bloque aussi le wake manuel (dans le TTL)", () => {
     assert.match(v.wakeSkipReason ?? "", /API unreachable/);
 });
 
-test("#1116 TTL expiré → FAIL OPEN (le wake repart malgré le flag)", () => {
-    // Échec terminal 10/10 (ni busy ni Stop pour clear) ou faux positif de
-    // détection : passé le TTL le gate laisse passer — jamais de loop gelée.
+test("#1116 TTL expired → FAIL OPEN (the wake resumes despite the flag)", () => {
+    // Terminal failure 10/10 (neither busy nor Stop to clear) or a detection
+    // false positive: past the TTL the gate lets through — never a frozen loop.
     const now = T0 + 10 * MIN;
     const v = computeLoopView(baseInput({
         nowMs: now,
         loopStartMs: T0,
         idleSinceMs: now,
-        apiUnreachableSinceMs: now - 121 * SEC, // TTL 120s dépassé
+        apiUnreachableSinceMs: now - 121 * SEC, // TTL 120s exceeded
     }));
     assert.equal(v.wakeAllowed, true);
 });
@@ -940,8 +940,8 @@ test("isReallyBusy : true when both are set", () => {
     assert.equal(isReallyBusy(baseInput({ paneBusy: true, paneCompacting: true })), true);
 });
 
-// #888 — `LoopStateBus.busy` tests retirés : event migré vers
-// TurnController turn:started/turn:ended emits (cf. turn-machine.test.ts).
+// #888 — `LoopStateBus.busy` tests removed: event moved to
+// TurnController turn:started/turn:ended emits (see turn-machine.test.ts).
 
 // #722 — `inputHotAgeMs(input)` + `isInputHot(input)` semantic helpers.
 // Pure observable derived from `humanTypingAtMs` + `inputHotTtlMs`.
@@ -977,8 +977,8 @@ test("isInputHot : false past the TTL window", () => {
     })), false);
 });
 
-// #888 — `LoopStateBus.inputHot` tests retirés : event migré vers
-// TypingController typing:started/typing:ended emits (cf. typing-machine.test.ts).
+// #888 — `LoopStateBus.inputHot` tests removed: event moved to
+// TypingController typing:started/typing:ended emits (see typing-machine.test.ts).
 
 // #722 — `shouldPollFast(input)` aggregator + `pollFast` bus event.
 // OR of {boot, busy, input-hot}.

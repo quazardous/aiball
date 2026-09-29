@@ -1,5 +1,5 @@
-// #992/#993 — "is the prompt empty or not", CURSOR-COLUMN rule (david : "si le
-// curseur n'est pas à l'origine de l'input, c'est qu'on tape, c'est tout").
+// #992/#993 — "is the prompt empty or not", CURSOR-COLUMN rule (david: "if the
+// cursor is not at the input origin, someone is typing, that's all").
 // Content-independent → immune to Claude's greyed ghost-suggestions and hint
 // lines (both leave the cursor parked at the input start). INDICATOR only —
 // drives the coloured `❯` glyph, does NOT change the busy-clear rule.
@@ -44,37 +44,37 @@ test("no cursor (replay/tests) → text-based fallback", () => {
     assert.equal(promptInputEmpty("no box here"), false);
 });
 
-// --- la forme que `capture-pane` rend VRAIMENT ---------------------------
-// `box()` ci-dessus écrit `❯ ` à la main, avec son espace. capture-pane rase
-// les blancs de fin : un prompt vide revient comme `❯` tout court. Le fixture
-// était donc plus généreux que la réalité, et masquait un décalage d'une
-// colonne — le curseur parqué à l'origine (2) se lisait « à droite du début »,
-// donc « en train de taper ». Mesuré sur un pane réel : ligne `"❯"`, curseur
-// `2,36`, verdict « non vide » sur un prompt manifestement vide.
+// --- the shape `capture-pane` REALLY returns ------------------------------
+// `box()` above writes `❯ ` by hand, with its space. capture-pane trims
+// trailing blanks: an empty prompt comes back as a bare `❯`. So the fixture
+// was more generous than reality, and hid a one-column offset — the cursor
+// parked at the origin (2) read as "right of the start", so "typing".
+// Measured on a real pane: line `"❯"`, cursor `2,36`, verdict "not empty" on
+// a plainly empty prompt.
 function captured(chevronInput: string): string {
     return [
         "  some conversation output above",
         RULE,
-        `❯ ${chevronInput}`.replace(/\s+$/u, ""),   // comme capture-pane
+        `❯ ${chevronInput}`.replace(/\s+$/u, ""),   // like capture-pane
         RULE,
         "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
     ].join("\n");
 }
 
-test("prompt vide capturé (espace de fin rasé) → vide, curseur à l'origine", () => {
-    assert.equal(captured("").split("\n")[ROW], "❯", "témoin : l'espace a bien disparu");
+test("captured empty prompt (trailing space trimmed) → empty, cursor at the origin", () => {
+    assert.equal(captured("").split("\n")[ROW], "❯", "control: the space is really gone");
     assert.equal(promptInputEmpty(captured(""), { cursorX: ORIGIN, cursorY: ROW }), true);
 });
 
-test("suggestion grisée sur un pane capturé → vide (c'est tout l'intérêt du curseur)", () => {
+test("greyed suggestion on a captured pane → empty (the whole point of the cursor)", () => {
     assert.equal(promptInputEmpty(captured("git commit --amend"), { cursorX: ORIGIN, cursorY: ROW }), true);
 });
 
-test("saisie réelle sur un pane capturé → non vide", () => {
+test("real input on a captured pane → not empty", () => {
     assert.equal(promptInputEmpty(captured("hi"), { cursorX: ORIGIN + 2, cursorY: ROW }), false);
 });
 
-test("un prompt indenté garde son origine relative", () => {
+test("an indented prompt keeps its relative origin", () => {
     const indented = captured("").replace("❯", "  ❯");
     assert.equal(promptInputEmpty(indented, { cursorX: 4, cursorY: ROW }), true);
     assert.equal(promptInputEmpty(indented, { cursorX: 5, cursorY: ROW }), false);

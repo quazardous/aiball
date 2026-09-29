@@ -18,8 +18,8 @@ function mkActor() {
     });
 }
 
-/** #848 — la SM démarre en `gated`. Pour les tests pré-existants qui
- *  attendent `idle` initial, on envoie BOOT_READY après start. */
+/** #848 — the SM starts in `gated`. For the pre-existing tests that
+ *  expect an initial `idle`, we send BOOT_READY after start. */
 function mkActorReady() {
     const a = mkActor().start();
     a.send({ type: "BOOT_READY" });
@@ -39,7 +39,7 @@ test("#848 BOOT_READY : gated → idle", () => {
     assert.equal(actor.getSnapshot().value, "idle");
 });
 
-test("#848 REQUEST_WAKE pendant gated : emit cleared(boot_gated), stay gated", () => {
+test("#848 REQUEST_WAKE during gated : emit cleared(boot_gated), stay gated", () => {
     const actor = mkActor().start();
     const events: { reason: string }[] = [];
     actor.on("wake:cleared", (ev) => events.push(ev));
@@ -153,12 +153,12 @@ test("emit wake:cleared (reason=ttl) when inFlight outlives its TTL", async () =
     assert.equal(events[0].reason, "ttl");
 });
 
-test("WAKE_SKIPPED in inFlight : transition → idle directement (pas de cooldown)", () => {
+test("WAKE_SKIPPED in inFlight : transition → idle directly (no cooldown)", () => {
     const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     assert.equal(actor.getSnapshot().value, "inFlight");
     actor.send({ type: "WAKE_SKIPPED" });
-    assert.equal(actor.getSnapshot().value, "idle", "skip retourne directement à idle (no cooldown)");
+    assert.equal(actor.getSnapshot().value, "idle", "skip returns directly to idle (no cooldown)");
     assert.equal(actor.getSnapshot().context.wakeInFlightAtMs, null);
 });
 

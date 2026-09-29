@@ -1,6 +1,6 @@
-// #2042 — david's rule, in his words: "je réponds que si j'apporte un élément
-// nouveau (si c'est juste pour dire tu as raison ou je suis d'accord pas la
-// peine)". Agreement between two agents costs a turn on both sides and adds
+// #2042 — david's rule, in his words: "I only reply if I bring something
+// new (if it's just to say you're right or I agree, don't bother)".
+// Agreement between two agents costs a turn on both sides and adds
 // nothing, so the wake says so — but only when the event actually came from an
 // agent.
 //

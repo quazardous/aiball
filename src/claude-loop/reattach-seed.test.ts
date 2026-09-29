@@ -1,22 +1,22 @@
 /**
  * #1059 — revive → NOT-AFK-10min seed.
  *
- * Prouve la branche que le kernel exécute au boot : quand on REPREND une
- * session claude vivante via revive sur sock morte (CL_REATTACH=1 SANS
- * CL_RESPAWN_STATE), le snapshot AFK est perdu → seed un hold NOT-AFK-10min
- * (anti-surprise, auto-release après 10min) au lieu de `off` (autonome).
+ * Proves the branch the kernel runs at boot: when we TAKE BACK a live
+ * claude session via revive on a dead sock (CL_REATTACH=1 WITHOUT
+ * CL_RESPAWN_STATE), the AFK snapshot is lost → seed a NOT-AFK-10min hold
+ * (no surprise, auto-release after 10min) instead of `off` (autonomous).
  *
- * On combine le helper de décision (`shouldSeedReattachHold`, vraie
- * `parseRespawnSnapshots`) avec la vraie `AfkService` (même XState que le
- * kernel) → couvre la composition décision+seed, pas seulement les briques.
+ * We combine the decision helper (`shouldSeedReattachHold`, real
+ * `parseRespawnSnapshots`) with the real `AfkService` (same XState as the
+ * kernel) → covers the decision+seed composition, not just the pieces.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { shouldSeedReattachHold, serializeRespawnSnapshots } from "./respawn-state.js";
 import { AfkService } from "./afk-service.js";
 
-// Le snapshot AFK exact qu'un reload SAIN transmettrait (forme XState
-// persisted — seul `afk !== undefined` compte pour la décision).
+// The exact AFK snapshot a HEALTHY reload would pass on (XState persisted
+// shape — only `afk !== undefined` matters for the decision).
 const RAW_HEALTHY = serializeRespawnSnapshots({
     boot: { value: "sealed" },
     afk: { value: "wait_inf" },
@@ -26,11 +26,11 @@ const RAW_HEALTHY = serializeRespawnSnapshots({
 });
 
 test("revive on dead sock (reattach, no snapshots) → seeds NOT-AFK-10min", () => {
-    // cmdReload sock morte : CL_REATTACH=1 mais pas de CL_RESPAWN_STATE.
+    // cmdReload on a dead sock: CL_REATTACH=1 but no CL_RESPAWN_STATE.
     const decision = shouldSeedReattachHold(true, undefined);
     assert.equal(decision, true, "decision must fire when reattach + AFK snapshot lost");
 
-    // Le seed effectif que fait le kernel.
+    // The actual seed the kernel does.
     const svc = new AfkService();
     const expiry = 1_000_000 + 600_000;
     if (decision) svc.set10m(expiry);
@@ -41,21 +41,21 @@ test("revive on dead sock (reattach, no snapshots) → seeds NOT-AFK-10min", () 
 });
 
 test("healthy reload (reattach + AFK snapshot present) → NO seed", () => {
-    // cmdReload sock vivante : snapshots fetchés, afk présent → pas de seed
-    // (le vrai état AFK sera restauré via le respawn handoff, pas écrasé).
+    // cmdReload on a live sock: snapshots fetched, afk present → no seed
+    // (the real AFK state will be restored via the respawn handoff, not overwritten).
     const decision = shouldSeedReattachHold(true, RAW_HEALTHY);
     assert.equal(decision, false, "a healthy reload restores AFK from snapshot, must not seed");
 });
 
 test("cold start (cmdStart, no reattach) → NO seed", () => {
-    // cmdStart ne pose PAS CL_REATTACH → démarrage autonome normal.
+    // cmdStart does NOT set CL_REATTACH → normal autonomous start.
     assert.equal(shouldSeedReattachHold(false, undefined), false);
     assert.equal(shouldSeedReattachHold(false, RAW_HEALTHY), false);
 });
 
 test("reattach with snapshots but AFK slice missing → seeds (defensive)", () => {
-    // Snapshots transmis mais sans la clé `afk` (corruption partielle /
-    // controller absent) = état AFK perdu → on seed quand même.
+    // Snapshots passed on but without the `afk` key (partial corruption /
+    // missing controller) = AFK state lost → we seed anyway.
     const raw = serializeRespawnSnapshots({ boot: { value: "sealed" } });
     assert.equal(shouldSeedReattachHold(true, raw), true);
 });

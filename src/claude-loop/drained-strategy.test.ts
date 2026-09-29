@@ -1,13 +1,13 @@
-// #379 — tests purs de la drained-strategy (parseur + décision). node:test,
-// horloge injectée, aucun DB/timer. Couvre chaque stratégie + le reset au
-// changement de landscape_hash.
+// #379 — pure tests of the drained-strategy (parser + decision). node:test,
+// injected clock, no DB/timer. Covers every strategy + the reset on a
+// landscape_hash change.
 //
-// #750 Slice 2 — `parseIsoDuration` est migré vers
-// `tests/integration/scenarios/parse-iso-duration.yaml`. Le reste
-// (parseDrainedStrategy, decideDrainedWake) reste ici parce que les
-// returns référencent des module-constants (DEFAULT_STALE_MS,
-// DEFAULT_BACKOFF_BASE_MS, DEFAULT_BACKOFF_CAP_MS) non-référençables
-// dans le yaml runner.
+// #750 Slice 2 — `parseIsoDuration` moved to
+// `tests/integration/scenarios/parse-iso-duration.yaml`. The rest
+// (parseDrainedStrategy, decideDrainedWake) stays here because the
+// returns reference module constants (DEFAULT_STALE_MS,
+// DEFAULT_BACKOFF_BASE_MS, DEFAULT_BACKOFF_CAP_MS) that the yaml runner
+// cannot reference.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -60,15 +60,15 @@ test("decide silent: never wakes", () => {
     assert.equal(d.next.hash, "a");
 });
 
-test("decide once: fires at vidange, then silent, re-arms on hash change", () => {
+test("decide once: fires on drain, then silent, re-arms on hash change", () => {
     const s: DrainedStrategy = { kind: "once" };
-    // 1er passage : fire.
+    // 1st pass: fire.
     const d1 = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: 1000, prev: null });
     assert.equal(d1.wake, true);
-    // même hash → silence.
+    // same hash → silence.
     const d2 = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: 2000, prev: d1.next });
     assert.equal(d2.wake, false);
-    // le paysage bouge → ré-arme.
+    // the landscape moves → re-arms.
     const d3 = decideDrainedWake({ strategy: s, hash: "b", lastActivityMs: null, now: 3000, prev: d2.next });
     assert.equal(d3.wake, true);
 });
@@ -76,16 +76,16 @@ test("decide once: fires at vidange, then silent, re-arms on hash change", () =>
 test("decide stale: silent until stale, fires once, even when hash unchanged", () => {
     const s: DrainedStrategy = { kind: "stale", paramMs: 2 * H };
     const t0 = 10 * H;
-    // activité il y a 1h < seuil 2h → pas stale.
+    // activity 1h ago < 2h threshold → not stale.
     let prev: DrainedState | null = null;
     const fresh = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: t0 - 1 * H, now: t0, prev });
     assert.equal(fresh.wake, false);
     prev = fresh.next;
-    // 2h plus tard, MÊME hash, activité toujours à t0-1h → now - act = 3h > 2h → stale → fire.
+    // 2h later, SAME hash, activity still at t0-1h → now - act = 3h > 2h → stale → fire.
     const stale = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: t0 - 1 * H, now: t0 + 2 * H, prev });
     assert.equal(stale.wake, true);
     prev = stale.next;
-    // tick suivant, toujours stale, hash inchangé → pas de re-ping (auto-mémo une fois).
+    // next tick, still stale, hash unchanged → no re-ping (self-memo once).
     const again = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: t0 - 1 * H, now: t0 + 3 * H, prev });
     assert.equal(again.wake, false);
 });
@@ -95,7 +95,7 @@ test("decide stale: human acts (hash changes) → re-arms", () => {
     const t0 = 100 * H;
     const fired = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: t0 - 3 * H, now: t0, prev: null });
     assert.equal(fired.wake, true);
-    // humain agit : hash change + activité fraîche → pas stale, ré-armé.
+    // human acts: hash changes + fresh activity → not stale, re-armed.
     const acted = decideDrainedWake({ strategy: s, hash: "b", lastActivityMs: t0, now: t0 + MIN, prev: fired.next });
     assert.equal(acted.wake, false);
 });
@@ -106,19 +106,19 @@ test("decide backoff: gaps base, 2x, 4x ; reset on hash change", () => {
     const t0 = 1_000_000;
     let prev: DrainedState | null = null;
 
-    // vidange : pas de fire immédiat.
+    // drain: no immediate fire.
     const v = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: t0, prev });
     assert.equal(v.wake, false);
     prev = v.next;
 
-    // juste avant +base → non ; à +base → fire (1er rappel).
+    // just before +base → no; at +base → fire (1st reminder).
     assert.equal(decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: t0 + base - 1, prev }).wake, false);
     const r1 = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: t0 + base, prev });
     assert.equal(r1.wake, true);
     assert.equal(r1.next.step, 1);
     prev = r1.next;
 
-    // 2e rappel : gap = 2·base après le 1er.
+    // 2nd reminder: gap = 2·base after the 1st.
     const t1 = t0 + base;
     assert.equal(decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: t1 + 2 * base - 1, prev }).wake, false);
     const r2 = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: t1 + 2 * base, prev });
@@ -126,14 +126,14 @@ test("decide backoff: gaps base, 2x, 4x ; reset on hash change", () => {
     assert.equal(r2.next.step, 2);
     prev = r2.next;
 
-    // 3e rappel : gap = 4·base.
+    // 3rd reminder: gap = 4·base.
     const t2 = t1 + 2 * base;
     const r3 = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: t2 + 4 * base, prev });
     assert.equal(r3.wake, true);
     assert.equal(r3.next.step, 3);
     prev = r3.next;
 
-    // le paysage bouge → reset (step 0, ré-armé, pas de fire immédiat).
+    // the landscape moves → reset (step 0, re-armed, no immediate fire).
     const reset = decideDrainedWake({ strategy: s, hash: "b", lastActivityMs: null, now: t2 + 4 * base + 10, prev });
     assert.equal(reset.wake, false);
     assert.equal(reset.next.step, 0);
@@ -143,9 +143,9 @@ test("decide backoff: interval capped", () => {
     const base = 10 * MIN;
     const cap = 1 * H;
     const s: DrainedStrategy = { kind: "backoff", paramMs: base, capMs: cap };
-    // step assez grand pour dépasser le cap : interval = cap.
+    // step large enough to exceed the cap: interval = cap.
     const prev: DrainedState = { hash: "a", armedAt: 0, wakeAt: 0, step: 20 };
-    // à cap-1 → pas de fire ; à cap → fire.
+    // at cap-1 → no fire; at cap → fire.
     assert.equal(decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: cap - 1, prev }).wake, false);
     assert.equal(decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: cap, prev }).wake, true);
 });
@@ -162,8 +162,8 @@ test("decide persistent: respects spacing", () => {
     const s: DrainedStrategy = { kind: "persistent", paramMs: 30 * MIN };
     const a = decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: 1000, prev: null });
     assert.equal(a.wake, true);
-    // avant l'espacement → non.
+    // before the spacing → no.
     assert.equal(decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: 1000 + 30 * MIN - 1, prev: a.next }).wake, false);
-    // après → oui.
+    // after → yes.
     assert.equal(decideDrainedWake({ strategy: s, hash: "a", lastActivityMs: null, now: 1000 + 30 * MIN, prev: a.next }).wake, true);
 });

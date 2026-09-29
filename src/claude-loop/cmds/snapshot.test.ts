@@ -1,4 +1,4 @@
-// #963 — snapshot tool tests : capture / list / prune sous tmpdir.
+// #963 — snapshot tool tests : capture / list / prune under tmpdir.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -102,7 +102,7 @@ test("listSnapshots: empty dir → []", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("listSnapshots: tri desc par mtime + bytes calculés + note récupérée", () => {
+test("listSnapshots: sorted desc by mtime + bytes computed + note read back", () => {
     const sd = mkSd();
     seedStateDir(sd);
     captureSnapshot(sd, { nowMs: Date.parse("2026-06-14T10:00:00Z") });
