@@ -1,7 +1,7 @@
 /**
- * #2379 david `prrg57` — "claim est une version faible de assign… tant qu'un
- * agent est actif sur un ticket son claim est protégé pendant X minutes, un
- * autre agent ne peut pas claim un ticket protégé, le assign supplante le
+ * #2379 david `prrg57` — "claim is a weak version of assign… while an
+ * agent is active on a ticket its claim is protected for X minutes, another
+ * agent cannot claim a protected ticket, assign supersedes
  * claim". What must hold, over the bus as a client holding a token calls it:
  * - a free ticket is claimed as before, and re-claiming one's own is a no-op;
  * - another agent's claim on a PROTECTED ticket is refused, naming the holder;

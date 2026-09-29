@@ -72,8 +72,8 @@ test("only-rule that matches → ticket passes", () => {
 });
 
 test("only-rule that DOESN'T match → ticket passes (new semantic vs legacy)", () => {
-    // Legacy ticketPassesWorkFilters aurait exclu le ticket (only existe mais tag absent).
-    // Moteur unifié : rule ne matche pas → matched=[] → pass-through.
+    // Legacy ticketPassesWorkFilters would have excluded the ticket (only exists but tag missing).
+    // Unified engine: rule does not match → matched=[] → pass-through.
     const r = rule({ match_project: "aiball", match_tags: ["win"], action: { kind: "pickup", mode: "only" } });
     assert.equal(evaluatePickup([r], ev("agent", "aiball", ["linux"])), true);
     assert.equal(evaluatePickup([r], ev("agent", "aiball", [])), true);

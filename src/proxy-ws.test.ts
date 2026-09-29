@@ -1,7 +1,7 @@
-// #505 — canal inverse WS proxy node ↔ upstream. Phase 1 = handshake + liveness
-// via la WS persistante (remplace l'ancien HTTP heartbeat #502). Le serveur
-// monte `/ws/proxy-node` avec auth bearer node-token ; chaque frame bumpe
-// `tokens.last_used_at` — c'est ce timestamp qui alimente la pastille up/down.
+// #505 — reverse WS channel proxy node ↔ upstream. Phase 1 = handshake + liveness
+// over the persistent WS (replaces the old HTTP heartbeat #502). The server
+// mounts `/ws/proxy-node` with node-token bearer auth ; every frame bumps
+// `tokens.last_used_at` — that timestamp feeds the up/down dot.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -38,9 +38,9 @@ function openWs(token: string | null): Promise<{ ok: boolean; status?: number; w
         const opts = token ? { headers: { authorization: `Bearer ${token}` } } : {};
         const ws = new WebSocket(WS_URL, opts);
         let settled = false;
-        // Capture la première message dès maintenant — sinon le `hello` que
-        // le serveur envoie immédiatement à l'upgrade peut arriver AVANT que
-        // le test ait eu le temps d'attacher son propre listener.
+        // Capture the first message right now — otherwise the `hello` the
+        // server sends immediately on upgrade can arrive BEFORE the
+        // test has had time to attach its own listener.
         let firstFrame: string | undefined;
         let firstResolve: ((v: string) => void) | null = null;
         const firstFramePromise = new Promise<string>((res) => { firstResolve = res; });
@@ -74,48 +74,48 @@ function openWs(token: string | null): Promise<{ ok: boolean; status?: number; w
     });
 }
 
-test("WS /ws/proxy-node : sans token → 401", async () => {
+test("WS /ws/proxy-node : no token → 401", async () => {
     const r = await openWs(null);
     assert.equal(r.ok, false);
     assert.equal(r.status, 401);
 });
 
-test("WS /ws/proxy-node : token agent (mauvais kind) → 403", async () => {
+test("WS /ws/proxy-node : agent token (wrong kind) → 403", async () => {
     const r = await openWs(AGENT_TOKEN);
     assert.equal(r.ok, false);
     assert.equal(r.status, 403);
 });
 
-test("WS /ws/proxy-node : node token → handshake + frame `hello` + last_used_at bumpé", async () => {
+test("WS /ws/proxy-node : node token → handshake + frame `hello` + last_used_at bumped", async () => {
     const before = listNodes().find((n) => n.label === "test-node-ws")?.last_used_at;
     const r = await openWs(NODE_TOKEN);
     assert.equal(r.ok, true);
     assert.ok(r.ws);
-    assert.ok(r.firstFrame, "première frame reçue");
+    assert.ok(r.firstFrame, "first frame received");
     const hello = JSON.parse(r.firstFrame!);
     assert.equal(hello.kind, "hello");
     assert.equal(hello.node_id, computeNodeId(NODE_TOKEN));
-    // listNodes doit avoir last_used_at remis à neuf
+    // listNodes must have last_used_at refreshed
     const after = listNodes().find((n) => n.label === "test-node-ws")?.last_used_at;
-    assert.ok(after, "last_used_at peuplé après handshake");
-    if (before) assert.ok(after! >= before, "last_used_at avancé");
-    // Et on doit être indexable côté serveur via le node_id
+    assert.ok(after, "last_used_at set after handshake");
+    if (before) assert.ok(after! >= before, "last_used_at moved forward");
+    // And we must be indexed server-side by node_id
     const sock = getProxyNodeSocket(computeNodeId(NODE_TOKEN));
-    assert.ok(sock, "le serveur garde le socket dans son registry");
+    assert.ok(sock, "the server keeps the socket in its registry");
     r.ws!.close();
 });
 
-test("WS /ws/proxy-node : message du node bumpe last_used_at", async () => {
+test("WS /ws/proxy-node : a node message bumps last_used_at", async () => {
     const r = await openWs(NODE_TOKEN);
     assert.equal(r.ok, true);
     const tsBefore = listNodes().find((n) => n.label === "test-node-ws")?.last_used_at;
     await new Promise<void>((res) => setTimeout(res, 12)); // tick d'horloge
     r.ws!.send(JSON.stringify({ kind: "hello", label: "renamed-via-ws", client_ts: Date.now() }));
-    // Laisse au serveur le temps de traiter le on("message")
+    // Give the server time to handle the on("message")
     await new Promise<void>((res) => setTimeout(res, 50));
     const tsAfter = listNodes().find((n) => n.label === "test-node-ws")?.last_used_at;
-    assert.ok(tsAfter, "last_used_at toujours là");
-    if (tsBefore) assert.ok(tsAfter! >= tsBefore, "last_used_at re-bumpé sur frame du node");
+    assert.ok(tsAfter, "last_used_at still there");
+    if (tsBefore) assert.ok(tsAfter! >= tsBefore, "last_used_at re-bumped on a node frame");
     r.ws!.close();
 });
 

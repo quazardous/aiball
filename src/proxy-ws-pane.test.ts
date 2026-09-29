@@ -3,11 +3,11 @@
 // `agent.pane_keys` on the bus route through the node's reverse connection
 // instead of answering unavailable.
 //
-// On simule le node = un client WS qui se connecte sur /ws/proxy-node avec un
-// token node, intercepte les `pane.stream.open` / `pane.keys` qui arrivent, et
-// répond avec `pane.frame` / `pane.ack`. Pas besoin de tmux côté test : on
-// shortcut le pane handler du node-side (proxy.ts) en gérant manuellement les
-// frames côté test.
+// We simulate the node = a WS client that connects to /ws/proxy-node with a
+// node token, intercepts the incoming `pane.stream.open` / `pane.keys`, and
+// answers with `pane.frame` / `pane.ack`. No tmux needed on the test side: we
+// shortcut the node-side pane handler (proxy.ts) by handling the frames by
+// hand in the test.
 import { test, after } from "node:test";
 import { until } from "./tests/lib.js";
 import assert from "node:assert/strict";
@@ -29,10 +29,10 @@ const { attachProxyWs, PROXY_WS_PATH, listConnectedNodeIds } = await import("./p
 const { issueToken } = await import("./db/tokens.js");
 const { ensureConsumer, setConsumerState, touchLastSeen, upsertConsumer } = await import("./db.js");
 
-// Setup : un consumer "graphite-loop" + un node-token. Le matching IP entre le
-// node et le consumer se fait au runtime (le serveur bumpe last_seen_ip à la
-// connexion WS du fake-node depuis le loopback), donc on prend l'ip réelle
-// post-connect pour reconcilier le consumer.
+// Setup : a "graphite-loop" consumer + a node-token. The IP matching between the
+// node and the consumer happens at runtime (the server bumps last_seen_ip on the
+// fake-node's WS connection from loopback), so we take the real ip
+// post-connect to reconcile the consumer.
 ensureConsumer("graphite-loop");
 setConsumerState("graphite-loop", "idle", false, undefined, "/fake/cwd/graphite");
 const NODE_TOKEN = issueToken({ kind: "node", label: "fake-node" }).token;
@@ -45,9 +45,9 @@ await new Promise<void>((r) => server.once("listening", () => r()));
 const port = (server.address() as AddressInfo).port;
 const WS_URL = `ws://127.0.0.1:${port}${PROXY_WS_PATH}`;
 
-// Connecte le fake-node + attache le handler pane AVANT que open ne resolve,
-// pour ne pas perdre le `hello` du serveur dans la fenêtre entre open et le
-// attach (le ws lib ne buffer pas les events sans listener).
+// Connects the fake-node + attaches the pane handler BEFORE open resolves,
+// so the server's `hello` is not lost in the window between open and the
+// attach (the ws lib does not buffer events without a listener).
 /** A call of `agent` relayed by the node, as its loop's calls are. */
 async function relayedCall(agent: string): Promise<void> {
     await fetch(`http://127.0.0.1:${port}/api/uploads/none`, { headers: { authorization: `Bearer ${NODE_TOKEN}`, "x-aiball-consumer": agent } });
@@ -74,7 +74,7 @@ function attachPaneHandler(ws: WebSocket): void {
         if (!frame.request_id) return;
         switch (frame.kind) {
             case "pane.stream.open":
-                // Émet 2 frames synthétiques tout de suite
+                // Emit 2 synthetic frames right away
                 ws.send(JSON.stringify({
                     kind: "pane.frame",
                     request_id: frame.request_id,
@@ -93,7 +93,7 @@ function attachPaneHandler(ws: WebSocket): void {
                 }));
                 break;
             case "pane.stream.close":
-                /* no-op pour le test */
+                /* no-op for the test */
                 break;
             case "pane.keys":
                 ws.send(JSON.stringify({

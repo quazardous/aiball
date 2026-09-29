@@ -48,15 +48,15 @@ test("#400 renderSlot: string slot, list pick, fallback", () => {
     assert.equal(renderSlot({}, "missing", { x: "1" }, "fb {x}"), "fb 1");
 });
 
-// #400 recadré (david b296px): tone is back as a SELECTION layer over the grammar.
-test("#400 recadré renderSlot: tone bucket selects slot[tone]", () => {
+// #400 reframed (david b296px): tone is back as a SELECTION layer over the grammar.
+test("#400 reframed renderSlot: tone bucket selects slot[tone]", () => {
     const map = { s: { directive: "do {x}", hint: "maybe {x}", imperative: "DO {x}" } };
     assert.equal(renderSlot(map, "s", { x: "it" }, "", "hint"), "maybe it");
     assert.equal(renderSlot(map, "s", { x: "it" }, "", "imperative"), "DO it");
     assert.equal(renderSlot(map, "s", { x: "it" }, "", "directive"), "do it");
 });
 
-test("#400 recadré renderSlot: missing tone falls back to directive", () => {
+test("#400 reframed renderSlot: missing tone falls back to directive", () => {
     const map = { s: { directive: "default wording", hint: "soft" } };
     // 'imperative' absent → directive bucket.
     assert.equal(renderSlot(map, "s", {}, "", "imperative"), "default wording");
@@ -64,12 +64,12 @@ test("#400 recadré renderSlot: missing tone falls back to directive", () => {
     assert.equal(renderSlot(map, "s", {}), "default wording");
 });
 
-test("#400 recadré renderSlot: round-robin WITHIN a tone bucket", () => {
+test("#400 reframed renderSlot: round-robin WITHIN a tone bucket", () => {
     // Single-element list → deterministic, proves the array path runs inside a tone.
     assert.equal(renderSlot({ s: { directive: ["only {x}"] } }, "s", { x: "1" }, "", "directive"), "only 1");
 });
 
-test("#400 recadré renderSlot: tone bucket with neither tone nor directive → fallback", () => {
+test("#400 reframed renderSlot: tone bucket with neither tone nor directive → fallback", () => {
     assert.equal(renderSlot({ s: { hint: "soft" } }, "s", { x: "1" }, "fb {x}", "imperative"), "fb 1");
 });
 
@@ -101,7 +101,7 @@ test("#400 partials: partials may nest, and a cycle renders \"\" (no hang)", () 
     assert.equal(renderSlot({ _a: "a{_b}", _b: "b{_a}", s: "{_a}" }, "s"), "ab");
 });
 
-test("#400 recadré loadPromptsFromYamlBlock: accepts the tone-bucket shape", () => {
+test("#400 reframed loadPromptsFromYamlBlock: accepts the tone-bucket shape", () => {
     const block = {
         // Sample tone-bucket slot (any slot name works ; the loader is
         // shape-agnostic). Was `wake_lead` until #825 retired that slot.

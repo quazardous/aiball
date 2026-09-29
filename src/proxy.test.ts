@@ -4,7 +4,7 @@ import http from "node:http";
 import express from "express";
 import { proxyMiddleware, proxyLandingHtml, type ProxyTokenStore } from "./proxy.js";
 
-// Démarre un serveur sur un port éphémère ; renvoie le port.
+// Starts a server on an ephemeral port ; returns the port.
 function listen(server: http.Server): Promise<number> {
     return new Promise((resolve) => {
         server.listen(0, "127.0.0.1", () => {
@@ -14,10 +14,10 @@ function listen(server: http.Server): Promise<number> {
     });
 }
 
-// #394 QW-A : le proxy ne doit écraser l'Authorization par le token node QUE
-// si l'appelant n'en porte pas déjà un. Un appelant avec son propre token
-// agent (preuve per-consumer) traverse le proxy tel quel ; un appelant
-// token-less retombe sur le token node (modèle X-Forwarded-For).
+// #394 QW-A : the proxy must overwrite the Authorization with the node token ONLY
+// if the caller does not already carry one. A caller with its own agent
+// token (per-consumer proof) goes through the proxy as is ; a token-less
+// caller falls back to the node token (X-Forwarded-For model).
 test("#394 QW-A: proxy preserves a caller's own bearer, node token only as fallback", async () => {
     let received: string | undefined;
     const upstream = http.createServer((req, res) => {
@@ -45,12 +45,12 @@ test("#394 QW-A: proxy preserves a caller's own bearer, node token only as fallb
             r.end();
         });
 
-    // (1) appelant token-less → token node injecté (fallback).
+    // (1) token-less caller → node token injected (fallback).
     received = undefined;
     await call({});
     assert.equal(received, "Bearer node-tok");
 
-    // (2) appelant avec son propre token agent → préservé (PAS écrasé).
+    // (2) caller with its own agent token → kept (NOT overwritten).
     received = undefined;
     await call({ authorization: "Bearer agent-xyz" });
     assert.equal(received, "Bearer agent-xyz");
@@ -59,9 +59,9 @@ test("#394 QW-A: proxy preserves a caller's own bearer, node token only as fallb
     await new Promise((r) => proxySrv.close(r));
 });
 
-// #394 « tuer le point faible » : en mode strict le proxy n'injecte JAMAIS le
-// token node. Une requête token-less est rejetée (401) AVANT tout forward ;
-// une requête qui porte son propre bearer passe tel quel (preuve per-consumer).
+// #394 "kill the weak point" : in strict mode the proxy NEVER injects the
+// node token. A token-less request is rejected (401) BEFORE any forward ;
+// a request carrying its own bearer passes as is (per-consumer proof).
 test("#394 strict: token-less call is 401'd, own bearer passes, node token never injected", async () => {
     let received: string | undefined;
     let reached = false;
@@ -91,14 +91,14 @@ test("#394 strict: token-less call is 401'd, own bearer passes, node token never
             r.end();
         });
 
-    // (1) appelant token-less → 401 local, jamais forwardé, token node PAS injecté.
+    // (1) token-less caller → local 401, never forwarded, node token NOT injected.
     received = undefined;
     reached = false;
     const status1 = await call({});
     assert.equal(status1, 401);
     assert.equal(reached, false, "strict mode must not forward a token-less request");
 
-    // (2) appelant avec son propre token agent → forwardé tel quel (preuve per-consumer).
+    // (2) caller with its own agent token → forwarded as is (per-consumer proof).
     received = undefined;
     reached = false;
     const status2 = await call({ authorization: "Bearer agent-xyz" });
@@ -109,9 +109,9 @@ test("#394 strict: token-less call is 401'd, own bearer passes, node token never
     await new Promise((r) => proxySrv.close(r));
 });
 
-// #394 node-managed store : un bearer LOCAL connu est swappé contre le token A
-// mappé à l'egress ; un bearer inconnu (token A propre du client) passe tel
-// quel. Combiné avec strict : un token local devient une preuve valide.
+// #394 node-managed store : a known LOCAL bearer is swapped for the A-token
+// mapped at egress ; an unknown bearer (the client's own A-token) passes as
+// is. Combined with strict : a local token becomes a valid proof.
 test("#394 node store: a local bearer is swapped for the mapped upstream A-token", async () => {
     let received: string | undefined;
     const upstream = http.createServer((req, res) => {
@@ -147,13 +147,13 @@ test("#394 node store: a local bearer is swapped for the mapped upstream A-token
             r.end();
         });
 
-    // (1) bearer LOCAL connu → swappé contre le token A mappé (preuve per-consumer).
+    // (1) known LOCAL bearer → swapped for the mapped A-token (per-consumer proof).
     received = undefined;
     const s1 = await call({ authorization: "Bearer aiball-local-alice" });
     assert.equal(s1, 200);
     assert.equal(received, "Bearer aiball-A-alice");
 
-    // (2) bearer inconnu (le client porte déjà son propre token A) → passe tel quel.
+    // (2) unknown bearer (the client already carries its own A-token) → passes as is.
     received = undefined;
     const s2 = await call({ authorization: "Bearer aiball-A-bob-own" });
     assert.equal(s2, 200);
@@ -231,7 +231,7 @@ test("#463: proxy does NOT inject x-aiball-node-label when unset", async () => {
     await new Promise((r) => proxySrv.close(r));
 });
 
-// #394 (8c7xut): la page proxy annonce le remote et échappe l'URL.
+// #394 (8c7xut): the proxy page announces the remote and escapes the URL.
 test("#394: proxyLandingHtml announces the remote URL and escapes it", () => {
     const html = proxyLandingHtml("https://a-host:7777");
     assert.match(html, /proxy mode/i);

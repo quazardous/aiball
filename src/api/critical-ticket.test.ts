@@ -68,8 +68,8 @@ test("the project's critical ticket counts what it holds down the chain, in any 
     assert.equal((await call("project.critical", { project: P })).json.critical, null);
 });
 
-// #2770 david — "un wake à part après les events et avant le backlog, avec un
-// sink : c'est un nouveau tier". The critical ticket leads the backlog of an
+// #2770 david — "a separate wake after the events and before the backlog, with a
+// sink: it's a new tier". The critical ticket leads the backlog of an
 // agent whose pool it is in, and sinks like any head once the wake named it.
 test("the critical ticket is a tier of its own, ahead of the rest, with the backlog's sink", async () => {
     const Q = "p-2770-tier";
@@ -99,8 +99,8 @@ test("the critical ticket is a tier of its own, ahead of the rest, with the back
     assert.ok(after?.backlog_cooled_until, "but sunk until the cooldown ends");
 });
 
-// #2770 david — "dans les listes / détail ticket il est possible de flaguer le
-// critique ?": the inbox row and the ticket header say it.
+// #2770 david — "in the lists / ticket detail can we flag the
+// critical one?": the inbox row and the ticket header say it.
 test("the web inbox row and the ticket header flag the critical ticket", async () => {
     const R = "p-2770-ui";
     createProject({ name: R });

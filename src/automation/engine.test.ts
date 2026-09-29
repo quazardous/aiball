@@ -341,23 +341,23 @@ test("evaluateExpression : NOT flips its child", () => {
     assert.equal(evaluateExpression({ kind: "not", child: isOther }, ev), true);
 });
 
-// #504 david `b8x54s` : `in` op sur un field array (typiquement `tags`) =
-// "ANY OF" sémantique (au moins un tag sélectionné est sur le ticket). Permet
-// à l'UI de virer le op picker `carries`/`in` redondant pour ce field.
-test("evaluateExpression : `in` op sur field array = any-of (tags)", () => {
+// #504 david `b8x54s` : `in` op on an array field (typically `tags`) =
+// "ANY OF" semantics (at least one selected tag is on the ticket). Lets
+// the UI drop the redundant `carries`/`in` op picker for this field.
+test("evaluateExpression : `in` op on array field = any-of (tags)", () => {
     const ev = ticketCreatedEv({ ticket_tags: ["bug", "win"] });
-    // 1 tag commun → match
+    // 1 tag in common → match
     assert.equal(evaluateExpression(
         { kind: "leaf", field: "tags", op: "in", value: ["bug", "done"] }, ev), true);
-    // pas de tag commun → fail
+    // no tag in common → fail
     assert.equal(evaluateExpression(
         { kind: "leaf", field: "tags", op: "in", value: ["done", "wontfix"] }, ev), false);
-    // un seul tag sélectionné → équivalent à `includes`
+    // a single selected tag → same as `includes`
     assert.equal(evaluateExpression(
         { kind: "leaf", field: "tags", op: "in", value: ["bug"] }, ev), true);
     assert.equal(evaluateExpression(
         { kind: "leaf", field: "tags", op: "in", value: ["wontfix"] }, ev), false);
-    // empty value → no match (rien à matcher)
+    // empty value → no match (nothing to match)
     assert.equal(evaluateExpression(
         { kind: "leaf", field: "tags", op: "in", value: [] }, ev), false);
 });
@@ -501,12 +501,12 @@ test("ruleMatchesEvent : explicit expression overrides flat fields", () => {
 
 // ---------------------------------------------------------------------------
 // #509 — state-change triggers : ticket_priority_changed / _project_changed /
-// _status_changed. Chaque event porte la NOUVELLE valeur sur `priority` /
-// `project` / `status` + l'ancienne sur `old_*` (consommée par le runtime,
-// pas par les leaves aujourd'hui — un rule matche le post-état).
+// _status_changed. Each event carries the NEW value on `priority` /
+// `project` / `status` + the old one on `old_*` (read by the runtime,
+// not by the leaves today — a rule matches the post-state).
 // ---------------------------------------------------------------------------
 
-test("#509 ticket_priority_changed : rule matche la NOUVELLE priority", () => {
+test("#509 ticket_priority_changed : rule matches the NEW priority", () => {
     const r = rule({
         triggers: ["ticket_priority_changed"],
         expression: { kind: "leaf", field: "priority", op: "eq", value: "urgent" },
@@ -534,7 +534,7 @@ test("#509 ticket_priority_changed : rule matche la NOUVELLE priority", () => {
     assert.equal(ruleMatchesEvent(r, calmed), false);
 });
 
-test("#509 ticket_project_changed : rule matche le NOUVEAU project", () => {
+test("#509 ticket_project_changed : rule matches the NEW project", () => {
     const r = rule({
         triggers: ["ticket_project_changed"],
         expression: { kind: "leaf", field: "project", op: "eq", value: "aiball" },
@@ -561,7 +561,7 @@ test("#509 ticket_project_changed : rule matche le NOUVEAU project", () => {
     assert.equal(ruleMatchesEvent(r, outOfAiball), false);
 });
 
-test("#509 ticket_status_changed : leaf field `status` matche pending→approved", () => {
+test("#509 ticket_status_changed : leaf field `status` matches pending→approved", () => {
     const r = rule({
         triggers: ["ticket_status_changed"],
         expression: { kind: "leaf", field: "status", op: "eq", value: "approved" },
@@ -591,17 +591,17 @@ test("#509 ticket_status_changed : leaf field `status` matche pending→approved
     assert.equal(ruleMatchesEvent(r, rejected), false);
 });
 
-test("#509 leaf `status` sur un event sans status (ticket_created) → fail-closed", () => {
-    // Le field `status` n'existe QUE sur ticket_status_changed ; un autre
-    // trigger qui le query doit fail closed (cohérent avec tag_added sur
+test("#509 leaf `status` on an event without status (ticket_created) → fail-closed", () => {
+    // The `status` field exists ONLY on ticket_status_changed ; another
+    // trigger that queries it must fail closed (consistent with tag_added on
     // message_posted).
     const ev: AutomationEvent = ticketCreatedEv();
     assert.equal(evaluateExpression(
         { kind: "leaf", field: "status", op: "eq", value: "approved" }, ev), false);
 });
 
-test("#509 ticket_priority_changed : combinable avec `in` sur priority", () => {
-    // david pourrait vouloir : "fire si priority bumped → urgent OR high".
+test("#509 ticket_priority_changed : combines with `in` on priority", () => {
+    // david might want: "fire if priority bumped → urgent OR high".
     const r = rule({
         triggers: ["ticket_priority_changed"],
         expression: { kind: "leaf", field: "priority", op: "in", value: ["urgent", "high"] },

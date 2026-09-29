@@ -1,6 +1,6 @@
 /**
- * #2449 david — "si un agent pose un then:continue, ce continue devrait être hot
- * et passer en top du backlog (juste après les events)", for a while (30
+ * #2449 david — "if an agent posts a then:continue, that continue should be hot
+ * and go to the top of the backlog (right after the events)", for a while (30
  * minutes by default). What must hold, over the bus:
  * - a fresh step of mine leads my backlog, ahead of an older actionable ticket;
  * - an ordinary comment of mine does not (the anti-loop rule stands);
@@ -220,7 +220,7 @@ test("#2769 a step does not lift a ticket gated by an open dependency", async ()
     assert.equal((await backlog()).find((r) => r.id === t)?.backlog_tier, 4, "gated: the blocked tier, not the lead");
 });
 
-// #2765 david "est-ce que les outils mcp donnent ces infos à l'agent ?" — they
+// #2765 david "do the mcp tools give this info to the agent?" — they
 // did not: only the raw meta of a full read. The list row and the ticket header
 // now say what a live step resumes on, from the aggregate the UI reads.
 test("#2765 ticket_list and ticket_get say what the live step resumes on, until someone speaks", async () => {
