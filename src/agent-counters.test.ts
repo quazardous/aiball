@@ -29,3 +29,20 @@ test("a change recomputes a present agent's and a listened-to agent's counters, 
     assert.equal(cachedCounters("absent"), null, "an absent agent costs nothing");
     off();
 });
+
+// #3312 — `b:` counts an unassigned ticket in the agent's court, unless the agent itself may not claim.
+test("the backlog counts an unassigned actionable ticket; an agent that may not claim counts only its assignments", async () => {
+    const { computeCounters } = await import("./agent-counters.js");
+    const { createProject } = await import("./db/projects.js");
+    const { upsertSubscription } = await import("./db/subscriptions.js");
+    const { submitMessage } = await import("./messages.js");
+    const { updateConsumer } = await import("./db.js");
+    upsertConsumer({ consumer_id: "boss", kind: "human" });
+    upsertConsumer({ consumer_id: "lead-3312", kind: "agent", project: "p-3312" } as never);
+    createProject({ name: "p-3312" });
+    upsertSubscription("lead-3312", "p-3312", "owner");
+    submitMessage({ project: "p-3312", kind: "ticket_created", title: "for the lead", body: "b", by_agent: "boss" });
+    assert.equal(computeCounters("lead-3312").backlog, 1, "the lead's unassigned ticket is in its backlog");
+    updateConsumer("lead-3312", { can_claim: false });
+    assert.equal(computeCounters("lead-3312").backlog, 0, "an agent that may not claim waits for assignments");
+});

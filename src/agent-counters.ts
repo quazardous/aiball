@@ -53,7 +53,9 @@ export function computeCounters(agent: string): AgentCounters {
     const actionable = mine.reduce((n, p) => n + (p.actionable_count ?? 0), 0);
     const query: Record<string, string> = { backlog: "1", limit: "500", cooldown_sec: String(BACKLOG_COOLDOWN_SEC) };
     if (project) query.project = project;
-    const rows = listTicketsFor(agent, query, { noClaimHint: true });
+    // #3312 — the agent's own standing (`can_claim` on its row), not a no-claim hint:
+    // with the hint, every unassigned ticket left the count, whoever the agent.
+    const rows = listTicketsFor(agent, query, { noClaimHint: false });
     const backlog = Array.isArray(rows)
         ? (rows as Array<{ backlog_cooled_until?: string | null }>).filter((t) => !t.backlog_cooled_until).length
         : 0;

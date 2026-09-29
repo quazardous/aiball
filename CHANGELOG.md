@@ -92,6 +92,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop's backlog count (`b:` in its bar) counts the unassigned tickets in its
+  court again: it counted only the tickets assigned to it.
 - A crew or no-claim agent stays one when Claude is started without
   claude-loop (a plain `claude` in its folder): its role and no-claim setting
   are read from `.aiball.yaml` like its name. Before, such a start subscribed
