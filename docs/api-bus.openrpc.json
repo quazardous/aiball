@@ -2,7 +2,7 @@
   "openrpc": "1.3.2",
   "info": {
     "title": "aiball bus",
-    "version": "0.49.0",
+    "version": "0.50.0",
     "description": "JSON-RPC 2.0 over a WebSocket at /bus, protocol version 1. See docs/API-BUS.md."
   },
   "methods": [

@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-09-29
+
 ### Added
 
 - On Windows, a client of the machine can do what a local client does on the
