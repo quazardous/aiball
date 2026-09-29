@@ -101,7 +101,8 @@ export class AiballClient {
         const envSock = process.env.AIBALL_SOCK;
         this.socketPath =
             opts.socketPath ?? (envSock && envSock !== "" ? envSock : null);
-        this.token = opts.token ?? process.env.AIBALL_TOKEN ?? localMachineSecret(this.socketPath, this.url, this.home);
+        // An empty `AIBALL_TOKEN=` is no token: it must not hide the machine secret.
+        this.token = opts.token ?? (process.env.AIBALL_TOKEN || localMachineSecret(this.socketPath, this.url, this.home));
         this.features = opts.features ?? [];
         // The folder's `.aiball.yaml` speaks for the folder's own agent only: a
         // client built for another agent (an explicit agentId) keeps to the env.

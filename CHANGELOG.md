@@ -43,6 +43,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `aiball check` no longer reports the caller as refused when it connects
+  with the machine secret (Windows, a daemon on this machine): the secret is
+  this machine's user, not a token the daemon can name. An empty
+  `AIBALL_TOKEN=` no longer hides the secret either.
 - `claude-loop start` names a loop after the folder it runs in: started from a
   shell carrying another folder's `AIBALL_CWD`, it gave the agent a second loop
   under another name.
