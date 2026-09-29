@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A loop's bar says whether its Claude is in Remote Control now, whatever turned
+  it on (the folder's setting or a `/rc` typed in the session).
 - The model a loop's Claude runs is in its bar and in `loop.list`, by its id and a
   short name (`Opus 5.5`), read from the session's transcript at each turn's end.
 - When Claude Code says a usage limit is reached (weekly, session, 5-hour…),

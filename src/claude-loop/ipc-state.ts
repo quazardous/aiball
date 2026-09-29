@@ -209,6 +209,9 @@ export interface IpcState {
     /** #3283 — the model Claude ran its last turn on (the transcript's id);
      *  null before the first turn ends. Set by the Stop hook. */
     model: string | null;
+    /** #3291 — Claude's status line says it is in Remote Control. Set by the
+     *  RemoteControlWatcher. Default false. */
+    remoteControl: boolean;
     /** #3074 — Claude Code installed an update and asks for a restart. Set by
      *  the UpdateInstalledWatcher; a fresh process (the restart) starts false.
      *  Published in the bar for a host to offer the restart. Default false. */
@@ -299,6 +302,7 @@ const state: IpcState = {
     limitReached: false,
     limitResets: null,
     model: null,
+    remoteControl: false,
     restartNeeded: false,
     restartPending: false,
     trustDialog: false,
@@ -507,6 +511,13 @@ export function setIpcLimitReached(reached: boolean, resets: { text: string; at:
 export function setIpcModel(model: string | null): void {
     if (state.model === model) return;
     state.model = model;
+    notifyIpcChanged();
+}
+
+/** #3291 — Claude is in Remote Control, or no longer. */
+export function setIpcRemoteControl(on: boolean): void {
+    if (state.remoteControl === on) return;
+    state.remoteControl = on;
     notifyIpcChanged();
 }
 
@@ -756,6 +767,7 @@ export function resetIpcStateForTests(): void {
     state.limitReached = false;
     state.limitResets = null;
     state.model = null;
+    state.remoteControl = false;
     state.restartNeeded = false;
     state.restartPending = false;
     state.trustDialog = false;

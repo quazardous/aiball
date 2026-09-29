@@ -1017,6 +1017,11 @@ when the turn ends: `model` is `{ id, name }`, the id Claude Code records
 network, so a model released after aiball is named too. It is null until the first
 turn ends; a `/model` switch shows from the next turn.
 
+`remote_control` is `{ on }`: whether Claude is in Remote Control now, as Claude
+Code's status line shows it (a `/rc` at its end, below the input box), whatever
+turned it on — the folder's setting at start or a `/rc` typed in the session. What
+the folder asks for is in `loop.list`; the bar says what is.
+
 When Claude Code says a usage limit is reached (`You've hit your weekly limit`, and
 the session, 5-hour, Opus and monthly spend limits alike), the loop holds itself at
 once (AFK ∞, as F9 does), refuses every wake, paints the tmux line orange with

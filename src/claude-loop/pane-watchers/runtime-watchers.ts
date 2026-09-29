@@ -190,3 +190,14 @@ export class LimitReachedWatcher extends BoolWatcher {
         return this.last;
     }
 }
+
+/** #3291 — Claude is in Remote Control: Claude Code ends its status line, below
+ *  the input box, with `/rc` (a link to the session on claude.ai), whatever
+ *  turned it on — the flag at start or a `/rc` typed in the session. Below the
+ *  box only: a `/rc` typed in the prompt, or quoted in a thread, is not it. */
+export class RemoteControlWatcher extends BoolWatcher {
+    readonly name = "remote_control";
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        return belowPromptBox(paneText).split("\n").some((l) => /(^|\s)\/rc$/.test(l.trim()));
+    }
+}

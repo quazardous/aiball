@@ -64,6 +64,8 @@ export interface AgentBar {
     limit_resets: { text: string; at: string | null } | null;
     /** #3283 — the model Claude ran its last turn on: its id and short name ("Opus 5.5"); null before the first turn ends. Optional: absent from loops started before it. */
     model?: { id: string; name: string } | null;
+    /** #3291 — whether Claude is in Remote Control now, as its status line shows it (the flag at start or a `/rc` in the session). Optional: absent from loops started before it. */
+    remote_control?: { on: boolean };
     /** The PTY proxy fronting claude is alive. */
     proxy_alive: boolean;
     /** Zen mode is on. */
@@ -124,6 +126,9 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     if (!(md === undefined || md === null || (isObj(md) && typeof md.id === "string" && md.id && typeof md.name === "string" && md.name))) {
         return { error: "model must be null or { id, name } strings" };
     }
+    // #3291 — absent from loops started before the field.
+    const rc = b.remote_control;
+    if (!(rc === undefined || (isObj(rc) && isBool(rc.on)))) return { error: "remote_control must be { on: boolean }" };
     if (!isBool(b.proxy_alive) || !isBool(b.zen)) return { error: "proxy_alive and zen must be booleans" };
     const c = b.counters;
     if (!(c === null || (isObj(c) && isCountOrNull(c.open) && isCountOrNull(c.backlog) && isCountOrNull(c.events)))) {
@@ -154,6 +159,7 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         alerts: { link_down: a.link_down as boolean, daemon_down: a.daemon_down as boolean, not_logged_in: a.not_logged_in as boolean, trust_dialog: a.trust_dialog as boolean, api_unreachable: a.api_unreachable as boolean, restart_needed: a.restart_needed === true, restart_pending: a.restart_pending === true, limit_reached: a.limit_reached === true },
         limit_resets: isObj(lr) ? { text: lr.text as string, at: (lr.at as string | null) ?? null } : null,
         model: isObj(md) ? { id: md.id as string, name: md.name as string } : null,
+        remote_control: { on: isObj(rc) && rc.on === true },
         proxy_alive: b.proxy_alive,
         zen: b.zen,
         counters: c === null ? null : { open: (c as Record<string, number | null>).open!, backlog: (c as Record<string, number | null>).backlog!, events: (c as Record<string, number | null>).events! },

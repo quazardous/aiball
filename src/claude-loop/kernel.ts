@@ -121,7 +121,7 @@ import {
     CompactConfirmWatcher,
     TrustDialogWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, LimitReachedWatcher, limitResetsOf, UpdateInstalledWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, LimitReachedWatcher, limitResetsOf, RemoteControlWatcher, UpdateInstalledWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
@@ -170,7 +170,7 @@ import {
     setIpcSseConnected,
     setIpcLinkDown,
     setIpcDaemonDown,
-    setIpcNotLoggedIn, setIpcLimitReached, setIpcModel, setIpcRestartNeeded, setIpcRestartPending, setIpcTrustDialog,
+    setIpcNotLoggedIn, setIpcLimitReached, setIpcModel, setIpcRemoteControl, setIpcRestartNeeded, setIpcRestartPending, setIpcTrustDialog,
     setIpcApiUnreachable,
     refreshIpcApiUnreachableSeen,
     setIpcLastWakeAtMs,
@@ -773,6 +773,7 @@ const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
 const limitReachedW = new LimitReachedWatcher();
+const remoteControlW = new RemoteControlWatcher();
 const updateInstalledW = new UpdateInstalledWatcher();
 const apiUnreachableW = new ApiUnreachableWatcher();
 const errorW = new ErrorWatcher();
@@ -785,7 +786,7 @@ const trustDialogW = new TrustDialogWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, limitReachedW, updateInstalledW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
+    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, limitReachedW, remoteControlW, updateInstalledW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -949,6 +950,9 @@ if (sd) {
         setIpcLimitReached(true, resets);
         getAfkService().setInf();
     });
+    // #3291 — Claude's Remote Control, as its status line shows it: said in the bar.
+    remoteControlW.on("begin", () => { log("watcher: remote_control begin → in Remote Control"); setIpcRemoteControl(true); });
+    remoteControlW.on("end", () => { log("watcher: remote_control end → out of Remote Control"); setIpcRemoteControl(false); });
     // #3074 — Claude Code updated itself and asks for a restart: said in the
     // bar for a host to offer it. Latched: a restart (a fresh process) clears it.
     updateInstalledW.on("begin", () => {

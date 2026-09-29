@@ -133,3 +133,14 @@ test("#3283 the model of the last turn is in the bar, by its id and short name",
     assert.deepEqual(bar.model, { id: "claude-opus-5-5", name: "Opus 5.5" });
     assert.deepEqual((parseAgentBar(bar) as AgentBar).model, bar.model, "the daemon accepts it");
 });
+
+test("#3291 Remote Control, as the status line shows it, is in the bar", async () => {
+    const { setIpcRemoteControl, resetIpcStateForTests } = await import("./ipc-state.js");
+    const sd = mkdtempSync(join(tmpdir(), "aiball-3291-sd-"));
+    resetIpcStateForTests();
+    assert.deepEqual(computeAgentBar(sd).remote_control, { on: false });
+    setIpcRemoteControl(true);
+    const bar = computeAgentBar(sd);
+    assert.deepEqual(bar.remote_control, { on: true });
+    assert.deepEqual((parseAgentBar(bar) as AgentBar).remote_control, { on: true }, "the daemon accepts it");
+});
