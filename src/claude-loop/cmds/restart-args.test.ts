@@ -148,3 +148,19 @@ test("#3236 — a reload typed in another loop's shell does not hand the reloade
     assert.equal(env[REATTACH_ENV_VAR], "1", "the reattach mark");
     assert.equal(caller.CL_HOST_CONTROL, "/hosts/caller/control.sock", "the caller's own environment is not touched");
 });
+
+test("#3239 — prune offers the dead loops only: never a hidden lock, the root's log, or a loop that runs", async () => {
+    const { pruneCandidates } = await import("./manage.js");
+    const entries = [".start-lock-d077aa", "restart.log", "cl-dead", "cl-alive", "cl-on-host"];
+    const loops = new Set(["cl-dead", "cl-alive", "cl-on-host", ".start-lock-d077aa"]);
+    const alive = new Set(["cl-alive", "cl-on-host"]);
+    assert.deepEqual(pruneCandidates(entries, (n) => loops.has(n), (n) => alive.has(n)), ["cl-dead"]);
+});
+
+test("#3281 — a start clears only broken state dirs (no plate), never a stopped loop kept for its restart", async () => {
+    const { startSweepTargets } = await import("./manage.js");
+    const entries = [".start-lock-a1", "cl-stopped", "cl-broken", "cl-running", "cl-broken-running"];
+    const plates = new Set(["cl-stopped", "cl-running"]);
+    const alive = new Set(["cl-running", "cl-broken-running"]);
+    assert.deepEqual(startSweepTargets(entries, (n) => plates.has(n), (n) => alive.has(n)), ["cl-broken"]);
+});

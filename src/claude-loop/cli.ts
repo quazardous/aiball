@@ -78,7 +78,7 @@ import {
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
 import { cmdLog } from "./cmds/log.js";
-import { cmdBar, cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweepOrphans } from "./cmds/manage.js";
+import { cmdBar, cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, startSweepTargets, sweepOrphans } from "./cmds/manage.js";
 import { cmdInspect } from "./cmds/inspect.js";
 import { cmdHealth } from "./cmds/health.js";
 import { cmdDebug } from "./cmds/debug.js";
@@ -342,17 +342,20 @@ interface StartOpts {
 }
 
 /**
- * Silently prune state dirs whose tmux session no longer exists.
- * Called before `start` so orphans don't accumulate; safe no-op
+ * Silently clear the BROKEN state dirs (no plate) whose loop runs nowhere,
+ * before `start`; a stopped loop is kept for its restart (#3281). Safe no-op
  * when the state root is empty.
  */
 function pruneDeadStateDirs(): void {
     if (!existsSync(STATE_ROOT)) return;
-    for (const name of readdirSync(STATE_ROOT)) {
-        // #403: skip dotfiles — `.start-lock-*` lives here; a concurrent start's
-        // prune must NOT delete a live lock (that would re-open the race).
-        if (name.startsWith(".")) continue;
-        if (loopAlive(name)) continue;
+    // #403: dotfiles (the `.start-lock-*` of a concurrent start) are never
+    // touched; #3281: nor a stopped loop, whose plate a restart replays.
+    const targets = startSweepTargets(
+        readdirSync(STATE_ROOT),
+        (name) => existsSync(platePath(stateDirFor(name))),
+        (name) => loopAlive(name),
+    );
+    for (const name of targets) {
         try { rmSync(stateDirFor(name), { recursive: true, force: true }); }
         catch { /* ignore */ }
     }

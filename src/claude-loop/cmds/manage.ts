@@ -593,15 +593,48 @@ export function cmdRestart(name: string, opts: RestartOpts = {}): void {
     );
 }
 
+/**
+ * #3239 — what `prune` offers to delete: a loop's state directory (it holds a
+ * plate) whose loop runs nowhere. Never a hidden entry: the start lock
+ * (`.start-lock-*`) lives in the state root, and deleting a live one re-opens
+ * the race it guards (#403), as `pruneDeadStateDirs` already knew. Nor the
+ * root's own files (`restart.log`).
+ */
+export function pruneCandidates(entries: string[], isLoopDir: (name: string) => boolean, alive: (name: string) => boolean): string[] {
+    return entries.filter((name) => !name.startsWith(".") && isLoopDir(name) && !alive(name));
+}
+
+/**
+ * #3281 — what a `start` clears on its own before it spawns: only a BROKEN
+ * state directory (no plate: nothing a restart could replay) whose loop runs
+ * nowhere. A stopped loop keeps its plate on purpose (`stop` keeps the state
+ * so `restart` replays it): the automatic sweep used to delete every stopped
+ * loop of the machine whenever any loop started (a `loop.restart`, a
+ * `session.start`). Stopped loops go with `prune` (which asks) or `rm`.
+ */
+export function startSweepTargets(entries: string[], hasPlate: (name: string) => boolean, alive: (name: string) => boolean): string[] {
+    return entries.filter((name) => !name.startsWith(".") && !hasPlate(name) && !alive(name));
+}
+
 export async function cmdPrune(): Promise<void> {
     if (!existsSync(STATE_ROOT)) {
         process.stdout.write("nothing to prune\n");
         return;
     }
-    const orphans: string[] = [];
-    for (const name of readdirSync(STATE_ROOT)) {
-        if (!loopAlive(name)) orphans.push(name);
-    }
+    // #3239 — alive as `start` sees it: in tmux, on a host this home can see,
+    // or on the daemon's host (whose files may sit in another home).
+    const hosted = new Set<string>();
+    try {
+        for (const s of await new AiballClient({}).sessionList()) if (s.agent && s.running !== false) hosted.add(s.agent);
+    } catch { /* the daemon does not answer: what this machine sees */ }
+    const orphans = pruneCandidates(
+        readdirSync(STATE_ROOT),
+        (name) => existsSync(platePath(stateDirFor(name))),
+        (name) => {
+            if (loopAlive(name)) return true;
+            try { return hosted.has(readPlate(stateDirFor(name)).host_agent ?? ""); } catch { return false; }
+        },
+    );
     if (orphans.length === 0) {
         process.stdout.write("nothing to prune\n");
         return;
