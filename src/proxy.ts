@@ -32,6 +32,7 @@ import { globalConfigPath } from "./autopoll/config.js";
 import { resolveLoopName, paneTarget, captureOnce, sendKeys } from "./pane.js";
 import { AIBALL_VERSION, AIBALL_COMMIT } from "./version.js";
 import { resolveDisplayHost } from "./proxy-host-providers.js";
+import { isLoopback, isMachineSecret, looksLikeMachineSecret } from "./machine-secret.js";
 
 export interface ProxyConfig {
     url: string;
@@ -257,6 +258,16 @@ export function proxyMiddleware(cfg: ProxyConfig, tokens?: ProxyTokenStore): Req
             ...req.headers,
             host: target.host,
         };
+        // The machine secret proves a local caller of this node. It is checked
+        // here and never relayed: the node vouches with its own token instead.
+        const given = /^Bearer\s+(.+)$/i.exec(String(headers["authorization"] ?? ""))?.[1]?.trim();
+        if (given && looksLikeMachineSecret(given)) {
+            if (!isLoopback(req.socket?.remoteAddress) || !isMachineSecret(given)) {
+                res.status(401).json({ error: "invalid machine secret, or not from this machine" });
+                return;
+            }
+            delete headers["authorization"];
+        }
         const auth = relayAuthorization(cfg, store, headers["authorization"]);
         if (!auth.ok) {
             res.status(401).json({ error: auth.error });

@@ -7,6 +7,7 @@
  * gesture, on this machine only.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { isMachineLocal } from "../../machine-secret.js";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
@@ -27,7 +28,7 @@ const HUMAN_HERE = {
 };
 
 function localOnly(caller: Caller): void {
-    if (caller.transport !== "uds") throw new Refusal(403, "a loop of this machine: local callers only", ERROR_CODES.FORBIDDEN);
+    if (!isMachineLocal(caller)) throw new Refusal(403, "a loop of this machine: local callers only", ERROR_CODES.FORBIDDEN);
 }
 
 /** A loop as a client shows it: where it runs, whether it does, and what to open. */

@@ -5,6 +5,7 @@
  * coupling a ticket to an upstream issue, and reloading the daemon's config.
  */
 import { z } from "zod";
+import { isMachineLocal } from "../../machine-secret.js";
 import { authorOf, consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { getMessage } from "../../db.js";
 import { isTicketClosed, listMessages, listPendingChildren, listTypedRelationsForTicket, tagMessageAsStep, untagMessageStep } from "../../db/messages.js";
@@ -306,7 +307,7 @@ defineMethod({
     machine: true,
     params: z.object({}),
     run: (caller) => {
-        if (caller.transport !== "uds") {
+        if (!isMachineLocal(caller)) {
             throw new Refusal(403, "daemon reload is local-only — run `aiball reload` on the machine running the daemon (it goes over the Unix socket)", ERROR_CODES.FORBIDDEN);
         }
         try {

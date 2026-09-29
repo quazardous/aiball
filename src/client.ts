@@ -19,6 +19,7 @@ import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadConfig } from "./autopoll/config.js";
+import { isLoopback, readMachineSecret } from "./machine-secret.js";
 import { createHash, randomUUID } from "node:crypto";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import type { ControlEvent } from "./event-bus.js"; // #451: typed control payload
@@ -100,7 +101,7 @@ export class AiballClient {
         const envSock = process.env.AIBALL_SOCK;
         this.socketPath =
             opts.socketPath ?? (envSock && envSock !== "" ? envSock : null);
-        this.token = opts.token ?? process.env.AIBALL_TOKEN ?? null;
+        this.token = opts.token ?? process.env.AIBALL_TOKEN ?? localMachineSecret(this.socketPath, this.url, this.home);
         this.features = opts.features ?? [];
         // The folder's `.aiball.yaml` speaks for the folder's own agent only: a
         // client built for another agent (an explicit agentId) keeps to the env.
@@ -1533,6 +1534,20 @@ export function resolveConsumerStanding(
         ? env.AIBALL_NO_CLAIM === "1"
         : (yaml?.no_claim ?? false) || role === "crew";
     return { role, noClaim };
+}
+
+/**
+ * The machine secret, when a client of this machine has neither a socket nor a
+ * token: the daemon then treats it as a local caller, as over the socket. Only
+ * ever sent to a loopback address — a secret that proves "same user on this
+ * machine" means nothing, and must not travel, anywhere else.
+ */
+export function localMachineSecret(socketPath: string | null, url: string, home: string): string | null {
+    if (socketPath) return null;
+    let host: string;
+    try { host = new URL(url).hostname.replace(/^\[|\]$/g, ""); } catch { return null; }
+    if (host !== "localhost" && !isLoopback(host)) return null;
+    return readMachineSecret(join(home, "machine-secret"));
 }
 
 export function resolveAgentId(cwd = resolveUserCwd()): string {

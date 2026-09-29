@@ -30,6 +30,43 @@ your user can open the socket and **claim any consumer**. That's fine for a
 single-user host (it's *your* machine), but it is **not** a per-process or
 per-consumer guarantee.
 
+### The same boundary over TCP — the machine secret
+
+Where the socket is not used — Windows, whose daemon listens on TCP only — the
+same proof travels as a file instead of a socket mode:
+
+```
+   same host (your user)
+ ┌──────────────────────────────────────────────────────┐
+ │  [ loop / CLI / MCP / GUI ]                            │
+ │        │  TCP to 127.0.0.1 (loopback)                  │
+ │        │  Bearer <machine secret>                      │
+ │        │  header: x-aiball-consumer: alice             │
+ │        ▼                                               │
+ │  [ aiball daemon ]  reads <AIBALL_HOME>/machine-secret │
+ │     trusts it: same secret AND a loopback peer         │
+ └──────────────────────────────────────────────────────┘
+   PROOF = reading a file only your user can read.   IDENTITY = the header.
+```
+
+The daemon writes `<AIBALL_HOME>/machine-secret` once (`0600`; on Windows, the
+user profile's permissions) and keeps it across restarts. A caller bearing it
+**from the loopback** is treated as a socket caller — `caller.machine` is
+`local` — and reaches what only local callers may: the loops' controls
+(`loop.*`), `session.*`, a folder's `project.init`, `daemon.reload`.
+
+- **Both conditions.** The secret is the proof. The loopback check makes a
+  copied secret useless from another host. The loopback alone proves nothing:
+  another user of the machine reaches it, and so does whatever a local reverse
+  proxy (`tailscale serve`) forwards there.
+- **Never looked up as a token**, and never relayed: a proxy node checks it and
+  vouches upstream with its own token, as for any caller without one.
+- **Clients send it only to a loopback address** (`src/client.ts`), and prefer it
+  to `cli-env` there, as they prefer the socket.
+- **Limit:** the same as the socket's. Anything running as your user can read
+  the file and claim any consumer; an administrator of the machine can read it,
+  as root can open the socket.
+
 ---
 
 ## Boundary 2 — Direct remote — strongest
@@ -276,6 +313,7 @@ socket both are equally trusted.
 | mode | proof | strength | ergonomics |
 |---|---|---|---|
 | local UDS | OS uid | uid-level (any same-uid process) | token-less |
+| local TCP + machine secret | a file only the user reads, from the loopback | uid-level, as the socket | automatic (clients read it) |
 | direct | per-consumer token | **strongest** (hard per-consumer) | a token per client |
 | proxy | node token | **weakest** (node asserts identity) | token-less locally |
 | proxy + own token (QW-A) | per-consumer token | hard proof for the loop | one node secret + provisioned loop token |

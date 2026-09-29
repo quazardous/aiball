@@ -1,5 +1,6 @@
 /** #3063 — messages: one read, and the gestures on a comment or a ticket event. */
 import { z } from "zod";
+import { isMachineLocal } from "../../machine-secret.js";
 import { authorOf, consumerIdOf, defineMethod, Refusal, refusalFrom } from "../methods.js";
 import { id } from "../params.js";
 import { ERROR_CODES, MESSAGE_SCOPES, TICKET_LEVELS, type TicketLevel } from "../../domain.js";
@@ -59,7 +60,7 @@ defineMethod({
     run: (caller, p) => {
         const m = getMessage(p.id);
         if (!m) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
-        return { ...withTagsOne(m), attachments: resolveAttachments([m.body], caller.transport === "uds") };
+        return { ...withTagsOne(m), attachments: resolveAttachments([m.body], isMachineLocal(caller)) };
     },
 });
 

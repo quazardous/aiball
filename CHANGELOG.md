@@ -25,6 +25,14 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- On Windows, a client of the machine can do what a local client does on the
+  Unix socket: list, restart and wake loops, initialise a folder, reload the
+  daemon. The daemon writes a **machine secret** readable only by its user; a
+  call bearing it from the loopback is treated as a local call, identity in
+  `x-aiball-consumer`. The CLI, its MCP server and claude-loop use it by
+  themselves for a daemon on the same machine; another client (tvty) reads
+  `<AIBALL_HOME>/machine-secret`. A proxy node checks it and never relays it.
+
 - `project.settings` describes the folder settings a client may change (type,
   choices, default, value, where it comes from), and `project.settings_set`
   takes any of them as `{ key, value }`: a new one shows with no client code.
