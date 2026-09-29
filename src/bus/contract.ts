@@ -112,6 +112,8 @@ export function asyncApiDocument(): Record<string, unknown> {
                 event: { name: "event", summary: spec.doc?.event ?? "" },
             },
             ...(spec.replay === false ? { "x-replay": false } : {}),
+            // #3294 — about the machine that answers: a proxy node serves it for its own.
+            ...(spec.machine ? { "x-machine": true } : {}),
         };
     }
     return {

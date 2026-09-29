@@ -209,3 +209,27 @@ test("stop, prompt and restart a loop of the node's machine, through its socket"
         loop.close();
     }
 });
+
+// #3294 — the machine's sessions: a node serves the subscription for its own.
+test("a subscription to this machine's sessions is served by the node, events and end included", async () => {
+    const { publish } = await import("./subscriptions.js");
+    const c = await through("boss", local.sock);
+    const ws = (c as unknown as { ws: { on(e: string, f: (d: unknown) => void): void } }).ws;
+    const events: { subject: string; data: unknown }[] = [];
+    ws.on("message", (d) => { const m = JSON.parse(String(d)); if (m.method === "bus.event") events.push(m.params); });
+    const sub = await c.call<{ id: string; value: unknown }>("bus.subscribe", { subject: "session.*.state" });
+    assert.equal(typeof sub.id, "string", "served, where the hub refuses it relayed");
+    publish("session.probe.state", { name: "probe", session: null });
+    const deadline = Date.now() + 2000;
+    while (!events.some((e) => e.subject === "session.probe.state") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(events.some((e) => e.subject === "session.probe.state"), "its events reach the client");
+    assert.deepEqual(await c.call("bus.unsubscribe", { id: sub.id }), { unsubscribed: true }, "ended where it lives");
+    // The board's subjects still go to the hub.
+    assert.equal(typeof (await c.call<{ id: string }>("bus.subscribe", { subject: "agent.worker.bar" })).id, "string");
+});
+
+test("the hub refuses a relayed caller the machine's sessions: they would be the hub's", async () => {
+    const c = await BusClient.connect({ url: hubUrl, token: NODE, headers: { "x-aiball-consumer": "boss" } });
+    clients.push(c);
+    await assert.rejects(c.call("bus.subscribe", { subject: "session.*.state" }), (e: { code: string }) => e.code === "FORBIDDEN");
+});

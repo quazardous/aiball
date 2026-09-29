@@ -151,7 +151,8 @@
           "name": "event",
           "summary": "{ name, session }: started, clients, exited; session null once stopped"
         }
-      }
+      },
+      "x-machine": true
     },
     "ticket.*": {
       "address": "ticket.{id}",

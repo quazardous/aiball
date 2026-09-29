@@ -40,6 +40,12 @@ export interface SubjectSpec {
     /** Whether `*` may be asked in place of the id. */
     wildcard?: boolean;
     /**
+     * #3294 — about the machine that answers (its sessions): a proxy node
+     * serves the subscription itself, for its own machine; the core refuses it
+     * to a relayed caller, as it would describe the core's machine.
+     */
+    machine?: boolean;
+    /**
      * false: a `since` always gets the value again. For a view whose rows the
      * spec keeps per subscription, events replayed on the current rows could
      * leave behind one that left the view while the client was away.
@@ -143,6 +149,11 @@ export function subscriptionsOf(spec: SubjectSpec): Subscription[] {
     return [...all].filter((s) => s.spec === spec);
 }
 
+/** #3294 — the spec a subject is served by, if any. */
+export function subjectSpecOf(subject: string): SubjectSpec | undefined {
+    return specFor(subject.split("."))?.spec;
+}
+
 function specFor(parts: string[]): { spec: SubjectSpec; id: string } | null {
     for (const spec of specs) {
         const pat = spec.pattern.split(".");
@@ -182,6 +193,9 @@ export function subscribe(
     const found = specFor(parts);
     if (!found) throw new Refusal(404, `no subject ${subject}`, ERROR_CODES.NOT_FOUND);
     const { spec, id } = found;
+    if (spec.machine && caller.relayed) {
+        throw new Refusal(403, `${subject} is about the machine that answers: a proxy node serves it for its own machine, the core does not for a node`, ERROR_CODES.FORBIDDEN);
+    }
     if (id === "*" && !spec.wildcard) throw new Refusal(400, `${spec.pattern} takes one id, not *`);
     const denied = spec.access(caller, id);
     if (denied) throw denied;

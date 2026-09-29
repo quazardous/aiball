@@ -23,6 +23,7 @@ import { bearerFrom } from "../auth.js";
 import { RPC_ERRORS } from "../bus-protocol.js";
 import { ERROR_CODES } from "../domain.js";
 import { getMethod, type Caller, type CallerKind } from "./methods.js";
+import { dropSession, subjectSpecOf, type BusSession } from "./subscriptions.js";
 import { runOne } from "./rpc.js";
 // The table the node looks machine methods up in.
 import "./register.js";
@@ -41,8 +42,18 @@ function methodOf(msg: unknown): string | null {
     return msg && typeof msg === "object" && !Array.isArray(msg) && typeof m === "string" ? m : null;
 }
 
-const isMachine = (msg: unknown): boolean => {
+/**
+ * #3294 — the subscriptions a node serves itself on one client connection:
+ * their ids, so an unsubscribe goes where the subscription lives.
+ */
+export interface NodeSubs { ids: Set<string> }
+
+const isMachine = (msg: unknown, subs?: NodeSubs): boolean => {
     const name = methodOf(msg);
+    const params = ((msg as { params?: unknown }).params ?? {}) as { subject?: unknown; id?: unknown };
+    // #3294 — a subscription to this machine's subject, and its end.
+    if (name === "bus.subscribe") return typeof params.subject === "string" && subjectSpecOf(params.subject)?.machine === true;
+    if (name === "bus.unsubscribe") return typeof params.id === "string" && subs?.ids.has(params.id) === true;
     const m = name === null ? undefined : getMethod(name);
     if (!m) return false;
     if (m.machine === true) return true;
@@ -57,11 +68,21 @@ const isMachine = (msg: unknown): boolean => {
  * one that mixes both is answered with an error per call, as its two halves
  * would answer on two frames.
  */
-export async function nodeAnswer(text: string, caller: () => Promise<Caller>): Promise<{ relay: true } | { relay: false; answer: string | null }> {
+export async function nodeAnswer(text: string, caller: () => Promise<Caller>, subs?: NodeSubs): Promise<{ relay: true } | { relay: false; answer: string | null }> {
     let msg: unknown;
     try { msg = JSON.parse(text); } catch { return { relay: true }; }
+    const local = (m: unknown) => isMachine(m, subs);
+    const run = async (who: Caller, one: unknown) => {
+        const r = await runOne(who, one);
+        // #3294 — remember the subscriptions served here, forget the ended ones.
+        const name = methodOf(one);
+        const res = (r as { result?: { id?: unknown } } | null)?.result;
+        if (subs && name === "bus.subscribe" && typeof res?.id === "string") subs.ids.add(res.id);
+        if (subs && name === "bus.unsubscribe") subs.ids.delete(String(((one as { params?: { id?: unknown } }).params ?? {}).id));
+        return r;
+    };
     if (Array.isArray(msg)) {
-        const machine = msg.filter(isMachine).length;
+        const machine = msg.filter(local).length;
         if (machine === 0) return { relay: true };
         if (machine < msg.length) {
             const id = (m: unknown) => (m as { id?: unknown } | null)?.id ?? null;
@@ -76,13 +97,13 @@ export async function nodeAnswer(text: string, caller: () => Promise<Caller>): P
         const who = await caller();
         const out = [];
         for (const one of msg) {
-            const r = await runOne(who, one);
+            const r = await run(who, one);
             if (r) out.push(r);
         }
         return { relay: false, answer: out.length ? JSON.stringify(out) : null };
     }
-    if (!isMachine(msg)) return { relay: true };
-    const r = await runOne(await caller(), msg);
+    if (!local(msg)) return { relay: true };
+    const r = await run(await caller(), msg);
     return { relay: false, answer: r ? JSON.stringify(r) : null };
 }
 
@@ -147,9 +168,18 @@ export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTok
             // back synchronously), so the upstream's first message, its hello,
             // cannot arrive before the relay below is in place.
             wss.handleUpgrade(req, socket, head, (local) => {
+                // #3294 — the subscriptions the node serves itself: their events go to this client.
+                const session: BusSession = {
+                    subscriptions: new Map(),
+                    notify(method, params) {
+                        if (local.readyState === WebSocket.OPEN) local.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+                    },
+                };
+                const subs: NodeSubs = { ids: new Set() };
+                local.on("close", () => dropSession(session));
                 // #3284 — who the upstream says the caller is: its hello, the first frame.
                 let hello: (c: Caller) => void = () => {};
-                const helloCaller = new Promise<Caller>((resolve) => { hello = resolve; });
+                const helloCaller = new Promise<Caller>((resolve) => { hello = (c) => resolve({ ...c, session }); });
                 let greeted = false;
                 up.on("message", (data, binary) => {
                     if (!greeted && !binary) {
@@ -169,7 +199,7 @@ export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTok
                     }
                     const text = data.toString();
                     queue = queue.then(async () => {
-                        const d = await nodeAnswer(text, () => helloCaller);
+                        const d = await nodeAnswer(text, () => helloCaller, subs);
                         if (d.relay) {
                             if (up.readyState === WebSocket.OPEN) up.send(text);
                         } else if (d.answer !== null && local.readyState === WebSocket.OPEN) {

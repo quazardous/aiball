@@ -236,6 +236,8 @@ defineMethod({
 /** `session.<name>.state`: a session without an agent; `*` for all, those started later too. */
 defineSubject({
     pattern: "session.*.state",
+    // #3294 — this machine's sessions: a proxy node serves it for its own.
+    machine: true,
     doc: { value: "a session without an agent, as session.list gives it, or null; with *, keyed by name", event: "{ name, session }: started, clients, exited; session null once stopped" },
     wildcard: true,
     access: (caller) => (caller.kind === "key" ? new Refusal(403, "a consumer's subject") : null),

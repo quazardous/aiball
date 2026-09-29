@@ -42,7 +42,11 @@ not relayed: the node answers them, for its own machine, as the caller the
 upstream's `bus.hello` names (its kind included). They are marked *this machine's*
 in the tables below. The upstream refuses them to a relayed caller: they would act
 on the upstream's machine. A batch goes one way whole; one that mixes this
-machine's methods with the board's is refused, call by call.
+machine's methods with the board's is refused, call by call. The same goes for a subject
+about the machine (`session.<name>.state`): a node serves the subscription itself,
+from its own sessions, and its events arrive on the same connection as the board's;
+its end (`bus.unsubscribe`) goes where it lives. Such a subscription carries the
+node's own epoch and `seq`, not the upstream's.
 
 The loop controls that reach a loop through its bus connection
 (`consumer.stop_loop`, `consumer.prompt`, `consumer.restart_claude`) are answered by
@@ -135,7 +139,7 @@ events, and the same epoch), the answer is `replayed: true` with the missed
 | `project.<p>.tickets` | the rows `inbox.list` gives with `view: "turn"`; options `open`, `include_postponed` | `{ op: "upsert", row }` or `{ op: "remove", id, project }` | humans and agents; the rows are the subscriber's |
 | `ticket.<id>` | what `ticket.get` gives with `full: true` | `{ type, message }`: `message_created`, `_edited`, `_decided`, `_noted`, `_tagged` | humans and agents |
 | `user.<id>.pings` | `{ unread }` | a ping, as the event stream carries it, and `message`: what it points at (`id`, `hashid`, `kind`, `status`, `by_agent`, `created_at`, `project`, `ticket_id`, `title`, `decision`) | oneself |
-| `session.<name>.state` | a session without an agent, as `session.list` gives it, or `null` | `{ name, session }`: started, clients, exited, and `session: null` once stopped | humans and agents |
+| `session.<name>.state` | a session without an agent, as `session.list` gives it, or `null` | `{ name, session }`: started, clients, exited, and `session: null` once stopped | humans and agents; this machine's |
 | `agent.<id>.events` | `{ consumer_id, unread, counters }` | `{ event, data }`: a `ping` (not one outside the wake focus), a loop `control` (`kill`, `prompt`, `restart_claude`), a `signal`, its `counters` when a number changed; the waiting signals and spooled prompts come right after the answer; the subscription is the loop's liveness; never replayed | the loop itself |
 | `board.events` | `null` | every event the board broadcasts, `{ type, data }`, the feed the web UI patches its views from | humans and agents |
 | `config.changed` | `null` (`config.managed` is the whole read) | `{ op: "set" \| "clear", key, project, value, by }` on each `config.set` / `config.clear`; `{ op: "reload" }` after a config file was reloaded: read `config.managed` again | humans and agents |
