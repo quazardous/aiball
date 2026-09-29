@@ -5,7 +5,7 @@
 // exclusion. So a ticket assigned to ANOTHER agent counted as actionable for
 // you — the loop armed its wake countdown on that phantom work, the backlog
 // picker (canonical gate) then found nothing to surface, the drain skipped and
-// re-armed forever (david's "syndrome event fantôme": `o:3 b:0 e:0 📨 Ns`), and
+// re-armed forever (david's "phantom event syndrome": `o:3 b:0 e:0 📨 Ns`), and
 // the UI sidebar over-counted too.
 //
 // These tests pin the CONCORDANCE invariant so the two can't drift again.

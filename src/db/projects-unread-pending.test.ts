@@ -1,15 +1,15 @@
-// #643 — david `nch7je` : un unread c'est "quelque chose que j'ai pas lu",
-// indépendant du status moderation. Le sidebar badge `unread_for_consumer`
-// excluait jusqu'ici les tickets PENDING (`status !== "approved"`) en plus
-// des closed+snoozed, à cause du fix #456. Repro bame : 1 ticket pending
-// avec ping pour david → API `/api/unread/count` = 1, badge sidebar = 0.
+// #643 — david `nch7je`: an unread is "something I haven't read",
+// regardless of moderation status. The sidebar badge `unread_for_consumer`
+// used to exclude PENDING tickets (`status !== "approved"`) on top of
+// closed+snoozed, because of the #456 fix. bame repro: 1 pending ticket
+// with a ping for david → API `/api/unread/count` = 1, sidebar badge = 0.
 //
-// David `nch7je` redéfinit la sémantique : pending COMPTE comme unread
-// (rien empêche de l'avoir vu), snoozed reste exclu (repoussé dans le
-// temps), closed reste exclu (plus actionnable).
+// David `nch7je` redefines the semantics: pending COUNTS as unread
+// (nothing stops you having seen it), snoozed stays excluded (pushed back
+// in time), closed stays excluded (no longer actionable).
 //
-// Ce test pin la nouvelle invariance + relit closed/snoozed pour qu'on
-// ne perde pas leur exclusion par accident.
+// This test pins the new invariant + re-checks closed/snoozed so we
+// don't lose their exclusion by accident.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";

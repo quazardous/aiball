@@ -1,11 +1,11 @@
 /**
- * #1156 (REX runic #1155) — `priority` sur `ticket_new` était acceptée par le
- * schéma MCP mais inconnue de `validateNewMessage` → droppée SILENCIEUSEMENT,
- * le défaut SQL s'appliquait. Le fix miroir le handling `intent` : validée si
- * présente (400 sur valeur inconnue, pas de drop silencieux), forwardée sur
- * ticket_created, nullée ailleurs.
+ * #1156 (runic post-mortem #1155) — `priority` on `ticket_new` was accepted by
+ * the MCP schema but unknown to `validateNewMessage` → dropped SILENTLY, and
+ * the SQL default applied. The fix mirrors the `intent` handling: validated
+ * when present (400 on an unknown value, no silent drop), forwarded on
+ * ticket_created, nulled elsewhere.
  *
- * Setup : throwaway DB via AIBALL_HOME avant les imports (même pattern que
+ * Setup: throwaway DB via AIBALL_HOME before the imports (same pattern as
  * messages-decision-guard.test.ts).
  */
 import { test } from "node:test";
@@ -25,7 +25,7 @@ const { createProject } = await import("./db/projects.js");
 getDb();
 createProject({ name: "prio-test" });
 
-test("#1156: priority forwardée par le validateur sur ticket_created", () => {
+test("#1156: priority forwarded by the validator on ticket_created", () => {
     const v = validateNewMessage({
         project: "prio-test",
         kind: "ticket_created",
@@ -37,7 +37,7 @@ test("#1156: priority forwardée par le validateur sur ticket_created", () => {
     assert.equal(v.priority, "low");
 });
 
-test("#1156: priority invalide → erreur explicite (pas de drop silencieux)", () => {
+test("#1156: invalid priority → explicit error (no silent drop)", () => {
     const v = validateNewMessage({
         project: "prio-test",
         kind: "ticket_created",
@@ -48,7 +48,7 @@ test("#1156: priority invalide → erreur explicite (pas de drop silencieux)", (
     assert.match(v.error, /priority must be one of/);
 });
 
-test("#1156: priority absente → null (le défaut SQL s'applique en aval)", () => {
+test("#1156: missing priority → null (the SQL default applies downstream)", () => {
     const v = validateNewMessage({
         project: "prio-test",
         kind: "ticket_created",
@@ -58,7 +58,7 @@ test("#1156: priority absente → null (le défaut SQL s'applique en aval)", () 
     assert.equal(v.priority, null);
 });
 
-test("#1156: priority sur comment_added → nullée (tickets only, miroir d'intent)", () => {
+test("#1156: priority on comment_added → nulled (tickets only, mirrors intent)", () => {
     const v = validateNewMessage({
         project: "prio-test",
         kind: "comment_added",
@@ -72,7 +72,7 @@ test("#1156: priority sur comment_added → nullée (tickets only, miroir d'inte
     assert.equal(v.priority, null);
 });
 
-test("#1156: end-to-end — le ticket créé PORTE la priorité (le bug runic : 'low' devenait 'normal')", () => {
+test("#1156: end-to-end — the created ticket CARRIES the priority (the runic bug: 'low' became 'normal')", () => {
     const v = validateNewMessage({
         project: "prio-test",
         kind: "ticket_created",

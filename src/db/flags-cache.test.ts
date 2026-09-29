@@ -1,5 +1,5 @@
-// #1168 — le cache flags-context doit rendre exactement le recompute, et une
-// invalidation force un rebuild. The ceiling (and each entry's own clock
+// #1168 — the flags-context cache must return exactly the recompute, and an
+// invalidation forces a rebuild. The ceiling (and each entry's own clock
 // deadline, #2682) bounds any staleness.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 const { getCachedDecisionGate, getCachedActionable, repairEntries, CEILING_MS, clearFlagsCache: invalidateFlagsCache } =
     await import("./flags-cache.js");
 
-test("#1168: getCachedDecisionGate sert le cache dans le TTL, rebuild après invalidation", () => {
+test("#1168: getCachedDecisionGate serves the cache within the TTL, rebuilds after invalidation", () => {
     invalidateFlagsCache();
     let builds = 0;
     const build = () => { builds++; return new Map([[1, true]]); };
@@ -58,13 +58,13 @@ test("#2682: a repair brings the expiry forward, never back", () => {
     assert.equal(builds, 2);
 });
 
-test("#1168: actionable caché PAR consumer (clés distinctes)", () => {
+test("#1168: actionable cached PER consumer (distinct keys)", () => {
     invalidateFlagsCache();
     const seen: string[] = [];
     const build = (c: string) => () => { seen.push(c); return { openIds: new Set(), actionableIds: new Set() }; };
     const t0 = 3_000_000;
     getCachedActionable("A", build("A"), t0);
-    getCachedActionable("B", build("B"), t0);   // clé différente → build
-    getCachedActionable("A", build("A"), t0 + 100); // A en cache → pas de build
+    getCachedActionable("B", build("B"), t0);   // different key → build
+    getCachedActionable("A", build("A"), t0 + 100); // A cached → no build
     assert.deepEqual(seen, ["A", "B"]);
 });

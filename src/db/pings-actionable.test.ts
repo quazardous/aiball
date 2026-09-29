@@ -1,18 +1,18 @@
-// #643 + #805 + #886 — toutes les fonctions unread/pings (sidebar
-// incluse) appliquent le moteur `BacklogRules`. Cibles `unread-list` /
-// `unread-count` excluent SNOOZED et SELF-AUTHORED uniquement. Closed
-// est INCLUS (#805 : le prune se fait via MCP consult, pas par le gate).
+// #643 + #805 + #886 — every unread/pings function (sidebar
+// included) applies the `BacklogRules` engine. Targets `unread-list` /
+// `unread-count` exclude SNOOZED and SELF-AUTHORED only. Closed
+// is INCLUDED (#805: pruning happens via MCP consult, not the gate).
 //
-// Couvre les 4 fonctions de `src/db/pings.ts` qui alimentent badge sidebar,
-// inbox feed, MCP `_status`, wake-phrase :
+// Covers the 4 functions of `src/db/pings.ts` that feed the sidebar badge,
+// inbox feed, MCP `_status`, wake-phrase:
 //   listUnread / unreadCount / listPings / unreadPingCount
 //
-// Setup : 4 tickets dans 1 projet, chacun avec 1 unread ping pour david :
-//   T1 approved+open      → INCLUS
-//   T2 pending+open       → INCLUS (revers du #456)
-//   T3 approved+closed    → INCLUS (#805 : visible jusqu'au prune-on-consult)
-//   T4 approved+snoozed   → EXCLU (postponed_until 1h dans le futur)
-// Attendu : count = 3 (T1+T2+T3), excluded = T4 only.
+// Setup: 4 tickets in 1 project, each with 1 unread ping for david:
+//   T1 approved+open      → INCLUDED
+//   T2 pending+open       → INCLUDED (reverse of #456)
+//   T3 approved+closed    → INCLUDED (#805: visible until prune-on-consult)
+//   T4 approved+snoozed   → EXCLUDED (postponed_until 1h in the future)
+// Expected: count = 3 (T1+T2+T3), excluded = T4 only.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -65,7 +65,7 @@ mkTicket(3, "approved", { closed: true });
 const inOneHour = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 mkTicket(4, "approved", { postponedUntil: inOneHour });
 
-test("#805 unreadCount includes closed (visible jusqu'à prune-on-consult), excludes snoozed", () => {
+test("#805 unreadCount includes closed (visible until prune-on-consult), excludes snoozed", () => {
     assert.equal(unreadCount(RECIPIENT, PROJECT), 3);
 });
 
@@ -85,7 +85,7 @@ test("#805 listPings(unreadOnly) includes closed, excludes snoozed", () => {
     assert.deepEqual(ids, [1, 2, 3]);
 });
 
-// Defensive : re-open T3 (already INCLUS post-#805). Sanity : count unchanged.
+// Defensive: re-open T3 (already INCLUDED post-#805). Sanity: count unchanged.
 test("#643 reopened ticket stays unread (was already visible)", () => {
     db.insert(schema.messages).values({
         ticketId: 3,

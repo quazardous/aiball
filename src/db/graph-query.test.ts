@@ -142,8 +142,8 @@ test("the audit writes nothing — it reports candidates, it does not act", () =
     assert.equal(after, before, "no lifecycle event, no comment, no proposal");
 });
 
-// #1992 david `bzejyu` — "il faut quand même respecter les frontières projet :
-// un agent voit une projection, avec éventuellement les limites communes".
+// #1992 david `bzejyu` — "we still have to respect project boundaries:
+// an agent sees a projection, possibly with the shared limits".
 //
 // The graph is compiled corpus-wide (references cross projects, so a
 // per-project compile could not see them). The READ is what must be bounded.

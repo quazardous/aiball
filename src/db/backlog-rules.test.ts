@@ -37,7 +37,7 @@ function findRule(name: string) {
 }
 
 // =====================================================================
-//  Rules individuelles
+//  Individual rules
 // =====================================================================
 
 test("closed rule fires when ticketId in closedIds", () => {
@@ -48,8 +48,8 @@ test("closed rule fires when ticketId in closedIds", () => {
 });
 
 test("closed rule excludes backlog-tier + actionable-pool + hot-tier, NOT unread-*", () => {
-    // #805 — closed reste visible dans unread-list/unread-count
-    // jusqu'au prune-on-MCP-consult.
+    // #805 — closed stays visible in unread-list/unread-count
+    // until the prune-on-MCP-consult.
     const rule = findRule("closed");
     assert.equal(rule.excludesFrom.has("backlog-tier"), true);
     assert.equal(rule.excludesFrom.has("actionable-pool"), true);
@@ -132,11 +132,11 @@ test("assigned-to-other rule excludes ONLY backlog-tier", () => {
 test("#900 claimed-by-other excludes from backlog-tier + fifo-wake", () => {
     const ctx = mkCtx({ claimedByOtherIds: new Set([42]) });
     const item = { ticketId: 42 };
-    // backlog-tier + fifo-wake : exclues
+    // backlog-tier + fifo-wake: excluded
     assert.equal(defaultBacklogRules.excludes(ctx, item, "backlog-tier"), true);
     assert.equal(defaultBacklogRules.excludes(ctx, item, "fifo-wake"), true);
-    // unread-list/count + actionable-pool + hot-tier : pas exclues (le ticket
-    // peut quand même se surfacer via unread directs, on coupe juste le wake CTA)
+    // unread-list/count + actionable-pool + hot-tier: not excluded (the ticket
+    // can still surface via direct unreads, we only cut the wake CTA)
     assert.equal(defaultBacklogRules.excludes(ctx, item, "unread-list"), false);
     assert.equal(defaultBacklogRules.excludes(ctx, item, "actionable-pool"), false);
     assert.equal(defaultBacklogRules.excludes(ctx, item, "hot-tier"), false);
@@ -162,10 +162,10 @@ test("engine.filter drops excluded items only", () => {
     const items = [
         { ticketId: 1 }, { ticketId: 2 }, { ticketId: 3 }, { ticketId: 4 },
     ];
-    // backlog-tier : closed + snoozed both exclude
+    // backlog-tier: closed + snoozed both exclude
     const backlog = defaultBacklogRules.filter(items, (i) => i, ctx, "backlog-tier");
     assert.deepEqual(backlog.map((i) => i.ticketId), [4]);
-    // unread-list : snoozed exclues, closed n'exclut PAS (#805)
+    // unread-list: snoozed excluded, closed does NOT exclude (#805)
     const unread = defaultBacklogRules.filter(items, (i) => i, ctx, "unread-list");
     assert.deepEqual(unread.map((i) => i.ticketId).sort(), [1, 3, 4]);
 });

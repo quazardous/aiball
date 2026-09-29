@@ -96,48 +96,48 @@ test("no double-pick: two live claims never collide on the same ticket", () => {
     assert.ok(actionable(B).has(2) && !actionable(A).has(2), "T2 is B's alone");
 });
 
-// #523 (david `reztjq` + `dzakgw`) — assignment auto-release le claim si
-// claimant existant et claimant ≠ nouveau assignee.
-test("#523 assign to Y ≠ claimant X → claim X libéré + retourné dans le rapport", () => {
-    // T1 hold claim de A (cf. test précédent). On push à B (humain moderator).
+// #523 (david `reztjq` + `dzakgw`) — assignment auto-releases the claim when
+// there is a claimant and the claimant ≠ the new assignee.
+test("#523 assign to Y ≠ claimant X → claim X released + returned in the report", () => {
+    // T1 holds A's claim (see previous test). Push to B (human moderator).
     const before = db.select({ claimant: schema.tickets.claimant })
         .from(schema.tickets).where(eq(schema.tickets.id, 1)).get();
-    assert.equal(before?.claimant, A, "pré-condition : A claim T1");
+    assert.equal(before?.claimant, A, "precondition: A claims T1");
 
     const ar = setTicketAssignment(1, B, "human");
     assert.deepEqual(ar.released_claim, { ticket_id: 1, claimant: A },
-        "released_claim signale A éjecté");
+        "released_claim reports A evicted");
 
     const after = db.select({
         claimant: schema.tickets.claimant,
         assignee: schema.tickets.assignee,
     }).from(schema.tickets).where(eq(schema.tickets.id, 1)).get();
-    assert.equal(after?.claimant, null, "claim A libéré côté DB");
+    assert.equal(after?.claimant, null, "claim A released in the DB");
     assert.equal(after?.assignee, B, "assignee = B");
 });
 
-test("#523 self-assign (assignee = claimant) → claim INCHANGÉ", () => {
-    // Re-claim T1 pour A
+test("#523 self-assign (assignee = claimant) → claim UNCHANGED", () => {
+    // Re-claim T1 for A
     setTicketClaim(1, A);
-    const ar = setTicketAssignment(1, A, "human"); // promote focus → responsabilité
-    assert.equal(ar.released_claim, null, "pas de released_claim (self-assign)");
+    const ar = setTicketAssignment(1, A, "human"); // promote focus → responsibility
+    assert.equal(ar.released_claim, null, "no released_claim (self-assign)");
 
     const after = db.select({
         claimant: schema.tickets.claimant,
         assignee: schema.tickets.assignee,
     }).from(schema.tickets).where(eq(schema.tickets.id, 1)).get();
-    assert.equal(after?.claimant, A, "claim A conservé (self-assign)");
+    assert.equal(after?.claimant, A, "claim A kept (self-assign)");
     assert.equal(after?.assignee, A, "assignee = A");
 });
 
-test("#523 assign sans claim existant → released_claim null", () => {
-    // T2 : claim a été release implicitement plus tôt + déjà assigné à B.
+test("#523 assign with no existing claim → released_claim null", () => {
+    // T2: claim was implicitly released earlier + already assigned to B.
     releaseTicketClaim(2); // clean state
     db.update(schema.tickets)
         .set({ claimant: null, claimedAt: null })
         .where(eq(schema.tickets.id, 2)).run();
     const ar = setTicketAssignment(2, A, "human");
-    assert.equal(ar.released_claim, null, "pas de claim à libérer → null");
+    assert.equal(ar.released_claim, null, "no claim to release → null");
 });
 
 after(() => {

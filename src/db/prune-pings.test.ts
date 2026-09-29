@@ -1,4 +1,4 @@
-// #1185 — prunePings : mark-seen (défaut) ou delete, all-projects ou scopé.
+// #1185 — prunePings: mark-seen (default) or delete, all projects or scoped.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -56,7 +56,7 @@ test("#1185 scopes by consumer (other consumer untouched)", () => {
     seed("s1", "grace", 2);
     const r = prunePings("frank", { project: "s1" });
     assert.equal(r.affected, 2);
-    assert.equal(listUnread("grace", "s1", 100).length, 2); // grace intacte
+    assert.equal(listUnread("grace", "s1", 100).length, 2); // grace untouched
 });
 
 test("#1185 purgeSeenPingsForTicket drops seen, keeps unseen", async () => {

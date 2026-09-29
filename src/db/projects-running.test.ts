@@ -1,8 +1,8 @@
-// #968 david `ah6gyb` — la flag `p.running` doit être indexée par
-// (project, cwd), pas par cwd seul. Cas concret : un consumer mort
-// (testuser, project=test) partage son cwd avec un consumer live
-// (claude-aiball-dev, project=aiball) → pre-fix `test.running` était
-// `true` à tort parce que le set de running roots était global.
+// #968 david `ah6gyb` — the `p.running` flag must be keyed by
+// (project, cwd), not by cwd alone. Concrete case: a dead consumer
+// (testuser, project=test) shares its cwd with a live consumer
+// (claude-aiball-dev, project=aiball) → pre-fix `test.running` was
+// wrongly `true` because the set of running roots was global.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -47,7 +47,7 @@ db.update(schema.consumers)
     .where(eq(schema.consumers.consumerId, "dead-agent"))
     .run();
 
-test("listProjectsDetailed: running flag est indexé par (project, cwd), pas par cwd seul", () => {
+test("listProjectsDetailed: running flag is keyed by (project, cwd), not by cwd alone", () => {
     const projects = listProjectsDetailed();
     const live = projects.find((p) => p.name === "p968-live");
     const dead = projects.find((p) => p.name === "p968-dead");

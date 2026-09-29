@@ -1,14 +1,14 @@
-// #358 — gate de décision récence-aware. node:test + tsx (zero deps).
+// #358 — recency-aware decision gate. node:test + tsx (zero deps).
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { computeDecisionGate, computeDecisionGateProposers, type DecisionGateEvent } from "./decision-gate.js";
 
-// Humains du jeu de test : david. Tout le reste = agent.
+// Humans in the test set: david. Everyone else = agent.
 const isHuman = (id: string) => id === "david";
 
-// Petit builder : les events sont consommés dans l'ordre du tableau (= ordre
-// d'id asc). On ne renseigne que ce qui compte pour chaque cas.
+// Small builder: events are consumed in array order (= id asc order).
+// Only what matters for each case is filled in.
 type Ev = Partial<DecisionGateEvent> & { kind: string };
 function ev(e: Ev): DecisionGateEvent {
     return {
@@ -24,14 +24,14 @@ function decision(kind: "plan" | "resolution" | "wontfix" | "escalation", status
 }
 const gate = (events: DecisionGateEvent[]) => computeDecisionGate(events, isHuman);
 
-test("plan pending → gaté", () => {
+test("plan pending → gated", () => {
     const g = gate([ev({ kind: "comment_added", meta: decision("plan", "pending") })]);
     assert.equal(g.get(1), true);
 });
 
-test("#1113: plan pending + commentaire HUMAIN foreign postérieur → dé-gaté", () => {
-    // Renverse le cas #600 : l'humain a repris la parole au lieu d'accepter/
-    // rejeter → la proposition est moot, la balle revient à l'agent.
+test("#1113: plan pending + later foreign HUMAN comment → un-gated", () => {
+    // Reverses case #600: the human spoke again instead of accepting/
+    // rejecting → the proposal is moot, the ball goes back to the agent.
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }), // proposer=claude-aiball-dev
         ev({ kind: "comment_added", byAgent: "david" }), // plain human foreign
@@ -39,20 +39,20 @@ test("#1113: plan pending + commentaire HUMAIN foreign postérieur → dé-gaté
     assert.equal(g.get(1), false);
 });
 
-test("#1113: plan pending + commentaire du PROPOSEUR (même agent) → reste gaté", () => {
-    // #600 préservé pour le proposeur lui-même : parler tout seul ne ramène pas
-    // la balle au backlog (toujours en attente de l'action de l'autre).
+test("#1113: plan pending + comment by the PROPOSER (same agent) → stays gated", () => {
+    // #600 kept for the proposer itself: talking to itself does not bring
+    // the ball back to the backlog (still waiting on the other side).
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }), // proposer=claude-aiball-dev
-        ev({ kind: "comment_added", byAgent: "claude-aiball-dev" }), // même agent
+        ev({ kind: "comment_added", byAgent: "claude-aiball-dev" }), // same agent
     ]);
     assert.equal(g.get(1), true);
 });
 
-// #2376 david (a6zkyf) — renverse le cas #1113 pour les AGENTS : seule la
-// parole d'un humain rend la main, parce que seule elle répond à la décision
-// attendue. Un autre agent qui commente ne décide rien, le gate tient.
-test("#2376: plan pending + commentaire d'un AGENT TIERS → reste gaté", () => {
+// #2376 david (a6zkyf) — reverses case #1113 for AGENTS: only a human
+// speaking hands the ball back, because only that answers the pending
+// decision. Another agent commenting decides nothing, the gate holds.
+test("#2376: plan pending + comment by a THIRD-PARTY AGENT → stays gated", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }), // proposer=claude-aiball-dev
         ev({ kind: "comment_added", byAgent: "autre-agent" }), // foreign agent
@@ -60,7 +60,7 @@ test("#2376: plan pending + commentaire d'un AGENT TIERS → reste gaté", () =>
     assert.equal(g.get(1), true);
 });
 
-test("#2376: le commentaire humain, lui, rend la main à l'agent", () => {
+test("#2376: a human comment, though, hands the ball back to the agent", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }),
         ev({ kind: "comment_added", byAgent: "david" }),
@@ -68,7 +68,7 @@ test("#2376: le commentaire humain, lui, rend la main à l'agent", () => {
     assert.equal(g.get(1), false);
 });
 
-test("#1113: proposeur summary_until (meta sans decision) après pending → reste gaté", () => {
+test("#1113: proposer summary_until (meta without decision) after pending → stays gated", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("resolution", "pending") }), // proposer=claude-aiball-dev
         ev({ kind: "comment_added", byAgent: "claude-aiball-dev", meta: JSON.stringify({ summary_until: "x" }) }),
@@ -76,7 +76,7 @@ test("#1113: proposeur summary_until (meta sans decision) après pending → res
     assert.equal(g.get(1), true);
 });
 
-test("#1113: resolution pending + commentaire humain foreign postérieur → dé-gaté", () => {
+test("#1113: resolution pending + later foreign human comment → un-gated", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("resolution", "pending") }), // proposer=claude-aiball-dev
         ev({ kind: "comment_added", byAgent: "david" }),
@@ -84,25 +84,25 @@ test("#1113: resolution pending + commentaire humain foreign postérieur → dé
     assert.equal(g.get(1), false);
 });
 
-test("#1113: régression skybot #1109 — résolution pending puis échange plain (david Q / agent A / david Q) → dé-gaté", () => {
+test("#1113: skybot regression #1109 — resolution pending then plain exchange (david Q / agent A / david Q) → un-gated", () => {
     const g = gate([
         ev({ kind: "comment_added", byAgent: "skybot-claude", meta: decision("resolution", "pending") }),
-        ev({ kind: "comment_added", byAgent: "david" }),          // "quelle clé ?"
-        ev({ kind: "comment_added", byAgent: "skybot-claude" }),  // réponse
-        ev({ kind: "comment_added", byAgent: "david" }),          // nouvelle question
+        ev({ kind: "comment_added", byAgent: "david" }),          // "which key?"
+        ev({ kind: "comment_added", byAgent: "skybot-claude" }),  // answer
+        ev({ kind: "comment_added", byAgent: "david" }),          // new question
     ]);
     assert.equal(g.get(1), false);
 });
 
-test("#1113: commentaire foreign AVANT toute décision pending → pas de dé-gate parasite (reste gaté après pending)", () => {
+test("#1113: foreign comment BEFORE any pending decision → no spurious un-gate (stays gated after pending)", () => {
     const g = gate([
-        ev({ kind: "comment_added", byAgent: "david" }),          // pas de gate encore
+        ev({ kind: "comment_added", byAgent: "david" }),          // no gate yet
         ev({ kind: "comment_added", byAgent: "skybot-claude", meta: decision("resolution", "pending") }),
     ]);
     assert.equal(g.get(1), true);
 });
 
-test("resolution ACCEPTED + commentaire humain postérieur → reste gaté (settled, pas de reopen implicite)", () => {
+test("resolution ACCEPTED + later human comment → stays gated (settled, no implicit reopen)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("resolution", "accepted") }),
         ev({ kind: "comment_added", byAgent: "david" }),
@@ -110,17 +110,17 @@ test("resolution ACCEPTED + commentaire humain postérieur → reste gaté (sett
     assert.equal(g.get(1), true);
 });
 
-test("plan accepté = go-signal → dé-gaté", () => {
+test("plan accepted = go-signal → un-gated", () => {
     const g = gate([ev({ kind: "comment_added", meta: decision("plan", "accepted") })]);
     assert.equal(g.get(1), false);
 });
 
-test("plan / resolution rejeté → dé-gaté", () => {
+test("plan / resolution rejected → un-gated", () => {
     assert.equal(gate([ev({ kind: "comment_added", meta: decision("plan", "rejected") })]).get(1), false);
     assert.equal(gate([ev({ kind: "comment_added", meta: decision("resolution", "rejected") })]).get(1), false);
 });
 
-test("#600 v7z5u6: legacy ticket_resolved (pending OU approved) + commentaire humain → reste gaté", () => {
+test("#600 v7z5u6: legacy ticket_resolved (pending OR approved) + human comment → stays gated", () => {
     const pending = gate([
         ev({ kind: "ticket_resolved", status: "pending" }),
         ev({ kind: "comment_added", byAgent: "david" }),
@@ -133,21 +133,21 @@ test("#600 v7z5u6: legacy ticket_resolved (pending OU approved) + commentaire hu
     assert.equal(approved.get(1), true);
 });
 
-test("#802: wontfix pending → gaté (symétrique resolution)", () => {
+test("#802: wontfix pending → gated (mirrors resolution)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("wontfix", "pending") }),
     ]);
     assert.equal(g.get(1), true);
 });
 
-test("#802: wontfix accepté → reste gaté (le ticket est fermé en parallèle, pas dans le gate)", () => {
+test("#802: wontfix accepted → stays gated (the ticket is closed separately, not in the gate)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("wontfix", "accepted") }),
     ]);
     assert.equal(g.get(1), true);
 });
 
-test("#802: wontfix rejeté → dé-gaté (reporter dit non, le ticket reste ouvert)", () => {
+test("#802: wontfix rejected → un-gated (reporter says no, the ticket stays open)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("wontfix", "pending") }),
         ev({ kind: "comment_added", meta: decision("wontfix", "rejected") }),
@@ -155,14 +155,14 @@ test("#802: wontfix rejeté → dé-gaté (reporter dit non, le ticket reste ouv
     assert.equal(g.get(1), false);
 });
 
-test("#737: escalation pending → gaté (agent attend l'action humaine)", () => {
+test("#737: escalation pending → gated (agent waits for the human action)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("escalation", "pending") }),
     ]);
     assert.equal(g.get(1), true);
 });
 
-test("#737: escalation accepté = humain a fait l'action → dé-gaté (pas d'auto-close, l'agent peut continuer)", () => {
+test("#737: escalation accepted = human did the action → un-gated (no auto-close, the agent can carry on)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("escalation", "pending") }),
         ev({ kind: "comment_added", meta: decision("escalation", "accepted") }),
@@ -170,7 +170,7 @@ test("#737: escalation accepté = humain a fait l'action → dé-gaté (pas d'au
     assert.equal(g.get(1), false);
 });
 
-test("#737: escalation rejeté = pas une escalation → dé-gaté (agent peut re-classifier)", () => {
+test("#737: escalation rejected = not an escalation → un-gated (agent can re-classify)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("escalation", "pending") }),
         ev({ kind: "comment_added", meta: decision("escalation", "rejected") }),
@@ -178,7 +178,7 @@ test("#737: escalation rejeté = pas une escalation → dé-gaté (agent peut re
     assert.equal(g.get(1), false);
 });
 
-test("ticket_reopened (approved) dé-gate même après une résolution", () => {
+test("ticket_reopened (approved) un-gates even after a resolution", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("resolution", "accepted") }),
         ev({ kind: "ticket_reopened", status: "approved" }),
@@ -186,7 +186,7 @@ test("ticket_reopened (approved) dé-gate même après une résolution", () => {
     assert.equal(g.get(1), false);
 });
 
-test("#600 v7z5u6: dernier-signal-gagne : pending → reject (dé-gate) → nouvelle proposition pending (re-gate)", () => {
+test("#600 v7z5u6: last-signal-wins: pending → reject (un-gate) → new pending proposal (re-gate)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }),
         ev({ kind: "comment_added", meta: decision("plan", "rejected") }),
@@ -195,24 +195,24 @@ test("#600 v7z5u6: dernier-signal-gagne : pending → reject (dé-gate) → nouv
     assert.equal(g.get(1), true);
 });
 
-test("commentaire humain sans gate préalable → pas d'entrée (non gaté)", () => {
+test("human comment with no prior gate → no entry (not gated)", () => {
     const g = gate([ev({ kind: "comment_added", byAgent: "david" })]);
     assert.equal(g.get(1), undefined);
 });
 
-test("décision pending non-approuvée (modération en attente) → ignorée", () => {
+test("pending decision not approved (moderation waiting) → ignored", () => {
     const g = gate([ev({ kind: "comment_added", status: "pending", meta: decision("plan", "pending") })]);
     assert.equal(g.get(1), undefined);
 });
 
-test("#803: ticket_created avec plan pending → gaté", () => {
+test("#803: ticket_created with pending plan → gated", () => {
     const g = gate([
         ev({ kind: "ticket_created", meta: decision("plan", "pending") }),
     ]);
     assert.equal(g.get(1), true);
 });
 
-test("#803: ticket_created avec plan accepté → dé-gaté (go-signal)", () => {
+test("#803: ticket_created with accepted plan → un-gated (go-signal)", () => {
     const g = gate([
         ev({ kind: "ticket_created", meta: decision("plan", "pending") }),
         ev({ kind: "comment_added", meta: decision("plan", "accepted") }),
@@ -220,7 +220,7 @@ test("#803: ticket_created avec plan accepté → dé-gaté (go-signal)", () => 
     assert.equal(g.get(1), false);
 });
 
-test("#803: ticket_created avec plan rejeté → dé-gaté (re-plan)", () => {
+test("#803: ticket_created with rejected plan → un-gated (re-plan)", () => {
     const g = gate([
         ev({ kind: "ticket_created", meta: decision("plan", "pending") }),
         ev({ kind: "comment_added", meta: decision("plan", "rejected") }),
@@ -228,11 +228,11 @@ test("#803: ticket_created avec plan rejeté → dé-gaté (re-plan)", () => {
     assert.equal(g.get(1), false);
 });
 
-test("tickets indépendants ne se mélangent pas", () => {
+test("independent tickets do not mix", () => {
     const g = gate([
         ev({ ticketId: 1, kind: "comment_added", meta: decision("plan", "pending") }),
         ev({ ticketId: 2, kind: "comment_added", meta: decision("plan", "pending") }),
-        ev({ ticketId: 2, kind: "comment_added", meta: decision("plan", "accepted") }), // dé-gate seulement #2
+        ev({ ticketId: 2, kind: "comment_added", meta: decision("plan", "accepted") }), // un-gates #2 only
     ]);
     assert.equal(g.get(1), true);
     assert.equal(g.get(2), false);

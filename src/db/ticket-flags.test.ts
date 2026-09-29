@@ -66,8 +66,8 @@ test("tier 3 (was 2) — last actor=me, no decision, ball in their court", () =>
 });
 
 test("#885 tier 2 follow-up — last_actor=david + gated_by_decision", () => {
-    // Pile le case de #751 : david a répondu, mon plan/résolution reste
-    // pending, le ticket sort de `actionable`. Sans tier 2, invisible.
+    // Exactly the #751 case: david replied, my plan/resolution stays
+    // pending, the ticket leaves `actionable`. Without tier 2, invisible.
     const flags = computeTicketFlags(
         buildRow(),
         buildCtx({
@@ -118,8 +118,8 @@ test("tier null — closed", () => {
 });
 
 test("tier null — snoozed (in rulesCtx.snoozedIds)", () => {
-    // #886 : snoozed est calculé en amont par `buildBacklogRulesCtx`,
-    // pas via le champ `postponed_until` du row. Le test seed snoozedIds.
+    // #886: snoozed is computed upstream by `buildBacklogRulesCtx`,
+    // not from the row's `postponed_until` field. The test seeds snoozedIds.
     const closedSet = new Set<number>();
     const flags = computeTicketFlags(
         buildRow(),

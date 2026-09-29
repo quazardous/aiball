@@ -1,12 +1,12 @@
 /**
  * #569 (david `j8t4qa` greenlight A+C) — guard `assertDecisionOnApprovedTicket` :
  *
- *   ticket_reply (= comment_added) avec `then: "resolved"` ou `then: "plan"`
- *   (= decision_kind:"resolution"/"plan") sur un ticket parent encore en
- *   status `pending` (modération non confirmée) doit throw avec code
- *   `PARENT_PENDING_MODERATION`, mappé HTTP 409 côté API.
+ *   ticket_reply (= comment_added) with `then: "resolved"` or `then: "plan"`
+ *   (= decision_kind:"resolution"/"plan") on a parent ticket still in
+ *   status `pending` (moderation not confirmed) must throw with code
+ *   `PARENT_PENDING_MODERATION`, mapped to HTTP 409 on the API side.
  *
- * Setup : throwaway DB pointé via AIBALL_HOME avant les imports.
+ * Setup: throwaway DB pointed via AIBALL_HOME before the imports.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -130,7 +130,7 @@ test("#569 — then:resolved on APPROVED ticket → OK", () => {
 
 test("#569 — human author bypass : then:resolved on pending OK for moderator", () => {
     const tid = freshPendingTicket();
-    // Human bypass — chaining ticket+resolution+approve en rafale est légitime.
+    // Human bypass — chaining ticket+resolution+approve in a burst is legitimate.
     const msg = submitMessage({
         project: "p569",
         kind: "comment_added",
