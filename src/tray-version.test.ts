@@ -60,6 +60,15 @@ test("the tray's install confirmation and its after-update balloon", { skip: !ha
     const no = pwshJson(`Get-InstallConfirmation ('{"ok":false,"reason":"no record","command":"re-run"}' | ConvertFrom-Json) | ConvertTo-Json -Compress`) as { ok: boolean; text: string };
     assert.equal(no.ok, false);
     assert.match(no.text, /Cannot update from here: no record/);
+    assert.equal((no as { command?: string | null }).command ?? null, null, "no mode: the 'command' is a sentence, nothing to copy");
+    assert.doesNotMatch(no.text, /clipboard/);
+
+    const devCmd = "Set-Location C:\\src\\aiball; git pull --ff-only --tags; npm install; npm --prefix frontend run build; aiball restart";
+    const refused = JSON.stringify({ ok: false, mode: "dev", reason: "never recorded", command: devCmd }).replace(/'/g, "''");
+    const copy = pwshJson(`Get-InstallConfirmation ('${refused}' | ConvertFrom-Json) | ConvertTo-Json -Compress`) as { ok: boolean; text: string; command: string };
+    assert.equal(copy.ok, false);
+    assert.equal(copy.command, devCmd, "a refused dev install hands its command to the clipboard offer");
+    assert.match(copy.text, /Copy this command to the clipboard\?$/);
 
     const st = JSON.stringify({ state: "failed", finished_at: "2026-09-16T10:00:00Z", failed_step: "npm install", error: "exited with 1", log: "C:\\h\\update.log" });
     const first = pwshJson(`@{ t = (Get-UpdateResultBalloon ('${st}' | ConvertFrom-Json) $null) } | ConvertTo-Json -Compress`) as { t: string };

@@ -317,7 +317,12 @@ function Invoke-AiballJson([string]$cliArgs, [int]$timeoutMs) {
 function Start-UpdateInstall {
     $c = Get-InstallConfirmation (Invoke-AiballJson 'update --dry-run' 30000)
     if (-not $c.ok) {
-        [System.Windows.Forms.MessageBox]::Show($c.text, 'aiball update', 'OK', 'Information') | Out-Null
+        if ($c.command) {
+            $copy = [System.Windows.Forms.MessageBox]::Show($c.text, 'aiball update', 'YesNo', 'Information')
+            if ($copy -eq [System.Windows.Forms.DialogResult]::Yes) { [System.Windows.Forms.Clipboard]::SetText($c.command) }
+        } else {
+            [System.Windows.Forms.MessageBox]::Show($c.text, 'aiball update', 'OK', 'Information') | Out-Null
+        }
         return
     }
     $answer = [System.Windows.Forms.MessageBox]::Show($c.text, 'aiball update', 'YesNo', 'Question')

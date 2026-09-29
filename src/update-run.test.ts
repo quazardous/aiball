@@ -12,10 +12,10 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseInstallInfo, updateCommand, updateSteps } from "./install-info.js";
+import { inferInstallInfo, parseInstallInfo, updateCommand, updateSteps } from "./install-info.js";
 import { planUpdate, readGitState, readUpdateStatus, runUpdate, windowsRunnerScript } from "./update-run.js";
 
 const DIR = mkdtempSync(join(tmpdir(), "aiball-2588-"));
@@ -42,6 +42,28 @@ test("refused: no recorded install, a dev checkout off main, or with uncommitted
 
     assert.equal(planUpdate(dev, clean).ok, true);
     assert.equal(planUpdate(info({ mode: "release", source: "/c" }), null).ok, true, "a release clone is not held to main");
+});
+
+test("no record, but running from a git checkout: recognised as dev, refused with the real command", () => {
+    const checkout = mkdtempSync(join(DIR, "checkout-"));
+    mkdirSync(join(checkout, ".git"));
+    const copy = mkdtempSync(join(DIR, "copy-"));
+
+    const seen = inferInstallInfo(checkout, "win32");
+    assert.ok(seen);
+    assert.equal(seen.mode, "dev");
+    assert.equal(seen.source, realpathSync(checkout));
+    assert.equal(seen.inferred, true);
+    assert.equal(inferInstallInfo(copy, "win32"), null, "a copy has no .git and is not guessed at");
+    assert.equal(inferInstallInfo(join(DIR, "absent"), "win32"), null);
+
+    // Even clean and on main: no installer recorded it, so it is not run from here.
+    const plan = planUpdate(seen, clean);
+    assert.equal(plan.ok, false);
+    assert.match(!plan.ok ? plan.reason : "", /runs from the git checkout .*never recorded/);
+    assert.equal(plan.command, updateCommand(seen));
+    assert.match(plan.command, /git pull --ff-only --tags; npm install; npm --prefix frontend run build; aiball restart$/,
+        "the command is the dev update, ready to paste");
 });
 
 test("what runs is what `aiball version` shows", () => {

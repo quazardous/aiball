@@ -56,6 +56,11 @@ dates are YYYY-MM-DD.
   lint, the frontend's tests and its build as CI builds it), and the suites
   that drive a real session host, which the test image now builds; a
   missing host fails the run instead of skipping.
+- An install made before the installer recorded how is recognised when it
+  runs from a git checkout (a `--symlink` / `-Symlink` or `-Minimal` install):
+  `aiball update` and the tray still refuse to run the update, but now give the
+  exact command for that checkout instead of a generic "re-run the installer",
+  and the tray offers to copy it to the clipboard.
 
 ### Fixed
 

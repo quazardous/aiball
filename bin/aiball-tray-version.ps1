@@ -54,7 +54,14 @@ function Get-InstallConfirmation($dry) {
         return @{ ok = $false; text = 'aiball update did not answer.' }
     }
     if (-not $dry.ok) {
-        return @{ ok = $false; text = "Cannot update from here: $($dry.reason).`r`n`r`nBy hand:`r`n$($dry.command)" }
+        # With a command, the dialog offers to copy it: typing it out of a
+        # message box is where a path or a flag gets lost. An install of
+        # unknown mode only gets a sentence ("git pull ..., then re-run ..."),
+        # which is not worth a clipboard.
+        $text = "Cannot update from here: $($dry.reason).`r`n`r`nBy hand:`r`n$($dry.command)"
+        $command = if ($dry.command -and $dry.mode -and $dry.mode -ne 'unknown') { [string]$dry.command } else { $null }
+        if ($command) { $text += "`r`n`r`nCopy this command to the clipboard?" }
+        return @{ ok = $false; text = $text; command = $command }
     }
     $loops = @($dry.loops | Where-Object { $_ })
     $cut = if ($loops.Count -gt 0) {

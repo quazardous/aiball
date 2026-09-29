@@ -41,6 +41,14 @@ export function planUpdate(info: InstallInfo, git: GitState | null): UpdatePlan 
             reason: "this install was made before the installer recorded how — re-run the installer once, by hand",
         };
     }
+    if (info.inferred) {
+        // Recognised, not recorded: say how to update it, but do not run steps
+        // that no installer ever stood behind.
+        return {
+            ok: false, mode: info.mode, command,
+            reason: `this install runs from the git checkout ${info.source}, but how it was installed was never recorded — update it by hand with the command below, or re-run the installer once so the update can run from here`,
+        };
+    }
     if (info.mode === "dev") {
         if (!git) return { ok: false, mode: info.mode, command, reason: `${info.source} is not a git checkout` };
         if (git.branch !== "main") {

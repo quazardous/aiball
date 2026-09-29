@@ -7,10 +7,13 @@
  *   - `edge`    — a checkout copied as it was (`--edge` / `-Edge`);
  *   - `dev`     — the install dir is a symlink to a checkout (`--symlink`).
  * Nothing recorded which one was used, so the installers now write
- * `<config dir>/install.json`. An install older than that reads `unknown`.
+ * `<config dir>/install.json`. An install older than that is recognised from
+ * its layout when it runs from a git checkout (a dev install: the checkout is
+ * the install), and reads `unknown` otherwise.
  */
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { globalConfigPath } from "./autopoll/config.js";
 
 export type InstallMode = "release" | "edge" | "dev" | "unknown";
@@ -22,6 +25,8 @@ export interface InstallInfo {
     /** The installer's own flags worth repeating (port, host, …), as typed. */
     flags: string[];
     platform: "posix" | "windows";
+    /** Not recorded by an installer: worked out from where this code runs. */
+    inferred?: true;
 }
 
 export function installInfoPath(): string {
@@ -50,7 +55,26 @@ export function parseInstallInfo(text: string | null, platform: NodeJS.Platform 
 export function readInstallInfo(path = installInfoPath()): InstallInfo {
     let text: string | null = null;
     try { text = readFileSync(path, "utf8"); } catch { /* not recorded */ }
-    return parseInstallInfo(text);
+    const info = parseInstallInfo(text);
+    return info.mode === "unknown" && !text ? (inferInstallInfo() ?? info) : info;
+}
+
+/** src/install-info.ts -> up 1 = the root this code runs from. */
+function runningRoot(): string {
+    return resolve(dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+/**
+ * An install with no record, recognised from its layout. Running from a git
+ * checkout means a dev install (`--symlink` / `-Symlink`, whose install dir
+ * links to the checkout, or `-Minimal`, which runs it in place): the checkout
+ * is what gets updated. A copy carries no `.git` and is not guessed at.
+ */
+export function inferInstallInfo(root: string = runningRoot(), platform: NodeJS.Platform = process.platform): InstallInfo | null {
+    let real: string;
+    try { real = realpathSync(root); } catch { return null; }
+    if (!existsSync(join(real, ".git"))) return null;
+    return { mode: "dev", source: real, flags: [], platform: platform === "win32" ? "windows" : "posix", inferred: true };
 }
 
 function shq(s: string): string {
