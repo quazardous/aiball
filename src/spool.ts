@@ -1,13 +1,21 @@
 import { readdirSync, readFileSync, renameSync, unlinkSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
 import { SPOOL_DIR, SPOOL_FAILED_DIR, ensureDirs } from "./paths.js";
-import { submitMessage, validateNewMessage } from "./messages.js";
+import { callerOf, callMethod, Refusal } from "./bus/methods.js";
+import "./bus/register.js";
 
 function isSpoolFile(name: string): boolean {
     return name.endsWith(".json") && !name.startsWith(".");
 }
 
-function processOne(filename: string): void {
+/**
+ * #3245 — a spooled write replays as the bus's `message.post`, for its author
+ * on the local socket (the spool is written by this machine's clients): the
+ * same guards as a live post (author, commits, handback, decisions, platform
+ * tag), and its idempotency key makes a write that had in fact gone through
+ * answer with the message it made instead of posting it twice.
+ */
+async function processOne(filename: string): Promise<void> {
     const full = join(SPOOL_DIR, filename);
     let raw: string;
     try {
@@ -22,16 +30,17 @@ function processOne(filename: string): void {
         moveToFailed(full, filename, `invalid JSON: ${(e as Error).message}`);
         return;
     }
-    const v = validateNewMessage(parsed);
-    if ("error" in v) {
-        moveToFailed(full, filename, v.error);
+    const msg = parsed as Record<string, unknown> | null;
+    const author = typeof msg?.by_agent === "string" && msg.by_agent ? msg.by_agent : null;
+    if (!msg || typeof msg !== "object" || Array.isArray(msg) || !author) {
+        moveToFailed(full, filename, "not a message with its author (by_agent)");
         return;
     }
     try {
-        submitMessage(v);
+        await callMethod(callerOf({ consumer_id: author, token_kind: "agent", transport: "uds", token: null }), "message.post", msg);
         unlinkSync(full);
     } catch (e) {
-        moveToFailed(full, filename, `submit failed: ${(e as Error).message}`);
+        moveToFailed(full, filename, e instanceof Refusal ? `refused (${e.status} ${e.code}): ${e.message}` : `submit failed: ${(e as Error).message}`);
     }
 }
 
@@ -48,7 +57,17 @@ function moveToFailed(full: string, filename: string, reason: string): void {
  * Drain everything currently in the spool dir, oldest-first.
  * Safe to call multiple times.
  */
-export function drainSpool(): number {
+let draining: Promise<number> | null = null;
+
+export function drainSpool(): Promise<number> {
+    // One drain at a time: a replay is async now, and two drains reading the
+    // same file would post it twice (its key would answer the second, but a
+    // file with no key would not).
+    draining ??= drainOnce().finally(() => { draining = null; });
+    return draining;
+}
+
+async function drainOnce(): Promise<number> {
     ensureDirs();
     let entries: string[];
     try {
@@ -65,7 +84,7 @@ export function drainSpool(): number {
         } catch {
             continue;
         }
-        processOne(f);
+        await processOne(f);
         count++;
     }
     if (count > 0) {
@@ -89,7 +108,7 @@ export function watchSpool(): void {
             timer = null;
             if (pending) {
                 pending = false;
-                drainSpool();
+                void drainSpool();
             }
         }, 100);
     };

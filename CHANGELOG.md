@@ -79,6 +79,9 @@ dates are YYYY-MM-DD.
   left without its command by an older stop is replaced by the next start.
 - `claude-loop reload`, typed in another loop's shell, no longer hands that
   loop's session host to the reloaded kernel.
+- A post the client retried from its spool after the daemon had already taken it
+  is no longer filed twice: each post carries a key, and the daemon answers a
+  replay with the message it filed.
 - An idle loop whose kernel reloaded itself (after an update) no longer stops
   waking: the drain tempo starts again after the reload, and the heartbeat
   takes over when an announced drain never comes.

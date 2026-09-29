@@ -44,6 +44,7 @@ import { broadcast } from "../../ws.js";
 import { ticketMoved } from "./subjects.js";
 import { resolveAttachments } from "../../db/uploads.js";
 import { withTagsOne, withVotesOne } from "../../api/_helpers.js";
+import { isIdempotencyKey, keyedMessage, rememberKey } from "../../db/idempotency.js";
 
 const MODERATOR = (what: string) => ({
     who: ["human"] as const,
@@ -259,6 +260,14 @@ defineMethod({
     // on the author: judged on the body, a human leaving by_agent out was
     // taken for an agent.
     const author = authorOf(caller, p.by_agent);
+    // #3245 — the same write sent again (its answer was lost, the client's
+    // spool replays it): answered with the message it made, never a second.
+    const key = isIdempotencyKey(p.idempotency_key) ? p.idempotency_key : null;
+    if (key) {
+        const made = keyedMessage(key, author);
+        const prior = made !== null ? getMessage(made) : null;
+        if (prior) return { ...withTagsOne(prior), replayed: true };
+    }
     const v = validateNewMessage(p, author);
     if ("error" in v) throw new Refusal(400, v.error);
     // #830 — decision-event kinds (plan_accepted / plan_rejected / …) are
@@ -291,6 +300,7 @@ defineMethod({
     try {
         const msg = v.kind === "ticket_created" ? fileTicket(v, extras, author) : submitMessage(v);
         applyPlatformTag(msg, caller.platform ?? null);
+        if (key) rememberKey(key, author, msg.id);
         return { ...withTagsOne(msg), ...(warning ? { warnings: [warning] } : {}) };
     } catch (err) {
         const status = SUBMIT_REFUSAL_STATUS[(err as { code?: string }).code ?? ""];

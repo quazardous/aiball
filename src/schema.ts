@@ -1053,5 +1053,16 @@ export const waitCreditMoves = sqliteTable("wait_credit_moves", {
     createdAt: text("created_at").notNull(),
 });
 
+/**
+ * #3245 — a write's idempotency key (see migration 0081): the message a key
+ * made, so a client's replay of the same write is answered, not repeated.
+ */
+export const idempotencyKeys = sqliteTable("idempotency_keys", {
+    key: text("key").primaryKey(),
+    author: text("author").notNull(),
+    messageId: integer("message_id").notNull(),
+    createdAt: text("created_at").notNull(),
+});
+
 export type WaitCreditMove = typeof waitCreditMoves.$inferSelect;
 export type NewWaitCreditMove = typeof waitCreditMoves.$inferInsert;

@@ -141,7 +141,7 @@ function main(): void {
         console.log(`data dir: ${AIBALL_HOME}`);
         if (dist) console.log(`serving frontend from: ${dist}`);
         else console.log("no frontend build found (dev mode)");
-        drainSpool();
+        void drainSpool();
         watchSpool();
         // #271: backfill typed `child_of` lineage relations from legacy
         // parent_ticket_id rows (upgrading the old #B.123 `depends_on`

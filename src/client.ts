@@ -19,7 +19,7 @@ import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadConfig } from "./autopoll/config.js";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import type { ControlEvent } from "./event-bus.js"; // #451: typed control payload
 import { BusClient, BusError } from "./bus-client.js";
@@ -325,6 +325,10 @@ export class AiballClient {
     async postMessage(
         msg: Record<string, unknown>,
     ): Promise<unknown | SpoolResult> {
+        // #3245 — one key per write, drawn before the first attempt: the spool
+        // keeps it, so a replay of a write that had gone through is answered
+        // with the message it made, not posted twice.
+        msg = { ...msg, idempotency_key: msg.idempotency_key ?? randomUUID() };
         try {
             return await this.call("message.post", msg);
         } catch (e) {
