@@ -362,7 +362,7 @@ defineMethod({
             throw new Refusal(400, `root must be one of this project's known local roots: ${JSON.stringify(knownRoots)}`);
         }
         if (isRootActive(root)) throw new Refusal(409, "a claude-loop is already running for this root");
-        const pid = spawnDetached(join(installRoot(), "bin", "claude-loop"), ["start", "--cwd", root, "--no-attach"], `claude-loop for ${root}`);
+        const pid = spawnDetached(process.execPath, [join(installRoot(), "bin", "claude-loop"), "start", "--cwd", root, "--no-attach"], `claude-loop for ${root}`);
         if (pid === undefined) throw new Refusal(500, "failed to launch claude-loop");
         return { ok: true, project: p.name, root, pid };
     },

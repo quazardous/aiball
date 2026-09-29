@@ -78,13 +78,17 @@ defineMethod({
             const mode = p.mode ?? loadConfig(p.cwd).claude_loop.session;
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
-            const child = spawn(CLAUDE_LOOP_BIN, [
+            const child = spawn(process.execPath, [CLAUDE_LOOP_BIN,
                 "start", mode === "host" ? "--host" : "--tmux", "--no-attach", "--cwd", p.cwd,
                 ...(p.agent ? ["--agent", p.agent] : []),
                 ...(p.crew ? ["--crew", p.crew] : []),
                 ...(p.project ? ["--project", p.project] : []),
                 ...remoteControlFlags(p.remote_control),
             ], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
+            // Without a listener a failed spawn is an uncaught 'error' event:
+            // it took the whole daemon down, as project.launch once did (#3103).
+            let spawnError: string | null = null;
+            child.on("error", (e) => { spawnError = e.message; });
             child.unref();
             const deadline = Date.now() + 30_000;
             for (;;) {
@@ -102,6 +106,7 @@ defineMethod({
                     const view = agent ? tmuxSessionView(agent) : null;
                     if (view) return view;
                 }
+                if (spawnError) throw new Refusal(500, `claude-loop start could not be launched: ${spawnError}`, ERROR_CODES.INTERNAL);
                 if (child.exitCode !== null && child.exitCode !== 0) {
                     throw new Refusal(500, `claude-loop start --${mode} exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
                 }
@@ -124,7 +129,9 @@ defineMethod({
     },
 });
 
-/** The loop's launcher, next to the daemon's source. */
+/** The loop's launcher, next to the daemon's source. A `#!/usr/bin/env node`
+ *  script with no extension: Windows cannot execute it, so it is always run
+ *  as `node <launcher>` (process.execPath), on every platform. */
 const CLAUDE_LOOP_BIN = resolve(import.meta.dirname, "..", "..", "..", "bin", "claude-loop");
 
 /**

@@ -2977,7 +2977,7 @@ function hardRestart(why: string, extra: string[]): void {
     try {
         const bin = join(installRoot(), "bin", "claude-loop");
         const out = openSync(logPath, "a"); // restart child's stdout+stderr → the log
-        const child = spawn(bin, ["restart", name!, ...extra], { detached: true, stdio: ["ignore", out, out] });
+        const child = spawn(process.execPath, [bin, "restart", name!, ...extra], { detached: true, stdio: ["ignore", out, out] });
         child.unref();
         child.on("spawn", () => { log(`${why} → restart child pid ${child.pid} spawned`); process.exit(0); });
         child.on("error", (e) => { log(`${why} → restart spawn FAILED: ${String(e)}`); process.exit(1); });
@@ -3058,7 +3058,7 @@ async function main(): Promise<void> {
         try {
             const bin = join(installRoot(), "bin", "claude-loop");
             const out = openSync(logPath, "a");
-            const child = spawn(bin, ["reload", name!], { detached: true, stdio: ["ignore", out, out] });
+            const child = spawn(process.execPath, [bin, "reload", name!], { detached: true, stdio: ["ignore", out, out] });
             child.unref();
             child.on("spawn", () => { log(`SIGUSR2 → reload child pid ${child.pid} spawned`); process.exit(0); });
             child.on("error", (e) => { log(`SIGUSR2 → reload spawn FAILED: ${String(e)}`); process.exit(1); });

@@ -191,8 +191,8 @@ export function cmdCrewCreate(name: string, opts: CrewCreateOpts): void {
         // runs in its worktree without grabbing this terminal's tmux attach.
         const bin = join(installRoot(), "bin", "claude-loop");
         const child = spawn(
-            bin,
-            ["start", "--cwd", plan.dir, "--role", "crew", "--no-attach",
+            process.execPath,
+            [bin, "start", "--cwd", plan.dir, "--role", "crew", "--no-attach",
                 "--consumer", plan.agentId, "--project", plan.project],
             { detached: true, stdio: "ignore" },
         );
