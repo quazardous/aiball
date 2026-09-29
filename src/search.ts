@@ -17,6 +17,7 @@
  */
 
 import { expandToken } from "./search-synonyms.js";
+import { closedTicketIds as closedTicketIdsOf } from "./db/ticket-closed.js";
 import type { Intent } from "./db.js";
 import { getRawSqlite } from "./db.js";
 
@@ -317,21 +318,8 @@ export function searchMessages(
             // Apply open filter (closed-by-lifecycle check) if asked.
             let skipForOpen = false;
             if (opts.open) {
-                const closed = sqlite.prepare(`
-                    SELECT 1 FROM _messages c
-                    WHERE c.ticket_id = ?
-                      AND c.kind = 'ticket_closed'
-                      AND c.status = 'approved'
-                      AND c.id > COALESCE(
-                        (SELECT MAX(r.id) FROM _messages r
-                         WHERE r.ticket_id = c.ticket_id
-                           AND r.kind = 'ticket_reopened'
-                           AND r.status = 'approved'),
-                        0
-                      )
-                    LIMIT 1
-                `).get(row.ticket_id);
-                if (closed) skipForOpen = true;
+                // #3251 — the one rule (db/ticket-closed.ts).
+                if (closedTicketIdsOf([row.ticket_id]).has(row.ticket_id)) skipForOpen = true;
             }
             if (!skipForOpen) {
                 return [{
@@ -464,30 +452,8 @@ export function searchMessages(
     const candidateIds = new Set<number>();
     for (const r of ticketRows) candidateIds.add(r.id);
     for (const r of messageRows) candidateIds.add(r.ticket_id);
-    const closedTicketIds = new Set<number>();
-    if (opts.open && candidateIds.size > 0) {
-        const placeholders = Array.from(candidateIds).map(() => "?").join(",");
-        const ids = Array.from(candidateIds);
-        const rows = sqlite.prepare(`
-            SELECT t.id AS id
-            FROM tickets t
-            WHERE t.id IN (${placeholders})
-              AND EXISTS (
-                SELECT 1 FROM _messages c
-                WHERE c.ticket_id = t.id
-                  AND c.kind = 'ticket_closed'
-                  AND c.status = 'approved'
-                  AND c.id > COALESCE(
-                    (SELECT MAX(r.id) FROM _messages r
-                     WHERE r.ticket_id = t.id
-                       AND r.kind = 'ticket_reopened'
-                       AND r.status = 'approved'),
-                    0
-                  )
-              )
-        `).all(...ids) as { id: number }[];
-        for (const r of rows) closedTicketIds.add(r.id);
-    }
+    // #3251 — the one rule (db/ticket-closed.ts), not a SQL of its own.
+    const closedTicketIds = opts.open && candidateIds.size > 0 ? closedTicketIdsOf([...candidateIds]) : new Set<number>();
     // #2193 — `words` rides along only to order the merge; it is stripped
     // before the result leaves this function, so the public shape is unchanged.
     const hits: (SearchHit & { words: number })[] = [];

@@ -383,6 +383,8 @@ export interface MilestoneRow extends MilestoneRef {
 
 export interface TicketSummary {
     id: number;
+    /** #3251 — the thread's latest decision (any status), as the server reads it; null when none. */
+    latest_decision?: { message_id: number; kind: string; status: string } | null;
     project: string;
     /**
      * #2070 — the project this ticket was filed FROM, when its author does not

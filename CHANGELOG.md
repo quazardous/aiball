@@ -58,6 +58,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A ticket's state reads the same everywhere: the ticket header, the inbox,
+  the search's open filter and the counts replay one history, so a resolution
+  accepted on a comment or a reopen no longer shows differently from one place
+  to the next. `ticket.get` answers `latest_decision`, which the web now reads
+  instead of working it out.
 - A malformed post is refused with a precise code (`FIELD_REQUIRED`,
   `FIELD_INVALID`, `FIELD_NOT_ALLOWED`, `SUMMARY_REQUIRED`, `SUMMARY_TOO_LONG`)
   instead of the generic `BAD_REQUEST`. `decision_proposable` no longer tells a

@@ -13,6 +13,8 @@
 import { and, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
+import { parseMeta } from "../questions.js";
+import { resolvesTicket } from "../ticket-transitions.js";
 
 export function closedTicketIds(ticketIds: readonly number[]): Set<number> {
     const closed = new Set<number>();
@@ -37,4 +39,77 @@ export function closedTicketIds(ticketIds: readonly number[]): Set<number> {
         if (closeId > (lastReopen.get(ticketId) ?? 0)) closed.add(ticketId);
     }
     return closed;
+}
+
+/** An event of a ticket, as the replay reads it (a Message is one). */
+export interface LifecycleEvent {
+    id: number;
+    kind: string;
+    status: string;
+    by_agent: string | null;
+    created_at: string;
+    meta?: string | null;
+}
+
+/** A ticket's state from its events: closed, resolved, blocked, and who and when for the last two. */
+export interface LifecycleState {
+    closed: boolean;
+    resolved: boolean;
+    resolved_by: string | null;
+    resolved_at: string | null;
+    blocked: boolean;
+    blocked_by: string | null;
+    blocked_at: string | null;
+}
+
+/**
+ * #3251 — the one replay of a ticket's lifecycle: approved events only, in id
+ * order. A close closes; a reopen clears closed, resolved and blocked; a
+ * resolution (the legacy `ticket_resolved`, or a comment whose decision was
+ * accepted and resolves the ticket — dated by its decision) resolves; a block
+ * blocks. Resolved and blocked outlive a close. `ticket.get` and the inbox
+ * used to replay it apart, and dated a resolution differently.
+ */
+export function replayLifecycle(events: readonly LifecycleEvent[]): LifecycleState {
+    const s: LifecycleState = { closed: false, resolved: false, resolved_by: null, resolved_at: null, blocked: false, blocked_by: null, blocked_at: null };
+    const steps: { id: number; kind: string; by: string | null; at: string }[] = [];
+    for (const m of events) {
+        if (m.status !== "approved") continue;
+        if (m.kind === "comment_added") {
+            const d = parseMeta(m.meta ?? null).decision;
+            if (d && resolvesTicket(d.kind, d.status)) steps.push({ id: m.id, kind: "ticket_resolved", by: d.decided_by ?? m.by_agent, at: d.decided_at ?? m.created_at });
+            continue;
+        }
+        if (m.kind === "ticket_closed" || m.kind === "ticket_reopened" || m.kind === "ticket_resolved" || m.kind === "ticket_blocked") {
+            steps.push({ id: m.id, kind: m.kind, by: m.by_agent, at: m.created_at });
+        }
+    }
+    steps.sort((a, b) => a.id - b.id);
+    for (const e of steps) {
+        if (e.kind === "ticket_closed") s.closed = true;
+        else if (e.kind === "ticket_reopened") Object.assign(s, { closed: false, resolved: false, resolved_by: null, resolved_at: null, blocked: false, blocked_by: null, blocked_at: null });
+        else if (e.kind === "ticket_resolved") Object.assign(s, { resolved: true, resolved_by: e.by, resolved_at: e.at });
+        else if (e.kind === "ticket_blocked") Object.assign(s, { blocked: true, blocked_by: e.by, blocked_at: e.at });
+    }
+    return s;
+}
+
+/**
+ * #3251 — the thread's latest decision, whatever its status: the one the gate
+ * reads and the composer's buttons sit under. The ticket's own (a
+ * `ticket_new({ then: "plan" })`) once the ticket is approved, and each
+ * approved comment's; the highest id wins. The web replayed the thread for it.
+ */
+export function latestDecision(
+    ticket: { id: number; status: string; meta?: string | null },
+    thread: readonly LifecycleEvent[],
+): { message_id: number; kind: string; status: string } | null {
+    let latest: { message_id: number; kind: string; status: string } | null = null;
+    const consider = (id: number, meta: string | null | undefined) => {
+        const d = parseMeta(meta ?? null).decision;
+        if (d?.kind && d.status && (!latest || id > latest.message_id)) latest = { message_id: id, kind: d.kind, status: d.status };
+    };
+    if (ticket.status === "approved") consider(ticket.id, ticket.meta);
+    for (const m of thread) if (m.kind === "comment_added" && m.status === "approved") consider(m.id, m.meta);
+    return latest;
 }

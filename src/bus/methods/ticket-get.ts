@@ -1,5 +1,6 @@
 /** #3063 — a ticket read: its header, and its thread in the shape asked. */
 import { z } from "zod";
+import { latestDecision, replayLifecycle } from "../../db/ticket-closed.js";
 import { moderationRefusal } from "../../moderation-gate.js";
 import { isMachineLocal } from "../../machine-secret.js";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
@@ -15,7 +16,6 @@ import { listSubscriptions } from "../../db/subscriptions.js";
 import { milestoneProgress, milestonesOf } from "../../db/milestones.js";
 import { parseMeta } from "../../questions.js";
 import { projectCriticalTicket } from "../../db/critical-ticket.js";
-import { resolvesTicket } from "../../ticket-transitions.js";
 import { ticketHasPayload } from "../../db/payloads.js";
 import { withTags, withVotes } from "../../queries/decorate.js";
 import { enrichRelationStages } from "../../queries/tickets.js";
@@ -120,66 +120,17 @@ defineMethod({
                     isLineageRelationKind(parseMeta(m.meta ?? null).relation?.kind ?? "")),
         )
         .sort((a, b) => a.id - b.id);
-    // Lifecycle replay restricted to approved events for the header
-    // flags. Since #B.129 phase 2, a comment_added with `meta.decision
-    // .kind=="resolution"` and decision.status=="accepted" is replayed
-    // as a synthetic ticket_resolved event at the comment's id, so
-    // historical (legacy ticket_resolved kind) AND new (comment+decision)
-    // shapes converge in the same replay.
-    const lifecycle: Message[] = [];
-    for (const m of threadMessages) {
-        if (m.status !== "approved") continue;
-        if (m.kind === "comment_added") {
-            const d = parseMeta(m.meta ?? null).decision;
-            if (d && resolvesTicket(d.kind, d.status)) {
-                lifecycle.push({
-                    ...m,
-                    kind: "ticket_resolved",
-                    by_agent: d.decided_by ?? m.by_agent,
-                    created_at: d.decided_at ?? m.created_at,
-                });
-            }
-            continue;
-        }
-        lifecycle.push(m);
-    }
-    lifecycle.sort((a, b) => a.id - b.id);
-    let closedFlag = false;
-    let resolvedFlag = false;
-    let resolvedBy: string | null = null;
-    let resolvedAt: string | null = null;
-    let blockedFlag = false;
-    let blockedBy: string | null = null;
-    let blockedAt: string | null = null;
-    for (const ev of lifecycle) {
-        if (ev.kind === "ticket_closed") closedFlag = true;
-        else if (ev.kind === "ticket_reopened") {
-            closedFlag = false;
-            resolvedFlag = false;
-            resolvedBy = null;
-            resolvedAt = null;
-            blockedFlag = false;
-            blockedBy = null;
-            blockedAt = null;
-        } else if (ev.kind === "ticket_resolved") {
-            resolvedFlag = true;
-            resolvedBy = ev.by_agent;
-            resolvedAt = ev.created_at;
-        } else if (ev.kind === "ticket_blocked") {
-            blockedFlag = true;
-            blockedBy = ev.by_agent;
-            blockedAt = ev.created_at;
-        }
-    }
-    const closed = closedFlag || t.status === "rejected";
+    // #3251 — the one replay (db/ticket-closed.ts), the inbox's too.
+    const life = replayLifecycle(threadMessages);
+    const closed = life.closed || t.status === "rejected";
     // resolved stays true even after the ticket is closed — the UI uses the
     // pair (closed, resolved) to distinguish "closed because resolved" from
     // "closed without explicit resolution" (wontfix / abandoned / dup).
-    // Reopen still zeroes resolvedFlag inside the replay loop.
-    const resolved = resolvedFlag;
+    // A reopen still clears it (replayLifecycle).
+    const resolved = life.resolved;
     // Same idea for blocked (#B.119): persists past close so the UI can
     // still tell "closed after agent escalation" from a normal resolve.
-    const blocked = blockedFlag;
+    const blocked = life.blocked;
     // Verbosity (#B.87 palier 2): default is summary now — header only,
     // no body, no comments array. Pass `full=1` to opt back into the
     // full thread. Old `summary=0` accepted as the explicit override
@@ -226,11 +177,13 @@ defineMethod({
         status: t.status,
         closed,
         resolved,
-        resolved_by: resolved ? resolvedBy : null,
-        resolved_at: resolved ? resolvedAt : null,
+        resolved_by: life.resolved_by,
+        resolved_at: life.resolved_at,
         blocked,
-        blocked_by: blocked ? blockedBy : null,
-        blocked_at: blocked ? blockedAt : null,
+        blocked_by: life.blocked_by,
+        blocked_at: life.blocked_at,
+        // #3251 — the thread's latest decision (any status): the one to decide, the buttons' place.
+        latest_decision: latestDecision(t, threadMessages),
         scope: t.scope,
         postponed_until: t.postponed_until ?? null,
         intent: t.intent,

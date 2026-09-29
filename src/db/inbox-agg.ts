@@ -32,9 +32,10 @@ import {
     clearInboxAgg,
 } from "./inbox-agg-cache.js";
 import { listMessages } from "./messages.js";
+import { replayLifecycle } from "./ticket-closed.js";
 import type { Message } from "./connection.js";
 import { parseMeta } from "../questions.js";
-import { DECISION_KINDS, decisionGesture, isStepMeta, resolvesTicket, type DecisionKind } from "../ticket-transitions.js";
+import { DECISION_KINDS, decisionGesture, isStepMeta, type DecisionKind } from "../ticket-transitions.js";
 
 /** The latest decision of one kind on a thread. */
 export interface DecisionTrack {
@@ -149,7 +150,6 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
             cur.lastStepResumeOnTicket = stepMeta.step_resume_on_ticket ?? 0;
             if (cur.lastStepResumeAt && cur.lastStepResumeAt > cur.lastStepAt) cur.lastStepAt = cur.lastStepResumeAt;
         }
-        let syntheticResolved: Message | null = null;
         if (m.kind === "comment_added" && m.status === "approved") {
             const d = parseMeta(m.meta ?? null).decision;
             // #2308 — one fold for every kind: the latest decision of a kind wins.
@@ -161,25 +161,12 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
                     track.pending = d.status === "pending";
                     track.rejected = d.status === "rejected";
                 }
-                if (resolvesTicket(d.kind, d.status)) {
-                    syntheticResolved = { ...m, kind: "ticket_resolved" };
-                }
             }
         }
-        if (
-            (m.kind === "ticket_closed" ||
-                m.kind === "ticket_reopened" ||
-                m.kind === "ticket_resolved" ||
-                m.kind === "ticket_blocked") &&
-            m.status === "approved"
-        ) {
+        // #3251 — every approved event goes to the one replay (replayLifecycle), which picks its own.
+        if (m.status === "approved") {
             const list = lifecycleByTicket.get(m.ticket_id) ?? [];
             list.push(m);
-            lifecycleByTicket.set(m.ticket_id, list);
-        }
-        if (syntheticResolved) {
-            const list = lifecycleByTicket.get(m.ticket_id) ?? [];
-            list.push(syntheticResolved);
             lifecycleByTicket.set(m.ticket_id, list);
         }
         if (m.created_at > cur.lastActivity) cur.lastActivity = m.created_at;
@@ -187,17 +174,11 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
     }
     // Replay lifecycle events → final closed/resolved/blocked. Reopen resets.
     for (const [tid, events] of lifecycleByTicket) {
-        events.sort((a, b) => a.id - b.id);
         const cur = byTicket.get(tid)!;
-        for (const ev of events) {
-            if (ev.kind === "ticket_closed") cur.closed = true;
-            else if (ev.kind === "ticket_reopened") {
-                cur.closed = false;
-                cur.resolved = false;
-                cur.blocked = false;
-            } else if (ev.kind === "ticket_resolved") cur.resolved = true;
-            else if (ev.kind === "ticket_blocked") cur.blocked = true;
-        }
+        const life = replayLifecycle(events);
+        cur.closed = life.closed;
+        cur.resolved = life.resolved;
+        cur.blocked = life.blocked;
     }
     return byTicket;
 }

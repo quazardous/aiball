@@ -62,27 +62,13 @@ function latestDecisionEntry(
     ticket: TicketSummary | null,
     comments: Message[],
 ): { message: Message; decision: CommentDecision } | null {
-    let latest: { message: Message; decision: CommentDecision } | null = null;
-    // #803 — `ticket_new({then:"plan"})` attaches a decision DIRECTLY on
-    // the ticket_created event itself ; the UI must surface it like a
-    // decision-bearing comment. Seed `latest` from the ticket's meta so a
-    // later approved comment with a fresher decision still wins (latest-id).
-    // The consumer (decide/reject handlers) only reads `.id` so the cast
-    // is safe ; the ticket id and ticket_created.id are the SAME number.
-    if (ticket && ticket.status === "approved") {
-        const d = readDecision(ticket);
-        if (d) latest = { message: ticket as unknown as Message, decision: d };
-    }
-    for (const m of comments) {
-        if (m.kind !== "comment_added") continue;
-        if (m.status !== "approved") continue;
-        const d = readDecision(m);
-        if (!d) continue;
-        if (!latest || m.id > latest.message.id) {
-            latest = { message: m, decision: d };
-        }
-    }
-    return latest;
+    // #3251 — the server says which message it is (`latest_decision`); the
+    // thread is reloaded whole on every change, so it is never stale here.
+    const ref = ticket?.latest_decision;
+    if (!ticket || !ref) return null;
+    const message = ref.message_id === ticket.id ? (ticket as unknown as Message) : comments.find((c) => c.id === ref.message_id);
+    const decision = message ? readDecision(message) : null;
+    return message && decision ? { message, decision } : null;
 }
 
 /** #3006 — the thread's latest decision (any status), named for a tooltip. */
