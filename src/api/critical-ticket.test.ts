@@ -1,5 +1,5 @@
 /**
- * #2770 — `GET /api/projects/:project/critical`, over the real relations: the
+ * #2770 — `project.critical`, over the bus and the real relations: the
  * project's open ticket holding back the most open tickets, or null.
  */
 import { test, after } from "node:test";
@@ -7,12 +7,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2770-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -30,31 +29,22 @@ const LEAD = issueToken({ kind: "agent", consumer_id: "lead", label: "2770-l" })
 createProject({ name: P });
 createProject({ name: OTHER });
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(method: string, path: string, body?: unknown, token: string = HUMAN): Promise<{ status: number; json: any }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+function call(method: string, params: Record<string, unknown> = {}, token: string = HUMAN): Promise<{ status: number; json: any }> {
+    return asToken(token, method, params);
 }
 const ticket = (project: string, title: string) =>
     submitMessage({ project, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 async function relate(on: number, target: number, kind: string): Promise<void> {
-    const r = await call("POST", `/api/tickets/${on}/relations`, { target_ticket_id: target, kind });
+    const r = await call("ticket.relate", { id: on, target_ticket_id: target, kind });
     assert.equal(r.status, 200, JSON.stringify(r.json));
 }
 
 test("the project's critical ticket counts what it holds down the chain, in any project", async () => {
-    assert.equal((await call("GET", `/api/projects/${P}/critical`)).json.critical, null, "nothing held: none");
+    assert.equal((await call("project.critical", { project: P })).json.critical, null, "nothing held: none");
 
     const root = ticket(P, "the old blocker");
     const a = ticket(P, "waits on the blocker");
@@ -64,18 +54,18 @@ test("the project's critical ticket counts what it holds down the chain, in any 
     await relate(root, b, "blocks");
     await relate(c, a, "depends_on");
 
-    const r = await call("GET", `/api/projects/${P}/critical`);
+    const r = await call("project.critical", { project: P });
     assert.equal(r.status, 200);
     assert.equal(r.json.critical?.id, root, JSON.stringify(r.json));
     assert.equal(r.json.critical.holds, 3, "a, b, and c through a");
     assert.equal(r.json.critical.title, "the old blocker");
     assert.equal(r.json.critical.quiet, "", "it moved today");
-    assert.equal((await call("GET", `/api/projects/${OTHER}/critical`)).json.critical, null, "the other project holds nothing");
+    assert.equal((await call("project.critical", { project: OTHER })).json.critical, null, "the other project holds nothing");
 
     // Closing a held ticket takes it off the count; below two, no critical ticket.
     submitMessage({ project: OTHER, kind: "ticket_closed", ticket_id: b, by_agent: "boss" });
     submitMessage({ project: P, kind: "ticket_closed", ticket_id: c, by_agent: "boss" });
-    assert.equal((await call("GET", `/api/projects/${P}/critical`)).json.critical, null);
+    assert.equal((await call("project.critical", { project: P })).json.critical, null);
 });
 
 // #2770 david — "un wake à part après les events et avant le backlog, avec un
@@ -93,7 +83,7 @@ test("the critical ticket is a tier of its own, ahead of the rest, with the back
     await relate(w2, root, "depends_on");
 
     const backlog = async (): Promise<any[]> =>
-        (await call("GET", `/api/tickets?project=${Q}&backlog=1&limit=500&cooldown_sec=3600`, undefined, LEAD)).json;
+        (await call("ticket.list", { project: Q, backlog: true, limit: 500, cooldown_sec: 3600 }, LEAD)).json;
     const rows = await backlog();
     assert.equal(rows[0]?.id, root, `the critical ticket heads the backlog: ${JSON.stringify(rows.map((r) => [r.id, r.backlog_tier]))}`);
     assert.equal(rows[0].backlog_tier, -1);
@@ -102,7 +92,7 @@ test("the critical ticket is a tier of its own, ahead of the rest, with the back
     assert.equal(rows.find((r) => r.id === w1)?.backlog_tier, 4, "what it holds stays blocked");
 
     // The sink: once a wake named it, it cools like any backlog head.
-    const logged = await call("POST", "/api/backlog-wake", { consumer_id: "lead", ticket_id: root }, LEAD);
+    const logged = await call("backlog.record_wake", { consumer_id: "lead", ticket_id: root }, LEAD);
     assert.equal(logged.status, 200, JSON.stringify(logged.json));
     const after = (await backlog()).find((r) => r.id === root);
     assert.equal(after?.backlog_tier, -1, "still critical");
@@ -120,11 +110,11 @@ test("the web inbox row and the ticket header flag the critical ticket", async (
     await relate(w1, root, "depends_on");
     await relate(w2, root, "depends_on");
 
-    const inbox = (await call("GET", `/api/inbox?project=${R}`)).json;
-    const rows: any[] = Array.isArray(inbox) ? inbox : (inbox.rows ?? inbox.tickets ?? inbox.items ?? []);
+    const inbox = (await call("inbox.list", { project: R })).json;
+    const rows: any[] = inbox.rows;
     assert.deepEqual(rows.find((r) => r.id === root)?.critical, { holds: 2, quiet: "" }, JSON.stringify(inbox).slice(0, 300));
     assert.equal(rows.find((r) => r.id === w1)?.critical, null);
 
-    assert.deepEqual((await call("GET", `/api/tickets/${root}`)).json.ticket.critical, { holds: 2, quiet: "" });
-    assert.equal((await call("GET", `/api/tickets/${w1}`)).json.ticket.critical, null);
+    assert.deepEqual((await call("ticket.get", { id: root })).json.ticket.critical, { holds: 2, quiet: "" });
+    assert.equal((await call("ticket.get", { id: w1 })).json.ticket.critical, null);
 });

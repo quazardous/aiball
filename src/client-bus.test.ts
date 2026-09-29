@@ -1,7 +1,8 @@
 /**
  * #3067 — the shared client calls the core over the bus. What its callers (the
  * MCP server, the CLI, claude-loop) rely on must not change with the transport:
- * the same answers as HTTP, a refusal with its `status` and body, a daemon
+ * the same answers as a direct call of the method, a refusal with its `status`
+ * and body, a daemon
  * restart survived, a call cut in flight never replayed (it may have run) but
  * spooled when it is a post, and a short-lived process that exits without
  * closing the connection.
@@ -19,7 +20,9 @@ const home = mkdtempSync(join(tmpdir(), "aiball-3067-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("./tests/test-app.js");
+const { createApp } = await import("./app.js");
+const { asToken } = await import("./tests/bus-call.js");
+const { issueToken } = await import("./db/tokens.js");
 const { attachBus } = await import("./bus/server.js");
 const { upsertConsumer } = await import("./db.js");
 const { createProject } = await import("./db/projects.js");
@@ -28,6 +31,10 @@ const { AiballClient } = await import("./client.js");
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 createProject({ name: "p-3067" });
+const TOKENS: Record<string, string> = {
+    boss: issueToken({ kind: "agent", consumer_id: "boss", label: "3067-b" }).token,
+    worker: issueToken({ kind: "agent", consumer_id: "worker", label: "3067-w" }).token,
+};
 
 const sock = join(home, "d.sock");
 const daemon = createServer(createApp());
@@ -49,34 +56,29 @@ function client(agentId: string, socketPath = sock) {
     return new AiballClient({ socketPath, agentId, defaultProject: "p-3067", home: join(home, agentId) });
 }
 
-async function http(method: string, path: string, consumer: string): Promise<{ status: number; body: unknown }> {
-    const { request } = await import("node:http");
-    return new Promise((resolve, reject) => {
-        request({ socketPath: sock, path, method, headers: { "x-aiball-consumer": consumer } }, (res) => {
-            let b = "";
-            res.on("data", (d) => { b += d; });
-            res.on("end", () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(b) }));
-        }).on("error", reject).end();
-    });
+/** The method called directly as `consumer`, its answer as it crosses the wire. */
+async function direct(consumer: string, method: string, params: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const r = await asToken(TOKENS[consumer], method, params);
+    return { status: r.status, body: JSON.parse(JSON.stringify(r.json)) };
 }
 
-test("a ticket filed and read over the bus: the same answer as HTTP", async () => {
+test("a ticket filed and read over the bus: the same answer as a direct call", async () => {
     const boss = client("boss");
     const t = await boss.postMessage({ project: "p-3067", kind: "ticket_created", title: "over the bus", body: "b" }) as { id: number };
     assert.equal(typeof t.id, "number");
     const viaBus = await boss.getTicket(t.id, { summary: false });
-    const viaHttp = await http("GET", `/api/tickets/${t.id}?full=1`, "boss");
-    assert.deepEqual(viaBus, viaHttp.body);
+    const called = await direct("boss", "ticket.get", { id: t.id, full: true });
+    assert.deepEqual(viaBus, called.body);
 });
 
-test("a refusal keeps the shape HTTP gave it: status, and the body with its code", async () => {
+test("a refusal keeps its shape: status, and the body with its code", async () => {
     const worker = client("worker");
     const t = await client("boss").postMessage({ project: "p-3067", kind: "ticket_created", title: "for a refusal", body: "b" }) as { id: number };
-    const overHttp = await http("POST", `/api/messages/${t.id}/approve`, "worker");
-    assert.ok(overHttp.status >= 400 && overHttp.status < 500, JSON.stringify(overHttp));
+    const refused = await direct("worker", "message.approve", { id: t.id });
+    assert.ok(refused.status >= 400 && refused.status < 500, JSON.stringify(refused));
     await assert.rejects(worker.approve(t.id), (e: Error & { status?: number }) => {
-        assert.equal(e.status, overHttp.status, "the status HTTP gives the same call");
-        assert.ok(e.message.includes(JSON.stringify((overHttp.body as { code: string }).code)), e.message);
+        assert.equal(e.status, refused.status, "the status a direct call of the same method gets");
+        assert.ok(e.message.includes(JSON.stringify((refused.body as { code: string }).code)), e.message);
         return true;
     });
     await assert.rejects(worker.getTicket(999_999), (e: Error & { status?: number }) => e.status === 404);

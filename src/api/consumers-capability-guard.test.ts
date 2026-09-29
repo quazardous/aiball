@@ -1,22 +1,22 @@
 /**
  * #1477 — a consumer's capability fields (can_claim; future can_create_agent)
- * are human-piloted. PATCH /consumers/:id must reject an agent touching a
+ * are human-piloted. `consumer.update` must reject an agent touching a
  * capability field (else the whole #1435 authority model + #508 no-claim
  * specialists are decorative), while still letting agents edit non-capability
- * fields and letting a human set capabilities. Spawns the real app.
+ * fields and letting a human set capabilities. Over the bus, as a client
+ * holding a token calls it.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-1477-"));
 
 process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, ensureConsumer, getConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -28,21 +28,12 @@ ensureConsumer("target");
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "1477-h" }).token;
 const AGENT = issueToken({ kind: "agent", consumer_id: "worker", label: "1477-a" }).token;
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-function patch(token: string, body: unknown): Promise<Response> {
-    return fetch(`${BASE}/api/consumers/target`, {
-        method: "PATCH",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify(body),
-    });
+function patch(token: string, body: Record<string, unknown>) {
+    return asToken(token, "consumer.update", { consumer_id: "target", ...body });
 }
 
 test("agent editing can_claim → 403 (capability is human-only), flag unchanged", async () => {

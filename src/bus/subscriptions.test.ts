@@ -15,7 +15,7 @@ const home = mkdtempSync(join(tmpdir(), "aiball-3063-subs-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { attachBus } = await import("./server.js");
 const { subscriptionCountForTests } = await import("./subscriptions.js");
 const { getMethod } = await import("./methods.js");

@@ -4,20 +4,19 @@
  * on tasks, a cto agent on milestones and roadmap, a human on everything. The
  * scope decides the actionable pool, the notifications and what an agent may
  * claim; tickets out of scope stay open and readable. The level is set by a human
- * only, and moving a ticket its holder does not work on says so. Spawns the real
- * app on an ephemeral port for the HTTP cases.
+ * only, and moving a ticket its holder does not work on says so. The calls a
+ * client makes go over the bus.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2241-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, getMessage } = await import("../db.js");
 const { updateConsumer } = await import("../db/consumers.js");
@@ -42,11 +41,7 @@ createProject({ name: "p-2241" });
 upsertSubscription("coder", "p-2241", "owner");
 upsertSubscription("cto", "p-2241", "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
@@ -59,13 +54,9 @@ const newTicket = (title: string) =>
     approved(submitMessage({ project: "p-2241", kind: "ticket_created", title, body: "x", by_agent: "boss" }));
 const comment = (ticketId: number) =>
     approved(submitMessage({ project: "p-2241", kind: "comment_added", ticket_id: ticketId, body: "news", by_agent: "boss" }));
-const post = (token: string, path: string, body: unknown) => fetch(`${BASE}/api${path}`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify(body),
-});
-const setLevel = (token: string, id: number, level: string) => post(token, `/messages/${id}/edit`, { level });
-const claim = (token: string, id: number) => post(token, `/tickets/${id}/assign`, {});
+const post = (token: string, method: string, params: Record<string, unknown>) => asToken<{ warning?: string; error: string }>(token, method, params);
+const setLevel = (token: string, id: number, level: string) => post(token, "message.edit", { id, level });
+const claim = (token: string, id: number) => post(token, "ticket.assign", { id });
 const pinged = (commentId: number) =>
     db.select({ r: schema.pings.recipient }).from(schema.pings).where(eq(schema.pings.commentId, commentId)).all().map((x) => x.r).sort();
 async function ticketAt(title: string, level: "task" | "milestone" | "roadmap") {
@@ -84,7 +75,7 @@ test("an agent cannot set a level (403); a human can", async () => {
     assert.equal(getMessage(t.id)?.level, "task");
     const res = await setLevel(HUMAN, t.id, "roadmap");
     assert.equal(res.status, 200);
-    assert.equal(((await res.json()) as { warning?: string }).warning, undefined, "nobody held it: no warning");
+    assert.equal(res.json.warning, undefined, "nobody held it: no warning");
     assert.equal(getMessage(t.id)?.level, "roadmap");
 });
 
@@ -123,7 +114,7 @@ test("an agent claims only within its scope (403 outside); a human claims anythi
 
     const cto403 = await claim(CTO, task.id);
     assert.equal(cto403.status, 403);
-    assert.match(((await cto403.json()) as { error: string }).error, /task ticket.*roadmap and milestone/);
+    assert.match(cto403.json.error, /task ticket.*roadmap and milestone/);
     assert.equal((await claim(CODER, roadmap.id)).status, 403);
     assert.equal((await claim(CODER, milestone.id)).status, 403);
 
@@ -137,11 +128,11 @@ test("moving a ticket its holder does not work on says so, without blocking", as
     setTicketClaim(t.id, "coder");
     const res = await setLevel(HUMAN, t.id, "roadmap");
     assert.equal(res.status, 200);
-    assert.match(((await res.json()) as { warning?: string }).warning ?? "", /held by coder, who does not work on roadmap tickets/);
+    assert.match(res.json.warning ?? "", /held by coder, who does not work on roadmap tickets/);
     assert.equal(getMessage(t.id)?.level, "roadmap");
 
     const m = await ticketAt("held deliverable", "milestone");
     setTicketClaim(m.id, "cto");
     const within = await setLevel(HUMAN, m.id, "roadmap");
-    assert.equal(((await within.json()) as { warning?: string }).warning, undefined, "cto works on roadmap too: no warning");
+    assert.equal(within.json.warning, undefined, "cto works on roadmap too: no warning");
 });

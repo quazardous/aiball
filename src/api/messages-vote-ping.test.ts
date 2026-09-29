@@ -1,20 +1,18 @@
 // #749 david `wfhw74` — a thumb-up (+1) on a comment pings the comment
-// author so the wake-FIFO surfaces "your comment got attention". Spawns
-// the real app on an ephemeral port, POSTs a vote, asserts the row in
-// `pings`. -1 (thumb down) and 0 (retract) stay silent. Self-vote is a
+// author so the wake-FIFO surfaces "your comment got attention". Casts a
+// vote over the bus (`message.vote`), asserts the row in `pings`. -1 (thumb down) and 0 (retract) stay silent. Self-vote is a
 // no-op for the ping (self-ping filter).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-749-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { ensureConsumer } = await import("../db.js");
 const { getDb, nowIso } = await import("../db/connection.js");
@@ -28,13 +26,7 @@ ensureConsumer(VOTER);
 const TOKEN_VOTER = issueToken({ kind: "agent", consumer_id: VOTER, label: "749-voter" }).token;
 const TOKEN_AUTHOR = issueToken({ kind: "agent", consumer_id: AUTHOR, label: "749-author" }).token;
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const port = (server.address() as AddressInfo).port;
-const BASE = `http://127.0.0.1:${port}`;
-
 after(() => {
-    server.close();
     try { rmSync(home, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
@@ -75,15 +67,7 @@ function pingsOnComment(commentId: number, recipient: string): number {
 }
 
 async function vote(commentId: number, value: 1 | -1 | 0, token: string): Promise<number> {
-    const r = await fetch(`${BASE}/api/messages/${commentId}/vote`, {
-        method: "POST",
-        headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ value }),
-    });
-    return r.status;
+    return (await asToken(token, "message.vote", { id: commentId, value })).status;
 }
 
 test("#749: +1 on someone else's comment pings the author", async () => {

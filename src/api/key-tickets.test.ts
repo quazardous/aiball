@@ -1,7 +1,8 @@
 /**
  * #2526 — API keys with scopes, and tickets created by a key.
  *
- * What must hold, over HTTP and over a Unix socket tagged like the daemon's:
+ * What must hold, over HTTP and over a Unix socket tagged like the daemon's
+ * (the signal and ticket doors), and over the bus (minting and editing keys):
  * - a key minted before scopes existed keeps exactly `signals`;
  * - each door needs its scope: `signals` cannot create tickets, `tickets:create`
  *   cannot post signals, and neither opens any other route;
@@ -22,7 +23,8 @@ import type { AddressInfo } from "node:net";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2526-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -82,7 +84,7 @@ function sock(method: string, path: string, body: unknown, headers: Record<strin
     });
 }
 async function mint(label: string, scopes?: string[], projects?: string[]): Promise<Res> {
-    return http("POST", "/signal-keys", { label, note: "test", ...(scopes ? { scopes } : {}), ...(projects ? { projects } : {}) }, HUMAN);
+    return asToken(HUMAN, "signal_key.create", { label, note: "test", ...(scopes ? { scopes } : {}), ...(projects ? { projects } : {}) });
 }
 const signal = { target: { consumer: "lead" }, title: "hello" };
 
@@ -93,7 +95,7 @@ test("scopes are validated when a key is minted, and an old key keeps exactly `s
     const plain = await mint("plain");
     assert.deepEqual(plain.json.key.scopes, ["signals"], "no scopes given = signals, as before");
 
-    const keys = (await http("GET", "/signal-keys", undefined, HUMAN)).json as { label: string; scopes: string[] }[];
+    const keys = (await asToken(HUMAN, "signal_key.list")).json as { label: string; scopes: string[] }[];
     assert.deepEqual(keys.find((k) => k.label === "legacy-src")?.scopes, ["signals"]);
     assert.equal((await http("POST", "/signals", signal, LEGACY)).status, 200);
     assert.match((await http("POST", "/tickets", { project: "shop", title: "t" }, LEGACY)).json.error, /lacks the scope tickets:create/);
@@ -103,8 +105,8 @@ test("each door needs its scope, over HTTP and on the socket; no key opens anyth
     const tk = (await mint("ci", ["tickets:create"], ["shop"])).json.token as string;
     assert.equal((await http("POST", "/signals", signal, tk)).status, 403, "tickets:create cannot post signals");
     assert.equal((await sock("POST", "/signals", signal, { authorization: `Bearer ${tk}` })).status, 403, "…on the socket either");
-    assert.equal((await http("GET", "/tickets", undefined, tk)).status, 403, "nor read tickets");
-    assert.equal((await http("POST", "/messages", { project: "shop", kind: "ticket_created", title: "x" }, tk)).status, 403);
+    assert.equal((await asToken(tk, "ticket.list")).status, 403, "nor read tickets");
+    assert.equal((await asToken(tk, "message.post", { project: "shop", kind: "ticket_created", title: "x" })).status, 403);
 });
 
 test("a key creates an approved ticket in its projects only, authored by its source, and the owners hear it", async () => {
@@ -153,7 +155,7 @@ test("agents and humans cannot use the route, and the socket still wants a key",
 test("a key's scopes and projects can be edited, and the change applies at once", async () => {
     const minted = (await mint("editable")).json as { key: { key_id: string }; token: string };
     assert.equal((await http("POST", "/tickets", { project: "shop", title: "t" }, minted.token)).status, 403);
-    const up = await http("PATCH", `/signal-keys/${minted.key.key_id}`, { scopes: ["signals", "tickets:create"], projects: ["shop"] }, HUMAN);
+    const up = await asToken<{ scopes: string[] }>(HUMAN, "signal_key.update", { key_id: minted.key.key_id, scopes: ["signals", "tickets:create"], projects: ["shop"] });
     assert.deepEqual(up.json.scopes, ["signals", "tickets:create"]);
     assert.equal((await http("POST", "/tickets", { project: "shop", title: "t" }, minted.token)).status, 201);
 });

@@ -1,21 +1,22 @@
 /**
  * #3068 — the web's settings and housekeeping, as methods: strategy, a
  * project's standing prompt, purges, info, the config manager, tag admin,
- * `me`, and the moderator's ticket gestures. Over the bus and over the routes
- * that now serve them, the same answers; the human-only gestures stay so.
+ * `me`, and the moderator's ticket gestures. A bus connection and a direct
+ * call with the same token give the same answers; the human-only gestures stay so.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3068-board-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer } = await import("../db.js");
 const { submitMessage } = await import("../messages.js");
@@ -48,36 +49,29 @@ async function as(token: string) {
     return c;
 }
 
-function http(method: string, path: string, body?: unknown, token = BOSS): Promise<{ status: number; json: unknown }> {
-    return new Promise((resolve, reject) => {
-        const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" } }, (res) => {
-            let b = "";
-            res.on("data", (d) => { b += d; });
-            res.on("end", () => resolve({ status: res.statusCode ?? 0, json: b ? JSON.parse(b) : null }));
-        });
-        req.on("error", reject);
-        req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
+/** The same method called directly with the token, off any connection. */
+function direct(method: string, params: Record<string, unknown> = {}, token = BOSS): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 
 const status = (n: number) => (e: { status: number }) => e.status === n;
 const code = (c: string) => (e: { code: string }) => e.code === c;
 
-test("strategy, a project's strategy and standing prompt: bus and route agree", async () => {
+test("strategy, a project's strategy and standing prompt: a bus connection and a direct call agree", async () => {
     const boss = await as(BOSS);
     const set = await boss.call<{ strategy: string }>("strategy.set", { strategy: "manual" });
     assert.equal(set.strategy, "manual");
-    assert.deepEqual(await boss.call("strategy.get", {}), (await http("GET", "/api/strategy")).json);
+    assert.deepEqual(await boss.call("strategy.get", {}), (await direct("strategy.get")).json);
     await assert.rejects(boss.call("strategy.set", { strategy: "whatever" }), status(400));
 
     assert.equal((await boss.call<{ strategy: string | null }>("project.set_strategy", { project: "p-board", strategy: "auto" })).strategy, "auto");
     assert.equal((await boss.call<{ strategy: string | null }>("project.set_strategy", { project: "p-board", strategy: null })).strategy, null, "null clears it");
-    assert.deepEqual(await boss.call("project.strategy", { project: "p-board" }), (await http("GET", "/api/projects/p-board/strategy")).json);
+    assert.deepEqual(await boss.call("project.strategy", { project: "p-board" }), (await direct("project.strategy", { project: "p-board" })).json);
 
     const sp = await boss.call<{ standing_prompt: string }>("project.set_standing_prompt", { project: "p-board", standing_prompt: "focus" });
     assert.equal(sp.standing_prompt, "focus");
     const t = submitMessage({ project: "p-board", kind: "ticket_created", title: "t", body: "b", by_agent: "worker" });
-    const focus = await http("PATCH", "/api/projects/p-board/standing-prompt", { focus_tickets: `${t.id}`, focus_until: null });
+    const focus = await direct("project.set_standing_prompt", { project: "p-board", focus_tickets: `${t.id}`, focus_until: null });
     assert.equal(focus.status, 200, JSON.stringify(focus.json));
     assert.equal((focus.json as { standing_prompt: string }).standing_prompt, "focus", "the prompt stays when only the focus is sent");
     await assert.rejects(boss.call("project.set_standing_prompt", { project: "p-board", focus_tickets: "999999" }), status(400));
@@ -94,13 +88,13 @@ test("info, stats, token series and purges answer; purging a project with nothin
     assert.equal((await boss.call<{ purged_tickets: number }>("board.purge", { older_than_days: 30 })).purged_tickets, 0);
 });
 
-test("the config manager: an unknown key is 404, clearing answers 204 over HTTP", async () => {
+test("the config manager: an unknown key is 404, to set it and to clear it", async () => {
     const boss = await as(BOSS);
     const all = await boss.call<{ project: string | null; config: unknown[] }>("config.managed", {});
     assert.equal(all.project, null);
-    assert.deepEqual(all, (await http("GET", "/api/managed-config")).json);
+    assert.deepEqual(all, (await direct("config.managed")).json);
     await assert.rejects(boss.call("config.set", { key: "no.such.key", value: 1 }), status(404));
-    assert.equal((await http("DELETE", "/api/managed-config/no.such.key")).status, 404);
+    assert.equal((await direct("config.clear", { key: "no.such.key" })).status, 404);
 });
 
 test("tag admin: create, update, delete; a duplicate is refused", async () => {
@@ -108,10 +102,10 @@ test("tag admin: create, update, delete; a duplicate is refused", async () => {
     const t = await boss.call<{ id: number; name: string }>("tag.create", { name: "adm-x", color: "#123456" });
     assert.equal(t.name, "adm-x");
     await assert.rejects(boss.call("tag.create", { name: "adm-x" }), status(400));
-    const viaRoute = await http("POST", "/api/tags", { name: "adm-y" });
-    assert.equal(viaRoute.status, 201);
+    const viaDirect = await direct("tag.create", { name: "adm-y" });
+    assert.equal(viaDirect.status, 200);
     assert.equal((await boss.call<{ note: string }>("tag.update", { id: t.id, note: "n" })).note, "n");
-    assert.equal((await http("DELETE", `/api/tags/${t.id}`)).status, 204);
+    assert.equal((await direct("tag.delete", { id: t.id })).status, 200);
     await assert.rejects(boss.call("tag.delete", { id: t.id }), status(404));
 });
 
@@ -128,7 +122,7 @@ test("me, mark unread; the moderator's gestures stay a human's", async () => {
 
     assert.ok(Array.isArray((await boss.call<{ subscriptions: unknown[] }>("ticket.subscribers", { id: t.id })).subscriptions));
     await assert.rejects(w.call("ticket.subscribers", { id: t.id }), code("MODERATOR_ONLY"));
-    assert.equal((await http("GET", `/api/tickets/${t.id}/subscriptions`, undefined, WORKER)).status, 403);
+    assert.equal((await direct("ticket.subscribers", { id: t.id }, WORKER)).status, 403);
 
     await assert.rejects(w.call("ticket.step", { id: t.id }), code("MODERATOR_ONLY"));
     await assert.rejects(boss.call("ticket.step", { id: t.id }), status(409), "no comment yet");

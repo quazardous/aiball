@@ -17,7 +17,7 @@ process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 process.env.XDG_CONFIG_HOME = join(home, "xdg");
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer } = await import("../db.js");
 const { BusClient } = await import("../bus-client.js");

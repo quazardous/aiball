@@ -1,8 +1,8 @@
 /**
  * #3063 — the core as a table of methods. A method is a function of the
  * caller and its parameters, and declares in one place who may call it and
- * what it takes; it sees no HTTP request. The bus calls it directly; while
- * clients move over, an HTTP route calls the same function (`bus/http.ts`).
+ * what it takes; it sees no HTTP request. The bus calls it (`callMethod`
+ * checks who may, then the parameters, then runs it).
  */
 import type { z } from "zod";
 import type { CallerContext } from "../auth.js";
@@ -116,6 +116,27 @@ export function accessRefusal(m: AnyMethod, caller: Caller): Refusal | null {
         return new Refusal(403, `this key lacks the scope ${m.scope}`, ERROR_CODES.KEY_SCOPE_MISSING);
     }
     return null;
+}
+
+/**
+ * #3242 — a call as the bus makes it, for a caller settled elsewhere: who may
+ * call, then the parameters, then the method. Throws the `Refusal`, as the
+ * method would; an unknown method is a 404, invalid parameters a 400 naming
+ * the first one.
+ */
+export async function callMethod(caller: Caller, name: string, params: unknown): Promise<unknown> {
+    const m = getMethod(name);
+    if (!m) throw new Refusal(404, `no method ${name}`, ERROR_CODES.NOT_FOUND);
+    const denied = accessRefusal(m, caller);
+    if (denied) throw denied;
+    const parsed = m.params.safeParse(params ?? {});
+    if (!parsed.success) {
+        const first = parsed.error.issues[0];
+        throw new Refusal(400, first ? `${first.path.join(".") || "params"}: ${first.message}` : "invalid params", ERROR_CODES.BAD_REQUEST, {
+            issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+        });
+    }
+    return m.run(caller, parsed.data);
 }
 
 /**

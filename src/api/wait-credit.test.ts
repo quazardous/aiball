@@ -1,5 +1,5 @@
 /**
- * #2640 — the wait credit, over the real routes. What must hold:
+ * #2640 — the wait credit, over the bus. What must hold:
  * - an agent starts with 60 minutes per project; a step spends what it waits;
  * - short of credit the wait is capped to the balance, never under 5 minutes,
  *   and the floor never takes the balance below zero; 0 is free;
@@ -17,12 +17,12 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2640-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { attachBus } = await import("../bus/server.js");
 const { BusClient } = await import("../bus-client.js");
 const { issueToken } = await import("../db/tokens.js");
@@ -48,11 +48,10 @@ createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 upsertSubscription("boss", P, "owner");
 
+// #3068 — trimming the waits is a bus method, called over a real bus connection.
 const server = createApp().listen(0);
-// #3068 — trimming the waits is a bus method.
 const wss = attachBus(server);
 await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const REPO = mkdtempSync(join(tmpdir(), "aiball-2640-repo-"));
 const busClients: { close(): void }[] = [];
 after(() => {
@@ -64,25 +63,20 @@ after(() => {
 });
 
 type Credit = { project: string; balance: number; refunded: number; step?: { requested: number; granted: number; spent: number }; commits?: Array<{ commit: string; minutes: number; reason: string | null }> };
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(token, method, params);
 }
 function ticket(): number {
     return submitMessage({ project: P, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
 }
 async function post(ticketId: number, extra: Record<string, unknown>, token = WORKER): Promise<{ id: number; credit: Credit | undefined }> {
-    const r = await call(token, "POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", ...extra });
+    const r = await call(token, "message.post", { project: P, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", ...extra });
     assert.ok(r.status < 300, JSON.stringify(r.json));
     return { id: r.json.id as number, credit: r.json.wait_credit as Credit | undefined };
 }
 async function held(): Promise<number> {
     const t = ticket();
-    await call(WORKER, "POST", `/api/tickets/${t}/assign`, {});
+    await call(WORKER, "ticket.assign", { id: t });
     return t;
 }
 /** The step's wait is over: nothing left to give back. */
@@ -144,13 +138,13 @@ test("coming back before the end gives the rest back, once", async () => {
     createProject({ name: P2 });
     upsertSubscription("worker", P2, "owner");
     const t2 = submitMessage({ project: P2, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
-    await call(WORKER, "POST", `/api/tickets/${t2}/assign`, {});
-    const step = await call(WORKER, "POST", "/api/messages", { project: P2, kind: "comment_added", ticket_id: t2, body: "b", summary_until: "s", step: true, step_after_minutes: 40 });
+    await call(WORKER, "ticket.assign", { id: t2 });
+    const step = await call(WORKER, "message.post", { project: P2, kind: "comment_added", ticket_id: t2, body: "b", summary_until: "s", step: true, step_after_minutes: 40 });
     assert.equal((step.json.wait_credit as Credit).balance, 20);
-    const back = await call(WORKER, "POST", "/api/messages", { project: P2, kind: "comment_added", ticket_id: t2, body: "done early", summary_until: "s", handback: true });
+    const back = await call(WORKER, "message.post", { project: P2, kind: "comment_added", ticket_id: t2, body: "done early", summary_until: "s", handback: true });
     assert.equal((back.json.wait_credit as Credit).refunded, 40);
     assert.equal((back.json.wait_credit as Credit).balance, 60);
-    const again = await call(WORKER, "POST", "/api/messages", { project: P2, kind: "comment_added", ticket_id: t2, body: "again", summary_until: "s", handback: true });
+    const again = await call(WORKER, "message.post", { project: P2, kind: "comment_added", ticket_id: t2, body: "again", summary_until: "s", handback: true });
     assert.equal((again.json.wait_credit as Credit).refunded, 0, "given back once");
     assert.equal((again.json.wait_credit as Credit).balance, 60);
 });
@@ -162,31 +156,31 @@ test("a ticket closed on the agent's accepted resolution earns 10, 30 with a com
     upsertSubscription("boss", P3, "owner");
     async function propose(kind: "resolution" | "wontfix"): Promise<number> {
         const t = submitMessage({ project: P3, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
-        const r = await call(WORKER, "POST", "/api/messages", { project: P3, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", decision_kind: kind });
+        const r = await call(WORKER, "message.post", { project: P3, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", decision_kind: kind });
         assert.ok(r.status < 300, JSON.stringify(r.json));
         return r.json.id as number;
     }
     const res = await propose("resolution");
-    assert.equal((await call(BOSS, "POST", `/api/messages/${res}/decide`, { status: "accepted" })).status, 200);
+    assert.equal((await call(BOSS, "message.decide", { id: res, status: "accepted" })).status, 200);
     assert.equal(waitCreditBalance("worker", P3), 70, "a resolution without a commit earns 10");
     // A resolution on a ticket where the agent cited a commit earns 30.
     const tc = submitMessage({ project: P3, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
     getDb().run(sql`INSERT INTO wait_credit_moves (consumer_id, project, kind, minutes, ticket_id, ref, created_at) VALUES ('worker', ${P3}, 'earn_commit', 20, ${tc}, 'feedfacefeedfacefeedfacefeedfacefeedface', ${new Date().toISOString()})`);
-    const withCommit = await call(WORKER, "POST", "/api/messages", { project: P3, kind: "comment_added", ticket_id: tc, body: "b", summary_until: "s", decision_kind: "resolution" });
-    assert.equal((await call(BOSS, "POST", `/api/messages/${withCommit.json.id}/decide`, { status: "accepted" })).status, 200);
+    const withCommit = await call(WORKER, "message.post", { project: P3, kind: "comment_added", ticket_id: tc, body: "b", summary_until: "s", decision_kind: "resolution" });
+    assert.equal((await call(BOSS, "message.decide", { id: withCommit.json.id, status: "accepted" })).status, 200);
     assert.equal(waitCreditBalance("worker", P3), 120, "20 for the commit, 30 for a resolution with a commit");
     const wf = await propose("wontfix");
-    assert.equal((await call(BOSS, "POST", `/api/messages/${wf}/decide`, { status: "accepted" })).status, 200);
+    assert.equal((await call(BOSS, "message.decide", { id: wf, status: "accepted" })).status, 200);
     assert.equal(waitCreditBalance("worker", P3), 125);
     const rejected = await propose("resolution");
-    await call(BOSS, "POST", `/api/messages/${rejected}/decide`, { status: "rejected" });
+    await call(BOSS, "message.decide", { id: rejected, status: "rejected" });
     assert.equal(waitCreditBalance("worker", P3), 125, "a rejected resolution earns nothing");
     assert.equal(waitCreditBalance("boss", P3), 60, "the human who accepted earns nothing");
     upsertConsumer({ consumer_id: "boss2", kind: "human" });
     upsertSubscription("boss2", P3, "owner");
     const t = submitMessage({ project: P3, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
     const human = submitMessage({ project: P3, kind: "comment_added", ticket_id: t, body: "b", by_agent: "boss2", decision_kind: "resolution" }).id;
-    assert.equal((await call(BOSS, "POST", `/api/messages/${human}/decide`, { status: "accepted" })).status, 200);
+    assert.equal((await call(BOSS, "message.decide", { id: human, status: "accepted" })).status, 200);
     assert.equal(waitCreditBalance("boss2", P3), 60, "a human's accepted resolution earns nothing");
 });
 
@@ -232,16 +226,16 @@ test("a cited commit earns from its diff once, in the agent's checkout; the rest
 test("a backlog row carries the asking agent's credit on its project; a human's rows carry none", async () => {
     const t = await held();
     await post(t, { step: true, step_after_minutes: 0 });
-    const rows = (await call(WORKER, "GET", `/api/tickets?project=${P}&backlog=1&limit=500`)).json as unknown as Array<{ id: number; backlog_tier: number | null; wait_credit_minutes: number | null }>;
+    const rows = (await call(WORKER, "ticket.list", { project: P, backlog: true, limit: 500 })).json as unknown as Array<{ id: number; backlog_tier: number | null; wait_credit_minutes: number | null }>;
     const row = rows.find((r) => r.id === t)!;
     assert.notEqual(row.backlog_tier, null);
     assert.equal(row.wait_credit_minutes, waitCreditBalance("worker", P));
-    const human = (await call(BOSS, "GET", `/api/tickets?project=${P}&backlog=1&limit=500`)).json as unknown as Array<{ wait_credit_minutes: number | null }>;
+    const human = (await call(BOSS, "ticket.list", { project: P, backlog: true, limit: 500 })).json as unknown as Array<{ wait_credit_minutes: number | null }>;
     assert.ok(human.every((r) => r.wait_credit_minutes === null));
 });
 
 test("aiball steps lists every balance", async () => {
-    const r = (await call(BOSS, "GET", "/api/steps/timing")).json as { credits: Array<{ consumer_id: string; project: string; balance: number }> };
+    const r = (await call(BOSS, "step.timing")).json as { credits: Array<{ consumer_id: string; project: string; balance: number }> };
     const mine = r.credits.find((c) => c.consumer_id === "worker" && c.project === "p-2640-c");
     assert.equal(mine?.balance, 125);
 });
@@ -250,29 +244,29 @@ test("a human's post carries no wait credit, and commits on a close are refused"
     const t = ticket();
     const h = await post(t, {}, BOSS);
     assert.equal(h.credit, undefined);
-    const r = await call(WORKER, "POST", "/api/messages", { project: P, kind: "ticket_closed", ticket_id: t, commits: ["ef93fbb"] });
+    const r = await call(WORKER, "message.post", { project: P, kind: "ticket_closed", ticket_id: t, commits: ["ef93fbb"] });
     assert.equal(r.status, 400);
     assert.match(String(r.json.error), /commits only go with a comment/);
 });
 
 test("#2645 the consumers list carries each agent's credit per project, and a consumer's page its movements; a human has none", async () => {
-    const list = (await call(BOSS, "GET", "/api/consumers")).json as unknown as Array<{ consumer_id: string; wait_credit: Array<{ project: string; balance: number; earned: number }> | null }>;
+    const list = (await call(BOSS, "consumer.list")).json as unknown as Array<{ consumer_id: string; wait_credit: Array<{ project: string; balance: number; earned: number }> | null }>;
     const worker = list.find((c) => c.consumer_id === "worker")!;
     const c = worker.wait_credit!.find((r) => r.project === "p-2640-c")!;
     assert.equal(c.balance, 125);
     assert.equal(c.earned, 65);
     assert.equal(list.find((x) => x.consumer_id === "boss")!.wait_credit, null);
 
-    const page = (await call(BOSS, "GET", "/api/consumers/worker/wait-credit")).json as { credits: Array<{ project: string; balance: number }>; moves: Array<{ kind: string; minutes: number; ticket_id: number | null; ref: string | null }> };
+    const page = (await call(BOSS, "consumer.wait_credit", { consumer_id: "worker" })).json as { credits: Array<{ project: string; balance: number }>; moves: Array<{ kind: string; minutes: number; ticket_id: number | null; ref: string | null }> };
     assert.deepEqual(page.credits.map((r) => [r.project, r.balance]).sort(), worker.wait_credit!.map((r) => [r.project, r.balance]).sort(), "the page and the list agree");
     const kinds = new Set(page.moves.map((m) => m.kind));
     for (const k of ["spend", "refund", "earn_resolved", "earn_wontfix", "earn_commit"]) assert.ok(kinds.has(k), `a ${k} movement is listed`);
     assert.ok(page.moves.find((m) => m.kind === "earn_commit")?.ref?.match(/^[0-9a-f]{40}$/), "a commit movement names its SHA");
 
-    const human = (await call(BOSS, "GET", "/api/consumers/boss/wait-credit")).json as { credits: unknown; moves: unknown[] };
+    const human = (await call(BOSS, "consumer.wait_credit", { consumer_id: "boss" })).json as { credits: unknown; moves: unknown[] };
     assert.equal(human.credits, null);
     assert.deepEqual(human.moves, []);
-    assert.equal((await call(BOSS, "GET", "/api/consumers/nobody/wait-credit")).status, 404);
+    assert.equal((await call(BOSS, "consumer.wait_credit", { consumer_id: "nobody" })).status, 404);
 });
 
 test("#2645 trim: every waiting step comes down to N minutes from now, the cut-off credit comes back, only a human may", async () => {
@@ -280,12 +274,12 @@ test("#2645 trim: every waiting step comes down to N minutes from now, the cut-o
     createProject({ name: P4 });
     upsertSubscription("worker", P4, "owner");
     const t = submitMessage({ project: P4, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
-    await call(WORKER, "POST", `/api/tickets/${t}/assign`, {});
-    const step = await call(WORKER, "POST", "/api/messages", { project: P4, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 45 });
+    await call(WORKER, "ticket.assign", { id: t });
+    const step = await call(WORKER, "message.post", { project: P4, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 45 });
     assert.equal((step.json.wait_credit as Credit).balance, 15);
 
     // Read the inbox first, so a stale cache would show the old resume.
-    await call(BOSS, "GET", `/api/inbox?ids=${t}&project=${P4}`);
+    await call(BOSS, "inbox.list", { ids: [t], project: P4 });
     const bus = async (token: string) => {
         const c = await BusClient.connect({ url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, token });
         busClients.push(c);
@@ -300,8 +294,7 @@ test("#2645 trim: every waiting step comes down to N minutes from now, the cut-o
     const left = (Date.parse(mine.to) - Date.now()) / 60_000;
     assert.ok(left > 4 && left <= 5, `resumes in ${left.toFixed(1)} min`);
     assert.equal(waitCreditBalance("worker", P4), 55);
-    const inbox = (await call(BOSS, "GET", `/api/inbox?ids=${t}&project=${P4}`)).json as unknown as { rows?: Array<{ id: number; step_resume_at: string | null }> } | Array<{ id: number; step_resume_at: string | null }>;
-    const rows = Array.isArray(inbox) ? inbox : (inbox.rows ?? []);
+    const rows = ((await call(BOSS, "inbox.list", { ids: [t], project: P4 })).json as unknown as { rows: Array<{ id: number; step_resume_at: string | null }> }).rows;
     assert.equal(rows.find((x) => x.id === t)?.step_resume_at, mine.to, "the inbox shows the new resume at once (caches invalidated)");
 
     const again = await boss.call<{ trimmed: unknown[] }>("step.trim", { max_minutes: 5 });
@@ -314,39 +307,39 @@ test("#2640 every part of the scheme is a per-project setting: off, no refund, c
     createProject({ name: PO });
     upsertSubscription("worker", PO, "owner");
     const t = submitMessage({ project: PO, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
-    await call(WORKER, "POST", `/api/tickets/${t}/assign`, {});
+    await call(WORKER, "ticket.assign", { id: t });
 
     setConfigOverride(PO, "tickets.wait_credit.enabled", false);
-    const off = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 100 });
+    const off = await call(WORKER, "message.post", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 100 });
     assert.equal(off.json.wait_credit, undefined, "off: the reply says nothing about credit");
     const meta = JSON.parse(String(off.json.meta)) as { step_resume_at: string };
     assert.ok((Date.parse(meta.step_resume_at) - Date.now()) / 60_000 > 99, "off: the 100 minutes are granted, uncapped");
     assert.equal(waitCreditBalance("worker", PO), 60, "off: nothing spent");
-    const rows = (await call(WORKER, "GET", `/api/tickets?project=${PO}&backlog=1&limit=50`)).json as unknown as Array<{ wait_credit_minutes: number | null }>;
+    const rows = (await call(WORKER, "ticket.list", { project: PO, backlog: true, limit: 50 })).json as unknown as Array<{ wait_credit_minutes: number | null }>;
     assert.ok(rows.every((r) => r.wait_credit_minutes === null), "off: wakes say nothing");
 
     setConfigOverride(PO, "tickets.wait_credit.enabled", true);
     setConfigOverride(PO, "tickets.wait_credit.refund", false);
-    const s = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 30 });
+    const s = await call(WORKER, "message.post", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", step: true, step_after_minutes: 30 });
     assert.equal((s.json.wait_credit as Credit).balance, 30);
-    const back = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", handback: true });
+    const back = await call(WORKER, "message.post", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", handback: true });
     assert.equal((back.json.wait_credit as Credit).refunded, 0, "no refund when refunds are off");
     const r = (back.json.wait_credit as Credit & { rules: Record<string, unknown> }).rules;
     assert.equal(r.refund, false, "#2646 the reply carries the project's rules");
     assert.equal(r.floor, 5);
     assert.equal(r.resolved_no_commit, 10);
-    const bl = (await call(WORKER, "GET", `/api/tickets?project=${PO}&backlog=1&limit=50`)).json as unknown as Array<{ backlog_tier: number | null; wait_credit_rules: Record<string, unknown> | null }>;
+    const bl = (await call(WORKER, "ticket.list", { project: PO, backlog: true, limit: 50 })).json as unknown as Array<{ backlog_tier: number | null; wait_credit_rules: Record<string, unknown> | null }>;
     assert.ok(bl.filter((x) => x.backlog_tier !== null).every((x) => x.wait_credit_rules?.refund === false), "and so do backlog rows");
 
     setConfigOverride(PO, "tickets.wait_credit.earn.resolved_no_commit", 420);
-    const res = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", decision_kind: "resolution" });
-    assert.equal((await call(BOSS, "POST", `/api/messages/${res.json.id}/decide`, { status: "accepted" })).status, 200);
+    const res = await call(WORKER, "message.post", { project: PO, kind: "comment_added", ticket_id: t, body: "b", summary_until: "s", decision_kind: "resolution" });
+    assert.equal((await call(BOSS, "message.decide", { id: res.json.id, status: "accepted" })).status, 200);
     assert.equal(waitCreditBalance("worker", PO), 37, "the amounts are the project's");
 
     setConfigOverride(PO, "tickets.wait_credit.earn.commits_per_comment", 1);
     setConfigOverride(PO, "tickets.wait_credit.earn.commit_max_age", 3600);
     const t2 = submitMessage({ project: PO, kind: "ticket_created", title: "t2", body: "x", by_agent: "boss" }).id;
-    const c = await call(WORKER, "POST", "/api/messages", { project: PO, kind: "comment_added", ticket_id: t2, body: "b", summary_until: "s", handback: true, commits: ["deadbeef", "cafebabe"] });
+    const c = await call(WORKER, "message.post", { project: PO, kind: "comment_added", ticket_id: t2, body: "b", summary_until: "s", handback: true, commits: ["deadbeef", "cafebabe"] });
     const [first, second] = (c.json.wait_credit as Credit).commits!;
     assert.doesNotMatch(first.reason ?? "", /past the/);
     assert.match(second.reason ?? "", /past the 1 commits counted per comment/);

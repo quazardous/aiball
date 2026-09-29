@@ -16,7 +16,8 @@ process.env.AIBALL_SOCK = "";
 const { getDb } = await import("../db/connection.js");
 const { upsertConsumer } = await import("../db/consumers.js");
 const { issueToken } = await import("../db/tokens.js");
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 
 getDb();
 upsertConsumer({ consumer_id: "mod2718", kind: "human" });
@@ -43,6 +44,6 @@ test("the legacy rule and work-filter routes are gone, not silently accepting", 
         const r = await call(method, path, body);
         assert.ok(r.status >= 400, `${method} ${path} should be refused, got ${r.status}`);
     }
-    // The surface that replaced them still answers.
-    assert.equal((await call("GET", "/api/automation/rules")).status, 200);
+    // The surface that replaced them still answers, on the bus.
+    assert.equal((await asToken(token, "automation.rules")).status, 200);
 });

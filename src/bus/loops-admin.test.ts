@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3068-loops-"));
 process.env.AIBALL_HOME = home;
@@ -26,7 +26,8 @@ writeFileSync(join(home, "xdg", "aiball", "config.yaml"), [
     "",
 ].join("\n"));
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer, getConsumer } = await import("../db.js");
 const { createProject } = await import("../db/projects.js");
@@ -59,18 +60,6 @@ async function as(token: string) {
     return c;
 }
 
-function http(method: string, path: string, body?: unknown, token = BOSS): Promise<{ status: number; json: unknown }> {
-    return new Promise((resolve, reject) => {
-        const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" } }, (res) => {
-            let b = "";
-            res.on("data", (d) => { b += d; });
-            res.on("end", () => resolve({ status: res.statusCode ?? 0, json: b ? JSON.parse(b) : null }));
-        });
-        req.on("error", reject);
-        req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
-}
-
 const code = (c: string) => (e: { code: string }) => e.code === c;
 const status = (n: number) => (e: { status: number }) => e.status === n;
 
@@ -85,14 +74,13 @@ test("the loop controls are a human's; with no loop running they reach nobody", 
     ] as const) {
         await assert.rejects(w.call(m, p), code("MODERATOR_ONLY"), m);
     }
-    assert.equal((await http("POST", "/api/loops/release-all", {}, WORKER)).status, 403, "the route holds the same gate");
 
     assert.equal((await boss.call<{ delivered: boolean }>("consumer.stop_loop", { consumer_id: "worker" })).delivered, false);
     const prompt = await boss.call<{ spooled: boolean; delivered: boolean }>("consumer.prompt", { consumer_id: "worker", text: "hi" });
     assert.deepEqual([prompt.spooled, prompt.delivered], [true, false]);
     await assert.rejects(boss.call("consumer.prompt", { consumer_id: "worker", text: "  " }), status(400));
     assert.deepEqual((await boss.call<{ results: unknown[] }>("loops.message_all", { message: "hi" })).results, []);
-    assert.deepEqual(await boss.call("loops.release_all", {}), (await http("POST", "/api/loops/release-all", {})).json);
+    assert.deepEqual(await boss.call("loops.release_all", {}), JSON.parse(JSON.stringify((await asToken(BOSS, "loops.release_all", {})).json)), "the connection answers as a direct call");
 });
 
 test("a consumer's wait credit and deletion", async () => {

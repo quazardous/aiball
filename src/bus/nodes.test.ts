@@ -1,20 +1,21 @@
 /**
  * #3068 — nodes, pairing and signal keys as methods: every one a human's,
- * over the bus and over the routes that now serve them; a key's token comes
- * back once, when it is minted.
+ * over a bus connection and in a direct call with the same token; a key's
+ * token comes back once, when it is minted.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3068-nodes-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer } = await import("../db.js");
 const { createProject } = await import("../db/projects.js");
@@ -46,16 +47,9 @@ async function as(token: string) {
     return c;
 }
 
-function http(method: string, path: string, body?: unknown, token = BOSS): Promise<{ status: number; json: unknown }> {
-    return new Promise((resolve, reject) => {
-        const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" } }, (res) => {
-            let b = "";
-            res.on("data", (d) => { b += d; });
-            res.on("end", () => resolve({ status: res.statusCode ?? 0, json: b ? JSON.parse(b) : null }));
-        });
-        req.on("error", reject);
-        req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
+/** The same method called directly with the token, off any connection. */
+function direct(method: string, params: Record<string, unknown> = {}, token = BOSS): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 
 const code = (c: string) => (e: { code: string }) => e.code === c;
@@ -71,13 +65,13 @@ test("every node and key surface is a human's", async () => {
     ] as const) {
         await assert.rejects(w.call(m, p), code("MODERATOR_ONLY"), m);
     }
-    assert.equal((await http("GET", "/api/nodes", undefined, WORKER)).status, 403, "the route holds the same gate");
+    assert.equal((await direct("node.list", {}, WORKER)).status, 403, "a direct call holds the same gate");
 });
 
 test("the pairing window opens and shuts; a decision on a request that is not pending is a 409", async () => {
     const boss = await as(BOSS);
     assert.equal((await boss.call<{ open: boolean }>("node.set_pairing", { verb: "open", minutes: 5 })).open, true);
-    assert.deepEqual(await boss.call("node.pairing", {}), (await http("GET", "/api/nodes/pairing")).json);
+    assert.deepEqual(await boss.call("node.pairing", {}), (await direct("node.pairing")).json);
     assert.equal((await boss.call<{ open: boolean }>("node.set_pairing", { verb: "close" })).open, false);
     await assert.rejects(boss.call("node.set_pairing", { verb: "ajar" }), status(400));
     assert.ok(Array.isArray(await boss.call("node.list", {})));
@@ -88,8 +82,8 @@ test("the pairing window opens and shuts; a decision on a request that is not pe
 
 test("a signal key: minted with its token once, listed without it, changed, revoked", async () => {
     const boss = await as(BOSS);
-    const minted = await http("POST", "/api/signal-keys", { label: "ci", note: "the CI" });
-    assert.equal(minted.status, 201, JSON.stringify(minted.json));
+    const minted = await direct("signal_key.create", { label: "ci", note: "the CI" });
+    assert.equal(minted.status, 200, JSON.stringify(minted.json));
     const { key, token } = minted.json as { key: { key_id: string }; token: string };
     assert.ok(token);
     const listed = await boss.call<Array<{ key_id: string }>>("signal_key.list", {});
@@ -98,5 +92,5 @@ test("a signal key: minted with its token once, listed without it, changed, revo
     assert.equal((await boss.call<{ note: string }>("signal_key.update", { key_id: key.key_id, note: "changed" })).note, "changed");
     assert.deepEqual(await boss.call("signal_key.revoke", { key_id: key.key_id }), { key_id: key.key_id, revoked: true });
     await assert.rejects(boss.call("signal_key.revoke", { key_id: key.key_id }), status(404));
-    assert.deepEqual(await boss.call("project.signals", { name: "p-nodes" }), (await http("GET", "/api/projects/p-nodes/signals")).json);
+    assert.deepEqual(await boss.call("project.signals", { name: "p-nodes" }), (await direct("project.signals", { name: "p-nodes" })).json);
 });

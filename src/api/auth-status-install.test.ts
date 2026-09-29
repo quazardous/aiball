@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-auth-status-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { issueToken, deleteToken, listTokens } = await import("../db/tokens.js");
 
 const server = createApp().listen(0);

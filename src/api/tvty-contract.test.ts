@@ -3,8 +3,9 @@
  * share `client.ts`, so a change here that would break it has to fail here.
  *
  * The calls below are tvty's, as it sends them (tvty `src/aiball.rs`, at
- * 7e02bed): over the local socket, as the human, with the exact bodies. The
- * fields are the ones its serde structs read. Most of them are `Option` or
+ * d08fb90): on the bus, over the local socket, as the human, with the exact
+ * methods and params; its uploads stay HTTP, over the same socket. The fields
+ * are the ones its serde structs read. Most of them are `Option` or
  * `#[serde(default)]` on tvty's side, so a field dropped here would not make
  * tvty fail — it would silently lose a feature. So every field tvty reads must
  * be present, with its type when it is not null.
@@ -20,13 +21,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import type { AddressInfo } from "node:net";
 import { matchCalls, readServerRoutes, tvtyCalls } from "../devtools/route-inventory-lib.js";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3052-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { authenticate } = await import("../auth.js");
+const { callerOf, callMethod, Refusal } = await import("../bus/methods.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, insertUpload } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -63,16 +66,29 @@ const other = ticketOf("another");
 const plan = submitMessage({ project: P, kind: "comment_added", ticket_id: main, body: `a plan ![](/uploads/${sha}.png)\n- [ ] <!-- q:qq1 --> which db?`, by_agent: "worker", decision_kind: "plan", summary_until: "s" }).id;
 
 // ── the transport: the local socket, the human by header, like the daemon ─
+// tvty's bus connection opens on the local socket with `x-aiball-consumer`
+// (and `x-aiball-platform`): the caller is settled from those headers as the
+// bus settles it there, then each call goes through the bus's own checks.
+async function bus(method: string, params: Record<string, unknown> = {}, headers: Record<string, string> = {}): Promise<{ status: number; json: unknown }> {
+    const all: Record<string, string> = { "x-aiball-consumer": HUMAN, ...headers };
+    const out = authenticate({ transport: "uds", token: null, ip: null, header: (name) => all[name.toLowerCase()] });
+    if (!out.ok) return { status: out.status, json: { error: out.error, code: out.code } };
+    try {
+        const result = await callMethod(callerOf(out.ctx), method, params);
+        return { status: 200, json: result === undefined ? null : result };
+    } catch (e) {
+        if (e instanceof Refusal) return { status: e.status, json: { error: e.message, code: e.code } };
+        throw e;
+    }
+}
+
+// Uploads stay HTTP: the production app on a local socket.
 const SOCK = join(process.env.AIBALL_HOME!, "sock");
 const uds = createServer(createApp());
 uds.on("connection", (s) => { (s as unknown as { __aiballUds: boolean }).__aiballUds = true; });
 await new Promise<void>((r) => uds.listen(SOCK, () => r()));
-const tcp = createApp().listen(0);
-await new Promise<void>((r) => tcp.once("listening", () => r()));
-const TCP = `http://127.0.0.1:${(tcp.address() as AddressInfo).port}`;
 after(() => {
     uds.close();
-    tcp.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
@@ -179,30 +195,32 @@ test("reads: every field tvty reads is there, with its type", async () => {
         alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false },
         proxy_alive: true, zen: false, counters: { open: 1, backlog: 0, events: 0 }, next_wake_at: null, boot: null,
     };
-    const pushed = await fetch(`${TCP}/api/consumers/worker/bar`, { method: "PUT", headers: { authorization: `Bearer ${WORKER}`, "content-type": "application/json" }, body: JSON.stringify(bar) });
-    assert.equal(pushed.status, 200);
+    const pushed = await asToken(WORKER, "consumer.push_bar", { consumer_id: "worker", bar });
+    assert.equal(pushed.status, 200, JSON.stringify(pushed.json));
 
-    const reads: [string, Shape][] = [
-        ["/api/consumers", [CONSUMER]],
-        [`/api/inbox?project=${P}&open=1&view=turn&sort=band`, [ROW]],
-        [`/api/inbox?project=${P}&view=turn&sort=band&limit=50`, [ROW]],
-        [`/api/tickets/${main}?full=1&limit=9999`, THREAD],
-        [`/api/messages/${plan}`, { kind: "string", by_agent: "string", project: "string", title: "string?", meta: "string?" }],
-        ["/api/consumers/worker/bar", BAR],
-        [`/api/consumers/worker/backlog?project=${P}`, { rows: [{ id: "number", project: "string", title: "string", backlog_tier: "number?" }] }],
-        [`/api/tags?project=${P}`, [TAG]],
-        [`/api/projects/${P}/milestones`, { milestones: [{ id: "number", title: "string?", released: "boolean?" }] }],
-        ["/api/mention-suggestions", { projects: ["string"], agents: ["string"] }],
+    const INBOX: Shape = { total: "number", rows: [ROW] };
+    const reads: [string, Record<string, unknown>, Shape][] = [
+        ["consumer.list", {}, [CONSUMER]],
+        ["inbox.list", { project: P, open: true, view: "turn", sort: "band" }, INBOX],
+        ["inbox.list", { project: P, view: "turn", sort: "band", limit: 50 }, INBOX],
+        ["ticket.get", { id: main, full: true, limit: 9999 }, THREAD],
+        ["message.get", { id: plan }, { kind: "string", by_agent: "string", project: "string", title: "string?", meta: "string?" }],
+        ["consumer.bar", { consumer_id: "worker" }, BAR],
+        ["consumer.backlog", { consumer_id: "worker", project: P }, { rows: [{ id: "number", project: "string", title: "string", backlog_tier: "number?" }] }],
+        ["tag.list", { project: P }, [TAG]],
+        ["project.milestones", { project: P }, { milestones: [{ id: "number", title: "string?", released: "boolean?" }] }],
+        ["mention.suggestions", {}, { projects: ["string"], agents: ["string"] }],
     ];
-    for (const [path, shape] of reads) {
-        const r = await call("GET", path);
-        assert.equal(r.status, 200, `GET ${path} → ${r.status} ${JSON.stringify(r.json)}`);
-        assert.deepEqual(problems(r.json, shape, `GET ${path}`), []);
+    for (const [method, params, shape] of reads) {
+        const r = await bus(method, params);
+        const at = `${method} ${JSON.stringify(params)}`;
+        assert.equal(r.status, 200, `${at} → ${r.status} ${JSON.stringify(r.json)}`);
+        assert.deepEqual(problems(r.json, shape, at), []);
     }
     // The data it needs to be non-empty for the checks above to mean something.
-    const thread = (await call("GET", `/api/tickets/${main}?full=1&limit=9999`)).json as { comments: unknown[]; attachments: unknown[] };
+    const thread = (await bus("ticket.get", { id: main, full: true, limit: 9999 })).json as { comments: unknown[]; attachments: unknown[] };
     assert.ok(thread.comments.length > 0 && thread.attachments.length > 0, "the thread has comments and an attachment");
-    assert.ok(((await call("GET", `/api/inbox?project=${P}&view=turn&sort=band&limit=50`)).json as unknown[]).length > 0);
+    assert.ok(((await bus("inbox.list", { project: P, view: "turn", sort: "band", limit: 50 })).json as { rows: unknown[] }).rows.length > 0);
 });
 
 test("reads: an image by its API path, derived from the cited form", async () => {
@@ -211,63 +229,63 @@ test("reads: an image by its API path, derived from the cited form", async () =>
 });
 
 test("writes: every body tvty sends is accepted", async () => {
-    const r1 = await call("POST", "/api/messages", {
+    const r1 = await bus("message.post", {
         project: P, kind: "ticket_created", title: "filed whole", body: "b", intent: "request",
         summary: "s", priority: "high", scope: "internal", parent_id: main, tags: ["front"],
         assignee: "worker", milestone, level: "task",
     }, { "x-aiball-platform": "linux" });
-    assert.equal(r1.status, 201, JSON.stringify(r1.json));
+    assert.equal(r1.status, 200, JSON.stringify(r1.json));
     const filed = (r1.json as { id: number }).id;
-    const comment = await call("POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: main, parent_id: main, body: "a reply" });
-    assert.equal(comment.status, 201, JSON.stringify(comment.json));
+    const comment = await bus("message.post", { project: P, kind: "comment_added", ticket_id: main, parent_id: main, body: "a reply" });
+    assert.equal(comment.status, 200, JSON.stringify(comment.json));
     const mine = (comment.json as { id: number }).id;
-    const quiet = await call("POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: main, parent_id: main, body: "quiet", scope: "internal" });
-    assert.equal(quiet.status, 201);
+    const quiet = await bus("message.post", { project: P, kind: "comment_added", ticket_id: main, parent_id: main, body: "quiet", scope: "internal" });
+    assert.equal(quiet.status, 200);
     const quietId = (quiet.json as { id: number }).id;
     const pending = ticketOf("an agent's, awaiting moderation", "worker");
     const pending2 = ticketOf("another awaiting moderation", "worker");
     const step = submitMessage({ project: P, kind: "comment_added", ticket_id: main, body: "working", by_agent: "worker", summary_until: "s", handback: true }).id;
 
-    const writes: [string, string, unknown, number][] = [
-        ["POST", `/api/tickets/${main}/mark-read`, {}, 200],
-        ["POST", `/api/agents/worker/afk`, { action: "toggle" }, 404], // no loop on this test board: the route answers LOOP_NOT_FOUND
-        ["POST", `/api/messages/${plan}/questions/qq1/answer`, { answered_in: mine }, 200],
-        ["POST", `/api/tickets/${other}/postpone`, { until: new Date(Date.now() + 86_400_000).toISOString() }, 200],
-        ["POST", `/api/tickets/${other}/unsnooze`, {}, 200],
-        ["POST", `/api/messages/${other}/edit`, { priority: "high" }, 200],
-        ["POST", `/api/messages/${other}/edit`, { title: "renamed" }, 200],
-        ["POST", `/api/messages/${other}/edit`, { intent: "question" }, 200],
-        ["POST", `/api/messages/${other}/edit`, { level: "task" }, 200],
-        ["POST", `/api/messages/${other}/edit`, { scope: "default" }, 200],
-        ["POST", `/api/messages/${other}/edit`, { body: "new body" }, 200],
-        ["POST", `/api/messages/${other}/tags`, { tag: "front" }, 201],
-        ["DELETE", `/api/messages/${other}/tags/front`, undefined, 200],
-        ["POST", `/api/tickets/${other}/milestone`, { milestone_id: milestone }, 200],
-        ["POST", `/api/tickets/${other}/milestone`, { milestone_id: null }, 200],
-        ["POST", `/api/tickets/${other}/assign`, { assignee: "worker" }, 200],
-        ["POST", `/api/tickets/${other}/release`, {}, 200],
-        ["POST", `/api/tickets/${other}/owner`, { owner: "worker" }, 200],
-        ["POST", `/api/tickets/${other}/relations`, { target_ticket_id: main, kind: "relates_to" }, 200],
-        ["POST", `/api/tickets/${other}/relations`, { target_ticket_id: main, kind: "ignored" }, 200],
-        ["POST", `/api/messages/${step}/step`, {}, 200],
-        ["POST", `/api/messages/${step}/unstep`, {}, 200],
-        ["POST", `/api/messages/${mine}/promote`, { kind: "plan" }, 200],
-        ["POST", `/api/messages/${mine}/untag`, {}, 200],
-        ["POST", `/api/messages/${plan}/vote`, { value: 1 }, 200],
-        ["POST", `/api/messages/${plan}/vote`, { value: 0 }, 200],
-        ["POST", `/api/messages/${mine}/resurface`, {}, 200],
-        ["POST", `/api/messages/${plan}/decide`, { status: "accepted" }, 200],
-        ["POST", `/api/messages/${pending}/approve`, {}, 200],
-        ["POST", `/api/messages/${pending2}/reject`, {}, 200],
-        ["POST", `/api/messages/${quietId}/delete`, {}, 200],
-        ["POST", "/api/messages", { project: P, kind: "ticket_closed", ticket_id: other, parent_id: other }, 201],
-        ["POST", "/api/messages", { project: P, kind: "ticket_reopened", ticket_id: other, parent_id: other }, 201],
-        ["POST", `/api/tickets/${filed}/move`, { project: `${P}-b` }, 200],
-        ["POST", "/api/consumers/worker/bar-host", { host: "external" }, 404], // no loop on this test board: LOOP_NOT_FOUND
+    const writes: [string, Record<string, unknown>, number][] = [
+        ["ticket.mark_read", { id: main }, 200],
+        ["consumer.afk", { name: "worker", action: "toggle" }, 404], // no loop on this test board: LOOP_NOT_FOUND
+        ["message.answer_question", { id: plan, qid: "qq1", answered_in: mine }, 200],
+        ["ticket.postpone", { id: other, until: new Date(Date.now() + 86_400_000).toISOString() }, 200],
+        ["ticket.unsnooze", { id: other }, 200],
+        ["message.edit", { id: other, priority: "high" }, 200],
+        ["message.edit", { id: other, title: "renamed" }, 200],
+        ["message.edit", { id: other, intent: "question" }, 200],
+        ["message.edit", { id: other, level: "task" }, 200],
+        ["message.edit", { id: other, scope: "default" }, 200],
+        ["message.edit", { id: other, body: "new body" }, 200],
+        ["message.add_tag", { id: other, tag: "front" }, 200],
+        ["message.remove_tag", { id: other, tag: "front" }, 200],
+        ["ticket.set_milestone", { id: other, milestone_id: milestone }, 200],
+        ["ticket.set_milestone", { id: other, milestone_id: null }, 200],
+        ["ticket.assign", { id: other, assignee: "worker" }, 200],
+        ["ticket.release", { id: other }, 200],
+        ["ticket.set_owner", { id: other, owner: "worker" }, 200],
+        ["ticket.relate", { id: other, target_ticket_id: main, kind: "relates_to" }, 200],
+        ["ticket.relate", { id: other, target_ticket_id: main, kind: "ignored" }, 200],
+        ["message.step", { id: step }, 200],
+        ["message.unstep", { id: step }, 200],
+        ["message.promote", { id: mine, kind: "plan" }, 200],
+        ["message.untag", { id: mine }, 200],
+        ["message.vote", { id: plan, value: 1 }, 200],
+        ["message.vote", { id: plan, value: 0 }, 200],
+        ["message.resurface", { id: mine }, 200],
+        ["message.decide", { id: plan, status: "accepted" }, 200],
+        ["message.approve", { id: pending }, 200],
+        ["message.reject", { id: pending2 }, 200],
+        ["message.delete", { id: quietId }, 200],
+        ["message.post", { project: P, kind: "ticket_closed", ticket_id: other, parent_id: other }, 200],
+        ["message.post", { project: P, kind: "ticket_reopened", ticket_id: other, parent_id: other }, 200],
+        ["ticket.move", { id: filed, project: `${P}-b` }, 200],
+        ["consumer.set_bar_host", { consumer_id: "worker", host: "external" }, 404], // no loop on this test board: LOOP_NOT_FOUND
     ];
-    for (const [method, path, body, status] of writes) {
-        const r = await call(method, path, body).catch((e) => { throw new Error(`${method} ${JSON.stringify(path)}: ${(e as Error).message}`); });
-        assert.equal(r.status, status, `${method} ${path} ${JSON.stringify(body)} → ${r.status} ${JSON.stringify(r.json)}`);
+    for (const [method, params, status] of writes) {
+        const r = await bus(method, params);
+        assert.equal(r.status, status, `${method} ${JSON.stringify(params)} → ${r.status} ${JSON.stringify(r.json)}`);
     }
     const upload = await call("POST", "/api/uploads", Buffer.from("another picture"), { "content-type": "image/png", "x-aiball-upload-name": "b.png" });
     assert.ok(upload.status < 300, JSON.stringify(upload.json));
@@ -275,24 +293,16 @@ test("writes: every body tvty sends is accepted", async () => {
 });
 
 test("refusals carry a code tvty can branch on", async () => {
-    const r = await call("GET", "/api/messages/987654321");
+    const r = await bus("message.get", { id: 987654321 });
     assert.deepEqual([r.status, (r.json as { code?: string }).code], [404, "MESSAGE_NOT_FOUND"]);
 });
 
-/** The routes the tests above exercise, as `docs/API-ROUTES.md` names them. */
+/**
+ * The HTTP routes the tests above exercise, as `docs/API-ROUTES.md` names them:
+ * what tvty still calls over HTTP (the rest is on the bus, above).
+ */
 const COVERED = new Set([
-    "GET /api/consumers", "GET /api/inbox", "GET /api/tickets/:id", "GET /api/messages/:id",
-    "GET /api/consumers/:consumer_id/bar", "GET /api/consumers/:consumer_id/backlog", "GET /api/tags",
-    "GET /api/projects/:project/milestones", "GET /api/mention-suggestions",
-    "POST /api/messages", "POST /api/tickets/:id/mark-read", "POST /api/agents/:name/afk",
-    "POST /api/messages/:id/questions/:qid/answer", "POST /api/tickets/:id/postpone", "POST /api/tickets/:id/unsnooze",
-    "POST /api/messages/:id/edit", "POST /api/messages/:id/tags", "DELETE /api/messages/:id/tags/:tag",
-    "POST /api/tickets/:id/milestone", "POST /api/tickets/:id/assign", "POST /api/tickets/:id/release",
-    "POST /api/tickets/:id/owner", "POST /api/tickets/:id/relations", "POST /api/messages/:id/step",
-    "POST /api/messages/:id/unstep", "POST /api/messages/:id/promote", "POST /api/messages/:id/untag",
-    "POST /api/messages/:id/vote", "POST /api/messages/:id/resurface", "POST /api/messages/:id/decide",
-    "POST /api/messages/:id/approve", "POST /api/messages/:id/reject", "POST /api/messages/:id/delete",
-    "POST /api/tickets/:id/move", "POST /api/uploads", "POST /api/consumers/:consumer_id/bar-host",
+    "POST /api/uploads",
 ]);
 
 /**

@@ -1,21 +1,22 @@
 /**
  * #3067 — the last calls of the shared client, as methods: rules, a message's
  * tag set, a consumer's record, the config, the step timing, the import and
- * the reload. Over the bus and over the routes that now serve them, the same
- * answers; the capability fields stay a human's, the reload stays local.
+ * the reload. Over a bus connection and in a direct call with the same token,
+ * the same answers; the capability fields stay a human's, the reload stays
+ * local.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3067-admin-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer, getConsumer } = await import("../db.js");
 const { submitMessage } = await import("../messages.js");
@@ -32,7 +33,7 @@ insertTag({ name: "adm-b" });
 const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "w" }).token;
 const BOSS = issueToken({ kind: "auth", consumer_id: "boss", label: "b" }).token;
 
-const tcp = createServer(createApp());
+const tcp = createServer();
 const wss = attachBus(tcp);
 await new Promise<void>((r) => tcp.listen(0, "127.0.0.1", () => r()));
 const port = (tcp.address() as { port: number }).port;
@@ -51,21 +52,14 @@ async function as(token: string) {
     return c;
 }
 
-function http(method: string, path: string, body?: unknown, token = WORKER): Promise<{ status: number; json: unknown }> {
-    return new Promise((resolve, reject) => {
-        const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" } }, (res) => {
-            let b = "";
-            res.on("data", (d) => { b += d; });
-            res.on("end", () => resolve({ status: res.statusCode ?? 0, json: b ? JSON.parse(b) : null }));
-        });
-        req.on("error", reject);
-        req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
+/** The same method, called directly as the holder of the token (no connection). */
+function direct(method: string, params: Record<string, unknown> = {}, token = WORKER): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 
 const status = (n: number) => (e: { status: number }) => e.status === n;
 
-test("rules: create, list, toggle, delete; the route answers the same, a bad action is refused", async () => {
+test("rules: create, list, toggle, delete; a direct call answers the same, a bad action is refused", async () => {
     const w = await as(WORKER);
     const rule = await w.call<{ id: number; enabled: boolean }>("automation.create_rule", {
         triggers: ["message_posted"], action: { kind: "decision", decision: "review" }, match_project: " p-adm ",
@@ -73,17 +67,17 @@ test("rules: create, list, toggle, delete; the route answers the same, a bad act
     assert.equal((rule as unknown as { match_project: string }).match_project, "p-adm", "trimmed");
     const listed = await w.call<Array<{ id: number }>>("automation.rules", { trigger: "message_posted" });
     assert.ok(listed.some((r) => r.id === rule.id));
-    assert.deepEqual(listed, (await http("GET", "/api/automation/rules?trigger=message_posted")).json);
+    assert.deepEqual(listed, (await direct("automation.rules", { trigger: "message_posted" })).json);
 
-    // The row stores the flag as 0 / 1, over both transports.
+    // The row stores the flag as 0 / 1, over both paths.
     assert.equal(Boolean((await w.call<{ enabled: unknown }>("automation.update_rule", { id: rule.id, enabled: false })).enabled), false);
-    const viaRoute = await http("PATCH", `/api/automation/rules/${rule.id}`, { enabled: true });
-    assert.equal(Boolean((viaRoute.json as { enabled: unknown }).enabled), true);
+    const viaDirect = await direct("automation.update_rule", { id: rule.id, enabled: true });
+    assert.equal(Boolean((viaDirect.json as { enabled: unknown }).enabled), true);
 
     await assert.rejects(w.call("automation.create_rule", { triggers: ["message_posted"], actions: [{ kind: "nope" }] }), status(400));
     await assert.rejects(w.call("automation.rules", { trigger: "whenever" }), status(400));
     await assert.rejects(w.call("automation.delete_rule", { id: -1 }), status(400));
-    assert.equal((await http("DELETE", `/api/automation/rules/${rule.id}`)).status, 204);
+    assert.equal((await direct("automation.delete_rule", { id: rule.id })).status, 200);
     assert.ok(!(await w.call<Array<{ id: number }>>("automation.rules", {})).some((r) => r.id === rule.id));
 });
 
@@ -92,8 +86,8 @@ test("a message's tag set is replaced; an unknown tag is refused, nothing change
     const t = submitMessage({ project: "p-adm", kind: "ticket_created", title: "tags", body: "b", by_agent: "worker" });
     const tags = await w.call<Array<{ name: string }>>("message.set_tags", { id: t.id, tag_ids: ["adm-a", "adm-b"] });
     assert.deepEqual(tags.map((x) => x.name).sort(), ["adm-a", "adm-b"]);
-    const viaRoute = await http("PUT", `/api/messages/${t.id}/tags`, { tag_ids: ["adm-b"] });
-    assert.deepEqual((viaRoute.json as Array<{ name: string }>).map((x) => x.name), ["adm-b"]);
+    const viaDirect = await direct("message.set_tags", { id: t.id, tag_ids: ["adm-b"] });
+    assert.deepEqual((viaDirect.json as Array<{ name: string }>).map((x) => x.name), ["adm-b"]);
     await assert.rejects(w.call("message.set_tags", { id: t.id, tag_ids: ["ghost"] }), status(400));
     await assert.rejects(w.call("message.set_tags", { id: t.id, tag_ids: ["adm-a"], set_by: "boss" }), (e: { code: string }) => e.code === "AUTHOR_MISMATCH");
 });
@@ -108,15 +102,15 @@ test("a consumer's record: anyone upserts and edits the note, only a human sets 
 
     assert.equal((await w.call<{ note: string }>("consumer.update", { consumer_id: "helper", note: "edited" })).note, "edited");
     await assert.rejects(w.call("consumer.update", { consumer_id: "helper", can_claim: false }), (e: { code: string }) => e.code === "MODERATOR_ONLY");
-    const viaRoute = await http("PATCH", "/api/consumers/helper", { agent_type: "cto" });
-    assert.equal(viaRoute.status, 403, "the route holds the same gate");
+    const viaDirect = await direct("consumer.update", { consumer_id: "helper", agent_type: "cto" });
+    assert.equal(viaDirect.status, 403, "a direct call holds the same gate");
     assert.equal((await boss.call<{ agent_type: string }>("consumer.update", { consumer_id: "helper", agent_type: "cto" })).agent_type, "cto");
     await assert.rejects(boss.call("consumer.update", { consumer_id: "ghost", note: "n" }), (e: { code: string }) => e.code === "CONSUMER_NOT_FOUND");
 });
 
 test("config, step timing, import and reload", async () => {
     const w = await as(WORKER);
-    assert.deepEqual(await w.call("config.get", {}), (await http("GET", "/api/config")).json);
+    assert.deepEqual(await w.call("config.get", {}), (await direct("config.get")).json);
     const timing = await w.call<{ project: string; since: string | null }>("step.timing", { project: "p-adm", since_days: 7 });
     assert.equal(timing.project, "p-adm");
     assert.ok(timing.since, "since_days becomes a cutoff");
@@ -127,5 +121,5 @@ test("config, step timing, import and reload", async () => {
     // Over TCP: a remote caller, whoever it is, cannot reload.
     const boss = await as(BOSS);
     await assert.rejects(boss.call("daemon.reload", {}), status(403));
-    assert.equal((await http("POST", "/api/daemon/reload", {}, BOSS)).status, 403);
+    assert.equal((await direct("daemon.reload", {}, BOSS)).status, 403);
 });

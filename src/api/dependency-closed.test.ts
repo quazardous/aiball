@@ -2,7 +2,7 @@
  * #2297 step 1 — when a ticket closes, the tickets that were waiting on it hear
  * about it. Before, a `depends_on` gate lifted in silence: the dependent only
  * came back at the next backlog pass, if at all.
- * What must hold, over the real routes:
+ * What must hold, over the bus:
  * - closing T posts one `dependency_closed` event on each OPEN ticket waiting on
  *   it, whether the link was written `A depends_on T` or `T blocks A`; its owner
  *   gets it as an unread event, and it says which ticket closed;
@@ -15,12 +15,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2297-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -38,21 +37,12 @@ const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2297-w
 createProject({ name: "p-2297" });
 upsertSubscription("worker", "p-2297", "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 
 function ticket(title: string): number {
@@ -63,7 +53,7 @@ function lifecycle(kind: "ticket_closed" | "ticket_reopened", id: number): void 
     assert.equal(m.status, "approved");
 }
 async function relate(source: number, target: number, kind: string): Promise<void> {
-    const r = await call(HUMAN, "POST", `/api/tickets/${source}/relations`, { target_ticket_id: target, kind });
+    const r = await call(HUMAN, "ticket.relate", { id: source, target_ticket_id: target, kind });
     assert.equal(r.status, 200, JSON.stringify(r.json));
 }
 function dependencyEvents(onTicket: number): { source: number | null; body: string | null }[] {
@@ -73,7 +63,7 @@ function dependencyEvents(onTicket: number): { source: number | null; body: stri
         .all();
 }
 async function workerUnreadKinds(onTicket: number): Promise<string[]> {
-    const r = await call(WORKER, "GET", "/api/unread?consumer_id=worker&limit=500");
+    const r = await call(WORKER, "unread.list", { consumer_id: "worker", limit: 500 });
     const rows = (Array.isArray(r.json) ? r.json : (r.json as { messages?: unknown[] }).messages ?? []) as { kind: string; ticket_id: number | null }[];
     return rows.filter((m) => m.ticket_id === onTicket).map((m) => m.kind);
 }

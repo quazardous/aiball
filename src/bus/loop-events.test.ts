@@ -18,7 +18,7 @@ process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 process.env.AIBALL_PRESENCE_GRACE_MS = "20";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer } = await import("../db.js");
 const { issueToken } = await import("../db/tokens.js");

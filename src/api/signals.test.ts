@@ -3,8 +3,9 @@
  * and on the socket, and opens nothing else; the source comes from the key;
  * a target reaches the named agent or the project owners working on a level;
  * dedup refreshes instead of duplicating, expiry and ack take a signal out of
- * the pending list, a flood gets 429, and the SSE stream carries it. Spawns the
- * real app over HTTP and over a Unix socket tagged like the daemon's.
+ * the pending list, a flood gets 429, and the SSE stream carries it. Posts
+ * signals to the real app over HTTP and over a Unix socket tagged like the
+ * daemon's; reads and acks them over the bus.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +18,8 @@ import type { AddressInfo } from "node:net";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2255-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { updateConsumer } = await import("../db/consumers.js");
@@ -85,6 +87,10 @@ function sock(method: string, path: string, body?: unknown, headers: Record<stri
         req.on("error", reject); if (data) req.write(data); req.end();
     });
 }
+/** A bus method called as the holder of `token`: everything but posting a signal. */
+function bus(token: string, method: string, params: Record<string, unknown> = {}): Promise<Res> {
+    return asToken(token, method, params);
+}
 const toCoder = (title: string, extra: Record<string, unknown> = {}) => ({ target: { consumer: "coder" }, title, ...extra });
 
 test("over HTTP: no key → 401, an agent token → 403, a signal key → 200 with the key's source", async () => {
@@ -105,9 +111,9 @@ test("on the socket too: no key → 401, an agent token → 403, a signal key �
 });
 
 test("a signal key opens nothing else", async () => {
-    assert.equal((await http("GET", "/signals", undefined, KEY)).status, 403);
-    assert.equal((await http("GET", "/pings", undefined, KEY)).status, 403);
-    assert.equal((await http("POST", "/messages", { project: "p-2255", kind: "ticket_created", title: "x", body: "x" }, KEY)).status, 403);
+    assert.equal((await bus(KEY, "signal.list")).status, 403);
+    assert.equal((await bus(KEY, "ping.list")).status, 403);
+    assert.equal((await bus(KEY, "message.post", { project: "p-2255", kind: "ticket_created", title: "x", body: "x" })).status, 403);
 });
 
 test("a project target reaches the owners working on that level, never a human", async () => {
@@ -130,17 +136,17 @@ test("a malformed signal is refused", async () => {
 
 test("pending: listed for its recipient, gone once acked; a second ack is a 404", async () => {
     const posted = await http("POST", "/signals", toCoder("to ack"), KEY);
-    const listed = await http("GET", "/signals", undefined, CODER);
+    const listed = await bus(CODER, "signal.list");
     assert.ok(listed.json.signals.some((s: any) => s.id === posted.json.id));
-    assert.equal((await http("POST", `/signals/${posted.json.id}/ack`, {}, CODER)).status, 200);
-    const after = await http("GET", "/signals", undefined, CODER);
+    assert.equal((await bus(CODER, "signal.ack", { id: posted.json.id })).status, 200);
+    const after = await bus(CODER, "signal.list");
     assert.equal(after.json.signals.some((s: any) => s.id === posted.json.id), false);
-    assert.equal((await http("POST", `/signals/${posted.json.id}/ack`, {}, CODER)).status, 404);
+    assert.equal((await bus(CODER, "signal.ack", { id: posted.json.id })).status, 404);
 });
 
 test("an agent cannot read another consumer's signals; a human can", async () => {
-    assert.equal((await http("GET", "/signals?consumer_id=cto", undefined, CODER)).status, 403);
-    assert.equal((await http("GET", "/signals?consumer_id=cto", undefined, HUMAN)).status, 200);
+    assert.equal((await bus(CODER, "signal.list", { consumer_id: "cto" })).status, 403);
+    assert.equal((await bus(HUMAN, "signal.list", { consumer_id: "cto" })).status, 200);
 });
 
 test("same source + dedup_key while unacked refreshes the signal instead of duplicating it", async () => {
@@ -156,7 +162,7 @@ test("an expired signal is no longer pending; panic comes first", async () => {
     const old = await http("POST", "/signals", toCoder("stale"), KEY);
     getDb().update(schema.signals).set({ expiresAt: "2000-01-01T00:00:00.000Z" }).where(eq(schema.signals.id, old.json.id)).run();
     const urgent = await http("POST", "/signals", toCoder("urgent", { severity: "panic" }), KEY);
-    const pending = (await http("GET", "/signals", undefined, CODER)).json.signals as any[];
+    const pending = (await bus(CODER, "signal.list")).json.signals as any[];
     assert.equal(pending.some((s) => s.id === old.json.id), false);
     assert.equal(pending[0].id, urgent.json.id);
 });

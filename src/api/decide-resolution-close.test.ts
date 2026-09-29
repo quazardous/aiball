@@ -3,19 +3,18 @@
 // `skipFanOut` so the accept produces ONE ping (the `resolution_accepted`
 // decision-event), not two (the old front POSTed a separate `ticket_closed`
 // whose fan-out was the 2nd ping, cf. #965/#972). Mirrors the existing
-// wontfix auto-close (#802). Spawns the real app on an ephemeral port.
+// wontfix auto-close (#802). Over the bus, as a client holding a token calls it.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-980-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { ensureConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -32,13 +31,7 @@ ensureConsumer(REP);
 ensureConsumer(AG);
 const TOKEN_REP = issueToken({ kind: "agent", consumer_id: REP, label: "980-rep" }).token;
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const port = (server.address() as AddressInfo).port;
-const BASE = `http://127.0.0.1:${port}`;
-
 after(() => {
-    server.close();
     try { rmSync(home, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
@@ -74,11 +67,7 @@ function seed(kind: "resolution" | "wontfix" | "plan"): { tid: number; commentId
 }
 
 async function decide(commentId: number, status: "accepted" | "rejected", closeBody?: string): Promise<number> {
-    const r = await fetch(`${BASE}/api/messages/${commentId}/decide`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN_REP}` },
-        body: JSON.stringify({ status, ...(closeBody ? { body: closeBody } : {}) }),
-    });
+    const r = await asToken(TOKEN_REP, "message.decide", { id: commentId, status, ...(closeBody ? { body: closeBody } : {}) });
     return r.status;
 }
 

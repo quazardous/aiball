@@ -14,12 +14,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2460-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -37,32 +36,23 @@ const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2460-w
 createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${WORKER}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(WORKER, method, params);
 }
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
-const step = (id: number) => call("POST", "/api/messages", {
+const step = (id: number) => call("message.post", {
     project: P, kind: "comment_added", ticket_id: id, body: "step", summary_until: "s", step: true, step_after_minutes: 0,
 });
-const header = async (id: number) => (await call("GET", `/api/tickets/${id}`)).json.ticket as Record<string, unknown>;
+const header = async (id: number) => (await call("ticket.get", { id })).json.ticket as Record<string, unknown>;
 
 /** A ticket the worker claimed `claimedMin` ago and last commented on `actedMin` ago. */
 async function claimedTicket(claimedMin: number, actedMin: number): Promise<number> {
     const id = submitMessage({ project: P, kind: "ticket_created", title: "work", body: "x", by_agent: "boss" }).id;
-    assert.equal((await call("POST", `/api/tickets/${id}/assign`, {})).status, 200);
+    assert.equal((await call("ticket.assign", { id })).status, 200);
     const c = submitMessage({ project: P, kind: "comment_added", ticket_id: id, parent_id: id, body: "working", by_agent: "worker", summary_until: "s", handback: false });
     getDb().update(schema.tickets).set({ claimedAt: ago(claimedMin) }).where(eq(schema.tickets.id, id)).run();
     getDb().update(schema.messages).set({ createdAt: ago(actedMin) })
@@ -77,7 +67,7 @@ test("still working five hours after claiming: the claim holds, the step is acce
     const until = Date.parse(String(h.claim_until));
     assert.ok(Math.abs(until - (Date.now() + 40 * 60_000)) < 60_000, `claim_until ≈ last action + 60 min, got ${h.claim_until}`);
     const r = await step(id);
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
 });
 
 test("past both clocks the claim has lapsed everywhere, and claiming again renews it", async () => {
@@ -89,6 +79,6 @@ test("past both clocks the claim has lapsed everywhere, and claiming again renew
     // #2781 david — "si on continue on claim aussi": the step renews the lapsed
     // claim of the agent it belonged to, instead of refusing it.
     const r = await step(id);
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal((await header(id)).is_claim, true, "the step claimed it again");
 });

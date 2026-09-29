@@ -1,18 +1,16 @@
-// #324 e2e — bus lifecycle (#321) : un `onLifecycle` reçoit `created` / `moved`
-// / `decided`, EXACTEMENT une fois par mutation — le filet de régression du
-// dédup ("emit exactly once per mutation, no double-fire", event-bus.ts).
+// #324 e2e — bus lifecycle (#321): an `onLifecycle` listener receives
+// `created` / `moved` / `decided` EXACTLY once per mutation — the regression
+// net for the dedup ("emit exactly once per mutation, no double-fire",
+// event-bus.ts).
 //
-// STRUCTURELLEMENT DIFFÉRENT des autres scénarios : le bus lifecycle est un
-// EventEmitter IN-PROCESS (src/event-bus.ts). On ne peut donc PAS l'observer
-// par HTTP depuis le daemon partagé (autre process — son bus est invisible
-// d'ici). On monte donc le VRAI app in-process (`createApp`, exactement
-// l'affordance pour laquelle src/app.ts a été extrait) sur un port éphémère, et
-// on s'abonne à `onLifecycle` dans LE MÊME process avant de driver la business
-// API contre cette instance locale. DB de test partagée, projet distinct → pas
-// d'interférence avec le daemon que les autres scénarios attaquent.
+// Structurally different from the other scenarios: the lifecycle bus is an
+// in-process EventEmitter (src/event-bus.ts), invisible from the shared daemon
+// the others drive. So this one subscribes to `onLifecycle` in its own process
+// and makes the mutations there, as bus calls (`asToken`: a token's caller,
+// the bus's own checks — #3242). Shared test DB, its own projects: no
+// interference with the daemon the other scenarios use.
 // (#328 checklist : bus lifecycle #321)
-import type { AddressInfo } from "node:net";
-import { createTestApp as createApp } from "../src/tests/test-app.js";
+import { asToken } from "../src/tests/bus-call.js";
 import { onLifecycle, type LifecycleEvent } from "../src/event-bus.js";
 import { provision, provisionProject, provisionHuman, metaDecision, ok, fail } from "./lib.js";
 
@@ -25,48 +23,20 @@ async function main(): Promise<void> {
     const events: LifecycleEvent[] = [];
     const off = onLifecycle((e) => events.push(e));
 
-    // Monter le vrai app in-process et écouter sur un port éphémère.
-    const server = createApp().listen(0);
-    await new Promise<void>((r) => server.once("listening", () => r()));
-    const port = (server.address() as AddressInfo).port;
-    const BASE = `http://127.0.0.1:${port}`;
-
     provisionProject(project);
     provisionProject(dstProject);
     const tokA = provision("agent-a"); // l'agent qui porte le ticket (reporter)
     const tokB = provision("agent-b"); // l'agent qui propose un plan
     const tokMod = provisionHuman("human-mod"); // moderates the agent's ticket before anyone plans on it
 
-    async function post(token: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-        const r = await fetch(`${BASE}/api/messages`, {
-            method: "POST",
-            headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-            body: JSON.stringify(body),
-        });
-        const text = await r.text();
-        if (!r.ok) throw new Error(`POST /api/messages → ${r.status}: ${text}`);
-        return JSON.parse(text) as Record<string, unknown>;
+    async function call(token: string, method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+        const r = await asToken<Record<string, unknown>>(token, method, params);
+        if (r.status !== 200) throw new Error(`${method} → ${r.status}: ${JSON.stringify(r.json)}`);
+        return r.json;
     }
-    async function decide(token: string, id: number, status: "accepted" | "rejected"): Promise<Record<string, unknown>> {
-        const r = await fetch(`${BASE}/api/messages/${id}/decide`, {
-            method: "POST",
-            headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-            body: JSON.stringify({ status }),
-        });
-        const text = await r.text();
-        if (!r.ok) throw new Error(`POST /api/messages/${id}/decide → ${r.status}: ${text}`);
-        return JSON.parse(text) as Record<string, unknown>;
-    }
-    async function move(token: string, id: number, toProject: string): Promise<Record<string, unknown>> {
-        const r = await fetch(`${BASE}/api/tickets/${id}/move`, {
-            method: "POST",
-            headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-            body: JSON.stringify({ project: toProject }),
-        });
-        const text = await r.text();
-        if (!r.ok) throw new Error(`POST /api/tickets/${id}/move → ${r.status}: ${text}`);
-        return JSON.parse(text) as Record<string, unknown>;
-    }
+    const post = (token: string, body: Record<string, unknown>) => call(token, "message.post", body);
+    const decide = (token: string, id: number, status: "accepted" | "rejected") => call(token, "message.decide", { id, status });
+    const move = (token: string, id: number, toProject: string) => call(token, "ticket.move", { id, project: toProject });
 
     // Fenêtre d'événements lifecycle depuis le dernier checkpoint (= la
     // mutation qu'on vient de déclencher). C'est ce découpage par mutation qui
@@ -91,11 +61,8 @@ async function main(): Promise<void> {
     // A plan is refused on a ticket still waiting for moderation: approve it
     // first, on this same in-process app, and start the next window after it.
     {
-        const r = await fetch(`${BASE}/api/messages/${ticketId}/approve`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${tokMod}` },
-        });
-        if (!r.ok) fail(`approving ticket #${ticketId} → ${r.status}: ${await r.text()}`);
+        const r = await asToken(tokMod, "message.approve", { id: ticketId });
+        if (r.status !== 200) fail(`approving ticket #${ticketId} → ${r.status}: ${JSON.stringify(r.json)}`);
         checkpoint();
     }
 
@@ -141,7 +108,6 @@ async function main(): Promise<void> {
     }
 
     off();
-    await new Promise<void>((r) => server.close(() => r()));
     ok("bus lifecycle — onLifecycle a reçu created/moved/decided, une seule fois chacun (#321 dédup)");
     process.exit(0);
 }

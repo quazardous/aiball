@@ -18,7 +18,7 @@ process.env.AIBALL_SOCK = "";
 process.env.AIBALL_COUNTERS_GAP_MS = "30";
 process.env.AIBALL_PRESENCE_GRACE_MS = "20";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer, setConsumerState } = await import("../db.js");
 const { createProject } = await import("../db/projects.js");

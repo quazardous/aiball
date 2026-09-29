@@ -1,7 +1,8 @@
 /**
  * #2215 — a comment on a ticket that does not exist is a clean 404, and no
- * error ever comes back as Express's HTML page with a stack in it. Spawns the
- * real app on an ephemeral port for the HTTP cases.
+ * error ever comes back as Express's HTML page with a stack in it. The comment
+ * goes over the bus as a client holding a token calls it; the malformed body
+ * goes to the real app on an ephemeral port.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -13,8 +14,8 @@ import type { AddressInfo } from "node:net";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2215-"));
 process.env.AIBALL_SOCK = "";
 
-const { jsonErrorHandler } = await import("../app.js");
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { jsonErrorHandler, createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -36,33 +37,31 @@ after(() => {
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-const post = (body: string) => fetch(`${BASE}/api/messages`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-    body,
-});
-const comment = (ticket_id: number) => JSON.stringify({
+const comment = (ticket_id: number) => asToken<{ error?: string }>(TOKEN, "message.post", {
     project: "p-2215", kind: "comment_added", ticket_id, body: "x", by_agent: "worker", summary_until: "state", handback: true,
 });
 const messageCount = () => db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM _messages`)[0].n;
 
 test("a comment on a ticket that does not exist is a 404 in JSON, and nothing is written", async () => {
     const before = messageCount();
-    const res = await post(comment(987654321));
+    const res = await comment(987654321);
     assert.equal(res.status, 404);
-    assert.match(res.headers.get("content-type") ?? "", /application\/json/);
-    const body = (await res.json()) as { error?: string };
-    assert.match(body.error ?? "", /ticket #987654321 does not exist/);
+    assert.match(res.json.error ?? "", /ticket #987654321 does not exist/);
     assert.equal(messageCount(), before);
 });
 
 test("a comment on a real ticket still posts", async () => {
-    const res = await post(comment(real.id));
-    assert.equal(res.status, 201);
+    const res = await comment(real.id);
+    assert.equal(res.status, 200);
 });
 
 test("a malformed body is answered in JSON, not as an HTML error page", async () => {
-    const res = await post("{not json");
+    // A production route: the body is parsed before any route is reached.
+    const res = await fetch(`${BASE}/api/tickets`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: "{not json",
+    });
     assert.equal(res.status, 400);
     assert.match(res.headers.get("content-type") ?? "", /application\/json/);
     const text = await res.text();

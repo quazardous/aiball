@@ -4,7 +4,8 @@
  * note, and no two keys share a label; the token leaves the daemon once, at
  * minting; a revoked key can no longer post; a project lists the signals aimed
  * at it or at one of its owners — not another project's — with each recipient's
- * delivery state.
+ * delivery state. Keys and listings go over the bus; a key posts its signal
+ * over the production HTTP route.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +17,8 @@ import type { AddressInfo } from "node:net";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2276-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -55,27 +57,32 @@ async function http(method: string, path: string, body?: unknown, token?: string
     let json: any; try { json = JSON.parse(text); } catch { json = text; }
     return { status: res.status, json, text };
 }
+/** A bus call as the holder of `token`, read as `http` reads a route. */
+async function bus(method: string, params: Record<string, unknown>, token: string): Promise<Res> {
+    const r = await asToken(token, method, params);
+    return { status: r.status, json: r.json, text: JSON.stringify(r.json) };
+}
 async function mint(label: string, note = `given to ${label} for the tests`): Promise<{ token: string; key_id: string }> {
-    const r = await http("POST", "/signal-keys", { label, note }, HUMAN);
-    assert.equal(r.status, 201, r.text);
+    const r = await bus("signal_key.create", { label, note }, HUMAN);
+    assert.equal(r.status, 200, r.text);
     return { token: r.json.token, key_id: r.json.key.key_id };
 }
 
 test("an agent can neither list, mint, edit nor revoke a key, nor read a project's signals", async () => {
     const { key_id } = await mint("agent-probe");
-    assert.equal((await http("GET", "/signal-keys", undefined, CODER)).status, 403);
-    assert.equal((await http("POST", "/signal-keys", { label: "x", note: "y" }, CODER)).status, 403);
-    assert.equal((await http("PATCH", `/signal-keys/${key_id}`, { note: "z" }, CODER)).status, 403);
-    assert.equal((await http("DELETE", `/signal-keys/${key_id}`, undefined, CODER)).status, 403);
-    assert.equal((await http("GET", "/projects/p1-2276/signals", undefined, CODER)).status, 403);
+    assert.equal((await bus("signal_key.list", {}, CODER)).status, 403);
+    assert.equal((await bus("signal_key.create", { label: "x", note: "y" }, CODER)).status, 403);
+    assert.equal((await bus("signal_key.update", { key_id, note: "z" }, CODER)).status, 403);
+    assert.equal((await bus("signal_key.revoke", { key_id }, CODER)).status, 403);
+    assert.equal((await bus("project.signals", { name: "p1-2276" }, CODER)).status, 403);
 });
 
 test("minting needs a label and a note, and a label already taken is refused", async () => {
-    assert.equal((await http("POST", "/signal-keys", { label: "no-note" }, HUMAN)).status, 400);
-    assert.equal((await http("POST", "/signal-keys", { label: "blank-note", note: "   " }, HUMAN)).status, 400);
-    assert.equal((await http("POST", "/signal-keys", { note: "no label" }, HUMAN)).status, 400);
+    assert.equal((await bus("signal_key.create", { label: "no-note" }, HUMAN)).status, 400);
+    assert.equal((await bus("signal_key.create", { label: "blank-note", note: "   " }, HUMAN)).status, 400);
+    assert.equal((await bus("signal_key.create", { note: "no label" }, HUMAN)).status, 400);
     await mint("taken");
-    assert.equal((await http("POST", "/signal-keys", { label: "taken", note: "second holder" }, HUMAN)).status, 409);
+    assert.equal((await bus("signal_key.create", { label: "taken", note: "second holder" }, HUMAN)).status, 409);
 });
 
 test("the token comes back once, at minting, and never in the list", async () => {
@@ -84,7 +91,7 @@ test("the token comes back once, at minting, and never in the list", async () =>
     assert.equal(token.includes(key_id), false, "the handle is not a piece of the token");
     const posted = await http("POST", "/signals", { target: { consumer: "coder" }, title: "proves the key works" }, token);
     assert.equal(posted.status, 200);
-    const list = await http("GET", "/signal-keys", undefined, HUMAN);
+    const list = await bus("signal_key.list", {}, HUMAN);
     assert.equal(list.text.includes(token.slice("aiball-".length, "aiball-".length + 12)), false, "no part of the token is listed");
     const row = list.json.find((k: any) => k.key_id === key_id);
     assert.equal(row.note, "given to the chat bridge");
@@ -95,22 +102,22 @@ test("the token comes back once, at minting, and never in the list", async () =>
 
 test("the note can be edited but not blanked; an unknown key is a 404", async () => {
     const { key_id } = await mint("editable");
-    const edited = await http("PATCH", `/signal-keys/${key_id}`, { note: "now held by the deploy bot" }, HUMAN);
+    const edited = await bus("signal_key.update", { key_id, note: "now held by the deploy bot" }, HUMAN);
     assert.equal(edited.status, 200);
     assert.equal(edited.json.note, "now held by the deploy bot");
-    assert.equal((await http("PATCH", `/signal-keys/${key_id}`, { note: "" }, HUMAN)).status, 400);
-    assert.equal((await http("PATCH", "/signal-keys/0000000000000000", { note: "x" }, HUMAN)).status, 404);
-    assert.equal((await http("DELETE", "/signal-keys/0000000000000000", undefined, HUMAN)).status, 404);
+    assert.equal((await bus("signal_key.update", { key_id, note: "" }, HUMAN)).status, 400);
+    assert.equal((await bus("signal_key.update", { key_id: "0000000000000000", note: "x" }, HUMAN)).status, 404);
+    assert.equal((await bus("signal_key.revoke", { key_id: "0000000000000000" }, HUMAN)).status, 404);
 });
 
 test("a revoked key can no longer post and leaves the list; its signals stay", async () => {
     const { token, key_id } = await mint("revoked-src");
     await http("POST", "/signals", { target: { project: "p1-2276", level: "task" }, title: "sent before revocation" }, token);
-    assert.equal((await http("DELETE", `/signal-keys/${key_id}`, undefined, HUMAN)).status, 200);
+    assert.equal((await bus("signal_key.revoke", { key_id }, HUMAN)).status, 200);
     assert.equal((await http("POST", "/signals", { target: { consumer: "coder" }, title: "after" }, token)).status, 401);
-    const list = await http("GET", "/signal-keys", undefined, HUMAN);
+    const list = await bus("signal_key.list", {}, HUMAN);
     assert.equal(list.json.some((k: any) => k.key_id === key_id), false);
-    const signals = await http("GET", "/projects/p1-2276/signals", undefined, HUMAN);
+    const signals = await bus("project.signals", { name: "p1-2276" }, HUMAN);
     assert.ok(signals.json.signals.some((s: any) => s.source === "revoked-src"));
 });
 
@@ -122,21 +129,21 @@ test("a project lists what was aimed at it or at its owners, not another project
     await post({ project: "p2-2276", level: "task" }, "to p2");
     await post({ consumer: "other" }, "to p2's owner");
 
-    const listed = await http("GET", "/projects/p1-2276/signals", undefined, HUMAN);
+    const listed = await bus("project.signals", { name: "p1-2276" }, HUMAN);
     const titles = listed.json.signals.filter((s: any) => s.source === "scoped-src").map((s: any) => s.title);
     assert.deepEqual(titles, ["to p1's owner", "to p1"], "newest first, the other project's left out");
 
     const pending = listed.json.signals.find((s: any) => s.id === toProject.json.id);
     assert.deepEqual(pending.deliveries.map((d: any) => [d.recipient, d.state]), [["coder", "pending"]]);
-    assert.equal((await http("POST", `/signals/${toProject.json.id}/ack`, {}, CODER)).status, 200);
-    const after = await http("GET", "/projects/p1-2276/signals", undefined, HUMAN);
+    assert.equal((await bus("signal.ack", { id: toProject.json.id }, CODER)).status, 200);
+    const after = await bus("project.signals", { name: "p1-2276" }, HUMAN);
     assert.equal(after.json.signals.find((s: any) => s.id === toProject.json.id).deliveries[0].state, "delivered");
 
     const later = listProjectSignals("p1-2276", "2999-01-01T00:00:00.000Z");
     const owner = later.find((s) => s.title === "to p1's owner")!;
     assert.equal(owner.deliveries[0].state, "expired", "unacked past its expiry");
 
-    const keys = await http("GET", "/signal-keys?project=p1-2276", undefined, HUMAN);
+    const keys = await bus("signal_key.list", { project: "p1-2276" }, HUMAN);
     const row = keys.json.find((k: any) => k.label === "scoped-src");
     assert.equal(row.signals_sent, 4);
     assert.equal(row.signals_to_project, 2);

@@ -2,8 +2,7 @@
  * #2380 david `75jv33` — the outcome of a decision wakes the agent whose
  * proposal was decided, and nobody else. A reporter used to be woken by every
  * accept on their ticket, including decisions they cannot take (no MCP tool
- * accepts a plan) and that ask them nothing. What must hold, over the real
- * routes:
+ * accepts a plan) and that ask them nothing. What must hold, over the bus:
  * - accepting a plan wakes its author, not the ticket's reporter;
  * - the reporter still hears what concerns them: the agent's comment, and the
  *   close — which david keeps, since it can unblock tickets on their side;
@@ -16,12 +15,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2380-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -41,21 +39,12 @@ createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 upsertSubscription("reporter", P, "follower");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 /** The reporter files it; the human approves so the thread is live. */
 function ticketByReporter(title: string): number {
@@ -64,23 +53,23 @@ function ticketByReporter(title: string): number {
     return m.id;
 }
 async function approve(messageId: number): Promise<void> {
-    const r = await call(HUMAN, "POST", `/api/messages/${messageId}/approve`, {});
+    const r = await call(HUMAN, "message.approve", { id: messageId });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 async function propose(ticketId: number, kind: "plan" | "resolution"): Promise<number> {
-    const r = await call(WORKER, "POST", "/api/messages", {
+    const r = await call(WORKER, "message.post", {
         project: P, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", decision_kind: kind,
     });
     assert.ok(r.status < 300, JSON.stringify(r.json));
     return (r.json as { id: number }).id;
 }
 async function decide(messageId: number, status: "accepted" | "rejected"): Promise<void> {
-    const r = await call(HUMAN, "POST", `/api/messages/${messageId}/decide`, { status });
+    const r = await call(HUMAN, "message.decide", { id: messageId, status });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 /** The kinds waiting unseen for a consumer on this ticket. */
 async function wakesFor(token: string, consumer: string, ticketId: number): Promise<string[]> {
-    const r = await call(token, "GET", `/api/unread?consumer_id=${consumer}&limit=500`);
+    const r = await call(token, "unread.list", { consumer_id: consumer, limit: 500 });
     const rows = (Array.isArray(r.json) ? r.json : (r.json as { messages?: unknown[] }).messages ?? []) as { kind: string; ticket_id: number | null }[];
     return rows.filter((m) => m.ticket_id === ticketId).map((m) => m.kind);
 }
@@ -110,7 +99,7 @@ test("a rejection reaches the same single recipient", async () => {
 test("the reporter still hears the agent's comment and the close", async () => {
     const t = ticketByReporter("what the reporter must keep hearing");
     await approve(t);
-    const r1 = await call(WORKER, "POST", "/api/messages", {
+    const r1 = await call(WORKER, "message.post", {
         project: P, kind: "comment_added", ticket_id: t, body: "a word for the reporter", summary_until: "s", handback: true,
     });
     assert.ok(r1.status < 300, JSON.stringify(r1.json));

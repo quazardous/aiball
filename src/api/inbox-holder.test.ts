@@ -8,12 +8,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3038-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -31,16 +30,12 @@ const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "3038-h" }
 createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function get(path: string): Promise<unknown> {
-    return (await fetch(`${BASE}${path}`, { headers: { authorization: `Bearer ${HUMAN}` } })).json();
+async function get(method: string, params: Record<string, unknown>): Promise<unknown> {
+    return (await asToken(HUMAN, method, params)).json;
 }
 function ticket(title: string, hold: { assignee?: string; claimant?: string; claimedAt?: string } = {}): number {
     const id = submitMessage({ project: P, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
@@ -53,12 +48,12 @@ function ticket(title: string, hold: { assignee?: string; claimant?: string; cla
 }
 type Held = { holder: string | null; held_as: string | null };
 async function rowOf(id: number): Promise<Held> {
-    const rows = await get(`/api/inbox?ids=${id}&project=${P}`) as (Held & { id: number })[];
+    const { rows } = await get("inbox.list", { ids: [id], project: P }) as { rows: (Held & { id: number })[] };
     const r = rows.find((x) => x.id === id)!;
     return { holder: r.holder, held_as: r.held_as };
 }
 async function headerOf(id: number): Promise<Held> {
-    const t = (await get(`/api/tickets/${id}`) as { ticket: Held }).ticket;
+    const t = (await get("ticket.get", { id }) as { ticket: Held }).ticket;
     return { holder: t.holder, held_as: t.held_as };
 }
 

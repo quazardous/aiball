@@ -1,8 +1,7 @@
 /**
  * #2386 — a backlog wake asks the woken agent for a gesture, and a comment is
  * one. Counting that answer as "the thread moved" voided the cooldown the wake
- * had just set, so the ticket came straight back. What must hold, over the real
- * routes:
+ * had just set, so the ticket came straight back. What must hold, over the bus:
  * - the woken agent's own comment leaves the ticket sunk for the cooldown;
  * - anyone else's word still lifts it at once — that is news, and the point of
  *   the rule;
@@ -14,12 +13,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2386-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -40,38 +38,29 @@ createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 upsertSubscription("other", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 function ticket(title: string): number {
     return submitMessage({ project: P, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 }
 async function wake(ticketId: number): Promise<void> {
-    const r = await call(WORKER, "POST", "/api/backlog-wake", { consumer_id: "worker", ticket_id: ticketId });
+    const r = await call(WORKER, "backlog.record_wake", { consumer_id: "worker", ticket_id: ticketId });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 async function comment(token: string, ticketId: number, extra: Record<string, unknown> = {}): Promise<void> {
-    const r = await call(token, "POST", "/api/messages", {
+    const r = await call(token, "message.post", {
         project: P, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", ...extra,
     });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 /** Seconds the ticket stays out of the worker's wake pool from now (0 = a candidate). */
 async function cooledFor(ticketId: number): Promise<number> {
-    const r = await call(WORKER, "GET", `/api/tickets?project=${P}&backlog=1&limit=500&cooldown_sec=${COOLDOWN}`);
+    const r = await call(WORKER, "ticket.list", { project: P, backlog: true, limit: 500, cooldown_sec: COOLDOWN });
     const rows = r.json as { id: number; backlog_cooled_until: string | null }[];
     const row = rows.find((x) => x.id === ticketId);
     assert.ok(row, `#${ticketId} in the worker's backlog`);
@@ -104,7 +93,7 @@ test("someone else's word still lifts the cooldown at once", async () => {
 
 test("the agent's own step still lifts the sink at once — it says there is work now", async () => {
     const t = ticket("the agent marks a step after the wake");
-    await call(WORKER, "POST", `/api/tickets/${t}/assign`, {}); // self-claim
+    await call(WORKER, "ticket.assign", { id: t }); // self-claim
     await wake(t);
 
     await comment(WORKER, t, { step: true, step_after_minutes: 0 });

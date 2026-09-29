@@ -10,12 +10,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2458-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -37,20 +36,15 @@ createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 upsertSubscription("zed", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 type Row = { id: number; backlog_cooled_until: string | null; backlog_last_wake_at: string | null };
 async function row(ticketId: number): Promise<Row> {
-    const r = await fetch(`${BASE}/api/tickets?project=${P}&backlog=1&limit=500&cooldown_sec=${COOLDOWN}`, {
-        headers: { authorization: `Bearer ${WORKER}` },
-    });
-    const found = ((await r.json()) as Row[]).find((x) => x.id === ticketId);
+    const r = await asToken<Row[]>(WORKER, "ticket.list", { project: P, backlog: true, limit: 500, cooldown_sec: COOLDOWN });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const found = r.json.find((x) => x.id === ticketId);
     assert.ok(found, `#${ticketId} in the worker's backlog`);
     return found;
 }

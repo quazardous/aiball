@@ -3,7 +3,7 @@
  * accepted on a comment closed it. The resolved count replayed the lifecycle
  * rows only, and accepting a resolution on a comment writes no
  * `ticket_resolved` row, so nearly every resolved ticket was missed (84 of 822
- * on the live aiball board). What must hold, over the real routes (one project
+ * on the live aiball board). What must hold, over the bus as a client holding a token calls it (one project
  * per case, so counts are exact):
  * - a resolution accepted on a comment (which closes the ticket) counts as
  *   closed and resolved;
@@ -15,12 +15,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2373-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -34,21 +33,12 @@ upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2373-h" }).token;
 const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2373-w" }).token;
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(token, method, params);
 }
 function project(name: string): string {
     createProject({ name });
@@ -60,15 +50,15 @@ function ticket(p: string, title: string): number {
 }
 /** The worker proposes a resolution and the human accepts it, which closes the ticket. */
 async function resolveOnComment(p: string, ticketId: number): Promise<void> {
-    const r = await call(WORKER, "POST", "/api/messages", { project: p, kind: "comment_added", ticket_id: ticketId, body: "done", summary_until: "s", decision_kind: "resolution" });
+    const r = await call(WORKER, "message.post", { project: p, kind: "comment_added", ticket_id: ticketId, body: "done", summary_until: "s", decision_kind: "resolution" });
     assert.ok(r.status < 300, JSON.stringify(r.json));
-    assert.ok((await call(HUMAN, "POST", `/api/messages/${r.json.id as number}/decide`, { status: "accepted" })).status < 300);
+    assert.ok((await call(HUMAN, "message.decide", { id: r.json.id as number, status: "accepted" })).status < 300);
 }
 function lifecycle(p: string, kind: "ticket_closed" | "ticket_reopened", ticketId: number): void {
     assert.equal(submitMessage({ project: p, kind, ticket_id: ticketId, by_agent: "boss" }).status, "approved");
 }
 async function counts(p: string): Promise<{ closed: number; resolved: number }> {
-    const r = await call(HUMAN, "GET", `/api/projects/${p}/stats-rich`);
+    const r = await call(HUMAN, "project.stats_rich", { name: p });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     return { closed: r.json.closed_count as number, resolved: r.json.resolved_count as number };
 }

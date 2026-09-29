@@ -1,21 +1,20 @@
 /**
- * #3067 — projects as methods: over the bus and over the routes that now
- * serve them, the same answer and the same refusals (a name taken, a rename
- * onto an existing name or from a missing one), and the create route still
- * answers 201.
+ * #3067 — projects as methods, over the bus: created, listed and read, and
+ * the refusals (a name taken, a rename onto an existing name or from a
+ * missing one).
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3067-project-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer } = await import("../db.js");
 const { issueToken } = await import("../db/tokens.js");
@@ -44,31 +43,22 @@ async function worker() {
     return c;
 }
 
-function http(method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    return new Promise((resolve, reject) => {
-        const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${WORKER}`, "content-type": "application/json" } }, (res) => {
-            let b = "";
-            res.on("data", (d) => { b += d; });
-            res.on("end", () => resolve({ status: res.statusCode ?? 0, json: b ? JSON.parse(b) : null }));
-        });
-        req.on("error", reject);
-        req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
-}
-
-test("create, list and read a project: bus and route agree", async () => {
+test("create, list and read a project over the bus", async () => {
     const c = await worker();
     const made = await c.call<{ name: string }>("project.create", { name: "p-one", description: "first" });
     assert.equal(made.name, "p-one");
-    const viaRoute = await http("POST", "/api/projects", { name: "p-two" });
-    assert.equal(viaRoute.status, 201, "the route still answers 201");
-    assert.deepEqual(await c.call("project.list"), (await http("GET", "/api/projects")).json);
-    assert.deepEqual(await c.call("project.list", { detailed: true, consumer_id: "worker" }), (await http("GET", "/api/projects?detailed=1&consumer_id=worker")).json);
+    assert.equal((await c.call<{ name: string }>("project.create", { name: "p-two" })).name, "p-two");
+    const listed = await c.call<string[]>("project.list");
+    assert.ok(listed.includes("p-one") && listed.includes("p-two"), JSON.stringify(listed));
+    const detailed = await c.call<{ name: string }[]>("project.list", { detailed: true, consumer_id: "worker" });
+    assert.ok(["p-one", "p-two"].every((n) => detailed.some((p) => p.name === n)), JSON.stringify(detailed.map((p) => p.name)));
     const one = await c.call<{ name: string }[]>("project.list", { detailed: true, consumer_id: "worker", project: "p-one" });
     assert.deepEqual(one.map((p) => p.name), ["p-one"], "narrowed to one project");
-    assert.deepEqual(await c.call("project.stats", { name: "p-one" }), (await http("GET", "/api/projects/p-one/stats")).json);
-    assert.deepEqual(await c.call("project.standing_prompt", { project: "p-one" }), (await http("GET", "/api/projects/p-one/standing-prompt")).json);
-    assert.deepEqual(await c.call("consumer.presence", { project: "p-one" }), (await http("GET", "/api/presence?project=p-one")).json);
+    const stats = await c.call("project.stats", { name: "p-one" });
+    assert.equal(typeof stats, "object", "the stats are answered");
+    assert.ok(stats);
+    await c.call("project.standing_prompt", { project: "p-one" });
+    await c.call("consumer.presence", { project: "p-one" });
 });
 
 test("the refusals: a name taken, a rename onto one, a rename from nothing", async () => {

@@ -1,6 +1,6 @@
 /**
  * #3037 — a ticket filed in one call, with its tags, assignee, milestone,
- * level and parent. Over the real route:
+ * level and parent. Over the bus:
  * - everything lands, and one creation event announces the ticket, already
  *   whole (tags, assignee, milestone, level on it): what the automation sees;
  * - an unknown tag, a released milestone, a level or an assignment the caller
@@ -12,12 +12,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3037-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, getMessage, listMessageTags } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -50,21 +49,12 @@ const V1 = milestone("v1");
 const V0 = milestone("v0", true);
 const PARENT = submitMessage({ project: P, kind: "ticket_created", title: "parent", body: "x", by_agent: "boss" }).id;
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function file(token: string, extra: Record<string, unknown>): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}/api/messages`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ project: P, kind: "ticket_created", title: "t", body: "b", ...extra }),
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function file(token: string, extra: Record<string, unknown>): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(token, "message.post", { project: P, kind: "ticket_created", title: "t", body: "b", ...extra });
 }
 const ticketCount = () => getDb().select().from(schema.tickets).all().length;
 
@@ -86,7 +76,7 @@ test("a whole ticket in one call, announced once and already whole", async () =>
     });
     try {
         const r = await file(HUMAN, { tags: ["front", "urgent-ish"], assignee: "worker", milestone: V1, level: "task", parent_id: PARENT });
-        assert.equal(r.status, 201, JSON.stringify(r.json));
+        assert.equal(r.status, 200, JSON.stringify(r.json));
         const id = r.json.id as number;
         const t = getMessage(id)!;
         assert.deepEqual(listMessageTags(id).map((x) => x.name).sort(), ["front", "urgent-ish"]);
@@ -101,7 +91,7 @@ test("a whole ticket in one call, announced once and already whole", async () =>
 
 test("a human sets a level other than task at creation", async () => {
     const r = await file(HUMAN, { level: "milestone" });
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(getMessage(r.json.id as number)?.level, "milestone");
 });
 

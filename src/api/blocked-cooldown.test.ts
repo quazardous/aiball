@@ -2,7 +2,7 @@
  * #2377 — a blocked ticket must keep surfacing so it is not forgotten, but
  * nothing moves on it between two wakes: after a backlog wake it stays out of
  * the pool `tickets.backlog.blocked_multiplier` times longer than any other
- * ticket (twice, by default). What must hold, over the real routes:
+ * ticket (twice, by default). What must hold, over the bus:
  * - a ticket gated by an open blocker is cooled for twice the cooldown, while a
  *   plain ticket woken in the same pass is cooled for exactly the cooldown;
  * - the multiplier is per project: at 1, a blocked ticket cools like the rest.
@@ -12,12 +12,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2377-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -43,43 +42,34 @@ for (const p of [P, ONE]) {
 }
 setConfigOverride(ONE, "tickets.backlog.blocked_multiplier", 1);
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 function ticket(project: string, title: string): number {
     return submitMessage({ project, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 }
 async function blockOn(project: string, waiting: number, blocker: number): Promise<void> {
-    const r = await call(HUMAN, "POST", `/api/tickets/${waiting}/relations`, { target_ticket_id: blocker, kind: "depends_on" });
+    const r = await call(HUMAN, "ticket.relate", { id: waiting, target_ticket_id: blocker, kind: "depends_on" });
     assert.equal(r.status, 200, JSON.stringify(r.json));
 }
 async function wake(ticketId: number): Promise<void> {
-    const r = await call(WORKER, "POST", "/api/backlog-wake", { consumer_id: "worker", ticket_id: ticketId });
+    const r = await call(WORKER, "backlog.record_wake", { consumer_id: "worker", ticket_id: ticketId });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 /** Seconds the ticket stays out of the wake pool from now (0 = a candidate). */
 async function cooledFor(project: string, ticketId: number): Promise<number> {
-    const r = await call(WORKER, "GET", `/api/tickets?project=${project}&backlog=1&limit=500&cooldown_sec=${COOLDOWN}`);
+    const r = await call(WORKER, "ticket.list", { project, backlog: true, limit: 500, cooldown_sec: COOLDOWN });
     const rows = r.json as { id: number; backlog_tier: number | null; backlog_cooled_until: string | null }[];
     const row = rows.find((x) => x.id === ticketId);
     assert.ok(row, `#${ticketId} in the worker's backlog`);
     return row!.backlog_cooled_until ? Math.round((Date.parse(row!.backlog_cooled_until) - Date.now()) / 1000) : 0;
 }
 async function tierOf(project: string, ticketId: number): Promise<number | null> {
-    const r = await call(WORKER, "GET", `/api/tickets?project=${project}&backlog=1&limit=500&cooldown_sec=${COOLDOWN}`);
+    const r = await call(WORKER, "ticket.list", { project, backlog: true, limit: 500, cooldown_sec: COOLDOWN });
     const rows = r.json as { id: number; backlog_tier: number | null }[];
     return rows.find((x) => x.id === ticketId)?.backlog_tier ?? null;
 }

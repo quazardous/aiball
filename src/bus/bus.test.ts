@@ -23,7 +23,8 @@ const { ensureConsumer, upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
 const schema = await import("../schema.js");
 const { eq } = await import("drizzle-orm");
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { api } = await import("../api.js");
 const { attachBus, sweepConnections, busConnectionCountForTests, BUS_CLOSE } = await import("./server.js");
 const { defineMethod, Refusal, undefineMethodForTests } = await import("./methods.js");
 const { MAX_BATCH } = await import("./rpc.js");
@@ -61,6 +62,9 @@ defineMethod({
 defineMethod({ name: "test.store", who: ["human", "agent"], params: z.object({ v: z.unknown() }), run: (_c, p) => { stored = p.v; return null; } });
 defineMethod({ name: "test.read", who: ["human", "agent"], params: z.object({}), run: () => stored });
 
+// No production route echoes who a request runs as: a probe on the real `api`
+// router, behind its real authentication, says what HTTP settled.
+api.get("/test-3063/me", (req, res) => { res.json({ consumer_id: (req as unknown as { consumer_id?: string }).consumer_id }); });
 const app = createApp();
 const tcp = createServer(app);
 const tcpBus = attachBus(tcp);
@@ -137,7 +141,7 @@ test("the identity the bus settles is the one HTTP settles, for every kind of ca
     for (const k of cases) {
         const c = await connect(k.bus);
         const who = await c.call<{ consumer: string }>("bus.whoami");
-        const httpMe = await httpGet("/api/me", k.http.headers, k.http.socket);
+        const httpMe = await httpGet("/api/test-3063/me", k.http.headers, k.http.socket);
         assert.equal(who.consumer, k.want, `${k.name}: bus`);
         assert.equal((httpMe as { consumer_id: string }).consumer_id, k.want, `${k.name}: http`);
         c.close();

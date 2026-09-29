@@ -1,7 +1,7 @@
 /**
  * #3036 — the author of a write is the authenticated caller, never a name in
- * the body. Over the real routes, with tokens (TCP, where the caller is bound
- * to its token):
+ * the body. Over the bus, with tokens (as a TCP client, where the caller is
+ * bound to its token):
  * - a body naming someone else is refused whole (403 AUTHOR_MISMATCH), and
  *   nothing is written;
  * - a body naming the caller is accepted; a body naming nobody gets the caller;
@@ -12,12 +12,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3036-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, getMessage } = await import("../db.js");
 const { submitMessage } = await import("../messages.js");
@@ -34,21 +33,12 @@ createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 insertTag({ name: "t-3036" });
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(token, method, params);
 }
 const ticket = (title: string) => submitMessage({ project: P, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 const comment = (t: number, extra: Record<string, unknown> = {}) => ({
@@ -57,18 +47,18 @@ const comment = (t: number, extra: Record<string, unknown> = {}) => ({
 
 test("a comment signed by someone else is refused, and not written", async () => {
     const t = ticket("impersonation");
-    const r = await call(WORKER, "POST", "/api/messages", comment(t, { by_agent: "boss" }));
+    const r = await call(WORKER, "message.post", comment(t, { by_agent: "boss" }));
     assert.equal(r.status, 403);
     assert.equal(r.json.code, "AUTHOR_MISMATCH");
-    const thread = (await call(HUMAN, "GET", `/api/tickets/${t}?full=1`)).json as { comments: unknown[] };
+    const thread = (await call(HUMAN, "ticket.get", { id: t, full: true })).json as { comments: unknown[] };
     assert.equal(thread.comments.length, 0, "nothing was posted");
 });
 
 test("signed by the caller, or not signed: the caller is the author", async () => {
     const t = ticket("honest");
     for (const extra of [{ by_agent: "worker" }, {}]) {
-        const r = await call(WORKER, "POST", "/api/messages", comment(t, extra));
-        assert.equal(r.status, 201, JSON.stringify(r.json));
+        const r = await call(WORKER, "message.post", comment(t, extra));
+        assert.equal(r.status, 200, JSON.stringify(r.json));
         assert.equal(getMessage(r.json.id as number)?.by_agent, "worker");
     }
 });
@@ -77,26 +67,26 @@ test("a human leaving by_agent out is judged as the human it is: no summary_unti
     // The regression: validation judged "human or agent" on the body's by_agent,
     // so a human following the rule (no author in the body) was taken for an agent.
     const t = ticket("human, unsigned");
-    const r = await call(HUMAN, "POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: t, body: "plain" });
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const r = await call(HUMAN, "message.post", { project: P, kind: "comment_added", ticket_id: t, body: "plain" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(getMessage(r.json.id as number)?.by_agent, "boss");
-    const agent = await call(WORKER, "POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: t, body: "plain", handback: true, commits: null });
+    const agent = await call(WORKER, "message.post", { project: P, kind: "comment_added", ticket_id: t, body: "plain", handback: true, commits: null });
     assert.equal(agent.status, 400, "an agent still owes its summary_until");
 });
 
 test("the other author fields: set_by, answered_by, decided_by", async () => {
     const t = ticket("fields");
-    const tags = await call(WORKER, "PUT", `/api/messages/${t}/tags`, { tag_ids: ["t-3036"], set_by: "boss" });
+    const tags = await call(WORKER, "message.set_tags", { id: t, tag_ids: ["t-3036"], set_by: "boss" });
     assert.deepEqual([tags.status, tags.json.code], [403, "AUTHOR_MISMATCH"], "set_by");
-    assert.equal((await call(WORKER, "PUT", `/api/messages/${t}/tags`, { tag_ids: ["t-3036"] })).status, 200, "set_by left out");
+    assert.equal((await call(WORKER, "message.set_tags", { id: t, tag_ids: ["t-3036"] })).status, 200, "set_by left out");
 
-    const answer = await call(WORKER, "POST", `/api/messages/${t}/questions/q1/answer`, { answered_by: "boss", answered_in: 1 });
+    const answer = await call(WORKER, "message.answer_question", { id: t, qid: "q1", answered_by: "boss", answered_in: 1 });
     assert.deepEqual([answer.status, answer.json.code], [403, "AUTHOR_MISMATCH"], "answered_by");
 
     const plan = submitMessage({ project: P, kind: "comment_added", ticket_id: t, body: "plan", by_agent: "worker", decision_kind: "plan", summary_until: "p" }).id;
-    const decide = await call(HUMAN, "POST", `/api/messages/${plan}/decide`, { status: "accepted", decided_by: "worker" });
+    const decide = await call(HUMAN, "message.decide", { id: plan, status: "accepted", decided_by: "worker" });
     assert.deepEqual([decide.status, decide.json.code], [403, "AUTHOR_MISMATCH"], "decided_by");
-    const ok = await call(HUMAN, "POST", `/api/messages/${plan}/decide`, { status: "accepted" });
+    const ok = await call(HUMAN, "message.decide", { id: plan, status: "accepted" });
     assert.equal(ok.status, 200, JSON.stringify(ok.json));
     const meta = JSON.parse(getMessage(plan)?.meta ?? "{}") as { decision?: { decided_by?: string } };
     assert.equal(meta.decision?.decided_by, "boss");

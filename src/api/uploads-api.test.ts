@@ -5,7 +5,7 @@
  *   the file (the extension optional; given, it must match);
  * - the hash is the ETag: a repeated request gets a 304;
  * - a text's uploads are listed where the text is returned: a single message,
- *   and each comment of a thread, with their API reference.
+ *   and each comment of a thread, with their API reference (read over the bus).
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -18,7 +18,8 @@ import type { AddressInfo } from "node:net";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3040-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { insertUpload, upsertConsumer } = await import("../db.js");
 const { issueToken } = await import("../db/tokens.js");
 const { submitMessage } = await import("../messages.js");
@@ -74,12 +75,12 @@ test("a single message and each thread comment list the uploads their text cites
     const withPic = submitMessage({ project: "p-3040", kind: "comment_added", ticket_id: t, body: `here: ![](${ref})`, by_agent: "boss" }).id;
     const plain = submitMessage({ project: "p-3040", kind: "comment_added", ticket_id: t, body: "no picture", by_agent: "boss" }).id;
 
-    const one = await (await fetch(`${BASE}/api/messages/${withPic}`, { headers: auth })).json() as { attachments: { sha: string; ref: string; api_ref: string }[] };
+    const one = (await asToken<{ attachments: { sha: string; ref: string; api_ref: string }[] }>(TOKEN, "message.get", { id: withPic })).json;
     assert.equal(one.attachments.length, 1);
     assert.equal(one.attachments[0]!.ref, ref);
     assert.equal(one.attachments[0]!.api_ref, `/api/uploads/${sha}`);
 
-    const thread = await (await fetch(`${BASE}/api/tickets/${t}?full=1`, { headers: auth })).json() as { comments: { id: number; attachments?: unknown[] }[] };
+    const thread = (await asToken<{ comments: { id: number; attachments?: unknown[] }[] }>(TOKEN, "ticket.get", { id: t, full: true })).json;
     const byId = new Map(thread.comments.map((c) => [c.id, c]));
     assert.equal(byId.get(withPic)?.attachments?.length, 1, "the comment carries its own upload");
     assert.equal(byId.get(plain)?.attachments, undefined, "a comment without one carries no list");

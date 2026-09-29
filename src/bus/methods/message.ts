@@ -267,7 +267,7 @@ defineMethod({
     // decision validation pipeline (gates by-status, applies the meta
     // flip atomically). Reject any direct POST with one of these kinds.
     if (isDecisionEventKind(v.kind)) {
-        throw new Refusal(400, `kind ${v.kind} is server-emitted only — use POST /messages/:id/decide to accept/reject a decision`);
+        throw new Refusal(400, `kind ${v.kind} is server-emitted only — use message.decide to accept or reject a decision`);
     }
     // #595 — auto-fill by_agent from the auth context when the caller omits
     // it. The bulk-close UI in App.vue calls POST /messages without by_agent

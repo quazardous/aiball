@@ -1,5 +1,6 @@
 /**
- * #2525 — a project's wake focus over the real routes. What must hold:
+ * #2525 — a project's wake focus over the bus, as a client holding a token
+ * calls it. What must hold:
  * - the focus is set and read beside the standing prompt; a mixed or foreign
  *   list is refused and nothing is written;
  * - an owner agent's backlog and unread events keep only the focused tickets,
@@ -11,12 +12,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2525-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -35,31 +35,23 @@ createProject({ name: P });
 upsertSubscription("lead", P, "owner");
 upsertSubscription("boss", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: any }> {
+    return asToken(token, method, params);
 }
 const ticket = (title: string) => submitMessage({ project: P, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 const backlog = async (token: string) =>
-    ((await call(token, "GET", `/api/tickets?project=${P}&backlog=1&limit=500`)).json as { id: number }[]).map((r) => r.id).sort((a, b) => a - b);
+    ((await call(token, "ticket.list", { project: P, backlog: true, limit: 500 })).json as { id: number }[]).map((r) => r.id).sort((a, b) => a - b);
 const unreadTickets = async () =>
-    [...new Set(((await call(LEAD, "GET", `/api/unread?consumer_id=lead&project=${P}&limit=500`)).json.messages as { id: number; ticket_id: number | null; kind: string }[])
+    [...new Set(((await call(LEAD, "unread.list", { consumer_id: "lead", project: P, limit: 500 })).json.messages as { id: number; ticket_id: number | null; kind: string }[])
         .map((m) => m.kind === "ticket_created" ? m.id : m.ticket_id))].sort((a, b) => (a ?? 0) - (b ?? 0));
-const pingCount = async () => (await call(LEAD, "GET", "/api/pings/count?consumer_id=lead")).json.unread as number;
+const pingCount = async () => (await call(LEAD, "ping.count", { consumer_id: "lead" })).json.unread as number;
 const setFocus = (tickets: string | null, until: string | null = null) =>
-    call(HUMAN, "PATCH", `/api/projects/${P}/standing-prompt`, { standing_prompt: "stabilise", focus_tickets: tickets, focus_until: until });
+    call(HUMAN, "project.set_standing_prompt", { project: P, standing_prompt: "stabilise", focus_tickets: tickets, focus_until: until });
 
 const T1 = ticket("focused");
 const T2 = ticket("outside");
@@ -78,7 +70,7 @@ test("the focus is set and read beside the standing prompt; a mixed or foreign l
     const foreign = await setFocus("999999");
     assert.equal(foreign.status, 400);
     assert.match(foreign.json.error, /not a ticket of p-2525: #999999/);
-    assert.equal((await call(HUMAN, "GET", `/api/projects/${P}/standing-prompt`)).json.focus_tickets, `${T1}`, "the refused writes left the focus as it was");
+    assert.equal((await call(HUMAN, "project.standing_prompt", { project: P })).json.focus_tickets, `${T1}`, "the refused writes left the focus as it was");
 });
 
 test("an owner agent's backlog and events keep the focused ticket; the human sees everything", async () => {

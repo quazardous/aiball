@@ -2,7 +2,7 @@
  * #2379 david `prrg57` — "claim est une version faible de assign… tant qu'un
  * agent est actif sur un ticket son claim est protégé pendant X minutes, un
  * autre agent ne peut pas claim un ticket protégé, le assign supplante le
- * claim". What must hold, over the real routes:
+ * claim". What must hold, over the bus as a client holding a token calls it:
  * - a free ticket is claimed as before, and re-claiming one's own is a no-op;
  * - another agent's claim on a PROTECTED ticket is refused, naming the holder;
  * - working on a ticket renews its protection;
@@ -17,12 +17,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2379-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -44,26 +43,17 @@ createProject({ name: P });
 upsertSubscription("first", P, "owner");
 upsertSubscription("second", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(token, method, params);
 }
 function ticket(title: string): number {
     return submitMessage({ project: P, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 }
-const claim = (token: string, id: number) => call(token, "POST", `/api/tickets/${id}/assign`, {});
+const claim = (token: string, id: number) => call(token, "ticket.assign", { id });
 function claimantOf(id: number): string | null {
     return getDb().select({ c: schema.tickets.claimant }).from(schema.tickets).where(eq(schema.tickets.id, id)).get()?.c ?? null;
 }
@@ -118,7 +108,7 @@ test("working on the ticket renews the protection", async () => {
     assert.equal((await claim(FIRST, t)).status, 200);
     agePast(t, 120);
     // The holder speaks again: its last action is now.
-    const said = await call(FIRST, "POST", "/api/messages", {
+    const said = await call(FIRST, "message.post", {
         project: P, kind: "comment_added", ticket_id: t, body: "still on it", summary_until: "s", handback: false,
     });
     assert.ok(said.status < 300, JSON.stringify(said.json));
@@ -130,7 +120,7 @@ test("working on the ticket renews the protection", async () => {
 
 test("an assignment supersedes a claim, and a human is never restricted", async () => {
     const t = ticket("assigned to the first agent");
-    const assigned = await call(HUMAN, "POST", `/api/tickets/${t}/assign`, { assignee: "first" });
+    const assigned = await call(HUMAN, "ticket.assign", { id: t, assignee: "first" });
     assert.equal(assigned.status, 200, JSON.stringify(assigned.json));
 
     const refused = await claim(SECOND, t);

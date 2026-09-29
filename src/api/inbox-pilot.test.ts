@@ -1,7 +1,7 @@
 /**
- * #3005 — `/api/inbox?view=turn` (#3038; it was `v=tvty`) gives each row whose turn it is, its band and its
+ * #3005 — `inbox.list` with `view: "turn"` (#3038; it was `v=tvty`) gives each row whose turn it is, its band and its
  * state glyph, computed by the server for the viewer. What must hold, over the
- * real routes:
+ * bus:
  * - `turn` follows the actionable gate, not the last comment: a decision taken
  *   or a ticket reopened without a word hands the ball over; a viewer alone on
  *   a thread keeps it; a step keeps it with its author;
@@ -15,12 +15,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3005-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -38,38 +37,29 @@ const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "3005-w
 createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 function ticket(title: string): number {
     return submitMessage({ project: P, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 }
 async function comment(token: string, ticketId: number, extra: Record<string, unknown> = {}): Promise<number> {
-    const r = await call(token, "POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: ticketId, body: "c", summary_until: "s", handback: true, ...extra });
+    const r = await call(token, "message.post", { project: P, kind: "comment_added", ticket_id: ticketId, body: "c", summary_until: "s", handback: true, ...extra });
     assert.ok(r.status < 300, JSON.stringify(r.json));
     return (r.json as { id: number }).id;
 }
 async function decide(messageId: number, status: "accepted" | "rejected"): Promise<void> {
-    const r = await call(HUMAN, "POST", `/api/messages/${messageId}/decide`, { status });
+    const r = await call(HUMAN, "message.decide", { id: messageId, status });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 type Row = { id: number; last_speaker: string; turn?: string; band?: number; band_name?: string; state_glyph?: string | null; unread?: boolean };
 async function row(ticketId: number, token = HUMAN): Promise<Row> {
-    const r = await call(token, "GET", `/api/inbox?view=turn&ids=${ticketId}&project=${P}`);
-    const rows = r.json as Row[];
+    const r = await call(token, "inbox.list", { view: "turn", ids: [ticketId], project: P });
+    const rows = (r.json as { rows: Row[] }).rows;
     assert.equal(rows.length, 1, JSON.stringify(r.json));
     // Every turn row names its band: a client reads the name, not the index.
     assert.equal(rows[0]!.band_name, BANDS[rows[0]!.band!], "band_name is BANDS[band]");
@@ -92,10 +82,10 @@ test("a plan accepted without a comment hands the ball to the agent, though the 
 test("a ticket reopened without a comment hands the ball back", async () => {
     const t = ticket("reopened silently");
     await comment(WORKER, t);
-    assert.ok((await call(HUMAN, "POST", "/api/messages", { project: P, kind: "ticket_closed", ticket_id: t })).status < 300);
+    assert.ok((await call(HUMAN, "message.post", { project: P, kind: "ticket_closed", ticket_id: t })).status < 300);
     let r = await row(t);
     assert.deepEqual([r.turn, r.band, r.state_glyph], ["none", band("closed"), "closed"]);
-    assert.ok((await call(HUMAN, "POST", "/api/messages", { project: P, kind: "ticket_reopened", ticket_id: t })).status < 300);
+    assert.ok((await call(HUMAN, "message.post", { project: P, kind: "ticket_reopened", ticket_id: t })).status < 300);
     r = await row(t);
     assert.equal(r.last_speaker, "worker");
     assert.equal(r.turn, "them");
@@ -113,7 +103,7 @@ test("a step keeps the ball with its author, and a pending decision outranks it"
     await comment(WORKER, t, { step: true, step_after_minutes: 0, handback: undefined });
     let r = await row(t);
     assert.deepEqual([r.turn, r.band, r.state_glyph, r.unread], ["them", band("working"), "step", true], "unread is a flag on the row, not a band: it stays where its work is");
-    assert.ok((await call(HUMAN, "POST", `/api/tickets/${t}/mark-read`)).status < 300);
+    assert.ok((await call(HUMAN, "ticket.mark_read", { id: t })).status < 300);
     r = await row(t);
     assert.equal(r.band, band("working"));
     assert.equal((await row(t, WORKER)).turn, "you", "for its author, a step is still its turn");
@@ -136,11 +126,11 @@ test("the decision band is the viewer's to decide, not the proposer's", async ()
 });
 
 test("without the view the rows are unchanged, the old name adds nothing, and sort=band orders by band", async () => {
-    for (const q of [`project=${P}`, `v=tvty&project=${P}`]) {
-        const plain = await call(HUMAN, "GET", `/api/inbox?${q}`);
-        for (const r of plain.json as Row[]) assert.ok(!("turn" in r) && !("band" in r) && !("state_glyph" in r), q);
+    for (const q of [{ project: P }, { v: "tvty", project: P }]) {
+        const plain = await call(HUMAN, "inbox.list", q);
+        for (const r of (plain.json as { rows: Row[] }).rows) assert.ok(!("turn" in r) && !("band" in r) && !("state_glyph" in r), JSON.stringify(q));
     }
-    const sorted = (await call(HUMAN, "GET", `/api/inbox?view=turn&sort=band&project=${P}`)).json as Row[];
+    const sorted = ((await call(HUMAN, "inbox.list", { view: "turn", sort: "band", project: P })).json as { rows: Row[] }).rows;
     const bands = sorted.map((r) => r.band!);
     assert.deepEqual(bands, [...bands].sort((a, b) => a - b));
     assert.ok(new Set(bands).size > 2, "several bands are exercised");

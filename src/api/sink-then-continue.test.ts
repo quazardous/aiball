@@ -2,7 +2,7 @@
  * #2365 — the backlog wake that follows a step (`then: continue`) sinks the
  * ticket only briefly. It used to sink it for the whole cooldown, hiding the
  * work the step announced (seen live: a loop showing b:0 with six actionable
- * tickets). What must hold, over the real routes:
+ * tickets). What must hold, over the bus:
  * - a wake after a step cools the ticket for `tickets.backlog.after_step`
  *   (5 by default), a wake after any other last action for the whole cooldown;
  * - once that short window has passed the step's ticket is a candidate again,
@@ -14,12 +14,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2365-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -42,42 +41,33 @@ for (const p of ["p-2365", "p-2365-zero"]) {
 }
 setConfigOverride("p-2365-zero", "tickets.backlog.after_step", 0);
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${WORKER}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(WORKER, method, params);
 }
 
 async function held(project: string, title: string): Promise<number> {
     const id = submitMessage({ project, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
-    const r = await call("POST", `/api/tickets/${id}/assign`, {});
+    const r = await call("ticket.assign", { id });
     assert.ok(r.status < 300, JSON.stringify(r.json));
     return id;
 }
 async function post(project: string, ticketId: number, extra: Record<string, unknown>): Promise<number> {
-    const r = await call("POST", "/api/messages", { project, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", ...extra });
+    const r = await call("message.post", { project, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", ...extra });
     assert.ok(r.status < 300, JSON.stringify(r.json));
     return r.json.id as number;
 }
 async function wake(ticketId: number): Promise<void> {
-    const r = await call("POST", "/api/backlog-wake", { consumer_id: "worker", ticket_id: ticketId });
+    const r = await call("backlog.record_wake", { consumer_id: "worker", ticket_id: ticketId });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 /** Seconds the ticket stays cooled from now (0 = a wake candidate). */
 async function cooledFor(project: string, ticketId: number): Promise<number> {
-    const r = await fetch(`${BASE}/api/tickets?project=${project}&backlog=1&limit=500&cooldown_sec=${COOLDOWN}`, { headers: { authorization: `Bearer ${WORKER}` } });
-    const rows = await r.json() as { id: number; backlog_cooled_until: string | null }[];
+    const r = await asToken<{ id: number; backlog_cooled_until: string | null }[]>(WORKER, "ticket.list", { project, backlog: true, limit: 500, cooldown_sec: COOLDOWN });
+    const rows = r.json;
     const row = rows.find((x) => x.id === ticketId);
     assert.ok(row, `#${ticketId} in the worker's backlog`);
     return row!.backlog_cooled_until ? Math.round((Date.parse(row!.backlog_cooled_until) - Date.now()) / 1000) : 0;

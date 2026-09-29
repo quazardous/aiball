@@ -1,6 +1,6 @@
 /**
  * #2339 — the pending tickets poll lists are the ones it counts.
- * What must hold, over the real HTTP routes:
+ * What must hold, over the bus:
  * - a pending ticket that was closed leaves the list (with `open=1`) and the
  *   count; reopened, it comes back in both;
  * - the closed ones are dropped before the limit cuts the list, so a cut list
@@ -12,12 +12,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2339-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -32,18 +31,14 @@ upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2339-h" }).token;
 createProject({ name: "p-2339" });
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function get<T>(path: string): Promise<T> {
-    const r = await fetch(`${BASE}${path}`, { headers: { authorization: `Bearer ${HUMAN}` } });
-    assert.equal(r.status, 200, path);
-    return await r.json() as T;
+async function get<T>(method: string, params: Record<string, unknown>): Promise<T> {
+    const r = await asToken<T>(HUMAN, method, params);
+    assert.equal(r.status, 200, method);
+    return r.json;
 }
 
 /** A ticket by the agent, left waiting in moderation. */
@@ -57,10 +52,10 @@ function lifecycle(kind: "ticket_closed" | "ticket_reopened", ticketId: number):
     assert.equal(m.status, "approved", `${kind} by the moderator lands at once`);
 }
 
-const listed = async (query = "", open = true) =>
-    (await get<{ id: number }[]>(`/api/messages?kind=ticket_created&status=pending&by_agent=worker${open ? "&open=1" : ""}${query}`))
+const listed = async (extra: Record<string, unknown> = {}, open = true) =>
+    (await get<{ id: number }[]>("message.list", { kind: "ticket_created", status: "pending", by_agent: "worker", ...(open ? { open: true } : {}), ...extra }))
         .map((m) => m.id);
-const counted = async () => (await get<{ count: number }>("/api/my-pending/count?by_agent=worker")).count;
+const counted = async () => (await get<{ count: number }>("message.pending_count", { by_agent: "worker" })).count;
 
 const kept = pendingTicket("stays open");
 const dropped = pendingTicket("closed while pending");
@@ -82,9 +77,9 @@ test("a closed pending ticket leaves the list and the count, and comes back when
 });
 
 test("the closed tickets go before the limit cuts the list", async () => {
-    assert.deepEqual(await listed("&limit=1"), [kept], "the newest is closed, the open one still comes back");
+    assert.deepEqual(await listed({ limit: 1 }), [kept], "the newest is closed, the open one still comes back");
 });
 
 test("without open, the listing still carries closed pending tickets", async () => {
-    assert.deepEqual(await listed("", false), [dropped, kept]);
+    assert.deepEqual(await listed({}, false), [dropped, kept]);
 });

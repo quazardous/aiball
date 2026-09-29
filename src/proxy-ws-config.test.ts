@@ -16,7 +16,7 @@ const home = mkdtempSync(join(tmpdir(), "aiball-775-ws-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
 
-const { createTestApp: createApp } = await import("./tests/test-app.js");
+const { createApp } = await import("./app.js");
 const { attachProxyWs, PROXY_WS_PATH } = await import("./proxy-ws.js");
 const { issueToken } = await import("./db/tokens.js");
 const { getConsumer } = await import("./db/consumers.js");

@@ -1,6 +1,6 @@
 /**
  * #2308 — `then: continue`: a step on a ticket the author holds.
- * What must hold, over the real HTTP route: an agent that does not hold the
+ * What must hold, over the bus: an agent that does not hold the
  * ticket is refused and nothing is posted, whether nobody holds it or another
  * agent does; the holder's step lands as a step, needs no handback, and
  * leaves the ticket's last actor where it was; a step cannot carry a decision.
@@ -10,12 +10,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2308-api-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -33,11 +32,7 @@ upsertConsumer({ consumer_id: "other", kind: "agent" });
 const AGENT = issueToken({ kind: "agent", consumer_id: "worker", label: "2308-a" }).token;
 createProject({ name: "p-2308" });
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
@@ -53,13 +48,8 @@ const lastActor = (ticketId: number) =>
 const { lastActorExclusions } = await import("../db/projects.js");
 /** Is the ticket out of the worker's pool, waiting on someone else? */
 const waiting = (ticketId: number) => lastActorExclusions("worker", [ticketId]).has(ticketId);
-async function post(payload: Record<string, unknown>) {
-    const res = await fetch(`${BASE}/api/messages`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${AGENT}`, "content-type": "application/json" },
-        body: JSON.stringify(payload),
-    });
-    return { status: res.status, json: await res.json() as { error?: string } };
+function post(payload: Record<string, unknown>) {
+    return asToken<{ error?: string }>(AGENT, "message.post", payload);
 }
 const step = (ticketId: number, extra: Record<string, unknown> = {}) =>
     post({ project: "p-2308", kind: "comment_added", ticket_id: ticketId, body: "step 1 done", summary_until: "state", step: true, step_after_minutes: 0, ...extra });
@@ -85,7 +75,7 @@ test("the holder's step lands as a step, needs no handback, and keeps the ticket
     const t = ticket();
     setTicketClaim(t, "worker");
     const r = await step(t);
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     const [c] = commentsOn(t);
     assert.equal(JSON.parse(c.meta ?? "{}").step, true);
     assert.equal(waiting(t), false, "after a step the ticket is in the worker's pool");
@@ -95,13 +85,13 @@ test("#2326 a step right after the agent's own question puts the ticket back in 
     const t = ticket();
     setTicketClaim(t, "worker");
     const question = await post({ project: "p-2308", kind: "comment_added", ticket_id: t, body: "a question", summary_until: "state", handback: true });
-    assert.equal(question.status, 201, JSON.stringify(question.json));
+    assert.equal(question.status, 200, JSON.stringify(question.json));
     assert.equal(waiting(t), true, "a question leaves the worker waiting on the reporter");
-    assert.equal((await step(t)).status, 201);
+    assert.equal((await step(t)).status, 200);
     assert.equal(lastActor(t), "worker");
     assert.equal(waiting(t), false, "the step puts the ticket back in the worker's pool");
     const again = await post({ project: "p-2308", kind: "comment_added", ticket_id: t, body: "another question", summary_until: "state", handback: true });
-    assert.equal(again.status, 201, JSON.stringify(again.json));
+    assert.equal(again.status, 200, JSON.stringify(again.json));
     assert.equal(waiting(t), true, "a comment after the step hands the ticket back again");
 });
 
@@ -120,7 +110,7 @@ test("a step may wait up to the project's limit, 120 minutes by default, and not
     const t = ticket();
     setTicketClaim(t, "worker");
     const atMax = await step(t, { step_after_minutes: 120 });
-    assert.equal(atMax.status, 201, JSON.stringify(atMax.json));
+    assert.equal(atMax.status, 200, JSON.stringify(atMax.json));
 
     const over = await step(t, { step_after_minutes: 121 });
     assert.equal(over.status, 400);
@@ -129,7 +119,7 @@ test("a step may wait up to the project's limit, 120 minutes by default, and not
 
     setConfigOverride("p-2308", "tickets.steps.max_wait", 14400);
     const raised = await step(t, { step_after_minutes: 200 });
-    assert.equal(raised.status, 201, "the project raised its limit");
+    assert.equal(raised.status, 200, "the project raised its limit");
 });
 
 // #2781 david — "si on continue on claim aussi": on a project it leads, an agent
@@ -148,7 +138,7 @@ test("#2781 an owner's step on a ticket nobody holds claims it; one held by anot
 
     const free = mk();
     const r = await post({ project: "p-2781", kind: "comment_added", ticket_id: free, body: "on it", summary_until: "s", step: true, step_after_minutes: 0 });
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(claimant(free), "worker", "the step claimed it");
 
     const held = mk();

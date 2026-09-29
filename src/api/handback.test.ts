@@ -1,6 +1,6 @@
 /**
  * #2331 — every agent message says whether it hands the ticket back.
- * What must hold, over the real HTTP route:
+ * What must hold, over the bus as a client holding a token calls it:
  * - a comment with no `then` carries `handback`; without it the comment is
  *   refused and nothing is posted, and `comment_only` is refused by name;
  * - a `then` implies the handback, and a contradicting one is refused;
@@ -17,12 +17,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2331-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -46,11 +45,7 @@ createProject({ name: "p-2331" });
 createProject({ name: "p-2331-off" });
 upsertSubscription("worker", "p-2331", "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
@@ -68,13 +63,8 @@ const ticketHandback = (ticketId: number) => {
     return meta ? (JSON.parse(meta) as { handback?: boolean }).handback : undefined;
 };
 const waiting = (consumer: string, ticketId: number) => lastActorExclusions(consumer, [ticketId]).has(ticketId);
-async function post(token: string, payload: Record<string, unknown>): Promise<Reply> {
-    const res = await fetch(`${BASE}/api/messages`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify(payload),
-    });
-    return { status: res.status, json: await res.json() as Reply["json"] };
+function post(token: string, payload: Record<string, unknown>): Promise<Reply> {
+    return asToken<Reply["json"]>(token, "message.post", payload);
 }
 function comment(token: string, ticketId: number, extra: Record<string, unknown> = {}, project = "p-2331") {
     return post(token, { project, kind: "comment_added", ticket_id: ticketId, body: "an update", summary_until: "state", ...extra });
@@ -102,7 +92,7 @@ test("comment_only is refused by name", async () => {
 
 test("handback: true lets it through and hands the ticket back", async () => {
     const t = ticket();
-    assert.equal((await comment(AGENT, t, { handback: true })).status, 201);
+    assert.equal((await comment(AGENT, t, { handback: true })).status, 200);
     assert.equal(comments(t), 1);
     assert.equal(waiting("worker", t), true);
 });
@@ -111,7 +101,7 @@ test("handback: false is for the holder, and keeps the ticket in its author's po
     const t = ticket();
     // #2781 david — "si on continue on claim aussi": an owner nobody else holds
     // it for becomes its holder by keeping it.
-    assert.equal((await comment(AGENT, t, { handback: false })).status, 201);
+    assert.equal((await comment(AGENT, t, { handback: false })).status, 200);
     assert.equal(getDb().select({ c: schema.tickets.claimant }).from(schema.tickets).where(eq(schema.tickets.id, t)).get()?.c, "worker", "claimed by keeping it");
     assert.equal(waiting("worker", t), false);
     // Someone who may not claim here is still told to claim first.
@@ -124,8 +114,8 @@ test("handback: false is for the holder, and keeps the ticket in its author's po
 
 test("a then implies the handback, and a contradicting one is refused", async () => {
     const t = ticket();
-    assert.equal((await comment(AGENT, t, { decision_kind: "plan" })).status, 201, "a decision needs no handback");
-    assert.equal((await comment(AGENT, t, { decision_kind: "plan", handback: true })).status, 201, "a matching one is fine");
+    assert.equal((await comment(AGENT, t, { decision_kind: "plan" })).status, 200, "a decision needs no handback");
+    assert.equal((await comment(AGENT, t, { decision_kind: "plan", handback: true })).status, 200, "a matching one is fine");
     const planKeeps = await comment(AGENT, t, { decision_kind: "plan", handback: false });
     assert.equal(planKeeps.status, 400);
     assert.match(planKeeps.json.error ?? "", /contradicts then: plan/);
@@ -138,7 +128,7 @@ test("a then implies the handback, and a contradicting one is refused", async ()
 
 test("a human is exempt, and naming a human in by_agent does not exempt an agent", async () => {
     const t = ticket();
-    assert.equal((await comment(HUMAN, t)).status, 201);
+    assert.equal((await comment(HUMAN, t)).status, 200);
     // #3036 — refused before the rule is even read: an agent may not sign as anyone else.
     assert.equal((await comment(AGENT, t, { by_agent: "boss" })).status, 403);
     assert.equal(comments(t), 1);
@@ -148,7 +138,7 @@ test("tickets.rules.require_then = false switches the requirement off for that p
     setConfigOverride("p-2331-off", "tickets.rules.require_then", false);
     try {
         const off = ticket("p-2331-off");
-        assert.equal((await comment(AGENT, off, {}, "p-2331-off")).status, 201);
+        assert.equal((await comment(AGENT, off, {}, "p-2331-off")).status, 200);
         assert.equal((await comment(AGENT, off, { decision_kind: "plan", handback: false }, "p-2331-off")).status, 400);
         assert.equal((await comment(AGENT, ticket())).status, 400);
     } finally {
@@ -158,18 +148,18 @@ test("tickets.rules.require_then = false switches the requirement off for that p
 
 test("a ticket filed by the project's lead keeps it, with a reminder to attach a plan", async () => {
     const bare = await newTicket(AGENT);
-    assert.equal(bare.status, 201, JSON.stringify(bare.json));
+    assert.equal(bare.status, 200, JSON.stringify(bare.json));
     assert.match((bare.json.warnings ?? []).join(" "), /then: plan/);
     assert.equal(ticketHandback(bare.json.id!), false);
     assert.equal(waiting("worker", bare.json.id!), false, "the lead's own ticket stays in its pool");
     const planned = await newTicket(AGENT, { decision_kind: "plan" });
-    assert.equal(planned.status, 201);
+    assert.equal(planned.status, 200);
     assert.equal(planned.json.warnings, undefined, "no reminder when the plan is there");
 });
 
 test("a ticket filed from outside the project hands it back and leaves its creator's pool", async () => {
     const r = await newTicket(OUTSIDER);
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(r.json.warnings, undefined);
     assert.equal(ticketHandback(r.json.id!), true);
     assert.equal(waiting("outsider", r.json.id!), true);
@@ -177,7 +167,7 @@ test("a ticket filed from outside the project hands it back and leaves its creat
 
 test("a human files freely, and nobody sends a handback at creation", async () => {
     const human = await newTicket(HUMAN);
-    assert.equal(human.status, 201);
+    assert.equal(human.status, 200);
     assert.equal(human.json.warnings, undefined);
     const sent = await newTicket(AGENT, { handback: false });
     assert.equal(sent.status, 400);

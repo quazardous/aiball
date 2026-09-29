@@ -1,22 +1,8 @@
 /**
- * Message CRUD + moderation + decision-on-comment routes (carved out
- * of api.ts in #B.213 phase 1.F on 2026-05-19). Behavior-preserving move.
- *
- * Endpoints:
- *   POST /messages                              — create (ticket / comment / lifecycle)
- *   GET  /messages                              — list with filters
- *   GET  /messages/:id                          — fetch one
- *   POST /messages/:id/approve                  — moderation (human-only by convention)
- *   POST /messages/:id/reject                   — moderation
- *   POST /messages/:id/edit                     — title/body/summary/intent/priority
- *   POST /messages/:id/questions/:qid/answer    — #B.104 question audit
- *   POST /messages/:id/decide                   — #B.129 decision-on-comment accept/reject
- *   POST /messages/:id/summarize                — #B.130 set/clear comment summary_until
- *   POST /messages/:id/reclassify               — #B.129 follow-up: swap decision kind
- *   POST /messages/:id/note                     — moderator note
- *
- * #3063 — a route that says `serveMethod(name)` serves the bus method of that
- * name (src/bus/methods/); the code is there, the route only maps the request.
+ * What filing a message needs besides the bus method (`message.post`, in
+ * src/bus/methods/message.ts): the platform tag of a new ticket, and the HTTP
+ * status of each submit refusal. The routes this file held moved to the bus
+ * (#3063, #3068); the router is empty and mounted for nothing (#3242).
  */
 import { Router } from "express";
 import { ERROR_CODES } from "../domain.js";
@@ -30,7 +16,7 @@ export const messagesRouter = Router();
  *
  * Applied here rather than in the MCP tool so it cannot be forgotten by a
  * client: the CLI, the MCP and anything else that files a ticket go through
- * this route. Creation only — a comment inherits its thread's tags by being on
+ * `message.post`. Creation only — a comment inherits its thread's tags by being on
  * it, and tagging each one would say nothing new.
  *
  * Best-effort by construction. A ticket that exists is worth more than a

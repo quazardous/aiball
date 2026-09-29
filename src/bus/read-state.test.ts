@@ -1,6 +1,6 @@
 /**
- * #3067 — the read state as methods: over the bus and over the routes that now
- * serve them, the same answer; `consumer_id` left out means the caller; marking
+ * #3067 — the read state as methods: a bus connection and a direct call give
+ * the same answer; `consumer_id` left out means the caller; marking
  * another consumer's backlog read, or deleting, stays a human's gesture.
  */
 import { test, after } from "node:test";
@@ -8,13 +8,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, request } from "node:http";
+import { createServer } from "node:http";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3067-read-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { attachBus } = await import("./server.js");
 const { upsertConsumer } = await import("../db.js");
 const { submitMessage } = await import("../messages.js");
@@ -49,29 +50,22 @@ async function worker() {
     return c;
 }
 
-function http(method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    return new Promise((resolve, reject) => {
-        const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${WORKER}`, "content-type": "application/json" } }, (res) => {
-            let b = "";
-            res.on("data", (d) => { b += d; });
-            res.on("end", () => resolve({ status: res.statusCode ?? 0, json: b ? JSON.parse(b) : null }));
-        });
-        req.on("error", reject);
-        req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
+/** The same method called directly, as the holder of the worker's token. */
+function direct(method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: unknown }> {
+    return asToken(WORKER, method, params);
 }
 
 // Something unread for worker and other: a ticket boss files, then a comment on it.
 const t = submitMessage({ project: "p-read", kind: "ticket_created", title: "to read", body: "b", by_agent: "boss" });
 submitMessage({ project: "p-read", kind: "comment_added", ticket_id: t.id, parent_id: t.id, body: "c", by_agent: "boss" });
 
-test("unread and pings: the bus and the route give the same answer", async () => {
+test("unread and pings: a bus connection and a direct call give the same answer", async () => {
     const c = await worker();
     const viaBus = await c.call("unread.list", { consumer_id: "worker", project: "p-read" });
-    const viaHttp = await http("GET", "/api/unread?consumer_id=worker&project=p-read");
-    assert.deepEqual(viaBus, viaHttp.json);
-    assert.deepEqual(await c.call("ping.count", { consumer_id: "worker" }), (await http("GET", "/api/pings/count?consumer_id=worker")).json);
-    assert.deepEqual(await c.call("consumer.micro_status", { consumer_id: "worker", project: "p-read" }), (await http("GET", "/api/micro-status?consumer_id=worker&project=p-read")).json);
+    const viaDirect = await direct("unread.list", { consumer_id: "worker", project: "p-read" });
+    assert.deepEqual(viaBus, viaDirect.json);
+    assert.deepEqual(await c.call("ping.count", { consumer_id: "worker" }), (await direct("ping.count", { consumer_id: "worker" })).json);
+    assert.deepEqual(await c.call("consumer.micro_status", { consumer_id: "worker", project: "p-read" }), (await direct("consumer.micro_status", { consumer_id: "worker", project: "p-read" })).json);
 });
 
 test("consumer_id left out: the caller's own", async () => {
@@ -85,8 +79,8 @@ test("an agent marking another consumer's backlog read, or deleting, is refused;
     const c = await worker();
     await assert.rejects(c.call("unread.mark_read", { consumer_id: "other", project: "p-read", all: true }), (e: { code: string }) => e.code === "MODERATOR_ONLY");
     await assert.rejects(c.call("unread.mark_read", { project: "p-read", all: true, delete: true }), (e: { code: string }) => e.code === "MODERATOR_ONLY");
-    const over = await http("POST", "/api/mark-read", { consumer_id: "other", project: "p-read", all: true });
-    assert.equal(over.status, 403, "the route refuses it the same way");
+    const over = await direct("unread.mark_read", { consumer_id: "other", project: "p-read", all: true });
+    assert.equal(over.status, 403, "a direct call refuses it the same way");
     const own = await c.call<{ consumer_id: string }>("unread.mark_read", { project: "p-read", all: true });
     assert.equal(own.consumer_id, "worker");
     assert.equal((await c.call<{ count: number }>("unread.count", { project: "p-read" })).count, 0);

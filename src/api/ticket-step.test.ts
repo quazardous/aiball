@@ -2,7 +2,7 @@
  * #2383 — marking a step from the TICKET (a button in the thread, a bulk action
  * in the list) rather than from a comment's classify menu. The route tags the
  * ticket's latest comment, which must be an agent's. What must hold, over the
- * real routes:
+ * bus:
  * - the ticket goes back to the agent, exactly as the comment-level tag does,
  *   and the tag can be removed the same way;
  * - only a human may ask;
@@ -14,12 +14,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2383-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -38,32 +37,23 @@ const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2383-w
 createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(token, method, params);
 }
 function ticket(title: string): number {
     return submitMessage({ project: P, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 }
 async function workerReply(ticketId: number, extra: Record<string, unknown>): Promise<number> {
-    const r = await call(WORKER, "POST", "/api/messages", { project: P, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", ...extra });
+    const r = await call(WORKER, "message.post", { project: P, kind: "comment_added", ticket_id: ticketId, body: "b", summary_until: "s", ...extra });
     assert.ok(r.status < 300, JSON.stringify(r.json));
     return r.json.id as number;
 }
 async function workerActionable(id: number): Promise<boolean> {
-    const r = await call(WORKER, "GET", `/api/tickets?project=${P}&actionable=1&limit=500`);
+    const r = await call(WORKER, "ticket.list", { project: P, actionable: true, limit: 500 });
     return (r.json as unknown as { id: number }[]).some((row) => row.id === id);
 }
 function meta(messageId: number): Record<string, unknown> {
@@ -77,12 +67,12 @@ test("marking the ticket as a step tags its latest agent comment, and removing i
     const last = await workerReply(t, { handback: true });
     assert.equal(await workerActionable(t), false, "handed back: waiting on the reporter");
 
-    const tagged = await call(HUMAN, "POST", `/api/tickets/${t}/step`);
+    const tagged = await call(HUMAN, "ticket.step", { id: t });
     assert.equal(tagged.status, 200, JSON.stringify(tagged.json));
     assert.equal(await workerActionable(t), true, "the ticket is the agent's again");
     assert.equal(meta(last).step, true, "the LATEST comment is the one tagged");
 
-    assert.equal((await call(HUMAN, "POST", `/api/tickets/${t}/unstep`)).status, 200);
+    assert.equal((await call(HUMAN, "ticket.unstep", { id: t })).status, 200);
     assert.equal(await workerActionable(t), false);
     assert.equal(meta(last).step, undefined);
 });
@@ -90,21 +80,21 @@ test("marking the ticket as a step tags its latest agent comment, and removing i
 test("only a human asks, and a thread whose last word is not an agent's plain comment is refused with its reason", async () => {
     const t = ticket("refusals");
     await workerReply(t, { handback: true });
-    assert.equal((await call(WORKER, "POST", `/api/tickets/${t}/step`)).status, 403, "an agent cannot ask");
+    assert.equal((await call(WORKER, "ticket.step", { id: t })).status, 403, "an agent cannot ask");
 
     const empty = ticket("no comment at all");
-    const noComment = await call(HUMAN, "POST", `/api/tickets/${empty}/step`);
+    const noComment = await call(HUMAN, "ticket.step", { id: empty });
     assert.equal(noComment.status, 409);
     assert.match(String(noComment.json.error), /no comment/);
 
     submitMessage({ project: P, kind: "comment_added", ticket_id: t, body: "my word is last", by_agent: "boss" });
-    const humanLast = await call(HUMAN, "POST", `/api/tickets/${t}/step`);
+    const humanLast = await call(HUMAN, "ticket.step", { id: t });
     assert.equal(humanLast.status, 409);
     assert.match(String(humanLast.json.error), /last word is a human's/);
 
     const planned = ticket("the agent's last word is a plan");
     await workerReply(planned, { decision_kind: "plan" });
-    const onDecision = await call(HUMAN, "POST", `/api/tickets/${planned}/step`);
+    const onDecision = await call(HUMAN, "ticket.step", { id: planned });
     assert.equal(onDecision.status, 409);
     assert.match(String(onDecision.json.error), /decision/);
 });

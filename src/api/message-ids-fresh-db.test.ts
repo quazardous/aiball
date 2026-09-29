@@ -10,12 +10,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3014-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, getMessage } = await import("../db.js");
 const { submitMessage } = await import("../messages.js");
@@ -33,11 +32,7 @@ upsertConsumer({ consumer_id: "boss", kind: "human" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "3014-h" }).token;
 createProject({ name: P });
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
@@ -51,12 +46,8 @@ test("editing a comment edits the comment, never the ticket that shares its numb
     // Enough tickets that a comment id counted from 1 would name one of them.
     const tickets = Array.from({ length: 12 }, (_, i) => ticket(`u${i}`, `body ${i}`));
     const comment = submitMessage({ project: P, kind: "comment_added", ticket_id: tickets[0], body: "before", by_agent: "boss", summary_until: "s" }).id;
-    const r = await fetch(`${BASE}/api/messages/${comment}/edit`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${HUMAN}`, "content-type": "application/json" },
-        body: JSON.stringify({ body: "probe" }),
-    });
-    assert.ok(r.status < 300, await r.text());
+    const r = await asToken(HUMAN, "message.edit", { id: comment, body: "probe" });
+    assert.ok(r.status < 300, JSON.stringify(r.json));
     assert.equal(getMessage(comment)?.body, "probe");
     for (const [id, body] of filed) assert.equal(getMessage(id)?.body, body, `ticket #${id} untouched`);
 });

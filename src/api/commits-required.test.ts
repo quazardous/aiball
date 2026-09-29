@@ -1,6 +1,6 @@
 /**
  * #2652 david — « il faut que le champ commit soit obligatoire (avec une valeur
- * explicite none ou null) ». What must hold, over the real routes:
+ * explicite none ou null) ». What must hold, over the bus:
  * - an agent's comment without `commits`, from a client that knows the field,
  *   is refused with how to fill it; from an older client it lands with a
  *   warning to reconnect (nothing blocked until it does);
@@ -12,12 +12,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2652-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { callerOfToken } = await import("../tests/bus-call.js");
+const { callMethod, Refusal } = await import("../bus/methods.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -36,26 +36,27 @@ createProject({ name: P });
 upsertSubscription("worker", P, "owner");
 upsertSubscription("boss", P, "owner");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 const t = submitMessage({ project: P, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
-async function post(extra: Record<string, unknown>, opts: { token?: string; knowsCommits?: boolean; project?: string; ticket?: number } = {}) {
-    const r = await fetch(`${BASE}/api/messages`, {
-        method: "POST",
-        headers: {
-            authorization: `Bearer ${opts.token ?? WORKER}`,
-            "content-type": "application/json",
-            ...(opts.knowsCommits !== false ? { "x-aiball-client": "commits" } : {}),
-        },
-        body: JSON.stringify({ project: opts.project ?? P, kind: "comment_added", ticket_id: opts.ticket ?? t, body: "b", summary_until: "s", handback: true, ...extra }),
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+/**
+ * A bus call as the holder of `token`; a client that knows the field declares
+ * it (`client_features`, what `x-aiball-client: commits` sets on a connection).
+ */
+async function call(token: string, method: string, params: Record<string, unknown>, knowsCommits = true): Promise<{ status: number; json: Record<string, unknown> }> {
+    const caller = callerOfToken(token);
+    if (knowsCommits) caller.client_features = ["commits"];
+    try {
+        return { status: 200, json: (await callMethod(caller, method, params) ?? null) as Record<string, unknown> };
+    } catch (e) {
+        if (e instanceof Refusal) return { status: e.status, json: { error: e.message, code: e.code } };
+        throw e;
+    }
+}
+function post(extra: Record<string, unknown>, opts: { token?: string; knowsCommits?: boolean; project?: string; ticket?: number } = {}) {
+    return call(opts.token ?? WORKER, "message.post", { project: opts.project ?? P, kind: "comment_added", ticket_id: opts.ticket ?? t, body: "b", summary_until: "s", handback: true, ...extra }, opts.knowsCommits !== false);
 }
 
 test("an agent's comment without commits is refused, and the reason says how to fill it", async () => {
@@ -68,35 +69,27 @@ test("an agent's comment without commits is refused, and the reason says how to 
 test("null, \"none\" and [] say no commit; a list of SHAs is taken as before", async () => {
     for (const commits of [null, "none", []]) {
         const r = await post({ commits });
-        assert.equal(r.status, 201, `${JSON.stringify(commits)}: ${JSON.stringify(r.json)}`);
+        assert.equal(r.status, 200, `${JSON.stringify(commits)}: ${JSON.stringify(r.json)}`);
         assert.equal(r.json.warnings, undefined);
         assert.equal((r.json.wait_credit as { commits?: unknown }).commits, undefined, "no commit to count");
     }
     const listed = await post({ commits: ["deadbeef"] });
-    assert.equal(listed.status, 201);
+    assert.equal(listed.status, 200);
     assert.equal(((listed.json.wait_credit as { commits: Array<{ commit: string }> }).commits)[0].commit, "deadbeef");
     assert.equal((await post({ commits: "some" })).status, 400, "any other string is not \"none\"");
 });
 
 test("a client from before the field is warned, not refused", async () => {
     const r = await post({}, { knowsCommits: false });
-    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.match(String((r.json.warnings as string[])[0]), /claude-loop restart <loop> --fresh/);
 });
 
 test("humans, close and reopen are exempt; the project setting lifts the rule", async () => {
-    assert.equal((await post({}, { token: BOSS })).status, 201, "a human");
-    const close = await fetch(`${BASE}/api/messages`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${WORKER}`, "content-type": "application/json", "x-aiball-client": "commits" },
-        body: JSON.stringify({ project: P, kind: "ticket_closed", ticket_id: t }),
-    });
+    assert.equal((await post({}, { token: BOSS })).status, 200, "a human");
+    const close = await call(WORKER, "message.post", { project: P, kind: "ticket_closed", ticket_id: t });
     assert.notEqual(close.status, 400, "close is not held to it");
-    const closeWithNone = await fetch(`${BASE}/api/messages`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${WORKER}`, "content-type": "application/json" },
-        body: JSON.stringify({ project: P, kind: "ticket_reopened", ticket_id: t, commits: "none" }),
-    });
+    const closeWithNone = await call(WORKER, "message.post", { project: P, kind: "ticket_reopened", ticket_id: t, commits: "none" }, false);
     assert.equal(closeWithNone.status, 400, "and commits do not go on a lifecycle event");
 
     const P2 = "p-2652-off";
@@ -105,7 +98,7 @@ test("humans, close and reopen are exempt; the project setting lifts the rule", 
     const t2 = submitMessage({ project: P2, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" }).id;
     setConfigOverride(P2, "tickets.rules.require_commits", false);
     const off = await post({}, { project: P2, ticket: t2 });
-    assert.equal(off.status, 201, JSON.stringify(off.json));
+    assert.equal(off.status, 200, JSON.stringify(off.json));
     assert.equal(off.json.warnings, undefined);
 });
 
@@ -123,7 +116,7 @@ test("#2653 the comment keeps its commits in meta: each with its credit, null fo
     assert.equal("commits" in (JSON.parse(String(old.json.meta)) as object), false);
 
     // Read back from the thread, not just from the post's answer.
-    const thread = await fetch(`${BASE}/api/tickets/${t}?full=1`, { headers: { authorization: `Bearer ${BOSS}` } }).then((r) => r.json()) as { comments?: Array<{ id: number; meta: string | null }> };
+    const thread = (await call(BOSS, "ticket.get", { id: t, full: true }, false)).json as { comments?: Array<{ id: number; meta: string | null }> };
     const stored = thread.comments?.find((c) => c.id === listed.json.id);
     assert.deepEqual((JSON.parse(String(stored?.meta)) as { commits: Array<{ sha: string }> }).commits.map((c) => c.sha), ["deadbeef", "cafebabe"]);
 });
@@ -133,7 +126,7 @@ test("#2662 no body-line fallback: only the field counts", async () => {
     assert.equal(declared.status, 400, "a line in the body is not the field");
     assert.match(String(declared.json.error), /claude-loop restart <loop> --fresh/);
     const old = await post({ body: "x\ncommits: [deadbeef]" }, { knowsCommits: false });
-    assert.equal(old.status, 201);
+    assert.equal(old.status, 200);
     assert.equal("commits" in (JSON.parse(String(old.json.meta)) as object), false, "an undeclared client's body line is not read either");
     assert.ok(old.json.warnings, "it is warned");
 });

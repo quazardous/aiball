@@ -2,7 +2,7 @@
  * #2682 — listProjectsDetailed builds its consumer-independent base once for
  * every caller, dropped on every write that invalidates the flags cache: counts
  * never lag a write.
- * `&project=` narrows the answer.
+ * `project` narrows the answer.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -54,20 +54,12 @@ test("each call gets its own copy, with landscape only when asked", () => {
     assert.equal(typeof pa2.landscape_hash, "string");
 });
 
-test("the route narrows to one project with &project=", async () => {
-    const { createTestApp: createApp } = await import("../tests/test-app.js");
-    const server = createApp().listen(0);
-    await new Promise<void>((r) => server.once("listening", () => r()));
-    const port = (server.address() as { port: number }).port;
-    try {
-        const { issueToken } = await import("../db/tokens.js");
-        const tok = issueToken({ kind: "agent", consumer_id: "boss", label: "2682" }).token;
-        const r = await fetch(`http://127.0.0.1:${port}/api/projects?detailed=1&project=pb`, { headers: { authorization: `Bearer ${tok}` } });
-        const rows = await r.json() as Array<{ name: string }>;
-        assert.deepEqual(rows.map((p) => p.name), ["pb"]);
-        const all = await (await fetch(`http://127.0.0.1:${port}/api/projects?detailed=1`, { headers: { authorization: `Bearer ${tok}` } })).json() as Array<{ name: string }>;
-        assert.ok(all.length >= 2);
-    } finally {
-        server.close();
-    }
+test("project.list narrows to one project with project", async () => {
+    const { asToken } = await import("../tests/bus-call.js");
+    const { issueToken } = await import("../db/tokens.js");
+    const tok = issueToken({ kind: "agent", consumer_id: "boss", label: "2682" }).token;
+    const rows = (await asToken<Array<{ name: string }>>(tok, "project.list", { detailed: true, project: "pb" })).json;
+    assert.deepEqual(rows.map((p) => p.name), ["pb"]);
+    const all = (await asToken<Array<{ name: string }>>(tok, "project.list", { detailed: true })).json;
+    assert.ok(all.length >= 2);
 });

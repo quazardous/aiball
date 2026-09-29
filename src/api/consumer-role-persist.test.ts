@@ -15,7 +15,7 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-1435s5-"));
 
 process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, getConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -36,7 +36,7 @@ after(() => {
 // Any authenticated /api/* request runs bearerAuth → readRoleHint. Hit a cheap
 // authed endpoint; the persist happens in the middleware regardless of the body.
 function ping(role?: string): Promise<Response> {
-    return fetch(`${BASE}/api/subscriptions?consumer_id=worker`, {
+    return fetch(`${BASE}/api/uploads/stats`, {
         headers: {
             authorization: `Bearer ${TOKEN}`,
             ...(role ? { "x-aiball-role": role } : {}),

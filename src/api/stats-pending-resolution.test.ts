@@ -3,7 +3,7 @@
  * badges: open, unsnoozed tickets whose latest decision is a proposed
  * resolution. It used to count only the old `ticket_resolved` rows, so the
  * resolutions agents post today (a decision on a comment) never showed. What
- * must hold, over the real routes (one project per case, so counts are exact):
+ * must hold, over the bus (one project per case, so counts are exact):
  * - a pending resolution on a comment is counted;
  * - a resolution replaced by a newer plan is not;
  * - a closed ticket, or a snoozed one, is not.
@@ -13,12 +13,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2372-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -32,21 +31,12 @@ upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const HUMAN = issueToken({ kind: "agent", consumer_id: "boss", label: "2372-h" }).token;
 const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2372-w" }).token;
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() as Record<string, unknown> };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: Record<string, unknown> }> {
+    return asToken<Record<string, unknown>>(token, method, params);
 }
 function project(name: string): string {
     createProject({ name });
@@ -57,12 +47,12 @@ function ticket(p: string, title: string): number {
     return submitMessage({ project: p, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 }
 async function propose(p: string, ticketId: number, kind: "plan" | "resolution"): Promise<number> {
-    const r = await call(WORKER, "POST", "/api/messages", { project: p, kind: "comment_added", ticket_id: ticketId, body: kind, summary_until: "s", decision_kind: kind });
+    const r = await call(WORKER, "message.post", { project: p, kind: "comment_added", ticket_id: ticketId, body: kind, summary_until: "s", decision_kind: kind });
     assert.ok(r.status < 300, JSON.stringify(r.json));
     return r.json.id as number;
 }
 async function pendingResolution(p: string): Promise<number> {
-    const r = await call(HUMAN, "GET", `/api/projects/${p}/stats-rich`);
+    const r = await call(HUMAN, "project.stats_rich", { name: p });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     return r.json.pending_resolution as number;
 }
@@ -93,6 +83,6 @@ test("a closed ticket, or a snoozed one, is not counted", async () => {
 
     assert.equal(submitMessage({ project: p, kind: "ticket_closed", ticket_id: closed, by_agent: "boss" }).status, "approved");
     const until = new Date(Date.now() + 3600 * 1000).toISOString();
-    assert.ok((await call(HUMAN, "POST", `/api/tickets/${snoozed}/postpone`, { until })).status < 300);
+    assert.ok((await call(HUMAN, "ticket.postpone", { id: snoozed, until })).status < 300);
     assert.equal(await pendingResolution(p), 0);
 });

@@ -2,7 +2,7 @@
  * #2394 david — the ticket backlog is the PROJECT's work. What an agent is told
  * is actionable used to be computed board-wide with no role check: an agent
  * asking for its work got every project's tickets, none of them claimable.
- * What must hold, over the real routes:
+ * What must hold, over the bus:
  * - the project's lead (owner) keeps its project's tickets;
  * - an agent with no role there sees nothing of it — unless the ticket is
  *   ASSIGNED to it, which a follower and a no-claim agent keep too;
@@ -14,12 +14,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-2394-"));
 process.env.AIBALL_SOCK = "";
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
@@ -42,46 +41,37 @@ upsertSubscription("neighbour", THEIRS, "owner");
 // The neighbour follows the other project: it hears it, it does not work it.
 upsertSubscription("neighbour", MINE, "follower");
 
-const server = createApp().listen(0);
-await new Promise<void>((r) => server.once("listening", () => r()));
-const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => {
-    server.close();
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-async function call(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
-    const r = await fetch(`${BASE}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: r.status, json: await r.json() };
+function call(token: string, method: string, params: Record<string, unknown> = {}): Promise<{ status: number; json: unknown }> {
+    return asToken(token, method, params);
 }
 function ticket(project: string, title: string): number {
     return submitMessage({ project, kind: "ticket_created", title, body: "x", by_agent: "boss" }).id;
 }
 async function actionableFor(token: string): Promise<number[]> {
-    const r = await call(token, "GET", "/api/tickets?actionable=1&limit=500");
+    const r = await call(token, "ticket.list", { actionable: true, limit: 500 });
     return (r.json as { id: number }[]).map((t) => t.id);
 }
 async function assignTo(ticketId: number, consumer: string): Promise<void> {
-    const r = await call(HUMAN, "POST", `/api/tickets/${ticketId}/assign`, { assignee: consumer });
+    const r = await call(HUMAN, "ticket.assign", { id: ticketId, assignee: consumer });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 async function approve(messageId: number): Promise<void> {
-    const r = await call(HUMAN, "POST", `/api/messages/${messageId}/approve`, {});
+    const r = await call(HUMAN, "message.approve", { id: messageId });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 async function comment(token: string, ticketId: number): Promise<void> {
-    const r = await call(token, "POST", "/api/messages", {
-        project: (await call(HUMAN, "GET", `/api/tickets/${ticketId}`).then((x) => (x.json as { ticket: { project: string } }).ticket.project)),
+    const r = await call(token, "message.post", {
+        project: (await call(HUMAN, "ticket.get", { id: ticketId }).then((x) => (x.json as { ticket: { project: string } }).ticket.project)),
         kind: "comment_added", ticket_id: ticketId, body: "a word", summary_until: "s", handback: true,
     });
     assert.ok(r.status < 300, JSON.stringify(r.json));
 }
 async function unreadKinds(token: string, consumer: string, ticketId: number): Promise<string[]> {
-    const r = await call(token, "GET", `/api/unread?consumer_id=${consumer}&limit=500`);
+    const r = await call(token, "unread.list", { consumer_id: consumer, limit: 500 });
     const rows = (Array.isArray(r.json) ? r.json : (r.json as { messages?: unknown[] }).messages ?? []) as { kind: string; ticket_id: number | null }[];
     return rows.filter((m) => m.ticket_id === ticketId).map((m) => m.kind);
 }

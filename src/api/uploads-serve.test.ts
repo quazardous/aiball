@@ -21,7 +21,7 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-841-"));
 
 process.env.AIBALL_SOCK = ""; // #3241 — never the live daemon's socket, even run directly
 
-const { createTestApp: createApp } = await import("../tests/test-app.js");
+const { createApp } = await import("../app.js");
 const { insertUpload } = await import("../db.js");
 const { UPLOADS_DIR } = await import("../paths.js");
 
