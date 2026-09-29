@@ -33,6 +33,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop's bar no longer shows a backlog whose tickets are all resting after a
+  backlog wake, with a countdown to a wake that never comes: the count drops at
+  the wake and comes back when the rest ends.
 - Restarting the daemon's systemd service no longer ends the loops running on
   its session host: each host starts in a systemd scope of its own.
 - A loop's session host ends with its Claude. Before, a host left without it

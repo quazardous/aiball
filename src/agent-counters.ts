@@ -8,11 +8,12 @@
  * Computed only when something that moves them happened: a ticket's lifecycle
  * (created, decided, edited, moved, tagged…) marks the agents concerned — the
  * project's owners, the agents whose loop works in it, the ticket's holder —
- * and a ping written or read marks its recipient. At most one computation per
+ * a ping written or read marks its recipient, and a backlog wake marks its
+ * agent (the ticket it named starts its rest). At most one computation per
  * agent every few seconds; published (`agent.<id>.state`, and the loop's own
- * `agent.<id>.events`) only when a number changed. What moves with time alone
- * (a snooze lapsing, a cooldown ending) waits for a client to ask
- * (`consumer.counters`).
+ * `agent.<id>.events`) only when a number changed. A backlog rest ending moves
+ * the count too: the computation that saw the earliest end is computed again
+ * then. A snooze lapsing waits for a client to ask (`consumer.counters`).
  */
 import { agentCooldownSec } from "./agent-cooldown.js";
 import { onLifecycle } from "./event-bus.js";
@@ -57,10 +58,44 @@ export function computeCounters(agent: string): AgentCounters {
     // #3312 — the agent's own standing (`can_claim` on its row), not a no-claim hint:
     // with the hint, every unassigned ticket left the count, whoever the agent.
     const rows = listTicketsFor(agent, query, { noClaimHint: false });
-    const backlog = Array.isArray(rows)
-        ? (rows as Array<{ backlog_cooled_until?: string | null }>).filter((t) => !t.backlog_cooled_until).length
-        : 0;
+    const list = Array.isArray(rows) ? (rows as Array<{ backlog_cooled_until?: string | null }>) : [];
+    const backlog = list.filter((t) => !t.backlog_cooled_until).length;
+    // The earliest rest to end: the count moves then, with no event to say so.
+    let restEnds: number | null = null;
+    for (const t of list) {
+        const at = t.backlog_cooled_until ? Date.parse(t.backlog_cooled_until) : NaN;
+        if (Number.isFinite(at) && (restEnds === null || at < restEnds)) restEnds = at;
+    }
+    restEndsAt.set(agent, restEnds);
     return { open, actionable, backlog, events: unreadPingCount(agent), computed_at: new Date().toISOString() };
+}
+
+/** #3337 — per agent, when the earliest backlog rest its last computation saw ends. */
+const restEndsAt = new Map<string, number | null>();
+const restTimers = new Map<string, NodeJS.Timeout>();
+
+/** Compute again when the earliest rest ends, for an agent whose counters are kept. */
+function armRestEnd(agent: string): void {
+    const old = restTimers.get(agent);
+    if (old) clearTimeout(old);
+    restTimers.delete(agent);
+    const at = restEndsAt.get(agent);
+    if (at === null || at === undefined) return;
+    const t = setTimeout(() => {
+        restTimers.delete(agent);
+        markCountersDirty(agent);
+    }, Math.max(0, at - Date.now()) + 1000);
+    t.unref?.();
+    restTimers.set(agent, t);
+}
+
+/**
+ * #3337 — a backlog wake named `ticketId` to `agent`: that ticket starts its
+ * rest, so the count drops. Left as it was, the bar showed a backlog the
+ * picker no longer gives and counted down to a wake that was skipped.
+ */
+export function backlogWakeRecorded(agent: string): void {
+    markCountersDirty(agent);
 }
 
 const same = (a: AgentCounters | undefined, b: AgentCounters) =>
@@ -77,6 +112,7 @@ export function refreshCounters(agent: string): AgentCounters {
     const next = computeCounters(agent);
     const prev = cache.get(agent);
     cache.set(agent, next);
+    armRestEnd(agent);
     if (!same(prev, next)) {
         for (const fn of listeners.get(agent) ?? []) {
             try { fn(next); } catch { /* a listener never breaks the others */ }

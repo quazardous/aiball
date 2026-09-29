@@ -24,6 +24,7 @@ import {
 import { ticketsAwaitingModeration } from "../../db/tickets.js";
 import { withTags } from "../../queries/decorate.js";
 import { ERROR_CODES } from "../../domain.js";
+import { backlogWakeRecorded } from "../../agent-counters.js";
 
 /** The consumer a call is about: the one named, else the caller. */
 function whose(caller: Caller, named: string | undefined): string {
@@ -203,6 +204,7 @@ defineMethod({
     run: (caller, p) => {
         const consumer_id = whose(caller, p.consumer_id);
         recordBacklogWake(consumer_id, p.ticket_id);
+        backlogWakeRecorded(consumer_id);
         return { consumer_id, ticket_id: p.ticket_id, recorded: true };
     },
 });
