@@ -4,6 +4,7 @@
  * signals, a project's feed path; the board's config, the step timing report,
  * coupling a ticket to an upstream issue, and reloading the daemon's config.
  */
+import { requestStatsReport } from "../../request-stats.js";
 import { z } from "zod";
 import { isMachineLocal } from "../../machine-secret.js";
 import { authorOf, consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
@@ -316,6 +317,21 @@ defineMethod({
             throw new Refusal(500, (e as Error).message, ERROR_CODES.INTERNAL, { reloaded: false });
         }
     },
+});
+
+/**
+ * #3243 — what keeps this daemon busy: per HTTP route and bus method, how many
+ * calls, their total and worst time, the slow ones with their caller, the
+ * event loop's delay, and its stalls with the calls that ran during them. What
+ * GET /api/debug/requests answers.
+ */
+defineMethod({
+    name: "debug.requests",
+    who: ["human", "agent"],
+    // The stats of the daemon that answers: through a node, the node's.
+    machine: true,
+    params: z.object({}),
+    run: () => requestStatsReport(),
 });
 
 /**

@@ -33,6 +33,9 @@ dates are YYYY-MM-DD.
   themselves for a daemon on the same machine; another client (tvty) reads
   `<AIBALL_HOME>/machine-secret`. A proxy node checks it and never relays it.
 
+- `/api/debug/requests` (and `debug.requests` on the bus) counts and times the
+  bus's methods with the HTTP routes, and keeps the event loop's stalls over
+  500 ms with the calls that ran during them, also logged to the journal.
 - `project.settings` describes the folder settings a client may change (type,
   choices, default, value, where it comes from), and `project.settings_set`
   takes any of them as `{ key, value }`: a new one shows with no client code.

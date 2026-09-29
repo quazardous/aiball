@@ -64,3 +64,31 @@ test("a fast request is not kept, and a query without a token is left as is", as
     listeners.finish();
     assert.equal(requestStatsReport().slow.some((s) => s.route === "GET /api/fast-3000"), false);
 });
+
+// #3243 — the bus's methods in the same stats, and a stall of the event loop named with the call that held it.
+test("a bus method call is counted and timed as BUS <method>, with its caller", async () => {
+    const { defineMethod } = await import("./bus/methods.js");
+    const { runOne } = await import("./bus/rpc.js");
+    const { requestStatsReport } = await import("./request-stats.js");
+    const { z } = await import("zod");
+    defineMethod({ name: "test.stats_probe", who: ["human", "agent"], params: z.object({}), run: () => ({ ok: true }) });
+    await runOne({ consumer_id: "probe-agent", kind: "agent", token_kind: "agent", transport: "uds", token: null, relayed: false }, { jsonrpc: "2.0", id: 1, method: "test.stats_probe" });
+    const row = requestStatsReport().routes.find((r) => r.route === "BUS test.stats_probe");
+    assert.equal(row?.count, 1);
+});
+
+test("a stall names the call that ran during it", async () => {
+    const { beginCall, checkStall, resetStallsForTests, requestStatsReport } = await import("./request-stats.js");
+    resetStallsForTests();
+    // All synchronous: the background tick cannot run between the block and the check.
+    const end = beginCall("BUS test.block", { consumer: "blocker", agent: null });
+    const until = Date.now() + 700;
+    while (Date.now() < until) { /* hold the event loop, as a synchronous read would */ }
+    end();
+    const stall = checkStall(Date.now());
+    assert.ok(stall && stall.ms >= 500, `a stall of about 700 ms: ${JSON.stringify(stall)}`);
+    assert.deepEqual(stall!.calls[0]!.call, "BUS test.block");
+    assert.equal(stall!.calls[0]!.consumer, "blocker");
+    assert.equal(requestStatsReport().stalls[0]!.ms, stall!.ms, "kept in the report, newest first");
+    assert.equal(checkStall(Date.now()), null, "no stall right after: the tick is on time");
+});

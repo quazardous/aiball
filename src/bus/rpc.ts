@@ -5,6 +5,7 @@
 import { RPC_ERRORS, type RpcError, type RpcId, type RpcResponse } from "../bus-protocol.js";
 import { ERROR_CODES } from "../domain.js";
 import { accessRefusal, getMethod, Refusal, type Caller } from "./methods.js";
+import { beginCall } from "../request-stats.js";
 
 /** Past this many calls, a batch is refused whole. */
 export const MAX_BATCH = 100;
@@ -57,6 +58,8 @@ export async function runOne(caller: Caller, msg: unknown): Promise<RpcResponse 
             },
         }));
     }
+    // #3243 — every method call counted and timed with the HTTP routes, named in a stall.
+    const end = beginCall(`BUS ${m.name}`, { consumer: caller.consumer_id ?? null, agent: caller.machine ?? caller.transport ?? null });
     try {
         const result = await m.run(caller, parsed.data);
         return answer({ jsonrpc: "2.0", id, result: result === undefined ? null : result });
@@ -68,6 +71,8 @@ export async function runOne(caller: Caller, msg: unknown): Promise<RpcResponse 
             message: "internal error",
             data: { code: ERROR_CODES.INTERNAL, status: 500 },
         }));
+    } finally {
+        end();
     }
 }
 

@@ -1238,6 +1238,21 @@
       "x-machine": true
     },
     {
+      "name": "debug.requests",
+      "description": "What keeps this daemon busy: per HTTP route and bus method, how many calls, their total and worst time, the slow ones with their caller, the event loop's delay, and its stalls with the calls that ran during them. What GET /api/debug/requests answers.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ],
+      "x-machine": true
+    },
+    {
       "name": "decision.mine",
       "description": "Pending plans and resolutions on open tickets the caller reports: its arbitrage queue.",
       "paramStructure": "by-name",
