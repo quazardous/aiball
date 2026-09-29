@@ -6,7 +6,7 @@
 // synthetic state dirs + the pure interpretation of a `LiveLoopState`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -48,13 +48,27 @@ test("checkLoop: pid file with non-numeric → fail", () => {
     assert.equal(c.status, "fail");
 });
 
-test("checkLoop: live pid but cmdline doesn't match kernel.ts → fail (pid recycled)", () => {
+const HAS_PROC = existsSync("/proc");
+
+test("checkLoop: live pid but cmdline doesn't match kernel.ts → fail (pid recycled)", { skip: !HAS_PROC && "no /proc to read a command line from" }, () => {
     const sd = mkSd("c2");
     // Our own pid is alive, but the cmdline is node --test, not kernel.ts.
     writeFileSync(join(sd, "loop.pid"), `${process.pid}\n`);
     const c = checkLoop(sd);
     assert.equal(c.status, "fail");
     assert.match(c.detail, /cmdline doesn't match|not running/);
+});
+
+test("checkLoop / checkProxy without /proc: a live pid is running, its command line unchecked — not a recycled pid", { skip: HAS_PROC && "this platform has /proc" }, () => {
+    // #3299 — on Windows every healthy loop and proxy used to be reported as a
+    // recycled pid (FAIL), because the /proc read that checks it always failed.
+    const sd = mkSd("c2w");
+    writeFileSync(join(sd, "loop.pid"), `${process.pid}\n`);
+    writeFileSync(join(sd, "proxy-alive"), `${process.pid}\n`);
+    for (const c of [checkLoop(sd), checkProxy(sd)]) {
+        assert.equal(c.status, "ok", c.detail);
+        assert.match(c.detail, /not checked/);
+    }
 });
 
 test("checkLoopSource: plate.json missing → warn", () => {
