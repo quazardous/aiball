@@ -11,10 +11,13 @@ import {
     planRelocate,
     rewriteClaudeJsonProjects,
     rewriteFieldPaths,
+    under,
     type RelocateEnv,
 } from "./relocate.js";
 
 const ROOTS: string[] = [];
+/** A path as a JSON text holds it: a Windows `\` is escaped there. */
+const inJson = (p: string): string => JSON.stringify(p).slice(1, -1);
 after(() => { for (const r of ROOTS) rmSync(r, { recursive: true, force: true }); });
 
 /** A machine: two projects side by side, one of them a name-prefix of the other. */
@@ -31,7 +34,8 @@ function machine(opts: { processes?: Array<{ pid: number; cwd: string; cmd: stri
     writeFileSync(join(oldDir, "Cargo.toml"), "[package]\n");
 
     const claudeDir = join(root, ".claude");
-    const t = (cwd: string, extra = "") => `{"type":"user","cwd":"${cwd}","message":"cd ${oldDir} && ls${extra}"}\n`;
+    // Stringified: a Windows path holds `\`, which the JSON text escapes.
+    const t = (cwd: string, extra = "") => `${JSON.stringify({ type: "user", cwd, message: `cd ${oldDir} && ls${extra}` })}\n`;
     const mk = (dir: string, lines: string) => { mkdirSync(join(claudeDir, "projects", claudeProjectKey(dir)), { recursive: true }); writeFileSync(join(claudeDir, "projects", claudeProjectKey(dir), "s1.jsonl"), lines); };
     mk(oldDir, t(oldDir) + t(join(oldDir, "wrap")) + t(oldDir));
     mk(join(oldDir, "wrap"), t(join(oldDir, "wrap")));
@@ -40,7 +44,7 @@ function machine(opts: { processes?: Array<{ pid: number; cwd: string; cmd: stri
     const lookalike = join(projects, "BookShepherd", "jobbox-tools");
     mk(lookalike, t(lookalike));
     writeFileSync(join(claudeDir, "history.jsonl"),
-        `{"display":"a","project":"${oldDir}"}\n{"display":"b","project":"${sibling}"}\n{"display":"c","project":"${join(oldDir, "wrap")}"}\n`);
+        [["a", oldDir], ["b", sibling], ["c", join(oldDir, "wrap")]].map(([display, project]) => `${JSON.stringify({ display, project })}\n`).join(""));
     const claudeJson = join(root, ".claude.json");
     writeFileSync(claudeJson, JSON.stringify({ numStartups: 3, projects: { [oldDir]: { hasTrustDialogAccepted: true }, [sibling]: { hasTrustDialogAccepted: false } } }, null, 2));
 
@@ -77,6 +81,26 @@ test("field rewrites touch only the named fields, only the old path and what lie
     const json: Record<string, unknown> = { projects: { "/a/jobbox": 1, "/a/jobbox/wrap": 2, "/a/jobbox2": 3 } };
     assert.equal(rewriteClaudeJsonProjects(json, "/a/jobbox", "/b/jobbox"), 2);
     assert.deepEqual(Object.keys(json.projects as object).sort(), ["/a/jobbox2", "/b/jobbox", "/b/jobbox/wrap"]);
+});
+
+// #3299 — Windows paths: escaped in the JSON text, separated by `\` as well as `/`.
+test("a Windows path is rewritten as the JSON text holds it, and only under the old one", () => {
+    const rows = ["C:\\a\\jobbox", "C:\\a\\jobbox\\wrap", "C:\\a\\jobbox2", "C:/a/jobbox/fwd"];
+    const text = rows.map((cwd) => JSON.stringify({ cwd })).join("\n");
+    const r = rewriteFieldPaths(text, ["cwd"], "C:\\a\\jobbox", "D:\\b\\jobbox");
+    assert.equal(r.count, 2, "the folder and what lies under it; not jobbox2, not the slash spelling");
+    const after = r.text.split("\n").map((l) => (JSON.parse(l) as { cwd: string }).cwd);
+    assert.deepEqual(after, ["D:\\b\\jobbox", "D:\\b\\jobbox\\wrap", "C:\\a\\jobbox2", "C:/a/jobbox/fwd"]);
+});
+
+test("under: the platform's separators; a name sharing a prefix is not under", () => {
+    const win = ["/", "\\"];
+    assert.equal(under("C:\\a\\jobbox\\wrap", "C:\\a\\jobbox", win), true);
+    assert.equal(under("C:\\a\\jobbox\\wrap", "C:\\a\\jobbox\\", win), true);
+    assert.equal(under("C:\\a\\jobbox2", "C:\\a\\jobbox", win), false);
+    assert.equal(under("C:\\a\\jobbox", "C:\\a\\jobbox", win), true);
+    assert.equal(under("/a/jobbox\\x", "/a/jobbox", ["/"]), false, "a backslash is part of a Unix name");
+    assert.equal(under("/a/jobbox/x", "/a/jobbox", ["/"]), true);
 });
 
 test("an entry Claude already made for the new path is merged with the old one, not overwritten", () => {
@@ -118,15 +142,15 @@ test("apply moves the folder and every piece of state, and leaves the sibling al
 
     const newKeyDir = join(m.claudeDir, "projects", claudeProjectKey(m.newDir));
     const transcript = readFileSync(join(newKeyDir, "s1.jsonl"), "utf8");
-    assert.ok(!transcript.includes(`"cwd":"${m.oldDir}`), "no cwd left on the old path");
-    assert.ok(transcript.includes(`cd ${m.oldDir} && ls`), "what was typed is not rewritten");
+    assert.ok(!transcript.includes(`"cwd":"${inJson(m.oldDir)}`), "no cwd left on the old path");
+    assert.ok(transcript.includes(`cd ${inJson(m.oldDir)} && ls`), "what was typed is not rewritten");
     assert.ok(existsSync(join(m.claudeDir, "projects", claudeProjectKey(join(m.newDir, "wrap")), "s1.jsonl")));
     assert.ok(existsSync(join(m.claudeDir, "projects", claudeProjectKey(m.sibling), "s1.jsonl")), "the sibling's history stays");
     assert.ok(existsSync(join(m.claudeDir, "projects", claudeProjectKey(m.lookalike), "s1.jsonl")), "a look-alike key whose cwd is elsewhere stays");
 
     const history = readFileSync(join(m.claudeDir, "history.jsonl"), "utf8");
-    assert.ok(history.includes(`"project":"${m.newDir}"`) && history.includes(`"project":"${join(m.newDir, "wrap")}"`));
-    assert.ok(history.includes(`"project":"${m.sibling}"`));
+    assert.ok(history.includes(`"project":"${inJson(m.newDir)}"`) && history.includes(`"project":"${inJson(join(m.newDir, "wrap"))}"`));
+    assert.ok(history.includes(`"project":"${inJson(m.sibling)}"`));
     const cj = JSON.parse(readFileSync(m.claudeJson, "utf8")) as { projects: Record<string, { hasTrustDialogAccepted: boolean }>; numStartups: number };
     assert.equal(cj.projects[m.newDir]?.hasTrustDialogAccepted, true, "trust follows the folder");
     assert.equal(cj.projects[m.sibling]?.hasTrustDialogAccepted, false);
@@ -145,7 +169,7 @@ test("--state-only catches up a folder already moved by hand", () => {
     assert.deepEqual(plan.blockers, []);
     const r = applyRelocate(plan);
     assert.equal(r.moved, false);
-    assert.ok(readFileSync(join(m.claudeDir, "history.jsonl"), "utf8").includes(`"project":"${m.newDir}"`));
+    assert.ok(readFileSync(join(m.claudeDir, "history.jsonl"), "utf8").includes(`"project":"${inJson(m.newDir)}"`));
 });
 
 test("--state-only also finishes a move whose history directory was renamed by hand but not rewritten", () => {

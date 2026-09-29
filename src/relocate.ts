@@ -76,8 +76,13 @@ export function claudeProjectKey(absPath: string): string {
     return absPath.replace(/[^A-Za-z0-9]/g, "-");
 }
 
-function under(path: string, root: string): boolean {
-    return path === root || path.startsWith(root.endsWith("/") ? root : `${root}/`);
+// #3299 — a Windows path is separated by `\` as well as `/`.
+const SEPARATORS = process.platform === "win32" ? ["/", "\\"] : ["/"];
+
+export function under(path: string, root: string, seps: string[] = SEPARATORS): boolean {
+    if (path === root) return true;
+    const base = seps.some((sep) => root.endsWith(sep)) ? root.slice(0, -1) : root;
+    return seps.some((sep) => path.startsWith(base + sep));
 }
 
 function escapeRe(s: string): string {
@@ -90,11 +95,15 @@ function escapeRe(s: string): string {
  * reads), and rewriting what an agent once typed would falsify the record.
  */
 export function rewriteFieldPaths(text: string, fields: string[], oldPath: string, newPath: string): { text: string; count: number } {
-    const re = new RegExp(`("(?:${fields.map(escapeRe).join("|")})"\\s*:\\s*")${escapeRe(oldPath)}(?=["/])`, "g");
+    // #3299 — the paths as the JSON text holds them: a Windows `C:\x` is `C:\\x` there,
+    // and a path goes on past it after a separator, `/` or an escaped `\`.
+    const oldJson = JSON.stringify(oldPath).slice(1, -1);
+    const newJson = JSON.stringify(newPath).slice(1, -1);
+    const re = new RegExp(`("(?:${fields.map(escapeRe).join("|")})"\\s*:\\s*")${escapeRe(oldJson)}(?=["/]|\\\\\\\\)`, "g");
     let count = 0;
     const out = text.replace(re, (_m, head: string) => {
         count++;
-        return head + newPath;
+        return head + newJson;
     });
     return { text: out, count };
 }
@@ -142,7 +151,10 @@ function readCwds(dir: string): Set<string> {
     for (const f of readdirSync(dir)) {
         if (!f.endsWith(".jsonl")) continue;
         const text = readFileSync(join(dir, f), "utf8");
-        for (const m of text.matchAll(/"cwd"\s*:\s*"([^"]*)"/g)) cwds.add(m[1]);
+        // #3299 — decoded: a Windows path is escaped in the JSON text.
+        for (const m of text.matchAll(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+            try { cwds.add(JSON.parse(`"${m[1]}"`) as string); } catch { /* not a JSON string */ }
+        }
     }
     return cwds;
 }
@@ -352,7 +364,7 @@ export function applyRelocate(plan: RelocatePlan, opts: { fixLinks?: boolean; no
     // Directories first, so the transcript rewrites below address their new home.
     const relocated = (file: string): string => {
         for (const d of plan.transcriptDirs) {
-            if (file.startsWith(`${d.from}/`)) return d.to + file.slice(d.from.length);
+            if (file !== d.from && under(file, d.from)) return d.to + file.slice(d.from.length);
         }
         return file;
     };

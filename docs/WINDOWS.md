@@ -130,9 +130,6 @@ Windows they are protected only by the user profile's permissions.
 - **Session host mode** (`session: host`) relies on Unix sockets, so loops run
   in tmux mode (psmux): that is the default on Windows for now. A config that
   sets `session: host` explicitly fails to start a loop (`session.host` refused).
-- **`claude-loop tail -f` / `log -f`** need a `tail` command, absent from
-  PowerShell and cmd. Run them from Git Bash.
-- **`relocate`** does not yet recognise Windows paths below the old folder.
 - **Restoring a backup** while the tray runs: quit the tray first, or it
   restarts the daemon during the restore.
 - **The mouse wheel over Claude** in a loop scrolls the pane only with a psmux
@@ -155,7 +152,10 @@ What has broken before, and the helper to use instead:
 - **A `.cmd` / `.bat` file**: Node refuses to spawn it without a shell; see
   `src/launch-argv.ts`.
 - **Paths**: compare with `path.relative()`, not string prefixes. git prints
-  `C:/…`, `join()` gives `C:\…`.
+  `C:/…`, `join()` gives `C:\…`. A path read from a JSON text is escaped
+  there (`C:\\…`): parse it before comparing.
+- **Following a file**: `followLines()` (`src/claude-loop/follow-file.ts`),
+  never a spawned `tail`.
 - **PowerShell and `.cmd` scripts**: ASCII only. Without a BOM, Windows
   PowerShell 5.1 reads a script in the ANSI code page, and an em dash is enough
   to break parsing. A test checks `install.ps1` and the tray files.

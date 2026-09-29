@@ -16,8 +16,8 @@
  *
  * `--json` keeps raw NDJSON for piping into jq.
  */
-import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { followLines } from "../follow-file.js";
 import { resolve as resolvePath } from "node:path";
 import {
     stateDirFor,
@@ -141,7 +141,7 @@ export async function cmdLog(name: string, opts: LogOpts): Promise<void> {
 
     if (!existsSync(path)) {
         if (!opts.follow) die(`no log at ${path}`);
-        // Follow mode : tail -F handles a not-yet-existent file.
+        // Follow mode waits for a not-yet-existent file.
     }
 
     if (!opts.follow) {
@@ -157,35 +157,13 @@ export async function cmdLog(name: string, opts: LogOpts): Promise<void> {
         return;
     }
 
-    // Follow mode : delegate the tail-F mechanics to /usr/bin/tail (same
-    // pattern as cmdTail), apply our filters in-stream on each chunk.
-    await new Promise<void>((resolveP, rejectP) => {
-        const child = spawn("tail", ["-n", String(lines), "-F", path], {
-            stdio: ["ignore", "pipe", "pipe"],
+    // Follow mode (#3299: in Node, no `tail` needed): our filters on each new line.
+    await new Promise<void>(() => {
+        const h = followLines(path, lines, (raw) => {
+            if (!raw) return;
+            const p = parseLine(raw);
+            if (matchesFilters(p, filterOpts)) process.stdout.write(`${render(p)}\n`);
         });
-        // Drop the "file truncated" / "no such file" tail chatter onto
-        // stderr (matches cmdTail behavior — see cmds/tail.ts).
-        child.stderr?.on("data", () => { /* swallow */ });
-        let carry = "";
-        child.stdout?.on("data", (chunk: Buffer) => {
-            const text = carry + chunk.toString("utf8");
-            const out = text.split("\n");
-            carry = out.pop() ?? "";
-            for (const raw of out) {
-                if (!raw) continue;
-                const p = parseLine(raw);
-                if (!matchesFilters(p, filterOpts)) continue;
-                process.stdout.write(`${render(p)}\n`);
-            }
-        });
-        child.stdout?.on("end", () => {
-            if (carry) {
-                const p = parseLine(carry);
-                if (matchesFilters(p, filterOpts)) process.stdout.write(`${render(p)}\n`);
-            }
-        });
-        child.on("error", rejectP);
-        child.on("exit", (code) => code === 0 || code === null ? resolveP() : rejectP(new Error(`tail exited ${code}`)));
-        process.on("SIGINT", () => { child.kill("SIGINT"); process.exit(0); });
+        process.on("SIGINT", () => { h.stop(); process.exit(0); });
     });
 }

@@ -4,6 +4,10 @@ import { SPOOL_DIR, SPOOL_FAILED_DIR, ensureDirs } from "./paths.js";
 import { callerOf, callMethod, Refusal } from "./bus/methods.js";
 import "./bus/register.js";
 
+/** The file `aiball drain` touches to wake the watcher: not a spooled write, so
+ *  never read as one, but a reason to drain now (#3299). */
+export const DRAIN_TRIGGER = ".drain-trigger";
+
 function isSpoolFile(name: string): boolean {
     return name.endsWith(".json") && !name.startsWith(".");
 }
@@ -97,7 +101,7 @@ async function drainOnce(): Promise<number> {
  * Watch the spool dir for new drops while the daemon is running.
  * Debounces to absorb rapid bursts.
  */
-export function watchSpool(): void {
+export function watchSpool(): { close(): void } {
     ensureDirs();
     let pending = false;
     let timer: NodeJS.Timeout | null = null;
@@ -114,10 +118,12 @@ export function watchSpool(): void {
     };
     try {
         const w = watch(SPOOL_DIR, (_event, filename) => {
-            if (filename && isSpoolFile(filename)) trigger();
+            if (filename && (isSpoolFile(filename) || filename === DRAIN_TRIGGER)) trigger();
         });
         w.on("error", (e) => console.warn("[spool] watch error:", e.message));
+        return { close: () => { w.close(); if (timer) clearTimeout(timer); } };
     } catch (e) {
         console.warn("[spool] watch unavailable:", (e as Error).message);
+        return { close: () => {} };
     }
 }
