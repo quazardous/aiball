@@ -9,7 +9,7 @@
  */
 import { existsSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
@@ -80,7 +80,8 @@ registerInstallCommands(program);
 function aiballHome(): string {
     return (
         process.env.AIBALL_HOME ??
-        join(process.env.HOME ?? "/tmp", ".local", "share", "aiball")
+        // HOME is unset in cmd and PowerShell; homedir() is the daemon's own default (paths.ts).
+        join(homedir(), ".local", "share", "aiball")
     );
 }
 

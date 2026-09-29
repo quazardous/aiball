@@ -129,7 +129,7 @@ defineMethod({
             }
         }
         const mode = p.mode ?? before.mode;
-        const child = spawn(CLAUDE_LOOP_BIN, [
+        const child = spawn(process.execPath, [CLAUDE_LOOP_BIN,
             "restart", loop.name, p.fresh ? "--fresh" : "--resume", `--${mode}`,
             ...remoteControlFlags(p.remote_control),
         ], { cwd: loop.plate.cwd ?? undefined, detached: true, stdio: "ignore" });
@@ -184,7 +184,7 @@ defineMethod({
         }
         // Not spawnSync: the CLI starts in a second or two, which must not hold the daemon.
         const failure = await new Promise<string | null>((resolve) => {
-            const child = spawn(CLAUDE_LOOP_BIN, ["wake", loop.name], { stdio: "ignore", timeout: 10_000 });
+            const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, "wake", loop.name], { stdio: "ignore", timeout: 10_000 });
             child.on("error", (e) => resolve(e.message));
             child.on("exit", (code, signal) => resolve(code === 0 ? null : `exit ${code ?? signal}`));
         });

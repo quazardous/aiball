@@ -28,6 +28,18 @@ test("the tray files stay ASCII, and the tray dot-sources the wording", () => {
     assert.match(readFileSync(join(BIN, "aiball-tray.ps1"), "utf8"), /\. \(Join-Path \$PSScriptRoot 'aiball-tray-version\.ps1'\)/);
 });
 
+test("the Windows scripts run by PowerShell 5.1 and cmd.exe stay ASCII", () => {
+    // Neither carries a BOM, so Windows PowerShell 5.1 reads install.ps1 in the
+    // ANSI code page: an em dash becomes bytes that include a curly quote, which
+    // closes the string it sits in, and the whole file fails to parse. That is
+    // what `aiball update` runs on Windows.
+    for (const f of [join(BIN, "..", "install.ps1"), join(BIN, "aiball-tray.cmd")]) {
+        const lines = readFileSync(f, "utf8").split("\n");
+        const bad = lines.map((l, i) => [i + 1, l] as const).filter(([, l]) => /[^\x00-\x7F]/.test(l));
+        assert.deepEqual(bad, [], `${f}: non-ASCII lines`);
+    }
+});
+
 test("the tray's version line, update command and tooltip", { skip: !hasPwsh && "pwsh not installed" }, () => {
     const daemon = { running: "0.41.0", installed: "0.41.0", latest: "0.42.0", release_url: "https://gh/r", error: null, update_available: true, restart_needed: false, check_disabled: false };
     const cli = JSON.stringify({ cli: "0.41.0", daemon, update_command: "Set-Location C:\\a; git pull --ff-only --tags; .\\install.ps1" }).replace(/'/g, "''");

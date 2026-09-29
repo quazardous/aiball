@@ -41,7 +41,8 @@ import { formatReason, type AutopollPayload } from "./templates.js";
 function claudeStillWorking(): boolean {
     if (!process.env.TMUX) return false;
     // No -t: defaults to the active pane in the current tmux session.
-    const cap = spawnSync("tmux", ["capture-pane", "-p", "-J"], { encoding: "utf8" });
+    // The loop's multiplexer (psmux on Windows), as everywhere else in the loop.
+    const cap = spawnSync(process.env.MUX_CMD || "tmux", ["capture-pane", "-p", "-J"], { encoding: "utf8" });
     if (cap.status !== 0) return false;
     return paneFooterShowsBusy(cap.stdout ?? "");
 }

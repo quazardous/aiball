@@ -70,6 +70,17 @@ dates are YYYY-MM-DD.
 - A proposal (plan, resolution, wontfix, escalation) can no longer be decided
   while its ticket waits for moderation, as it could not be posted there:
   approve the ticket first (`PARENT_PENDING_MODERATION`).
+- Windows fixes:
+  - `install.ps1` runs under Windows PowerShell 5.1 again, so `aiball update`
+    can update a Windows install.
+  - A loop's hook events (end of turn, start of session) reach it instead of
+    being set aside, and `claude-loop health` no longer reports healthy loops
+    and the daemon as failing.
+  - Starting a loop from the board no longer takes the daemon down, and
+    launching or restarting a loop from the board, `crew create --start`, and
+    the loop's own restart and reload work.
+  - `crew list` finds the crews, `debug-proxy` finds the proxy, and
+    `aiball status` looks in the right folder.
 
 ## [0.49.0] — 2026-09-28
 

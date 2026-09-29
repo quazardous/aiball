@@ -24,7 +24,7 @@
  * verdict builder now reads `afkHoldActive` only, the AFK SM is the
  * single source of truth for "is a human here."
  */
-import { existsSync } from "node:fs";
+import { selectTransport } from "./transport/index.js";
 import {
     type LiveLoopSnapshot,
     loopSockPath,
@@ -56,7 +56,7 @@ export type LoopStateSnapshot = LoopStateView & {
  *  #972 — type partagé `LiveLoopSnapshot` (state.ts), helper `mirrorLiveSnapshotToIpc`. */
 async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<LiveLoopSnapshot | null> {
     const sock = loopSockPath(sd);
-    if (!existsSync(sock)) return null;
+    if (!selectTransport().reachable(sock)) return null;
     const ch = openEventChannel(sock, { reconnectMs: 100 });
     try {
         // openEventChannel reconnects forever ; race against a deadline so

@@ -63,28 +63,33 @@ interface PidProbe {
     pid: number | null;
     alive: boolean;
     cmdline: string | null;
+    /** False where there is no /proc (Windows, macOS): the pid is alive, but
+     *  whether it is still ours could not be asked, so it is not a recycled pid. */
+    cmdlineChecked: boolean;
 }
 function probePid(pidPath: string, cmdlineMatch: RegExp): PidProbe {
-    if (!existsSync(pidPath)) return { pid: null, alive: false, cmdline: null };
+    if (!existsSync(pidPath)) return { pid: null, alive: false, cmdline: null, cmdlineChecked: false };
     const raw = readFileSync(pidPath, "utf8").trim();
     const pid = Number(raw);
-    if (!Number.isFinite(pid) || pid <= 0) return { pid: null, alive: false, cmdline: null };
+    if (!Number.isFinite(pid) || pid <= 0) return { pid: null, alive: false, cmdline: null, cmdlineChecked: false };
     let alive = false;
     try { process.kill(pid, 0); alive = true; } catch { alive = false; }
+    const cmdlineChecked = alive && existsSync("/proc");
     let cmdline: string | null = null;
-    if (alive) {
+    if (cmdlineChecked) {
         try {
             cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ").trim();
             if (!cmdlineMatch.test(cmdline)) cmdline = null; // pid recycled
         } catch { cmdline = null; }
     }
-    return { pid, alive, cmdline };
+    return { pid, alive, cmdline, cmdlineChecked };
 }
 
 export function checkLoop(sd: string): HealthCheck {
     const p = probePid(loopPidPath(sd), /kernel\.ts/);
     if (p.pid === null) return { name: "loop", status: "fail", detail: "loop.pid missing / unreadable" };
     if (!p.alive) return { name: "loop", status: "fail", detail: `pid ${p.pid} not running` };
+    if (!p.cmdlineChecked) return { name: "loop", status: "ok", detail: `pid ${p.pid} running (no /proc here: its command line is not checked)` };
     if (p.cmdline === null) {
         return {
             name: "loop",
@@ -174,6 +179,7 @@ export function checkProxy(sd: string): HealthCheck {
     const p = probePid(proxyAlivePath(sd), PROXY_CMDLINE);
     if (p.pid === null) return { name: "proxy", status: "warn", detail: "proxy-alive missing (running without PTY proxy?)" };
     if (!p.alive) return { name: "proxy", status: "fail", detail: `pid ${p.pid} not running` };
+    if (!p.cmdlineChecked) return { name: "proxy", status: "ok", detail: `pid ${p.pid} running (no /proc here: its command line is not checked)` };
     if (p.cmdline === null) {
         return {
             name: "proxy",
@@ -349,14 +355,20 @@ export function checkBootStatus(sd: string, live: LiveLoopState | null, nowMs: n
 
 export async function checkAiballDaemon(timeoutMs = 500): Promise<HealthCheck> {
     const aiballHome = process.env.AIBALL_HOME ?? join(homedir(), ".local", "share", "aiball");
-    const sock = process.env.AIBALL_SOCK || join(aiballHome, "sock");
+    // The daemon's own rule (daemon.ts SOCK_PATH): an empty AIBALL_SOCK opts
+    // out, a set one opts in, and Windows has no socket by default — it listens
+    // on TCP only. Without a socket, ask over TCP instead of reporting it missing.
+    const envSock = process.env.AIBALL_SOCK;
+    const daemonSock = envSock === "" ? null : envSock || (process.platform === "win32" ? null : join(aiballHome, "sock"));
+    const tcp = new URL(process.env.AIBALL_URL || `http://127.0.0.1:${process.env.AIBALL_PORT || "7777"}`);
     return new Promise<HealthCheck>((resolve) => {
-        if (!existsSync(sock)) {
-            resolve({ name: "aiball daemon", status: "fail", detail: `sock missing : ${sock}` });
+        if (daemonSock && !existsSync(daemonSock)) {
+            resolve({ name: "aiball daemon", status: "fail", detail: `sock missing : ${daemonSock}` });
             return;
         }
+        const target = daemonSock ? { socketPath: daemonSock } : { host: tcp.hostname, port: Number(tcp.port || 80) };
         const req = httpRequest(
-            { socketPath: sock, path: "/api/health", method: "GET", timeout: timeoutMs },
+            { ...target, path: "/api/health", method: "GET", timeout: timeoutMs },
             (res) => {
                 let body = "";
                 res.on("data", (chunk: Buffer) => { body += chunk.toString("utf8"); });
