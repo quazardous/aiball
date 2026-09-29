@@ -325,6 +325,8 @@ test("the rest of tvty's calls: its settings, its loops, its pings, its counters
         ["bus.whoami", {}, {}],
         // #3305 — what tvty's new-project assistant starts from: every value with where it comes from.
         ["project.settings", { cwd: settingsDir }, SETTINGS],
+        // #3326 — its 📢 marks, read in one call at start; then it follows project_standing_changed.
+        ["project.list", { detailed: true }, [{ name: "string", standing_prompt: "string?", focus_active: "boolean", focus_line: "string?" }]],
     ];
     for (const [method, params, shape] of reads) {
         const r = await bus(method, params);
