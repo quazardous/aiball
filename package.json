@@ -47,7 +47,7 @@
     "dev": "tsx watch src/daemon.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test:frontend": "TSX_TSCONFIG_PATH=frontend/tsconfig.json node --import tsx --import ./src/tests/setup-isolation.ts --test \"frontend/src/lib/*.test.ts\"",
+    "test:frontend": "tsx --tsconfig frontend/tsconfig.json --import ./src/tests/setup-isolation.ts --test \"frontend/src/lib/*.test.ts\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node --import tsx --import ./src/tests/setup-isolation.ts --test \"src/**/*.test.ts\"",

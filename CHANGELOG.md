@@ -55,6 +55,13 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- On Windows, `claude-loop tail -f` and `log -f` follow the log without a
+  `tail` command, from PowerShell or cmd.
+- On Windows, `aiball relocate` finds and rewrites the state under the old
+  folder: its paths are separated by `\`, and escaped in the JSON files.
+- `npm run test:frontend` runs under cmd.exe.
+- `aiball drain` makes the daemon drain its spool at once. Its trigger file
+  was ignored by the spool watcher, whatever the platform.
 - The web terminal reaches an agent on a proxy node through the node its calls
   come through. It matched them by address, which fails behind tailscale serve
   (every node is the loopback) and named a node that was never connected; the

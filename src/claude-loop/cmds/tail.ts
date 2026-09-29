@@ -6,17 +6,17 @@
  *   - `cmdTail(name, lines, which, follow)` — the command handler
  *   - `TailMode` — `"pane" | "timer" | "stop-hook" | "log"`
  *
- * Local helpers (`paneDelta`, `followPane`, `TAIL_NOISE_RE`,
- * `pipeFilteredStderr`, `followFile`) stay private to this module —
+ * Local helpers (`paneDelta`, `followPane`, `followFile`) stay private to this module —
  * they only matter for the tail flow.
  *
  * `die` is a tiny inlined helper rather than imported from cli.ts, to keep
  * the extraction self-contained and avoid a circular import; `tmuxAlive`
  * comes from state.ts.
  */
-import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { followLines } from "../follow-file.js";
 import {
     MUX_CMD,
     stateDirFor,
@@ -84,56 +84,11 @@ async function followPane(name: string, lines: number): Promise<void> {
     }
 }
 
-/**
- * GNU tail prints chatty status lines on stderr when a watched file
- * disappears (claude-loop restart deletes the session's state dir):
- * "became inaccessible" / "est devenu inaccessible", "cannot use
- * inotify" / "impossible d'utiliser inotify", "reverting to polling"
- * / "retour à l'interrogation active". Tail itself keeps working via
- * polling — these are warnings, not errors — but they clutter the
- * `claude-loop --log` view. #B.210. We drop the known noise and let
- * any other stderr (real errors) through.
- */
-const TAIL_NOISE_RE =
-    /became inaccessible|est devenu inaccessible|cannot use inotify|impossible d'utiliser inotify|reverting to polling|retour à l'interrogation active|le répertoire contenant le fichier|directory containing the watched file|tail: cannot open .* for reading: No such file or directory|tail: impossible d'ouvrir .* en lecture: Aucun fichier ou dossier de ce nom/i;
-
-function pipeFilteredStderr(child: import("node:child_process").ChildProcess): void {
-    if (!child.stderr) return;
-    let carry = "";
-    child.stderr.on("data", (chunk: Buffer) => {
-        const text = carry + chunk.toString("utf8");
-        const out = text.split("\n");
-        carry = out.pop() ?? "";
-        for (const l of out) {
-            if (!l) continue;
-            if (TAIL_NOISE_RE.test(l)) continue;
-            process.stderr.write(`${l}\n`);
-        }
-    });
-    child.stderr.on("end", () => {
-        if (carry && !TAIL_NOISE_RE.test(carry)) process.stderr.write(`${carry}\n`);
-    });
-}
-
+/** Follow `path` until Ctrl-C (#3299: in Node, no `tail` needed). */
 function followFile(path: string, lines: number, prefix?: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const child = spawn("tail", ["-n", String(lines), "-F", path], {
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        pipeFilteredStderr(child);
-        if (child.stdout) {
-            let carry = "";
-            child.stdout.on("data", (chunk: Buffer) => {
-                const text = carry + chunk.toString("utf8");
-                const lines = text.split("\n");
-                carry = lines.pop() ?? "";
-                for (const l of lines) process.stdout.write(`${prefix ?? ""}${l}\n`);
-            });
-            child.stdout.on("end", () => { if (carry) process.stdout.write(`${prefix ?? ""}${carry}\n`); });
-        }
-        child.on("error", reject);
-        child.on("exit", (code) => code === 0 || code === null ? resolve() : reject(new Error(`tail exited ${code}`)));
-        process.on("SIGINT", () => { child.kill("SIGINT"); process.exit(0); });
+    return new Promise(() => {
+        const h = followLines(path, lines, (l) => process.stdout.write(`${prefix ?? ""}${l}\n`));
+        process.on("SIGINT", () => { h.stop(); process.exit(0); });
     });
 }
 
@@ -145,7 +100,7 @@ export async function cmdTail(name: string, lines: number, which: TailMode, foll
         const label = which === "timer" ? "timer log" : "stop-hook log";
         if (!existsSync(log)) {
             if (!follow) die(`no ${label} at ${log}`);
-            // Follow mode: tail -F handles a not-yet-existent file
+            // Follow mode waits for a not-yet-existent file
             // (waits for it to appear). Helpful when the Stop hook
             // hasn't fired yet — user can leave it running.
         }
@@ -196,27 +151,10 @@ export async function cmdTail(name: string, lines: number, which: TailMode, foll
             }
             return;
         }
-        const runFollow = async (path: string, tag: string): Promise<void> => {
-            return new Promise((resolveP, rejectP) => {
-                const child = spawn("tail", ["-n", String(lines), "-F", path], {
-                    stdio: ["ignore", "pipe", "pipe"],
-                });
-                pipeFilteredStderr(child);
-                let carry = "";
-                child.stdout?.on("data", (chunk: Buffer) => {
-                    const text = carry + chunk.toString("utf8");
-                    const out = text.split("\n");
-                    carry = out.pop() ?? "";
-                    for (const l of out) process.stdout.write(`${reformat(l, tag)}\n`);
-                });
-                child.stdout?.on("end", () => {
-                    if (carry) process.stdout.write(`${reformat(carry, tag)}\n`);
-                });
-                child.on("error", rejectP);
-                child.on("exit", (code) => code === 0 || code === null ? resolveP() : rejectP(new Error(`tail exited ${code}`)));
-                process.on("SIGINT", () => { child.kill("SIGINT"); process.exit(0); });
-            });
-        };
+        const runFollow = (path: string, tag: string): Promise<void> => new Promise(() => {
+            const h = followLines(path, lines, (l) => process.stdout.write(`${reformat(l, tag)}\n`));
+            process.on("SIGINT", () => { h.stop(); process.exit(0); });
+        });
         await Promise.race([
             runFollow(timer, TIMER_TAG),
             runFollow(hook, HOOK_TAG),

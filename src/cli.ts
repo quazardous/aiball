@@ -586,6 +586,7 @@ program
         const home = aiballHome();
         const spoolDir = join(home, "spool");
         if (existsSync(spoolDir)) {
+            // The name the daemon's spool watcher drains on (`DRAIN_TRIGGER` in spool.ts).
             const marker = join(spoolDir, ".drain-trigger");
             try {
                 // eslint-disable-next-line @typescript-eslint/no-require-imports

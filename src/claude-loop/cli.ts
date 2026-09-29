@@ -2419,7 +2419,7 @@ async function main(): Promise<void> {
     // `--follow` tails forever ; `--json` keeps raw NDJSON for jq.
     program.command("log [name]")
         .description("Filter + tail the unified loop log (NDJSON). Filters compose: --level / --tag / --grep / --since. Name optional — defaults to the loop registered for the current cwd.")
-        .option("-f, --follow", "Follow new lines (tail -F)")
+        .option("-f, --follow", "Follow new lines, as tail -F does")
         .option("--lines <n>", "Lines to keep (default 50, max 10000)", "50")
         .option("--level <level>", "Drop records below this level (debug|info|notice|warning|error|critical|alert|emergency)")
         .option("--tag <regex>", "Only records whose tag matches this regex (e.g. '^wakeMachine')")

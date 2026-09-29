@@ -6,9 +6,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 const SRC = resolve(import.meta.dirname);
+/** A path under src/ as the rules below spell it, with `/` (#3299: `` on Windows). */
+const relOf = (p: string): string => relative(SRC, p).split(sep).join("/");
 
 /** The core's own modules: what a client must not import, even indirectly. */
 const CORE = [/^db\.ts$/, /^db\//, /^bus\//, /^queries\//, /^sessions\//, /^schema\.ts$/, /^messages\.ts$/, /^api\.ts$/, /^api\//, /^app\.ts$/, /^daemon\.ts$/];
@@ -57,8 +59,8 @@ function pathToCore(start: string): string[] | null {
     while (queue.length) {
         const chain = queue.shift()!;
         for (const next of importsOf(chain.at(-1)!)) {
-            const rel = relative(SRC, next);
-            if (isCore(rel)) return [...chain, next].map((f) => relative(SRC, f));
+            const rel = relOf(next);
+            if (isCore(rel)) return [...chain, next].map((f) => relOf(f));
             if (EXCEPTIONS[rel] || seen.has(next)) continue;
             seen.add(next);
             queue.push([...chain, next]);
@@ -73,7 +75,7 @@ for (const client of CLIENTS) {
     test(`${client}/ reaches the core only through the API`, () => {
         const leaks: string[] = [];
         for (const file of sources(join(SRC, client))) {
-            if (EXCEPTIONS[relative(SRC, file)]) continue;
+            if (EXCEPTIONS[relOf(file)]) continue;
             const chain = pathToCore(file);
             if (chain) leaks.push(chain.join(" → "));
         }
@@ -92,8 +94,8 @@ test("bus/ does not import api/", () => {
     const leaks: string[] = [];
     for (const file of sources(join(SRC, "bus"))) {
         for (const dep of importsOf(file)) {
-            const rel = relative(SRC, dep);
-            if (/^api\//.test(rel) || rel === "api.ts") leaks.push(`${relative(SRC, file)} → ${rel}`);
+            const rel = relOf(dep);
+            if (/^api\//.test(rel) || rel === "api.ts") leaks.push(`${relOf(file)} → ${rel}`);
         }
     }
     assert.deepEqual(leaks, [], `the bus imports api/:\n  ${leaks.join("\n  ")}`);
