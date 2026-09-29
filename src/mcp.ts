@@ -83,7 +83,7 @@ registerWelcomeTools(tools);
 // the owner-gated surfaces (e.g. the #1542 upstream tools below). `lead` /
 // unset keep the historical owner subscription.
 if (client.defaultProject) {
-    const subRole = subscriptionRoleFor(process.env.AIBALL_ROLE);
+    const subRole = subscriptionRoleFor(client.role); // env, else .aiball.yaml (a plain `claude` too)
     try {
         await client.subscribe(client.defaultProject, false, subRole);
     } catch {

@@ -64,6 +64,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A crew or no-claim agent stays one when Claude is started without
+  claude-loop (a plain `claude` in its folder): its role and no-claim setting
+  are read from `.aiball.yaml` like its name. Before, such a start subscribed
+  it as a project owner, which received the whole backlog, and let it claim.
 - An idle loop whose kernel reloaded itself (after an update) no longer stops
   waking: the drain tempo starts again after the reload, and the heartbeat
   takes over when an announced drain never comes.

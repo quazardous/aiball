@@ -79,6 +79,10 @@ export class AiballClient {
     readonly defaultProject: string | null;
     readonly token: string | null;
     readonly socketPath: string | null;
+    /** The multi-agent role this client states (`x-aiball-role`), or null (lead). */
+    readonly role: "lead" | "crew" | null;
+    /** Whether this client asks not to claim (`x-aiball-no-claim`). */
+    readonly noClaim: boolean;
 
     constructor(opts: ClientOptions = {}) {
         this.url = opts.url ?? process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
@@ -98,6 +102,11 @@ export class AiballClient {
             opts.socketPath ?? (envSock && envSock !== "" ? envSock : null);
         this.token = opts.token ?? process.env.AIBALL_TOKEN ?? null;
         this.features = opts.features ?? [];
+        // The folder's `.aiball.yaml` speaks for the folder's own agent only: a
+        // client built for another agent (an explicit agentId) keeps to the env.
+        const standing = resolveConsumerStanding(process.env, opts.agentId === undefined ? resolveUserCwd() : null);
+        this.role = standing.role;
+        this.noClaim = standing.noClaim;
     }
 
     /**
@@ -121,17 +130,12 @@ export class AiballClient {
     private identityHeaders(): Record<string, string> {
         const headers: Record<string, string> = {};
         if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
-        // #508 phase A2 — claude-loop exports AIBALL_NO_CLAIM=1 when the
-        // project's `.aiball.yaml` sets `consumer.no_claim: true`. Forward as
-        // a header so the upstream's claimable lens picks it up.
-        if (process.env.AIBALL_NO_CLAIM === "1") {
-            headers["x-aiball-no-claim"] = "1";
-        }
-        // #1435 slice 5 — forward the multi-agent role so the daemon persists it
-        // on the consumer (visible in the UI). Mirrors the no-claim hint.
-        if (process.env.AIBALL_ROLE) {
-            headers["x-aiball-role"] = process.env.AIBALL_ROLE;
-        }
+        // #508 phase A2 — the no-claim hint, so the upstream's claimable lens
+        // picks it up. Resolved like the agent id (env, else .aiball.yaml).
+        if (this.noClaim) headers["x-aiball-no-claim"] = "1";
+        // #1435 slice 5 — the multi-agent role, which the daemon persists on the
+        // consumer (visible in the UI). Mirrors the no-claim hint.
+        if (this.role) headers["x-aiball-role"] = this.role;
         // #2099 — say what this machine is, so a ticket filed from here can be
         // tagged with it. The daemon cannot deduce it: behind a proxy node the
         // connection carries the NODE's platform, not the agent's. Same shape
@@ -401,12 +405,8 @@ export class AiballClient {
         if (name) headers["x-aiball-upload-name"] = name;
         // #508 phase A2 — propagate the no-claim hint on uploads too (cosmetic
         // but consistent — auth middleware reads the same header in any path).
-        if (process.env.AIBALL_NO_CLAIM === "1") {
-            headers["x-aiball-no-claim"] = "1";
-        }
-        if (process.env.AIBALL_ROLE) {
-            headers["x-aiball-role"] = process.env.AIBALL_ROLE;
-        }
+        if (this.noClaim) headers["x-aiball-no-claim"] = "1";
+        if (this.role) headers["x-aiball-role"] = this.role;
         const path = "/api/uploads";
         const timeoutMs = Math.max(this.timeoutMs, 15000);
         type UploadResult = { url: string; sha256: string; bytes: number; content_type: string };
@@ -1496,6 +1496,36 @@ export function resolveDefaultProject(cwd = resolveUserCwd()): string | null {
     } catch {
         return null;
     }
+}
+
+/**
+ * The agent's standing — its multi-agent role and whether it may claim —
+ * resolved like its id: the environment first (claude-loop exports
+ * AIBALL_ROLE / AIBALL_NO_CLAIM), else the folder's `.aiball.yaml`, with the
+ * rule claude-loop applies: a `crew` agent never claims.
+ *
+ * Reading only the environment made a plain `claude` in a crew agent's folder
+ * (its MCP started from `.mcp.json`, outside claude-loop) state no role at
+ * all: the MCP subscribed it as an owner and it could claim, whatever the
+ * yaml said. `cwd` null = the environment alone (a client built for another
+ * agent than the folder's).
+ */
+export function resolveConsumerStanding(
+    env: NodeJS.ProcessEnv = process.env,
+    cwd: string | null = resolveUserCwd(),
+): { role: "lead" | "crew" | null; noClaim: boolean } {
+    let yaml: { role: "lead" | "crew" | null; no_claim: boolean } | null = null;
+    if (cwd !== null) {
+        try { yaml = loadConfig(cwd).consumer; } catch { /* no readable config: env only */ }
+    }
+    const envRole = env.AIBALL_ROLE;
+    const role = envRole === "lead" || envRole === "crew" ? envRole
+        : envRole ? null // set but unknown: stated, not guessed
+        : yaml?.role ?? null;
+    const noClaim = env.AIBALL_NO_CLAIM !== undefined
+        ? env.AIBALL_NO_CLAIM === "1"
+        : (yaml?.no_claim ?? false) || role === "crew";
+    return { role, noClaim };
 }
 
 export function resolveAgentId(cwd = resolveUserCwd()): string {
