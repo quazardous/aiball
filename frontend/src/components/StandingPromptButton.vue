@@ -212,7 +212,7 @@ function describeLoopResult(r: LoopHoldResult): string {
                     list="standing-prompt-pop-history"
                     type="text"
                     class="standing-prompt-pop__input"
-                    placeholder="e.g. priorité au debug léger, pas de grosse évolution"
+                    placeholder="e.g. light debugging first, no big changes"
                     :disabled="busy || !project"
                     @keyup.enter="save"
                 >

@@ -129,7 +129,7 @@ watch(() => props.project, () => load());
                     list="standing-prompt-history"
                     type="text"
                     class="project-settings__standing-input"
-                    placeholder="e.g. priorité au debug léger, pas de grosse évolution"
+                    placeholder="e.g. light debugging first, no big changes"
                     :disabled="standingBusy"
                     @blur="applyStandingPrompt"
                     @keyup.enter="applyStandingPrompt"
