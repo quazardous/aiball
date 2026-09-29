@@ -36,10 +36,9 @@ Without a Unix socket, a client authenticates with a bearer token, the same way
 the CLI does:
 
 1. **Find the token**: `AIBALL_TOKEN` if set, else the `export AIBALL_TOKEN=…`
-   line of `%USERPROFILE%\.local\share\aiball\cli-env` (written when the human
-   account is created; see
-   [Transport: TCP, not UDS](./WIN-INSTALL.md#transport-tcp-not-uds)). The CLI
-   does exactly this in `bin/launcher.js`.
+   line of `%USERPROFILE%\.local\share\aiball\cli-env`. The CLI does exactly
+   this in `bin/launcher.js`. Better, give the client a token of its own: see
+   [Tokens](#tokens-who-creates-them-where-they-live) below.
 2. **Find the daemon**: `AIBALL_URL` if set, else `http://127.0.0.1:7777`
    (the daemon's `-Port` at install; the clients read `AIBALL_URL`, not the port).
 3. **Send it**: `Authorization: Bearer <token>`, or `?token=` where headers
@@ -48,6 +47,42 @@ the CLI does:
 
 A client that shares an agent with claude-loop also needs
 [`TVTY-BIND.md`](./TVTY-BIND.md): which of the two holds the agent's Claude.
+
+## Tokens: who creates them, where they live
+
+**The first one is created by the daemon**, once: when the human account is
+set up (the `/setup` page the installer opens). It issues an **agent-kind
+token bound to that human account** and writes it to
+`%USERPROFILE%\.local\share\aiball\cli-env` as `export AIBALL_TOKEN=…` —
+**only if the file does not exist yet**. It is never rewritten afterwards: a
+missing `cli-env` after the first setup stays missing until someone writes it.
+Every client that falls back to `cli-env` acts as that human.
+
+**Any number of tokens can be active at once.** Each one is independent:
+
+```powershell
+aiball auth issue --consumer <id> --label "<what it is for>"   # prints a new token, writes nothing
+aiball auth list                                               # every active token, with its last use
+aiball auth revoke <token-or-prefix>                           # deletes one; the others keep working
+```
+
+Give each client its own token, bound to its own consumer: a GUI such as tvty
+gets one, each claude-loop agent another. Revoking or rotating one then never
+breaks the others, and the board tells them apart. Sharing `cli-env` works, but
+ties every client to the human's identity and to one credential.
+
+**Where claude-loop keeps a token** it was given
+(`claude-loop init --aiball-url <url> --aiball-token <token>`, or the same flags
+on `start`):
+
+- `<project>\.aiball.local.yaml`, under `remote:` (`url`, `token`, `consumer`,
+  `project`). Git-ignored; read by every later `claude-loop start` in that
+  folder, so the flags need not be repeated.
+- the loop's own `env` file, `%USERPROFILE%\.claude-loop\<loop>\env`, rewritten
+  at each start from the above.
+
+The file modes aiball sets on these files (`0600`) mean nothing on NTFS: on
+Windows they are protected only by the user profile's permissions.
 
 ## Not working on Windows yet
 
