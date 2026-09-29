@@ -113,6 +113,10 @@ export interface LoopStateInput {
      *  useless until the human runs /login. */
     notLoggedIn: boolean;
 
+    /** #3268 — a usage limit is reached: blocks ALL wakes (even manual), none
+     *  can do anything before the reset. Optional: absent = not reached. */
+    limitReached?: boolean;
+
     /** #2230 — Claude Code's folder trust dialog is on screen. Blocks ALL wakes
      *  (even manual): typed into the dialog, a wake's Enter picks "No, exit"
      *  and claude quits. Only the human answers it. */
@@ -329,6 +333,11 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     // runs /login. Blocks even manual wakes (placed before the manual bypass).
     if (input.notLoggedIn) {
         return { allowed: false, reason: "not logged in (run /login)" };
+    }
+
+    // #3268 — a usage limit reached: no wake can do anything before the reset.
+    if (input.limitReached) {
+        return { allowed: false, reason: "usage limit reached (held until it resets)" };
     }
 
     // #2230 — never type into Claude Code's trust dialog: Enter picks its

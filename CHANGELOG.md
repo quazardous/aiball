@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- When Claude Code says a usage limit is reached (weekly, session, 5-hour…),
+  the loop holds itself at once instead of waking Claude for nothing, and says
+  it in its bar with the reset time.
 - `loop.wake` on the bus wakes a loop now, as `claude-loop wake` does: a
   client's way out of a loop that stays asleep with events waiting.
 - In the web board, hovering a `#NNN` link shows the ticket's title.
@@ -71,6 +74,11 @@ dates are YYYY-MM-DD.
   claude-loop (a plain `claude` in its folder): its role and no-claim setting
   are read from `.aiball.yaml` like its name. Before, such a start subscribed
   it as a project owner, which received the whole backlog, and let it claim.
+- Stopping a loop on the session host stops its host too: the loop no longer
+  reads as alive, and starting it again is no longer refused as busy. A host
+  left without its command by an older stop is replaced by the next start.
+- `claude-loop reload`, typed in another loop's shell, no longer hands that
+  loop's session host to the reloaded kernel.
 - An idle loop whose kernel reloaded itself (after an update) no longer stops
   waking: the drain tempo starts again after the reload, and the heartbeat
   takes over when an announced drain never comes.

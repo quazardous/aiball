@@ -1113,3 +1113,13 @@ test("#2255 a waiting signal arms the wake countdown even with empty ticket queu
     assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0, backlog: 0, signals: 1 }), true);
     assert.equal(wakeCountdownArmable({ events: 0, actionableOpen: 0, backlog: 0, signals: 0 }), false);
 });
+
+test("#3268 a usage limit reached → every wake skipped, a manual one too", () => {
+    const now = T0 + 5 * MIN;
+    for (const manualWake of [false, true]) {
+        const v = computeLoopView(baseInput({ nowMs: now, loopStartMs: T0, idleSinceMs: now, limitReached: true, manualWake }));
+        assert.equal(v.wakeAllowed, false, `manual=${manualWake}`);
+        assert.match(v.wakeSkipReason ?? "", /usage limit reached/);
+    }
+    assert.equal(computeLoopView(baseInput({ nowMs: now, loopStartMs: T0, idleSinceMs: now, manualWake: true })).wakeAllowed, true, "control: the same manual wake passes without it");
+});

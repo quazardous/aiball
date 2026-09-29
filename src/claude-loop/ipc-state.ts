@@ -200,6 +200,12 @@ export interface IpcState {
      *  the RED link-down overlay) and the wake gate blocks ALL wakes (a wake is
      *  useless until login). Default false. */
     notLoggedIn: boolean;
+    /** #3268 — Claude Code says a usage limit is reached (`You've hit your
+     *  weekly limit`), and when it lifts if it says so. Set by the
+     *  LimitReachedWatcher, cleared when Claude works again (busy / Stop).
+     *  While set, the wake gate refuses every wake and the bar says it. */
+    limitReached: boolean;
+    limitResets: { text: string; at: string | null } | null;
     /** #3074 — Claude Code installed an update and asks for a restart. Set by
      *  the UpdateInstalledWatcher; a fresh process (the restart) starts false.
      *  Published in the bar for a host to offer the restart. Default false. */
@@ -287,6 +293,8 @@ const state: IpcState = {
     linkDown: false,
     daemonDown: false,
     notLoggedIn: false,
+    limitReached: false,
+    limitResets: null,
     restartNeeded: false,
     restartPending: false,
     trustDialog: false,
@@ -479,6 +487,15 @@ export function setIpcDaemonDown(down: boolean): void {
 export function setIpcNotLoggedIn(notLoggedIn: boolean): void {
     if (state.notLoggedIn === notLoggedIn) return;
     state.notLoggedIn = notLoggedIn;
+    notifyIpcChanged();
+}
+
+/** #3268 — a usage limit reached (with its reset, when said), or lifted. */
+export function setIpcLimitReached(reached: boolean, resets: { text: string; at: string | null } | null = null): void {
+    const next = reached ? resets : null;
+    if (state.limitReached === reached && JSON.stringify(state.limitResets) === JSON.stringify(next)) return;
+    state.limitReached = reached;
+    state.limitResets = next;
     notifyIpcChanged();
 }
 
@@ -725,6 +742,8 @@ export function resetIpcStateForTests(): void {
     state.linkDown = false;
     state.daemonDown = false;
     state.notLoggedIn = false;
+    state.limitReached = false;
+    state.limitResets = null;
     state.restartNeeded = false;
     state.restartPending = false;
     state.trustDialog = false;

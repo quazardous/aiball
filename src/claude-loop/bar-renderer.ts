@@ -94,6 +94,9 @@ export interface BarSnapshot {
      *  PRIORITY over the RED link-down overlay) + a `/login` hint in the state
      *  tag. Cleared on the first Stop hook. */
     notLoggedIn: boolean;
+    /** #3268 — a usage limit reached ? ORANGE, with the reset in the state tag. */
+    limitReached: boolean;
+    limitResetsText: string | null;
     /** #2230 — Claude Code's folder trust dialog on screen ? Same ORANGE
      *  overlay + an `attach to answer` hint. Cleared when the dialog goes. */
     trustDialog: boolean;
@@ -259,6 +262,8 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         linkDown: ipc.linkDown,
         daemonDown: ipc.daemonDown,
         notLoggedIn: ipc.notLoggedIn,
+        limitReached: ipc.limitReached === true,
+        limitResetsText: ipc.limitResets?.text ?? null,
         trustDialog: ipc.trustDialog,
         restartNeeded: ipc.restartNeeded === true,
         restartPending: ipc.restartPending === true,
@@ -301,12 +306,16 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
             restart_needed: ipc.restartNeeded === true,
             // #3117 — a restart ordered `when_idle` is waiting for Claude to go idle.
             restart_pending: ipc.restartPending === true,
+            // #3268
+            limit_reached: ipc.limitReached === true,
         },
         proxy_alive: proxyIsAlive(sd),
         zen: existsSync(zenPath(sd)),
         counters: ipc.counters ?? null,
         // Only while idle, as the tmux countdown: busy, the next wake is not due.
         next_wake_at: phase === "idle" && ipc.nextWakeAtMs !== null && ipc.nextWakeAtMs > nowMs ? iso(ipc.nextWakeAtMs) : null,
+        // #3268 — when the reached limit lifts, as said; null when none is reached.
+        limit_resets: ipc.limitReached ? ipc.limitResets ?? null : null,
         boot: phase === "boot"
             ? { started_at: new Date(input.loopStartMs).toISOString(), deadline_at: iso(ipc.bootDeadlineMs ?? null) }
             : null,
@@ -345,6 +354,7 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     // #1072 — not-logged-in flips the bar bg ORANGE + the state-tag hint ;
     // route through the same status-bg repaint block.
     if (prev.notLoggedIn !== next.notLoggedIn) changed.push("loopStatus");
+    if (prev.limitReached !== next.limitReached || prev.limitResetsText !== next.limitResetsText) changed.push("loopStatus");
     // #2230 — the trust dialog flips the bar ORANGE + the state-tag hint too.
     if (prev.trustDialog !== next.trustDialog) changed.push("loopStatus");
     if (prev.restartNeeded !== next.restartNeeded) changed.push("loopStatus");
@@ -579,7 +589,7 @@ export class BarRenderer {
             // fix immediately (run /login).
             // #1116 — api-unreachable shares the ORANGE overlay + priority with
             // not-logged-in : both are "no point waking, here's why" states.
-            const bg = (next.trustDialog || next.notLoggedIn || next.apiUnreachable)
+            const bg = (next.trustDialog || next.notLoggedIn || next.limitReached || next.apiUnreachable)
                 ? "colour208"
                 : (next.linkDown || next.daemonDown) ? col.link_down_bg : stateBg(col, next.loopStatus);
             setOpt("status-bg", bg);
@@ -593,6 +603,8 @@ export class BarRenderer {
                 ? "⚠ trust this folder? · attach to answer"
                 : next.notLoggedIn
                 ? "⚠ not logged in · /login"
+                : next.limitReached
+                ? `⚠ usage limit reached · held${next.limitResetsText ? ` · resets ${next.limitResetsText}` : ""}`
                 : next.apiUnreachable ? "⚠ API unreachable · retrying"
                 : next.restartPending ? `${next.stateTag} · ⟳ restart when idle`
                 : next.restartNeeded ? `${next.stateTag} · ⟳ update installed, restart` : next.stateTag;

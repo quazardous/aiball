@@ -316,7 +316,7 @@ flowchart TD
     C -- no --> D{"idle marker set?"}
     D -- no --> S2["skip: claude busy or still booting"]
     D -- yes --> E{"loop view allows it?"}
-    E -- no --> S3["skip, first reason that applies:<br/>not logged in · trust dialog · API unreachable ·<br/>boot grace · human typing in the last 5 s · presence hold ·<br/>busy-defer · esc to interrupt · /compact"]
+    E -- no --> S3["skip, first reason that applies:<br/>not logged in · usage limit · trust dialog · API unreachable ·<br/>boot grace · human typing in the last 5 s · presence hold ·<br/>busy-defer · esc to interrupt · /compact"]
     E -- yes --> F{"work waiting?<br/>pings · actionable tickets · signals"}
     F -- no --> S4["skip: drained"]
     F -- yes --> G["pick the phrase:<br/>1. external signal<br/>2. unread event, or the live notification<br/>3. backlog ticket"]
@@ -1008,8 +1008,18 @@ What the loop paints in the tmux status line is also pushed to the daemon, as
 facts rather than glyphs, so another host can draw it its own way: the phase, the
 human's presence, the AFK hold and when it lapses, the input zone, a human typing,
 the state marker and its dialogs, the alerts (link or daemon down, not logged in,
-trust dialog, API unreachable), the proxy, zen, the counters, the next wake and the
-boot window. Times are absolute dates, never countdowns.
+trust dialog, API unreachable, usage limit reached), the proxy, zen, the counters,
+the next wake and the boot window. Times are absolute dates, never countdowns.
+
+When Claude Code says a usage limit is reached (`You've hit your weekly limit`, and
+the session, 5-hour, Opus and monthly spend limits alike), the loop holds itself at
+once (AFK ∞, as F9 does), refuses every wake, paints the tmux line orange with
+`⚠ usage limit reached · held · resets …`, and publishes `alerts.limit_reached` with
+`limit_resets` (`{ text, at }`: the reset as Claude says it, and as a date when it is
+a delay). It reads the banner at the foot of the screen only, so a thread quoting
+the words does not trip it; the fast mode's limit and the `NN% of your weekly limit`
+warning do not either. The human lets the hold go; the alert lifts when Claude works
+again.
 
 The loop pushes on change, at most once a second (a burst ends on its last value).
 A human, or the agent itself, reads it with `GET /api/consumers/<agent>/bar`, and

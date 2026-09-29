@@ -150,3 +150,43 @@ export class IdlePromptWatcher extends BoolWatcher {
         return !isBusy;
     }
 }
+
+/** #3268 — when a usage limit lifts, as Claude Code says it: the words, and the moment when they can be read. */
+export interface LimitResets { text: string; at: string | null }
+
+/**
+ * #3268 — the `resets …` part of a limit banner: kept as said, and read as a
+ * moment when it is a delay (`resets in 3h 20m`, `resets in 45m`, `in 2d`).
+ * A clock time or a date (`resets 3pm (Europe/Paris)`) is kept as text only:
+ * its reading depends on a timezone the pane does not always give.
+ */
+export function limitResetsOf(banner: string, nowMs: number): LimitResets | null {
+    const m = /resets\s+([^·\n]+)/i.exec(banner);
+    if (!m) return null;
+    const text = m[1].trim();
+    const d = /^in\s+(?:(\d+)\s*d(?:ays?)?)?\s*(?:(\d+)\s*h(?:ours?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?$/i.exec(text);
+    if (!d || !(d[1] || d[2] || d[3])) return { text, at: null };
+    const ms = ((Number(d[1] ?? 0) * 24 + Number(d[2] ?? 0)) * 60 + Number(d[3] ?? 0)) * 60_000;
+    return { text, at: new Date(nowMs + ms).toISOString() };
+}
+
+/** #3268 — Claude Code says a usage limit is reached: `You've hit your <name>
+ *  limit` (weekly, session, 5-hour, Opus, the monthly spend limit), built at
+ *  run time with an optional `· resets …`. Waking Claude is pointless until the
+ *  reset. Not the fast mode's limit (Claude falls back to its normal model on
+ *  its own), not the `You've used NN% of your weekly limit` warning. Footer
+ *  only, prompt lines dropped — as NotLoggedInWatcher: a thread quoting the
+ *  words must not trip it. `banner()` is the line that matched, for its reset. */
+export class LimitReachedWatcher extends BoolWatcher {
+    readonly name = "limit_reached";
+    private static readonly BANNER = /You've hit your (?!fast limit)[A-Za-z0-9' -]{0,40}?limit\b[^\n]*/;
+    private last: string | null = null;
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        const m = LimitReachedWatcher.BANNER.exec(footerOf(paneText, 8));
+        this.last = m ? m[0] : null;
+        return m !== null;
+    }
+    banner(): string | null {
+        return this.last;
+    }
+}

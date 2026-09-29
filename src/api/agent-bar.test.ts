@@ -54,7 +54,8 @@ const bar = (over: Record<string, unknown> = {}) => ({
     prompt: { visible: true, has_input: false },
     human_typing: false,
     marker: { info: null, health_prompt: false, resume_picker: false, resume_mode_picker: false },
-    alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false, restart_pending: false },
+    alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false, restart_pending: false, limit_reached: false },
+    limit_resets: null,
     proxy_alive: true,
     zen: false,
     counters: { open: 3, backlog: 1, events: 0 },
@@ -108,6 +109,17 @@ test("the bar is stale unless its loop is present", async () => {
 test("the shape the daemon accepts round-trips unchanged", () => {
     assert.deepEqual(parseAgentBar(bar()), bar());
     assert.deepEqual(parseAgentBar(bar({ host: "external" })), bar({ host: "external" }));
+});
+
+test("#3268 — a usage limit: its alert and reset round-trip; a loop started before the fields sends neither; a malformed reset is refused", () => {
+    const hit = bar({ alerts: { ...bar().alerts, limit_reached: true }, limit_resets: { text: "in 3h 20m", at: "2026-09-28T20:00:00.000Z" } });
+    assert.deepEqual(parseAgentBar(hit), hit);
+    const { limit_resets: _r, ...old } = bar();
+    const { limit_reached: _l, ...oldAlerts } = bar().alerts;
+    const parsed = parseAgentBar({ ...old, alerts: oldAlerts }) as { alerts: { limit_reached: boolean }; limit_resets: unknown };
+    assert.equal(parsed.alerts.limit_reached, false);
+    assert.equal(parsed.limit_resets, null);
+    assert.match(String((parseAgentBar(bar({ limit_resets: { text: 3 } })) as { error: string }).error), /limit_resets/);
 });
 
 test("#3044 — a bar without host (a loop started before the field) draws in tmux; an unknown host is refused", () => {
