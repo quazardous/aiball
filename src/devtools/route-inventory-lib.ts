@@ -138,3 +138,18 @@ export function tvtyCalls(tvtyDir: string): Call[] {
     const files = walk(join(tvtyDir, "src"), (f) => f.endsWith(".rs"));
     return callsIn(files.map((f) => readFileSync(f, "utf8")).join("\n"));
 }
+
+/**
+ * The bus methods tvty calls: every quoted `family.method` string in its Rust
+ * sources that the bus registers. A keymap action or a subject that happens to
+ * share a method's name is counted too — a guard that errs toward covering more.
+ */
+export function tvtyBusMethods(tvtyDir: string, known: Iterable<string>): string[] {
+    const registered = new Set(known);
+    const files = walk(join(tvtyDir, "src"), (f) => f.endsWith(".rs"));
+    const quoted = new Set<string>();
+    for (const f of files) {
+        for (const m of readFileSync(f, "utf8").matchAll(/"([a-z_]+\.[a-z_]+)"/g)) quoted.add(m[1]!);
+    }
+    return [...quoted].filter((name) => registered.has(name)).sort();
+}

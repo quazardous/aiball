@@ -39,10 +39,13 @@ tvty's calls as it sends them — over the socket, with its exact bodies — and
 checks that every field it reads is there, with its type. Most of those fields
 are optional on tvty's side, so a field dropped by aiball would not break tvty,
 it would silently lose a feature; here it fails the test. The test also checks
-that every route tvty calls is covered: when tvty's checkout sits next to this
-one (or at `AIBALL_TVTY_DIR`), it reads tvty's sources live, with the route
+that every bus method and every route tvty calls is covered — a method by a call
+in the test itself, or by the test named next to it when it needs a running
+loop, a session host or a project folder. When tvty's checkout sits next to
+this one (or at `AIBALL_TVTY_DIR`), it reads tvty's sources live, with the route
 inventory's own reader, so a call tvty adds fails the test at once, naming
-tvty's commit; without the checkout (Docker, CI), it reads `API-ROUTES.md`.
+tvty's commit; without the checkout (Docker, CI), it reads the routes and the
+methods `API-ROUTES.md` lists.
 When tvty changes what it reads, the field table in the test changes with it.
 
 The bus's contract is published, generated from the code: the methods as an

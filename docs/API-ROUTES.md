@@ -40,3 +40,61 @@ A path a consumer requests that no server route serves: dead code, a drifted pat
 or a route this script cannot read (a regex route, a path built at run time).
 
 - **tvty**: `/api/uploads/ab12`
+
+## Bus methods tvty calls
+
+Every bus method named in tvty's sources: what `src/api/tvty-contract.test.ts` guards
+when tvty's checkout is not next to this one.
+
+- `bus.subscribe`
+- `bus.whoami`
+- `config.clear`
+- `config.managed`
+- `config.set`
+- `consumer.afk`
+- `consumer.backlog`
+- `consumer.counters`
+- `consumer.list`
+- `consumer.restart_claude`
+- `consumer.stop_loop`
+- `daemon.info`
+- `inbox.list`
+- `loop.list`
+- `loop.restart`
+- `mention.suggestions`
+- `message.add_tag`
+- `message.answer_question`
+- `message.approve`
+- `message.decide`
+- `message.delete`
+- `message.edit`
+- `message.get`
+- `message.post`
+- `message.promote`
+- `message.reject`
+- `message.remove_tag`
+- `message.resurface`
+- `message.step`
+- `message.unstep`
+- `message.untag`
+- `message.vote`
+- `ping.list`
+- `project.init`
+- `project.milestones`
+- `project.settings_set`
+- `session.list`
+- `session.start`
+- `session.stop`
+- `tag.list`
+- `ticket.assign`
+- `ticket.get`
+- `ticket.mark_read`
+- `ticket.mark_unread`
+- `ticket.move`
+- `ticket.postpone`
+- `ticket.relate`
+- `ticket.release`
+- `ticket.set_milestone`
+- `ticket.set_owner`
+- `ticket.step`
+- `ticket.unsnooze`

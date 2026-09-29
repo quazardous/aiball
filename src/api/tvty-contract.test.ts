@@ -21,14 +21,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { matchCalls, readServerRoutes, tvtyCalls } from "../devtools/route-inventory-lib.js";
+import { matchCalls, readServerRoutes, tvtyBusMethods, tvtyCalls } from "../devtools/route-inventory-lib.js";
 
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-3052-"));
 process.env.AIBALL_SOCK = "";
 
 const { createApp } = await import("../app.js");
 const { authenticate } = await import("../auth.js");
-const { callerOf, callMethod, Refusal } = await import("../bus/methods.js");
+const { callerOf, callMethod, methodNames, Refusal } = await import("../bus/methods.js");
 const { asToken } = await import("../tests/bus-call.js");
 const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer, insertUpload } = await import("../db.js");
@@ -137,6 +137,8 @@ function problems(value: unknown, shape: Shape, at: string): string[] {
 }
 
 const TAG: Shape = { name: "string", color: "string?" };
+// tvty `ConfigEntry`: the fields without a serde default, and `sources`, which says what `config.set` may write.
+const CONFIG_ENTRY: Shape = { key: "string", scope: "string", type: "string", label: "string", sources: ["string"] };
 const HOLDING = { holder: "string?", held_as: "string?" };
 const TOKEN_USAGE: Shape = { tokens_in: "number", tokens_out: "number", cache_w: "number", cache_r: "number" };
 const CONSUMER: Shape = {
@@ -297,6 +299,45 @@ test("refusals carry a code tvty can branch on", async () => {
     assert.deepEqual([r.status, (r.json as { code?: string }).code], [404, "MESSAGE_NOT_FOUND"]);
 });
 
+test("the rest of tvty's calls: its settings, its loops, its pings, its counters", async () => {
+    // A ticket whose last word is an agent's, for tvty to mark as a step.
+    const worked = ticketOf("worked on");
+    submitMessage({ project: P, kind: "comment_added", ticket_id: worked, body: "done this", by_agent: "worker", summary_until: "s", handback: true });
+
+    const reads: [string, Record<string, unknown>, Shape][] = [
+        ["daemon.info", {}, { version: "string" }],
+        ["config.managed", {}, { config: [CONFIG_ENTRY] }],
+        ["config.managed", { project: P }, { project: "string?", config: [CONFIG_ENTRY] }],
+        ["ping.list", { unread: true, limit: 20 }, { pings: [{ message: {} }] }],
+        ["loop.list", {}, [{ name: "string", cwd: "string" }]],
+        ["session.list", {}, [{ agent: "string?", running: "boolean?" }]],
+        ["bus.whoami", {}, {}],
+    ];
+    for (const [method, params, shape] of reads) {
+        const r = await bus(method, params);
+        const at = `${method} ${JSON.stringify(params)}`;
+        assert.equal(r.status, 200, `${at} → ${r.status} ${JSON.stringify(r.json)}`);
+        assert.deepEqual(problems(r.json, shape, at), []);
+    }
+
+    // A board setting tvty flips and puts back: one the daemon stores itself.
+    const managed = (await bus("config.managed", {})).json as { config: { key: string; type: string; protected?: boolean; sources?: string[]; value: unknown }[] };
+    const flag = managed.config.find((e) => e.type === "boolean" && !e.protected && e.sources?.includes("db"));
+    assert.ok(flag, "a boolean setting the board stores, for tvty to set");
+
+    const writes: [string, Record<string, unknown>, number][] = [
+        ["config.set", { key: flag!.key, value: !flag!.value }, 200],
+        ["config.clear", { key: flag!.key }, 200],
+        ["consumer.counters", { consumer_id: "worker" }, 200],
+        ["ticket.mark_unread", { id: main }, 200],
+        ["ticket.step", { id: worked }, 200],
+    ];
+    for (const [method, params, status] of writes) {
+        const r = await bus(method, params);
+        assert.equal(r.status, status, `${method} ${JSON.stringify(params)} → ${r.status} ${JSON.stringify(r.json)}`);
+    }
+});
+
 /**
  * The HTTP routes the tests above exercise, as `docs/API-ROUTES.md` names them:
  * what tvty still calls over HTTP (the rest is on the bus, above).
@@ -329,6 +370,60 @@ function tvtyCertainRoutes(): { routes: string[]; source: string } {
         .map((cells) => cells[1]!.trim().replace(/`/g, ""));
     return { routes, source: "docs/API-ROUTES.md (tvty's checkout not found)" };
 }
+
+/**
+ * The bus methods tvty calls, and where each is held: `true` when a test above
+ * calls it, else the test that covers it — a method that needs a running loop,
+ * a session host or a project on disk is exercised where those are set up.
+ */
+const COVERED_METHODS: Record<string, true | string> = {
+    "consumer.list": true, "inbox.list": true, "ticket.get": true, "message.get": true, "consumer.backlog": true,
+    "tag.list": true, "project.milestones": true, "mention.suggestions": true, "message.post": true,
+    "ticket.mark_read": true, "consumer.afk": true, "message.answer_question": true, "ticket.postpone": true,
+    "ticket.unsnooze": true, "message.edit": true, "message.add_tag": true, "message.remove_tag": true,
+    "ticket.set_milestone": true, "ticket.assign": true, "ticket.release": true, "ticket.set_owner": true,
+    "ticket.relate": true, "message.step": true, "message.unstep": true, "message.promote": true,
+    "message.untag": true, "message.vote": true, "message.resurface": true, "message.decide": true,
+    "message.approve": true, "message.reject": true, "message.delete": true, "ticket.move": true,
+    "daemon.info": true, "config.managed": true, "config.set": true, "config.clear": true, "ping.list": true,
+    "loop.list": true, "session.list": true, "bus.whoami": true, "consumer.counters": true,
+    "ticket.mark_unread": true, "ticket.step": true,
+    "bus.subscribe": "src/bus/counters.test.ts, src/bus/config-changed.test.ts (on a bus connection)",
+    "session.start": "src/sessions/sessions.test.ts (a session host)",
+    "session.stop": "src/sessions/sessions.test.ts, src/sessions/stop-hup.test.ts (a session host)",
+    "loop.restart": "src/bus/loop-methods.test.ts (a loop on disk)",
+    "consumer.stop_loop": "src/bus/loops-admin.test.ts (a running loop)",
+    "consumer.restart_claude": "src/bus/restart-claude.test.ts (a running loop)",
+    "project.init": "src/bus/project-init.test.ts (a project folder)",
+    "project.settings_set": "src/bus/project-settings.test.ts (a project folder)",
+};
+
+/**
+ * #3279 — tvty's bus methods, read as its routes are: from its checkout when
+ * it is there, else from the list the route inventory commits.
+ */
+function tvtyMethods(): { methods: string[]; source: string } {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
+    const dir = process.env.AIBALL_TVTY_DIR ?? join(root, "../tvty");
+    if (existsSync(join(dir, "src"))) {
+        const commit = spawnSync("git", ["-C", dir, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).stdout?.trim() || "?";
+        return { methods: tvtyBusMethods(dir, methodNames()), source: `tvty's checkout at ${commit}` };
+    }
+    const table = readFileSync(join(root, "docs/API-ROUTES.md"), "utf8");
+    const section = table.split("## Bus methods tvty calls")[1] ?? "";
+    const methods = [...section.matchAll(/^- `([a-z_]+\.[a-z_]+)`$/gm)].map((m) => m[1]!);
+    return { methods, source: "docs/API-ROUTES.md (tvty's checkout not found)" };
+}
+
+test("every bus method tvty calls is covered", () => {
+    const { methods, source } = tvtyMethods();
+    // The reading worked: tvty opens every thread with ticket.get.
+    assert.ok(methods.includes("ticket.get"), `tvty's methods were read (${source}): ${methods.join(", ") || "none"}`);
+    assert.deepEqual(methods.filter((m) => !(m in COVERED_METHODS)).sort(), [], `tvty calls these (${source}) and no test covers them`);
+    // A method named here that the bus no longer has is a contract broken, not a stale line.
+    const known = new Set(methodNames());
+    assert.deepEqual(Object.keys(COVERED_METHODS).filter((m) => !known.has(m)), [], "methods named here that the bus does not have");
+});
 
 test("every route tvty calls (●) is covered here", () => {
     const { routes, source } = tvtyCertainRoutes();

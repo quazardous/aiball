@@ -10,7 +10,8 @@
  *   - loop / mcp / cli / sim: the methods of src/client.ts each calls, mapped to
  *     the paths those methods request;
  *   - web: every /api path in frontend/src;
- *   - tvty: every /api path in the tvty checkout's Rust sources, when found.
+ *   - tvty: every /api path in the tvty checkout's Rust sources, when found;
+ *     and, in a section of their own, the bus methods those sources name.
  * A call's `${…}` / `{}` segment matches any route parameter. A call whose verb
  * cannot be read matches every verb of its path. Calls that match no route are
  * listed at the end: they are dead or drifted.
@@ -19,7 +20,9 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { CONSUMERS, callsIn, isSource, pathMatches, readServerRoutes, routeKey, tvtyCalls, walk, type Call, type Consumer, type Verb } from "../src/devtools/route-inventory-lib.js";
+import { methodNames } from "../src/bus/methods.js";
+import "../src/bus/register.js";
+import { CONSUMERS, callsIn, isSource, pathMatches, readServerRoutes, routeKey, tvtyBusMethods, tvtyCalls, walk, type Call, type Consumer, type Verb } from "../src/devtools/route-inventory-lib.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
@@ -128,7 +131,16 @@ for (const c of CONSUMERS) {
     const list = [...unmatched.get(c)!].sort();
     if (list.length) lines.push(`- **${c}**: ${list.map((p) => `\`${p}\``).join(", ")}`);
 }
-lines.push("");
+lines.push(
+    "",
+    "## Bus methods tvty calls",
+    "",
+    "Every bus method named in tvty's sources: what `src/api/tvty-contract.test.ts` guards",
+    "when tvty's checkout is not next to this one.",
+    "",
+    ...tvtyBusMethods(TVTY, methodNames()).map((m) => `- \`${m}\``),
+    "",
+);
 const out = lines.join("\n");
 
 if (args.includes("--check")) {
