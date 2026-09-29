@@ -6,7 +6,7 @@
  */
 import type { Request, Response } from "express";
 import type { AuthenticatedRequest } from "../auth.js";
-import { ERROR_CODES, errorCodeForStatus, isErrorCode, type ErrorCode } from "../domain.js";
+import { errorCodeForStatus, type ErrorCode } from "../domain.js";
 
 /**
  * #3039 — every refusal is `{ error, code, details? }`: the sentence for a
@@ -16,38 +16,6 @@ import { ERROR_CODES, errorCodeForStatus, isErrorCode, type ErrorCode } from "..
  */
 export function refuse(res: Response, status: number, msg: string, code?: ErrorCode, details?: Record<string, unknown>): Response {
     return res.status(status).json({ error: msg, code: code ?? errorCodeForStatus(status), ...(details ? { details } : {}) });
-}
-
-/**
- * #3039 — a caught error as a refusal: its own code when it carries one, else
- * the generic code of `status`.
- */
-export function refuseError(res: Response, status: number, err: unknown): Response {
-    const code = (err as { code?: unknown } | null)?.code;
-    return refuse(res, status, err instanceof Error ? err.message : String(err), isErrorCode(code) ? code : undefined);
-}
-
-/**
- * #3036 — the author of a write is the authenticated caller (`consumerOf`),
- * never a name in the body: identity belongs to the transport. A body may
- * still carry the author field (older clients do); equal to the caller it is
- * accepted, anything else is refused (403 `AUTHOR_MISMATCH`). Returns the
- * author, or null once the refusal is sent.
- *
- * Over TCP the caller is bound to its token; on the local socket it is the
- * `x-aiball-consumer` header, declared by the caller — consistency there, not
- * a security boundary (docs/SECURITY.md).
- */
-export function authorFor(req: Request, res: Response, given: unknown, field = "by_agent"): string | null {
-    const caller = consumerOf(req);
-    if (given === undefined || given === null || given === "" || given === caller) return caller;
-    refuse(
-        res,
-        403,
-        `${field} "${String(given)}" is not the caller (${caller}): the author of a write is who is authenticated — leave ${field} out`,
-        ERROR_CODES.AUTHOR_MISMATCH,
-    );
-    return null;
 }
 
 export function badRequest(res: Response, msg: string, code?: ErrorCode): Response {
@@ -81,8 +49,3 @@ export function consumerOf(req: Request): string {
     return process.env.AIBALL_HUMAN ?? "human";
 }
 
-/** #442: the request's auth tier (`agent` = UDS/direct bearer, `node` = proxy
- *  node token), set by bearerAuth. Undefined on routes reached without auth. */
-export function tokenKindOf(req: Request): string | undefined {
-    return (req as AuthenticatedRequest).token_kind;
-}

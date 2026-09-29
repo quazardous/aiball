@@ -23,46 +23,19 @@
  */
 import { Router, type Request, type Response } from "express";
 import { and, eq, sql } from "drizzle-orm";
-import { readBearerToken, type AuthenticatedRequest } from "../auth.js";
-import { getTokenAndTouch } from "../db/tokens.js";
-import { keyProjects, keyScopes } from "../db/signal-keys.js";
+import { keyFor } from "./keys.js";
 import { getDb } from "../db/connection.js";
 import { getMessage } from "../db.js";
 import * as schema from "../schema.js";
 import { validateNewMessage } from "../messages.js";
-import { fileTicket, isExtrasRefusal, ticketExtras } from "../file-ticket.js";
+import { fileTicket, isExtrasRefusal, SUBMIT_REFUSAL_STATUS, ticketExtras } from "../file-ticket.js";
+import { isErrorCode } from "../domain.js";
 import { refuse } from "./_helpers.js";
 import { withTagsOne } from "../queries/decorate.js";
-import { ERROR_CODES, type ErrorCode } from "../domain.js";
 
 export const keyTicketsRouter = Router();
 
 export const EXTERNAL_ID_MAX = 200;
-
-type KeyGrant = { source: string; projects: string[] };
-
-function keyGrantOf(req: Request): KeyGrant | { status: 401 | 403; error: string; code: ErrorCode } {
-    const ar = req as AuthenticatedRequest;
-    if (ar.token_kind === "signal" && ar.signal_source) {
-        if (!ar.signal_scopes?.includes("tickets:create")) return { status: 403, error: "this key lacks the scope tickets:create", code: ERROR_CODES.KEY_SCOPE_MISSING };
-        return { source: ar.signal_source, projects: ar.signal_projects ?? [] };
-    }
-    const onSocket = (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
-    const bearer = onSocket ? readBearerToken(req) : null;
-    if (onSocket && bearer) {
-        const row = getTokenAndTouch(bearer);
-        if (!row) return { status: 401, error: "invalid or expired API key", code: ERROR_CODES.TOKEN_INVALID };
-        if (row.kind === "signal") {
-            if (!keyScopes(row).includes("tickets:create")) return { status: 403, error: "this key lacks the scope tickets:create", code: ERROR_CODES.KEY_SCOPE_MISSING };
-            return { source: row.label ?? "unnamed", projects: keyProjects(row) };
-        }
-    }
-    return {
-        status: 403,
-        error: "POST /api/tickets is for an API key with the scope tickets:create — agents and humans file tickets with POST /api/messages",
-        code: ERROR_CODES.FORBIDDEN,
-    };
-}
 
 /** The ticket this source already created under `externalId`, if any. */
 function findByExternalId(source: string, externalId: string): number | null {
@@ -84,7 +57,7 @@ function recordExternalId(ticketId: number, externalId: string): void {
 }
 
 keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
-    const grant = keyGrantOf(req);
+    const grant = keyFor(req, "tickets:create", "POST /api/tickets is for an API key with the scope tickets:create — agents and humans file tickets with POST /api/messages", "not-a-key");
     if ("status" in grant) return refuse(res, grant.status, grant.error, grant.code);
     const body = (req.body ?? {}) as Record<string, unknown>;
 
@@ -132,7 +105,17 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
     if (body.approved !== undefined && typeof body.approved !== "boolean") {
         return refuse(res, 400, "approved must be true or false");
     }
-    const msg = fileTicket(v, extras, grant.source, { preApprovedByKey: body.approved === true });
+    let msg;
+    try {
+        msg = fileTicket(v, extras, grant.source, { preApprovedByKey: body.approved === true });
+    } catch (err) {
+        // #3248 — the refusals of the write path answer as on the bus (a project
+        // gone since the key was scoped is a 400 PROJECT_NOT_FOUND, not a 500).
+        const code = (err as { code?: string }).code ?? "";
+        const status = SUBMIT_REFUSAL_STATUS[code];
+        if (!status) throw err;
+        return refuse(res, status, err instanceof Error ? err.message : String(err), isErrorCode(code) ? code : undefined);
+    }
     if (externalId) recordExternalId(msg.id, externalId);
     const out = getMessage(msg.id) ?? msg;
     res.status(201).json({ ...withTagsOne(out), existing: false });

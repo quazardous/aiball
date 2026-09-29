@@ -43,6 +43,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `POST /api/tickets` with a key scoped to a project deleted since answers
+  `400 PROJECT_NOT_FOUND`, as the bus does, instead of a 500.
 - `claude-loop start` names a loop after the folder it runs in: started from a
   shell carrying another folder's `AIBALL_CWD`, it gave the agent a second loop
   under another name.

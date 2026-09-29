@@ -37,8 +37,8 @@ import {
 import { clearSeenForMessage, insertPing } from "../../db/pings.js";
 import { isDecisionKind } from "../../decisions.js";
 import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, validateNewMessage, withoutDecisionRefusal } from "../../messages.js";
-import { NO_EXTRAS, fileTicket, isExtrasRefusal, ticketExtras } from "../../file-ticket.js";
-import { applyPlatformTag, SUBMIT_REFUSAL_STATUS } from "./message-filing.js";
+import { NO_EXTRAS, fileTicket, isExtrasRefusal, ticketExtras, SUBMIT_REFUSAL_STATUS } from "../../file-ticket.js";
+import { applyPlatformTag } from "./message-filing.js";
 import { applyModeration } from "./moderation.js";
 import { tagMessageAsStep, untagMessageStep } from "../../db/messages.js";
 import { broadcast } from "../../ws.js";
