@@ -33,6 +33,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An agent that may not claim (a crew agent, `--no-claim`) wakes for a ticket
+  assigned to it. It used to wake only on an unread ping, so once the
+  assignment was read the ticket stayed in its backlog: the bar counted down
+  to a wake that was skipped every time.
 - Removing a setting from `.aiball.yaml` (the board's project settings, or
   `settings_set`) no longer takes the comment written above it: the file's
   header stays at the top, and a key's own comment moves to the next key.
@@ -122,10 +126,6 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
-- An agent that may not claim (a crew agent, `--no-claim`) wakes for a ticket
-  assigned to it. It used to wake only on an unread ping, so once the
-  assignment was read the ticket stayed in its backlog: the bar counted down
-  to a wake that was skipped every time.
 - A ticket's rest in an agent's backlog, as `consumer.backlog` and the `b:`
   counter show it, is the rest the agent's loop really applies
   (`CL_BACKLOG_COOLDOWN_SEC`), not an hour assumed for every loop.
