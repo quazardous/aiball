@@ -130,3 +130,22 @@ test("#737 — resolution / plan / wontfix do NOT touch priority (only escalatio
         assert.equal(priorityOf(tid), "normal", `${kind} should not bump priority`);
     }
 });
+
+test("#3238 — an escalation broadcasts whatever client posted it: the core sets the scope, not the MCP", () => {
+    const tid = freshApprovedTicket("normal");
+    const esc = submitMessage({
+        project: "p737", kind: "comment_added", ticket_id: tid, body: "needs a human", decision_kind: "escalation",
+        summary_until: "escalated", by_agent: "agent-x",
+    });
+    assert.equal(esc.scope, "broadcast", "no scope given: broadcast");
+    const narrowed = submitMessage({
+        project: "p737", kind: "comment_added", ticket_id: tid, body: "needs a human, again", decision_kind: "escalation",
+        summary_until: "escalated again", by_agent: "agent-x", scope: "internal",
+    });
+    assert.equal(narrowed.scope, "broadcast", "an escalation cannot be narrowed");
+    const plan = submitMessage({
+        project: "p737", kind: "comment_added", ticket_id: tid, body: "a plan", decision_kind: "plan",
+        summary_until: "planned", by_agent: "agent-x",
+    });
+    assert.notEqual(plan.scope, "broadcast", "a plan keeps its scope");
+});

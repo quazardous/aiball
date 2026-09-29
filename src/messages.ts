@@ -29,7 +29,7 @@ import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } 
 import { purgeSeenPingsForTicket } from "./db.js";
 import { isTicketClosed } from "./db/messages.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
-import { isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
+import { DECISION_GESTURES, isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, type DecisionKind, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { getConsumer, levelsVisibleTo, seesLevel } from "./db/consumers.js";
@@ -911,6 +911,14 @@ function parseMetaObject(meta: string | null | undefined): Record<string, unknow
 }
 
 export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message {
+    // #3238 — a decision whose gesture broadcasts (an escalation: the agent
+    // asks for a human) reaches every follower, whatever client posted it. The
+    // rule lived in the MCP client alone; the CLI, the web and tvty posted it
+    // with the default scope and the followers never heard.
+    const dk = input.decision_kind as string | null | undefined;
+    if (dk && isDecisionKind(dk) && DECISION_GESTURES[dk as DecisionKind].onPost.broadcast) {
+        input = { ...input, scope: "broadcast" };
+    }
     // #2215 — a comment or lifecycle event aimed at a ticket that does not exist
     // used to reach the insert and die on the foreign key as a raw SqliteError:
     // a 500 with a stack for an HTTP caller, an unnamed failure for the spool.

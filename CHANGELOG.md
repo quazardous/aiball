@@ -85,6 +85,8 @@ dates are YYYY-MM-DD.
 - Starting or restarting a loop no longer deletes the state of the other
   stopped loops (kept for their restart): only broken state folders are
   cleared on their own.
+- An escalation reaches every follower whatever posted it (the CLI, the web,
+  tvty), not only when an agent used the MCP.
 - A post the client retried from its spool after the daemon had already taken it
   is no longer filed twice: each post carries a key, and the daemon answers a
   replay with the message it filed.

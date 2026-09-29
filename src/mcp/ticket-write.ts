@@ -12,7 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MESSAGE_SCOPES } from "../domain.js";
 import { type DecisionKind } from "../decisions.js";
-import { DECISION_GESTURES, STEP_VERB, kindForVerb, verbsAllowedOn } from "../ticket-transitions.js";
+import { STEP_VERB, kindForVerb, verbsAllowedOn } from "../ticket-transitions.js";
 import { asText, client, effectiveBy, markActiveTicket } from "./_helpers.js";
 
 // #2308 — each decision's `then` verb, where it may be posted and what posting
@@ -303,11 +303,9 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // ny8m8a directive for `'internal'`-by-default; replies
                 // should fan out to subscribers like a normal post,
                 // explicit `scope` to narrow or broaden).
-                // #737 — escalation always broadcasts : the agent is
-                // asking for human attention, the comment must reach
-                // every follower (not just subscribers/owners) regardless
-                // of the agent's default scope preference.
-                scope: decision_kind && DECISION_GESTURES[decision_kind].onPost.broadcast ? "broadcast" : (scope ?? "default"),
+                // #737 — an escalation always broadcasts: the core does it
+                // (submitMessage, #3238), whatever client posts it.
+                scope: scope ?? "default",
             });
             markActiveTicket(ticketId); // #404: focus = this ticket (token attribution)
             // #928 david `2uxj45` (Slice 2) : surface la décision posée en
