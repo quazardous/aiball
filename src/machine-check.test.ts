@@ -14,6 +14,7 @@ import { BUILD_CMD } from "./claude-loop/proxy-launch.js";
 function healthy(over: Partial<MachineProbes> = {}): MachineProbes {
     return {
         cliVersion: "0.40.0",
+        platform: "linux",
         socket: { path: "/home/u/.local/share/aiball/sock", exists: true },
         transport: "socket",
         daemon: { up: true, version: "0.40.0", error: null },
@@ -209,4 +210,18 @@ test("an update line: warn with this install's command when a release is out, si
     assert.match(line(assembleMachineReport(healthy({ update: upd({ latest: null, error: "GitHub answered 403" }) })), "update").detail, /403/);
     assert.equal(assembleMachineReport(healthy({ update: upd({ check_disabled: true, latest: "0.42.0", update_available: true }) })).some((l) => l.id === "update"), false);
     assert.equal(assembleMachineReport(healthy()).some((l) => l.id === "update"), false, "an older daemon without /api/version: no line");
+});
+
+test("the fixes a Windows box is told fit Windows: no systemd, no sudo", () => {
+    // #3299 — Windows has no systemd and no sudo: the logon task starts the tray,
+    // which owns the daemon, and tailscale runs in the user's session.
+    const down = { daemon: { up: false, version: null, error: "ECONNREFUSED" } };
+    assert.equal(line(assembleMachineReport(healthy({ ...down, platform: "win32" })), "daemon").fix, "Start-ScheduledTask -TaskName aiball-daemon");
+    assert.equal(line(assembleMachineReport(healthy({ ...down, platform: "linux" })), "daemon").fix, "systemctl --user start aiball");
+
+    const ts = {
+        mode: "https" as const, listen: 8443, path: "/aiball", enabled: true,
+        installed: true, running: false, dnsName: null, serving: false,
+    };
+    assert.equal(line(assembleMachineReport(healthy({ tailscale: ts, platform: "win32" })), "tailscale").fix, "tailscale up");
 });

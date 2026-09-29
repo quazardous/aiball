@@ -58,6 +58,8 @@ export interface TailscaleProbe {
 
 export interface MachineProbes {
     cliVersion: string;
+    /** Which fix to print (systemd or the Windows tray). Defaults to this process's. */
+    platform?: NodeJS.Platform;
     /** Null when this machine talks TCP by design (Windows default, `AIBALL_SOCK=""`). */
     socket: { path: string; exists: boolean } | null;
     /** How the CLI reaches the daemon: its socket, a bearer token, or neither. */
@@ -94,6 +96,9 @@ export interface MachineProbes {
 /** Pure: facts in, verdicts out. */
 export function assembleMachineReport(p: MachineProbes): MachineLine[] {
     const lines: MachineLine[] = [];
+    const win = (p.platform ?? process.platform) === "win32";
+    // Windows has no systemd: the logon task starts the tray, which owns the daemon.
+    const startDaemon = win ? "Start-ScheduledTask -TaskName aiball-daemon" : "systemctl --user start aiball";
 
     // --- daemon ---------------------------------------------------------
     if (!p.daemon.up) {
@@ -101,7 +106,7 @@ export function assembleMachineReport(p: MachineProbes): MachineLine[] {
             id: "daemon",
             status: "error",
             detail: `not reachable${p.daemon.error ? ` — ${p.daemon.error}` : ""}`,
-            fix: "systemctl --user start aiball",
+            fix: startDaemon,
         });
     } else if (p.daemon.version && p.daemon.version !== p.cliVersion) {
         // The CLI is read from disk on every run, the daemon at its last boot:
@@ -140,7 +145,7 @@ export function assembleMachineReport(p: MachineProbes): MachineLine[] {
             id: "socket",
             status: p.daemon.up ? "warn" : "error",
             detail: `missing: ${p.socket.path}`,
-            fix: p.daemon.up ? "aiball restart" : "systemctl --user start aiball",
+            fix: p.daemon.up ? "aiball restart" : startDaemon,
         });
     }
 
@@ -258,7 +263,7 @@ export function assembleMachineReport(p: MachineProbes): MachineLine[] {
                 fix: "install tailscale — https://tailscale.com/download",
             });
         } else if (!ts.running) {
-            lines.push({ id: "tailscale", status: "error", detail: "configured, but tailscale is not logged in / not running", fix: "sudo tailscale up" });
+            lines.push({ id: "tailscale", status: "error", detail: "configured, but tailscale is not logged in / not running", fix: win ? "tailscale up" : "sudo tailscale up" });
         } else if (!ts.serving) {
             lines.push({
                 id: "tailscale",
@@ -418,6 +423,7 @@ export async function probeMachine(input: ProbeMachineInput): Promise<MachinePro
 
     return {
         cliVersion,
+        platform: process.platform,
         socket: sockPath ? { path: sockPath, exists: isSocket(sockPath) } : null,
         transport: client.socketPath ? "socket" : client.token ? "token" : "none",
         daemon,

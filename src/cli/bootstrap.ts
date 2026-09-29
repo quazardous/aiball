@@ -742,7 +742,8 @@ function initProxy(opts: { url: string; token: string; strict?: boolean }): void
                     `be rejected. This closes the cross-host weak point (docs/SECURITY.md).`,
                 ]
                 : [`Mint the token on the REMOTE with:  aiball auth issue --node`]),
-            `Apply:  systemctl --user restart aiball`,
+            // aiball restart asks the supervisor: systemd on Linux, the tray on Windows.
+            `Apply:  aiball restart`,
             `Check:  aiball status`,
             ``,
         ].join("\n"),
@@ -794,7 +795,8 @@ function addProxyToken(opts: { consumer: string; remote: string; local?: string 
             `Give the LOCAL token to the client (export AIBALL_TOKEN=${local}, or`,
             `claude-loop init --aiball-token ${local}). The proxy swaps it for the`,
             `A-token at egress → A authenticates as '${opts.consumer}' (hard proof).`,
-            `Apply:  systemctl --user restart aiball`,
+            // aiball restart asks the supervisor: systemd on Linux, the tray on Windows.
+            `Apply:  aiball restart`,
             ``,
         ].join("\n"),
     );

@@ -27,7 +27,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir, release, type as osType } from "node:os";
 import { join, relative } from "node:path";
 
-import { stateDirFor } from "../state.js";
+import { MUX_CMD, stateDirFor } from "../state.js";
 import { captureSnapshot } from "./snapshot.js";
 import { runHealthChecks } from "./health.js";
 import { loadConfig } from "../../autopoll/config.js";
@@ -337,7 +337,7 @@ export async function cmdBug(name: string, opts: BugOpts): Promise<void> {
             loopName: name,
             aiballVersion: AIBALL_VERSION,
             claudeVersion: firstLine("claude", ["--version"]),
-            tmuxVersion: firstLine("tmux", ["-V"]),
+            tmuxVersion: firstLine(MUX_CMD, ["-V"]), // the loop's multiplexer: psmux on Windows
             nodeVersion: process.version,
             platform: process.platform,
             osRelease: release(),

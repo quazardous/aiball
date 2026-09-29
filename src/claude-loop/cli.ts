@@ -1874,7 +1874,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         }
     } else {
         // Custom check-cmd → shell out, report exit code.
-        const r = spawnSync("bash", ["-c", checkCmd], { stdio: ["ignore", "inherit", "inherit"] });
+        const r = spawnSync(resolveBashCmd(), ["-c", checkCmd], { stdio: ["ignore", "inherit", "inherit"] });
         process.stdout.write(`\n`);
         const verdict = r.status === 0 ? "WAKE (exit 0)" : `SLEEP (exit ${r.status})`;
         process.stdout.write(`  verdict: ${verdict}\n`);
@@ -2053,7 +2053,7 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
                 process.stdout.write(`[${ts}] tick ${tick}: ERROR ${(e as Error).message ?? String(e)} → sleep\n`);
             }
         } else {
-            const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
+            const r = spawnSync(resolveBashCmd(), ["-c", checkCmd], { stdio: "ignore" });
             const verdict = r.status === 0 ? "WAKE" : "sleep";
             process.stdout.write(`[${ts}] tick ${tick}: exit=${r.status} → ${verdict}\n`);
         }
