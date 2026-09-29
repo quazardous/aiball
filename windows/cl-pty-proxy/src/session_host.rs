@@ -60,11 +60,15 @@ mod unix {
         name: Option<String>,
         size: (u16, u16),
         argv: Vec<String>,
+        /// #3333 — the host ends with its command (a loop's host): an exit no
+        /// restart was asked for shuts it down, files and all.
+        exit_with_command: bool,
     }
 
     fn parse_args() -> Result<Args, String> {
         let mut it = env::args().skip(1);
         let (mut dir, mut agent, mut name, mut rows, mut cols) = (None, None, None, 24u16, 80u16);
+        let mut exit_with_command = false;
         let mut argv = Vec::new();
         while let Some(a) = it.next() {
             match a.as_str() {
@@ -73,6 +77,7 @@ mod unix {
                 "--name" => name = it.next(),
                 "--rows" => rows = it.next().and_then(|v| v.parse().ok()).unwrap_or(rows),
                 "--cols" => cols = it.next().and_then(|v| v.parse().ok()).unwrap_or(cols),
+                "--exit-with-command" => exit_with_command = true,
                 "--" => {
                     argv = it.collect();
                     break;
@@ -84,7 +89,7 @@ mod unix {
         if agent.is_none() && name.is_none() {
             return Err("--agent or --name is required".into());
         }
-        Ok(Args { dir, agent, name, size: (rows.max(1), cols.max(1)), argv })
+        Ok(Args { dir, agent, name, size: (rows.max(1), cols.max(1)), argv, exit_with_command })
     }
 
     fn listen(path: &Path) -> std::io::Result<UnixListener> {
@@ -148,7 +153,17 @@ mod unix {
             let _ = fs::remove_dir(&dir);
             std::process::exit(0);
         });
-        let control = Control::new(session.clone(), hello.clone(), shutdown);
+        let control = Control::new(session.clone(), hello.clone(), shutdown.clone());
+        if args.exit_with_command {
+            let s = session.clone();
+            // The clients were told (exited, closed) as the command ended; a
+            // moment for those frames to go out, then the host goes.
+            thread::spawn(move || {
+                s.wait_over();
+                thread::sleep(Duration::from_millis(200));
+                shutdown();
+            });
+        }
 
         let s = session.clone();
         thread::spawn(move || crate::attach::serve(attach_l, s));

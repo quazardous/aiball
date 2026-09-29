@@ -33,6 +33,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Restarting the daemon's systemd service no longer ends the loops running on
+  its session host: each host starts in a systemd scope of its own.
+- A loop's session host ends with its Claude. Before, a host left without it
+  read as a live loop, and `claude-loop start --force` waited on it forever.
+  A client attaching to a session that has ended is told so at once.
 - An agent that may not claim (a crew agent, `--no-claim`) wakes for a ticket
   assigned to it. It used to wake only on an unread ping, so once the
   assignment was read the ticket stayed in its backlog: the bar counted down

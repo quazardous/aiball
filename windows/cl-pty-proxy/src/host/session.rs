@@ -139,6 +139,8 @@ struct Inner {
     claude: ClaudeState,
     /// The next exit is a restart the controller asked for: clients stay attached.
     restarting: bool,
+    /// #3333 — the command exited and no restart was asked: the session is over.
+    over: bool,
 }
 
 /// What the control channel is told, as it happens.
@@ -187,6 +189,7 @@ impl Session {
                 pty: None,
                 claude: ClaudeState { running: false, pid: None, started_at: None, exit_code: None },
                 restarting: false,
+                over: false,
             }),
             exited: Condvar::new(),
             decider: Mutex::new(decider),
@@ -248,6 +251,7 @@ impl Session {
         let killer = child.clone_killer();
         inner.pty = Some(Pty { master: pair.master, writer, killer, pid });
         inner.claude = ClaudeState { running: true, pid, started_at: Some(now_iso()), exit_code: None };
+        inner.over = false;
         // A restart: the screen starts afresh, and each stream client with a snapshot of it.
         let was_restart = std::mem::take(&mut inner.restarting);
         if was_restart {
@@ -314,6 +318,7 @@ impl Session {
             c.push(exited.clone());
         }
         if !restarting {
+            inner.over = true;
             // The session is over for its clients; the host waits for start or shutdown.
             let closed = frames::encode_json(frames::CLOSED, &json!({}));
             for c in inner.clients.values() {
@@ -374,6 +379,19 @@ impl Session {
             inner = self.exited.wait_timeout(inner, left).unwrap().0;
         }
         inner.claude.exit_code
+    }
+
+    /// #3333 — the command ran and exited, and no restart was asked.
+    pub fn is_over(&self) -> bool {
+        self.inner.lock().unwrap().over
+    }
+
+    /// #3333 — blocks until the command exits with no restart asked.
+    pub fn wait_over(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        while !inner.over {
+            inner = self.exited.wait(inner).unwrap();
+        }
     }
 
     pub fn claude(&self) -> Value {

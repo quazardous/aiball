@@ -6,11 +6,11 @@
  * clients attach to the host's own socket.
  */
 import { hostDirName, MAX_SOCKET_PATH } from "../session-dir.js";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { connect, type Socket } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AIBALL_HOME } from "../paths.js";
 
@@ -179,6 +179,50 @@ export interface StartHost {
     env: Record<string, string>;
 }
 
+/**
+ * #3333 — under systemd, a host goes in a scope of its own: in the daemon's
+ * cgroup, a restart of the service (`systemctl --user restart aiball`) killed
+ * every host and the Claude in it, though a host is meant to outlive the
+ * daemon. `systemd-run --scope` moves itself into the scope, then becomes the
+ * host (exec): the pid is the host's. Null outside a systemd service, or
+ * without systemd-run.
+ */
+export function hostScope(dir: string, env: Record<string, string>, daemonEnv: NodeJS.ProcessEnv = process.env, hasSystemdRun: () => boolean = systemdRunFound): { cmd: string; args: string[]; env: Record<string, string> } | null {
+    if (process.platform !== "linux" || !daemonEnv.INVOCATION_ID || !hasSystemdRun()) return null;
+    const unit = `aiball-host-${basename(dir).replace(/[^A-Za-z0-9_.-]/g, "_")}-${Date.now()}`;
+    // systemd-run reaches the user manager through these; the host's own
+    // environment may not carry them.
+    const bus: Record<string, string> = {};
+    for (const k of ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"]) {
+        const v = env[k] ?? daemonEnv[k];
+        if (v) bus[k] = v;
+    }
+    return { cmd: "systemd-run", args: ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, "--"], env: { ...env, ...bus } };
+}
+
+let systemdRun: boolean | null = null;
+function systemdRunFound(): boolean {
+    systemdRun ??= spawnSync("systemd-run", ["--version"], { stdio: "ignore" }).status === 0;
+    return systemdRun;
+}
+
+/** Spawn the host (detached) and wait for its host.json. */
+async function spawnHost(cmd: string, args: string[], o: StartHost, dir: string, env: Record<string, string>): Promise<void> {
+    // A spawn that fails (a missing cwd reads as ENOENT) is an 'error' event:
+    // unheard, it kills the daemon.
+    const child = spawn(cmd, args, { cwd: o.cwd, env, detached: true, stdio: "ignore" });
+    let spawnError: Error | null = null;
+    child.on("error", (e) => { spawnError = e; });
+    child.unref();
+    const deadline = Date.now() + 5000;
+    while (!existsSync(join(dir, "host.json"))) {
+        if (spawnError) throw new Error(`the session host could not start: ${(spawnError as Error).message}`);
+        if (Date.now() > deadline) throw new Error("the session host did not come up");
+        if (child.exitCode !== null) throw new Error(`the session host exited (${child.exitCode})`);
+        await new Promise((r) => setTimeout(r, 25));
+    }
+}
+
 /** Start a host, detached; resolves once it answers on its control channel. */
 export async function startHost(o: StartHost): Promise<HostLink> {
     const dir = hostDirFor(o);
@@ -192,19 +236,20 @@ export async function startHost(o: StartHost): Promise<HostLink> {
     rmSync(dir, { recursive: true, force: true });
     const args = ["--dir", dir, ...(o.agent ? ["--agent", o.agent] : ["--name", o.name!])];
     if (o.size) args.push("--rows", String(o.size.rows), "--cols", String(o.size.cols));
+    // #3333 — an agent's host ends with its Claude: left empty, it read as a
+    // live loop and a start that joined it waited forever.
+    if (o.agent) args.push("--exit-with-command");
     args.push("--", ...o.argv);
-    // A spawn that fails (a missing cwd reads as ENOENT) is an 'error' event:
-    // unheard, it kills the daemon.
-    const child = spawn(bin, args, { cwd: o.cwd, env: o.env, detached: true, stdio: "ignore" });
-    let spawnError: Error | null = null;
-    child.on("error", (e) => { spawnError = e; });
-    child.unref();
-    const deadline = Date.now() + 5000;
-    while (!existsSync(join(dir, "host.json"))) {
-        if (spawnError) throw new Error(`the session host could not start: ${(spawnError as Error).message}`);
-        if (Date.now() > deadline) throw new Error("the session host did not come up");
-        if (child.exitCode !== null) throw new Error(`the session host exited (${child.exitCode})`);
-        await new Promise((r) => setTimeout(r, 25));
+    const scoped = hostScope(dir, o.env);
+    try {
+        await spawnHost(scoped ? scoped.cmd : bin, scoped ? [...scoped.args, bin, ...args] : args, o, dir, scoped?.env ?? o.env);
+    } catch (e) {
+        if (!scoped) throw e;
+        // No user manager to answer (a bus missing from the environment): the
+        // host starts as before, in the daemon's own cgroup.
+        console.error(`[sessions] the host did not start in its own scope (${(e as Error).message}): starting it without`);
+        rmSync(dir, { recursive: true, force: true });
+        await spawnHost(bin, args, o, dir, o.env);
     }
     const info = readInfo(dir);
     if (!info) throw new Error("the session host wrote no host.json");

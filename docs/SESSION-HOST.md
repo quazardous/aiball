@@ -44,6 +44,13 @@ checkout. A session must not end with it, so the daemon starts a host
 **detached** — its own process session, no parent to die with — and finds it
 again when it starts.
 
+Under systemd, detached is not enough: a service's processes all share its
+cgroup, and a restart of the service (`systemctl --user restart aiball`) stops
+the whole cgroup. So a daemon running as a systemd service starts each host in
+a scope of its own (`systemd-run --user --scope`, unit
+`aiball-host-<dir>-<time>`). If the user manager does not answer, the host
+starts as before, in the daemon's cgroup.
+
 Each host keeps its files in `$AIBALL_HOME/hosts/<agent>/`:
 
 | File | What |
@@ -57,8 +64,11 @@ A Unix socket's path is at most about 100 bytes: the daemon checks
 
 The host is the `cl-session-host` binary, built with `cl-pty-proxy`:
 `cl-session-host --dir <dir> --agent <id> | --name <name> [--rows R --cols C]
-[-- argv…]` — with an argv it starts the command at once, otherwise it waits
-for `host.start`.
+[--exit-with-command] [-- argv…]` — with an argv it starts the command at once,
+otherwise it waits for `host.start`. An agent's host is started with
+`--exit-with-command`: when its command ends and no restart was asked, the host
+removes its files and exits. A host left without its command would read as a
+live loop.
 
 On start, the daemon reads every `host.json`, checks the pid is alive and
 answers on `control.sock`, and takes control again; a dead host's directory is
@@ -100,7 +110,7 @@ Nothing on this channel carries Claude's raw output.
 | `host.screen_changed` | `{ text, cursor, rows, cols, seq }` | the screen changed; at most 4 per second, the latest state |
 | `host.keys` | `{ typing, lone_esc, afk_key, reload, afk_active, now_ms }` | a client's keys meant something for the loop — the PTY proxy's keystroke verdict, what its `proxyEvent`s carry today |
 | `host.clients` | `{ count, interactive }` | a client attached or left |
-| `host.exited` | `{ code, restarting }` | Claude ended; the host waits for `host.start` or `host.shutdown` |
+| `host.exited` | `{ code, restarting }` | Claude ended; the host waits for `host.start` or `host.shutdown`, or exits with it (`--exit-with-command`) |
 
 The kernel reads the screen from `host.screen_changed` rather than by polling:
 the watchers (busy, prompt, dialogs, compacting) run on each change.

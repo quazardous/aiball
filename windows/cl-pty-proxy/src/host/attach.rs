@@ -43,6 +43,13 @@ fn handle(mut sock: UnixStream, session: Arc<Session>) {
     if hello["version"].as_u64() != Some(PROTOCOL_VERSION) {
         return refuse(&mut sock, "VERSION_UNSUPPORTED", "this host speaks version 1", json!({ "versions": [PROTOCOL_VERSION] }));
     }
+    // #3333 — a session whose command is over has nothing more to show: say so
+    // at once, as its clients were told when it ended, instead of an attach
+    // that waits for output that never comes.
+    if session.is_over() {
+        let _ = frames::write_frame(&mut sock, &frames::encode_json(frames::CLOSED, &json!({})));
+        return;
+    }
     let Ok(writer) = sock.try_clone() else { return };
     let client = session.attach(writer, &hello, std::process::id());
     loop {

@@ -38,10 +38,14 @@ impl Drop for Host {
 }
 
 fn start(name: &str, argv: &[&str]) -> Host {
+    start_with(name, &[], argv)
+}
+
+fn start_with(name: &str, flags: &[&str], argv: &[&str]) -> Host {
     let dir = std::env::temp_dir().join(format!("cl-session-host-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_cl-session-host"));
-    cmd.args(["--dir", dir.to_str().unwrap(), "--agent", name, "--rows", "10", "--cols", "40", "--"]).args(argv);
+    cmd.args(["--dir", dir.to_str().unwrap(), "--agent", name, "--rows", "10", "--cols", "40"]).args(flags).arg("--").args(argv);
     let child = cmd.spawn().expect("spawn the host");
     let deadline = Instant::now() + Duration::from_secs(10);
     while !dir.join("host.json").exists() {
@@ -206,8 +210,16 @@ fn two_controllers_at_once_each_get_their_answers_and_both_hear_the_screen() {
     // One leaving does not take the other with it.
     drop(daemon);
     assert!(kernel.call("host.inject", json!({ "text": "still here\r" }))["result"].is_object());
-    let screen = kernel.call("host.screen", json!({}))["result"].clone();
-    assert!(screen["text"].as_str().unwrap().contains("still here"));
+    // The echo reaches the screen a moment after the inject answers.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let screen = kernel.call("host.screen", json!({}))["result"].clone();
+        if screen["text"].as_str().unwrap().contains("still here") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the screen never showed it: {screen}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -303,4 +315,48 @@ fn shutdown_stops_the_command_and_removes_the_files() {
     }
     assert!(!h.dir.join("host.json").exists());
     assert!(!h.dir.join("attach.sock").exists());
+}
+
+// #3333 — a client that attaches once the command is over is told so at once,
+// instead of waiting for output that never comes (a `start --force` froze on it).
+#[test]
+fn attaching_to_a_session_that_is_over_closes_at_once() {
+    let h = start("over", &["sh", "-c", "exit 0"]);
+    let mut c = Ctl::open(&h.dir);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while c.call("host.hello", json!({}))["result"]["claude"]["running"] != json!(false) || c.call("host.hello", json!({}))["result"]["claude"]["exit_code"].is_null() {
+        assert!(Instant::now() < deadline, "the command never ended");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let mut s = attach(&h.dir, json!({ "version": 1, "mode": "interactive" }));
+    let (k, _) = read_frame(&mut s);
+    assert_eq!(k, CLOSED);
+}
+
+// #3333 — a loop's host ends with its command: an empty host read as a live
+// loop, and a start that joined it waited forever.
+#[test]
+fn a_host_that_exits_with_its_command_removes_its_files_and_goes() {
+    let mut h = start_with("exits", &["--exit-with-command"], &["sh", "-c", "sleep 0.3"]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(st) = h.child.try_wait().unwrap() {
+            break st;
+        }
+        assert!(Instant::now() < deadline, "the host outlived its command");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(status.success());
+    assert!(!h.dir.join("host.json").exists(), "its files go with it");
+}
+
+#[test]
+fn a_restart_does_not_end_a_host_that_exits_with_its_command() {
+    let h = start_with("exits-restart", &["--exit-with-command"], &["cat"]);
+    let mut c = Ctl::open(&h.dir);
+    c.call("host.stop", json!({ "restart": true, "timeout_ms": 3000 }));
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(h.dir.join("host.json").exists(), "a restart keeps the host");
+    let started = c.call("host.start", json!({ "argv": ["cat"] }));
+    assert!(started["result"]["pid"].as_u64().unwrap() > 0);
 }
