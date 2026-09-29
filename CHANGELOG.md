@@ -87,6 +87,9 @@ dates are YYYY-MM-DD.
   claude-loop (a plain `claude` in its folder): its role and no-claim setting
   are read from `.aiball.yaml` like its name. Before, such a start subscribed
   it as a project owner, which received the whole backlog, and let it claim.
+- A loop started from a client without a mode (tvty, the web) now runs where it
+  would from a terminal: a folder bound to a remote daemon starts in tmux instead
+  of on this machine's session host.
 - An agent claiming a ticket still waiting for moderation is refused
   (`PARENT_PENDING_MODERATION`) instead of getting an answer that read as a
   claim made.

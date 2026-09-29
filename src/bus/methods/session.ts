@@ -14,7 +14,6 @@ import { hostDirFor, SESSION_NAME } from "../../sessions/hosts.js";
 import { sessionEnv } from "../../sessions/env.js";
 import { listSessionViews, sessionFor, startSession, stopSession, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
-import { loadConfig } from "../../autopoll/config.js";
 import { listConsumers } from "../../db/consumers.js";
 import { tmuxSessionView } from "../../sessions/registry.js";
 import { remoteControlFlags } from "../../claude-loop/remote-control.js";
@@ -46,8 +45,9 @@ const size = z.object({ rows: z.number().int().min(1).max(1000), cols: z.number(
  * start` would (`agent`, or `crew` with a crew agent's name, or neither and
  * the folder decides); the answer names the agent. The loop runs where `mode`
  * says — `host` (this daemon's session host) or `tmux` (a tmux session, the
- * loop's bar in its status line) — or, without it, where the project's
- * `claude_loop.session` says (host by default). `remote_control` starts Claude
+ * loop's bar in its status line) — or, without it, where the loop's start
+ * decides, as from a terminal: the project's `claude_loop.session` (host by
+ * default), and tmux for a folder bound to a remote daemon. `remote_control` starts Claude
  * with Remote Control (`true`: the session named after the agent, a string: that
  * name, `false`: without it), over the project's `claude.remote_control`, and
  * the loop keeps it for its restarts. The login environment and a local
@@ -87,17 +87,10 @@ defineMethod({
             // state) as for tmux, then asks back for the host (session.host)
             // and starts the kernel on it: one way to prepare Claude, not two.
             const env = sessionEnv(p.env, caller.transport === "uds");
-            // #3135 — the caller's mode, else the project's configured one.
-            const mode = p.mode ?? loadConfig(p.cwd).claude_loop.session;
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
-            const child = spawn(process.execPath, [CLAUDE_LOOP_BIN,
-                "start", mode === "host" ? "--host" : "--tmux", "--no-attach", "--cwd", p.cwd,
-                ...(p.agent ? ["--agent", p.agent] : []),
-                ...(p.crew ? ["--crew", p.crew] : []),
-                ...(p.project ? ["--project", p.project] : []),
-                ...remoteControlFlags(p.remote_control),
-            ], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
+            const args = loopStartArgs(p);
+            const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, ...args], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
             // Without a listener a failed spawn is an uncaught 'error' event:
             // it took the whole daemon down, as project.launch once did (#3103).
             let spawnError: string | null = null;
@@ -105,13 +98,17 @@ defineMethod({
             child.unref();
             const deadline = Date.now() + 30_000;
             for (;;) {
-                if (mode === "host") {
+                // #3298 — without a mode, the loop decides where it runs (its
+                // configured mode, tmux for a folder on a remote daemon): the
+                // answer is where it came up, the host or tmux.
+                if (p.mode !== "tmux") {
                     // The named agent's session; or, when the folder decides, the new one started here.
                     const view = named
                         ? listSessionViews().find((v) => v.agent === named)
                         : listSessionViews().find((v) => v.agent && !before.has(v.agent) && v.cwd === p.cwd);
                     if (view) return view;
-                } else {
+                }
+                if (p.mode !== "host") {
                     // In tmux, the loop is up once its kernel is present.
                     const agent = named
                         ? (isPresent(named) ? named : null)
@@ -121,7 +118,7 @@ defineMethod({
                 }
                 if (spawnError) throw new Refusal(500, `claude-loop start could not be launched: ${spawnError}`, ERROR_CODES.INTERNAL);
                 if (child.exitCode !== null && child.exitCode !== 0) {
-                    throw new Refusal(500, `claude-loop start --${mode} exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
+                    throw new Refusal(500, `claude-loop ${args.slice(0, 2).join(" ")} exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
                 }
                 if (Date.now() > deadline) throw new Refusal(504, "the agent's session did not come up in 30 s", ERROR_CODES.INTERNAL);
                 await new Promise((r) => setTimeout(r, 200));
@@ -141,6 +138,22 @@ defineMethod({
         }
     },
 });
+
+/**
+ * #3298 — the `claude-loop start` a `session.start` runs. `--host` / `--tmux`
+ * only when the caller chose: otherwise the loop's start decides, as it does
+ * from a terminal — the folder's configured mode, and tmux for a folder bound
+ * to a remote daemon (whose session host is not this one).
+ */
+export function loopStartArgs(p: { cwd: string; mode?: "host" | "tmux"; agent?: string; crew?: string; project?: string; remote_control?: boolean | string }): string[] {
+    return [
+        "start", ...(p.mode ? [`--${p.mode}`] : []), "--no-attach", "--cwd", p.cwd,
+        ...(p.agent ? ["--agent", p.agent] : []),
+        ...(p.crew ? ["--crew", p.crew] : []),
+        ...(p.project ? ["--project", p.project] : []),
+        ...remoteControlFlags(p.remote_control),
+    ];
+}
 
 /** The loop's launcher, next to the daemon's source. A `#!/usr/bin/env node`
  *  script with no extension: Windows cannot execute it, so it is always run
