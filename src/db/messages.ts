@@ -805,7 +805,7 @@ export function insertRelationEvent(opts: {
     body?: string;
 }): Message | null {
     const db = getDb();
-    return db.transaction((tx) => {
+    const out = db.transaction((tx) => {
         // #B.153: dedupe ticket_referenced. The same source can mention
         // the target multiple times — once at creation, then again in
         // edited bodies / new comments. The first event already records
@@ -847,6 +847,9 @@ export function insertRelationEvent(opts: {
             .from(schema.tickets).where(eq(schema.tickets.id, opts.target_ticket_id)).get();
         return messageRowToMessage(inserted, parent?.project ?? "");
     });
+    // #3331 — the event is on the ticket's thread: its latest activity moved.
+    if (out) invalidateInboxAgg(out.project, opts.target_ticket_id);
+    return out;
 }
 
 /**
@@ -909,6 +912,8 @@ export function insertTypedRelation(opts: {
     // #2165 — a `depends_on` / `blocks` relation gates its dependent the moment
     // it lands, on BOTH ends. Another hole the old blanket clear was hiding.
     invalidateFlagsCache([opts.source_ticket_id, opts.target_ticket_id]);
+    // #3331 — the event is on the source ticket's thread: its latest activity moved.
+    if (out) invalidateInboxAgg(out.project, opts.source_ticket_id);
     return out;
 }
 

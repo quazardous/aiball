@@ -26,8 +26,11 @@
  * (150-300 ms each). With the time effects handled exactly, the ceiling is only
  * the net for a write that forgot to invalidate, and for the inputs that live
  * in the YAML config (claim window, automation rules), which no write signals.
+ * #3331 — a YAML change now empties the cache itself (`clearFlagsOnConfigChange`
+ * in projects.ts), so the net went from 60 s to 10 min: every loop paid a full
+ * rebuild (~350 ms) each minute, most of what held the event loop.
  */
-export const CEILING_MS = 60_000;
+export const CEILING_MS = 600_000;
 
 interface Entry { val: unknown; at: number; until: number }
 

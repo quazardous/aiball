@@ -21,7 +21,8 @@ import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
 import { isAssignmentLive, isHeldByOther } from "./assignment-gate.js";
-import { assignWindowSec } from "../autopoll/config.js";
+import { assignWindowSec, findConfigUpwards, globalConfigPath } from "../autopoll/config.js";
+import { statSync } from "node:fs";
 import { levelsVisibleTo, listHumans } from "./consumers.js";
 import { listSubscriptions } from "./subscriptions.js";
 import { computeDecisionGate, computeDecisionGateProposers } from "./decision-gate.js";
@@ -1872,10 +1873,28 @@ function decisionGateEvents(ticketIds?: readonly number[]): { events: Array<{ cr
     return { events: merged, isHuman: (id) => humans.has(id) };
 }
 
+/**
+ * #3331 — the YAML files an actionable set reads (the claim window, the YAML
+ * automation rules), by their mtime. A change empties the cache: the ceiling
+ * no longer stands in for a config clock, so it can be long.
+ */
+let configStamp: string | null = null;
+let projectConfig: string | null | undefined;
+function clearFlagsOnConfigChange(): void {
+    projectConfig ??= findConfigUpwards(process.cwd());
+    const stamp = [globalConfigPath(), projectConfig].map((p) => {
+        if (!p) return "-";
+        try { return String(statSync(p).mtimeMs); } catch { return "0"; }
+    }).join("|");
+    if (configStamp !== null && stamp !== configStamp) clearFlagsCache();
+    configStamp = stamp;
+}
+
 export function computeActionableTicketIds(
     consumerId?: string,
     ticketIds?: readonly number[],
 ): ActionableTicketSet {
+    clearFlagsOnConfigChange();
     // #2102 — the cache is bypassed for a scoped call, and the returned sets
     // are restricted to what was asked for. Seeding the board-wide cache from a
     // partial answer would make every later reader see a set missing the

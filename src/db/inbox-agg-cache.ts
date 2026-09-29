@@ -18,7 +18,10 @@
  * that forgets to speak up degrades to a few seconds of staleness rather than
  * a permanently wrong inbox.
  */
-const TTL_MS = 5_000;
+// #3331 — 60 s, as the flags cache's net was: every write path repairs or
+// clears the map (#2159, and the relation events since), so the TTL is only the
+// net. At 5 s nearly every read rebuilt it (~180 ms), the loops asking every ~13 s.
+const TTL_MS = 60_000;
 
 /** Cache key for the cross-project view. */
 export const ALL_PROJECTS = "\0all";

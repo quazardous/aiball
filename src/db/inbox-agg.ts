@@ -272,7 +272,7 @@ export function invalidateInboxAgg(project?: string | null, ticketId?: number): 
         // Both maps hold this ticket, and the entry is identical in each: the
         // fold reads only the thread's own messages, which belong to one
         // project. Repairing just the project map would leave the cross-project
-        // view stale until the TTL — a wrong count, silently, for 5 s.
+        // view stale until the TTL — a wrong count, silently, for 60 s.
         for (const key of [project, ALL_PROJECTS]) {
             const agg = peekInboxAgg<Map<number, InboxAgg>>(key);
             if (!agg) continue;

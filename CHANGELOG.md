@@ -63,6 +63,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The daemon no longer holds its event loop about 5% of the time rebuilding
+  the inbox and each agent's backlog caches on a clock: they are repaired by
+  every write and kept 60 s and 10 min; a config file change clears them.
 - Uploads and downloads go through the client's one transport: retried while
   the daemon restarts, sent with the identity headers, and a refusal says its
   status and code, apart from a transport failure. Every client reads a
