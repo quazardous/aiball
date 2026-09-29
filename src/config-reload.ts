@@ -18,9 +18,7 @@
  * surfaces now, with the effective values reported as proof it ran, and (b) is
  * the single extension point for any future boot-cached config.
  */
-import { readFileSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
-import { globalConfigPath } from "./autopoll/config.js";
+import { globalConfigPath, globalConfigValue } from "./config/file-reader.js";
 import { publish } from "./bus/subscriptions.js";
 
 export interface ConfigReloadResult {
@@ -31,13 +29,8 @@ export interface ConfigReloadResult {
 /** Never throws: a reload failing must not be able to take the daemon down. */
 export function reloadConfig(): ConfigReloadResult {
     const gp = globalConfigPath();
-    let hotWin: unknown;
-    try {
-        const raw = parseYaml(readFileSync(gp, "utf8")) as { hot_window_sec?: unknown } | null;
-        hotWin = raw?.hot_window_sec;
-    } catch {
-        // Missing or empty global config is the normal case, not an error.
-    }
+    // #3250 — through the schema, as every read of it.
+    const hotWin: unknown = globalConfigValue("hot_window_sec");
     console.log(
         `[reload] config reloaded (most config is read fresh per request; `
         + `global=${gp}, hot_window_sec=${hotWin ?? "default"})`,

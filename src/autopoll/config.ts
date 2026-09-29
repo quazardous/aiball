@@ -23,26 +23,15 @@ import { parseMouse } from "../claude-loop/mouse-setup.js";
 import { parseRemoteControl, type RemoteControl } from "../claude-loop/remote-control.js";
 import { isBarHost, type BarHost } from "../agent-bar.js";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { parseDuration } from "../config/duration.js";
+import { CONFIG_FILENAME, globalConfigPath, globalConfigValue, readConfigFile, renamedFallback } from "../config/file-reader.js";
+import { coerceConfigValue, getSchemaEntry } from "../config/schema.js";
 import { loadPromptsFromYaml, loadPromptsFromYamlBlock, mergePrompts, type PromptMap } from "../prompt-templates.js";
 
-export const CONFIG_FILENAME = ".aiball.yaml";
-
-/**
- * Global per-user config path (#B.232 7bxrr2, david "ok chemin").
- * Honours XDG_CONFIG_HOME when set, else falls back to `$HOME/.config`.
- * Currently sources only the `prompts:` block; the rest of the schema
- * (autopoll / consumer / claude_loop) stays project-grained because
- * those values are inherently per-repo (identity, throttle, hook
- * timeouts).
- */
-export function globalConfigPath(): string {
-    const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-    return join(base, "aiball", "config.yaml");
-}
+// #3250 — the config paths and the cached file reader have one home.
+export { CONFIG_FILENAME, globalConfigPath } from "../config/file-reader.js";
 
 /**
  * #418 — assignment window (seconds): how long a ticket assignment / claim
@@ -54,13 +43,7 @@ export function globalConfigPath(): string {
  */
 export const DEFAULT_ASSIGN_WINDOW_SEC = 14400;
 export function assignWindowSec(): number {
-    try {
-        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { assign_window_sec?: unknown };
-        const v = Number(raw?.assign_window_sec);
-        return Number.isFinite(v) && v > 0 ? v : DEFAULT_ASSIGN_WINDOW_SEC;
-    } catch {
-        return DEFAULT_ASSIGN_WINDOW_SEC;
-    }
+    return globalConfigValue("assign_window_sec") as number;
 }
 
 /**
@@ -78,15 +61,11 @@ export function assignWindowSec(): number {
  * public repos still import unauthenticated (subject to GitHub rate limits).
  */
 export function upstreamToken(kind: string): string | null {
-    try {
-        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as {
-            upstream_auth?: Record<string, { token?: unknown } | undefined>;
-        };
-        const t = raw?.upstream_auth?.[kind]?.token;
-        if (typeof t === "string" && t.trim()) return t.trim();
-    } catch {
-        // fall through to env
-    }
+    // A secret: kept out of the schema (it would show in the settings UI),
+    // read with the shared cached reader.
+    const raw = readConfigFile(globalConfigPath()) as { upstream_auth?: Record<string, { token?: unknown } | undefined> } | null;
+    const t = raw?.upstream_auth?.[kind]?.token;
+    if (typeof t === "string" && t.trim()) return t.trim();
     if (kind === "github") {
         return process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || null;
     }
@@ -119,15 +98,8 @@ export function isTransportChoice(v: unknown): v is TransportChoice {
  * `auto`.
  */
 export function upstreamTransportChoice(): TransportChoice {
-    try {
-        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as {
-            upstream_transport?: unknown;
-        };
-        if (isTransportChoice(raw?.upstream_transport)) return raw.upstream_transport;
-    } catch {
-        // Missing / unparsable global config is the normal case.
-    }
-    return "auto";
+    const v = globalConfigValue("upstream_transport");
+    return isTransportChoice(v) ? v : "auto";
 }
 
 /**
@@ -148,13 +120,8 @@ function isSyncMode(v: unknown): v is SyncMode {
 }
 
 export function upstreamSyncMode(project?: string | null): SyncMode {
-    let host: SyncMode = "pull";
-    try {
-        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { upstream_sync?: unknown };
-        if (isSyncMode(raw?.upstream_sync)) host = raw.upstream_sync;
-    } catch {
-        // No global config is the normal case.
-    }
+    const g = globalConfigValue("upstream_sync");
+    const host: SyncMode = isSyncMode(g) ? g : "pull";
     if (!project) return host;
     const bindings = loadConfig().upstream[project] ?? [];
     const def = bindings.find((b) => b.default) ?? bindings[0];
@@ -859,12 +826,14 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #3138 — the names since the rename, and for one version the old
             // ones (`throttle_seconds`, `include_recent_tickets`) when the new
             // is absent; a renamed key is reported, to be updated.
-            const throttle = parseDuration("throttle" in a ? a.throttle : a.throttle_seconds);
-            if (throttle !== null) cfg.autopoll.throttle = throttle;
-            const recent = "recent_tickets" in a ? a.recent_tickets : a.include_recent_tickets;
-            if (typeof recent === "number" && recent >= 0) cfg.autopoll.recent_tickets = Math.min(20, recent);
-            for (const [old, now] of [["throttle_seconds", "throttle"], ["include_recent_tickets", "recent_tickets"]] as const) {
-                if (old in a) cfg.renamed_keys.push(`autopoll.${old} → autopoll.${now}`);
+            // #3250 — the renames from their one table (RENAMED_CONFIG_KEYS), the bounds from the schema.
+            for (const key of ["autopoll.throttle", "autopoll.recent_tickets"] as const) {
+                const field = key.slice("autopoll.".length) as "throttle" | "recent_tickets";
+                const legacy = field in a ? undefined : renamedFallback(raw, key);
+                if (legacy) cfg.renamed_keys.push(`${legacy.from} → ${key}`);
+                const entry = getSchemaEntry(key)!;
+                const v = coerceConfigValue(entry, field in a ? a[field] : legacy?.value);
+                if (typeof v === "number" && v >= (entry.min ?? 0)) cfg.autopoll[field] = Math.min(entry.max ?? v, v);
             }
             if (typeof a.tone === "string" && (VALID_TONES as string[]).includes(a.tone)) {
                 cfg.autopoll.tone = a.tone as AutopollTone;
@@ -888,22 +857,22 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             // #B.180 david: all claude-loop timeouts configurable.
             const cl = (raw.claude_loop ?? {}) as Record<string, unknown>;
-            if (typeof cl.interval_seconds === "number" && cl.interval_seconds > 0) {
-                cfg.claude_loop.interval_seconds = cl.interval_seconds;
-            }
-            if (typeof cl.wake_tempo_seconds === "number" && cl.wake_tempo_seconds > 0) {
-                cfg.claude_loop.wake_tempo_seconds = cl.wake_tempo_seconds;
-            }
-            if (typeof cl.boot_grace_seconds === "number" && cl.boot_grace_seconds >= 0) {
-                cfg.claude_loop.boot_grace_seconds = cl.boot_grace_seconds;
-            }
-            if (typeof cl.boot_min_seconds === "number" && cl.boot_min_seconds >= 0) {
-                cfg.claude_loop.boot_min_seconds = cl.boot_min_seconds;
-            }
+            // #3250 — durations in the config notation (`30s`, `1m`, `1h30m`); a
+            // bare number is still seconds, as before, fractions included.
+            const secs = (v: unknown): number | null => typeof v === "number" ? v : parseDuration(v);
+            const positive = (v: number | null): v is number => v !== null && v > 0;
+            const nonNegative = (v: number | null): v is number => v !== null && v >= 0;
+            const interval = secs(cl.interval_seconds);
+            if (positive(interval)) cfg.claude_loop.interval_seconds = interval;
+            const tempo = secs(cl.wake_tempo_seconds);
+            if (positive(tempo)) cfg.claude_loop.wake_tempo_seconds = tempo;
+            const grace = secs(cl.boot_grace_seconds);
+            if (nonNegative(grace)) cfg.claude_loop.boot_grace_seconds = grace;
+            const bootMin = secs(cl.boot_min_seconds);
+            if (nonNegative(bootMin)) cfg.claude_loop.boot_min_seconds = bootMin;
             // #1132 — presence-hold duration knob.
-            if (typeof cl.presence_hold_seconds === "number" && cl.presence_hold_seconds > 0) {
-                cfg.claude_loop.presence_hold_seconds = cl.presence_hold_seconds;
-            }
+            const hold = secs(cl.presence_hold_seconds);
+            if (positive(hold)) cfg.claude_loop.presence_hold_seconds = hold;
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }

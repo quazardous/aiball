@@ -38,14 +38,16 @@ Different blocks merge differently — that's the "russian doll" part.
 ### Autopoll — `autopoll:` — *per-project only*
 Read from `.aiball.yaml` (defaults when the file/block is absent). Pilot
 from the CLI: `aiball autopoll enable|disable|tone <t>|throttle <n>`.
-Keys: `enabled`, `volatile`, `throttle` (a duration, see below), `recent_tickets`,
-`backlog`, `tone` (`hint`|`directive`|`imperative`).
+Keys: `enabled`, `volatile`, `throttle` (a duration, see below; `0` = at every
+Stop), `recent_tickets` (at most 20), `backlog`, `tone`
+(`hint`|`directive`|`imperative`).
 
 ### claude-loop timeouts — `claude_loop:` — *defaults → yaml → CLI/env*
 Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
 `--check-cmd`, `--wait`/`--no-wait`) and `CL_*` env (which the loop's
 child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
-`boot_grace_seconds`, `boot_min_seconds`, `presence_hold_seconds`,
+`boot_grace_seconds`, `boot_min_seconds`, `presence_hold_seconds` (durations:
+`1m`, `90s`, or a bare number of seconds),
 `wake_in_flight_ttl_ms`, `input_hot_ttl_ms`, `pane_probe_fast_ms`,
 `pane_probe_slow_ms`, `esc_takeover`, `mouse`, `bar`, `session`, `afk_key`, `afk_window_ms`, `wait`,
 `drained_strategy`, `log_level`, `permission_mode`, `gates`. See
@@ -133,6 +135,15 @@ Set it up with `aiball init tailscale [--http] [--port N]`; manage from the CLI:
 > (`systemd/aiball.service`). An existing install picks it up after a re-run
 > of `install.sh` (regenerates the unit + `daemon-reload`); then a daemon
 > (re)start brings the provider up.
+
+### Host-level timings and upstream — *global only*
+In the global config, read through the schema like the settings the UI shows
+(typed, ranged; a value outside its range falls back to the default):
+`assign_window_sec` (a duration, default 4h: how long an assignment or claim
+stays live), `hot_window_sec` (a duration, default 20m: how recent a move keeps
+a ticket hot), `upstream_transport` (`auto`|`http`|`gh`), `upstream_sync`
+(`pull`|`off`). `upstream_auth.<provider>.token` is a secret: read from the
+same file, never shown in the UI.
 
 ### Serving under a path — `server.base_path` — *global only (host-level)*
 To serve aiball under a path (`https://host/aiball/`) behind a reverse proxy

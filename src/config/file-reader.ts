@@ -10,9 +10,9 @@
  * Pure I/O — no in-memory cache yet (each call re-reads the YAML). Cache
  * is a phase-4 concern when the call sites multiply.
  *
- * Path resolution is intentionally duplicated from `autopoll/config.ts`
- * to avoid a cyclic import (`src/config/` shouldn't depend on
- * `src/autopoll/`). Future cleanup: consolidate in `src/config/paths.ts`.
+ * #3250 — the one place config paths are resolved and config files read
+ * (cached on mtime): `autopoll/config.ts`, the daemon and the inbox import
+ * them from here.
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -25,9 +25,9 @@ import {
     type ConfigValue,
 } from "./schema.js";
 
-const CONFIG_FILENAME = ".aiball.yaml";
+export const CONFIG_FILENAME = ".aiball.yaml";
 
-function projectConfigPath(cwd: string): string | null {
+export function projectConfigPath(cwd: string): string | null {
     let dir = resolve(cwd);
     const rootPath = parsePath(dir).root;
     for (let i = 0; i < 64; i++) {
@@ -41,7 +41,8 @@ function projectConfigPath(cwd: string): string | null {
     return null;
 }
 
-function globalConfigPath(): string {
+/** The user's global config (`$XDG_CONFIG_HOME` or `~/.config`, then `aiball/config.yaml`). */
+export function globalConfigPath(): string {
     const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
     return join(base, "aiball", "config.yaml");
 }
@@ -59,6 +60,11 @@ function walkDotted(obj: unknown, key: string): unknown {
 }
 
 const fileCache = new Map<string, { mtimeMs: number; data: unknown }>();
+
+/** A config file's content, parsed and cached on its mtime; null when absent or unreadable. */
+export function readConfigFile(path: string): unknown {
+    return readYamlCached(path);
+}
 
 function readYamlCached(path: string): unknown {
     try {
@@ -108,4 +114,32 @@ export function readFileValue(
  *  file on every call and re-parse only when mtime changes. */
 export function _resetFileCache(): void {
     fileCache.clear();
+}
+
+/**
+ * #3250 — a key of the global config through its schema entry: typed, its
+ * rename honoured, else the entry's default. Values outside the entry's range
+ * fall back to the default too, as a refused `config.set` would.
+ */
+export function globalConfigValue(key: string): ConfigValue {
+    const entry = getSchemaEntry(key);
+    if (!entry) throw new Error(`no config key ${key}`);
+    const v = readFileValue("global", key);
+    if (v === undefined) return entry.default;
+    if (typeof v === "number" && ((entry.min !== undefined && v < entry.min) || (entry.max !== undefined && v > entry.max))) return entry.default;
+    return v;
+}
+
+/**
+ * #3250 — an old key's value under its current name, from a parsed file
+ * (`RENAMED_CONFIG_KEYS`, factor applied), and the renames found, to report.
+ */
+export function renamedFallback(raw: unknown, key: string): { value: unknown; from: string } | undefined {
+    for (const [old, r] of Object.entries(RENAMED_CONFIG_KEYS)) {
+        if (r.key !== key) continue;
+        const legacy = walkDotted(raw, old);
+        if (legacy === undefined) continue;
+        return { value: typeof legacy === "number" ? Math.round(legacy * r.factor) : legacy, from: old };
+    }
+    return undefined;
 }

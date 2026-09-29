@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `claude_loop.*_seconds` take the duration notation (`1m`, `90s`); a bare
+  number is still seconds. `assign_window_sec` and `hot_window_sec` take it too,
+  and show with `upstream_transport` / `upstream_sync` in the settings.
 - `loop.<name>.state`: a client hears each loop of the machine appear, start,
   stop, change and be forgotten, instead of re-reading `loop.list`.
 - `agent.<id>.backlog`: a client hears the tickets whose place in an agent's
@@ -55,6 +58,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `autopoll.throttle` may be 0 (a reminder at every Stop), as its description
+  said and the loop did; the settings page refused it (at least 10).
 - The web terminal reaches an agent on a proxy node through the node its calls
   come through. It matched them by address, which fails behind tailscale serve
   (every node is the loopback) and named a node that was never connected; the

@@ -13,8 +13,6 @@
 // context for a whole page; a mutation builds one for a single id. Same code,
 // same shape, by construction rather than by discipline.
 
-import { readFileSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
 import type { Message } from "../db.js";
 import {
     getTicketTokenUsage,
@@ -29,7 +27,7 @@ import { DECISION_GESTURES, isStepStalled, kindsByAttention, type DecisionKind }
 import { getConfig } from "../db/config-overrides.js";
 import { projectCriticalTicket, type CriticalTicket } from "../db/critical-ticket.js";
 import { milestonesOf, type MilestoneRef } from "../db/milestones.js";
-import { globalConfigPath } from "../autopoll/config.js";
+import { globalConfigValue } from "../config/file-reader.js";
 import { holding, ticketClaimHeldUntil, ticketsClaimHeldUntil } from "../db/claim-hold.js";
 
 /**
@@ -54,16 +52,10 @@ export function ticketDecision(t: { meta?: string | null }, kind: string | null)
     }
 }
 
-const DEFAULT_HOT_WINDOW_SEC = 1200;
 /** Same rationale as `ticketDecision`: moved here to keep the imports acyclic. */
 export function hotWindowSec(): number {
-    try {
-        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { hot_window_sec?: unknown };
-        const v = Number(raw?.hot_window_sec);
-        return Number.isFinite(v) && v > 0 ? v : DEFAULT_HOT_WINDOW_SEC;
-    } catch {
-        return DEFAULT_HOT_WINDOW_SEC;
-    }
+    // #3250 — through the schema (hot_window_sec, 20 min by default).
+    return globalConfigValue("hot_window_sec") as number;
 }
 
 export interface InboxRowContext {
