@@ -19,7 +19,7 @@ import { onPingsChanged, unreadPingCount } from "./db/pings.js";
 import { getConsumer, listConsumers } from "./db/consumers.js";
 import { listProjectSubscribers } from "./db/subscriptions.js";
 import { listProjectsDetailed } from "./db/projects.js";
-import { listTicketsFor } from "./api/tickets.js";
+import { listTicketsFor } from "./queries/tickets.js";
 import { broadcast } from "./ws.js";
 import { isPresent } from "./live-presence.js";
 

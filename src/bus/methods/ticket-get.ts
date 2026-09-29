@@ -4,7 +4,7 @@ import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { flag } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { computeActionableTicketIds } from "../../db/projects.js";
-import { type FeedPagination, paginateFeed } from "../../api/feed-paginate.js";
+import { type FeedPagination, paginateFeed } from "../../queries/feed-paginate.js";
 import { type Message, getConsumer, getMessage, getMessageByHashid, getTicketStages, getTicketTitles, getTicketTokenUsage, listMessageTags, listMessages, listSubTickets, listTypedRelationsForTicket, resolveAttachments, ticketUnreadFlags } from "../../db.js";
 import { getInboxAgg, liveStep } from "../../db/inbox-agg.js";
 import { holding, ticketClaimHeldUntil } from "../../db/claim-hold.js";
@@ -15,8 +15,8 @@ import { parseMeta } from "../../questions.js";
 import { projectCriticalTicket } from "../../db/critical-ticket.js";
 import { resolvesTicket } from "../../ticket-transitions.js";
 import { ticketHasPayload } from "../../db/payloads.js";
-import { withTags, withVotes } from "../../api/_helpers.js";
-import { enrichRelationStages } from "../../api/tickets.js";
+import { withTags, withVotes } from "../../queries/decorate.js";
+import { enrichRelationStages } from "../../queries/tickets.js";
 
 /**
  * One ticket, by id, comment id or hashid (a comment resolves to its thread,

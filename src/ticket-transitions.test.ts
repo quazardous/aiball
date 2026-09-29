@@ -21,7 +21,7 @@ const t = await import("./ticket-transitions.js");
 const { computeDecisionGate } = await import("./db/decision-gate.js");
 const { CLOSING_DECISION_KINDS, WAITING_DECISION_KINDS } = await import("./decisions.js");
 const { validateNewMessage } = await import("./messages.js");
-const { buildInboxRow } = await import("./api/inbox-row.js");
+const { buildInboxRow } = await import("./queries/inbox-row.js");
 const { emptyAgg } = await import("./db/inbox-agg.js");
 
 type Kind = typeof t.DECISION_KINDS[number];

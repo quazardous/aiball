@@ -19,7 +19,7 @@ import {
     upsertSubscription,
     upsertTicketSubscription,
 } from "../../db.js";
-import { listTicketsFor } from "../../api/tickets.js";
+import { listTicketsFor } from "../../queries/tickets.js";
 import { searchMessages } from "../../search.js";
 import { graphAudit, ticketNeighbors } from "../../db/graph-query.js";
 import { ERROR_CODES, INTENTS, type Intent } from "../../domain.js";

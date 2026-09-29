@@ -14,10 +14,10 @@ import { isPresent, presenceRunning } from "../../live-presence.js";
 import { emitControl } from "../../event-bus.js";
 import { listWaitCreditMoves, listWaitCredits, waitCreditBalance, waitCreditEnabled, type WaitCreditRow } from "../../db/wait-credit.js";
 import { unreadPingCount } from "../../db/pings.js";
-import { listTicketsFor } from "../../api/tickets.js";
+import { listTicketsFor } from "../../queries/tickets.js";
 import { getAgentBar } from "../../agent-bar-store.js";
 import { isBarHost } from "../../agent-bar.js";
-import { localLoopDir, sendAfkToLoop } from "../../api/agents.js";
+import { localLoopDir, sendAfkToLoop } from "./loop-afk.js";
 import { sendEventOnce } from "../../claude-loop/ipc-events.js";
 import { loopSockPath } from "../../claude-loop/state.js";
 

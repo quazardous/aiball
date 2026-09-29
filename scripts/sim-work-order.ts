@@ -72,7 +72,7 @@ const schema = await import("../src/schema.js");
 const { computeHotFocus, compareWorkOrder } = await import("../src/db/work-order.js");
 type WorkOrderCtx = Parameters<typeof compareWorkOrder>[2];
 const { ticketSelfLastActivity } = await import("../src/db/tickets.js");
-const { hotWindowSec } = await import("../src/api/inbox-row.js");
+const { hotWindowSec } = await import("../src/queries/inbox-row.js");
 const { clearFlagsCache } = await import("../src/db/flags-cache.js");
 // #2165 — l'invalidation RÉELLE, celle que le daemon appelle. Le simulateur
 // ne modélise plus la réparation : il la juge.

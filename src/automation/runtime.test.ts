@@ -3,7 +3,7 @@
 // Drives a REAL throwaway SQLite (migrations 0039 + 0040 run on the first
 // getDb), exercises submitMessage → emitLifecycle → runtime → setTicketAssignment
 // end-to-end. The tag-trigger arm emits the lifecycle event directly
-// (mirroring what `api/tags.ts` does in-process), since this test stays out
+// (mirroring what `queries/tag-catalog.ts` does in-process), since this test stays out
 // of Express. node:test + tsx — run via `npm test`.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

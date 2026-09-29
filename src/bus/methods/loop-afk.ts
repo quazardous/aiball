@@ -13,11 +13,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { loopSockPath } from "../claude-loop/state.js";
-import { sendEventOnce } from "../claude-loop/ipc-events.js";
-import { resolveLoopName } from "../pane.js";
-import { getConsumer } from "../db.js";
-import { ERROR_CODES, type ErrorCode } from "../domain.js";
+import { loopSockPath } from "../../claude-loop/state.js";
+import { sendEventOnce } from "../../claude-loop/ipc-events.js";
+import { resolveLoopName } from "../../pane.js";
+import { getConsumer } from "../../db.js";
+import { ERROR_CODES, type ErrorCode } from "../../domain.js";
 
 export type LoopAfkAction = "toggle" | "off" | "arm_10m" | "arm_inf";
 

@@ -11,7 +11,7 @@ import { dirname, join, relative, resolve } from "node:path";
 const SRC = resolve(import.meta.dirname);
 
 /** The core's own modules: what a client must not import, even indirectly. */
-const CORE = [/^db\.ts$/, /^db\//, /^bus\//, /^sessions\//, /^schema\.ts$/, /^messages\.ts$/, /^api\.ts$/, /^api\//, /^app\.ts$/, /^daemon\.ts$/];
+const CORE = [/^db\.ts$/, /^db\//, /^bus\//, /^queries\//, /^sessions\//, /^schema\.ts$/, /^messages\.ts$/, /^api\.ts$/, /^api\//, /^app\.ts$/, /^daemon\.ts$/];
 const isCore = (rel: string) => CORE.some((re) => re.test(rel));
 
 /** Known crossings, named so they stay visible; each is a decision to revisit. */
@@ -38,9 +38,10 @@ function sources(dir: string): string[] {
 function importsOf(file: string): string[] {
     const text = readFileSync(file, "utf8");
     const out: string[] = [];
-    for (const m of text.matchAll(/(?:^|\n)\s*((?:import|export)\s[^;]*?)from\s+["'](\.[^"']+)["']|import\(\s*["'](\.[^"']+)["']\s*\)/g)) {
+    // The third form is a bare `import "./x.js"`: it loads the module for its effects.
+    for (const m of text.matchAll(/(?:^|\n)\s*((?:import|export)\s[^;]*?)from\s+["'](\.[^"']+)["']|import\(\s*["'](\.[^"']+)["']\s*\)|(?:^|\n)\s*import\s+["'](\.[^"']+)["']/g)) {
         if (m[1] && /^(?:import|export)\s+type\s/.test(m[1])) continue;
-        const spec = m[2] ?? m[3]!;
+        const spec = m[2] ?? m[3] ?? m[4]!;
         const base = resolve(dirname(file), spec).replace(/\.js$/, "");
         for (const cand of [`${base}.ts`, join(base, "index.ts")]) {
             if (existsSync(cand)) { out.push(cand); break; }

@@ -12,10 +12,19 @@ wrong side of it.
 
 | Layer | What | Where |
 |---|---|---|
-| **Core** | the database and its migrations, the rules (actionable, decisions, backlog, wakes), the bus and the HTTP/UDS API, authentication | `src/db*`, `src/schema.ts`, `src/messages.ts`, `src/api*`, `src/app.ts`, `src/daemon.ts`, `src/ws.ts` |
+| **Core** | the database and its migrations, the rules (actionable, decisions, backlog, wakes), the bus and the HTTP/UDS API, authentication | `src/db*`, `src/schema.ts`, `src/messages.ts`, `src/queries/`, `src/bus/`, `src/sessions/`, `src/api*`, `src/app.ts`, `src/daemon.ts`, `src/ws.ts` |
 | **Shared vocabulary** | pure modules any layer may import: kinds, decision gestures, transitions, config parsing | `src/domain.ts`, `src/decisions.ts`, `src/ticket-transitions.ts`, `src/autopoll/config.ts`, … |
 | **Clients** | talk to the core through the API only | `src/client.ts` (the shared client), `src/claude-loop/`, `src/mcp/`, `src/cli/`, `src/sim/`, `tests/sim/`, the tvty terminal (its own repository) |
 | **Web UI** | a client of the same API | `frontend/` |
+
+### Inside the core
+
+| Where | What goes there |
+|---|---|
+| `src/db/` | a table's reads and writes |
+| `src/queries/` | the reads composed from several tables that several methods, and the core itself, answer with: ticket lists and the work order, inbox rows and their pilot fields, a thread's pagination, the tag catalog, the tags and votes added to message rows |
+| `src/bus/` | the bus: its methods (`src/bus/methods/`), and next to them the helpers only they use |
+| `src/api/` | the HTTP routes production keeps (logging in, uploads, API keys' doors, a few consumer routes) and their helpers |
 
 ## The rule, and what holds it
 

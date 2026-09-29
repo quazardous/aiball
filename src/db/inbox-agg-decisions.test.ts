@@ -16,7 +16,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyAgg } from "./inbox-agg.js";
 import { DECISION_KINDS } from "../decisions.js";
-import { ticketDecision } from "../api/tickets.js";
+import { ticketDecision } from "../queries/tickets.js";
 
 test("every decision kind the model defines is tracked on the aggregate", () => {
     // #2308 — one track per kind, built from the transition table. A kind with

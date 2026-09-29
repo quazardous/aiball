@@ -1,5 +1,5 @@
 /**
- * #505 phase 2 — partagé entre `src/api/agents.ts` (chemin local, agent qui
+ * #505 phase 2 — partagé entre `src/bus/methods/loop-afk.ts` (chemin local, agent qui
  * tourne sur le même host que le daemon) et la WS reverse côté node
  * (`src/proxy.ts`, agent qui tourne sur un node distant). Le contenu vient de
  * `agents.ts` d'origine (#464/#472) — extrait tel quel pour pouvoir l'appeler

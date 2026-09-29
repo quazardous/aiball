@@ -25,7 +25,7 @@ const { submitMessage } = await import("../messages.js");
 const { createProject, computeActionableTicketIds } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
 const { setTicketClaim } = await import("../db/tickets.js");
-const { applyModeration } = await import("./moderation.js");
+const { applyModeration } = await import("../bus/methods/moderation.js");
 const schema = await import("../schema.js");
 const { eq } = await import("drizzle-orm");
 

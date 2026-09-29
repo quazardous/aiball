@@ -15,8 +15,8 @@ import { getTicketBookends, ticketsClaimedBy } from "../../db/tickets.js";
 import { pickFocusClaim } from "../../db/assignment-gate.js";
 import { assignWindowSec } from "../../autopoll/config.js";
 import { addTicketTokenUsage } from "../../db/token-usage.js";
-import { ticketStateAfter } from "../../api/tickets.js";
-import { withTags } from "../../api/_helpers.js";
+import { ticketStateAfter } from "../../queries/tickets.js";
+import { withTags } from "../../queries/decorate.js";
 import { broadcast } from "../../ws.js";
 import { ERROR_CODES, type MessageKind, type MessageStatus } from "../../domain.js";
 

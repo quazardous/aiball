@@ -4,9 +4,9 @@
  * status of each submit refusal. No route: the ones this file held moved to
  * the bus (#3063, #3068).
  */
-import { ERROR_CODES } from "../domain.js";
-import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
-import { platformTagName } from "../db/platform-tag.js";
+import { ERROR_CODES } from "../../domain.js";
+import { addMessageTag, getTagByName, insertTag } from "../../db/tags.js";
+import { platformTagName } from "../../db/platform-tag.js";
 
 
 /**

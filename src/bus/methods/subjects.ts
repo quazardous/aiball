@@ -17,8 +17,8 @@ import { presenceConnect, presenceDisconnect } from "../../live-presence.js";
 import { onCounters, refreshCounters } from "../../agent-counters.js";
 import { wakeFocusHidesTicket } from "../../db/backlog-rules.js";
 import { parseMeta } from "../../questions.js";
-import { buildInboxRow, buildInboxRowContext, inboxRowDeadline, type InboxRowContext } from "../../api/inbox-row.js";
-import { buildPilotFacts, pilotFields } from "../../api/inbox-pilot.js";
+import { buildInboxRow, buildInboxRowContext, inboxRowDeadline, type InboxRowContext } from "../../queries/inbox-row.js";
+import { buildPilotFacts, pilotFields } from "../../queries/inbox-pilot.js";
 
 /** An agent's own data: a human, or the agent itself. */
 function ownOrHuman(caller: Caller, id: string, what: string): Refusal | null {

@@ -378,7 +378,7 @@ function readClient(input: AuthInput, ctx: CallerContext): void {
  * the client lib injects the header on every request. Trust the agent's own
  * declaration (no privilege escalation — it gates the agent OUT of the
  * claim pool, never IN). Stashed on `AuthenticatedRequest.no_claim_hint`
- * for the claimable lens in `api/tickets.ts`.
+ * for the claimable lens in `queries/tickets.ts`.
  *
  * Called at the END of the auth chain — after `consumer_id`/`token_kind` are
  * known. Re-applied also on the UDS local-trust path (humans driving a loop

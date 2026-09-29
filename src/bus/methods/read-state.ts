@@ -21,7 +21,7 @@ import {
     unreadPingCount,
 } from "../../db.js";
 import { ticketsAwaitingModeration } from "../../db/tickets.js";
-import { withTags } from "../../api/_helpers.js";
+import { withTags } from "../../queries/decorate.js";
 import { ERROR_CODES } from "../../domain.js";
 
 /** The consumer a call is about: the one named, else the caller. */

@@ -12,13 +12,13 @@
  * The caller owns the checks — the message exists, is still pending, and the
  * caller may moderate. This only applies the status and ripples it.
  */
-import { deletePingsForMessage, updateMessageStatus, type Message, type MessageStatus } from "../db.js";
-import { postRejectRelationEvents } from "../messages.js";
-import { emitLifecycle } from "../event-bus.js";
-import { fanOutPings, notifyDecision } from "../notifications.js";
-import { deliverToOutbox } from "../outbox.js";
-import { broadcast } from "../ws.js";
-import { withTagsOne } from "./_helpers.js";
+import { deletePingsForMessage, updateMessageStatus, type Message, type MessageStatus } from "../../db.js";
+import { postRejectRelationEvents } from "../../messages.js";
+import { emitLifecycle } from "../../event-bus.js";
+import { fanOutPings, notifyDecision } from "../../notifications.js";
+import { deliverToOutbox } from "../../outbox.js";
+import { broadcast } from "../../ws.js";
+import { withTagsOne } from "../../queries/decorate.js";
 
 export function applyModeration(existing: Message, status: MessageStatus, decider: string) {
     const updated = updateMessageStatus(existing.id, status, "human", null, existing.kind);

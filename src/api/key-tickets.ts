@@ -31,7 +31,8 @@ import { getMessage } from "../db.js";
 import * as schema from "../schema.js";
 import { validateNewMessage } from "../messages.js";
 import { fileTicket, isExtrasRefusal, ticketExtras } from "../file-ticket.js";
-import { refuse, withTagsOne } from "./_helpers.js";
+import { refuse } from "./_helpers.js";
+import { withTagsOne } from "../queries/decorate.js";
 import { ERROR_CODES, type ErrorCode } from "../domain.js";
 
 export const keyTicketsRouter = Router();

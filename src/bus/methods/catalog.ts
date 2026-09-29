@@ -7,7 +7,7 @@ import { configTagNames } from "../../config-tags.js";
 import { getMessage } from "../../db.js";
 import { broadcast } from "../../ws.js";
 import { emitLifecycle } from "../../event-bus.js";
-import { resolveTagRef, tagCatalog } from "../../api/tags.js";
+import { resolveTagRef, tagCatalog } from "../../queries/tag-catalog.js";
 import { listMilestones } from "../../db/milestones.js";
 import { listProjects } from "../../db/projects.js";
 import { listKnownAgents } from "../../db/subscriptions.js";

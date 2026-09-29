@@ -24,8 +24,8 @@ import { levelsVisibleTo, seesLevel } from "../../db/consumers.js";
 import { milestonesOf, milestoneTargetRefusal, setTicketMilestone } from "../../db/milestones.js";
 import { moveTicketTo } from "../../messages.js";
 import { broadcast } from "../../ws.js";
-import { withTagsOne } from "../../api/_helpers.js";
-import { ticketStateAfter } from "../../api/tickets.js";
+import { withTagsOne } from "../../queries/decorate.js";
+import { ticketStateAfter } from "../../queries/tickets.js";
 
 const MODERATOR = (what: string) => ({
     who: ["human"] as const,

@@ -4,9 +4,9 @@ import { consumerIdOf, defineMethod } from "../methods.js";
 import { flag } from "../params.js";
 import { isHuman, listMessages, ticketUnreadFlags, type MessageStatus } from "../../db.js";
 import { emptyAgg, getInboxAgg } from "../../db/inbox-agg.js";
-import { buildInboxRow, buildInboxRowContext, inboxRowCheap } from "../../api/inbox-row.js";
-import { buildPilotFacts, pilotFields } from "../../api/inbox-pilot.js";
-import { PRIORITY_WEIGHT } from "../../api/tickets.js";
+import { buildInboxRow, buildInboxRowContext, inboxRowCheap } from "../../queries/inbox-row.js";
+import { buildPilotFacts, pilotFields } from "../../queries/inbox-pilot.js";
+import { PRIORITY_WEIGHT } from "../../queries/tickets.js";
 
 /**
  * The board's ticket rows for the caller (docs/API-INBOX.md), with `total`

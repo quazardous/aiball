@@ -57,6 +57,9 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- `src/api/` holds only the HTTP routes production keeps; the composed reads the
+  bus and the core share moved to `src/queries/`, the bus's own helpers next to
+  its methods.
 - The Docker test profiles run what CI runs besides the tests (typecheck,
   lint, the frontend's tests and its build as CI builds it), and the suites
   that drive a real session host, which the test image now builds; a

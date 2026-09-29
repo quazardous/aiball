@@ -37,13 +37,13 @@ import { clearSeenForMessage, insertPing } from "../../db/pings.js";
 import { isDecisionKind } from "../../decisions.js";
 import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, validateNewMessage, withoutDecisionRefusal } from "../../messages.js";
 import { NO_EXTRAS, fileTicket, isExtrasRefusal, ticketExtras } from "../../file-ticket.js";
-import { applyPlatformTag, SUBMIT_REFUSAL_STATUS } from "../../api/messages.js";
-import { applyModeration } from "../../api/moderation.js";
+import { applyPlatformTag, SUBMIT_REFUSAL_STATUS } from "./message-filing.js";
+import { applyModeration } from "./moderation.js";
 import { tagMessageAsStep, untagMessageStep } from "../../db/messages.js";
 import { broadcast } from "../../ws.js";
 import { ticketMoved } from "./subjects.js";
 import { resolveAttachments } from "../../db/uploads.js";
-import { withTagsOne, withVotesOne } from "../../api/_helpers.js";
+import { withTagsOne, withVotesOne } from "../../queries/decorate.js";
 import { isIdempotencyKey, keyedMessage, rememberKey } from "../../db/idempotency.js";
 
 const MODERATOR = (what: string) => ({
@@ -312,7 +312,7 @@ defineMethod({
 
 /**
  * Moderate a pending message: approve or reject it (#2180 — the ripple, the
- * same one the pending-children sweep applies, lives in api/moderation.ts).
+ * same one the pending-children sweep applies, lives in ./moderation.ts).
  */
 for (const [name, status] of [["message.approve", "approved"], ["message.reject", "rejected"]] as const) {
     defineMethod({
