@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `loop.<name>.state`: a client hears each loop of the machine appear, start,
+  stop, change and be forgotten, instead of re-reading `loop.list`.
 - `agent.<id>.backlog`: a client hears the tickets whose place in an agent's
   backlog changed (sunk by a backlog wake, back from their rest, another tier),
   for an agent with no loop too.

@@ -134,6 +134,25 @@
         }
       }
     },
+    "loop.*.state": {
+      "address": "loop.{id}.state",
+      "parameters": {
+        "id": {
+          "description": "an id, or * for all (those added later too)"
+        }
+      },
+      "messages": {
+        "value": {
+          "name": "value",
+          "summary": "the loop as loop.list shows it, or null; with *, keyed by loop name"
+        },
+        "event": {
+          "name": "event",
+          "summary": "the whole view again whenever it changed; null once the loop is forgotten (rm)"
+        }
+      },
+      "x-machine": true
+    },
     "project.*.tickets": {
       "address": "project.{id}.tickets",
       "parameters": {

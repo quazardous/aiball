@@ -9,9 +9,11 @@
 import { spawn, spawnSync } from "node:child_process";
 import { isMachineLocal } from "../../machine-secret.js";
 import { join, resolve } from "node:path";
-import { statSync } from "node:fs";
+import { statSync, watch, type FSWatcher } from "node:fs";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
+import { defineSubject, publish } from "../subscriptions.js";
+import { onBroadcast } from "../../ws.js";
 import { remoteControl } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
@@ -289,3 +291,104 @@ defineMethod({
 
 /** The loop's launcher, next to the daemon's source. */
 const CLAUDE_LOOP_BIN = resolve(import.meta.dirname, "..", "..", "..", "bin", "claude-loop");
+
+// ---- loop.<name>.state ------------------------------------------------------------
+
+/**
+ * #3357 — each loop of this machine as `loop.list` shows it, pushed when it
+ * changed, `null` once it is forgotten (`rm`). A client (tvty) re-read
+ * `loop.list` every 3 s for want of it. Recomputed, while anyone is
+ * subscribed, when a plate is written or removed (the state root watched), on
+ * the board's events that move a loop (a loop's presence, its tmux clients,
+ * its bar's model, its host), and every 30 s for a tmux session killed with no
+ * word said.
+ */
+const LOOP_DEBOUNCE_MS = 300;
+const LOOP_SAFETY_MS = 30_000;
+const loopState: {
+    subs: number;
+    sent: Map<string, string>;
+    watcher: FSWatcher | null;
+    safety: NodeJS.Timeout | null;
+    debounce: NodeJS.Timeout | null;
+    offBroadcast: (() => void) | null;
+} = { subs: 0, sent: new Map(), watcher: null, safety: null, debounce: null, offBroadcast: null };
+
+/** Views again; publish those that changed, `null` for those gone. */
+function publishLoopChanges(): void {
+    const now = new Map(loopViews().map((v) => [v.name, v]));
+    for (const [name, v] of now) {
+        const json = JSON.stringify(v);
+        if (loopState.sent.get(name) === json) continue;
+        loopState.sent.set(name, json);
+        publish(`loop.${name}.state`, v);
+    }
+    for (const name of [...loopState.sent.keys()]) {
+        if (now.has(name)) continue;
+        loopState.sent.delete(name);
+        publish(`loop.${name}.state`, null);
+    }
+}
+
+function scheduleLoopChanges(): void {
+    if (loopState.subs === 0 || loopState.debounce) return;
+    loopState.debounce = setTimeout(() => { loopState.debounce = null; publishLoopChanges(); }, LOOP_DEBOUNCE_MS);
+    loopState.debounce.unref?.();
+}
+
+function startLoopWatch(): void {
+    for (const v of loopViews()) loopState.sent.set(v.name, JSON.stringify(v));
+    try {
+        // A plate, or a loop's folder coming or going; its log writes are not a change.
+        loopState.watcher = watch(loopStateRoot(), { recursive: true }, (_e, file) => {
+            const f = String(file ?? "");
+            if (f && !f.includes("/") && !f.includes("\\") || f.endsWith("plate.json")) scheduleLoopChanges();
+        });
+        loopState.watcher.on("error", () => { /* the safety tick covers it */ });
+    } catch { /* no state root yet: the safety tick covers it */ }
+    loopState.offBroadcast = onBroadcast((ev) => {
+        if (ev.type === "consumer_changed" || ev.type === "agent_bar") scheduleLoopChanges();
+    });
+    loopState.safety = setInterval(publishLoopChanges, LOOP_SAFETY_MS);
+    loopState.safety.unref?.();
+}
+
+function stopLoopWatch(): void {
+    loopState.watcher?.close();
+    loopState.offBroadcast?.();
+    if (loopState.safety) clearInterval(loopState.safety);
+    if (loopState.debounce) clearTimeout(loopState.debounce);
+    Object.assign(loopState, { watcher: null, offBroadcast: null, safety: null, debounce: null });
+    loopState.sent.clear();
+}
+
+defineSubject({
+    pattern: "loop.*.state",
+    doc: {
+        value: "the loop as loop.list shows it, or null; with *, keyed by loop name",
+        event: "the whole view again whenever it changed; null once the loop is forgotten (rm)",
+    },
+    wildcard: true,
+    machine: true,
+    access: (caller) => caller.kind !== "human" ? new Refusal(403, "the loops of this machine are a human's view")
+        : !isMachineLocal(caller) ? new Refusal(403, "a loop of this machine: local callers only", ERROR_CODES.FORBIDDEN)
+        : null,
+    setup: (sub) => {
+        if (sub.state.watching) return;
+        if (loopState.subs++ === 0) startLoopWatch();
+        sub.state.watching = true;
+    },
+    value: (sub) => {
+        const name = sub.parts[1]!;
+        const views = loopViews();
+        return name === "*" ? Object.fromEntries(views.map((v) => [v.name, v])) : views.find((v) => v.name === name) ?? null;
+    },
+    release: (sub) => {
+        if (sub.state.watching && --loopState.subs === 0) stopLoopWatch();
+    },
+});
+
+/** Tests only: compute and publish the changes now. */
+export function publishLoopChangesForTests(): void {
+    publishLoopChanges();
+}
