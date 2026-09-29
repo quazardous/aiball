@@ -35,6 +35,7 @@ import {
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { selectTransport } from "./transport/index.js";
 import type { BarHost } from "../agent-bar.js";
 import { homedir, uptime as osUptime } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -3116,7 +3117,7 @@ export async function injectWakePhrase(
             // to the proxy which writes the bytes to its PTY. Two frames
             // (phrase, then `\r`) with a 200ms gap.
             const sock = loopSockPath(sd);
-            if (existsSync(sock)) {
+            if (selectTransport().reachable(sock)) {
                 const r = await injectViaLoopSocket(sock, phrase);
                 if (r.submitted) return true;
                 if (r.phraseSent) {
@@ -3226,7 +3227,7 @@ export async function sendShutdownToTimer(sd: string, timeoutMs = 500): Promise<
  *  behavior, AFK reverts to `off`). */
 export async function fetchSnapshotsFromTimer(sd: string, timeoutMs = 500): Promise<string | null> {
     const sock = loopSockPath(sd);
-    if (!existsSync(sock)) return null;
+    if (!selectTransport().reachable(sock)) return null;
     const ipcEvents = await import("./ipc-events.js");
     const ch = ipcEvents.openEventChannel(sock, { reconnectMs: 100 });
     try {
@@ -3503,7 +3504,7 @@ async function injectViaLoopSocket(sockPath: string, phrase: string): Promise<{ 
  */
 export async function injectRawBytes(sd: string, bytes: string): Promise<boolean> {
     const sock = loopSockPath(sd);
-    if (!existsSync(sock)) return false;
+    if (!selectTransport().reachable(sock)) return false;
     try {
         await sendEventOnce(sock, { kind: "inject", data: { text: bytes } }, { timeoutMs: 2000, throwOnError: true });
         return true;

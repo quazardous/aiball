@@ -19,7 +19,7 @@
  * no dispatcher change is needed : the inner `event:"hook"` payload
  * lands in `dispatchProxyEvent` unchanged.
  */
-import { existsSync } from "node:fs";
+import { selectTransport } from "./transport/index.js";
 import { sendEventOnce } from "./ipc-events.js";
 import { loopSockPath } from "./state.js";
 import { appendOffload } from "./offload.js";
@@ -43,7 +43,7 @@ export async function emitHookEventToTimer(
     // Buffer it per-component so the reconnect drain replays it into the
     // central log (ts preserved) and we can SEE what was lost.
     const kind = String(event.kind ?? event.event ?? "hook");
-    if (!existsSync(sockPath)) {
+    if (!selectTransport().reachable(sockPath)) {
         appendOffload(sd, "hook", { kind, msg: "emitHookEventToTimer: loop.sock absent (timer down/respawning)", event });
         return false;
     }
