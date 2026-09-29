@@ -81,6 +81,12 @@ dates are YYYY-MM-DD.
     the loop's own restart and reload work.
   - `crew list` finds the crews, `debug-proxy` finds the proxy, and
     `aiball status` looks in the right folder.
+  - A loop's custom check command and its gates run in Git Bash instead of
+    possibly landing in WSL.
+  - A `.cmd` / `.bat` launcher on the board starts.
+  - `aiball check` suggests Windows commands (not `systemctl` or `sudo`) to
+    start the daemon or bring tailscale up.
+  - `claude-loop bug` reports psmux's version.
 
 ## [0.49.0] — 2026-09-28
 
