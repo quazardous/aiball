@@ -50,6 +50,10 @@ dates are YYYY-MM-DD.
 
 - `POST /api/tickets` with a key scoped to a project deleted since answers
   `400 PROJECT_NOT_FOUND`, as the bus does, instead of a 500.
+- `aiball check` no longer reports the caller as refused when it connects
+  with the machine secret (Windows, a daemon on this machine): the secret is
+  this machine's user, not a token the daemon can name. An empty
+  `AIBALL_TOKEN=` no longer hides the secret either.
 - `claude-loop start` names a loop after the folder it runs in: started from a
   shell carrying another folder's `AIBALL_CWD`, it gave the agent a second loop
   under another name.

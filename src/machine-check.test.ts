@@ -92,6 +92,14 @@ test("caller: token accepted, token rejected, nothing at all", () => {
     assert.match(none.fix ?? "", /aiball auth issue/);
 });
 
+// The machine secret is checked against its file: the daemon never names its bearer, and that is no refusal.
+test("caller: the machine secret is this machine's user, though the daemon names no token", () => {
+    const machine = line(assembleMachineReport(healthy({ transport: "machine" })), "caller");
+    assert.equal(machine.status, "ok");
+    assert.match(machine.detail, /machine secret/);
+    assert.match(machine.detail, /proj-claude/);
+});
+
 test("web login: pending setup shows the install token's expiry; nothing at all needs reinit", () => {
     const pending = line(assembleMachineReport(healthy({
         auth: { ready: false, install_available: true, install_expires_at: "2026-09-15T10:00:00.000Z", me: null },

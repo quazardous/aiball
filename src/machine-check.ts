@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import type { AiballClient } from "./client.js";
 import { BUILD_CMD, resolveProxyLaunch, type ProxyLaunch } from "./claude-loop/proxy-launch.js";
 import { readInstallInfo, updateCommand } from "./install-info.js";
+import { looksLikeMachineSecret } from "./machine-secret.js";
 import type { PrereqStatus } from "./sysdeps.js";
 
 export type MachineStatus = "ok" | "warn" | "error";
@@ -62,8 +63,9 @@ export interface MachineProbes {
     platform?: NodeJS.Platform;
     /** Null when this machine talks TCP by design (Windows default, `AIBALL_SOCK=""`). */
     socket: { path: string; exists: boolean } | null;
-    /** How the CLI reaches the daemon: its socket, a bearer token, or neither. */
-    transport: "socket" | "token" | "none";
+    /** How the CLI reaches the daemon: its socket, a bearer token, this machine's
+     *  secret (a daemon on the loopback, no token given), or neither. */
+    transport: "socket" | "token" | "machine" | "none";
     daemon: { up: boolean; version: string | null; error: string | null };
     /** `/api/version` plus the command for this install; null when unanswered. */
     update: {
@@ -153,6 +155,10 @@ export function assembleMachineReport(p: MachineProbes): MachineLine[] {
     const issue = `aiball auth issue --consumer ${p.agent ?? "<agent-id>"}`;
     if (p.transport === "socket") {
         lines.push({ id: "caller", status: "ok", detail: "local socket — trusted, no token needed" });
+    } else if (p.transport === "machine") {
+        // The daemon checks the secret against its file, not its token table:
+        // `/api/auth/status` never names its bearer, and that is no refusal.
+        lines.push({ id: "caller", status: "ok", detail: `machine secret — this machine's user, as ${p.agent ?? "no agent named"}` });
     } else if (p.transport === "none") {
         lines.push({
             id: "caller",
@@ -425,7 +431,9 @@ export async function probeMachine(input: ProbeMachineInput): Promise<MachinePro
         cliVersion,
         platform: process.platform,
         socket: sockPath ? { path: sockPath, exists: isSocket(sockPath) } : null,
-        transport: client.socketPath ? "socket" : client.token ? "token" : "none",
+        transport: client.socketPath ? "socket"
+            : client.token ? (looksLikeMachineSecret(client.token) ? "machine" : "token")
+            : "none",
         daemon,
         update,
         auth,
