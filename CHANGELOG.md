@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `project.settings` describes the folder settings a client may change (type,
+  choices, default, value, where it comes from), and `project.settings_set`
+  takes any of them as `{ key, value }`: a new one shows with no client code.
 - A loop's bar says the price of its model and whether a newer model of the same
   family exists, from an open list of models read when the daemon starts.
 - `project.settings` gives a folder's whole resolved configuration (project,
@@ -92,6 +95,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A `.aiball.yaml` whose last setting is removed is no longer left as `{}`: it
+  keeps its leading comments, or becomes empty.
 - A client that names an agent can no longer change that agent's standing: only
   the agent's own loop sets its role and claim right, when it starts, and a
   second loop under the same agent from another machine is refused. A crew set

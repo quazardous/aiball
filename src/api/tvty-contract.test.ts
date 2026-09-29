@@ -144,6 +144,8 @@ const SETTINGS: Shape = {
     file: "string?", configured: "boolean",
     consumer: { project: FROM, agent: FROM, role: FROM },
     session: FROM, remote_control: FROM,
+    // #3308 — the settings described, for a page that shows a key it has no code for.
+    settings: [{ key: "string", type: "string", default: "any?", value: "any?", from: "string", label: "string", description: "string" }],
 };
 const settingsDir = mkdtempSync(join(tmpdir(), "aiball-3305-"));
 writeFileSync(join(settingsDir, ".aiball.yaml"), "consumer:\n  project: p-3305\n");

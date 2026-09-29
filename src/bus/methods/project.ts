@@ -30,7 +30,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { ERROR_CODES } from "../../domain.js";
 import { initFolder, InitRefusal } from "../../project-init.js";
-import { readSettings, writeSettings } from "../../project-settings.js";
+import { patchForKey, readSettings, writeSettings } from "../../project-settings.js";
 
 /** #2525 — the standing prompt, and the wake focus beside it. */
 export function standingPromptView(project: string) {
@@ -276,6 +276,12 @@ defineMethod({
         remote_control: remoteControl.nullable().optional(),
         /** #3305 — where the folder's loops run: `host`, `tmux`, or null for the layer below. */
         session: z.enum(["host", "tmux"]).nullable().optional(),
+        /** #3308 — any setting `project.settings` describes, by its key; `value` null for the layer below. */
+        key: z.string().optional(),
+        value: z.unknown().optional(),
     }),
-    run: (caller, p) => inFolder(caller, p.cwd, () => writeSettings(p.cwd, { remote_control: p.remote_control, session: p.session })),
+    run: (caller, p) => inFolder(caller, p.cwd, () => writeSettings(p.cwd, {
+        remote_control: p.remote_control, session: p.session,
+        ...(p.key !== undefined ? patchForKey(p.key, p.value === undefined ? null : p.value) : {}),
+    })),
 });

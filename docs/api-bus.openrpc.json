@@ -3107,6 +3107,13 @@
           }
         },
         {
+          "name": "key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
           "name": "remote_control",
           "required": false,
           "schema": {
@@ -3147,6 +3154,11 @@
               }
             ]
           }
+        },
+        {
+          "name": "value",
+          "required": false,
+          "schema": {}
         }
       ],
       "result": {

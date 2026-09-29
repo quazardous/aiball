@@ -148,3 +148,35 @@ test("set writes where loops run, in place; null hands it back to the layer belo
     assert.deepEqual(set({ cwd: d, session: null }).session, { value: "host", from: "default" });
     assert.equal(readFileSync(join(d, ".aiball.yaml"), "utf8"), YAML, "back to the file as it was");
 });
+
+// #3308 — an emptied file is not left `{}`; the settings are described, and set by key.
+test("a file emptied by set is not written {}: its leading comments stay, else it is empty", () => {
+    const bare = folder("claude_loop:\n  session: tmux\n");
+    set({ cwd: bare, session: null });
+    assert.equal(readFileSync(join(bare, ".aiball.yaml"), "utf8"), "");
+    const noted = folder("# my notes\n# more\nclaude_loop:\n  session: tmux\n");
+    set({ cwd: noted, session: null });
+    assert.equal(readFileSync(join(noted, ".aiball.yaml"), "utf8"), "# my notes\n# more\n");
+});
+
+test("the settings are described, each with its type, choices, default, value and where it comes from", () => {
+    const d = folder("claude_loop:\n  session: tmux\n");
+    const r = settings.run(human, { cwd: d }) as Settings & { settings: { key: string; type: string; options?: string[]; default: unknown; value: unknown; from: string; label: string }[] };
+    assert.deepEqual(r.settings.map((s) => s.key), ["claude_loop.session", "claude.remote_control"]);
+    const session = r.settings[0]!;
+    assert.deepEqual([session.type, session.options, session.value, session.from], ["enum", ["host", "tmux"], "tmux", "file"]);
+    assert.equal(typeof session.label, "string");
+    assert.deepEqual([r.settings[1]!.type, r.settings[1]!.value, r.settings[1]!.from], ["boolean_or_name", false, "default"]);
+});
+
+test("set by key writes what the named field writes; an unknown key or a value out of its type is refused", () => {
+    const a = folder(YAML);
+    const b = folder(YAML);
+    set({ cwd: a, session: "tmux" });
+    set({ cwd: b, key: "claude_loop.session", value: "tmux" });
+    assert.equal(readFileSync(join(a, ".aiball.yaml"), "utf8"), readFileSync(join(b, ".aiball.yaml"), "utf8"));
+    assert.deepEqual(set({ cwd: b, key: "claude.remote_control", value: "phone" }).remote_control, { value: "phone", from: "file" });
+    assert.deepEqual(set({ cwd: b, key: "claude_loop.session", value: null }).session.from, "default");
+    assert.throws(() => set({ cwd: b, key: "claude.model", value: "x" }), (e: { code: string }) => e.code === "BAD_REQUEST");
+    assert.throws(() => set({ cwd: b, key: "claude_loop.session", value: "screen" }), (e: { code: string }) => e.code === "BAD_REQUEST");
+});
