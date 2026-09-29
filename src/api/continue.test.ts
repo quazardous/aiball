@@ -49,7 +49,7 @@ const { lastActorExclusions } = await import("../db/projects.js");
 /** Is the ticket out of the worker's pool, waiting on someone else? */
 const waiting = (ticketId: number) => lastActorExclusions("worker", [ticketId]).has(ticketId);
 function post(payload: Record<string, unknown>) {
-    return asToken<{ error?: string }>(AGENT, "message.post", payload);
+    return asToken<{ error?: string; code?: string }>(AGENT, "message.post", payload);
 }
 const step = (ticketId: number, extra: Record<string, unknown> = {}) =>
     post({ project: "p-2308", kind: "comment_added", ticket_id: ticketId, body: "step 1 done", summary_until: "state", step: true, step_after_minutes: 0, ...extra });

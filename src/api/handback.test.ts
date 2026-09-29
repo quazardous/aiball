@@ -49,7 +49,7 @@ after(() => {
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
-type Reply = { status: number; json: { id?: number; error?: string; warnings?: string[] } };
+type Reply = { status: number; json: { id?: number; error?: string; code?: string; warnings?: string[] } };
 
 function ticket(project = "p-2331"): number {
     const t = submitMessage({ project, kind: "ticket_created", title: "t", body: "x", by_agent: "boss" });
