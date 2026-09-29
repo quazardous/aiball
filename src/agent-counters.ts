@@ -21,6 +21,7 @@ import { listProjectSubscribers } from "./db/subscriptions.js";
 import { listProjectsDetailed } from "./db/projects.js";
 import { listTicketsFor } from "./api/tickets.js";
 import { broadcast } from "./ws.js";
+import { isPresent } from "./live-presence.js";
 
 export interface AgentCounters {
     open: number;
@@ -107,8 +108,25 @@ function drain(): void {
     setTimeout(drain, QUEUE_PAUSE_MS).unref?.();
 }
 
-/** Something moved `agent`'s counters: compute them again, soon. */
+/**
+ * #3272 — counters are kept for the agents someone reads them for: a loop
+ * listening to its own (`onCounters`), or an agent present on the board. Of 54
+ * agents on a real board, 5 were; the others (dormant, test, no project — the
+ * dearest, a whole-board backlog each) were recomputed on every post anyway,
+ * and that held the daemon for seconds. An absent agent's cached value is
+ * dropped instead: it would only go stale, and `consumer.counters` computes
+ * it when asked.
+ */
+function kept(agent: string): boolean {
+    return (listeners.get(agent)?.size ?? 0) > 0 || isPresent(agent);
+}
+
+/** Something moved `agent`'s counters: compute them again, soon — if anyone reads them. */
 export function markCountersDirty(agent: string): void {
+    if (!kept(agent)) {
+        cache.delete(agent);
+        return;
+    }
     if (timers.has(agent) || queue.includes(agent)) return;
     const since = Date.now() - (lastRun.get(agent) ?? 0);
     const delay = Math.max(0, gapMs() - since);

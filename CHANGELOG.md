@@ -74,6 +74,9 @@ dates are YYYY-MM-DD.
   claude-loop (a plain `claude` in its folder): its role and no-claim setting
   are read from `.aiball.yaml` like its name. Before, such a start subscribed
   it as a project owner, which received the whole backlog, and let it claim.
+- The daemon no longer freezes for seconds after a post: an agent's counters
+  are recomputed only when someone reads them (its loop, or the agent is on
+  the board), not for every agent the post concerns.
 - Stopping a loop on the session host stops its host too: the loop no longer
   reads as alive, and starting it again is no longer refused as busy. A host
   left without its command by an older stop is replaced by the next start.
