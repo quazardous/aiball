@@ -11,8 +11,9 @@
  * board, a rename (`--migrate-from`) are the callers' gestures.
  */
 import { accessSync, constants, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parseDocument } from "yaml";
+import { loadConfig } from "./autopoll/config.js";
 
 /** A project or agent name: what the board accepts in a path or a file name. */
 export const NAME_RE = /^[a-zA-Z0-9_.-]+$/;
@@ -52,6 +53,21 @@ export class InitRefusal extends Error {
     }
 }
 
+/**
+ * #3312 — a crew agent set up without a name of its own would take the
+ * folder's default, `<project>-claude`: the lead's name. Its loop would then
+ * speak as the lead, from another machine. So a crew with no agent named,
+ * here or in the folder's config, is named `<project>-crew`.
+ */
+function crewNamed(input: ProjectInitInput): ProjectInitInput {
+    if (input.role !== "crew" || input.agent) return input;
+    let cfg: ReturnType<typeof loadConfig> | null = null;
+    try { cfg = loadConfig(input.cwd); } catch { /* unreadable: the defaults */ }
+    if (cfg && cfg.consumer.agent_source !== "default") return input;
+    const project = input.project ?? cfg?.consumer.project ?? basename(input.cwd);
+    return { ...input, agent: `${project}-crew` };
+}
+
 /** Set the folder up; the steps, in order. Throws `InitRefusal`. */
 export function initFolder(input: ProjectInitInput): InitStep[] {
     const { cwd } = input;
@@ -64,6 +80,7 @@ export function initFolder(input: ProjectInitInput): InitStep[] {
     let isDir = false;
     try { isDir = statSync(cwd).isDirectory(); } catch { /* absent */ }
     if (!isDir) throw new InitRefusal(404, "NOT_FOUND", `no such folder: ${cwd}`);
+    input = crewNamed(input);
     try {
         accessSync(cwd, constants.W_OK);
     } catch {

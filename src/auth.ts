@@ -20,7 +20,6 @@ import {
     touchLastSeen,
     type Token,
 } from "./db.js";
-import { getConsumer, updateConsumer } from "./db/consumers.js";
 import { keyProjects, keyScopes } from "./db/signal-keys.js";
 import { refuse } from "./api/_helpers.js";
 import { ERROR_CODES, type ErrorCode } from "./domain.js";
@@ -205,6 +204,14 @@ export interface CallerContext {
      */
     client_features?: string[];
     platform?: string | null;
+    /** #3312 — the multi-agent role the client declares (`x-aiball-role`), for this request only. */
+    role_hint?: "lead" | "crew";
+    /**
+     * #3312 — which machine the connection comes from: `local` (the socket),
+     * `node:<label>` (relayed by a proxy node), `tcp:<address>` (a token over
+     * TCP). What tells two loops under one agent apart.
+     */
+    machine?: string;
 }
 
 
@@ -229,6 +236,7 @@ export function authenticate(input: AuthInput): AuthOutcome {
         // the human only ever uses a named identity. Only an EXPLICIT identity
         // (header present) touches last_seen.
         const ctx: CallerContext = { consumer_id: explicit ?? "human", token_kind: "agent", transport: "uds", token: null };
+        ctx.machine = "local";
         if (explicit) touchLastSeen(ctx.consumer_id!, "uds"); // #B.177 / #386 / #422 (local same-uid)
         readHints(input, ctx);
         return { ok: true, ctx };
@@ -294,6 +302,8 @@ export function authenticate(input: AuthInput): AuthOutcome {
             const labelRaw = advertised.trim().slice(0, 200);
             if (labelRaw && labelRaw !== row.label) updateTokenLabel(token, labelRaw);
         }
+        // #3312 — the node the call comes through: its label, else its token's.
+        ctx.machine = `node:${(typeof advertised === "string" && advertised.trim()) || row.label || "?"}`;
         readHints(input, ctx);
         return { ok: true, ctx };
     }
@@ -310,6 +320,7 @@ export function authenticate(input: AuthInput): AuthOutcome {
         // Non-humans: silently ignore the override.
     }
     touchLastSeen(ctx.consumer_id!, "tcp", input.ip); // #B.177 / #422 (direct bearer over TCP)
+    ctx.machine = `tcp:${input.ip ?? "?"}`;
     readHints(input, ctx);
     return { ok: true, ctx };
 }
@@ -384,44 +395,25 @@ function readClient(input: AuthInput, ctx: CallerContext): void {
  * known. Re-applied also on the UDS local-trust path (humans driving a loop
  * over UDS with AIBALL_NO_CLAIM set in their env).
  */
-/** #1183 — the `x-aiball-no-claim: 1` header (claude-loop/MCP exports it from the
- *  project `.aiball.yaml consumer.no_claim`) is the CANONICAL no-claim declaration.
- *  Persist it to `consumers.can_claim=false` so the notification fan-out gate
- *  (#752-B, `notifications.ts`) honours it — the header alone is per-request +
- *  lens-only, so a `no_claim` owner would otherwise still get the full default-scope
- *  firehose. The project's own config drives it, with NO global `proxy.project_yaml`
- *  pointer (supersedes the #775 config-push : the header already carries it from the
- *  project dir). Trust the agent's own declaration (it gates the agent OUT of the
- *  claim pool, never IN). Diff-guarded: write only on the true→false flip, so there's
- *  no DB write per request. Also stashed on `ar.no_claim_hint` for the claimable lens. */
+/** #1183 — the `x-aiball-no-claim: 1` header (claude-loop / the MCP send it from
+ *  the project's `.aiball.yaml consumer.no_claim`, or a crew role): stashed on
+ *  `ar.no_claim_hint` for the claimable lens. #3312 — it no longer writes
+ *  `consumers.can_claim`: the agent's own loop does, when it opens its events. */
 function readNoClaimHint(input: AuthInput, ar: CallerContext): void {
+    // #3312 — for this request only: a request no longer writes the agent's row.
+    // Any client naming an agent (from any machine) could otherwise take its
+    // claim right away for good. The row follows the agent's own loop, when it
+    // opens its events (`agent.<id>.events`), and the moderator's hand.
     const v = input.header("x-aiball-no-claim");
-    if (typeof v === "string" && (v === "1" || v.toLowerCase() === "true")) {
-        ar.no_claim_hint = true;
-        if (ar.consumer_id) {
-            const c = getConsumer(ar.consumer_id);
-            if (c && c.can_claim) {
-                updateConsumer(ar.consumer_id, { can_claim: false });
-            }
-        }
-    }
+    if (typeof v === "string" && (v === "1" || v.toLowerCase() === "true")) ar.no_claim_hint = true;
 }
 
-/** #1435 slice 5 — persist the agent's multi-agent role from the `x-aiball-role`
- *  header so it shows in the UI. Unlike no_claim (one-way, capability), role is a
- *  descriptor: update-on-change in BOTH directions (an agent relaunched with a
- *  different role updates it) — but only when the header is present (absence never
- *  clears it). Only `lead`/`crew` are accepted; anything else is ignored. Role is
- *  self-declared (how the loop launched), NOT a gated capability, so it's set here
- *  and deliberately kept out of the #1477 PATCH capability guard. */
+/** #1435 slice 5 — the multi-agent role a client declares (`x-aiball-role`): kept
+ *  for the request. #3312 — the agent's row takes it from the agent's own loop only. */
 function readRoleHint(input: AuthInput, ar: CallerContext): void {
+    // #3312 — like the no-claim hint: for this request, written by the agent's own loop only.
     const v = input.header("x-aiball-role");
-    if (v !== "lead" && v !== "crew") return;
-    if (!ar.consumer_id) return;
-    const c = getConsumer(ar.consumer_id);
-    if (c && c.role !== v) {
-        updateConsumer(ar.consumer_id, { role: v });
-    }
+    if (v === "lead" || v === "crew") ar.role_hint = v;
 }
 
 /** #422: the TCP peer address (B's IP for a proxy node; the client's for direct).

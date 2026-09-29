@@ -3,17 +3,18 @@
  * event the daemon already broadcasts (`ws.ts`), and the pings. A subscriber
  * gets data, built by the same code as the matching read.
  */
+import { ERROR_CODES } from "../../domain.js";
 import { z } from "zod";
 import { consumerIdOf, defineMethod, getMethod, Refusal, type Caller } from "../methods.js";
 import { consumerEntries, consumerEntryFor } from "./consumer.js";
 import { defineSubject, publish, sendTo, SKIP, subscribe, subscriptionsOf, unsubscribe, type SubjectSpec, type Subscription } from "../subscriptions.js";
 import { onBroadcast, type WsEvent } from "../../ws.js";
-import { getMessage, ticketUnreadFlags, unreadPingCount, type Message } from "../../db.js";
+import { getConsumer, getMessage, ticketUnreadFlags, unreadPingCount, updateConsumer, type Message } from "../../db.js";
 import { getAgentBar, listAgentBars } from "../../agent-bar-store.js";
 import { onControl, onPing, onSignal } from "../../event-bus.js";
 import { listPendingSignals } from "../../db/signals.js";
 import { drainPrompts } from "../../loop-prompts.js";
-import { presenceConnect, presenceDisconnect } from "../../live-presence.js";
+import { presenceConnect, presenceDisconnect, presenceElsewhere } from "../../live-presence.js";
 import { onCounters, refreshCounters } from "../../agent-counters.js";
 import { wakeFocusHidesTicket } from "../../db/backlog-rules.js";
 import { parseMeta } from "../../questions.js";
@@ -307,6 +308,25 @@ defineSubject({
 // ---- agent.<id>.events --------------------------------------------------------
 
 /**
+ * #3312 — what the agent's own loop says of its standing, written on its row
+ * when it opens its events: no longer by any request that names the agent.
+ * `no-claim` takes the claim right away (the moderator gives it back); the
+ * role follows the loop both ways. Every change is logged with its machine.
+ */
+function applyLoopStanding(id: string, caller: Caller): void {
+    const c = getConsumer(id);
+    if (!c) return;
+    if (caller.no_claim_hint && c.can_claim) {
+        updateConsumer(id, { can_claim: false });
+        console.log(`[standing] ${id}: can_claim true -> false, from its loop on ${caller.machine ?? "?"}`);
+    }
+    if (caller.role_hint && c.role !== caller.role_hint) {
+        updateConsumer(id, { role: caller.role_hint });
+        console.log(`[standing] ${id}: role ${c.role ?? "none"} -> ${caller.role_hint}, from its loop on ${caller.machine ?? "?"}`);
+    }
+}
+
+/**
  * #3068 — what a loop's event stream carried (`/api/events`), for the loop
  * itself: its pings (#2525: one outside the wake focus is not pushed, the loop
  * wakes on this push), the loop controls (#442 kill, #451 prompt, #3074
@@ -324,9 +344,21 @@ defineSubject({
         value: "{ consumer_id, unread, counters }",
         event: "`{ event, data }`: `ping` (the ping, outside the wake focus not sent), `control` (`kill`, `prompt`, `restart_claude`), `signal`, or `counters` (the agent's counters, when a number changed)",
     },
-    access: (caller, id) => (id === caller.consumer_id ? null : new Refusal(403, "a loop's own events only")),
+    access: (caller, id) => {
+        if (id !== caller.consumer_id) return new Refusal(403, "a loop's own events only");
+        // #3312 — one agent, one live loop: a second one from another machine
+        // would take the agent's name, and the first one's standing with it.
+        const elsewhere = presenceElsewhere(id, caller.machine);
+        if (elsewhere) {
+            console.log(`[identity] ${id}: a loop from ${caller.machine} refused, one runs already on ${elsewhere}`);
+            return new Refusal(409, `${id} runs already on ${elsewhere}: a second loop under the same agent is refused (start it with its own --agent)`, ERROR_CODES.CONFLICT);
+        }
+        return null;
+    },
     setup: (sub) => {
         const id = idOf(sub);
+        // #3312 — the agent's own loop states its standing: the only writer of it besides the moderator.
+        applyLoopStanding(id, sub.caller);
         const offs = [
             onPing(id, (payload) => {
                 if (payload.ticket_id !== undefined && wakeFocusHidesTicket(id, payload.ticket_id)) return;
@@ -337,7 +369,7 @@ defineSubject({
             onCounters(id, (counters) => sendTo(sub, { event: "counters", data: counters })),
         ];
         sub.state.off = () => { for (const off of offs) off(); };
-        presenceConnect(id, sub.opts.source === "ui" ? "ui" : "terminal");
+        presenceConnect(id, sub.opts.source === "ui" ? "ui" : "terminal", sub.caller.machine);
         // After the answer: an event reaches a subscription only once it is registered.
         setImmediate(() => {
             for (const pending of listPendingSignals(id)) sendTo(sub, { event: "signal", data: pending });

@@ -92,6 +92,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A client that names an agent can no longer change that agent's standing: only
+  the agent's own loop sets its role and claim right, when it starts, and a
+  second loop under the same agent from another machine is refused. A crew set
+  up without a name of its own is named `<project>-crew`, not the lead's name.
 - A loop's backlog count (`b:` in its bar) counts the unassigned tickets in its
   court again: it counted only the tickets assigned to it.
 - A crew or no-claim agent stays one when Claude is started without

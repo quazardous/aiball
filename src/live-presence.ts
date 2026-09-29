@@ -27,6 +27,8 @@ interface Entry {
     /** Live SSE connections for this consumer (reconnect overlap / multi-client). */
     count: number;
     source: LaunchSource;
+    /** #3312 — the machine its connections come from (`local`, `node:<label>`, `tcp:<address>`). */
+    machine?: string;
     /** Set while count===0 and we're waiting out the grace before declaring stop. */
     graceTimer?: ReturnType<typeof setTimeout>;
 }
@@ -49,10 +51,12 @@ function emit(consumer: string, running: boolean, source?: LaunchSource): void {
 
 /** Register an SSE connection. Returns whether the consumer transitioned to
  *  live (so the caller broadcasts `running:true` only on a real edge). */
-export function presenceConnect(consumer: string, source: LaunchSource = "terminal"): { becameLive: boolean } {
+export function presenceConnect(consumer: string, source: LaunchSource = "terminal", machine?: string): { becameLive: boolean } {
     everSeen.add(consumer);
     const e = live.get(consumer);
     if (e) {
+        // #3312 — a connection that takes over during the grace (count 0) moves the agent to its machine.
+        if (machine && e.count === 0) e.machine = machine;
         if (e.graceTimer) {
             clearTimeout(e.graceTimer);
             e.graceTimer = undefined;
@@ -61,7 +65,7 @@ export function presenceConnect(consumer: string, source: LaunchSource = "termin
         if (source === "ui") e.source = "ui";
         return { becameLive: false };
     }
-    live.set(consumer, { count: 1, source });
+    live.set(consumer, { count: 1, source, ...(machine ? { machine } : {}) });
     emit(consumer, true, source);
     for (const fn of startListeners) fn(consumer);
     return { becameLive: true };
@@ -96,6 +100,18 @@ export function onPresenceStop(fn: (consumer: string) => void): void {
 const startListeners: Array<(consumer: string) => void> = [];
 export function onPresenceStart(fn: (consumer: string) => void): void {
     startListeners.push(fn);
+}
+
+/**
+ * #3312 — the machine another live connection of `consumer` runs on, when it
+ * is not `machine`: a second loop under the same agent from another machine.
+ * Null when the agent has no live connection (one in its grace does not
+ * count: it is going), when none says its machine, or when it is this one.
+ */
+export function presenceElsewhere(consumer: string, machine: string | undefined): string | null {
+    const e = live.get(consumer);
+    if (!e || e.count === 0 || !e.machine || !machine || e.machine === machine) return null;
+    return e.machine;
 }
 
 /** True while a consumer holds (or is within the grace of) a live SSE. */

@@ -323,8 +323,13 @@ defineMethod({
         if (p.notify_project_broadcasts === null || typeof p.notify_project_broadcasts === "boolean") {
             patch.notify_project_broadcasts = p.notify_project_broadcasts;
         }
+        const before = patch.can_claim !== undefined ? getConsumer(p.consumer_id)?.can_claim : undefined;
         const updated = updateConsumer(p.consumer_id, patch);
         if (!updated) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
+        // #3312 — every change of a claim right says who made it.
+        if (before !== undefined && before !== updated.can_claim) {
+            console.log(`[standing] ${p.consumer_id}: can_claim ${before} -> ${updated.can_claim}, by ${caller.consumer_id ?? "?"} (${caller.machine ?? caller.transport})`);
+        }
         broadcast({ type: "consumer_changed", data: updated });
         return updated;
     },
