@@ -3245,11 +3245,17 @@ export interface LoopServer {
  *  refused → silent no-op). Used by `cmdReload` / `cmdRm` as a
  *  cooperative kill BEFORE falling back to SIGKILL on the (possibly
  *  wrong) wrapper pid. */
-export async function sendShutdownToTimer(sd: string, timeoutMs = 500): Promise<void> {
+export async function sendShutdownToTimer(sd: string, timeoutMs = 500, opts: { endSession?: boolean } = {}): Promise<boolean> {
     const sockPath = loopSockPath(sd);
+    // #3299 — `end_session`: a clean stop that also ends Claude's session.
+    // Without it the kernel only exits (reload, rm), and the session stays.
+    const ev = opts.endSession ? { kind: LOOP_SOCK_KIND.SHUTDOWN, data: { end_session: true } } : { kind: LOOP_SOCK_KIND.SHUTDOWN };
     try {
-        await import("./ipc-events.js").then(m => m.sendEventOnce(sockPath, { kind: LOOP_SOCK_KIND.SHUTDOWN }, { timeoutMs, throwOnError: false }));
-    } catch { /* best-effort */ }
+        await import("./ipc-events.js").then(m => m.sendEventOnce(sockPath, ev, { timeoutMs, throwOnError: true }));
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /** #943 — UDS round-trip to grab the live XState snapshots from the
@@ -3292,8 +3298,9 @@ export function createLoopServer(
         onProxyEvent: (event: Record<string, unknown>) => void;
         /** #866 Slice 2 — invoked when a `LOOP_SOCK_KIND.SHUTDOWN` frame
          *  lands. Defaults to `process.exit(0)` (after `server.close()`).
-         *  Tests inject a spy to avoid killing the test process. */
-        onShutdownRequest?: () => void;
+         *  Tests inject a spy to avoid killing the test process.
+         *  #3299 — `endSession`: the sender asked for Claude's session to end too. */
+        onShutdownRequest?: (req: { endSession: boolean }) => void;
         /** #943 — called when a `LOOP_SOCK_KIND.GET_SNAPSHOTS` frame
          *  lands ; should return the serialized `RespawnSnapshots` JSON
          *  string (same shape `selfReloadIfStale` builds via
@@ -3427,9 +3434,10 @@ export function createLoopServer(
             // cases where this message never lands (parent kill -9,
             // network split, etc.).
             try { server.close(); } catch { /* ignore */ }
+            const req = { endSession: (ev.data as { end_session?: unknown } | null | undefined)?.end_session === true };
             const onShutdown = handlers.onShutdownRequest
                 ?? (() => process.exit(0));
-            process.nextTick(onShutdown);
+            process.nextTick(() => onShutdown(req));
             return;
         }
         // Unknown kinds dropped silently — forward-compat.

@@ -2477,7 +2477,8 @@ async function main(): Promise<void> {
         }));
     program.command("stop [name]")
         .description("Clean-STOP a loop: kill claude/tmux + exit the timer, but KEEP the state dir (loop shows dead, stays restart/prune-able — `rm` is the halt+delete). Also the SIGTERM action: `kill -TERM <timer.pid>` (#442 — convention HUP=restart, USR2=reload, TERM=stop). Remotely via the daemon: the Consumers-page stop button. Name optional — defaults to the current-cwd loop.")
-        .action((name: string | undefined) => cmdStop(name ?? resolveCurrentLoopName()));
+        .option("--keep-session", "#3299: stop the loop's kernel only; Claude keeps running in its session (attach to it, or `restart` the loop later)")
+        .action((name: string | undefined, opts: { keepSession?: boolean }) => cmdStop(name ?? resolveCurrentLoopName(), { keepSession: opts.keepSession === true }));
     program.command("check [name]")
         .description("Diagnose what the check-cmd would do right now (no claude spawn)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")

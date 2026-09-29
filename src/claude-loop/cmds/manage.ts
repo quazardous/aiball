@@ -18,6 +18,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { pidAlive } from "../start-lock.js";
 import {
     MUX_CMD,
     STATE_ROOT,
@@ -221,8 +222,12 @@ export async function cmdRm(name: string, force: boolean): Promise<void> {
  * state dir is KEPT). The signal mirror of the timer's TERM handler, completing
  * the convention alongside reload (USR2) / restart (HUP). Unlike `rm` (halt +
  * delete), `stop` leaves the loop listed as dead so it stays restart/prune-able.
+ *
+ * #3299 — the kernel is asked first, over its socket, and given time to end the
+ * session: on Windows a signal only terminates it, and Claude kept running.
+ * `keepSession` stops the kernel alone and leaves Claude in its session.
  */
-export function cmdStop(name: string): void {
+export async function cmdStop(name: string, opts: { keepSession?: boolean } = {}): Promise<void> {
     const sd = stateDirFor(name);
     if (!existsSync(loopPidPath(sd))) die(`no loop '${name}' at ${sd}`);
     let pid: number | null = null;
@@ -231,15 +236,29 @@ export function cmdStop(name: string): void {
         if (Number.isFinite(raw) && raw > 0) pid = raw;
     } catch { /* unreadable */ }
     if (pid === null) die(`no timer pid recorded for '${name}'`);
-    // #866 Slice 2 — cooperative shutdown via loop.sock avant le SIGTERM
-    // pid-based (qui peut viser le wrapper tsx au lieu du vrai timer #413).
-    void sendShutdownToTimer(sd);
-    try {
-        process.kill(pid, "SIGTERM");
-    } catch {
-        die(`timer for '${name}' not running (stale pid ${pid}) — use 'rm' to clean up`);
+    if (!pidAlive(pid)) die(`timer for '${name}' not running (stale pid ${pid}) — use 'rm' to clean up`);
+    const keep = opts.keepSession === true;
+    const asked = await sendShutdownToTimer(sd, 500, { endSession: !keep });
+    if (!asked || !(await exitedWithin(pid, 3_000))) {
+        // The kernel did not answer: a signal. On Unix SIGTERM runs its clean
+        // stop (session ended) and SIGKILL skips it (session kept); on Windows
+        // either one only ends the process, so the session is ended from here.
+        try { process.kill(pid, keep ? "SIGKILL" : "SIGTERM"); } catch { /* ended meanwhile */ }
+        if (!keep) spawnSync(MUX_CMD, ["kill-session", "-t", tmuxName(name)], { stdio: "ignore" });
     }
-    process.stdout.write(`stop sent to loop '${name}' (clean shutdown; state kept — 'rm' to delete)\n`);
+    process.stdout.write(keep
+        ? `loop '${name}' stopped; Claude keeps running in its session (state kept — 'rm' to delete)\n`
+        : `loop '${name}' stopped, its session ended (state kept — 'rm' to delete)\n`);
+}
+
+/** Has `pid` ended within `ms`? Polled: a process that is not our child gives no exit event. */
+async function exitedWithin(pid: number, ms: number): Promise<boolean> {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+        if (!pidAlive(pid)) return true;
+        await new Promise((r) => setTimeout(r, 100));
+    }
+    return !pidAlive(pid);
 }
 
 export async function cmdWake(name: string): Promise<void> {

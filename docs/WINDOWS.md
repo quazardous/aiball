@@ -130,8 +130,6 @@ Windows they are protected only by the user profile's permissions.
 - **Session host mode** (`session: host`) relies on Unix sockets, so loops run
   in tmux mode (psmux): that is the default on Windows for now. A config that
   sets `session: host` explicitly fails to start a loop (`session.host` refused).
-- **`claude-loop stop`** ends the loop's kernel but can leave the psmux session
-  and Claude running; `claude-loop rm` then cleans up.
 - **`claude-loop tail -f` / `log -f`** need a `tail` command, absent from
   PowerShell and cmd. Run them from Git Bash.
 - **`relocate`** does not yet recognise Windows paths below the old folder.
