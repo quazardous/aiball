@@ -11,6 +11,7 @@ import { getConsumer } from "../db/consumers.js";
 import { isPresent } from "../live-presence.js";
 import { resolveLoopName } from "../pane.js";
 import { tmuxName } from "../claude-loop/state.js";
+import { tmuxClientsOf } from "./tmux-clients.js";
 
 const byKey = new Map<string, HostLink>();
 
@@ -23,7 +24,9 @@ export interface SessionView {
     pid: number;
     cwd: string;
     running: boolean;
+    /** Clients attached, and (#3340) how many of them have the controls; null before the host says. */
     clients: number;
+    interactive: number | null;
     attach: { socket: string };
 }
 
@@ -40,6 +43,14 @@ export interface TmuxSessionView {
     running: true;
     /** The tmux session the loop runs in. */
     tmux: string;
+    /**
+     * #3340 — clients attached to the tmux session, and how many have the
+     * controls, as the loop last said (null before it did). A client attached
+     * in tmux counts itself: another holds the loop when `clients` > 1 once
+     * attached, or > 0 before.
+     */
+    clients: number | null;
+    interactive: number | null;
 }
 
 export function tmuxSessionView(agent: string): TmuxSessionView | null {
@@ -47,7 +58,10 @@ export function tmuxSessionView(agent: string): TmuxSessionView | null {
     const c = getConsumer(agent);
     if (!c?.cwd || c.last_seen_via === "node") return null;
     const loop = resolveLoopName(c.cwd, agent);
-    return loop ? { agent, name: null, host: "tmux", cwd: c.cwd, running: true, tmux: tmuxName(loop) } : null;
+    const said = tmuxClientsOf(agent);
+    return loop
+        ? { agent, name: null, host: "tmux", cwd: c.cwd, running: true, tmux: tmuxName(loop), clients: said?.clients ?? null, interactive: said?.interactive ?? null }
+        : null;
 }
 
 export function viewOf(link: HostLink): SessionView {
@@ -59,6 +73,7 @@ export function viewOf(link: HostLink): SessionView {
         cwd: link.info.cwd,
         running: link.running,
         clients: link.clients,
+        interactive: link.interactive,
         attach: { socket: link.attachSocket() },
     };
 }

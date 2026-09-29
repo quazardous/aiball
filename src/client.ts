@@ -995,6 +995,11 @@ export class AiballClient {
      * Best-effort: failures are not surfaced to the caller, the timer
      * heartbeats again on the next tick.
      */
+    /** #3340 — the clients attached to this agent's tmux loop: how many, how many with the controls. */
+    pushClients(clients: number, interactive: number) {
+        return this.call<{ consumer_id: string; clients: number; interactive: number }>("consumer.push_clients", { consumer_id: this.agentId, clients, interactive });
+    }
+
     pushState(
         state: "busy" | "idle" | "boot",
         human?: boolean,

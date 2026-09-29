@@ -18,6 +18,8 @@ import { addTicketTokenUsage } from "../../db/token-usage.js";
 import { ticketStateAfter } from "../../queries/tickets.js";
 import { withTags } from "../../queries/decorate.js";
 import { broadcast } from "../../ws.js";
+import { setTmuxClients } from "../../sessions/tmux-clients.js";
+import { tmuxSessionView } from "../../sessions/registry.js";
 import { ERROR_CODES, type MessageKind, type MessageStatus } from "../../domain.js";
 
 /** #397 — one consumer's record, its micro-prompt included: the loop reads its own for the wake. */
@@ -29,6 +31,27 @@ defineMethod({
         const c = getConsumer(p.consumer_id);
         if (!c) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
         return c;
+    },
+});
+
+/**
+ * #3340 — a tmux loop says who is attached to its session: how many clients,
+ * how many with the controls. Kept while the loop is present; a change is
+ * broadcast with the agent's session view (`consumer_changed { session }`),
+ * as a host's clients are.
+ */
+defineMethod({
+    name: "consumer.push_clients",
+    who: ["agent"],
+    params: z.object({ consumer_id: z.string(), clients: z.number().int().min(0), interactive: z.number().int().min(0) }),
+    run: (caller, p) => {
+        const me = consumerIdOf(caller);
+        if (p.consumer_id !== me) throw new Refusal(403, "can only push clients for your own consumer_id");
+        if (p.interactive > p.clients) throw new Refusal(400, "interactive cannot exceed clients");
+        if (setTmuxClients(me, { clients: p.clients, interactive: p.interactive })) {
+            broadcast({ type: "consumer_changed", data: { consumer_id: me, session: tmuxSessionView(me) } });
+        }
+        return { consumer_id: me, clients: p.clients, interactive: p.interactive };
     },
 });
 

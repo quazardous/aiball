@@ -945,6 +945,45 @@
       ]
     },
     {
+      "name": "consumer.push_clients",
+      "description": "A tmux loop says who is attached to its session: how many clients, how many with the controls. Kept while the loop is present; a change is broadcast with the agent's session view (`consumer_changed { session }`), as a host's clients are.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "clients",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "interactive",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "agent"
+      ]
+    },
+    {
       "name": "consumer.push_state",
       "description": "A loop's state (`busy`, `idle`, `boot`), with the human's presence and its word, the loop's root and project. Own state only, and agents only; the board hears of it only when something changed .",
       "paramStructure": "by-name",

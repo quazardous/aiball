@@ -85,6 +85,17 @@ export function loopStateRoot(): string {
     return process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop");
 }
 
+/**
+ * #3340 — the clients attached to the loop's tmux session: how many, and how
+ * many have the controls (not `client_readonly`). Null when tmux cannot say.
+ */
+export function tmuxClients(name: string): { clients: number; interactive: number } | null {
+    const r = spawnSync(MUX_CMD, ["list-clients", "-t", tmuxName(name), "-F", "#{client_readonly}"], { encoding: "utf8" });
+    if (r.error || r.status !== 0) return null;
+    const flags = r.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+    return { clients: flags.length, interactive: flags.filter((f) => f === "0").length };
+}
+
 /** #3246 — whether the loop's tmux session exists: the one probe, for the CLI and the daemon. */
 export function tmuxAlive(name: string): boolean {
     return spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" }).status === 0;

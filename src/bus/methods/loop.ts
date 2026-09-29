@@ -17,6 +17,7 @@ import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
 import { loopStateRoot, tmuxAlive, tmuxName } from "../../claude-loop/state.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
+import { tmuxClientsOf } from "../../sessions/tmux-clients.js";
 import { isPresent } from "../../live-presence.js";
 import { getConsumer } from "../../db/consumers.js";
 import { getAgentBar } from "../../agent-bar-store.js";
@@ -55,6 +56,13 @@ export interface LoopView {
     last_seen_at: string | null;
     /** #3338 — a stopped loop whose agent has a loop that runs, or a later one: the others show that one. */
     superseded: boolean;
+    /**
+     * #3340 — clients attached to a loop that runs, and how many have the
+     * controls: the host's word, or in tmux the loop's; null when stopped or
+     * not said yet. A client attached counts itself.
+     */
+    clients: number | null;
+    interactive: number | null;
 }
 
 function lastSeenAt(name: string): string | null {
@@ -92,6 +100,8 @@ function loopView(e: LoopEntry): Omit<LoopView, "superseded"> & { at: number } {
         model: running && agent ? getAgentBar(agent)?.bar.model ?? null : null,
         ...(mode === "tmux" ? { tmux: tmuxName(e.name) } : {}),
         ...(link && running ? { attach: viewOf(link).attach } : {}),
+        clients: !running ? null : link ? link.clients : agent ? tmuxClientsOf(agent)?.clients ?? null : null,
+        interactive: !running ? null : link ? link.interactive : agent ? tmuxClientsOf(agent)?.interactive ?? null : null,
         started_at: e.plate.created_at ?? null,
         last_seen_at: lastSeenAt(e.name),
         at: e.at,

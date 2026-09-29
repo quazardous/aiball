@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A loop in tmux says who is attached to it, as the session host does: an
+  agent's session and `loop.list` carry `clients` and `interactive` (those with
+  the controls), and a change is broadcast. A client can open a loop another
+  one holds as a copy.
 - `loop.list` dates each loop (`started_at`, `last_seen_at`) and marks a
   stopped loop another loop of its agent replaces (`superseded`).
 - A change of a project's standing prompt or wake focus is broadcast

@@ -100,6 +100,7 @@ import {
     type WakeEventHint,
     writeBarHost,
     type LoopServer,
+    tmuxClients,
 } from "./state.js";
 import { paneDiffGuessesTyping } from "./typing-fallback.js";
 import { compareScreens, recordScreenComparison, type ScreenReading } from "./screen-compare.js";
@@ -1872,6 +1873,19 @@ async function mainSse(): Promise<void> {
     //     it's never reached. Running the SHA check on the watchdog
     //     cadence forces a full process respawn within 2s of any
     //     install-root SHA change, regardless of claude state.
+    // #3340 — who is attached to a tmux loop, told to the daemon when it
+    // changes, so a client (tvty) knows another holds the loop. On the host,
+    // the host says it itself (`host.clients`).
+    let tmuxClientsSaid = "";
+    const pushTmuxClientsIfChanged = (): void => {
+        if (term.kind !== "tmux" || !name) return;
+        const c = tmuxClients(name);
+        if (!c) return;
+        const key = `${c.clients}/${c.interactive}`;
+        if (key === tmuxClientsSaid) return;
+        tmuxClientsSaid = key;
+        void client().pushClients(c.clients, c.interactive).catch(() => { tmuxClientsSaid = ""; });
+    };
     const watchdog = setInterval(() => {
         if (!term.alive()) {
             clearInterval(watchdog);
@@ -1879,6 +1893,7 @@ async function mainSse(): Promise<void> {
             return;
         }
         selfReloadIfStale();
+        pushTmuxClientsIfChanged();
     }, 2000);
 
     // #627 — view-push loop. The timer owns the LoopState rules ;

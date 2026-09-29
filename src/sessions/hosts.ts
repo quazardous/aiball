@@ -54,6 +54,8 @@ export class HostLink extends EventEmitter {
     private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
     private buf = "";
     clients = 0;
+    /** #3340 — how many clients have the controls; null until the host says (`host.clients`). */
+    interactive: number | null = null;
     running = false;
 
     private constructor(readonly info: HostInfo, private readonly sock: Socket) {
@@ -66,7 +68,10 @@ export class HostLink extends EventEmitter {
             this.emit("gone");
         });
         sock.on("error", () => { /* surfaced by close */ });
-        this.on("host.clients", (p: { count: number }) => { this.clients = p.count; });
+        this.on("host.clients", (p: { count: number; interactive?: number }) => {
+            this.clients = p.count;
+            if (typeof p.interactive === "number") this.interactive = p.interactive;
+        });
         this.on("host.exited", () => { this.running = false; });
     }
 
