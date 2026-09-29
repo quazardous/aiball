@@ -10,9 +10,9 @@
  * `pipeFilteredStderr`, `followFile`) stay private to this module —
  * they only matter for the tail flow.
  *
- * `die` + `tmuxAlive` are duplicated as tiny inlined helpers rather
- * than imported from cli.ts to keep the extraction self-contained and
- * avoid creating a circular import. They're 3-5 lines each.
+ * `die` is a tiny inlined helper rather than imported from cli.ts, to keep
+ * the extraction self-contained and avoid a circular import; `tmuxAlive`
+ * comes from state.ts.
  */
 import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -22,6 +22,7 @@ import {
     stateDirFor,
     loopLogPath,
     tmuxName,
+    tmuxAlive,
 } from "../state.js";
 
 function die(msg: string): never {
@@ -29,10 +30,6 @@ function die(msg: string): never {
     process.exit(1);
 }
 
-function tmuxAlive(name: string): boolean {
-    const r = spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" });
-    return r.status === 0;
-}
 
 export type TailMode = "pane" | "timer" | "stop-hook" | "log";
 

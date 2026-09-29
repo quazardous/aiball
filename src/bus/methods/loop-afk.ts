@@ -12,8 +12,7 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
-import { loopSockPath } from "../../claude-loop/state.js";
+import { loopSockPath, loopStateRoot } from "../../claude-loop/state.js";
 import { sendEventOnce } from "../../claude-loop/ipc-events.js";
 import { listLoopPlates, plateAgent, resolveLoopName } from "../../pane.js";
 import { getConsumer } from "../../db.js";
@@ -35,7 +34,7 @@ export function localLoopDir(
         // here: the node knows it by its plate alone, the one that names it.
         const own = listLoopPlates().filter((e) => plateAgent(e.plate) === consumerId).sort((a, b) => b.at - a.at)[0];
         if (own) {
-            const sd = join(process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop"), own.name);
+            const sd = join(loopStateRoot(), own.name);
             if (existsSync(sd)) return { ok: true, loop: own.name, sd };
         }
         // #3039 — an agent unknown, or without a loop heartbeat, has no loop to reach.
@@ -48,9 +47,7 @@ export function localLoopDir(
     if (!loopName) {
         return { ok: false, status: 404, error: `no claude-loop dir matches cwd ${consumer.cwd}`, code: ERROR_CODES.LOOP_NOT_FOUND };
     }
-    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
-        ?? join(homedir(), ".claude-loop");
-    const sd = join(stateRoot, loopName);
+    const sd = join(loopStateRoot(), loopName);
     if (!existsSync(sd)) {
         return { ok: false, status: 404, error: `loop state dir missing : ${sd}`, code: ERROR_CODES.LOOP_NOT_FOUND };
     }

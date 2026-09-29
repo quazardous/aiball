@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AIBALL_HOME } from "../paths.js";
 import { readPlate, type Plate } from "./state.js";
+import { AiballClient } from "../client.js";
 
 /** The agent the loop at `sd` runs as on the host, when that host is alive; otherwise null. */
 export function liveHostAgent(sd: string, home: string = AIBALL_HOME): string | null {
@@ -53,4 +54,31 @@ function hostDirOf(plate: Pick<Plate, "host_dir"> | null, agent: string, home: s
  */
 export function loopAlive(sd: string, tmuxAlive: () => boolean, home: string = AIBALL_HOME): boolean {
     return tmuxAlive() || liveHostAgent(sd, home) !== null;
+}
+
+/**
+ * #3246 — the agents whose session runs on the daemon's host, as the daemon
+ * says (`session.list`): agent → its attach socket (null when it gives none);
+ * null when the daemon does not answer. The host's files may sit in a home
+ * this process does not share: every "is it dead?" of the CLI asks this too,
+ * or it takes such a loop for dead (#3166, #3239).
+ */
+export async function daemonHostedAgents(agent: string | null = null): Promise<Map<string, string | null> | null> {
+    try {
+        const sessions = await new AiballClient({ agentId: agent ?? undefined }).sessionList();
+        return new Map(sessions.filter((s) => s.agent && s.running !== false).map((s) => [s.agent!, s.attach?.socket ?? null]));
+    } catch {
+        return null;
+    }
+}
+
+/** Whether the loop at `sd` runs on the daemon's host, by `hosted` (daemonHostedAgents). */
+export function hostedByDaemon(sd: string, hosted: Map<string, string | null> | null): boolean {
+    if (!hosted) return false;
+    try {
+        const agent = readPlate(sd).host_agent;
+        return !!agent && hosted.has(agent);
+    } catch {
+        return false;
+    }
 }

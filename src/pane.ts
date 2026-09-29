@@ -8,8 +8,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
-import { MUX_CMD, loopSockPath, tmuxName } from "./claude-loop/state.js";
+import { MUX_CMD, canonicalCwd, loopSockPath, loopStateRoot, tmuxName } from "./claude-loop/state.js";
 import { sendEventOnce } from "./claude-loop/ipc-events.js";
 
 /** Soft cap sur une capture de pane — quelques KB en pratique, on borne pour
@@ -67,11 +66,6 @@ export function listLoopPlates(): LoopEntry[] {
     return out;
 }
 
-/** Where this machine's loops keep their state (`CLAUDE_LOOP_STATE_ROOT`, else `~/.claude-loop`), read at each call. */
-export function loopStateRoot(): string {
-    return process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop");
-}
-
 /** #3168 — the agent a plate names: `agent`; before that field, `consumer` when one was passed, or `host_agent`. */
 export function plateAgent(plate: LoopPlate): string | null {
     return plate.agent ?? plate.consumer ?? plate.host_agent ?? null;
@@ -81,10 +75,13 @@ export function resolveLoopName(cwd: string, agent?: string | null): string | nu
     // #3168 — a folder may hold several loops (a lead and its crew): the one
     // of `agent`, never another agent's. A plate that names none is the
     // folder's own agent from before the field. Several: the latest started.
+    // #3246 — canonical paths on both sides, as the CLI compares them (#414):
+    // a folder reached through a symlink is the same folder.
+    const want = canonicalCwd(cwd);
     const mine: LoopEntry[] = [];
     const unnamed: LoopEntry[] = [];
     for (const e of listLoopPlates()) {
-        if (e.plate.cwd !== cwd) continue;
+        if (!e.plate.cwd || (e.plate.cwd !== cwd && canonicalCwd(e.plate.cwd) !== want)) continue;
         const named = plateAgent(e.plate);
         if (!agent || named === agent) mine.push(e);
         else if (named === null) unnamed.push(e);

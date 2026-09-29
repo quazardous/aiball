@@ -6,7 +6,7 @@
  * plate), run by the daemon as `session.start` runs `start`. A human's
  * gesture, on this machine only.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { isMachineLocal } from "../../machine-secret.js";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -14,7 +14,7 @@ import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { remoteControl } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
-import { MUX_CMD, tmuxName } from "../../claude-loop/state.js";
+import { tmuxAlive, tmuxName } from "../../claude-loop/state.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
 import { getConsumer } from "../../db/consumers.js";
@@ -48,10 +48,6 @@ export interface LoopView {
     tmux?: string;
     /** The host's attach socket, for a loop on the host that runs. */
     attach?: { socket: string | null };
-}
-
-function tmuxAlive(name: string): boolean {
-    return spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" }).status === 0;
 }
 
 function loopView(e: LoopEntry): LoopView {

@@ -76,6 +76,20 @@ export function takeAfterRestartNote(name: string): boolean {
 
 export const MUX_CMD = process.env.MUX_CMD ?? "tmux";
 
+/**
+ * #3246 — the state root, read at each call: the daemon's side, whose tests
+ * set `CLAUDE_LOOP_STATE_ROOT` after this module loaded. The CLI keeps
+ * STATE_ROOT, fixed for its one run.
+ */
+export function loopStateRoot(): string {
+    return process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop");
+}
+
+/** #3246 — whether the loop's tmux session exists: the one probe, for the CLI and the daemon. */
+export function tmuxAlive(name: string): boolean {
+    return spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" }).status === 0;
+}
+
 export function stateDirFor(name: string): string {
     return join(STATE_ROOT, name);
 }

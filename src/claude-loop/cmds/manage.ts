@@ -8,8 +8,8 @@
  *   - `cmdReload(name)`     — respawn detached timer w/o touching claude
  *   - `cmdPrune()`          — interactively clean orphan state dirs
  *
- * `die`, `tmuxAlive`, `shQuote` are inlined small helpers — same
- * rationale as cmds/tail.ts. `installRoot()` from state.ts replaces
+ * `die` and `shQuote` are inlined small helpers — same rationale as
+ * cmds/tail.ts; `tmuxAlive` comes from state.ts. `installRoot()` from state.ts replaces
  * the cli.ts-local `selfRoot()` (computes the same value, just lives
  * in state.ts).
  */
@@ -42,11 +42,12 @@ import {
     type Plate,
     readBarHost,
     writeBarHost,
+    tmuxAlive,
 } from "../state.js";
 import { isBarHost } from "../../agent-bar.js";
 import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
-import { liveHostAgent, loopAlive as isLoopAlive } from "../host-alive.js";
+import { daemonHostedAgents, hostedByDaemon, liveHostAgent, loopAlive as isLoopAlive } from "../host-alive.js";
 import { remoteControlFlags, type RemoteControl } from "../remote-control.js";
 // A bare `bash` can resolve to WSL's launcher on Windows (#1584): reload and
 // restart then failed silently, with an empty log.
@@ -58,10 +59,6 @@ function die(msg: string): never {
     process.exit(1);
 }
 
-function tmuxAlive(name: string): boolean {
-    const r = spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" });
-    return r.status === 0;
-}
 
 /** #3066 — alive in tmux, or on the daemon's session host (no tmux session there). */
 function loopAlive(name: string): boolean {
@@ -245,8 +242,9 @@ export function cmdStop(name: string): void {
     process.stdout.write(`stop sent to loop '${name}' (clean shutdown; state kept — 'rm' to delete)\n`);
 }
 
-export function cmdWake(name: string): void {
-    if (!loopAlive(name)) die(`loop '${name}' not alive`);
+export async function cmdWake(name: string): Promise<void> {
+    // #3246 — alive as `start` and `prune` see it: the daemon's host too.
+    if (!loopAlive(name) && !hostedByDaemon(stateDirFor(name), await daemonHostedAgents())) die(`loop '${name}' not alive`);
     const sd = stateDirFor(name);
     // Don't clear idle-since: the timer's first check is
     // `if (!idle-since) continue` — wiping it would make the next
@@ -623,16 +621,12 @@ export async function cmdPrune(): Promise<void> {
     }
     // #3239 — alive as `start` sees it: in tmux, on a host this home can see,
     // or on the daemon's host (whose files may sit in another home).
-    const hosted = new Set<string>();
-    try {
-        for (const s of await new AiballClient({}).sessionList()) if (s.agent && s.running !== false) hosted.add(s.agent);
-    } catch { /* the daemon does not answer: what this machine sees */ }
+    const hosted = await daemonHostedAgents(); // null: the daemon does not answer, what this machine sees
     const orphans = pruneCandidates(
         readdirSync(STATE_ROOT),
         (name) => existsSync(platePath(stateDirFor(name))),
         (name) => {
-            if (loopAlive(name)) return true;
-            try { return hosted.has(readPlate(stateDirFor(name)).host_agent ?? ""); } catch { return false; }
+            return loopAlive(name) || hostedByDaemon(stateDirFor(name), hosted);
         },
     );
     if (orphans.length === 0) {

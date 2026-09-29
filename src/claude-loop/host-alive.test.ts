@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { hostAttachSocket, liveHostAgent, loopAlive } from "./host-alive.js";
+import { hostAttachSocket, hostedByDaemon, liveHostAgent, loopAlive } from "./host-alive.js";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3066-hostalive-"));
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -63,4 +63,14 @@ test("#3166 — the host in the folder the daemon gave, when the daemon's home i
     const old = loop("split-old", { host_agent: "split-claude" });
     assert.equal(liveHostAgent(old, home), null, "not found here — start asks the daemon (session.list) before it wipes anything");
     assert.equal(hostAttachSocket(old, "split-claude", home), join(home, "hosts", "split-claude", "attach.sock"));
+});
+
+// #3246 — `wake`, `prune` and `start` all read the daemon's word the same way.
+test("the daemon's word: a loop on its host is alive though this home sees no host files", () => {
+    const sd = loop("cl-far", { host_agent: "far-agent" });
+    assert.equal(loopAlive(sd, () => false, home), false, "no host.json in this home");
+    assert.equal(hostedByDaemon(sd, new Map([["far-agent", null]])), true);
+    assert.equal(hostedByDaemon(sd, new Map([["someone-else", null]])), false);
+    assert.equal(hostedByDaemon(sd, null), false, "the daemon does not answer: what this machine sees");
+    assert.equal(hostedByDaemon(loop("cl-tmux-only", { host_agent: null }), new Map([["far-agent", null]])), false);
 });

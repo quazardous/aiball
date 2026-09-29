@@ -1,7 +1,7 @@
 // #3168 — a folder's loops, a lead and its crew: each agent resolves its own, never another agent's.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -39,4 +39,21 @@ test("an agent with no plate of its own: the plate that names nobody (the folder
 test("two plates of one agent: the latest started", () => {
     plate("cl-crew-b-new", { agent: "crew-b" }, 1);
     assert.equal(resolveLoopName("/w", "crew-b"), "cl-crew-b-new");
+});
+
+// #3246 — the daemon compares canonical folders, as the CLI does: a loop started
+// through a symlinked path is found from the real one, and the other way round.
+test("a folder reached through a symlink is the same folder", () => {
+    const real = mkdtempSync(join(tmpdir(), "aiball-3246-real-"));
+    const link = `${real}-link`;
+    symlinkSync(real, link);
+    try {
+        plate("cl-via-link", { agent: "linked", cwd: link }, 0);
+        assert.equal(resolveLoopName(real, "linked"), "cl-via-link", "the plate holds the symlink, the agent the real path");
+        plate("cl-via-real", { agent: "real-one", cwd: real }, 0);
+        assert.equal(resolveLoopName(link, "real-one"), "cl-via-real", "the plate holds the real path, the agent the symlink");
+    } finally {
+        rmSync(link, { force: true });
+        rmSync(real, { recursive: true, force: true });
+    }
 });

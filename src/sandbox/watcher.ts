@@ -30,6 +30,7 @@ import {
     type Plate,
 } from "./state.js";
 import { unreadPingCount } from "../db.js";
+import { MUX_CMD } from "../claude-loop/state.js";
 
 const RESPAWN_THROTTLE_MS = 60_000;
 
@@ -59,7 +60,7 @@ function writeWatcherState(sd: string, state: WatcherState): void {
 }
 
 function tmuxHasSession(name: string): boolean {
-    const r = spawnSync("tmux", ["has-session", "-t", name], { stdio: "ignore" });
+    const r = spawnSync(MUX_CMD, ["has-session", "-t", name], { stdio: "ignore" });
     return r.status === 0;
 }
 

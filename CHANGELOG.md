@@ -37,6 +37,11 @@ dates are YYYY-MM-DD.
   assigned to it. It used to wake only on an unread ping, so once the
   assignment was read the ticket stayed in its backlog: the bar counted down
   to a wake that was skipped every time.
+- The board finds a loop started from a symlinked path of its folder (its
+  AFK key, its screen in the web terminal, its session), as `claude-loop`
+  already did.
+- `claude-loop wake` no longer calls a loop running on the daemon's session
+  host dead when this machine cannot see that host's files.
 - Keys typed from the web terminal into a loop running on a proxy node tell
   that loop a human is typing, as they already did on the hub: a wake no
   longer injects a prompt over them.

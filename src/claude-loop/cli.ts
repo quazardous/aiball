@@ -75,6 +75,7 @@ import {
     pingsSnapshotNote,
     type Plate,
     writeBarHost,
+    tmuxAlive,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
 import { cmdLog } from "./cmds/log.js";
@@ -91,7 +92,7 @@ import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
-import { hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
+import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
 import { dropInheritedLoopEnv } from "./inherited-env.js";
@@ -179,10 +180,6 @@ function collectShellOverrideLines(): string[] {
     return lines;
 }
 
-function tmuxAlive(name: string): boolean {
-    const r = spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" });
-    return r.status === 0;
-}
 
 /** #3066 — alive in tmux or on the daemon's session host (host-alive.ts). */
 function loopAlive(name: string): boolean {
@@ -200,12 +197,7 @@ function loopAlive(name: string): boolean {
 /** Agent → its attach socket (null when the daemon gives none). */
 let hostedByDaemon: Map<string, string | null> | null = null;
 async function readHostedByDaemon(agent: string | null): Promise<void> {
-    try {
-        const sessions = await new AiballClient({ agentId: agent ?? undefined }).sessionList();
-        hostedByDaemon = new Map(sessions.filter((s) => s.agent && s.running !== false).map((s) => [s.agent!, s.attach?.socket ?? null]));
-    } catch {
-        hostedByDaemon = null;
-    }
+    hostedByDaemon = await daemonHostedAgents(agent);
 }
 function daemonHostAgent(sd: string): string | null {
     if (!hostedByDaemon) return null;
