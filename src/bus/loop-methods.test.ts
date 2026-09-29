@@ -107,3 +107,34 @@ test("loop.list dates each loop and marks a stopped loop its agent has replaced"
     assert.equal("at" in marked[0]!, false, "the internal plate time stays inside");
 });
 
+// #3343 — the other clients of a tmux loop, made copies or detached, the caller's own kept.
+test("loop.clients_readonly and loop.clients_detach act on the other clients only", async () => {
+    const { spawn } = await import("node:child_process");
+    const { tmuxClientList } = await import("../claude-loop/state.js");
+    plate("cl-cli", { agent: "cli-3343" });
+    plate("cl-hostcli", { agent: "hostcli-3343", host_agent: "hostcli-3343" });
+    spawnSync("tmux", ["new-session", "-d", "-s", tmuxName("cl-cli"), "sleep 60"], { stdio: "ignore" });
+    const kids = [0, 1].map(() => spawn("tmux", ["-C", "attach", "-t", tmuxName("cl-cli")], { stdio: ["pipe", "ignore", "ignore"] }));
+    try {
+        const deadline = Date.now() + 5000;
+        while (tmuxClientList("cl-cli").length < 2) {
+            assert.ok(Date.now() < deadline, "the two clients never attached");
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        const keep = tmuxClientList("cl-cli")[0]!.pid;
+        const ro = getMethod("loop.clients_readonly")!.run(human, { name: "cl-cli", keep_pid: keep }) as Record<string, unknown>;
+        assert.deepEqual(ro, { name: "cl-cli", clients: 2, interactive: 1 });
+        assert.equal(tmuxClientList("cl-cli").find((c) => c.pid === keep)?.readonly, false, "the caller's own keeps the controls");
+        const again = getMethod("loop.clients_readonly")!.run(human, { name: "cl-cli", keep_pid: keep }) as Record<string, unknown>;
+        assert.equal(again.interactive, 1, "twice is still a copy: switch-client -r toggles, only writable ones are switched");
+        const det = getMethod("loop.clients_detach")!.run(human, { name: "cl-cli", keep_pid: keep }) as Record<string, unknown>;
+        assert.deepEqual(det, { name: "cl-cli", clients: 1, interactive: 1 });
+        assert.equal((await refused(() => getMethod("loop.clients_detach")!.run(human, { name: "cl-hostcli" }))).status, 409, "a host loop has its own controls");
+        const tcp = testCaller("boss", { kind: "human", transport: "tcp" });
+        assert.equal((await refused(() => getMethod("loop.clients_detach")!.run(tcp, { name: "cl-cli" }))).status, 403);
+    } finally {
+        for (const k of kids) k.kill();
+        spawnSync("tmux", ["kill-session", "-t", tmuxName("cl-cli")], { stdio: "ignore" });
+    }
+});
+

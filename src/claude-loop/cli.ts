@@ -93,6 +93,7 @@ import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { loopName } from "./loop-name.js";
+import { afterTmuxAttach, type LoopWhereabouts } from "./attach-end.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
 import { dropInheritedLoopEnv } from "./inherited-env.js";
@@ -1500,6 +1501,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     }
     process.stdout.write(`loop '${name}' started — attaching... (Ctrl-B D to detach)\n`);
     spawnSync(MUX_CMD, ["attach", "-t", tname], { stdio: "inherit" });
+    process.stdout.write(`${await afterTmuxAttach(name, loopWhereabouts(name))}\n`);
+}
+
+/** #3343 — where a loop is, as the end of an attach reports it. */
+function loopWhereabouts(name: string): LoopWhereabouts {
+    return {
+        tmuxAlive: () => tmuxAlive(name),
+        onHost: () => liveHostAgent(stateDirFor(name)) !== null,
+    };
 }
 
 /**
@@ -1604,6 +1614,7 @@ async function joinLive(name: string, place: LivePlace, opts: StartOpts): Promis
 async function attachLoop(resolved: string, opts: { readonly: boolean }): Promise<void> {
     if (tmuxAlive(resolved)) {
         spawnSync(MUX_CMD, ["attach", ...(opts.readonly ? ["-r"] : []), "-t", tmuxName(resolved)], { stdio: "inherit" });
+        process.stdout.write(`${await afterTmuxAttach(resolved, loopWhereabouts(resolved))}\n`);
         return;
     }
     // #3066 — a loop on the daemon's session host: attach to the host itself.

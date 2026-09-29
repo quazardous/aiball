@@ -101,4 +101,5 @@ export function renderAfkChunk(input: LoopStateInput): AfkChunk {
  * copy, `attach --read-only`) sees it at the head of the status line. tmux
  * evaluates it per client: a client with the controls sees nothing new.
  */
-export const COPY_MARK = "#{?client_readonly,#[fg=colour16#,bg=colour226#,bold] 👁 COPY · read-only #[default],}";
+// #3343 — a copy is left with the prefix then d: the mark says so, with the prefix as set.
+export const COPY_MARK = "#{?client_readonly,#[fg=colour16#,bg=colour226#,bold] 👁 COPY · read-only · #{prefix} d to leave #[default],}";

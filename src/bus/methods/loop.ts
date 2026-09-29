@@ -6,7 +6,7 @@
  * plate), run by the daemon as `session.start` runs `start`. A human's
  * gesture, on this machine only.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { isMachineLocal } from "../../machine-secret.js";
 import { join, resolve } from "node:path";
 import { statSync } from "node:fs";
@@ -15,7 +15,7 @@ import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { remoteControl } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
-import { loopStateRoot, tmuxAlive, tmuxName } from "../../claude-loop/state.js";
+import { loopStateRoot, MUX_CMD, tmuxAlive, tmuxClientList, tmuxClients, tmuxName } from "../../claude-loop/state.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
 import { tmuxClientsOf } from "../../sessions/tmux-clients.js";
 import { isPresent } from "../../live-presence.js";
@@ -201,6 +201,51 @@ defineMethod({
             }
             if (Date.now() > deadline) throw new Refusal(504, `the loop ${loop.name} did not come back in 60 s`, ERROR_CODES.INTERNAL);
         }
+    },
+});
+
+/**
+ * #3343 — the clients of a loop in tmux, other than `keep_pid`'s (the one
+ * taking the controls): made read-only copies (`clients_readonly`, the
+ * COPY_MARK shows on them), or detached (`clients_detach`). tmux does it; a
+ * client (tvty) asks aiball. A loop on the host has its own controls.
+ */
+function otherTmuxClients(caller: Caller, p: { name?: string; agent?: string; keep_pid?: number }) {
+    localOnly(caller);
+    if (!p.name === !p.agent) throw new Refusal(400, "name or agent: one of them", ERROR_CODES.BAD_REQUEST);
+    const loop = findLoop(p);
+    const view = loopView(loop);
+    if (view.mode !== "tmux") throw new Refusal(409, `${loop.name} runs on the session host: its clients take the controls there`, ERROR_CODES.CONFLICT);
+    if (!view.running) throw new Refusal(404, `the loop ${loop.name} does not run`, ERROR_CODES.LOOP_NOT_FOUND);
+    return { loop, others: tmuxClientList(loop.name).filter((c) => c.pid !== p.keep_pid) };
+}
+
+const clientsParams = z.object({ name: z.string().optional(), agent: z.string().optional(), keep_pid: z.number().int().optional() });
+
+/** Every other client of a loop in tmux becomes a read-only copy (all but `keep_pid`'s); answers the clients left. */
+defineMethod({
+    name: "loop.clients_readonly",
+    ...HUMAN_HERE,
+    params: clientsParams,
+    run: (caller, p) => {
+        const { loop, others } = otherTmuxClients(caller, p);
+        // `switch-client -r` toggles: only the clients that may still type.
+        // `-t` the loop's own session: without it tmux also moves the client to
+        // the session it last used, which takes it out of the loop.
+        for (const c of others.filter((o) => !o.readonly)) spawnSync(MUX_CMD, ["switch-client", "-c", c.client, "-t", tmuxName(loop.name), "-r"], { stdio: "ignore" });
+        return { name: loop.name, ...(tmuxClients(loop.name) ?? { clients: 0, interactive: 0 }) };
+    },
+});
+
+/** Every other client of a loop in tmux is detached (all but `keep_pid`'s); answers the clients left. */
+defineMethod({
+    name: "loop.clients_detach",
+    ...HUMAN_HERE,
+    params: clientsParams,
+    run: (caller, p) => {
+        const { loop, others } = otherTmuxClients(caller, p);
+        for (const c of others) spawnSync(MUX_CMD, ["detach-client", "-t", c.client], { stdio: "ignore" });
+        return { name: loop.name, ...(tmuxClients(loop.name) ?? { clients: 0, interactive: 0 }) };
     },
 });
 

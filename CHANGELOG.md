@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A client taking the controls of a loop in tmux can make its other clients
+  read-only copies (`loop.clients_readonly`) or detach them
+  (`loop.clients_detach`). A copy's mark says how to leave it (the tmux prefix,
+  then `d`), and a terminal whose `claude-loop` attach ends says where the loop
+  went: still in tmux, moved to the session host, or stopped.
 - A loop in tmux says who is attached to it, as the session host does: an
   agent's session and `loop.list` carry `clients` and `interactive` (those with
   the controls), and a change is broadcast. A client can open a loop another

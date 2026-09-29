@@ -96,6 +96,14 @@ export function tmuxClients(name: string): { clients: number; interactive: numbe
     return { clients: flags.length, interactive: flags.filter((f) => f === "0").length };
 }
 
+/** #3343 — each client attached to the loop's tmux session: its tmux name, its process, whether it may type. */
+export function tmuxClientList(name: string): { client: string; pid: number; readonly: boolean }[] {
+    const r = spawnSync(MUX_CMD, ["list-clients", "-t", tmuxName(name), "-F", "#{client_name} #{client_pid} #{client_readonly}"], { encoding: "utf8" });
+    if (r.error || r.status !== 0) return [];
+    return r.stdout.split("\n").map((l) => l.trim().split(" ")).filter((f) => f.length === 3)
+        .map(([client, pid, ro]) => ({ client: client!, pid: Number(pid), readonly: ro === "1" }));
+}
+
 /** #3246 — whether the loop's tmux session exists: the one probe, for the CLI and the daemon. */
 export function tmuxAlive(name: string): boolean {
     return spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" }).status === 0;
