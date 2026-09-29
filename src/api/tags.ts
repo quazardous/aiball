@@ -1,10 +1,9 @@
 /**
- * Tag CRUD + message-tag association routes (#B.213 phase 1.A).
- * Carved out of api.ts on 2026-05-19. No behavior change — handlers and
- * helper `resolveTagRef` moved verbatim, mounted as a sub-router from
- * the top-level api router.
+ * Tags as the bus's catalog reads them (`tag.list`, src/bus/methods/catalog.ts):
+ * resolving a tag given by id or name, and the catalog with the tags a
+ * project's config declares. No route: the tag routes moved to the bus
+ * (#3063, #3068).
  */
-import { Router } from "express";
 import {
     getTag,
     getTagByName,
@@ -13,7 +12,6 @@ import {
 } from "../db.js";
 import { resolveConfigTags } from "../config-tags.js";
 
-export const tagsRouter = Router();
 
 export function resolveTagRef(ref: unknown): Tag | null {
     if (typeof ref === "number") return getTag(ref);

@@ -1,26 +1,13 @@
 /**
- * Ticket-domain routes (carved out of api.ts in #B.213 phase 1.G on
- * 2026-05-19). Behavior-preserving move.
- *
- * Endpoints:
- *   GET   /tickets/bookends                  — slim inbox edges (#B.68)
- *   GET   /inbox                             — unified inbox view
- *   GET   /tickets                           — list with filters (#B.83/87)
- *   POST  /tickets/:id/mark-read             — per-consumer ack (#B.191)
- *   POST  /tickets/:id/mark-unread
- *   PATCH /tickets/:id                       — broadcast toggle
- *   POST  /tickets/:id/postpone              — snooze (#B.329)
- *   POST  /tickets/:id/unsnooze
- *   GET   /tickets/:id/relations             — typed relations (#B.123 phase B)
- *   POST  /tickets/:id/relations
- *   GET   /tickets/:id                       — header / brief / digest / full
- *
- * Local helper `enrichRelationStages` is kept private — only the GET
- * /tickets/:id thread builder uses it.
+ * The ticket lists and the thread read the bus serves (`ticket.list`,
+ * `inbox.list`, `ticket.get`…, and each agent's counters): `listTicketsFor`
+ * with its filters (backlog, actionable, open…), the work order, the inbox
+ * rows, and the relations' stages on a thread. No route: the ticket routes
+ * moved to the bus (#3063, #3068).
  */
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
-import { Router, type Request } from "express";
+import type { Request } from "express";
 import {
     listMessages,
     tagsForMessages,
@@ -66,7 +53,6 @@ export function ticketStateAfter(id: number, consumerId: string) {
     return buildInboxRow(t, buildInboxRowContext([t], consumerId, t.project));
 }
 
-export const ticketsRouter = Router();
 
 /** #402 levier 1 — hot-window (seconds) read from the global config yaml
  *  (`~/.config/aiball/config.yaml` → `hot_window_sec:`, david `xkehmv` D2).

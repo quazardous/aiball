@@ -1,15 +1,13 @@
 /**
  * What filing a message needs besides the bus method (`message.post`, in
  * src/bus/methods/message.ts): the platform tag of a new ticket, and the HTTP
- * status of each submit refusal. The routes this file held moved to the bus
- * (#3063, #3068); the router is empty and mounted for nothing (#3242).
+ * status of each submit refusal. No route: the ones this file held moved to
+ * the bus (#3063, #3068).
  */
-import { Router } from "express";
 import { ERROR_CODES } from "../domain.js";
 import { addMessageTag, getTagByName, insertTag } from "../db/tags.js";
 import { platformTagName } from "../db/platform-tag.js";
 
-export const messagesRouter = Router();
 
 /**
  * #2099 — stamp the filing machine's platform on a new ticket.
