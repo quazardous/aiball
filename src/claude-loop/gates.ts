@@ -25,6 +25,7 @@
  * gate never blocks the wake.
  */
 import { spawnSync } from "node:child_process";
+import { resolveBashCmd } from "./resolve-bash.js";
 
 /** A parsed gate config entry. */
 export interface GateSpec {
@@ -128,7 +129,7 @@ export function runGate(spec: GateSpec, cwd: string): GateResult | null {
         return { name: spec.name, type: spec.type, blocks: spec.blocks, slot: b.slot, message: b.defaultMessage, vars };
     }
     if (spec.cmd) {
-        const r = spawnSync("bash", ["-c", spec.cmd], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+        const r = spawnSync(resolveBashCmd(), ["-c", spec.cmd], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
         if (r.status !== 0) return null; // exit 0 = triggered (mirrors check_cmd)
         const stdout = (r.stdout ?? "").trim();
         const message = stdout || spec.message || `⚠ gate ${spec.name} triggered`;

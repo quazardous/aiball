@@ -36,6 +36,7 @@ import {
 } from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { selectTransport } from "./transport/index.js";
+import { resolveBashCmd } from "./resolve-bash.js";
 import type { BarHost } from "../agent-bar.js";
 import { homedir, uptime as osUptime } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -1188,7 +1189,7 @@ export async function checkHasWork(
             return emptyWork();
         }
     }
-    const r = spawnSync("bash", ["-c", cmd], { stdio: "ignore" });
+    const r = spawnSync(resolveBashCmd(), ["-c", cmd], { stdio: "ignore" });
     return emptyWork({ has: r.status === 0 });
 }
 
