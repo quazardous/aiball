@@ -23,6 +23,14 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- A change of a project's standing prompt or wake focus is broadcast
+  (`project_standing_changed` on `board.events`, with the new values), and a
+  detailed `project.list` carries `standing_prompt`, `focus_active` and
+  `focus_line`: a client follows an edit made elsewhere without reading each
+  project again.
+
 ### Fixed
 
 - Removing a setting from `.aiball.yaml` (the board's project settings, or

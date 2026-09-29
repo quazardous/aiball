@@ -146,7 +146,7 @@ events, and the same epoch), the answer is `replayed: true` with the missed
 | `user.<id>.pings` | `{ unread }` | a ping, as the event stream carries it, and `message`: what it points at (`id`, `hashid`, `kind`, `status`, `by_agent`, `created_at`, `project`, `ticket_id`, `title`, `decision`) | oneself |
 | `session.<name>.state` | a session without an agent, as `session.list` gives it, or `null` | `{ name, session }`: started, clients, exited, and `session: null` once stopped | humans and agents; this machine's |
 | `agent.<id>.events` | `{ consumer_id, unread, counters }` | `{ event, data }`: a `ping` (not one outside the wake focus), a loop `control` (`kill`, `prompt`, `restart_claude`), a `signal`, its `counters` when a number changed; the waiting signals and spooled prompts come right after the answer; the subscription is the loop's liveness; never replayed. Opening it (with `backlog_cooldown_sec`, the rest its backlog applies after a backlog wake) is where the loop states it for `consumer.backlog` and the counters, and the agent's standing (`x-aiball-role`, `x-aiball-no-claim` on its row); a second loop under the agent from another machine is refused (`CONFLICT`) | the loop itself |
-| `board.events` | `null` | every event the board broadcasts, `{ type, data }`, the feed the web UI patches its views from | humans and agents |
+| `board.events` | `null` | every event the board broadcasts, `{ type, data }`, the feed the web UI patches its views from; `project_standing_changed` carries a project's `project.standing_prompt` answer after each change of its standing prompt or wake focus (a focus that runs out on its own date sends nothing) | humans and agents |
 | `config.changed` | `null` (`config.managed` is the whole read) | `{ op: "set" \| "clear", key, project, value, by }` on each `config.set` / `config.clear`; `{ op: "reload" }` after a config file was reloaded: read `config.managed` again | humans and agents |
 | `agent.<id>.screen` | `{ source }`: `host`, `tmux` or `node`; `null` when it cannot be followed | from the session host, `snapshot` (bytes that repaint the screen, base64, after a reset, with the `size`) then `output` (Claude's output as it comes, base64) and `size`; from tmux or a node, `frame` (the whole visible pane as text, with `cursor` and `geometry`) when it changed; `error` (passing), `unavailable` (why nothing more comes). Options `typing` (on the host, an interactive client: it may type, and takes the size once it does) and `size` (the size it would like). Never replayed: a new subscription gets a fresh snapshot | humans |
 
@@ -293,7 +293,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `ticket.subscribe` | human, agent | `POST /api/ticket-subscriptions` |
 | `ticket.subscription` | human, agent | `GET /api/ticket-subscriptions/:ticket_id` |
 | `ticket.unsubscribe` | human, agent | `DELETE /api/ticket-subscriptions/:ticket_id` |
-| `project.list` | human, agent | `GET /api/projects` — `detailed`, `landscape` are booleans |
+| `project.list` | human, agent | `GET /api/projects` — `detailed`, `landscape` are booleans; a detailed row also carries `standing_prompt`, `focus_active`, `focus_line` |
 | `project.create` | human, agent | `POST /api/projects` |
 | `project.stats` | human, agent | `GET /api/projects/:name/stats` |
 | `project.standing_prompt` | human, agent | `GET /api/projects/:project/standing-prompt` |

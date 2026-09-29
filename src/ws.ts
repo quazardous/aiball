@@ -14,6 +14,8 @@ export type WsEvent =
     | { type: "automation_rule_changed"; data: unknown }
     | { type: "tag_changed"; data: unknown }
     | { type: "strategy_changed"; data: unknown }
+    // A project's standing prompt or wake focus changed: its standingPromptView.
+    | { type: "project_standing_changed"; data: unknown }
     | { type: "project_deleted"; data: unknown }
     | { type: "project_renamed"; data: unknown }
     | { type: "project_purged"; data: unknown }

@@ -112,8 +112,9 @@ defineMethod({
  * #1832 — set a project's standing instruction (null or empty clears it),
  * and #2525 its wake focus: `focus_tickets` is checked whole, every ticket
  * must belong to the project, before anything is written. No length cap: the
- * UI's one-line input is what keeps it short. No broadcast: it changes what
- * the next wake says, edited from one page that re-reads on load.
+ * UI's one-line input is what keeps it short. The change is broadcast
+ * (`project_standing_changed`, the new view) so a client that shows it follows
+ * an edit made elsewhere without reading every project again.
  */
 defineMethod({
     name: "project.set_standing_prompt",
@@ -143,7 +144,9 @@ defineMethod({
         }
         if (v !== undefined) setProjectStandingPrompt(p.project, (v as string | null) ?? null);
         if (hasFocus) setProjectWakeFocus(p.project, nextFocus);
-        return standingPromptView(p.project);
+        const view = standingPromptView(p.project);
+        broadcast({ type: "project_standing_changed", data: view });
+        return view;
     },
 });
 

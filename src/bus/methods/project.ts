@@ -50,9 +50,11 @@ export function standingPromptView(project: string) {
 }
 
 /**
- * The projects. `detailed` adds each one's counters for `consumer_id`;
- * `landscape` (#379) its landscape hash, which only the loop asks for;
- * `project` (#2682) narrows a detailed answer to one.
+ * The projects. `detailed` adds each one's counters for `consumer_id`, and
+ * (#3326) its standing prompt and whether a wake focus applies
+ * (`standing_prompt`, `focus_active`, `focus_line`), read fresh: the counters'
+ * cache would keep an edit out; `landscape` (#379) its landscape hash, which
+ * only the loop asks for; `project` (#2682) narrows a detailed answer to one.
  */
 defineMethod({
     name: "project.list",
@@ -61,7 +63,11 @@ defineMethod({
     run: (_caller, p) => {
         if (p.detailed !== true) return listProjects();
         const all = listProjectsDetailed(p.consumer_id, p.landscape === true);
-        return p.project ? all.filter((x) => x.name === p.project) : all;
+        const some = p.project ? all.filter((x) => x.name === p.project) : all;
+        return some.map((x) => {
+            const s = standingPromptView(x.name);
+            return { ...x, standing_prompt: s.standing_prompt, focus_active: s.focus_active, focus_line: s.focus_line };
+        });
     },
 });
 

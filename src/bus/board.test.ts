@@ -77,6 +77,29 @@ test("strategy, a project's strategy and standing prompt: a bus connection and a
     await assert.rejects(boss.call("project.set_standing_prompt", { project: "p-board", focus_tickets: "999999" }), status(400));
 });
 
+// #3326 — a client that shows the standing prompt or the focus follows an edit made elsewhere.
+test("a standing change is broadcast with the new view, and a detailed project.list carries it", async () => {
+    const { onBroadcast } = await import("../ws.js");
+    const heard: { type: string; data: unknown }[] = [];
+    const off = onBroadcast((ev) => { if (ev.type === "project_standing_changed") heard.push(ev); });
+    try {
+        const boss = await as(BOSS);
+        const t = submitMessage({ project: "p-board", kind: "ticket_created", title: "t3326", body: "b", by_agent: "worker" });
+        const view = await boss.call("project.set_standing_prompt", { project: "p-board", standing_prompt: "ship it", focus_tickets: `${t.id}`, focus_until: null });
+        assert.equal(heard.length, 1);
+        assert.deepEqual(heard[0]!.data, view, "the event carries the answer");
+        const [row] = await boss.call<{ standing_prompt: string | null; focus_active: boolean; focus_line: string | null }[]>("project.list", { detailed: true, project: "p-board" });
+        assert.equal(row!.standing_prompt, "ship it");
+        assert.equal(row!.focus_active, true);
+        assert.match(String(row!.focus_line), new RegExp(`#${t.id}`));
+        await boss.call("project.set_standing_prompt", { project: "p-board", standing_prompt: null, focus_tickets: null });
+        assert.equal(heard.length, 2);
+        const [cleared] = await boss.call<{ standing_prompt: string | null; focus_active: boolean }[]>("project.list", { detailed: true, project: "p-board" });
+        assert.equal(cleared!.standing_prompt, null, "read fresh, not from the counters' cache");
+        assert.equal(cleared!.focus_active, false);
+    } finally { off(); }
+});
+
 test("info, stats, token series and purges answer; purging a project with nothing old purges nothing", async () => {
     const boss = await as(BOSS);
     const info = await boss.call<{ version: string; counts: unknown }>("board.info", {});
