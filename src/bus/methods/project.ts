@@ -242,11 +242,12 @@ function inFolder<T>(caller: { transport: string }, cwd: string, f: () => T): T 
 
 /**
  * The settings a client may show for a folder's project, as a loop started
- * there would get them: each one's value and whether the folder's
- * `.aiball.yaml` sets it or it is the default, and `file`, the `.aiball.yaml`
- * that loop reads (the nearest one up the tree; null without one). Today:
- * `remote_control`, Claude's Remote Control. A human's gesture, on this
- * machine only.
+ * there would get them: each one's value and where it comes from (`from`),
+ * and `file`, the `.aiball.yaml` that loop reads (the nearest one up the tree;
+ * null without one, `configured` false). #3305 — the identity (`consumer`:
+ * project, agent, role), where it runs (`session`) and `remote_control`,
+ * Claude's Remote Control: what a client setting the folder up starts from. A
+ * human's gesture, on this machine only.
  */
 defineMethod({
     name: "project.settings",
@@ -260,7 +261,8 @@ defineMethod({
  * Change settings of a folder's project, in the `.aiball.yaml` a loop started
  * there reads, patched in place (its other keys and its comments stay), and
  * answer them as `project.settings` does. `remote_control`: true, false or a
- * name; null removes it, and the default applies again. The next start reads
+ * name; `session`: host or tmux; null removes either, and the layer below
+ * applies again. The next start reads
  * it; a loop that runs keeps what it started with. A folder without a
  * `.aiball.yaml` is refused (`CONFLICT`: set it up with `project.init`). A
  * human's gesture, on this machine only.
@@ -269,6 +271,11 @@ defineMethod({
     name: "project.settings_set",
     who: ["human"],
     machine: true,
-    params: z.object({ cwd: z.string(), remote_control: remoteControl.nullable().optional() }),
-    run: (caller, p) => inFolder(caller, p.cwd, () => writeSettings(p.cwd, { remote_control: p.remote_control })),
+    params: z.object({
+        cwd: z.string(),
+        remote_control: remoteControl.nullable().optional(),
+        /** #3305 — where the folder's loops run: `host`, `tmux`, or null for the layer below. */
+        session: z.enum(["host", "tmux"]).nullable().optional(),
+    }),
+    run: (caller, p) => inFolder(caller, p.cwd, () => writeSettings(p.cwd, { remote_control: p.remote_control, session: p.session })),
 });

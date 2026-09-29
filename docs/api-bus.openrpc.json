@@ -3074,7 +3074,7 @@
     },
     {
       "name": "project.settings",
-      "description": "The settings a client may show for a folder's project, as a loop started there would get them: each one's value and whether the folder's `.aiball.yaml` sets it or it is the default, and `file`, the `.aiball.yaml` that loop reads (the nearest one up the tree; null without one). Today: `remote_control`, Claude's Remote Control. A human's gesture, on this machine only.",
+      "description": "The settings a client may show for a folder's project, as a loop started there would get them: each one's value and where it comes from (`from`), and `file`, the `.aiball.yaml` that loop reads (the nearest one up the tree; null without one, `configured` false). the identity (`consumer`: project, agent, role), where it runs (`session`) and `remote_control`, Claude's Remote Control: what a client setting the folder up starts from. A human's gesture, on this machine only.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -3096,7 +3096,7 @@
     },
     {
       "name": "project.settings_set",
-      "description": "Change settings of a folder's project, in the `.aiball.yaml` a loop started there reads, patched in place (its other keys and its comments stay), and answer them as `project.settings` does. `remote_control`: true, false or a name; null removes it, and the default applies again. The next start reads it; a loop that runs keeps what it started with. A folder without a `.aiball.yaml` is refused (`CONFLICT`: set it up with `project.init`). A human's gesture, on this machine only.",
+      "description": "Change settings of a folder's project, in the `.aiball.yaml` a loop started there reads, patched in place (its other keys and its comments stay), and answer them as `project.settings` does. `remote_control`: true, false or a name; `session`: host or tmux; null removes either, and the layer below applies again. The next start reads it; a loop that runs keeps what it started with. A folder without a `.aiball.yaml` is refused (`CONFLICT`: set it up with `project.init`). A human's gesture, on this machine only.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -3122,6 +3122,24 @@
                     "maxLength": 100,
                     "pattern": "^[^-]"
                   }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        {
+          "name": "session",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "host",
+                  "tmux"
                 ]
               },
               {

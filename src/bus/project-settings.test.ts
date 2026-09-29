@@ -9,6 +9,8 @@ import { join } from "node:path";
 const home = mkdtempSync(join(tmpdir(), "aiball-3256-"));
 process.env.AIBALL_HOME = home;
 process.env.AIBALL_SOCK = "";
+// #3305 — the machine's layer (claude_loop.session) is read from here, not the user's.
+process.env.XDG_CONFIG_HOME = join(home, "xdg");
 const { getMethod } = await import("./methods.js");
 await import("./register.js");
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -16,7 +18,13 @@ after(() => rmSync(home, { recursive: true, force: true }));
 const settings = getMethod("project.settings")!;
 const settingsSet = getMethod("project.settings_set")!;
 const human = testCaller("boss", { kind: "human" });
-type Settings = { file: string | null; remote_control: { value: boolean | string; from: string } };
+type Settings = {
+    file: string | null;
+    configured: boolean;
+    consumer: { project: { value: string; from: string }; agent: { value: string; from: string }; role: { value: string | null; from: string } };
+    session: { value: string; from: string };
+    remote_control: { value: boolean | string; from: string };
+};
 const read = (cwd: string, caller = human) => settings.run(caller, { cwd }) as Settings;
 const set = (p: Record<string, unknown>, caller = human) => settingsSet.run(caller, p) as Settings;
 let n = 0;
@@ -31,10 +39,12 @@ const YAML = "# my notes\nconsumer:\n  agent: a-3256 # who\nautopoll:\n  enabled
 
 test("read: the default when the file says nothing, the file's value when it does, and which file", () => {
     const d = folder(YAML);
-    assert.deepEqual(read(d), { file: join(d, ".aiball.yaml"), remote_control: { value: false, from: "default" } });
+    const r = read(d);
+    assert.deepEqual([r.file, r.remote_control], [join(d, ".aiball.yaml"), { value: false, from: "default" }]);
     const e = folder("claude:\n  remote_control: phone\n");
     assert.deepEqual(read(e).remote_control, { value: "phone", from: "file" });
-    assert.deepEqual(read(folder()), { file: null, remote_control: { value: false, from: "default" } }, "no file at all");
+    const bare = read(folder());
+    assert.deepEqual([bare.file, bare.remote_control], [null, { value: false, from: "default" }], "no file at all");
 });
 
 test("a sub-folder reads, and patches, the file its loops read: the nearest one up the tree", () => {
@@ -96,4 +106,45 @@ test("a human's gesture on this machine: not over TCP, not an agent's; and a nam
     for (const m of [settings, settingsSet]) assert.deepEqual(m.who, ["human"], `${m.name} is a human's`);
     assert.equal(settingsSet.params.safeParse({ cwd: d, remote_control: "--model" }).success, false);
     assert.equal(settingsSet.params.safeParse({ cwd: d, remote_control: null }).success, true);
+});
+
+// #3305 — what a client setting the folder up starts from: every value, and where it comes from.
+test("the folder's resolved configuration: identity, where it runs, each with where it comes from", () => {
+    const d = folder("consumer:\n  project: proj-3305\n  agent: proj-claude\n  role: crew\nclaude_loop:\n  session: tmux\n");
+    const r = read(d);
+    assert.equal(r.configured, true);
+    assert.deepEqual(r.consumer, {
+        project: { value: "proj-3305", from: "file" },
+        agent: { value: "proj-claude", from: "file" },
+        role: { value: "crew", from: "file" },
+    });
+    assert.deepEqual(r.session, { value: "tmux", from: "file" });
+
+    // A bare folder: the defaults, and it says so.
+    const bare = folder();
+    const b = read(bare);
+    assert.equal(b.configured, false);
+    assert.deepEqual(b.consumer.project.from, "default");
+    assert.deepEqual(b.consumer.role, { value: null, from: "default" });
+    assert.deepEqual(b.session, { value: "host", from: "default" });
+
+    // The machine's layer: the global config's session, unless the file says otherwise.
+    mkdirSync(join(home, "xdg", "aiball"), { recursive: true });
+    writeFileSync(join(home, "xdg", "aiball", "config.yaml"), "claude_loop:\n  session: tmux\n");
+    try {
+        assert.deepEqual(read(bare).session, { value: "tmux", from: "global" });
+        assert.deepEqual(read(d).session, { value: "tmux", from: "file" });
+    } finally {
+        rmSync(join(home, "xdg", "aiball", "config.yaml"));
+    }
+});
+
+test("set writes where loops run, in place; null hands it back to the layer below", () => {
+    const d = folder(YAML);
+    assert.deepEqual(set({ cwd: d, session: "tmux" }).session, { value: "tmux", from: "file" });
+    const text = readFileSync(join(d, ".aiball.yaml"), "utf8");
+    assert.match(text, /# my notes/);
+    assert.match(text, /claude_loop:\n {2}session: tmux/);
+    assert.deepEqual(set({ cwd: d, session: null }).session, { value: "host", from: "default" });
+    assert.equal(readFileSync(join(d, ".aiball.yaml"), "utf8"), YAML, "back to the file as it was");
 });

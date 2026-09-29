@@ -5,10 +5,15 @@
  * client sets is what the next start gets. Patched in place: the file's other
  * keys and its comments stay. A short list, each key a typed field, never a
  * free key/value: first `claude.remote_control`.
+ *
+ * #3305 — the folder's resolved configuration too, for a client that sets a
+ * folder up (tvty's new-project assistant) to start from what is there: the
+ * identity a loop there takes and where it runs, each value with where it
+ * comes from (`from`), so what is not the default can be shown as such.
  */
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { parseDocument } from "yaml";
-import { findConfigUpwards, loadConfig } from "./autopoll/config.js";
+import { findConfigUpwards, globalConfigPath, loadConfig, parseLoopSession, readGlobalLoopSession, type ConsumerRole, type ConsumerSource, type LoopSession } from "./autopoll/config.js";
 import { parseRemoteControl, type RemoteControl } from "./claude-loop/remote-control.js";
 import { InitRefusal } from "./project-init.js";
 
@@ -16,12 +21,29 @@ import { InitRefusal } from "./project-init.js";
 export interface ProjectSettings {
     /** The `.aiball.yaml` a loop in this folder reads; null when there is none. */
     file: string | null;
+    /** #3305 — a `.aiball.yaml` applies to this folder (its own, or one up the tree). */
+    configured: boolean;
+    /** #3305 — the identity a loop started here takes. `env`: the daemon's own environment says so. */
+    consumer: {
+        project: { value: string; from: IdentityFrom };
+        agent: { value: string; from: IdentityFrom };
+        role: { value: ConsumerRole | null; from: "file" | "default" };
+    };
+    /** #3305 — where a loop started here runs: the file's, the machine's (global config), or the default. */
+    session: { value: LoopSession; from: "file" | "global" | "default" };
     remote_control: { value: RemoteControl; from: "file" | "default" };
 }
 
-/** The changes a client may make; `null` removes the key, and the default applies again. */
+/** Where an identity value comes from: the folder's file, the legacy `.mcp.json`, the environment, or the default. */
+export type IdentityFrom = "file" | "mcp" | "env" | "default";
+
+const IDENTITY_FROM: Record<ConsumerSource, IdentityFrom> = { "aiball.yaml": "file", "mcp.json": "mcp", env: "env", default: "default" };
+
+/** The changes a client may make; `null` removes the key, and the layer below applies again. */
 export interface SettingsPatch {
     remote_control?: RemoteControl | null;
+    /** #3305 — `claude_loop.session`. */
+    session?: LoopSession | null;
 }
 
 type Doc = ReturnType<typeof parseDocument>;
@@ -48,11 +70,42 @@ function readDoc(file: string): Doc {
 export function readSettings(cwd: string): ProjectSettings {
     checkFolder(cwd);
     const file = findConfigUpwards(cwd);
-    const inFile = file ? parseRemoteControl(readDoc(file).getIn(["claude", "remote_control"])) : null;
+    const doc = file ? readDoc(file) : null;
+    const inFile = doc ? parseRemoteControl(doc.getIn(["claude", "remote_control"])) : null;
+    const cfg = loadConfig(cwd);
+    const sessionInFile = doc ? parseLoopSession(doc.getIn(["claude_loop", "session"])) : undefined;
+    const roleInFile = doc ? doc.getIn(["consumer", "role"]) : undefined;
     return {
         file,
-        remote_control: { value: loadConfig(cwd).claude.remote_control, from: inFile !== null ? "file" : "default" },
+        configured: file !== null,
+        consumer: {
+            project: { value: cfg.consumer.project!, from: IDENTITY_FROM[cfg.consumer.project_source ?? "default"] },
+            agent: { value: cfg.consumer.agent!, from: IDENTITY_FROM[cfg.consumer.agent_source ?? "default"] },
+            role: { value: cfg.consumer.role, from: roleInFile !== undefined && roleInFile !== null && cfg.consumer.role !== null ? "file" : "default" },
+        },
+        session: {
+            value: cfg.claude_loop.session,
+            from: sessionInFile !== undefined ? "file" : readGlobalLoopSession(globalConfigPath()) !== undefined ? "global" : "default",
+        },
+        remote_control: { value: cfg.claude.remote_control, from: inFile !== null ? "file" : "default" },
     };
+}
+
+/** Set `path` (a key under one block) to `value`, or remove it with null; an emptied block goes too. */
+function patchKey(doc: Doc, file: string, block: string, key: string, value: unknown): void {
+    const node = doc.get(block);
+    if (node !== undefined && node !== null && typeof (node as { set?: unknown }).set !== "function") {
+        throw new InitRefusal(409, "CONFLICT", `${file} has a non-mapping '${block}' value — fix it by hand first`);
+    }
+    if (value === null) {
+        doc.deleteIn([block, key]);
+        // An emptied block says nothing: drop it rather than leave `block: {}`.
+        const left = doc.get(block) as { items?: unknown[] } | undefined;
+        if (left && Array.isArray(left.items) && left.items.length === 0) doc.delete(block);
+    } else {
+        if (node === undefined || node === null) doc.set(block, doc.createNode({}));
+        doc.setIn([block, key], value);
+    }
 }
 
 /**
@@ -65,21 +118,8 @@ export function writeSettings(cwd: string, patch: SettingsPatch): ProjectSetting
     const file = findConfigUpwards(cwd);
     if (!file) throw new InitRefusal(409, "CONFLICT", `no .aiball.yaml in ${cwd} or above: set the folder up first (project.init)`);
     const doc = readDoc(file);
-    if (patch.remote_control !== undefined) {
-        const claude = doc.get("claude");
-        if (claude !== undefined && claude !== null && typeof (claude as { set?: unknown }).set !== "function") {
-            throw new InitRefusal(409, "CONFLICT", `${file} has a non-mapping 'claude' value — fix it by hand first`);
-        }
-        if (patch.remote_control === null) {
-            doc.deleteIn(["claude", "remote_control"]);
-            // An emptied `claude:` block says nothing: drop it rather than leave `claude: {}`.
-            const left = doc.get("claude") as { items?: unknown[] } | undefined;
-            if (left && Array.isArray(left.items) && left.items.length === 0) doc.delete("claude");
-        } else {
-            if (claude === undefined || claude === null) doc.set("claude", doc.createNode({}));
-            doc.setIn(["claude", "remote_control"], patch.remote_control);
-        }
-    }
+    if (patch.remote_control !== undefined) patchKey(doc, file, "claude", "remote_control", patch.remote_control);
+    if (patch.session !== undefined) patchKey(doc, file, "claude_loop", "session", patch.session);
     try {
         writeFileSync(file, String(doc));
     } catch (e) {

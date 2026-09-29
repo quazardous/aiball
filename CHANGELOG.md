@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `project.settings` gives a folder's whole resolved configuration (project,
+  agent, role, where its loops run, Remote Control), each value with where it
+  comes from, and `project.settings_set` sets where its loops run.
 - A loop's bar says whether its Claude is in Remote Control now, whatever turned
   it on (the folder's setting or a `/rc` typed in the session).
 - The model a loop's Claude runs is in its bar and in `loop.list`, by its id and a

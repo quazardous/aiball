@@ -610,7 +610,7 @@ export function parseLoopSession(value: unknown): LoopSession | undefined {
 }
 
 /** #3135 — `claude_loop.session` from the global config file; undefined when unset. */
-function readGlobalLoopSession(path: string): LoopSession | undefined {
+export function readGlobalLoopSession(path: string): LoopSession | undefined {
     if (!existsSync(path)) return undefined;
     try {
         const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;

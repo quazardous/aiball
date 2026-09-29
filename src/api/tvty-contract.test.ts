@@ -138,6 +138,15 @@ function problems(value: unknown, shape: Shape, at: string): string[] {
 
 const TAG: Shape = { name: "string", color: "string?" };
 // tvty `ConfigEntry`: the fields without a serde default, and `sources`, which says what `config.set` may write.
+// #3305 — project.settings: the folder's resolved configuration, each value with its `from`.
+const FROM = { value: "any?", from: "string" } as const;
+const SETTINGS: Shape = {
+    file: "string?", configured: "boolean",
+    consumer: { project: FROM, agent: FROM, role: FROM },
+    session: FROM, remote_control: FROM,
+};
+const settingsDir = mkdtempSync(join(tmpdir(), "aiball-3305-"));
+writeFileSync(join(settingsDir, ".aiball.yaml"), "consumer:\n  project: p-3305\n");
 const CONFIG_ENTRY: Shape = { key: "string", scope: "string", type: "string", label: "string", sources: ["string"] };
 const HOLDING = { holder: "string?", held_as: "string?" };
 const TOKEN_USAGE: Shape = { tokens_in: "number", tokens_out: "number", cache_w: "number", cache_r: "number" };
@@ -312,6 +321,8 @@ test("the rest of tvty's calls: its settings, its loops, its pings, its counters
         ["loop.list", {}, [{ name: "string", cwd: "string" }]],
         ["session.list", {}, [{ agent: "string?", running: "boolean?" }]],
         ["bus.whoami", {}, {}],
+        // #3305 — what tvty's new-project assistant starts from: every value with where it comes from.
+        ["project.settings", { cwd: settingsDir }, SETTINGS],
     ];
     for (const [method, params, shape] of reads) {
         const r = await bus(method, params);
@@ -396,6 +407,7 @@ const COVERED_METHODS: Record<string, true | string> = {
     "consumer.restart_claude": "src/bus/restart-claude.test.ts (a running loop)",
     "project.init": "src/bus/project-init.test.ts (a project folder)",
     "project.settings_set": "src/bus/project-settings.test.ts (a project folder)",
+    "project.settings": true,
 };
 
 /**
