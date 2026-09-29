@@ -8,7 +8,8 @@ combination to another without breaking the session.
 
 - **The mode** is where Claude runs: in a **tmux** session, or on the
   daemon's **session host** ([`SESSION-HOST.md`](./SESSION-HOST.md)). It is a
-  setting, `claude_loop.session` (`host` by default; global, then per project),
+  setting, `claude_loop.session` (`host` by default, `tmux` on Windows for now;
+  global, then per project),
   and `--host` / `--tmux` on a start choose one.
 - **The client** is who watches or drives it: **claude-loop** in a terminal,
   or **tvty**. Any number of clients at once.

@@ -290,7 +290,8 @@ export interface AiballConfig {
          *  switches a running loop. */
         bar: BarHost;
         /** #3135: where a loop's Claude runs — `host` (the daemon's session
-         *  host, the default) or `tmux` (a tmux session, with the loop's bar in
+         *  host, the default — `tmux` on Windows for now, see defaultLoopSession)
+         *  or `tmux` (a tmux session, with the loop's bar in
          *  its status line). Global `claude_loop.session`, overridden per
          *  project; `start --host` / `--tmux` wins; `restart` keeps a loop where
          *  it runs unless one of them says otherwise. */
@@ -489,7 +490,7 @@ const DEFAULTS: AiballConfig = {
         esc_takeover: true,
         mouse: true,
         bar: "tmux",
-        session: "host",
+        session: defaultLoopSession(),
         // #351 / #381: AFK = a single ATOMIC combo that TOGGLES away/back —
         // #381 (david s4r9n8) dropped the 2-press timing sequence. Default
         // `f9` (david 9garjb) — the previous `alt+esc` was confirmed
@@ -587,6 +588,20 @@ function pickColors(block: unknown): Partial<AiballConfig["colors"]> {
 /** Read a `colors:` block from a YAML file (the global config). Missing/malformed → {}. */
 /** #3135 — where a loop's Claude runs. */
 export type LoopSession = "host" | "tmux";
+
+/**
+ * Where a loop's Claude runs when nothing says otherwise: the daemon's session
+ * host, except on Windows.
+ *
+ * TEMPORARY: the session host (the process, its control channel, attaching to
+ * it) is built on Unix domain sockets, and a Windows daemon listens on TCP only
+ * — every host start there failed (`session.host` refused). Windows defaults to
+ * tmux (psmux) until the session host runs on Windows; then this goes back to
+ * `host` everywhere. An explicit `claude_loop.session: host` is still honoured.
+ */
+export function defaultLoopSession(platform: NodeJS.Platform = process.platform): LoopSession {
+    return platform === "win32" ? "tmux" : "host";
+}
 
 /** #3135 — a `claude_loop.session` value: `host` or `tmux`; anything else, undefined. */
 export function parseLoopSession(value: unknown): LoopSession | undefined {

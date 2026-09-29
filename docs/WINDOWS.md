@@ -122,8 +122,9 @@ Windows they are protected only by the user profile's permissions.
 - **`aiball reload`** is refused: it is reserved for the local socket, which
   Windows does not have. The same restriction applies to the bus's loop
   controls (`loop.list`, `loop.restart`, `loop.wake`). `aiball restart` works.
-- **Session host mode** (`session: host`) relies on Unix sockets. Start loops
-  in tmux mode: `claude-loop start --tmux`.
+- **Session host mode** (`session: host`) relies on Unix sockets, so loops run
+  in tmux mode (psmux): that is the default on Windows for now. A config that
+  sets `session: host` explicitly fails to start a loop (`session.host` refused).
 - **`claude-loop stop`** ends the loop's kernel but can leave the psmux session
   and Claude running; `claude-loop rm` then cleans up.
 - **`claude-loop tail -f` / `log -f`** need a `tail` command, absent from
