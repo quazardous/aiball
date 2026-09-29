@@ -86,7 +86,7 @@ test("comment_only is refused by name", async () => {
     const t = ticket();
     const r = await comment(AGENT, t, { comment_only: true });
     assert.equal(r.status, 400);
-    assert.match(r.json.error ?? "", /comment_only no longer exists/);
+    assert.equal(r.json.code, "FIELD_NOT_ALLOWED"); // #3249 — the code, not the text
     assert.equal(comments(t), 0);
 });
 
@@ -118,11 +118,11 @@ test("a then implies the handback, and a contradicting one is refused", async ()
     assert.equal((await comment(AGENT, t, { decision_kind: "plan", handback: true })).status, 200, "a matching one is fine");
     const planKeeps = await comment(AGENT, t, { decision_kind: "plan", handback: false });
     assert.equal(planKeeps.status, 400);
-    assert.match(planKeeps.json.error ?? "", /contradicts then: plan/);
+    assert.equal(planKeeps.json.code, "HANDBACK_CONTRADICTS");
     setTicketClaim(t, "worker");
     const stepHandsBack = await comment(AGENT, t, { step: true, step_after_minutes: 0, handback: true });
     assert.equal(stepHandsBack.status, 400);
-    assert.match(stepHandsBack.json.error ?? "", /contradicts then: continue/);
+    assert.equal(stepHandsBack.json.code, "HANDBACK_CONTRADICTS");
     assert.equal(comments(t), 2);
 });
 
@@ -171,5 +171,5 @@ test("a human files freely, and nobody sends a handback at creation", async () =
     assert.equal(human.json.warnings, undefined);
     const sent = await newTicket(AGENT, { handback: false });
     assert.equal(sent.status, 400);
-    assert.match(sent.json.error ?? "", /deduced/);
+    assert.equal(sent.json.code, "FIELD_NOT_ALLOWED");
 });

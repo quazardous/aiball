@@ -1899,7 +1899,7 @@ export function applyMessageDecision(
         // #803 fix : ticket_created events do NOT live in `_messages` (see schema
         // comment "no ticket_created here"). When `ticket_new({then:"plan"})`
         // attaches a pending decision, it lands on `tickets.meta`. The frontend
-        // still POSTs /api/messages/<ticketId>/decide because the
+        // still calls message.decide with the ticket id, because the
         // ticket id IS the ticket_created event id by convention. Fall back to
         // the tickets table when `_messages` doesn't have the id ; apply the
         // decision on the ticket row and return the synthesized ticket_created

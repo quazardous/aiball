@@ -47,7 +47,7 @@ export interface MessageMeta {
     questions?: Record<string, QuestionAnswer>;
     /** Decision-on-comment sidecar (#B.129). Set by the author at post
      *  time (composer dropdown) and updated when the reporter accepts
-     *  or rejects via POST /api/messages/:id/decide. */
+     *  or rejects via the bus's message.decide. */
     decision?: CommentDecision;
     /** One-line agent-authored TLDR of the **thread state up to and
      *  including this comment** (#B.130). Not just this comment's body

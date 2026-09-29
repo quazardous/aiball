@@ -207,6 +207,16 @@ export const ERROR_CODES = {
     MILESTONE_HAS_OPEN: "MILESTONE_HAS_OPEN",
     /** #2910 — an agent writing on a ticket above the levels it works on. */
     LEVEL_READ_ONLY: "LEVEL_READ_ONLY",
+    /** #3249 — a post's field is missing (a project, a title, a ticket_id). */
+    FIELD_REQUIRED: "FIELD_REQUIRED",
+    /** #3249 — a post's field has the wrong type or a value not in its list. */
+    FIELD_INVALID: "FIELD_INVALID",
+    /** #3249 — a field this kind of post does not take (a step on a ticket, commits on a close). */
+    FIELD_NOT_ALLOWED: "FIELD_NOT_ALLOWED",
+    /** #3249 — an agent's comment without its summary_until. */
+    SUMMARY_REQUIRED: "SUMMARY_REQUIRED",
+    /** #3249 — a summary_until over the project's budget. */
+    SUMMARY_TOO_LONG: "SUMMARY_TOO_LONG",
 } as const;
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 

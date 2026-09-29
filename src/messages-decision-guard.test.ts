@@ -66,8 +66,7 @@ test("#569 — ticket_reply then:resolved on pending → PARENT_PENDING_MODERATI
     assert.ok(caught instanceof Error);
     const err = caught as Error & { code?: string };
     assert.equal(err.code, "PARENT_PENDING_MODERATION");
-    assert.match(err.message, /cannot propose resolution/);
-    assert.match(err.message, /status "pending"/);
+    // #3249 — the code says it; the text is for a human.
 });
 
 test("#569 — ticket_reply then:plan on pending → PARENT_PENDING_MODERATION", () => {

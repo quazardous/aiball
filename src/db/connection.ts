@@ -238,7 +238,7 @@ export interface NewMessage {
     /** #B.129 decision-on-comment: author tags a comment as decisional
      *  at post-time (`plan` / `resolution` / extensible). Stored in
      *  `meta.decision = {kind, status:"pending"}` so the reporter can
-     *  later accept/reject via POST /api/messages/:id/decide. */
+     *  later accept/reject via the bus's message.decide. */
     decision_kind?: string | null;
     /** #B.130 phase 1: author-supplied one-line TLDR. comment_added
      *  only — used by brief-mode reads to skip the full body. */

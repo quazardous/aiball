@@ -1,5 +1,6 @@
 /** #3063 — a ticket: its read, and the gestures on it (owner, hold, snooze, move, milestone). */
 import { z } from "zod";
+import { moderationRefusal } from "../../moderation-gate.js";
 import { authorOf, consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { id } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
@@ -222,9 +223,8 @@ defineMethod({
     // #3237 — a refusal, as everywhere else: it used to come back as a 200
     // carrying `{ error }`, which a client (the MCP's ticket_claim) reported as
     // a claim made.
-    if (isClaim && t.status !== "approved" && !isHuman(caller)) {
-        throw new Refusal(409, `cannot claim a ticket in status "${t.status}" — the reporter must moderate (approve) the ticket first`, ERROR_CODES.PARENT_PENDING_MODERATION);
-    }
+    const claimRefusal = isClaim ? moderationRefusal("claim", t, { human: isHuman(caller) }) : null; // #3249
+    if (claimRefusal) throw new Refusal(claimRefusal.status, claimRefusal.error, claimRefusal.code);
     // #2241 — an agent claims only within its scope: a cto agent `roadmap` and
     // `milestone` tickets, a coder agent tasks. Same claim, different scope. A
     // human is not restricted, and neither is a moderator's push-assignment.

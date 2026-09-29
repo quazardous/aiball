@@ -63,7 +63,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 
 | Code | Status | When |
 |---|---|---|
-| `PARENT_PENDING_MODERATION` | 409 | The ticket is not approved yet. Also on `POST /api/messages`: a proposal on a ticket still pending; and on `message.decide` / `message.accept_and_close`: deciding a proposal whose ticket is still pending. |
+| `PARENT_PENDING_MODERATION` | 409 | The ticket is not approved yet: an agent proposing on it or claiming it, anyone deciding its proposal. One rule for the three (a human may propose and claim on a pending ticket; a plan may amend one already waiting); `ticket.get`'s `decision_proposable` says it for its reader. |
 | `TICKET_ASSIGNED` | 409 | The ticket is assigned to someone else. |
 | `TICKET_HELD` | 409 | Another agent holds it, still protected. |
 | `LEVEL_READ_ONLY` | 403 | The ticket is above the levels this agent works on. Also on `POST /api/messages` and `POST /api/tickets/:id/milestone`. |
@@ -73,6 +73,11 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | Code | Status | When |
 |---|---|---|
 | `HANDBACK_REQUIRED` | 400 | An agent's comment with no `then` and no `handback`. |
+| `FIELD_REQUIRED` | 400 | A post's field is missing: its `project`, its `title`, its `ticket_id`. |
+| `FIELD_INVALID` | 400 | A post's field has the wrong type, or a value outside its list (`intent`, `priority`, `scope`…). |
+| `FIELD_NOT_ALLOWED` | 400 | A field this kind of post does not take: a step on a ticket, `commits` on a close, `summary_until` off a comment, the retired `comment_only`. |
+| `SUMMARY_REQUIRED` | 400 | An agent's comment without its `summary_until`. |
+| `SUMMARY_TOO_LONG` | 400 | A `summary_until` over the project's budget (`tickets.rules.summary_max`). |
 | `HANDBACK_CONTRADICTS` | 400 | A `handback` that says the opposite of the `then`. |
 | `COMMITS_REQUIRED` | 400 | An agent's comment that does not say which commits it delivers. |
 | `STEP_RESUME_REQUIRED` | 400 | `then: continue` without `resume_on`. |

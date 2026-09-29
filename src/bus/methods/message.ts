@@ -1,5 +1,6 @@
 /** #3063 — messages: one read, and the gestures on a comment or a ticket event. */
 import { z } from "zod";
+import { moderationRefusal } from "../../moderation-gate.js";
 import { isMachineLocal } from "../../machine-secret.js";
 import { authorOf, consumerIdOf, defineMethod, Refusal, refusalFrom } from "../methods.js";
 import { id } from "../params.js";
@@ -270,7 +271,7 @@ defineMethod({
         if (prior) return { ...withTagsOne(prior), replayed: true };
     }
     const v = validateNewMessage(p, author);
-    if ("error" in v) throw new Refusal(400, v.error);
+    if ("error" in v) throw new Refusal(400, v.error, v.code);
     // #830 — decision-event kinds (plan_accepted / plan_rejected / …) are
     // emitted server-side by the /decide handler ONLY. External callers
     // can't fabricate them: a real accept/reject must flow through the
@@ -364,13 +365,8 @@ function refuseWhileTicketAwaitsModeration(messageId: number): void {
     const m = getMessage(messageId);
     if (!m) return;
     const ticket = m.kind === "ticket_created" ? m : m.ticket_id != null ? getMessage(m.ticket_id) : null;
-    if (ticket && ticket.status !== "approved") {
-        throw new Refusal(
-            409,
-            `approve the ticket first (it is ${ticket.status}), then decide its proposal`,
-            ERROR_CODES.PARENT_PENDING_MODERATION,
-        );
-    }
+    const refusal = ticket ? moderationRefusal("decide", ticket, { human: false }) : null; // #3249
+    if (refusal) throw new Refusal(refusal.status, refusal.error, refusal.code);
 }
 
 /**

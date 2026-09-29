@@ -58,6 +58,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A malformed post is refused with a precise code (`FIELD_REQUIRED`,
+  `FIELD_INVALID`, `FIELD_NOT_ALLOWED`, `SUMMARY_REQUIRED`, `SUMMARY_TOO_LONG`)
+  instead of the generic `BAD_REQUEST`. `decision_proposable` no longer tells a
+  human "no" on a ticket they may propose on.
 - `autopoll.throttle` may be 0 (a reminder at every Stop), as its description
   said and the loop did; the settings page refused it (at least 10).
 - A loop is started in the folder it is asked for (`--cwd`, else the shell's),

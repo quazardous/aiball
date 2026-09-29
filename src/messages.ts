@@ -1,3 +1,4 @@
+import { moderationRefusal } from "./moderation-gate.js";
 import {
     getMessage,
     getProject,
@@ -74,6 +75,8 @@ export { isDecisionEventKind };
 
 export interface ValidationError {
     error: string;
+    /** #3249 — what a client branches on; the text is for a human. */
+    code: ErrorCode;
 }
 
 /** #2203 — the refusal an agent reads when its summary_until is over budget.
@@ -173,27 +176,27 @@ export function creationHandbackFor(msg: NewMessage): { handback: boolean; warni
  * `by_agent` is then never read here. Absent (the spool, a key), the body's.
  */
 export function validateNewMessage(input: unknown, author?: string): ValidationError | NewMessage {
-    if (!input || typeof input !== "object") return { error: "body must be object" };
+    if (!input || typeof input !== "object") return { error: "body must be object", code: ERROR_CODES.FIELD_INVALID };
     const o = input as Record<string, unknown>;
     if (typeof o.project !== "string" || !o.project) {
-        return { error: "project required" };
+        return { error: "project required", code: ERROR_CODES.FIELD_REQUIRED };
     }
     if (typeof o.kind !== "string" || !(VALID_KINDS as readonly string[]).includes(o.kind)) {
-        return { error: `kind must be one of ${VALID_KINDS.join(", ")}` };
+        return { error: `kind must be one of ${VALID_KINDS.join(", ")}`, code: ERROR_CODES.FIELD_INVALID };
     }
     const kind = o.kind as MessageKind;
     if (kind !== "ticket_created") {
         if (typeof o.ticket_id !== "number" || !o.ticket_id) {
-            return { error: `ticket_id required for kind=${kind}` };
+            return { error: `ticket_id required for kind=${kind}`, code: ERROR_CODES.FIELD_REQUIRED };
         }
     }
     if (kind === "ticket_created" && (typeof o.title !== "string" || !o.title)) {
-        return { error: "title required for ticket_created" };
+        return { error: "title required for ticket_created", code: ERROR_CODES.FIELD_REQUIRED };
     }
     let intent: Intent | null = null;
     if (o.intent !== undefined && o.intent !== null) {
         if (typeof o.intent !== "string" || !INTENTS.includes(o.intent as Intent)) {
-            return { error: `intent must be one of ${INTENTS.join(", ")}` };
+            return { error: `intent must be one of ${INTENTS.join(", ")}`, code: ERROR_CODES.FIELD_INVALID };
         }
         intent = o.intent as Intent;
     }
@@ -204,7 +207,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     let priority: Priority | null = null;
     if (o.priority !== undefined && o.priority !== null) {
         if (typeof o.priority !== "string" || !(PRIORITIES as readonly string[]).includes(o.priority)) {
-            return { error: `priority must be one of ${PRIORITIES.join(", ")}` };
+            return { error: `priority must be one of ${PRIORITIES.join(", ")}`, code: ERROR_CODES.FIELD_INVALID };
         }
         priority = o.priority as Priority;
     }
@@ -221,18 +224,18 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     let decisionKind: string | null = null;
     if (o.decision_kind !== undefined && o.decision_kind !== null) {
         if (typeof o.decision_kind !== "string") {
-            return { error: "decision_kind must be a string" };
+            return { error: "decision_kind must be a string", code: ERROR_CODES.FIELD_INVALID };
         }
         if (!isDecisionKind(o.decision_kind)) {
-            return { error: `decision_kind must be one of ${DECISION_KINDS.join(", ")}` };
+            return { error: `decision_kind must be one of ${DECISION_KINDS.join(", ")}`, code: ERROR_CODES.FIELD_INVALID };
         }
         if (kind !== "comment_added" && kind !== "ticket_created") {
-            return { error: `decision_kind only allowed on comment_added or ticket_created (got kind=${kind})` };
+            return { error: `decision_kind only allowed on comment_added or ticket_created (got kind=${kind})`, code: ERROR_CODES.FIELD_NOT_ALLOWED };
         }
         // #2308 — which kinds may sit on which host is the table's `allowedOn`.
         if (!isDecisionAllowedOn(o.decision_kind, kind)) {
             const allowed = kindsAllowedOn(kind as DecisionHost).map((k) => `"${k}"`).join(" or ");
-            return { error: `decision_kind on ${kind} must be ${allowed} (got "${o.decision_kind}")` };
+            return { error: `decision_kind on ${kind} must be ${allowed} (got "${o.decision_kind}")`, code: ERROR_CODES.FIELD_INVALID };
         }
         decisionKind = o.decision_kind;
     }
@@ -253,7 +256,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
         // "ça devrait être un champ comme body".
         const provided = typeof o.summary_until === "string" ? o.summary_until.trim() : "";
         if (!provided && !authorIsHuman) {
-            return { error: "summary_until is required on comment_added for agent authors (one-line TLDR of the thread state up to this comment; `aiball ticket comment --summary <text>` from the CLI). Humans skip the requirement." };
+            return { error: "summary_until is required on comment_added for agent authors (one-line TLDR of the thread state up to this comment; `aiball ticket comment --summary <text>` from the CLI). Humans skip the requirement.", code: ERROR_CODES.SUMMARY_REQUIRED };
         }
         // #2203 — the budget is back, as a REFUSAL. The caps removed above
         // truncated mid-word; this one never cuts anything: the write is refused
@@ -271,29 +274,30 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
                 // summary text. Lands in the daemon journal, like the other
                 // `[tag]` lines.
                 console.error(`[summary-budget] refused agent=${byAgent ?? "?"} project=${o.project} length=${provided.length} budget=${max}`);
-                return { error: summaryOverBudget(provided.length, max) };
+                return { error: summaryOverBudget(provided.length, max), code: ERROR_CODES.SUMMARY_TOO_LONG };
             }
         }
         if (o.summary_until !== undefined && o.summary_until !== null && typeof o.summary_until !== "string") {
-            return { error: "summary_until must be a string" };
+            return { error: "summary_until must be a string", code: ERROR_CODES.FIELD_INVALID };
         }
         summaryUntil = provided || null;
     } else if (o.summary_until !== undefined && o.summary_until !== null && o.summary_until !== "") {
-        return { error: `summary_until only allowed on comment_added (got kind=${kind})` };
+        return { error: `summary_until only allowed on comment_added (got kind=${kind})`, code: ERROR_CODES.FIELD_NOT_ALLOWED };
     }
     // #2331 — `comment_only` is gone: say so instead of ignoring it.
     if (o.comment_only !== undefined) {
         return {
             error: "comment_only no longer exists: set handback: true (you hand the ticket back and wait for an answer) "
                 + "or handback: false (you keep working on it), or attach a then. Nothing was posted.",
+            code: ERROR_CODES.FIELD_NOT_ALLOWED,
         };
     }
     // #2331 — `handback` is explicit on a comment only; a new ticket's is deduced.
     let handback: boolean | undefined;
     if (o.handback !== undefined && o.handback !== null) {
-        if (typeof o.handback !== "boolean") return { error: "handback must be true or false" };
+        if (typeof o.handback !== "boolean") return { error: "handback must be true or false", code: ERROR_CODES.FIELD_INVALID };
         if (kind !== "comment_added") {
-            return { error: `handback is only set on a comment (got kind=${kind}); a new ticket's handback is deduced from who files it` };
+            return { error: `handback is only set on a comment (got kind=${kind}); a new ticket's handback is deduced from who files it`, code: ERROR_CODES.FIELD_NOT_ALLOWED };
         }
         handback = o.handback;
     }
@@ -301,9 +305,9 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     // author holds. A comment only, and never together with a decision.
     let step = false;
     if (o.step !== undefined && o.step !== null && o.step !== false) {
-        if (o.step !== true) return { error: "step must be true when present" };
-        if (kind !== "comment_added") return { error: `step only allowed on comment_added (got kind=${kind})` };
-        if (decisionKind) return { error: "step and decision_kind are exclusive: then: continue proposes nothing" };
+        if (o.step !== true) return { error: "step must be true when present", code: ERROR_CODES.FIELD_INVALID };
+        if (kind !== "comment_added") return { error: `step only allowed on comment_added (got kind=${kind})`, code: ERROR_CODES.FIELD_NOT_ALLOWED };
+        if (decisionKind) return { error: "step and decision_kind are exclusive: then: continue proposes nothing", code: ERROR_CODES.FIELD_NOT_ALLOWED };
         step = true;
     }
     // #2449 david — the agent says when it can resume: at once (absent, or 0) or
@@ -311,11 +315,11 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     let stepAfterMinutes: number | undefined = undefined;
     if (o.step_after_minutes !== undefined && o.step_after_minutes !== null) {
         const n = o.step_after_minutes;
-        if (!step) return { error: "step_after_minutes only goes with a step (then: continue)" };
+        if (!step) return { error: "step_after_minutes only goes with a step (then: continue)", code: ERROR_CODES.FIELD_NOT_ALLOWED };
         // The upper bound is the project's (`tickets.steps.max_wait`),
         // checked where the project is known: `withoutDecisionRefusal`.
         if (typeof n !== "number" || !Number.isInteger(n) || n < 0) {
-            return { error: "step_after_minutes must be a whole number of minutes, 0 or more" };
+            return { error: "step_after_minutes must be a whole number of minutes, 0 or more", code: ERROR_CODES.FIELD_INVALID };
         }
         stepAfterMinutes = n;
     }
@@ -323,9 +327,9 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     let stepResumeOnTicket: number | undefined = undefined;
     if (o.step_resume_on_ticket !== undefined && o.step_resume_on_ticket !== null) {
         const n = o.step_resume_on_ticket;
-        if (!step) return { error: "step_resume_on_ticket only goes with a step (then: continue)" };
+        if (!step) return { error: "step_resume_on_ticket only goes with a step (then: continue)", code: ERROR_CODES.FIELD_NOT_ALLOWED };
         if (typeof n !== "number" || !Number.isInteger(n) || n <= 0) {
-            return { error: "step_resume_on_ticket must be a ticket id" };
+            return { error: "step_resume_on_ticket must be a ticket id", code: ERROR_CODES.FIELD_INVALID };
         }
         stepResumeOnTicket = n;
     }
@@ -334,15 +338,15 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     // all become null, which is not the same as the field being absent.
     let commits: string[] | null | undefined = undefined;
     if (o.commits === null || o.commits === "none" || (Array.isArray(o.commits) && o.commits.length === 0)) {
-        if (kind !== "comment_added") return { error: "commits only go with a comment" };
+        if (kind !== "comment_added") return { error: "commits only go with a comment", code: ERROR_CODES.FIELD_NOT_ALLOWED };
         commits = null;
     } else if (o.commits !== undefined) {
         if (!Array.isArray(o.commits) || !o.commits.every((c) => typeof c === "string")) {
-            return { error: "commits must be a list of commit SHAs" };
+            return { error: "commits must be a list of commit SHAs", code: ERROR_CODES.FIELD_INVALID };
         }
-        if (kind !== "comment_added") return { error: "commits only go with a comment" };
+        if (kind !== "comment_added") return { error: "commits only go with a comment", code: ERROR_CODES.FIELD_NOT_ALLOWED };
         // A payload guard only: how many earn is `tickets.wait_credit.earn.commits_per_comment`.
-        if (o.commits.length > 100) return { error: "commits: at most 100 per comment" };
+        if (o.commits.length > 100) return { error: "commits: at most 100 per comment", code: ERROR_CODES.FIELD_INVALID };
         commits = o.commits as string[];
     }
     // #B.245 tristate: composer-side `scope`. One of
@@ -354,10 +358,10 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     let scope: "internal" | "default" | "broadcast" | undefined = undefined;
     if (o.scope !== undefined && o.scope !== null) {
         if (typeof o.scope !== "string") {
-            return { error: "scope must be a string" };
+            return { error: "scope must be a string", code: ERROR_CODES.FIELD_INVALID };
         }
         if (o.scope !== "internal" && o.scope !== "default" && o.scope !== "broadcast") {
-            return { error: "scope must be one of internal, default, broadcast" };
+            return { error: "scope must be one of internal, default, broadcast", code: ERROR_CODES.FIELD_INVALID };
         }
         scope = o.scope as "internal" | "default" | "broadcast";
     }
@@ -367,10 +371,10 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     let fromProject: string | null = null;
     if (o.from_project !== undefined && o.from_project !== null) {
         if (typeof o.from_project !== "string" || !o.from_project.trim()) {
-            return { error: "from_project must be a non-empty string" };
+            return { error: "from_project must be a non-empty string", code: ERROR_CODES.FIELD_INVALID };
         }
         if (kind !== "ticket_created") {
-            return { error: `from_project only allowed on ticket_created (got kind=${kind})` };
+            return { error: `from_project only allowed on ticket_created (got kind=${kind})`, code: ERROR_CODES.FIELD_NOT_ALLOWED };
         }
         if (o.from_project === o.project) {
             // Redundant — same as project means it's intra-project. Treat as
@@ -574,15 +578,18 @@ function assertDecisionOnApprovedTicket(input: NewMessage): void {
     // Human moderator bypass — chaining ticket+resolution+approve en une rafale
     // est un cas légitime côté humain (orchestration manuelle, patch
     // d'anciens threads). La règle vise les agents.
-    if (input.by_agent && isHuman(input.by_agent)) return;
     const parent = getMessage(input.ticket_id);
     if (!parent || parent.kind !== "ticket_created") return;
-    if (parent.status === "approved") return;
-    if (input.decision_kind === "plan" && hasPendingPlan(input.ticket_id)) return;
-    const err = new Error(
-        `cannot propose ${input.decision_kind} on a ticket in status "${parent.status}" — the reporter must moderate (approve) the ticket first ; post a plain comment_added (without "then:") until then`,
-    );
-    (err as Error & { code?: string }).code = ERROR_CODES.PARENT_PENDING_MODERATION;
+    const ticketId = input.ticket_id;
+    // #3249 — the rule and its exemptions (a human; a plan amending one waiting) live in moderation-gate.ts.
+    const refusal = moderationRefusal("propose", parent, {
+        human: !!input.by_agent && isHuman(input.by_agent),
+        decisionKind: input.decision_kind,
+        pendingPlan: () => hasPendingPlan(ticketId),
+    });
+    if (!refusal) return;
+    const err = new Error(refusal.error);
+    (err as Error & { code?: string }).code = refusal.code;
     throw err;
 }
 

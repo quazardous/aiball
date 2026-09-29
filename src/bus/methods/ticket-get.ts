@@ -1,12 +1,13 @@
 /** #3063 — a ticket read: its header, and its thread in the shape asked. */
 import { z } from "zod";
+import { moderationRefusal } from "../../moderation-gate.js";
 import { isMachineLocal } from "../../machine-secret.js";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { flag } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { computeActionableTicketIds } from "../../db/projects.js";
 import { type FeedPagination, paginateFeed } from "../../queries/feed-paginate.js";
-import { type Message, getConsumer, getMessage, getMessageByHashid, getTicketStages, getTicketTitles, getTicketTokenUsage, listMessageTags, listMessages, listSubTickets, listTypedRelationsForTicket, resolveAttachments, ticketUnreadFlags } from "../../db.js";
+import { type Message, getConsumer, isHuman, getMessage, getMessageByHashid, getTicketStages, getTicketTitles, getTicketTokenUsage, listMessageTags, listMessages, listSubTickets, listTypedRelationsForTicket, resolveAttachments, ticketUnreadFlags } from "../../db.js";
 import { getInboxAgg, liveStep } from "../../db/inbox-agg.js";
 import { holding, ticketClaimHeldUntil } from "../../db/claim-hold.js";
 import { isLineageRelationKind } from "../../relations.js";
@@ -284,7 +285,10 @@ defineMethod({
         // (PARENT_PENDING_MODERATION) si l'agent tente, mais le flag
         // est plus pédagogique : l'agent lit le ticket → voit le flag →
         // décide d'attendre / d'asker un plain comment.
-        decision_proposable: t.status === "approved",
+        // #3249 — through the one moderation gate, for this reader: a human may
+        // propose on a pending ticket, an agent may not (a resolution: the
+        // strictest; a plan amending one waiting is the only other opening).
+        decision_proposable: moderationRefusal("propose", t, { human: isHuman(flagConsumer), decisionKind: "resolution" }) === null,
         // #2112 david: "si pas de payload doit être complètement invisible".
         // Invisible means the UI must not even ASK — a `GET …/payload` on every
         // thread open, answered 404 for all but a handful of tickets, is a

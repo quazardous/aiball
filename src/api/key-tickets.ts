@@ -99,7 +99,7 @@ keyTicketsRouter.post("/tickets", (req: Request, res: Response) => {
         intent: body.intent,
         by_agent: grant.source,
     });
-    if ("error" in v) return refuse(res, 400, v.error);
+    if ("error" in v) return refuse(res, 400, v.error, v.code);
     v.by_agent = grant.source;
 
     if (body.approved !== undefined && typeof body.approved !== "boolean") {

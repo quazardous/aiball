@@ -67,7 +67,7 @@ test("a ticket another agent holds refuses the step and names the holder", async
     setTicketClaim(t, "other");
     const r = await step(t);
     assert.equal(r.status, 409);
-    assert.match(r.json.error ?? "", /held by other/);
+    assert.equal(r.json.code, "STEP_NOT_HOLDER"); // #3249 — the code, not the text
     assert.equal(commentsOn(t).length, 0);
 });
 
@@ -100,7 +100,7 @@ test("a step cannot also carry a decision", async () => {
     setTicketClaim(t, "worker");
     const r = await step(t, { decision_kind: "plan" });
     assert.equal(r.status, 400);
-    assert.match(r.json.error ?? "", /exclusive/);
+    assert.equal(r.json.code, "FIELD_NOT_ALLOWED");
     assert.equal(commentsOn(t).length, 0);
 });
 
@@ -114,7 +114,8 @@ test("a step may wait up to the project's limit, 120 minutes by default, and not
 
     const over = await step(t, { step_after_minutes: 121 });
     assert.equal(over.status, 400);
-    assert.match(over.json.error ?? "", /at most 120 on this project \(tickets\.steps\.max_wait\)/);
+    assert.equal(over.json.code, "STEP_TIMER_TOO_LONG");
+    assert.match(over.json.error ?? "", /at most 120/, "the limit the agent must stay under"); // guidance: keeps the number
     assert.equal(commentsOn(t).length, 1, "the refused step left nothing");
 
     setConfigOverride("p-2308", "tickets.steps.max_wait", 14400);
@@ -145,6 +146,6 @@ test("#2781 an owner's step on a ticket nobody holds claims it; one held by anot
     setTicketClaim(held, "other");
     const refused = await post({ project: "p-2781", kind: "comment_added", ticket_id: held, body: "on it", summary_until: "s", step: true, step_after_minutes: 0 });
     assert.equal(refused.status, 409);
-    assert.match(refused.json.error ?? "", /held by other/);
+    assert.equal(refused.json.code, "STEP_NOT_HOLDER");
     assert.equal(claimant(held), "other");
 });
