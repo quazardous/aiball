@@ -121,7 +121,7 @@ import {
     CompactConfirmWatcher,
     TrustDialogWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, UpdateInstalledWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, LimitReachedWatcher, limitResetsOf, UpdateInstalledWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
@@ -170,7 +170,7 @@ import {
     setIpcSseConnected,
     setIpcLinkDown,
     setIpcDaemonDown,
-    setIpcNotLoggedIn, setIpcRestartNeeded, setIpcRestartPending, setIpcTrustDialog,
+    setIpcNotLoggedIn, setIpcLimitReached, setIpcRestartNeeded, setIpcRestartPending, setIpcTrustDialog,
     setIpcApiUnreachable,
     refreshIpcApiUnreachableSeen,
     setIpcLastWakeAtMs,
@@ -242,7 +242,9 @@ const tname = tmuxName(name);
  */
 function cleanShutdown(reason: string): void {
     log(`clean shutdown (${reason}) — stopping loop '${name}' (transient state swept; rm to delete)`);
-    term.end();
+    // #3235 — the end must reach the terminal before the process exits (a
+    // host's shutdown is a request on its channel); never wait more than 2 s.
+    const ended = Promise.race([term.end(), new Promise<void>((r) => setTimeout(r, 2_000))]);
     // #442 sweep — drop the transient RUNTIME markers (stale `loop.pid`,
     // `idle-since`, `wake-*`, `human-typing`, `busy-defer-until`,
     // `inject.sock`, …) so the dead loop reads cleanly in `claude-loop list` and a
@@ -258,7 +260,7 @@ function cleanShutdown(reason: string): void {
             }
         } catch { /* state dir already gone */ }
     }
-    process.exit(0);
+    void ended.finally(() => process.exit(0));
 }
 
 // #413: le timer enregistre SON PROPRE pid ici, en écrasant le pid-wrapper
@@ -770,6 +772,7 @@ const activityW = new ActivityWatcher();
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
+const limitReachedW = new LimitReachedWatcher();
 const updateInstalledW = new UpdateInstalledWatcher();
 const apiUnreachableW = new ApiUnreachableWatcher();
 const errorW = new ErrorWatcher();
@@ -782,7 +785,7 @@ const trustDialogW = new TrustDialogWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, updateInstalledW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
+    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, limitReachedW, updateInstalledW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -937,6 +940,15 @@ if (sd) {
         log("watcher: not_logged_in begin → setIpcNotLoggedIn(true)");
         setIpcNotLoggedIn(true);
     });
+    // #3268 — a usage limit reached: hold the loop at once (AFK ∞, the F9
+    // hold), block the wakes, say it in the bar with the reset when read. The
+    // human lets the hold go; the flag itself lifts when Claude works again.
+    limitReachedW.on("begin", () => {
+        const resets = limitResetsOf(limitReachedW.banner() ?? "", Date.now());
+        log(`watcher: limit_reached begin → hold (AFK ∞)${resets ? `, resets ${resets.text}` : ""}`);
+        setIpcLimitReached(true, resets);
+        getAfkService().setInf();
+    });
     // #3074 — Claude Code updated itself and asks for a restart: said in the
     // bar for a host to offer it. Latched: a restart (a fresh process) clears it.
     updateInstalledW.on("begin", () => {
@@ -972,6 +984,10 @@ if (sd) {
     // both the login banner and the retry banner, so this can't fight the
     // `begin` sets above.
     busyW.on("begin", () => {
+        if (getIpcState().limitReached) {
+            log("watcher: busy begin → clearing limitReached (claude is running → the limit lifted)");
+            setIpcLimitReached(false);
+        }
         if (getIpcState().notLoggedIn) {
             log("watcher: busy begin → clearing notLoggedIn (claude is running → logged in)");
             setIpcNotLoggedIn(false);
@@ -2072,6 +2088,10 @@ async function mainSse(): Promise<void> {
         // is now the belt to the busy-begin clear's suspenders (that path fires
         // earlier + hook-independently); kept for the case where a turn ends
         // without the busy footer ever being observed.
+        if (getIpcState().limitReached) {
+            log("hook:stop → clearing limitReached (a turn completed → the limit lifted)");
+            setIpcLimitReached(false);
+        }
         if (getIpcState().notLoggedIn) {
             log("hook:stop → clearing notLoggedIn (a turn completed → logged in)");
             setIpcNotLoggedIn(false);

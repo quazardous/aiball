@@ -25,6 +25,19 @@ const HUMAN_HERE = {
     denied: { message: "starting or stopping a session is a human's gesture", code: ERROR_CODES.MODERATOR_ONLY },
 };
 
+/**
+ * #3235 — an agent's session that runs something: a host left without its
+ * command (a loop stopped before its end shut the host down) is shut down and
+ * forgotten here, so a new start replaces it instead of answering HOST_BUSY.
+ */
+async function busySession(agent: string): Promise<boolean> {
+    const link = sessionFor({ agent });
+    if (!link) return false;
+    if (link.running) return true;
+    await stopSession(link);
+    return false;
+}
+
 const size = z.object({ rows: z.number().int().min(1).max(1000), cols: z.number().int().min(1).max(1000) }).optional();
 
 /**
@@ -67,7 +80,7 @@ defineMethod({
             if (named && isPresent(named)) {
                 throw new Refusal(409, `${named} runs in claude-loop`, ERROR_CODES.HOST_BUSY, { host: "claude-loop" });
             }
-            if (named && sessionFor({ agent: named })) {
+            if (named && await busySession(named)) {
                 throw new Refusal(409, `${named} runs on this daemon's host already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
             }
             // #3066 3c — the loop's own start prepares Claude (settings, hooks,
@@ -154,7 +167,7 @@ defineMethod({
     }),
     run: async (caller, p) => {
         if (caller.transport !== "uds") throw new Refusal(403, "a session runs on this machine: local callers only", ERROR_CODES.FORBIDDEN);
-        if (sessionFor({ agent: p.agent })) {
+        if (await busySession(p.agent)) {
             throw new Refusal(409, `${p.agent} runs on this daemon's host already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
         }
         const control = join(hostDirFor({ agent: p.agent }), "control.sock");

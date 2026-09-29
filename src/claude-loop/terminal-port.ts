@@ -27,8 +27,8 @@ export interface TerminalPort {
     inject(phrase: string, onWillInject?: () => void): Promise<boolean>;
     /** Raw bytes to Claude: a key such as Esc, Enter or an arrow. */
     injectRaw(bytes: string): Promise<boolean>;
-    /** End the terminal, and Claude with it. */
-    end(): void;
+    /** End the terminal, and Claude with it; resolves once the request is out (#3235). */
+    end(): Promise<void>;
 }
 
 /**
@@ -69,7 +69,7 @@ export function tmuxPort(opts: { session: string; stateDir: string | undefined; 
         },
         inject: (phrase, onWillInject) => injectWakePhrase(pane, phrase, onWillInject),
         injectRaw: (bytes) => injectRawBytes(opts.stateDir!, bytes),
-        end() {
+        async end() {
             try { spawnSync(MUX_CMD, ["kill-session", "-t", opts.session], { stdio: "ignore" }); } catch { /* tmux already gone */ }
         },
     };
@@ -200,7 +200,11 @@ export function hostPort(opts: {
             return inject("\r");
         },
         injectRaw: (bytes) => inject(bytes),
-        end() { void call("host.stop", {}).catch(() => { /* already gone */ }); },
+        // #3235 — the host goes with Claude, as the tmux session does: `host.stop`
+        // stopped Claude alone, and the host left behind made the loop read as
+        // alive and a new start answer HOST_BUSY. The host removes its directory
+        // as it goes, and the daemon forgets the session when its channel closes.
+        async end() { await call("host.shutdown", {}).catch(() => { /* already gone */ }); },
         close() { sock?.end(); },
     };
 }
