@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `agent.<id>.backlog`: a client hears the tickets whose place in an agent's
+  backlog changed (sunk by a backlog wake, back from their rest, another tier),
+  for an agent with no loop too.
 - `claude-loop stop --keep-session` stops a loop's kernel only: Claude keeps
   running in its session, to attach to or `restart` later.
 - A client taking the controls of a loop in tmux can make its other clients

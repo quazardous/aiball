@@ -11,6 +11,7 @@ import "./methods/ticket.js";
 import "./methods/inbox.js";
 import "./methods/ticket-get.js";
 import "./methods/subjects.js";
+import "./methods/backlog-subject.js";
 import "./methods/session.js";
 import "./methods/loop.js";
 import "./methods/read-state.js";

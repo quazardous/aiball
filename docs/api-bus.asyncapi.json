@@ -6,6 +6,24 @@
     "description": "bus.subscribe gives a subject's value, then bus.event notifications with each change as data. See docs/API-BUS.md."
   },
   "channels": {
+    "agent.*.backlog": {
+      "address": "agent.{id}.backlog",
+      "parameters": {
+        "id": {
+          "description": "an id"
+        }
+      },
+      "messages": {
+        "value": {
+          "name": "value",
+          "summary": "{ project, backlog: [{ id, tier, cooled_until }] }: the agent's backlog as the picker sees it"
+        },
+        "event": {
+          "name": "event",
+          "summary": "{ project, changed: [ids] }: the tickets whose place changed (sunk by a wake, out of their rest, another tier, in or out)"
+        }
+      }
+    },
     "agent.*.bar": {
       "address": "agent.{id}.bar",
       "parameters": {
