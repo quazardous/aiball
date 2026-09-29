@@ -102,10 +102,6 @@ export interface BarSnapshot {
     /** #2230 — Claude Code's folder trust dialog on screen ? Same ORANGE
      *  overlay + an `attach to answer` hint. Cleared when the dialog goes. */
     trustDialog: boolean;
-    /** #3074 — Claude Code installed an update ? A `restart` hint in the state tag. */
-    restartNeeded: boolean;
-    /** #3117 — a restart waits for Claude to go idle ? A hint in the state tag. */
-    restartPending: boolean;
     /** #1116 — Claude Code can't reach the API (retry banner) ? Same ORANGE
      *  overlay + a `retrying` hint in the state tag. Cleared on busy-begin /
      *  Stop. */
@@ -267,8 +263,6 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         limitReached: ipc.limitReached === true,
         limitResetsText: ipc.limitResets?.text ?? null,
         trustDialog: ipc.trustDialog,
-        restartNeeded: ipc.restartNeeded === true,
-        restartPending: ipc.restartPending === true,
         apiUnreachable: ipc.apiUnreachable,
     };
 }
@@ -363,8 +357,6 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.limitReached !== next.limitReached || prev.limitResetsText !== next.limitResetsText) changed.push("loopStatus");
     // #2230 — the trust dialog flips the bar ORANGE + the state-tag hint too.
     if (prev.trustDialog !== next.trustDialog) changed.push("loopStatus");
-    if (prev.restartNeeded !== next.restartNeeded) changed.push("loopStatus");
-    if (prev.restartPending !== next.restartPending) changed.push("loopStatus");
     // #1116 — api-unreachable flips the bar bg ORANGE + the state-tag hint too.
     if (prev.apiUnreachable !== next.apiUnreachable) changed.push("loopStatus");
     if (prev.stateTag !== next.stateTag) changed.push("stateTag");
@@ -611,9 +603,11 @@ export class BarRenderer {
                 ? "⚠ not logged in · /login"
                 : next.limitReached
                 ? `⚠ usage limit reached · held${next.limitResetsText ? ` · resets ${next.limitResetsText}` : ""}`
+                // #3362 — no update or restart hint here: an update Claude Code
+                // installed is the agent bar's news (`alerts.restart_needed`), for
+                // a host to offer the restart; the tmux bar leaves it out.
                 : next.apiUnreachable ? "⚠ API unreachable · retrying"
-                : next.restartPending ? `${next.stateTag} · ⟳ restart when idle`
-                : next.restartNeeded ? `${next.stateTag} · ⟳ update installed, restart` : next.stateTag;
+                : next.stateTag;
             setOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] ${stateTagStr}`);
             // status-left : @cl_state collé à `claude-loop`, AVANT la
             // fade-out glyph. Les counters restent sur le status-bg

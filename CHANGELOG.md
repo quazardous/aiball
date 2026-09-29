@@ -56,6 +56,11 @@ dates are YYYY-MM-DD.
   `focus_line`: a client follows an edit made elsewhere without reading each
   project again.
 
+### Changed
+
+- The claude-loop tmux bar no longer shows that Claude Code installed an update,
+  nor a restart waiting for idle: the agent bar still carries both for a host.
+
 ### Fixed
 
 - Uploads and downloads go through the client's one transport: retried while

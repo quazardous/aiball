@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
     BarRenderer,
     computeBarSnapshot,
+    computeAgentBar,
     diffSnapshots,
     type BarSnapshot,
     type SpawnFn,
@@ -28,6 +29,8 @@ import {
     setIpcLinkDown,
     setIpcDaemonDown,
     setIpcStateTagInfo,
+    setIpcRestartNeeded,
+    setIpcRestartPending,
 } from "./ipc-state.js";
 import { LOOP_STATUS } from "./state.js";
 
@@ -74,8 +77,6 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         limitReached: false,
         limitResetsText: null,
         trustDialog: false,
-        restartNeeded: false,
-        restartPending: false,
         apiUnreachable: false,
         ...overrides,
     };
@@ -436,5 +437,28 @@ test("BarRenderer.paint: humanWord change + proxy dead → setOpt @cl_human ; pr
     // Initial without proxy → we expect @cl_human to be painted.
     assert.ok(humanCalls.length > 0, "expected @cl_human to be painted when proxy is dead");
     r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+// #3362 — an update Claude Code installed, or a restart waiting for idle, is the
+// agent bar's news for a host; the tmux bar does not show it.
+test("BarRenderer.paint: no update or restart hint in the tmux bar; the agent bar still says both", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    calls.length = 0;
+    setIpcRestartNeeded(true);
+    setIpcRestartPending(true);
+    setIpcStateTagInfo("wait");
+    r.tick();
+    const painted = calls.flatMap((c) => c.args).join(" ");
+    assert.doesNotMatch(painted, /⟳|update installed|restart/);
+    const alerts = computeAgentBar(sd).alerts;
+    assert.equal(alerts.restart_needed, true);
+    assert.equal(alerts.restart_pending, true);
+    r.stop();
+    setIpcRestartNeeded(false);
+    setIpcRestartPending(false);
     rmSync(sd, { recursive: true, force: true });
 });
