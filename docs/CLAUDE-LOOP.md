@@ -330,8 +330,6 @@ flowchart TD
   override (boot, presence hold, typing, busy-defer), but still stops at not
   logged in, the trust dialog and an unreachable API. A panic wake only ignores
   busy-defer, `esc to interrupt` and `/compact`.
-- A consumer with `no_claim` and no personal pings is skipped before the work
-  check.
 - **busy-defer** is armed for 10 s after each delivered wake, by the Stop hook,
   and by the API-error backoff (5 s, doubling, capped at 10 min).
 

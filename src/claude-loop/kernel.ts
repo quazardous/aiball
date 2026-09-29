@@ -1588,18 +1588,10 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             sd!,
         );
         gateHash = gate.landscapeHash;
-        // #516 (david `r59bkm` plan B) — un consumer no_claim ne peut pas
-        // prendre de tickets de la pool générale. Pour lui, l'activité ne
-        // vient QUE de pings directs (assignment / @mention / follower
-        // ticket). Le leg "actionable count > 0" trigger des wakes
-        // parasites où il n'a rien à faire. On gate ce leg sur les pings
-        // exclusivement pour les no_claim — les autres consumers gardent
-        // le comportement antérieur (actionable + pings).
-        const isNoClaim = process.env.AIBALL_NO_CLAIM === "1";
-        if (isNoClaim && gate.pingsCount === 0 && pendingSignals.size() === 0) {
-            log(`skip wake (${reason}) — no_claim + no pings (actionable=${gate.openCount} but not for this consumer)`);
-            return false;
-        }
+        // A no_claim consumer used to wake on pings only (#516). The actionable
+        // count is now this consumer's own (its `can_claim` excludes the
+        // unassigned pool), so it wakes on it like any other: a ticket assigned
+        // to it stays actionable after its assignment ping has been read.
         // #2255 — a waiting signal is work even when the ticket queues are empty.
         if (!gate.has && pendingSignals.size() === 0) {
             // #379 drained-reminder branch. The timer is the SOLE writer of the
