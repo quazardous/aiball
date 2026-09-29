@@ -62,6 +62,8 @@ export interface AgentBar {
     alerts: { link_down: boolean; daemon_down: boolean; not_logged_in: boolean; trust_dialog: boolean; api_unreachable: boolean; restart_needed: boolean; restart_pending: boolean; limit_reached: boolean };
     /** #3268 — when a reached usage limit lifts, as Claude Code says it (`at` when it can be read as a moment); null when none is reached. */
     limit_resets: { text: string; at: string | null } | null;
+    /** #3283 — the model Claude ran its last turn on: its id and short name ("Opus 5.5"); null before the first turn ends. Optional: absent from loops started before it. */
+    model?: { id: string; name: string } | null;
     /** The PTY proxy fronting claude is alive. */
     proxy_alive: boolean;
     /** Zen mode is on. */
@@ -117,6 +119,11 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     if (!(lr === undefined || lr === null || (isObj(lr) && typeof lr.text === "string" && isDateOrNull(lr.at)))) {
         return { error: "limit_resets must be null or { text, at: ISO date | null }" };
     }
+    // #3283 — absent from loops started before the field.
+    const md = b.model;
+    if (!(md === undefined || md === null || (isObj(md) && typeof md.id === "string" && md.id && typeof md.name === "string" && md.name))) {
+        return { error: "model must be null or { id, name } strings" };
+    }
     if (!isBool(b.proxy_alive) || !isBool(b.zen)) return { error: "proxy_alive and zen must be booleans" };
     const c = b.counters;
     if (!(c === null || (isObj(c) && isCountOrNull(c.open) && isCountOrNull(c.backlog) && isCountOrNull(c.events)))) {
@@ -146,6 +153,7 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         marker: { info: m.info as string | null, health_prompt: m.health_prompt as boolean, resume_picker: m.resume_picker as boolean, resume_mode_picker: m.resume_mode_picker as boolean },
         alerts: { link_down: a.link_down as boolean, daemon_down: a.daemon_down as boolean, not_logged_in: a.not_logged_in as boolean, trust_dialog: a.trust_dialog as boolean, api_unreachable: a.api_unreachable as boolean, restart_needed: a.restart_needed === true, restart_pending: a.restart_pending === true, limit_reached: a.limit_reached === true },
         limit_resets: isObj(lr) ? { text: lr.text as string, at: (lr.at as string | null) ?? null } : null,
+        model: isObj(md) ? { id: md.id as string, name: md.name as string } : null,
         proxy_alive: b.proxy_alive,
         zen: b.zen,
         counters: c === null ? null : { open: (c as Record<string, number | null>).open!, backlog: (c as Record<string, number | null>).backlog!, events: (c as Record<string, number | null>).events! },

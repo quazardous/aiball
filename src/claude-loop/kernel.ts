@@ -170,7 +170,7 @@ import {
     setIpcSseConnected,
     setIpcLinkDown,
     setIpcDaemonDown,
-    setIpcNotLoggedIn, setIpcLimitReached, setIpcRestartNeeded, setIpcRestartPending, setIpcTrustDialog,
+    setIpcNotLoggedIn, setIpcLimitReached, setIpcModel, setIpcRestartNeeded, setIpcRestartPending, setIpcTrustDialog,
     setIpcApiUnreachable,
     refreshIpcApiUnreachableSeen,
     setIpcLastWakeAtMs,
@@ -2083,6 +2083,8 @@ async function mainSse(): Promise<void> {
         // le gate, soit null explicite = clear defer. Stop event = idle
         // confirmed. #881 — `setIpcIdleSince` délégué à TurnController.
         getTurnService().turnEnded(ev.atMs);
+        // #3283 — the model of the turn that ended, for the bar.
+        if (ev.model) setIpcModel(ev.model);
         // #1072 — a Stop hook proves claude is running (= logged in). Clear the
         // not-logged-in flag so the ORANGE bar + wake-block lift. #1119 — this
         // is now the belt to the busy-begin clear's suspenders (that path fires

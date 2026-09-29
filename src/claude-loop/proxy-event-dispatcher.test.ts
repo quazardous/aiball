@@ -324,6 +324,9 @@ test("dispatch hook Stop → HookWatcher.emit", () => {
         const v = dispatchProxyEvent(sd, { event: "hook", kind: "Stop", at_ms: 2_000 });
         assert.equal(v.kind, "hook-event");
         assert.deepEqual(seen[0], { type: "hook:stop", atMs: 2_000 });
+        // #3283 — the model of the turn that ended rides along.
+        dispatchProxyEvent(sd, { event: "hook", kind: "Stop", at_ms: 3_000, model: "claude-opus-5-5" });
+        assert.deepEqual(seen[1], { type: "hook:stop", atMs: 3_000, model: "claude-opus-5-5" });
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 

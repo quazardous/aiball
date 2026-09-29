@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The model a loop's Claude runs is in its bar and in `loop.list`, by its id and a
+  short name (`Opus 5.5`), read from the session's transcript at each turn's end.
 - When Claude Code says a usage limit is reached (weekly, session, 5-hour…),
   the loop holds itself at once instead of waking Claude for nothing, and says
   it in its bar with the reset time.

@@ -122,3 +122,14 @@ test("#3117 a restart waiting for idle is in the bar every client reads, and lea
     setIpcRestartPending(false);
     assert.equal(computeAgentBar(sd).alerts.restart_pending, false);
 });
+
+test("#3283 the model of the last turn is in the bar, by its id and short name", async () => {
+    const { setIpcModel, resetIpcStateForTests } = await import("./ipc-state.js");
+    const sd = mkdtempSync(join(tmpdir(), "aiball-3283-sd-"));
+    resetIpcStateForTests();
+    assert.equal(computeAgentBar(sd).model, null, "none before the first turn ends");
+    setIpcModel("claude-opus-5-5");
+    const bar = computeAgentBar(sd);
+    assert.deepEqual(bar.model, { id: "claude-opus-5-5", name: "Opus 5.5" });
+    assert.deepEqual((parseAgentBar(bar) as AgentBar).model, bar.model, "the daemon accepts it");
+});

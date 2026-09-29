@@ -206,6 +206,9 @@ export interface IpcState {
      *  While set, the wake gate refuses every wake and the bar says it. */
     limitReached: boolean;
     limitResets: { text: string; at: string | null } | null;
+    /** #3283 — the model Claude ran its last turn on (the transcript's id);
+     *  null before the first turn ends. Set by the Stop hook. */
+    model: string | null;
     /** #3074 — Claude Code installed an update and asks for a restart. Set by
      *  the UpdateInstalledWatcher; a fresh process (the restart) starts false.
      *  Published in the bar for a host to offer the restart. Default false. */
@@ -295,6 +298,7 @@ const state: IpcState = {
     notLoggedIn: false,
     limitReached: false,
     limitResets: null,
+    model: null,
     restartNeeded: false,
     restartPending: false,
     trustDialog: false,
@@ -496,6 +500,13 @@ export function setIpcLimitReached(reached: boolean, resets: { text: string; at:
     if (state.limitReached === reached && JSON.stringify(state.limitResets) === JSON.stringify(next)) return;
     state.limitReached = reached;
     state.limitResets = next;
+    notifyIpcChanged();
+}
+
+/** #3283 — the model Claude ran its last turn on. */
+export function setIpcModel(model: string | null): void {
+    if (state.model === model) return;
+    state.model = model;
     notifyIpcChanged();
 }
 
@@ -744,6 +755,7 @@ export function resetIpcStateForTests(): void {
     state.notLoggedIn = false;
     state.limitReached = false;
     state.limitResets = null;
+    state.model = null;
     state.restartNeeded = false;
     state.restartPending = false;
     state.trustDialog = false;

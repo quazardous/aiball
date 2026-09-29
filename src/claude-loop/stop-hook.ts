@@ -19,7 +19,7 @@ import { AiballClient } from "../client.js";
 import { LOOP_SOCK_KIND, PANE_BUSY_DELAY_MS, humanPresentHold, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
-import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
+import { captureTokenUsage, latestModel, latestSessionFile, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
 import { SESSION_ID_FILE, isValidUuid, parseSessionFile, recordSessionEntry, sessionEntry } from "./session-id.js";
 import { createLogger } from "../log.js";
@@ -47,7 +47,13 @@ if (!sd || !name) emit();
 // #793 — emit the Stop event to the timer's loop-sock subscriber so
 // the in-memory `IpcState.idleSinceMs` is set. No file fallback.
 try {
-    await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now() });
+    // #3283 — with the model of the turn that just ended, for the bar.
+    let model: string | null = null;
+    try {
+        const file = latestSessionFile(projectTranscriptDir(process.cwd()));
+        model = file ? latestModel(file) : null;
+    } catch { /* no transcript: no model */ }
+    await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now(), ...(model ? { model } : {}) });
 } catch { /* best-effort emit, never block the hook */ }
 
 // #840 Slice C1 (#766) — prime ipcState from the timer's live snapshot

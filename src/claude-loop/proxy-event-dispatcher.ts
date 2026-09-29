@@ -215,6 +215,8 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                     type: "hook:stop",
                     atMs,
                     ...(busyDeferUntilMs !== undefined ? { busyDeferUntilMs } : {}),
+                    // #3283 — the model of the turn that ended.
+                    ...(typeof event.model === "string" && event.model ? { model: event.model } : {}),
                 };
                 getHookWatcher().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };

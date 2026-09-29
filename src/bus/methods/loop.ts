@@ -41,6 +41,8 @@ export interface LoopView {
     running: boolean;
     /** Claude's Remote Control as the loop last started: off, or the session's name (`true`: Claude named it). */
     remote_control: boolean | string;
+    /** #3283 — the model its Claude ran its last turn on, as its bar says; null when unknown. */
+    model: { id: string; name: string } | null;
     /** The tmux session to attach, for a loop in tmux. */
     tmux?: string;
     /** The host's attach socket, for a loop on the host that runs. */
@@ -65,6 +67,7 @@ function loopView(e: LoopEntry): LoopView {
         mode,
         running,
         remote_control: e.plate.remote_control ?? false,
+        model: running && agent ? getAgentBar(agent)?.bar.model ?? null : null,
         ...(mode === "tmux" ? { tmux: tmuxName(e.name) } : {}),
         ...(link && running ? { attach: viewOf(link).attach } : {}),
     };

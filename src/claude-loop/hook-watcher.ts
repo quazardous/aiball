@@ -48,7 +48,7 @@ export type SessionStartSource = "startup" | "resume" | "compact" | "clear";
 export type HookWatcherEvent =
     | { type: "hook:session_start"; source: SessionStartSource; atMs: number; pickerSession?: boolean; pickerMode?: boolean }
     | { type: "hook:user_prompt_submit"; fromAutoWake: boolean; atMs: number }
-    | { type: "hook:stop"; atMs: number; busyDeferUntilMs?: number | null }
+    | { type: "hook:stop"; atMs: number; busyDeferUntilMs?: number | null; model?: string }
     | { type: "hook:pretooluse"; toolName: string; atMs: number };
 
 export type HookWatcherEventName = HookWatcherEvent["type"];

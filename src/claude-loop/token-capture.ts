@@ -16,7 +16,7 @@
  * Pure FS + an injected `postUsage`, so the discovery / latest-turn / dedup
  * logic unit-tests without a daemon (same shape as start-lock.ts).
  */
-import { readdirSync, statSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readdirSync, statSync, readFileSync, existsSync, writeFileSync, openSync, readSync, closeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -77,6 +77,36 @@ export function latestTurnUsage(file: string): TurnUsage | null {
         };
     }
     return last;
+}
+
+/**
+ * #3283 — the model of the transcript's last assistant turn: the model Claude
+ * runs now (a `/model` switch shows from the next turn). Reads the file's tail
+ * only, as a transcript grows long; `<synthetic>` (a message Claude Code writes
+ * itself, an API error) is not a model. Null when none is found.
+ */
+export function latestModel(file: string, tailBytes = 256 * 1024): string | null {
+    let text: string;
+    try {
+        const fd = openSync(file, "r");
+        try {
+            const size = statSync(file).size;
+            const start = Math.max(0, size - tailBytes);
+            const buf = Buffer.alloc(size - start);
+            readSync(fd, buf, 0, buf.length, start);
+            text = buf.toString("utf8");
+        } finally { closeSync(fd); }
+    } catch { return null; }
+    const lines = text.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]!;
+        if (!line.includes('"model"')) continue;
+        let o: { message?: { role?: string; model?: unknown } };
+        try { o = JSON.parse(line); } catch { continue; } // the first line of a tail may be cut
+        const m = o.message;
+        if (m?.role === "assistant" && typeof m.model === "string" && m.model && !m.model.startsWith("<")) return m.model;
+    }
+    return null;
 }
 
 /** Marker the MCP server writes (the ticket the agent is focused on). */

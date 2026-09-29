@@ -46,6 +46,7 @@ const bar = (over: Record<string, unknown> = {}) => ({
     marker: { info: null, health_prompt: false, resume_picker: false, resume_mode_picker: false },
     alerts: { link_down: false, daemon_down: false, not_logged_in: false, trust_dialog: false, api_unreachable: false, restart_needed: false, restart_pending: false, limit_reached: false },
     limit_resets: null,
+    model: null,
     proxy_alive: true,
     zen: false,
     counters: { open: 3, backlog: 1, events: 0 },
@@ -110,6 +111,14 @@ test("#3268 — a usage limit: its alert and reset round-trip; a loop started be
     assert.equal(parsed.alerts.limit_reached, false);
     assert.equal(parsed.limit_resets, null);
     assert.match(String((parseAgentBar(bar({ limit_resets: { text: 3 } })) as { error: string }).error), /limit_resets/);
+});
+
+test("#3283 — the model: it round-trips; a loop started before the field sends none; a malformed one is refused", () => {
+    const on = bar({ model: { id: "claude-opus-5-5", name: "Opus 5.5" } });
+    assert.deepEqual(parseAgentBar(on), on);
+    const { model: _m, ...old } = bar();
+    assert.equal((parseAgentBar(old) as { model: unknown }).model, null);
+    assert.match(String((parseAgentBar(bar({ model: { id: "claude-opus-5-5" } })) as { error: string }).error), /model/);
 });
 
 test("#3044 — a bar without host (a loop started before the field) draws in tmux; an unknown host is refused", () => {

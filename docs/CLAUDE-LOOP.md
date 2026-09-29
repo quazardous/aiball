@@ -1009,7 +1009,13 @@ facts rather than glyphs, so another host can draw it its own way: the phase, th
 human's presence, the AFK hold and when it lapses, the input zone, a human typing,
 the state marker and its dialogs, the alerts (link or daemon down, not logged in,
 trust dialog, API unreachable, usage limit reached), the proxy, zen, the counters,
-the next wake and the boot window. Times are absolute dates, never countdowns.
+the next wake, the boot window and the model. Times are absolute dates, never countdowns.
+
+The model is the one Claude ran its last turn on, read from the session's transcript
+when the turn ends: `model` is `{ id, name }`, the id Claude Code records
+(`claude-opus-5-5`) and a short name made from it (`Opus 5.5`), without asking the
+network, so a model released after aiball is named too. It is null until the first
+turn ends; a `/model` switch shows from the next turn.
 
 When Claude Code says a usage limit is reached (`You've hit your weekly limit`, and
 the session, 5-hour, Opus and monthly spend limits alike), the loop holds itself at

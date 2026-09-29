@@ -7,6 +7,7 @@ import {
     projectTranscriptDir,
     latestSessionFile,
     latestTurnUsage,
+    latestModel,
     captureTokenUsage,
     activeTicketMarkerPath,
     type TurnUsage,
@@ -188,4 +189,28 @@ test("#404 captureTokenUsage: marker ok but POST throws → push-failed (id stil
         assert.deepEqual(r, { status: "push-failed", ticketId: 404, id: "msg_x" });
         assert.equal(readFileSync(join(sdir, "token-push-last-id"), "utf8"), "msg_x");
     } finally { rmSync(tdir, { recursive: true, force: true }); rmSync(sdir, { recursive: true, force: true }); }
+});
+
+test("#3283 latestModel: the last assistant turn's model, from the file's tail", () => {
+    const d = tmp();
+    try {
+        const f = join(d, "s.jsonl");
+        const said = (model: string) => JSON.stringify({ message: { role: "assistant", id: model, model, usage: { output_tokens: 1 } } });
+        writeFileSync(f, [
+            said("claude-sonnet-4-6"),
+            JSON.stringify({ message: { role: "user", content: "/model opus" } }),
+            said("claude-opus-5-5"),
+            // An API error Claude Code writes itself is not a model.
+            JSON.stringify({ message: { role: "assistant", model: "<synthetic>" } }),
+            JSON.stringify({ type: "summary" }),
+            "",
+        ].join("\n"));
+        assert.equal(latestModel(f), "claude-opus-5-5");
+        // A tail that cuts the file mid-line still reads the last whole turn.
+        writeFileSync(f, "x".repeat(5000) + said("claude-opus-5") + "\n" + said("claude-opus-5-5") + "\n");
+        assert.equal(latestModel(f, 120), "claude-opus-5-5");
+        writeFileSync(f, JSON.stringify({ message: { role: "user", content: "hi" } }) + "\n");
+        assert.equal(latestModel(f), null);
+        assert.equal(latestModel(join(d, "absent.jsonl")), null);
+    } finally { rmSync(d, { recursive: true, force: true }); }
 });

@@ -14,7 +14,9 @@
  * paints; slice 3 made it the writer and neutralised those paints
  * (`setTmuxStatus` / `setTmuxCounters` / `setTmuxAfkState`). #2311 — this
  * header still described slice 1.
- */import { spawnSync } from "node:child_process";
+ */
+import { modelShortName } from "../model-name.js";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { getIpcState, onIpcChanged } from "./ipc-state.js";
 import {
@@ -316,6 +318,8 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
         next_wake_at: phase === "idle" && ipc.nextWakeAtMs !== null && ipc.nextWakeAtMs > nowMs ? iso(ipc.nextWakeAtMs) : null,
         // #3268 — when the reached limit lifts, as said; null when none is reached.
         limit_resets: ipc.limitReached ? ipc.limitResets ?? null : null,
+        // #3283 — the model Claude ran its last turn on, and its short name.
+        model: ipc.model ? { id: ipc.model, name: modelShortName(ipc.model) } : null,
         boot: phase === "boot"
             ? { started_at: new Date(input.loopStartMs).toISOString(), deadline_at: iso(ipc.bootDeadlineMs ?? null) }
             : null,
