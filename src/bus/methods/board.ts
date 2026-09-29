@@ -53,6 +53,7 @@ import { broadcast } from "../../ws.js";
 import { installRoot } from "../../claude-loop/state.js";
 import { getLauncher, loadLaunchers } from "../../launchers.js";
 import { ERROR_CODES } from "../../domain.js";
+import { launchArgv } from "../../launch-argv.js";
 
 function strategyOf(s: unknown, nullable: boolean): Strategy | null {
     if (nullable && (s === null || s === undefined)) return null;
@@ -339,11 +340,22 @@ defineMethod({
  * 'error' event on the child: unheard, it would end the daemon (#3103).
  */
 function spawnDetached(cmd: string, args: string[], what: string, cwd?: string): number | undefined {
-    const child = spawn(cmd, args, { detached: true, stdio: "ignore", ...(cwd ? { cwd } : {}) });
+    const argv = launchArgv(cmd, args);
+    let child;
+    try {
+        child = spawn(argv.cmd, argv.args, {
+            detached: true, stdio: "ignore", windowsVerbatimArguments: argv.verbatim, ...(cwd ? { cwd } : {}),
+        });
+    } catch (e) {
+        // Some failures are thrown, not emitted (a .cmd spawned without a shell: EINVAL).
+        console.error(`[launch] ${what} failed: ${(e as Error).message}`);
+        return undefined;
+    }
     child.on("error", (e) => console.error(`[launch] ${what} failed: ${e.message}`));
     child.unref();
     return child.pid;
 }
+
 
 /**
  * #393 — start a claude-loop for a project, at one of the roots it has run
