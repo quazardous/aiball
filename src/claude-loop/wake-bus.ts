@@ -14,6 +14,13 @@
  * cadence du timer existant.
  */
 import type { AiballClient } from "../client.js";
+import { CL_ENV } from "./env-vars.js";
+
+/** #3321 — this loop's backlog rest (`CL_BACKLOG_COOLDOWN_SEC`, 3600 s by default), as its backlog applies it. */
+function backlogCooldownSec(): number {
+    const v = Math.floor(Number(process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? 3600));
+    return Number.isFinite(v) && v >= 0 ? v : 3600;
+}
 
 /** Wake hint from a `sse:ping` event — the SSE payload as-is. */
 export interface PingHint {
@@ -111,6 +118,8 @@ export class WakeBus {
             onControl: (c) => this.emitControl(c as ControlEvent),
             onSignal: (s) => this.emitSignal(s as SignalHint),
             onCounters: (c) => this.emitCounters(c as CountersEvent),
+            // #3321 — the rest this loop's backlog applies, for the daemon to show the same.
+            backlogCooldownSec: backlogCooldownSec(),
             onError: (e) => {
                 this.emitError(e);
                 this.clientUnsubscribe = null;

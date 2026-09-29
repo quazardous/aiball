@@ -95,6 +95,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A ticket's rest in an agent's backlog, as `consumer.backlog` and the `b:`
+  counter show it, is the rest the agent's loop really applies
+  (`CL_BACKLOG_COOLDOWN_SEC`), not an hour assumed for every loop.
 - A `.aiball.yaml` whose last setting is removed is no longer left as `{}`: it
   keeps its leading comments, or becomes empty.
 - A client that names an agent can no longer change that agent's standing: only

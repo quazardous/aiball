@@ -3,6 +3,7 @@
  * event the daemon already broadcasts (`ws.ts`), and the pings. A subscriber
  * gets data, built by the same code as the matching read.
  */
+import { setAgentCooldown } from "../../agent-cooldown.js";
 import { ERROR_CODES } from "../../domain.js";
 import { z } from "zod";
 import { consumerIdOf, defineMethod, getMethod, Refusal, type Caller } from "../methods.js";
@@ -359,6 +360,8 @@ defineSubject({
         const id = idOf(sub);
         // #3312 — the agent's own loop states its standing: the only writer of it besides the moderator.
         applyLoopStanding(id, sub.caller);
+        // #3321 — and the rest its backlog applies, for consumer.backlog and the counters.
+        if (typeof sub.opts.backlog_cooldown_sec === "number") setAgentCooldown(id, sub.opts.backlog_cooldown_sec);
         const offs = [
             onPing(id, (payload) => {
                 if (payload.ticket_id !== undefined && wakeFocusHidesTicket(id, payload.ticket_id)) return;
@@ -457,12 +460,14 @@ defineMethod({
         include_postponed: z.boolean().optional(),
         /** `agent.<id>.events`: how the loop was launched, `terminal` or `ui` (#395). */
         source: z.enum(["terminal", "ui"]).optional(),
+        /** `agent.<id>.events`: how long a ticket rests in the loop's backlog after a backlog wake (#3321). */
+        backlog_cooldown_sec: z.number().int().min(0).optional(),
         /** `agent.<id>.screen`: whether this viewer may type (on the session host, an interactive client). */
         typing: z.boolean().optional(),
         /** `agent.<id>.screen`, with `typing`: the size this viewer would like once it types. */
         size: z.object({ rows: z.number().int().min(1).max(1000), cols: z.number().int().min(1).max(1000) }).optional(),
     }),
-    run: (caller, p) => subscribe(caller, p.subject, p.since, { open: p.open, include_postponed: p.include_postponed, source: p.source, typing: p.typing, size: p.size }),
+    run: (caller, p) => subscribe(caller, p.subject, p.since, { open: p.open, include_postponed: p.include_postponed, source: p.source, typing: p.typing, size: p.size, backlog_cooldown_sec: p.backlog_cooldown_sec }),
 });
 
 /** End a subscription: no more events for it. Closing the connection ends them all. */

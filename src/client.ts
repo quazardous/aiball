@@ -1047,6 +1047,8 @@ export class AiballClient {
         // #2255: external signals, replayed by the daemon on every (re)connect.
         onSignal?: (payload: { id: number; source: string; title: string; body: string | null; severity: "normal" | "panic"; repeat_count: number; expires_at: string }) => void;
         onError?: (err: Error) => void;
+        /** #3321 — the loop's backlog rest, said to the daemon with the subscription. */
+        backlogCooldownSec?: number;
     }): () => void {
         // #3068 — the loop's events come over the bus (`agent.<id>.events`), on a
         // connection of their own: it is the loop's liveness, open for as long
@@ -1086,6 +1088,7 @@ export class AiballClient {
                 });
                 const r = await conn.call<{ id: string; value: Parameters<NonNullable<typeof handlers.onHello>>[0] }>("bus.subscribe", {
                     subject: `agent.${this.agentId}.events`,
+                    ...(handlers.backlogCooldownSec !== undefined ? { backlog_cooldown_sec: handlers.backlogCooldownSec } : {}),
                 });
                 subscription = r.id;
                 handlers.onHello?.(r.value);

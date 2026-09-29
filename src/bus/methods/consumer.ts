@@ -1,4 +1,5 @@
 /** #3063 — consumers: the list, an agent's backlog and bar, the loop controls on it. */
+import { agentCooldownSec } from "../../agent-cooldown.js";
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal, type Caller } from "../methods.js";
 import { flag } from "../params.js";
@@ -122,7 +123,8 @@ defineMethod({
         ownOrHuman(caller, p.consumer_id, "backlog");
         const c = getConsumer(p.consumer_id);
         if (!c) throw new Refusal(404, "consumer not found", ERROR_CODES.CONSUMER_NOT_FOUND);
-        const query: Record<string, string> = { backlog: "1" };
+        // #3321 — without a `cooldown_sec`, the rest the agent's own loop applies.
+        const query: Record<string, string> = { backlog: "1", cooldown_sec: String(agentCooldownSec(p.consumer_id)) };
         for (const key of ["project", "cooldown_sec", "limit"] as const) {
             const v = p[key];
             if (v) query[key] = v;

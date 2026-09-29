@@ -14,6 +14,7 @@
  * (a snooze lapsing, a cooldown ending) waits for a client to ask
  * (`consumer.counters`).
  */
+import { agentCooldownSec } from "./agent-cooldown.js";
 import { onLifecycle } from "./event-bus.js";
 import { onPingsChanged, unreadPingCount } from "./db/pings.js";
 import { getConsumer, listConsumers } from "./db/consumers.js";
@@ -32,7 +33,7 @@ export interface AgentCounters {
 }
 
 /** The backlog picker's cooldown, as a loop asks it by default. */
-const BACKLOG_COOLDOWN_SEC = 3600;
+// #3321 — the rest the agent's own loop applies (`agent-cooldown.ts`), not an assumed hour.
 /** At most one computation per agent in this span; a burst is one. Read each
  *  time (env-overridable, tiny in tests). */
 function gapMs(): number {
@@ -51,7 +52,7 @@ export function computeCounters(agent: string): AgentCounters {
     const mine = project ? projects.filter((p) => p.name === project) : projects;
     const open = mine.reduce((n, p) => n + (p.open_count ?? 0), 0);
     const actionable = mine.reduce((n, p) => n + (p.actionable_count ?? 0), 0);
-    const query: Record<string, string> = { backlog: "1", limit: "500", cooldown_sec: String(BACKLOG_COOLDOWN_SEC) };
+    const query: Record<string, string> = { backlog: "1", limit: "500", cooldown_sec: String(agentCooldownSec(agent)) };
     if (project) query.project = project;
     // #3312 — the agent's own standing (`can_claim` on its row), not a no-claim hint:
     // with the hint, every unassigned ticket left the count, whoever the agent.
