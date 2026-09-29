@@ -160,6 +160,48 @@ test("LOOP_SOCK_KIND.SHUTDOWN: handler fires onShutdownRequest once", async () =
     }
 });
 
+// #3299 — `claude-loop stop` asks for its session to end; reload and rm only
+// ask the kernel to exit, and must not end Claude's session.
+test("LOOP_SOCK_KIND.SHUTDOWN: endSession only when the sender asks for it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loop-shutdown-3299-"));
+    const sock = join(dir, "loop.sock");
+    const requests: { endSession: boolean }[] = [];
+    const server = createLoopServer(sock, {
+        onProxyEvent: () => {},
+        onShutdownRequest: (req) => { requests.push(req); },
+    });
+    try {
+        await sleep(60);
+        assert.equal(await sendShutdownToTimer(dir, 300), true, "delivered");
+        await sleep(150);
+        assert.deepEqual(requests, [{ endSession: false }]);
+    } finally {
+        try { server.close(); } catch { /* ignore */ }
+    }
+    const server2 = createLoopServer(sock, {
+        onProxyEvent: () => {},
+        onShutdownRequest: (req) => { requests.push(req); },
+    });
+    try {
+        await sleep(60);
+        assert.equal(await sendShutdownToTimer(dir, 300, { endSession: true }), true, "delivered");
+        await sleep(150);
+        assert.deepEqual(requests, [{ endSession: false }, { endSession: true }]);
+    } finally {
+        try { server2.close(); } catch { /* ignore */ }
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+});
+
+test("sendShutdownToTimer: a loop that does not listen is reported, not assumed stopped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loop-shutdown-3299-none-"));
+    try {
+        assert.equal(await sendShutdownToTimer(dir, 200), false);
+    } finally {
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+});
+
 test("LOOP_SOCK_KIND enum: kinds canoniques", () => {
     assert.equal(LOOP_SOCK_KIND.VIEW, "view");
     assert.equal(LOOP_SOCK_KIND.PROXY_EVENT, "proxyEvent");

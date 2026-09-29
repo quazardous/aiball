@@ -1921,6 +1921,13 @@ async function mainSse(): Promise<void> {
     // is unchanged — it still sees the legacy event shape, the wrap is
     // unwrapped at the server boundary.
     const loopHandlers: Parameters<typeof createLoopServer>[1] = {
+        // #3299 — `claude-loop stop` asks for the clean stop, which ends the
+        // session: on Windows no SIGTERM handler runs, so this is the only way
+        // there. Any other shutdown request (reload, rm) only exits.
+        onShutdownRequest: (req) => {
+            if (req.endSession) cleanShutdown("stop");
+            else process.exit(0);
+        },
         onProxyEvent: (event) => {
             // #1040 — reload hotkey (Ctrl+N by default) : the proxy detects the
             // key, consumes it, and emits {event:"reload"}. Re-exec the timer on

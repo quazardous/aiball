@@ -371,6 +371,7 @@ claude-loop restart [name] --resume    # hard restart, resuming Claude's convers
 claude-loop restart [name] --fresh     # hard restart with a fresh conversation (a resumed one keeps the tools it started with)
 claude-loop restart [name]            # hard restart: kill + relaunch from the plate
 claude-loop stop [name]               # clean stop: kill claude/tmux + exit, KEEP state
+claude-loop stop [name] --keep-session # stop the kernel only: Claude keeps running in its session
 claude-loop rm <name> [--force]        # stop + DELETE the state dir
 claude-loop prune                      # interactive cleanup of orphans
 ```

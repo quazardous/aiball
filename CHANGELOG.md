@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `claude-loop stop --keep-session` stops a loop's kernel only: Claude keeps
+  running in its session, to attach to or `restart` later.
 - A client taking the controls of a loop in tmux can make its other clients
   read-only copies (`loop.clients_readonly`) or detach them
   (`loop.clients_detach`). A copy's mark says how to leave it (the tmux prefix,
@@ -48,6 +50,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `claude-loop stop` on Windows ends Claude's session too. It used to end the
+  loop's kernel only, and leave the psmux session and Claude running.
 - `POST /api/tickets` with a key scoped to a project deleted since answers
   `400 PROJECT_NOT_FOUND`, as the bus does, instead of a 500.
 - `aiball check` no longer reports the caller as refused when it connects
