@@ -16,7 +16,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { resolveProjectContext } from "./project-context.js";
 import { installRoot } from "./state.js";
 
@@ -229,13 +229,19 @@ export function cmdCrewList(): void {
     const worktreesRoot = join(ctx.cwd, "worktrees");
     const r = spawnSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8" });
     if (r.status !== 0) die("git worktree list failed (not a git repo?).");
-    const crews = parseWorktreeList(r.stdout ?? "").filter((w) => w.path.startsWith(worktreesRoot + "/"));
+    // git prints forward slashes (C:/...) where join() gives backslashes on
+    // Windows: relative() compares the paths themselves, whatever the separators.
+    const crewName = (p: string): string | null => {
+        const rel = relative(worktreesRoot, resolve(p));
+        return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel.split(/[\\/]/).join("/") : null;
+    };
+    const crews = parseWorktreeList(r.stdout ?? "").filter((w) => crewName(w.path) !== null);
     if (crews.length === 0) {
         process.stdout.write("(no crews)\n");
         return;
     }
     for (const w of crews) {
-        const name = w.path.slice(worktreesRoot.length + 1);
+        const name = crewName(w.path)!;
         const skill = crewSkillStatusFor(w.path);
         const skillCol = skill === "ok" ? "skill ✓" : skill === "stale" ? "skill ↻" : "skill ✗";
         process.stdout.write(`${name.padEnd(20)}  ${(w.branch ?? "-").padEnd(24)}  ${skillCol.padEnd(8)}  ${w.path}\n`);

@@ -2083,8 +2083,9 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
 function cmdDebugProxy(): void {
     const ctx = resolveProjectContext();
     const release = join(selfRoot(), "windows", "cl-pty-proxy", "target", "release");
-    const proxyBin = process.env[CL_ENV.PROXY_BIN]?.trim() || join(release, "cl-pty-proxy");
-    const loggerBin = join(dirname(proxyBin), "fake-claude-log");
+    const exe = process.platform === "win32" ? ".exe" : "";
+    const proxyBin = process.env[CL_ENV.PROXY_BIN]?.trim() || join(release, `cl-pty-proxy${exe}`);
+    const loggerBin = join(dirname(proxyBin), `fake-claude-log${exe}`);
     for (const [what, bin] of [["proxy", proxyBin], ["fake-claude-log", loggerBin]] as const) {
         if (!existsSync(bin)) die(`debug-proxy: no ${what} at ${bin} — build it: ${BUILD_CMD}`);
     }
