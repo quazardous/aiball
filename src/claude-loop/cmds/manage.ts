@@ -48,6 +48,9 @@ import { RESPAWN_STATE_ENV_VAR, REATTACH_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
 import { liveHostAgent, loopAlive as isLoopAlive } from "../host-alive.js";
 import { remoteControlFlags, type RemoteControl } from "../remote-control.js";
+// A bare `bash` can resolve to WSL's launcher on Windows (#1584): reload and
+// restart then failed silently, with an empty log.
+import { resolveBashCmd } from "../resolve-bash.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -451,7 +454,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     const spawnEnv = snapshotsJson
         ? { ...process.env, [RESPAWN_STATE_ENV_VAR]: snapshotsJson, [REATTACH_ENV_VAR]: "1" }
         : { ...process.env, [REATTACH_ENV_VAR]: "1" };
-    const child = spawn("bash", [
+    const child = spawn(resolveBashCmd(), [
         "-lc",
         // #991 — preserve + re-source the volatile env.local across a reload
         // (timer respawn keeps the debug-session shell overrides).
@@ -561,7 +564,7 @@ export function cmdRestart(name: string, opts: RestartOpts = {}): void {
         `echo "$(date -Is) [${name}] restart: rm + start (cwd ${plate.cwd})"; ` +
         `sleep 0.4; ${shQuote(bin)} rm ${shQuote(name)} --force; ` +
         `exec ${shQuote(bin)} ${startArgs.map(shQuote).join(" ")}`;
-    const child = spawn("bash", ["-lc", script], {
+    const child = spawn(resolveBashCmd(), ["-lc", script], {
         cwd: plate.cwd,
         detached: true,
         stdio: "ignore",
