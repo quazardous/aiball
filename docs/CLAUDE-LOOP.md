@@ -1017,6 +1017,14 @@ when the turn ends: `model` is `{ id, name }`, the id Claude Code records
 network, so a model released after aiball is named too. It is null until the first
 turn ends; a `/model` switch shows from the next turn.
 
+When it answers a bar, the daemon adds to `model` what an open list of models
+says of it: `cost` (USD per million tokens, input and output), `newer` (the newest
+model of the same family when there is a newer one: `{ id, name, cost }`, what a
+host colours the name for) and `catalog`, the list it came from. The list is read
+once when the daemon starts, without a key, from models.dev (LiteLLM's price table
+as a fallback), and kept in `$AIBALL_HOME/models-catalog.json` for a start without
+network. Both lists are kept by their communities: a price or a release may lag.
+
 `remote_control` is `{ on }`: whether Claude is in Remote Control now, as Claude
 Code's status line shows it (a `/rc` at its end, below the input box), whatever
 turned it on — the folder's setting at start or a `/rc` typed in the session. What

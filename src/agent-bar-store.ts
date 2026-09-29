@@ -11,6 +11,7 @@
 import type { AgentBar } from "./agent-bar.js";
 import { isPresent, onPresenceStart, onPresenceStop } from "./live-presence.js";
 import { broadcast } from "./ws.js";
+import { modelFacts } from "./model-catalog.js";
 
 interface Entry { bar: AgentBar; json: string; updatedAt: string }
 const bars = new Map<string, Entry>();
@@ -23,7 +24,16 @@ export interface AgentBarView {
 }
 
 function view(consumer: string, e: Entry): AgentBarView {
-    return { consumer_id: consumer, bar: e.bar, updated_at: e.updatedAt, stale: !isPresent(consumer) };
+    return { consumer_id: consumer, bar: withModelFacts(e.bar), updated_at: e.updatedAt, stale: !isPresent(consumer) };
+}
+
+/** #3288 — the model's price and any newer one of its family, from the daemon's catalog; read when shown, so a catalog loaded after the push still applies. */
+function withModelFacts(bar: AgentBar): AgentBar {
+    const m = bar.model;
+    if (!m) return bar;
+    const facts = modelFacts(m.id);
+    if (!facts) return bar;
+    return { ...bar, model: { ...m, cost: facts.cost, newer: facts.newer, catalog: facts.source } };
 }
 
 /** Keep `bar` as `consumer`'s latest. True when it differs from the one kept

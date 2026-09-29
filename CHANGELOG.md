@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A loop's bar says the price of its model and whether a newer model of the same
+  family exists, from an open list of models read when the daemon starts.
 - `project.settings` gives a folder's whole resolved configuration (project,
   agent, role, where its loops run, Remote Control), each value with where it
   comes from, and `project.settings_set` sets where its loops run.

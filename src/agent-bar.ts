@@ -63,7 +63,16 @@ export interface AgentBar {
     /** #3268 — when a reached usage limit lifts, as Claude Code says it (`at` when it can be read as a moment); null when none is reached. */
     limit_resets: { text: string; at: string | null } | null;
     /** #3283 — the model Claude ran its last turn on: its id and short name ("Opus 5.5"); null before the first turn ends. Optional: absent from loops started before it. */
-    model?: { id: string; name: string } | null;
+    model?: {
+        id: string;
+        name: string;
+        /** #3288 — added by the daemon from its model catalog (never sent by a loop): the price, USD per million tokens. */
+        cost?: { input: number; output: number } | null;
+        /** #3288 — a newer model of the same family, when the catalog knows one: what a host colours the name for. */
+        newer?: { id: string; name: string; cost: { input: number; output: number } | null } | null;
+        /** #3288 — where the price and `newer` come from: an open list, kept by its community. */
+        catalog?: "models.dev" | "litellm";
+    } | null;
     /** #3291 — whether Claude is in Remote Control now, as its status line shows it (the flag at start or a `/rc` in the session). Optional: absent from loops started before it. */
     remote_control?: { on: boolean };
     /** The PTY proxy fronting claude is alive. */

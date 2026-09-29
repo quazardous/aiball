@@ -131,6 +131,10 @@ function main(): void {
     if (relay) attachBusRelay(server, relay, relayTokens!);
     // #3066 — the session hosts still running from before this start. #3284 —
     // a proxy node too: it answers its own machine's sessions.
+    // #3288 — the models there are, once per start: an open list, kept on disk.
+    void import("./model-catalog.js").then((m) => m.loadModelCatalog()).then((c) => {
+        if (c) console.log(`model catalog: ${c.models.length} models from ${c.source}`);
+    }).catch(() => { /* no catalog: the bar says nothing of newer models */ });
     if (core || relay) {
         void initSessions()
             .then((n) => { if (n > 0) console.log(`took back ${n} session host(s)`); })
