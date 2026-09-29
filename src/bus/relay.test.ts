@@ -172,3 +172,40 @@ test("the client's platform reaches the hub: a ticket filed through the node get
     const { listMessageTags } = await import("../db/tags.js");
     assert.ok(listMessageTags(t.id).some((x) => x.name === "os:linux"), "tagged from the relayed platform");
 });
+
+// #3293 — a loop control for a loop of the node's own machine: the node sends
+// it on the loop's socket; a loop elsewhere is still relayed, and refused.
+test("stop, prompt and restart a loop of the node's machine, through its socket", async () => {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const { listenEvents } = await import("../claude-loop/ipc-events.js");
+    const { loopSockPath } = await import("../claude-loop/state.js");
+    const sd = join(process.env.CLAUDE_LOOP_STATE_ROOT!, "cl-b-1");
+    mkdirSync(sd, { recursive: true });
+    writeFileSync(join(sd, "plate.json"), JSON.stringify({ name: "cl-b-1", cwd: "/w/b", agent: "b-agent", created_at: new Date().toISOString() }));
+    const got: Record<string, unknown>[] = [];
+    let busy = true;
+    const loop = listenEvents(loopSockPath(sd), (ev, ctx) => {
+        // As the kernel answers: the request's id rides back on the reply.
+        if (ev.kind === "queryLoopState") ctx.reply({ kind: "queryLoopStateReply", data: { paneBusy: busy, paneReady: !busy, __req: (ev.data as { __req?: string }).__req } });
+        else if (ev.kind === "proxyEvent") got.push(ev.data as Record<string, unknown>);
+    });
+    try {
+        const c = await through("boss", local.sock);
+        const stop = await c.call<{ delivered: boolean }>("consumer.stop_loop", { consumer_id: "b-agent" });
+        assert.equal(stop.delivered, true);
+        await c.call("consumer.prompt", { consumer_id: "b-agent", text: "hello" });
+        await assert.rejects(c.call("consumer.restart_claude", { name: "b-agent" }), (e: { code: string }) => e.code === "NOT_IDLE", "busy: refused unless when_idle");
+        await c.call("consumer.restart_claude", { name: "b-agent", when_idle: true });
+        busy = false;
+        await c.call("consumer.restart_claude", { name: "b-agent" });
+        const deadline = Date.now() + 2000;
+        while (got.length < 4 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+        assert.deepEqual(got.map((e) => [e.event, e.action, e.text ?? e.when_idle ?? null]), [
+            ["control", "kill", null], ["control", "prompt", "hello"], ["control", "restart_claude", true], ["control", "restart_claude", null],
+        ]);
+        // A loop the node does not run is still the hub's, and refused relayed.
+        await assert.rejects(c.call("consumer.stop_loop", { consumer_id: "worker" }), (e: { code: string }) => e.code === "FORBIDDEN");
+    } finally {
+        loop.close();
+    }
+});

@@ -43,7 +43,12 @@ function methodOf(msg: unknown): string | null {
 
 const isMachine = (msg: unknown): boolean => {
     const name = methodOf(msg);
-    return name !== null && getMethod(name)?.machine === true;
+    const m = name === null ? undefined : getMethod(name);
+    if (!m) return false;
+    if (m.machine === true) return true;
+    // #3293 — a loop control, for a loop that runs on this machine.
+    if (!m.nodeLocal) return false;
+    try { return m.nodeLocal((msg as { params?: unknown }).params ?? {}); } catch { return false; }
 };
 
 /**
@@ -92,6 +97,7 @@ export function callerOfHello(params: unknown, trusted: boolean): Caller {
         transport: trusted ? "uds" : "tcp",
         token: null,
         relayed: false,
+        node: true,
     };
 }
 

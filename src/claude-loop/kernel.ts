@@ -195,7 +195,7 @@ import {
 } from "./busy-stack.js";
 import { BarRenderer, type SpawnFn } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
-import { WakeBus } from "./wake-bus.js";
+import { WakeBus, type ControlEvent } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
 import { fetchWakeContext, pingIsDeliverable } from "./wake-context.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
@@ -773,6 +773,8 @@ const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
 const limitReachedW = new LimitReachedWatcher();
+/** #3293 — a loop control, from the bus or the loop's socket; set once the wake bus is wired. */
+let applyControl: (c: ControlEvent) => void = (c) => log(`control before the wake bus is wired, ignored: ${JSON.stringify(c)}`);
 const remoteControlW = new RemoteControlWatcher();
 const updateInstalledW = new UpdateInstalledWatcher();
 const apiUnreachableW = new ApiUnreachableWatcher();
@@ -1748,6 +1750,11 @@ async function mainSse(): Promise<void> {
     wakeBus.on("control", (c) => {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
+        applyControl(c);
+    });
+    // #3293 — one handler for a control, whether it came on the bus or on the
+    // loop's socket (a proxy node reaching a loop of its own machine).
+    applyControl = (c) => {
         // #1054 S3 — surface every control action on the kernel bus.
         getKernelBus().emit("daemon:control", { action: String(c.action ?? "") });
         if (c.action === "kill") cleanShutdown("sse:control:kill");
@@ -1762,7 +1769,7 @@ async function mainSse(): Promise<void> {
             void sendKeys(c.text);
         }
         else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
-    });
+    };
     wakeBus.on("ping", (p) => {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
@@ -1939,6 +1946,12 @@ async function mainSse(): Promise<void> {
                     writeBarHost(sd!, host);
                     log(`proxy-event: bar host → ${host}`);
                 }
+                return;
+            }
+            // #3293 — a loop control on the socket: a proxy node, for a loop of its machine.
+            if (event.event === "control") {
+                log(`proxy-event: control ${String((event as { action?: unknown }).action ?? "")} (socket)`);
+                applyControl(event as unknown as ControlEvent);
                 return;
             }
             const verdict = dispatchProxyEvent(sd!, event);

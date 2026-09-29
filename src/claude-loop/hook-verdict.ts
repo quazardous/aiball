@@ -54,7 +54,7 @@ export type LoopStateSnapshot = LoopStateView & {
  *  back to local file reads, preserving the historical fail-open
  *  semantic. Mirrors the pattern from `cmds/inspect.ts:queryLoopState`.
  *  #972 — type partagé `LiveLoopSnapshot` (state.ts), helper `mirrorLiveSnapshotToIpc`. */
-async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<LiveLoopSnapshot | null> {
+export async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<LiveLoopSnapshot | null> {
     const sock = loopSockPath(sd);
     if (!selectTransport().reachable(sock)) return null;
     const ch = openEventChannel(sock, { reconnectMs: 100 });

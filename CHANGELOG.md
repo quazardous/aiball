@@ -59,6 +59,8 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- Behind a proxy node, stopping, prompting or restarting the Claude of a loop
+  that runs on the node's machine works: the node sends it on the loop's socket.
 - Behind a proxy node, the methods that act on a machine (its loops, session hosts,
   folders, the daemon itself) are answered by the node for its own machine,
   instead of being refused or, for `session.list` and `daemon.info`, answered by

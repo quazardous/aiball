@@ -82,6 +82,8 @@ export function openRpcDocument(): Record<string, unknown> {
                 ...(m.relayed === false && !m.machine ? { "x-relayed": false } : {}),
                 // #3284 — acts on the machine that answers: a proxy node answers it itself.
                 ...(m.machine ? { "x-machine": true } : {}),
+                // #3293 — a proxy node answers it for a loop of its own machine.
+                ...(m.nodeLocal ? { "x-node-local": true } : {}),
                 ...(m.scope ? { "x-scope": m.scope } : {}),
             };
         }),

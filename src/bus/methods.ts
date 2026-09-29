@@ -31,6 +31,8 @@ export interface Caller extends CallerContext {
     consumer_id?: string;
     /** On the bus: the connection, where subscriptions live. Absent over HTTP. */
     session?: BusSession;
+    /** #3293 — answered by a proxy node for its own machine (its relay runs the method). */
+    node?: boolean;
 }
 
 /** `kind` is fixed with the identity: a connection computes it once. */
@@ -75,6 +77,12 @@ export interface MethodSpec<S extends z.ZodType, R> {
      * would act on the core's machine.
      */
     machine?: boolean;
+    /**
+     * #3293 — on a proxy node, answered by the node when this says the target
+     * is on its machine (a loop that runs here); relayed otherwise. The method
+     * itself reaches the target locally when it runs on a node.
+     */
+    nodeLocal?: (params: unknown) => boolean;
     /** The refusal a caller outside `who` gets, when a precise one exists. */
     denied?: { message: string; code: ErrorCode };
     params: S;

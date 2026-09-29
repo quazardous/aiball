@@ -17,7 +17,8 @@ import { unreadPingCount } from "../../db/pings.js";
 import { listTicketsFor } from "../../queries/tickets.js";
 import { getAgentBar } from "../../agent-bar-store.js";
 import { isBarHost } from "../../agent-bar.js";
-import { localLoopDir, sendAfkToLoop } from "./loop-afk.js";
+import { isLocalLoop, localLoopDir, sendAfkToLoop, sendControlToLoop } from "./loop-afk.js";
+import { fetchLiveLoopStateUds } from "../../claude-loop/hook-verdict.js";
 import { sendEventOnce } from "../../claude-loop/ipc-events.js";
 import { loopSockPath } from "../../claude-loop/state.js";
 
@@ -34,6 +35,18 @@ const LOOP_CONTROL = {
     relayed: false,
     denied: { message: "loop control is moderator-only", code: ERROR_CODES.MODERATOR_ONLY },
 };
+
+/**
+ * #3293 — answered by a proxy node: a loop control is for a loop of its own
+ * machine, reached through the loop's socket (the loop's bus connection goes
+ * to the upstream, not here).
+ */
+const onNode = (caller: Caller): boolean => caller.node === true;
+
+/** #3293 — the refusal a socket send could not reach its loop with. */
+function refuseUnreached(r: { ok: false; status: number; error: string; code: import("../../domain.js").ErrorCode }): never {
+    throw new Refusal(r.status, r.error, r.code);
+}
 
 /** What every entry of one read shares: the ping tallies and the wait credits of everyone. */
 function entryContext() {
@@ -176,11 +189,13 @@ const MAX_NAME_LEN = 64;
 defineMethod({
     name: "consumer.restart_claude",
     ...LOOP_CONTROL,
+    nodeLocal: (p) => isLocalLoop((p as { name?: unknown }).name),
     params: z.object({ name: z.string(), when_idle: flag }),
-    run: (_c, p) => {
+    run: (caller, p) => {
         if (!p.name || p.name.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(p.name)) throw new Refusal(400, "bad consumer id");
-        if (!isPresent(p.name)) throw new Refusal(404, `no running claude-loop answers for ${p.name}`, ERROR_CODES.LOOP_NOT_FOUND);
         const whenIdle = p.when_idle === true;
+        if (onNode(caller)) return restartOnNode(p.name, whenIdle);
+        if (!isPresent(p.name)) throw new Refusal(404, `no running claude-loop answers for ${p.name}`, ERROR_CODES.LOOP_NOT_FOUND);
         const phase = getAgentBar(p.name)?.bar.phase;
         if (!whenIdle && phase !== "idle") {
             throw new Refusal(409, `Claude is ${phase ?? "in an unknown state"}: a restart waits until it is idle (or pass when_idle)`, ERROR_CODES.NOT_IDLE);
@@ -189,6 +204,28 @@ defineMethod({
         return { consumer_id: p.name, queued: true, ...(whenIdle ? { when_idle: true } : {}) };
     },
 });
+
+/** #3293 — `consumer.restart_claude` answered by a proxy node, for a loop of its machine. */
+async function restartOnNode(name: string, whenIdle: boolean): Promise<{ consumer_id: string; queued: boolean; when_idle?: true }> {
+    // The loop's own state, asked on its socket: the node holds no bar.
+    const where = localLoopDir(name);
+    if (!where.ok) refuseUnreached(where);
+    const live = await fetchLiveLoopStateUds(where.sd, 1000);
+    if (!live) throw new Refusal(404, `no running claude-loop answers for ${name}`, ERROR_CODES.LOOP_NOT_FOUND);
+    if (!whenIdle && (live.paneBusy || !live.paneReady)) {
+        throw new Refusal(409, `Claude is ${live.paneBusy ? "busy" : "not ready"}: a restart waits until it is idle (or pass when_idle)`, ERROR_CODES.NOT_IDLE);
+    }
+    const sent = await sendControlToLoop(name, { action: "restart_claude", ...(whenIdle ? { when_idle: true } : {}) });
+    if (!sent.ok) refuseUnreached(sent);
+    return { consumer_id: name, queued: sent.delivered, ...(whenIdle ? { when_idle: true as const } : {}) };
+}
+
+/** #3293 — a loop control sent by a proxy node to a loop of its machine: the answer it gives. */
+async function controlOnNode<T>(consumerId: string, control: Parameters<typeof sendControlToLoop>[1], answer: (delivered: boolean) => T): Promise<T> {
+    const sent = await sendControlToLoop(consumerId, control);
+    if (!sent.ok) refuseUnreached(sent);
+    return answer(sent.delivered);
+}
 
 /** #2333 — hold or release an agent's loop (AFK), as its own keys would. */
 defineMethod({
@@ -343,8 +380,11 @@ defineMethod({
 defineMethod({
     name: "consumer.stop_loop",
     ...LOOP_CONTROL,
+    nodeLocal: (p) => isLocalLoop((p as { consumer_id?: unknown }).consumer_id),
     params: z.object({ consumer_id: z.string() }),
-    run: (_c, p) => {
+    run: (caller, p) => {
+        // #3293 — a loop of the node's machine, through its socket.
+        if (onNode(caller)) return controlOnNode(p.consumer_id, { action: "kill" }, (delivered) => ({ consumer_id: p.consumer_id, action: "kill", delivered }));
         const delivered = isPresent(p.consumer_id);
         emitControl(p.consumer_id, { action: "kill" });
         return { consumer_id: p.consumer_id, action: "kill", delivered };
@@ -373,10 +413,13 @@ function deliverLoopPrompt(target: string, text: string): boolean {
 defineMethod({
     name: "consumer.prompt",
     ...LOOP_CONTROL,
+    nodeLocal: (p) => isLocalLoop((p as { consumer_id?: unknown }).consumer_id),
     params: z.object({ consumer_id: z.string(), text: z.unknown().optional() }),
-    run: (_c, p) => {
+    run: (caller, p) => {
         const text = typeof p.text === "string" ? p.text.trim() : "";
         if (!text) throw new Refusal(400, "text required");
+        // #3293 — straight to a loop of the node's machine: not spooled, the loop is here.
+        if (onNode(caller)) return controlOnNode(p.consumer_id, { action: "prompt", text }, (delivered) => ({ consumer_id: p.consumer_id, action: "prompt", spooled: false, delivered }));
         return { consumer_id: p.consumer_id, action: "prompt", spooled: true, delivered: deliverLoopPrompt(p.consumer_id, text) };
     },
 });

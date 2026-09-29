@@ -44,6 +44,13 @@ in the tables below. The upstream refuses them to a relayed caller: they would a
 on the upstream's machine. A batch goes one way whole; one that mixes this
 machine's methods with the board's is refused, call by call.
 
+The loop controls that reach a loop through its bus connection
+(`consumer.stop_loop`, `consumer.prompt`, `consumer.restart_claude`) are answered by
+a node when the loop runs on its machine (a plate there names the agent): the node
+sends the control on the loop's socket, and asks the loop itself whether Claude is
+idle. For any other loop they are relayed, and the upstream refuses them to a relayed
+caller, as the node's token could name anyone.
+
 The caller is authenticated **once**, on this opening request, by the same code
 as an HTTP request, and every call on the connection runs as that caller. An
 opening that fails is answered in HTTP with `{ error, code }` (401
@@ -222,7 +229,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `consumer.bar` | human, or the agent itself | `GET /api/consumers/:consumer_id/bar` |
 | `consumer.set_bar_host` | human, not relayed | `POST /api/consumers/:consumer_id/bar-host` |
 | `consumer.afk` | human, this machine's | `POST /api/agents/:name/afk` |
-| `consumer.restart_claude` | human, not relayed | — restarts an agent's Claude after it installed an update (its bar's `alerts.restart_needed`): refused `NOT_IDLE` while Claude works, unless `when_idle`: then the loop holds the order until Claude's next idle, however long, its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing; the loop resumes the conversation and tells the agent once it is back |
+| `consumer.restart_claude` | human; through a proxy node, only for a loop of its machine | — restarts an agent's Claude after it installed an update (its bar's `alerts.restart_needed`): refused `NOT_IDLE` while Claude works, unless `when_idle`: then the loop holds the order until Claude's next idle, however long, its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing; the loop resumes the conversation and tells the agent once it is back |
 | `consumer.counters` | human, or the agent itself | — an agent's counters computed now: `open`, `actionable`, `backlog` (cooled-down threads left out), `events`; a changed number is pushed on `agent.<id>.state` too. The daemon computes them on the events that move them (a ticket's lifecycle, a ping written or read); this is for what moves with time alone |
 | `agent.pane_keys` | human | `POST /api/agents/:name/pane/keys` — on the session host, through the caller's `agent.<id>.screen` opened with `typing` (`CONFLICT` without one); in tmux or on a node, straight to the pane |
 | `agent.pane_resize` | human | — the size a typing viewer would like, for a session on the host; applied while it owns the size |
@@ -342,8 +349,8 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `ticket.unstep` | human | `POST /api/tickets/:id/unstep` |
 | `consumer.wait_credit` | human, agent | `GET /api/consumers/:consumer_id/wait-credit` |
 | `consumer.delete` | human, agent | `DELETE /api/consumers/:consumer_id` |
-| `consumer.stop_loop` | human, never through a proxy node | `POST /api/consumers/:consumer_id/loop-stop` |
-| `consumer.prompt` | human, never through a proxy node | `POST /api/consumers/:consumer_id/prompt` |
+| `consumer.stop_loop` | human; through a proxy node, only for a loop of its machine | `POST /api/consumers/:consumer_id/loop-stop` |
+| `consumer.prompt` | human; through a proxy node, only for a loop of its machine | `POST /api/consumers/:consumer_id/prompt` |
 | `loops.message_all` | human, never through a proxy node | `POST /api/loops/message-all` |
 | `loops.release_all` | human, never through a proxy node | `POST /api/loops/release-all` |
 | `project.launch` | human | `POST /api/projects/:name/launch` — one of the project's known roots only |

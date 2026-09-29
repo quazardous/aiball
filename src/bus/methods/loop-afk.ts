@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { loopSockPath } from "../../claude-loop/state.js";
 import { sendEventOnce } from "../../claude-loop/ipc-events.js";
-import { resolveLoopName } from "../../pane.js";
+import { listLoopPlates, plateAgent, resolveLoopName } from "../../pane.js";
 import { getConsumer } from "../../db.js";
 import { ERROR_CODES, type ErrorCode } from "../../domain.js";
 
@@ -31,6 +31,13 @@ export function localLoopDir(
 ): { ok: true; loop: string; sd: string } | { ok: false; status: number; error: string; code: ErrorCode } {
     const consumer = getConsumer(consumerId);
     if (!consumer || !consumer.cwd) {
+        // #3293 — a loop behind a proxy node checks in with the upstream, not
+        // here: the node knows it by its plate alone, the one that names it.
+        const own = listLoopPlates().filter((e) => plateAgent(e.plate) === consumerId).sort((a, b) => b.at - a.at)[0];
+        if (own) {
+            const sd = join(process.env.CLAUDE_LOOP_STATE_ROOT ?? join(homedir(), ".claude-loop"), own.name);
+            if (existsSync(sd)) return { ok: true, loop: own.name, sd };
+        }
         // #3039 — an agent unknown, or without a loop heartbeat, has no loop to reach.
         return { ok: false, status: 404, error: `consumer not found / no cwd : ${consumerId}`, code: consumer ? ERROR_CODES.LOOP_NOT_FOUND : ERROR_CODES.CONSUMER_NOT_FOUND };
     }
@@ -80,3 +87,27 @@ export function sendAfkToLoop(
 }
 
 
+
+/** #3293 — the loop of `consumerId` runs on this machine: its state folder and socket are here. */
+export function isLocalLoop(consumerId: unknown): boolean {
+    return typeof consumerId === "string" && consumerId !== "" && localLoopDir(consumerId).ok;
+}
+
+/**
+ * #3293 — a loop control (`kill`, `restart_claude`, `prompt`) sent to a local
+ * loop through its socket, where the core sends it on the loop's bus
+ * connection: what a proxy node does for its own machine's loops. The kernel
+ * handles both the same way. `delivered`: the socket took it.
+ */
+export async function sendControlToLoop(
+    consumerId: string,
+    control: { action: "kill" | "restart_claude" | "prompt"; when_idle?: boolean; text?: string },
+): Promise<{ ok: true; loop: string; delivered: boolean } | { ok: false; status: number; error: string; code: ErrorCode }> {
+    const where = localLoopDir(consumerId);
+    if (!where.ok) return where;
+    let delivered = true;
+    try {
+        await sendEventOnce(loopSockPath(where.sd), { kind: "proxyEvent", data: { event: "control", ...control } }, { timeoutMs: 1000, throwOnError: true });
+    } catch { delivered = false; }
+    return { ok: true, loop: where.loop, delivered };
+}
