@@ -19,6 +19,7 @@
  * What would take it over is not credited, and a balance already over (the cap
  * lowered, or credit earned before it existed) is cut back by a `cap` move.
  */
+import { ticketChanged } from "./ticket-change.js";
 import { and, eq, sql } from "drizzle-orm";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
@@ -377,8 +378,7 @@ export interface TrimmedStep {
 /**
  * #2645 david — « rabote tous les then:continue à dans 5 minutes »: every step
  * still waiting longer than `maxMinutes` from now resumes at now + maxMinutes.
- * Credit spent on the part cut off comes back as a refund. The caller
- * invalidates the caches for the returned tickets.
+ * Credit spent on the part cut off comes back as a refund.
  */
 export function trimStepWaits(maxMinutes: number, nowMs = Date.now()): TrimmedStep[] {
     const limit = new Date(nowMs + maxMinutes * 60_000).toISOString();
@@ -401,6 +401,8 @@ export function trimStepWaits(maxMinutes: number, nowMs = Date.now()): TrimmedSt
                 refunded = credit({ consumerId: r.by_agent, project: r.project, kind: "refund", minutes, ticketId: r.ticket_id, messageId: r.id });
             }
         }
+        // #3388 — the step's resume moved: the thread's copies follow.
+        ticketChanged({ ticket_ids: [r.ticket_id], thread: { ticket_id: r.ticket_id, project: r.project } });
         return { message_id: r.id, ticket_id: r.ticket_id, project: r.project, by_agent: r.by_agent, from: r.resume_at, to: limit, refunded };
     });
 }

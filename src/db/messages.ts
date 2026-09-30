@@ -9,6 +9,7 @@
 import { decisionGesture, type DecisionKind, movesLastActor } from "../ticket-transitions.js";
 import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { invalidateInboxAgg } from "./inbox-agg.js";
+import { ticketChanged } from "./ticket-change.js";
 import { invalidateFlagsCache } from "./projects.js";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "../schema.js";
@@ -75,6 +76,19 @@ function bumpLastActor(
  * `undefined` for a null message: the write may have happened even though the
  * re-read came back empty, and clearing is the safe direction to be wrong in.
  */
+/**
+ * #3388 — say the write of one thread, once, after it. A re-read that came back
+ * empty names nothing: every copy is suspect, as the blanket clears it replaces.
+ */
+function threadChanged(m: Message | null | undefined): void {
+    const ids = touchedTicketIds(m);
+    if (!m || !ids) {
+        ticketChanged({ ticket_ids: [], thread: null, everything: true });
+        return;
+    }
+    ticketChanged({ ticket_ids: ids, thread: { ticket_id: ids[0], project: m.project } });
+}
+
 function touchedTicketIds(m: Message | null | undefined): number[] | undefined {
     if (!m) return undefined;
     const id = m.ticket_id ?? (m.kind === "ticket_created" ? m.id : null);
@@ -284,6 +298,7 @@ export function insertMessage(m: NewMessage): Message {
     // relations gate. Naming it repairs those entries instead of emptying the
     // per-consumer actionable sets on every single comment.
     invalidateFlagsCache(touchedTicketIds(result));
+    threadChanged(result);
     return result;
 }
 
@@ -544,6 +559,7 @@ export function updateMessageStatus(
     if (out) invalidateInboxAgg(out.project, out.kind === "ticket_created" ? out.id : out.ticket_id ?? undefined);
     else invalidateInboxAgg();
     invalidateFlagsCache(touchedTicketIds(out));
+    threadChanged(out);
     return out;
 }
 function applyMessageStatus(
@@ -600,6 +616,7 @@ export function editMessage(
     invalidateInboxAgg(); // #1167 — edit may change lastSpeaker/body-gated flags
     const out = applyMessageEdit(id, fields);
     invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    threadChanged(out);
     return out;
 }
 function applyMessageEdit(id: number, fields: EditMessageFields): Message | null {
@@ -708,6 +725,7 @@ export function deleteComment(id: number, by: string): Message | null {
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
     invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    threadChanged(out);
     return out;
 }
 
@@ -783,6 +801,8 @@ export function moveTicket(
     // thread's project re-evaluates the filter for every ticket it carries —
     // a blast radius this function cannot enumerate.
     invalidateFlagsCache();
+    // #3388 — a thread that changed project: this function cannot name every copy it moves.
+    ticketChanged({ ticket_ids: [], thread: null, everything: true });
     return out;
 }
 
@@ -853,6 +873,7 @@ export function insertRelationEvent(opts: {
     });
     // #3331 — the event is on the ticket's thread: its latest activity moved.
     if (out) invalidateInboxAgg(out.project, opts.target_ticket_id);
+    if (out) ticketChanged({ ticket_ids: [opts.target_ticket_id], thread: { ticket_id: opts.target_ticket_id, project: out.project } });
     return out;
 }
 
@@ -918,6 +939,9 @@ export function insertTypedRelation(opts: {
     invalidateFlagsCache([opts.source_ticket_id, opts.target_ticket_id]);
     // #3331 — the event is on the source ticket's thread: its latest activity moved.
     if (out) invalidateInboxAgg(out.project, opts.source_ticket_id);
+    ticketChanged(out
+        ? { ticket_ids: [opts.source_ticket_id, opts.target_ticket_id], thread: { ticket_id: opts.source_ticket_id, project: out.project } }
+        : { ticket_ids: [], thread: null, everything: true });
     return out;
 }
 
@@ -1436,6 +1460,7 @@ export function reclassifyMessageDecision(
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
     invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    threadChanged(out);
     return out;
 }
 
@@ -1485,6 +1510,7 @@ export function promoteMessageToDecision(
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
     invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    threadChanged(out);
     return out;
 }
 
@@ -1524,6 +1550,7 @@ export function removeMessageDecision(messageId: number): Message | null {
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
     invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
+    threadChanged(out);
     return out;
 }
 
@@ -1585,6 +1612,7 @@ function rewriteStepMeta(messageId: number, change: (meta: ReturnType<typeof par
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
     invalidateFlagsCache(touchedTicketIds(out)); // after the write, like the decision tags
+    threadChanged(out);
     return out;
 }
 
@@ -1937,5 +1965,6 @@ export function applyMessageDecision(
     // within five seconds. Found by the repair layer's own tests.
     invalidateInboxAgg();
     invalidateFlagsCache(touchedTicketIds(out));
+    threadChanged(out);
     return out;
 }

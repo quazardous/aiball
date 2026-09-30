@@ -6,6 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
+import { ticketChanged } from "./ticket-change.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
 import { invalidateFlagsCache } from "./projects.js";
@@ -287,6 +288,7 @@ export function setTicketOwner(ticket_id: number, by_agent: string): void {
         .set({ byAgent: by_agent })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
+    ticketChanged({ ticket_ids: [ticket_id], thread: null });
 }
 
 /**
@@ -334,6 +336,7 @@ export function setTicketAssignment(
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
     invalidateFlagsCache([ticket_id]);
+    ticketChanged({ ticket_ids: [ticket_id], thread: null });
     return out;
 }
 
@@ -351,6 +354,7 @@ export function setTicketClaim(ticket_id: number, claimant: string, at: string =
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
     invalidateFlagsCache([ticket_id]);
+    ticketChanged({ ticket_ids: [ticket_id], thread: null });
 }
 
 /**
@@ -381,6 +385,7 @@ export function releaseTicketAssignment(ticket_id: number): void {
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
     invalidateFlagsCache([ticket_id]);
+    ticketChanged({ ticket_ids: [ticket_id], thread: null });
 }
 
 /** #436: release a ticket's CLAIM (focus) — drop the lock, keep any assignment. */
@@ -392,6 +397,7 @@ export function releaseTicketClaim(ticket_id: number): void {
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
     invalidateFlagsCache([ticket_id]);
+    ticketChanged({ ticket_ids: [ticket_id], thread: null });
 }
 
 /**
@@ -490,6 +496,7 @@ export function setTicketPostpone(ticketId: number, until: string | null): boole
     // this path never invalidated anything. It went unnoticed while any other
     // write emptied the whole cache; a repair heals only what it is told about.
     invalidateFlagsCache([ticketId]);
+    ticketChanged({ ticket_ids: [ticketId], thread: null });
     return res.changes > 0;
 }
 

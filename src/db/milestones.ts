@@ -8,6 +8,7 @@
  * closing it, which is refused while any ticket in it is still open: each has
  * to be moved to another milestone or closed first, so nothing drops silently.
  */
+import { ticketChanged } from "./ticket-change.js";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
@@ -195,4 +196,5 @@ export function milestoneTargetRefusal(
 
 export function setTicketMilestone(ticketId: number, milestoneId: number | null): void {
     getDb().update(schema.tickets).set({ milestoneId }).where(eq(schema.tickets.id, ticketId)).run();
+    ticketChanged({ ticket_ids: [ticketId], thread: null });
 }

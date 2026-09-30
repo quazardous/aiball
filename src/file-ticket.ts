@@ -19,6 +19,7 @@
  *   milestones — and must be an unreleased milestone of the same project;
  * - a parent must be an existing ticket.
  */
+import { ticketChanged } from "./db/ticket-change.js";
 import { getDb } from "./db/connection.js";
 import * as schema from "./schema.js";
 import { eq } from "drizzle-orm";
@@ -140,7 +141,11 @@ export function isExtrasRefusal(v: TicketExtras | ExtrasRefusal): v is ExtrasRef
 /** The extras, on the ticket just inserted, before it is announced. */
 function applyExtras(msg: Message, extras: TicketExtras, caller: string): Message {
     const id = msg.id;
-    if (extras.level) getDb().update(schema.tickets).set({ level: extras.level }).where(eq(schema.tickets.id, id)).run();
+    if (extras.level) {
+        getDb().update(schema.tickets).set({ level: extras.level }).where(eq(schema.tickets.id, id)).run();
+        // #3388 — who sees a ticket depends on its level: the copies made at its insert are stale.
+        ticketChanged({ ticket_ids: [id], thread: null });
+    }
     if (extras.milestone !== null) setTicketMilestone(id, extras.milestone);
     if (extras.tagIds.length) setMessageTags(id, extras.tagIds, caller);
     if (extras.assignee) {
