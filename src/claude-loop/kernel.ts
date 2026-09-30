@@ -203,6 +203,7 @@ import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templat
 import { resolveBashCmd } from "./resolve-bash.js";
 import { heartbeatShouldWake } from "./heartbeat-fallback.js";
 import { ClockStepDetector } from "./clock-step.js";
+import { hostSocketPresent } from "../host-socket.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
@@ -400,7 +401,8 @@ log(`kernel.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
 // main-loop s'arme (ligne ~1086) et tape sa 1ère probe — soit 2-5s
 // supplémentaires d'orphelin. Probe AVANT d'armer quoi que ce soit.
 // Logique pure dans `parent-liveness.ts` pour qu'on puisse la tester.
-if (hostControl ? !existsSync(hostControl) : probeParentTmuxAtBoot(MUX_CMD, tname)) {
+// #3425 — on Windows a host's socket is its address file: nothing is at the path.
+if (hostControl ? !hostSocketPresent(hostControl) : probeParentTmuxAtBoot(MUX_CMD, tname)) {
     log(hostControl
         ? `startup: session host '${hostControl}' already gone — exit immediately (orphan-prevent)`
         : `startup: tmux session '${tname}' already gone — exit immediately (orphan-prevent)`);

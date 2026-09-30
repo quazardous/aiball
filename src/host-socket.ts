@@ -6,7 +6,7 @@
  * `<path>.addr`: the client connects to that port and says the token — in its
  * `hello` on attach, as `host.auth` on control, before anything else.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { connect, Socket } from "node:net";
 
 export interface HostAddress {
@@ -29,6 +29,15 @@ export function readHostAddress(socketPath: string): HostAddress | null {
     } catch {
         return null;
     }
+}
+
+/**
+ * Whether a host's socket is there: the socket file on Unix, a readable
+ * address on Windows, where nothing is at the path itself. Its host may still
+ * have gone without removing it; this only says whether there is one to try.
+ */
+export function hostSocketPresent(socketPath: string, platform: NodeJS.Platform = process.platform): boolean {
+    return platform === "win32" ? readHostAddress(socketPath) !== null : existsSync(socketPath);
 }
 
 /** A connection to a host's socket, and the token to say on it (null on Unix). */
