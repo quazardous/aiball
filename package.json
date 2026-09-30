@@ -27,6 +27,7 @@
     "bin/launcher.js",
     "bin/aiball-tray.cmd",
     "bin/aiball-tray.ps1",
+    "bin/aiball-tray-version.ps1",
     "install.ps1",
     "src",
     "!src/**/*.test.ts",
