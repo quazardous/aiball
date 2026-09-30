@@ -31,6 +31,7 @@ import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
 import { paneFooterShowsBusy } from "../claude-loop/state.js";
 import { loadConfig } from "./config.js";
+import { resolveMuxCmd } from "../claude-loop/mux-cmd.js";
 import { formatReason, type AutopollPayload } from "./templates.js";
 
 /**
@@ -42,7 +43,7 @@ function claudeStillWorking(): boolean {
     if (!process.env.TMUX) return false;
     // No -t: defaults to the active pane in the current tmux session.
     // The loop's multiplexer (psmux on Windows), as everywhere else in the loop.
-    const cap = spawnSync(process.env.MUX_CMD || "tmux", ["capture-pane", "-p", "-J"], { encoding: "utf8" });
+    const cap = spawnSync(resolveMuxCmd(process.env.MUX_CMD), ["capture-pane", "-p", "-J"], { encoding: "utf8" });
     if (cap.status !== 0) return false;
     return paneFooterShowsBusy(cap.stdout ?? "");
 }

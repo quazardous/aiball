@@ -64,6 +64,14 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- On Windows, a loop's kernel no longer spends half a core and a second to
+  answer. It drove the multiplexer through `tmux`, which there is psmux's
+  alias and takes several times longer to start than `psmux` itself; it now
+  calls `psmux` when it is installed, a running loop included at its next
+  reload. `MUX_CMD` set to anything but `tmux` is left as it is.
+- `claude-loop health` no longer calls a loop dead when its kernel is only
+  slow: it waits two seconds for the answer, and reports a late one as a
+  warning.
 - A loop reconnects to the daemon after the system clock is set back. Its
   reconnection delay was read on the wall clock: a clock corrected by two
   hours (Windows, after an update) left the loop disconnected, its bar red,

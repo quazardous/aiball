@@ -385,8 +385,10 @@ claude-loop list
 claude-loop attach myloop
 ```
 
-Set `MUX_CMD=psmux` if you want to be explicit (default `tmux`
-resolves to psmux's alias anyway).
+The loop drives the multiplexer as `psmux` when it is installed, not through
+its `tmux` alias: the alias takes several times longer to start, and the loop
+calls it several times a second. `MUX_CMD` names another command, or a path,
+when you need one; a bare `tmux` there still means psmux.
 
 ### ⚠️ First, clear claude's one-time prompts (important)
 
