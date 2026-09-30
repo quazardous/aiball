@@ -8,7 +8,6 @@
  */
 import { decisionGesture, type DecisionKind, movesLastActor } from "../ticket-transitions.js";
 import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
-import { invalidateInboxAgg } from "./inbox-agg.js";
 import { ticketChanged } from "./ticket-change.js";
 import { invalidateFlagsCache } from "./projects.js";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
@@ -293,7 +292,6 @@ export function insertMessage(m: NewMessage): Message {
     // thread's own messages. Naming the ticket repairs that entry instead of
     // dropping a thousand others the write did not touch. This is the hot
     // path — every comment, close and reopen goes through here.
-    invalidateInboxAgg(result.project, result.ticket_id ?? undefined);
     // #2165 — and it moves the flags of that thread alone, plus anything its
     // relations gate. Naming it repairs those entries instead of emptying the
     // per-consumer actionable sets on every single comment.
@@ -556,8 +554,6 @@ export function updateMessageStatus(
     // #3331 — the one thread repaired, not the whole map cleared: nearly every
     // post is auto-approved through here, and a cleared map made the next read
     // rebuild the whole project's aggregate (~180 ms).
-    if (out) invalidateInboxAgg(out.project, out.kind === "ticket_created" ? out.id : out.ticket_id ?? undefined);
-    else invalidateInboxAgg();
     invalidateFlagsCache(touchedTicketIds(out));
     threadChanged(out);
     return out;
@@ -613,7 +609,6 @@ export function editMessage(
     id: number,
     fields: EditMessageFields,
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — edit may change lastSpeaker/body-gated flags
     const out = applyMessageEdit(id, fields);
     invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
     threadChanged(out);
@@ -702,7 +697,6 @@ function applyMessageEdit(id: number, fields: EditMessageFields): Message | null
  * isn't a `comment_added`.
  */
 export function deleteComment(id: number, by: string): Message | null {
-    invalidateInboxAgg(); // #1167 — delete changes counts/lastSpeaker
     const db = getDb();
     const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
@@ -750,7 +744,6 @@ export function moveTicket(
     targetProject: string,
     byAgent: string | null,
 ): { ticket: Message; event: Message | null; from: string } | null {
-    invalidateInboxAgg(); // #1167 — move changes which project the thread aggregates into
     const db = getDb();
     const out = db.transaction((tx) => {
         const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
@@ -872,7 +865,6 @@ export function insertRelationEvent(opts: {
         return messageRowToMessage(inserted, parent?.project ?? "");
     });
     // #3331 — the event is on the ticket's thread: its latest activity moved.
-    if (out) invalidateInboxAgg(out.project, opts.target_ticket_id);
     if (out) ticketChanged({ ticket_ids: [opts.target_ticket_id], thread: { ticket_id: opts.target_ticket_id, project: out.project } });
     return out;
 }
@@ -938,7 +930,6 @@ export function insertTypedRelation(opts: {
     // it lands, on BOTH ends. Another hole the old blanket clear was hiding.
     invalidateFlagsCache([opts.source_ticket_id, opts.target_ticket_id]);
     // #3331 — the event is on the source ticket's thread: its latest activity moved.
-    if (out) invalidateInboxAgg(out.project, opts.source_ticket_id);
     ticketChanged(out
         ? { ticket_ids: [opts.source_ticket_id, opts.target_ticket_id], thread: { ticket_id: opts.source_ticket_id, project: out.project } }
         : { ticket_ids: [], thread: null, everything: true });
@@ -1436,7 +1427,6 @@ export function reclassifyMessageDecision(
     messageId: number,
     newKind: import("../decisions.js").DecisionKind,
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — decision kind change flips plan/resolution flags
     const db = getDb();
     const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1482,7 +1472,6 @@ export function promoteMessageToDecision(
     status: Exclude<DecisionStatus, "pending"> | undefined,
     by: string,
 ): Message | null {
-    invalidateInboxAgg(); // #1167 — promotion adds a decision
     const db = getDb();
     const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1522,7 +1511,6 @@ export function promoteMessageToDecision(
  * can be cleanly removed.
  */
 export function removeMessageDecision(messageId: number): Message | null {
-    invalidateInboxAgg(); // #1167 — removal clears a decision
     const db = getDb();
     const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1592,7 +1580,6 @@ export function untagMessageStep(messageId: number): Message | null {
 
 /** Rewrite a comment's meta in one transaction; `change` returns false when there is nothing to write. */
 function rewriteStepMeta(messageId: number, change: (meta: ReturnType<typeof parseMeta>) => boolean): Message | null {
-    invalidateInboxAgg();
     const db = getDb();
     const out = db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
@@ -1963,7 +1950,6 @@ export function applyMessageDecision(
     // and it invalidated NOTHING until now. The staleness was invisible: some
     // other write usually cleared the cache first, and the TTL closed the gap
     // within five seconds. Found by the repair layer's own tests.
-    invalidateInboxAgg();
     invalidateFlagsCache(touchedTicketIds(out));
     threadChanged(out);
     return out;

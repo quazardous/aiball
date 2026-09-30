@@ -39,7 +39,7 @@ import {
     UPLOAD_HARD_CAP_BYTES,
     type Strategy,
 } from "../../db.js";
-import { invalidateInboxAgg, projectTicketStates } from "../../db/inbox-agg.js";
+import { projectTicketStates } from "../../db/inbox-agg.js";
 import { invalidateFlagsCache } from "../../db/projects.js";
 import { trimStepWaits } from "../../db/wait-credit.js";
 import { purgeSeenPingsForClosedTickets } from "../../db/pings.js";
@@ -445,7 +445,6 @@ defineMethod({
         const max = Number(p.max_minutes);
         if (!Number.isInteger(max) || max < 0) throw new Refusal(400, "max_minutes: a whole number of minutes, 0 or more");
         const trimmed = trimStepWaits(max);
-        for (const t of trimmed) invalidateInboxAgg(t.project, t.ticket_id);
         if (trimmed.length) invalidateFlagsCache(trimmed.map((t) => t.ticket_id));
         return { max_minutes: max, trimmed };
     },

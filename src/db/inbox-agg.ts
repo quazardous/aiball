@@ -9,14 +9,13 @@
  * Correctness model:
  *  - `buildInboxAgg` is the SINGLE source of truth for the reduction (moved
  *    verbatim from the old inline loop). The cache only stores its output.
- *  - EXACT invalidation: every message write chokepoint calls
- *    `invalidateInboxAgg(project)` (append, status flip, edit, delete, decision
- *    change, move). The next hit rebuilds fresh — no incremental-update code to
- *    diverge.
- *  - SAFETY CEILING: even absent an invalidation call, a cached entry older
- *    than the store's TTL is rebuilt. So a future write path that forgets to
- *    invalidate degrades to ≤ a few seconds of staleness, never a permanent
- *    stale inbox. Bounded, self-healing.
+ *  - EXACT invalidation: every write of a thread says `ticketChanged`
+ *    (`ticket-change.ts`, #3388) and this module hears it: the thread written
+ *    is recomputed by the same fold over its own messages, so a repaired entry
+ *    cannot differ from a rebuilt one. No write calls this module.
+ *  - SAFETY CEILING: a cached map older than the store's TTL (60 s) is
+ *    rebuilt, so a write that said nothing degrades to a minute of staleness,
+ *    never a permanently stale inbox.
  *
  * #2168 — the STORE itself lives in `inbox-agg-cache.ts`, a leaf that imports
  * nothing, so `projects.ts` can drop this cache on a project delete / rename /
@@ -32,6 +31,7 @@ import {
     clearInboxAgg,
 } from "./inbox-agg-cache.js";
 import { listMessages } from "./messages.js";
+import { onTicketChanged } from "./ticket-change.js";
 import { replayLifecycle } from "./ticket-closed.js";
 import type { Message } from "./connection.js";
 import { parseMeta } from "../questions.js";
@@ -286,6 +286,15 @@ export function invalidateInboxAgg(project?: string | null, ticketId?: number): 
     }
     clearInboxAgg(project);
 }
+
+// #3388 — the aggregate hears the writes instead of being called by each one:
+// the thread that was written is repaired; a write that cannot name what it
+// touched drops every map. Registered with the module that holds the cache, so
+// a map can only exist where this listens.
+onTicketChanged((change) => {
+    if (change.everything) clearInboxAgg();
+    else if (change.thread) invalidateInboxAgg(change.thread.project, change.thread.ticket_id);
+});
 
 /** Tests — force a cold cache. */
 export function resetInboxAggCacheForTests(): void {
