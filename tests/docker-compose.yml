@@ -23,6 +23,9 @@ services:
       context: ..
       dockerfile: tests/Dockerfile
     cpus: ${AIBALL_TEST_CPUS:-4}
+    # #3383 — the cores the tests may use; run-docker.sh keeps some for the live
+    # daemon and loops of the machine. Empty: no restriction.
+    cpuset: "${AIBALL_TEST_CPUSET:-}"
     network_mode: none
     # #3241 — not root: root reads and writes everywhere, so the tests of a
     # file the daemon may not read or a folder it may not write in skipped
@@ -54,6 +57,9 @@ services:
       context: ..
       dockerfile: tests/Dockerfile.frontend
     cpus: ${AIBALL_TEST_CPUS:-4}
+    # #3383 — the cores the tests may use; run-docker.sh keeps some for the live
+    # daemon and loops of the machine. Empty: no restriction.
+    cpuset: "${AIBALL_TEST_CPUSET:-}"
     network_mode: none
     working_dir: /app/frontend
     volumes:
@@ -79,6 +85,9 @@ services:
       context: ..
       dockerfile: tests/Dockerfile
     cpus: ${AIBALL_TEST_CPUS:-4}
+    # #3383 — the cores the tests may use; run-docker.sh keeps some for the live
+    # daemon and loops of the machine. Empty: no restriction.
+    cpuset: "${AIBALL_TEST_CPUSET:-}"
     environment:
       NODE_ENV: test
       AIBALL_HOME: /data          # isolated, ephemeral DB (volume below)
@@ -117,6 +126,9 @@ services:
       context: ..
       dockerfile: tests/Dockerfile.agent
     cpus: ${AIBALL_TEST_CPUS:-4}
+    # #3383 — the cores the tests may use; run-docker.sh keeps some for the live
+    # daemon and loops of the machine. Empty: no restriction.
+    cpuset: "${AIBALL_TEST_CPUSET:-}"
     depends_on:
       daemon:
         condition: service_healthy

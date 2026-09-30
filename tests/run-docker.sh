@@ -20,9 +20,11 @@
 # The simulator plays its scenarios over AIBALL_SIM_SHARDS boards side by side
 # (default 4), each capped at AIBALL_SIM_CPUS cores (default 2).
 #
-# Each container is capped at AIBALL_TEST_CPUS cores (default 4) and the docker
-# client runs under `nice`: the live daemon and loops on the same machine keep
-# the upper hand. The unit container has no network and a read-only source.
+# Each container is capped at AIBALL_TEST_CPUS cores (default 4), all of them
+# share the cores of AIBALL_TEST_CPUSET (default: all but the last three), and
+# the docker client runs under `nice`: the live daemon and loops on the same
+# machine keep the upper hand. The unit container has no network and a
+# read-only source.
 #
 #   AIBALL_TEST_CPUS=2 bash tests/run-docker.sh unit
 #   AIBALL_TEST_SRC=/path/to/other/checkout bash tests/run-docker.sh unit
@@ -30,6 +32,14 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 export AIBALL_TEST_CPUS="${AIBALL_TEST_CPUS:-4}"
+# #3383 — the tests never take every core: side by side, the critical profile's
+# phases asked for far more than the machine has, and the live daemon's event
+# loop was held 423 s an hour while it ran (32 s an hour otherwise). All the
+# test containers share the cores but the last three, which stay the machine's.
+if [ -z "${AIBALL_TEST_CPUSET+x}" ]; then
+    cores="$(nproc)"
+    if [ "$cores" -gt 4 ]; then export AIBALL_TEST_CPUSET="0-$((cores - 4))"; else export AIBALL_TEST_CPUSET=""; fi
+fi
 if [ -n "${AIBALL_TEST_SRC:-}" ]; then
     AIBALL_TEST_SRC="$(cd "$AIBALL_TEST_SRC" && pwd)" || { echo "AIBALL_TEST_SRC: no such directory"; exit 2; }
     export AIBALL_TEST_SRC
