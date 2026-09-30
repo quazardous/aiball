@@ -530,7 +530,7 @@
     },
     {
       "name": "bus.whoami",
-      "description": "Who the connection runs as: what every call on it is authorized against.",
+      "description": "Who the connection runs as: what every call on it is authorized against. and `machine`, where the caller is (`hub`, `node:<label>`, `tcp:<address>`): what a client compares a consumer's or a session's `machine` with, to tell what runs on its own machine.",
       "paramStructure": "by-name",
       "params": [],
       "result": {

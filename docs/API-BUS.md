@@ -60,6 +60,22 @@ sends the control on the loop's socket, and asks the loop itself whether Claude 
 idle. For any other loop they are relayed, and the upstream refuses them to a relayed
 caller, as the node's token could name anyone.
 
+### Machines
+
+Where something runs is said in one vocabulary: `hub` (the daemon that holds the
+board), `node:<label>` (a proxy node), `tcp:<address>` (a client reaching the hub
+directly over TCP). It names where a consumer's loop is connected from
+(`machine` in `consumer.list` and `agent.<id>.state`, null without a loop), which
+machine holds a session (`machine` in a consumer's `session` and in
+`session.list`), and where the caller is (`machine` in `bus.whoami`).
+
+A client takes for its own what runs on **its** machine: the consumers and the
+sessions whose `machine` is the one `bus.whoami` answers. A session is attachable
+from its machine only: its socket, or its tmux session, is there. A consumer's
+`remote` is older and says something else: whether the consumer was last seen
+from outside **the hub's** machine. Behind a node it reads the wrong way round
+(the hub's agents `false`, the node's own `true`); compare `machine` instead.
+
 The caller is authenticated **once**, on this opening request, by the same code
 as an HTTP request, and every call on the connection runs as that caller. An
 opening that fails is answered in HTTP with `{ error, code }` (401
@@ -86,7 +102,7 @@ A text frame holds one JSON-RPC 2.0 message, or a batch of them:
 ```
 
 ```json
-{ "jsonrpc": "2.0", "id": 1, "result": { "consumer": "claude-aiball-dev", "kind": "agent", "transport": "uds" } }
+{ "jsonrpc": "2.0", "id": 1, "result": { "consumer": "claude-aiball-dev", "kind": "agent", "relayed": false, "transport": "uds", "machine": "hub" } }
 ```
 
 - A message without `id` is a notification: it runs, and gets no answer.
@@ -219,7 +235,7 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 
 | Method | Callers | Replaces |
 |---|---|---|
-| `bus.whoami` | human, agent | — who the connection runs as: `{ consumer, kind, relayed, transport }` |
+| `bus.whoami` | human, agent | — who the connection runs as: `{ consumer, kind, relayed, transport, machine }`; `machine` is where the caller is (see *Machines*) |
 | `rpc.discover` | human, agent | — this bus's methods, as OpenRPC |
 | `bus.subjects` | human, agent | — this bus's subjects, as AsyncAPI |
 | `bus.subscribe` | human, agent | — see *Subscriptions* |

@@ -11,7 +11,8 @@ import { AGENT_TYPES, type AgentType } from "../../db/consumers.js";
 import { broadcast } from "../../ws.js";
 import { cachedCounters, markCountersDirty, refreshCounters } from "../../agent-counters.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
-import { isPresent, presenceRunning } from "../../live-presence.js";
+import { isPresent, presenceMachine, presenceRunning } from "../../live-presence.js";
+import { machineName } from "../../machine-name.js";
 import { emitControl } from "../../event-bus.js";
 import { listWaitCreditMoves, listWaitCredits, waitCreditBalance, waitCreditEnabled, type WaitCreditRow } from "../../db/wait-credit.js";
 import { unreadPingCount } from "../../db/pings.js";
@@ -60,7 +61,8 @@ function entryContext() {
 /**
  * One consumer as `consumer.list` gives it, and as `agent.<id>.state` pushes
  * it (#3070: the same builder, so the two cannot name a field differently):
- * its live presence (#443), its ping tally (#1185), each agent's wait credit
+ * its live presence (#443), the machine its loop runs on (#3412: `hub`,
+ * `node:<label>`, `tcp:<address>`, null without a loop), its ping tally (#1185), each agent's wait credit
  * per project (#2645), its session — on the host (#3066) or in tmux (#3135) —
  * or null, and
  * an agent's counters (#3133): the last computed, null before the first. An
@@ -75,6 +77,8 @@ function consumerEntry(c: Consumer, ctx: ReturnType<typeof entryContext>) {
     return {
         ...c,
         present: presenceRunning(c.consumer_id),
+        // #3412 — where its loop runs now, in the words `bus.whoami` says the caller's machine in.
+        machine: machineName(presenceMachine(c.consumer_id)),
         ping_count: ctx.pings.get(c.consumer_id)?.total ?? 0,
         ping_unseen: ctx.pings.get(c.consumer_id)?.unseen ?? 0,
         wait_credit: c.kind === "human" ? null : (ctx.credits.get(c.consumer_id) ?? []),

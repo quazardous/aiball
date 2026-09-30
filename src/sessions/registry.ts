@@ -12,6 +12,7 @@ import { isPresent } from "../live-presence.js";
 import { resolveLoopName } from "../pane.js";
 import { tmuxName } from "../claude-loop/state.js";
 import { tmuxClientsOf } from "./tmux-clients.js";
+import { thisMachine } from "../machine-name.js";
 
 const byKey = new Map<string, HostLink>();
 
@@ -21,6 +22,8 @@ export interface SessionView {
     agent: string | null;
     name: string | null;
     host: "daemon";
+    /** #3412 — the machine that holds the session (`hub`, `node:<label>`): attachable from that machine only. */
+    machine: string;
     pid: number;
     cwd: string;
     running: boolean;
@@ -39,6 +42,8 @@ export interface TmuxSessionView {
     agent: string;
     name: null;
     host: "tmux";
+    /** #3412 — the machine the tmux session is on: reachable from that machine only. */
+    machine: string;
     cwd: string;
     running: true;
     /** The tmux session the loop runs in. */
@@ -60,7 +65,7 @@ export function tmuxSessionView(agent: string): TmuxSessionView | null {
     const loop = resolveLoopName(c.cwd, agent);
     const said = tmuxClientsOf(agent);
     return loop
-        ? { agent, name: null, host: "tmux", cwd: c.cwd, running: true, tmux: tmuxName(loop), clients: said?.clients ?? null, interactive: said?.interactive ?? null }
+        ? { agent, name: null, host: "tmux", machine: thisMachine(), cwd: c.cwd, running: true, tmux: tmuxName(loop), clients: said?.clients ?? null, interactive: said?.interactive ?? null }
         : null;
 }
 
@@ -69,6 +74,7 @@ export function viewOf(link: HostLink): SessionView {
         agent: link.info.agent,
         name: link.info.agent ? null : link.info.name,
         host: "daemon",
+        machine: thisMachine(),
         pid: link.info.pid,
         cwd: link.info.cwd,
         running: link.running,

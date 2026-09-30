@@ -155,6 +155,8 @@ const TOKEN_USAGE: Shape = { tokens_in: "number", tokens_out: "number", cache_w:
 const CONSUMER: Shape = {
     consumer_id: "string", kind: "string", cwd: "string?", project: "string?", last_seen_at: "string?",
     state: "string?", state_since: "string?", state_human_word: "string?", present: "boolean?",
+    // #3412 — where its loop runs, to compare with `bus.whoami`'s.
+    machine: "string?",
     ping_unseen: "number?", wait_credit: "array?",
 };
 const ROW: Shape = {
@@ -321,8 +323,8 @@ test("the rest of tvty's calls: its settings, its loops, its pings, its counters
         ["config.managed", { project: P }, { project: "string?", config: [CONFIG_ENTRY] }],
         ["ping.list", { unread: true, limit: 20 }, { pings: [{ message: {} }] }],
         ["loop.list", {}, [{ name: "string", cwd: "string", started_at: "string?", last_seen_at: "string?", superseded: "boolean", clients: "number?", interactive: "number?" }]],
-        ["session.list", {}, [{ agent: "string?", running: "boolean?" }]],
-        ["bus.whoami", {}, {}],
+        ["session.list", {}, [{ agent: "string?", running: "boolean?", machine: "string" }]],
+        ["bus.whoami", {}, { machine: "string?" }],
         // #3305 — what tvty's new-project assistant starts from: every value with where it comes from.
         ["project.settings", { cwd: settingsDir }, SETTINGS],
         // #3326 — its 📢 marks, read in one call at start; then it follows project_standing_changed.

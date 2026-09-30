@@ -114,6 +114,15 @@ export function presenceElsewhere(consumer: string, machine: string | undefined)
     return e.machine;
 }
 
+/**
+ * #3412 — the machine a consumer's loop is connected from (`local`,
+ * `node:<label>`, `tcp:<address>`), or null when it has no live connection or
+ * none said its machine.
+ */
+export function presenceMachine(consumer: string): string | null {
+    return live.get(consumer)?.machine ?? null;
+}
+
 /** True while a consumer holds (or is within the grace of) a live SSE. */
 export function isPresent(consumer: string): boolean {
     return live.has(consumer);

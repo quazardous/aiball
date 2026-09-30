@@ -32,6 +32,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- Where things run is said in one vocabulary (`hub`, `node:<label>`,
+  `tcp:<address>`): a consumer's entry carries the `machine` its loop is
+  connected from, a session the `machine` that holds it, and `bus.whoami` the
+  caller's. A client behind a proxy node took the hub's sessions for its own:
+  `remote` is the hub's view, and reads the wrong way round from a node.
 - `aiball ticket new` and `aiball ticket comment` take their text from a file
   (`--body-file <path>`) or from standard input (`--body -`). On Windows, a
   text of several lines given as an argument kept only its first line: the
