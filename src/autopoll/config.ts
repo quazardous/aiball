@@ -264,8 +264,7 @@ export interface AiballConfig {
          *  overridden per project; read by the hook at each call. */
         questions: LoopQuestions;
         /** #3135: where a loop's Claude runs — `host` (the daemon's session
-         *  host, the default — `tmux` on Windows for now, see defaultLoopSession)
-         *  or `tmux` (a tmux session, with the loop's bar in
+         *  host, the default) or `tmux` (a tmux session, with the loop's bar in
          *  its status line). Global `claude_loop.session`, overridden per
          *  project; `start --host` / `--tmux` wins; `restart` keeps a loop where
          *  it runs unless one of them says otherwise. */
@@ -566,15 +565,11 @@ export type LoopSession = "host" | "tmux";
 
 /**
  * Where a loop's Claude runs when nothing says otherwise: the daemon's session
- * host, except on Windows.
- *
- * TEMPORARY: the session host runs on Windows since #3425 (loopback ports with
- * a token), chosen by hand with `claude_loop.session: host`; Windows defaults
- * to tmux (psmux) until it has been through tvty's attach there, then this
- * goes back to `host` everywhere.
+ * host, on every system. #3425 — Windows too, since the host runs there
+ * (loopback ports with a token); it defaulted to tmux (psmux) until then.
  */
-export function defaultLoopSession(platform: NodeJS.Platform = process.platform): LoopSession {
-    return platform === "win32" ? "tmux" : "host";
+export function defaultLoopSession(): LoopSession {
+    return "host";
 }
 
 /** #3135 — a `claude_loop.session` value: `host` or `tmux`; anything else, undefined. */

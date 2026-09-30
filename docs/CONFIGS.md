@@ -75,9 +75,9 @@ child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
 `mouse` (`on` | `off`) is also read from the **global** config, since it is
 a per-user taste rather than a project's: defaults → global → project →
 `start --mouse`. So are `bar` (`tmux` | `external`, `start --bar`) and
-`session` (`host` | `tmux`: where Claude runs, `host` by default — `tmux` on
-Windows for now, where the session host does not run yet;
-`start --host` / `--tmux`, and a `restart` keeps a loop where it runs).
+`session` (`host` | `tmux`: where Claude runs, `host` by default, Windows
+included; `start --host` / `--tmux`, and a `restart` keeps a loop where it
+runs).
 
 **AskUserQuestion gate + AFK.** In a loop, `AskUserQuestion` is allowed
 while the **presence hold** is live (typing arms a hold of

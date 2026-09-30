@@ -209,6 +209,6 @@ a terminal answers. Under psmux the terminal does; a host may have no client
 yet, so it answers that first question itself from its screen, and does not
 pass it on.
 
-Until tmux mode stops being the default there, a loop runs on the host when
-its configuration says `claude_loop.session: host`
+A loop runs on the host there by default, as elsewhere; `claude_loop.session:
+tmux` (or `claude-loop start --tmux`) keeps it in psmux
 ([`WINDOWS.md`](./WINDOWS.md)).

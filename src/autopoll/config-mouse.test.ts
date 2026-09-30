@@ -66,10 +66,8 @@ test("#3135 — claude_loop.session: the platform default, set globally, overrid
     assert.equal(loadConfig(project("s-junk", "claude_loop:\n  session: nope\n")).claude_loop.session, defaultLoopSession());
 });
 
-test("the session defaults to tmux on Windows, where the session host does not run yet — host elsewhere", () => {
-    // Temporary: the session host is built on Unix sockets. An explicit
-    // `session: host` is still honoured (s-override above), on every platform.
-    assert.equal(defaultLoopSession("win32"), "tmux");
-    assert.equal(defaultLoopSession("linux"), "host");
-    assert.equal(defaultLoopSession("darwin"), "host");
+test("the session defaults to the host, Windows included", () => {
+    // #3425 — Windows defaulted to tmux while the host did not run there.
+    // An explicit `session: tmux` is still honoured, on every platform.
+    assert.equal(defaultLoopSession(), "host");
 });

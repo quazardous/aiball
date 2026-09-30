@@ -139,8 +139,8 @@ claude_loop:
   # Also settable in the global config; `claude-loop start --host|--tmux`
   # wins, and `restart` keeps a loop where it runs unless one of them says
   # otherwise. tvty's start follows it too.
-  # Default: host, except on Windows, where it is tmux for now (the session
-  # host is Unix-only). Left commented so a copied template keeps that default.
+  # Default: host, on every system. Left commented so a copied template keeps
+  # that default.
   # session: host
 
   # AFK key — F9 cycles 3 states: `AFK` (autonomous loop, dim) →

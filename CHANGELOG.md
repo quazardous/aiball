@@ -32,10 +32,13 @@ dates are YYYY-MM-DD.
 
 ### Added
 
-- The session host runs on Windows: a loop there runs on it with
-  `claude_loop.session: host` or `claude-loop start --host` (tmux mode stays
-  the default on Windows for now). Its sockets are loopback ports, each with a
-  token, written to `attach.sock.addr` and `control.sock.addr`; a client says
+- The session host runs on Windows, and a loop's Claude runs on it there by
+  default, as elsewhere: tmux mode (psmux) was the Windows default, and
+  `claude_loop.session: tmux` or `claude-loop start --tmux` still chooses it.
+  A loop already in psmux stays there, `restart` included; a new start takes
+  the default (`restart --resume <loop> --host` moves one). The host's
+  sockets are loopback ports, each with a token, written to
+  `attach.sock.addr` and `control.sock.addr`; a client says
   the token first (in its `hello`, or as `host.auth`), or is closed before
   anything is sent. The host gives its folder an ACL for its user alone,
   leaves the daemon's job so a daemon restart does not end it, and holds its
