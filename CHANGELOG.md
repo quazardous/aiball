@@ -30,7 +30,8 @@ dates are YYYY-MM-DD.
   others. Two agents had started the same release.
 - `claude_loop.questions: ticket_only` (global or per project): the choice
   dialog is refused even with a human present, and every question goes to
-  the ticket. `present`, the default, keeps today's rule.
+  the ticket. `present`, the default, keeps today's rule. A folder's settings
+  list it, so a client's options page shows and changes it.
 
 ### Fixed
 

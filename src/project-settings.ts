@@ -13,7 +13,7 @@
  */
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
-import { defaultLoopSession, findConfigUpwards, globalConfigPath, loadConfig, parseLoopSession, readGlobalLoopSession, type ConsumerRole, type ConsumerSource, type LoopSession } from "./autopoll/config.js";
+import { defaultLoopSession, findConfigUpwards, globalConfigPath, loadConfig, parseLoopQuestions, parseLoopSession, readGlobalLoopQuestions, readGlobalLoopSession, type ConsumerRole, type ConsumerSource, type LoopQuestions, type LoopSession } from "./autopoll/config.js";
 import { parseRemoteControl, type RemoteControl } from "./claude-loop/remote-control.js";
 import { InitRefusal } from "./project-init.js";
 
@@ -32,6 +32,8 @@ export interface ProjectSettings {
     /** #3305 — where a loop started here runs: the file's, the machine's (global config), or the default. */
     session: { value: LoopSession; from: "file" | "global" | "default" };
     remote_control: { value: RemoteControl; from: "file" | "default" };
+    /** #3393 — where the folder's agent may ask its questions: the file's, the machine's, or the default. */
+    questions: { value: LoopQuestions; from: "file" | "global" | "default" };
     /** #3308 — the settings a client may change here, described (as `config.managed` does its keys). */
     settings: FolderSetting[];
 }
@@ -64,6 +66,11 @@ const FOLDER_SETTINGS: { key: string; field: keyof SettingsPatch; type: FolderSe
         label: "Remote Control",
         description: "Claude starts with Remote Control: true names the session after the agent, a name names it so, false leaves it off.",
     },
+    {
+        key: "claude_loop.questions", field: "questions", type: "enum", options: ["present", "ticket_only"], default: () => "present",
+        label: "Agent questions",
+        description: "present: the agent may open its choice dialog while a human is present, and is sent to the ticket otherwise; ticket_only: the dialog is always refused, every question goes to the ticket. Applies at the agent's next question, no restart.",
+    },
 ];
 
 /** #3308 — a `{ key, value }` change as the named patch; refused for a key this table does not know or a value its type does not take. */
@@ -90,6 +97,8 @@ export interface SettingsPatch {
     remote_control?: RemoteControl | null;
     /** #3305 — `claude_loop.session`. */
     session?: LoopSession | null;
+    /** #3393 — `claude_loop.questions`. */
+    questions?: LoopQuestions | null;
 }
 
 type Doc = ReturnType<typeof parseDocument>;
@@ -132,6 +141,7 @@ function readResolved(cwd: string): ProjectSettings {
     const inFile = doc ? parseRemoteControl(doc.getIn(["claude", "remote_control"])) : null;
     const cfg = loadConfig(cwd);
     const sessionInFile = doc ? parseLoopSession(doc.getIn(["claude_loop", "session"])) : undefined;
+    const questionsInFile = doc ? parseLoopQuestions(doc.getIn(["claude_loop", "questions"])) : undefined;
     const roleInFile = doc ? doc.getIn(["consumer", "role"]) : undefined;
     return {
         file,
@@ -146,6 +156,10 @@ function readResolved(cwd: string): ProjectSettings {
             from: sessionInFile !== undefined ? "file" : readGlobalLoopSession(globalConfigPath()) !== undefined ? "global" : "default",
         },
         remote_control: { value: cfg.claude.remote_control, from: inFile !== null ? "file" : "default" },
+        questions: {
+            value: cfg.claude_loop.questions,
+            from: questionsInFile !== undefined ? "file" : readGlobalLoopQuestions(globalConfigPath()) !== undefined ? "global" : "default",
+        },
         settings: [],
     };
 }
@@ -215,6 +229,7 @@ export function writeSettings(cwd: string, patch: SettingsPatch): ProjectSetting
     const doc = readDoc(file);
     if (patch.remote_control !== undefined) patchKey(doc, file, "claude", "remote_control", patch.remote_control);
     if (patch.session !== undefined) patchKey(doc, file, "claude_loop", "session", patch.session);
+    if (patch.questions !== undefined) patchKey(doc, file, "claude_loop", "questions", patch.questions);
     try {
         writeFileSync(file, textOf(doc));
     } catch (e) {

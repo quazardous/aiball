@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadConfig } from "../autopoll/config.js";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-3256-"));
 process.env.AIBALL_HOME = home;
@@ -19,6 +20,7 @@ const settings = getMethod("project.settings")!;
 const settingsSet = getMethod("project.settings_set")!;
 const human = testCaller("boss", { kind: "human" });
 type Settings = {
+    questions: { value: string; from: string };
     file: string | null;
     configured: boolean;
     consumer: { project: { value: string; from: string }; agent: { value: string; from: string }; role: { value: string | null; from: string } };
@@ -162,7 +164,7 @@ test("a file emptied by set is not written {}: its leading comments stay, else i
 test("the settings are described, each with its type, choices, default, value and where it comes from", () => {
     const d = folder("claude_loop:\n  session: tmux\n");
     const r = settings.run(human, { cwd: d }) as Settings & { settings: { key: string; type: string; options?: string[]; default: unknown; value: unknown; from: string; label: string }[] };
-    assert.deepEqual(r.settings.map((s) => s.key), ["claude_loop.session", "claude.remote_control"]);
+    assert.deepEqual(r.settings.map((s) => s.key), ["claude_loop.session", "claude.remote_control", "claude_loop.questions"]);
     const session = r.settings[0]!;
     assert.deepEqual([session.type, session.options, session.value, session.from], ["enum", ["host", "tmux"], "tmux", "file"]);
     assert.equal(typeof session.label, "string");
@@ -179,6 +181,11 @@ test("set by key writes what the named field writes; an unknown key or a value o
     assert.deepEqual(set({ cwd: b, key: "claude_loop.session", value: null }).session.from, "default");
     assert.throws(() => set({ cwd: b, key: "claude.model", value: "x" }), (e: { code: string }) => e.code === "BAD_REQUEST");
     assert.throws(() => set({ cwd: b, key: "claude_loop.session", value: "screen" }), (e: { code: string }) => e.code === "BAD_REQUEST");
+    // #3393 — where the agent asks: written to the key the loop's hook reads.
+    assert.deepEqual(set({ cwd: b, key: "claude_loop.questions", value: "ticket_only" }).questions, { value: "ticket_only", from: "file" });
+    assert.equal(loadConfig(b).claude_loop.questions, "ticket_only");
+    assert.deepEqual(set({ cwd: b, key: "claude_loop.questions", value: null }).questions, { value: "present", from: "default" });
+    assert.throws(() => set({ cwd: b, key: "claude_loop.questions", value: "never" }), (e: { code: string }) => e.code === "BAD_REQUEST");
 });
 
 // #3327 — removing a block no longer takes the comment written above it (yaml attaches the file's header to the first key).

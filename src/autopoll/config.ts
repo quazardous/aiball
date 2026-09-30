@@ -612,7 +612,7 @@ export function parseLoopQuestions(value: unknown): LoopQuestions | undefined {
 }
 
 /** #3393 — `claude_loop.questions` from the global config file; undefined when unset. */
-function readGlobalLoopQuestions(path: string): LoopQuestions | undefined {
+export function readGlobalLoopQuestions(path: string): LoopQuestions | undefined {
     if (!existsSync(path)) return undefined;
     try {
         const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;
