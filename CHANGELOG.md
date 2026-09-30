@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.52.0] — 2026-09-30
+
 ### Changed
 
 - `aiball`, `aiball-mcp` and `claude-loop` refuse to run in a folder whose
