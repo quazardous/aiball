@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.51.1] — 2026-09-30
+
 ### Fixed
 
 - `claude-loop start` without `--cwd` starts the loop where the command was
