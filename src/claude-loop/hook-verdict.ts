@@ -24,6 +24,7 @@
  * verdict builder now reads `afkHoldActive` only, the AFK SM is the
  * single source of truth for "is a human here."
  */
+import type { LoopQuestions } from "../autopoll/config.js";
 import { selectTransport } from "./transport/index.js";
 import {
     type LiveLoopSnapshot,
@@ -128,7 +129,7 @@ export type { HUMAN_TYPING_TTL_SEC };
  * to a specific tool ; the verdict may further branch on it).
  */
 export type HookContext =
-    | { kind: "PreToolUse"; tool_name: string }
+    | { kind: "PreToolUse"; tool_name: string; questions?: LoopQuestions }
     | { kind: "SessionStart"; source: "startup" | "resume" | "compact" | "clear" }
     | { kind: "Stop" };
 
@@ -159,6 +160,11 @@ const ASK_USER_QUESTION_REDIRECT =
     "Post your question as an aiball ticket comment instead (ticket_reply on the relevant ticket); the conversation IS the channel. " +
     "When a human is present (interactive session) this dialog is allowed.";
 
+/** #3393 — `claude_loop.questions: ticket_only`: the dialog is refused even with a human in front. */
+const ASK_USER_QUESTION_TICKET_ONLY =
+    "AskUserQuestion (multi-choice dialog) is off for this project: its questions go to the ticket (claude_loop.questions: ticket_only). " +
+    "Post your question as an aiball ticket comment (ticket_reply on the relevant ticket, with handback: true, or then: \"plan\" when you propose a choice).";
+
 /**
  * Pure mapping `(state, context) → verdict`. Encapsulates the deny logic
  * the hooks used to inline ; each hook becomes a thin wrapper that just
@@ -180,6 +186,16 @@ const ASK_USER_QUESTION_REDIRECT =
  */
 export function buildHookVerdict(state: LoopStateSnapshot, context: HookContext): HookVerdict {
     if (context.kind === "PreToolUse" && context.tool_name === "AskUserQuestion") {
+        // #3393 — `ticket_only`: refused whoever is present; the rule below is `present`.
+        if (context.questions === "ticket_only") {
+            return {
+                hookSpecificOutput: {
+                    hookEventName: "PreToolUse",
+                    permissionDecision: "deny",
+                    permissionDecisionReason: ASK_USER_QUESTION_TICKET_ONLY,
+                },
+            };
+        }
         // #979 — `afkHoldActive=false` couvre DEUX cas qui convergent vers le
         // même verdict prudent : (1) AFK off réel (loop autonome), (2) état
         // indéterminé car UDS down → defaults AFK off (cf. queryLoopState).

@@ -24,6 +24,7 @@
 import { readFileSync } from "node:fs";
 import { buildHookVerdict, queryLoopState } from "./hook-verdict.js";
 import { CL_ENV } from "./env-vars.js";
+import { loadConfig } from "../autopoll/config.js";
 
 function allow(): never {
     process.stdout.write("{}\n");
@@ -45,7 +46,10 @@ try {
     if (!sd) allow();
 
     const state = await queryLoopState(sd);
-    const verdict = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });
+    // #3393 — read at each call: this process is started per tool use, so a
+    // change of `claude_loop.questions` applies without restarting the loop.
+    const questions = loadConfig(process.env.AIBALL_CWD ?? process.cwd()).claude_loop.questions;
+    const verdict = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion", questions });
     process.stdout.write(JSON.stringify(verdict) + "\n");
     process.exit(0);
 } catch {

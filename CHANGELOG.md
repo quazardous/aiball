@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- `claude_loop.questions: ticket_only` (global or per project): the choice
+  dialog is refused even with a human present, and every question goes to
+  the ticket. `present`, the default, keeps today's rule.
+
 ## [0.52.0] — 2026-09-30
 
 ### Changed

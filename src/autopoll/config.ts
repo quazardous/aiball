@@ -256,6 +256,13 @@ export interface AiballConfig {
          *  overridden per project; `start --bar` wins; `claude-loop bar`
          *  switches a running loop. */
         bar: BarHost;
+        /** #3393: where an agent's questions go — `present` (the default:
+         *  the choice dialog `AskUserQuestion` is allowed while a human is
+         *  present, NOT AFK 10 min or ∞, and refused otherwise) or
+         *  `ticket_only` (always refused: a question is a ticket comment,
+         *  even with a human in front). Global `claude_loop.questions`,
+         *  overridden per project; read by the hook at each call. */
+        questions: LoopQuestions;
         /** #3135: where a loop's Claude runs — `host` (the daemon's session
          *  host, the default — `tmux` on Windows for now, see defaultLoopSession)
          *  or `tmux` (a tmux session, with the loop's bar in
@@ -457,6 +464,7 @@ const DEFAULTS: AiballConfig = {
         esc_takeover: true,
         mouse: true,
         bar: "tmux",
+        questions: "present",
         session: defaultLoopSession(),
         // #351 / #381: AFK = a single ATOMIC combo that TOGGLES away/back —
         // #381 (david s4r9n8) dropped the 2-press timing sequence. Default
@@ -592,6 +600,27 @@ export function readGlobalLoopSession(path: string): LoopSession | undefined {
 export function parseBarHost(value: unknown): BarHost | undefined {
     const v = typeof value === "string" ? value.trim().toLowerCase() : value;
     return isBarHost(v) ? v : undefined;
+}
+
+/** #3393 — where an agent's questions go: the choice dialog while a human is present, or the ticket only. */
+export type LoopQuestions = "present" | "ticket_only";
+
+/** #3393 — a `claude_loop.questions` value: `present` or `ticket_only`; anything else, undefined. */
+export function parseLoopQuestions(value: unknown): LoopQuestions | undefined {
+    const v = typeof value === "string" ? value.trim().toLowerCase() : value;
+    return v === "present" || v === "ticket_only" ? v : undefined;
+}
+
+/** #3393 — `claude_loop.questions` from the global config file; undefined when unset. */
+function readGlobalLoopQuestions(path: string): LoopQuestions | undefined {
+    if (!existsSync(path)) return undefined;
+    try {
+        const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;
+        const cl = raw.claude_loop;
+        return cl && typeof cl === "object" ? parseLoopQuestions((cl as Record<string, unknown>).questions) : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /** #3044 — `claude_loop.bar` from the global config file; undefined when unset. */
@@ -795,6 +824,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     // #3044 — `claude_loop.bar`, same layers.
     const globalBar = readGlobalLoopBar(globalConfigPath());
     if (globalBar !== undefined) cfg.claude_loop.bar = globalBar;
+    // #3393 — `claude_loop.questions`, same layers.
+    const globalQuestions = readGlobalLoopQuestions(globalConfigPath());
+    if (globalQuestions !== undefined) cfg.claude_loop.questions = globalQuestions;
     // #3135 — `claude_loop.session`, same layers.
     const globalSession = readGlobalLoopSession(globalConfigPath());
     if (globalSession !== undefined) cfg.claude_loop.session = globalSession;
@@ -895,6 +927,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #3044 — tmux / external; anything else keeps the global value.
             const bar = parseBarHost(cl.bar);
             if (bar !== undefined) cfg.claude_loop.bar = bar;
+            // #3393 — present / ticket_only; anything else keeps the global value.
+            const questions = parseLoopQuestions(cl.questions);
+            if (questions !== undefined) cfg.claude_loop.questions = questions;
             // #3135 — host / tmux; anything else keeps the global value.
             const session = parseLoopSession(cl.session);
             if (session !== undefined) cfg.claude_loop.session = session;

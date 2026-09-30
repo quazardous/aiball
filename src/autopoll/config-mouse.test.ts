@@ -45,6 +45,17 @@ test("#3044 — claude_loop.bar: tmux by default, set globally, overridden per p
     assert.equal(loadConfig(project("b-junk", null)).claude_loop.bar, "tmux");
 });
 
+test("#3393 — claude_loop.questions: present by default, set globally, overridden per project, junk ignored", () => {
+    global("");
+    assert.equal(loadConfig(project("q-default", null)).claude_loop.questions, "present");
+    global("claude_loop:\n  questions: ticket_only\n");
+    assert.equal(loadConfig(project("q-global", "consumer:\n  project: q-global\n")).claude_loop.questions, "ticket_only");
+    assert.equal(loadConfig(project("q-override", "claude_loop:\n  questions: present\n")).claude_loop.questions, "present");
+    global("claude_loop:\n  questions: never\n");
+    assert.equal(loadConfig(project("q-junk", null)).claude_loop.questions, "present");
+    assert.equal(loadConfig(project("q-project", "claude_loop:\n  questions: ticket_only\n")).claude_loop.questions, "ticket_only");
+});
+
 test("#3135 — claude_loop.session: the platform default, set globally, overridden per project, junk ignored", () => {
     global("");
     assert.equal(loadConfig(project("s-default", null)).claude_loop.session, defaultLoopSession());

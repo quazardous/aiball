@@ -84,7 +84,13 @@ while the **presence hold** is live (typing arms a hold of
 `presence_hold_seconds`, default 10 min; F9 cycles away → hold →
 present-∞); past that it redirects the
 agent to ask via a ticket comment — a stalled question is cheap vs a
-lost one. `afk_key` (default `f9`) is the immediate control: the PTY
+lost one. That is `claude_loop.questions: present`, the default. With
+`questions: ticket_only` the dialog is refused whoever is present: every
+question of the project goes to its ticket. Set it in the global config or
+per project (the project wins); the hook reads it at each call, so a change
+applies without restarting the loop. It gates the choice dialog only: a
+question written as plain text in the conversation is not a tool call, and no
+hook sees it. `afk_key` (default `f9`) is the immediate control: the PTY
 proxy watches stdin for the key and cycles the presence state on match;
 `afk_window_ms` (default 400) is a post-fire key-repeat debounce.
 `afk_key` uses VS Code notation (`+` joins modifiers). Since the proxy

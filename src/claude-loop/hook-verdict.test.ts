@@ -151,3 +151,23 @@ test("queryLoopState + buildHookVerdict integration: AFK hold ∞ → ALLOW (hum
     const v = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });
     assert.deepEqual(v, ALLOW, "AFK SM hold = human present → dialog allowed");
 });
+
+// #3393 — `claude_loop.questions`: `present` is the rule above; `ticket_only`
+// refuses the dialog whoever is present, and says why.
+test("buildHookVerdict: questions=ticket_only → deny even with a human present, naming the setting", () => {
+    for (const afkHoldActive of [true, false]) {
+        const v = buildHookVerdict(snap({ afkHoldActive }), { kind: "PreToolUse", tool_name: "AskUserQuestion", questions: "ticket_only" });
+        assert.equal(v.hookSpecificOutput?.permissionDecision, "deny", `human present: ${afkHoldActive}`);
+        assert.match(v.hookSpecificOutput?.permissionDecisionReason ?? "", /claude_loop\.questions: ticket_only/);
+    }
+});
+
+test("buildHookVerdict: questions=present → today's rule: allowed with a human present, denied without", () => {
+    const ctx = { kind: "PreToolUse", tool_name: "AskUserQuestion", questions: "present" } as const;
+    assert.deepEqual(buildHookVerdict(snap({ afkHoldActive: true }), ctx), {});
+    assert.equal(buildHookVerdict(snap({ afkHoldActive: false }), ctx).hookSpecificOutput?.permissionDecision, "deny");
+});
+
+test("buildHookVerdict: ticket_only gates the dialog only, not another tool", () => {
+    assert.deepEqual(buildHookVerdict(snap({ afkHoldActive: true }), { kind: "PreToolUse", tool_name: "Bash", questions: "ticket_only" }), {});
+});
