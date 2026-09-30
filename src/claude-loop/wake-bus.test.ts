@@ -150,3 +150,38 @@ test("#2255 WakeBus: signal event fires registered listeners", () => {
     assert.equal(seen.length, 1);
     assert.equal(seen[0].id, 9);
 });
+
+test("#3416 WakeBus: the throttle is a delay on a monotonic clock", () => {
+    let subscribeCalls = 0;
+    const client = {
+        subscribeEvents: () => { subscribeCalls++; return () => { /* */ }; },
+    } as unknown as import("../client.js").AiballClient;
+    let t = 1_000;
+    const bus = new WakeBus(client, { throttleMs: 5_000, now: () => t });
+    bus.connect();
+    t = 3_000;
+    bus.connect();
+    assert.equal(subscribeCalls, 1, "2 s later: too soon");
+    t = 6_001;
+    bus.connect();
+    assert.equal(subscribeCalls, 2, "past the throttle: it reconnects");
+});
+
+test("#3416 WakeBus: the system clock set back does not hold the reconnection", async () => {
+    let subscribeCalls = 0;
+    const client = {
+        subscribeEvents: () => { subscribeCalls++; return () => { /* */ }; },
+    } as unknown as import("../client.js").AiballClient;
+    const bus = new WakeBus(client, { throttleMs: 20 });
+    const realNow = Date.now;
+    try {
+        bus.connect();
+        // Windows corrects a clock that ran two hours ahead.
+        Date.now = () => realNow() - 2 * 3_600_000;
+        await new Promise((r) => setTimeout(r, 40));
+        bus.connect();
+        assert.equal(subscribeCalls, 2, "40 ms later the throttle is over, whatever the wall clock says");
+    } finally {
+        Date.now = realNow;
+    }
+});

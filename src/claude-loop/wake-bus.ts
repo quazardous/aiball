@@ -82,16 +82,23 @@ export class WakeBus {
     private signalListeners: WakeBusEvents["signal"][] = [];
     private errorListeners: WakeBusEvents["error"][] = [];
     private clientUnsubscribe: (() => void) | null = null;
-    private lastConnectAt = 0;
+    /** When the last connection was tried, on the monotonic clock; null before the first. */
+    private lastConnectAt: number | null = null;
     private throttleMs: number;
+    private readonly now: () => number;
     /** Default 5s reconnect throttle — same as the legacy inline reconnect. */
     private static DEFAULT_THROTTLE_MS = 5000;
 
     constructor(
         private readonly client: AiballClient,
-        opts: { throttleMs?: number } = {},
+        opts: { throttleMs?: number; now?: () => number } = {},
     ) {
         this.throttleMs = opts.throttleMs ?? WakeBus.DEFAULT_THROTTLE_MS;
+        // #3416 — a delay is measured on a clock that only goes forward. With
+        // the wall clock, a system time set back two hours (Windows correcting
+        // itself after an update) left "too soon since the last try" true for
+        // two hours: the loop never reconnected, its bar red until a reload.
+        this.now = opts.now ?? (() => performance.now());
     }
 
     /** Subscribe to a typed event. Returns an unsubscribe handle. */
@@ -108,8 +115,8 @@ export class WakeBus {
      *  loop. Throws nothing — errors flow through the `error` event. */
     connect(): void {
         // Throttle so a daemon flap doesn't turn into a hot loop.
-        const now = Date.now();
-        if (now - this.lastConnectAt < this.throttleMs) return;
+        const now = this.now();
+        if (this.lastConnectAt !== null && now - this.lastConnectAt < this.throttleMs) return;
         this.lastConnectAt = now;
         this.clientUnsubscribe?.();
         this.clientUnsubscribe = this.client.subscribeEvents({
