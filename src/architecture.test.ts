@@ -100,3 +100,17 @@ test("bus/ does not import api/", () => {
     }
     assert.deepEqual(leaks, [], `the bus imports api/:\n  ${leaks.join("\n  ")}`);
 });
+
+// #3388 — a write says `ticketChanged` and the copies of a ticket's state hear
+// it: outside db/, nothing repairs or clears those copies itself. A caller that
+// did would be a reader the next write forgets.
+test("outside db/, nothing invalidates the ticket caches directly", () => {
+    const direct = /\b(invalidateInboxAgg|invalidateFlagsCache|clearFlagsCache|clearInboxAgg)\(/;
+    const callers: string[] = [];
+    for (const file of sources(SRC)) {
+        const rel = relOf(file);
+        if (rel.startsWith("db/") || rel.endsWith(".test.ts")) continue;
+        if (direct.test(readFileSync(file, "utf8"))) callers.push(rel);
+    }
+    assert.deepEqual(callers, [], `these call a ticket cache directly; say ticketChanged (db/ticket-change.ts) instead:\n  ${callers.join("\n  ")}`);
+});
