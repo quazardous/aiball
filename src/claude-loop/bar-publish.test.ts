@@ -99,6 +99,8 @@ test("#3066 attach: the host's socket, no_socket in tmux, remote for another mac
     assert.deepEqual(attachFor({ remoteUrl: "http://box.tail:7777" }), { socket: null, reason: "remote" });
     assert.deepEqual(attachFor({ remoteUrl: "http://127.0.0.1:7777" }), { socket: null, reason: "no_socket" }, "this machine's daemon over TCP");
     assert.deepEqual(attachFor({ hostControl: "/h/c.sock", remoteUrl: "http://box:1" }), { socket: "/h/attach.sock" }, "on a host, its socket");
+    // #3425 — a Windows host's path, with its own separator.
+    assert.deepEqual(attachFor({ hostControl: "C:\\Users\\u\\hosts\\worker\\control.sock" }), { socket: "C:\\Users\\u\\hosts\\worker\\attach.sock" });
 });
 
 test("#3066 attach is checked, and a loop older than the field reports no_socket", () => {

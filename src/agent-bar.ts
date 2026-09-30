@@ -33,8 +33,9 @@ export type BarAttach = { socket: string } | { socket: null; reason: "no_socket"
 /** The attach a loop reports, from where it runs. Pure: its inputs are the kernel's environment. */
 export function attachFor(o: { hostControl?: string | null; remoteUrl?: string | null }): BarAttach {
     if (o.hostControl) {
-        const dir = o.hostControl.replace(/\/[^/]*$/, "");
-        return { socket: `${dir}/attach.sock` };
+        // Beside control.sock, with the path's own separator (a Windows host's is `\`).
+        const cut = Math.max(o.hostControl.lastIndexOf("/"), o.hostControl.lastIndexOf("\\"));
+        return { socket: `${o.hostControl.slice(0, cut + 1)}attach.sock` };
     }
     // A daemon on this machine, reached over TCP, is not another machine.
     if (o.remoteUrl && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(o.remoteUrl)) return { socket: null, reason: "remote" };

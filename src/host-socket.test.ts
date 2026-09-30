@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type AddressInfo, type Socket } from "node:net";
-import { addressFile, connectHost, controlAuthLine, readHostAddress, withToken } from "./host-socket.js";
+import { addressFile, connectHost, controlAuthLine, hostSocketPresent, readHostAddress, withToken } from "./host-socket.js";
 
 const dir = mkdtempSync(join(tmpdir(), "aiball-3425-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -55,4 +55,18 @@ test("without a token nothing more is said: no auth line, the hello as it was", 
     assert.equal(controlAuthLine(null), "");
     assert.deepEqual(withToken({ version: 1 }, null), { version: 1 });
     assert.deepEqual(withToken({ version: 1 }, "t0k"), { version: 1, token: "t0k" });
+});
+
+test("a host's socket is there: its file on Unix, a readable address on Windows", () => {
+    const sock = join(dir, "present.sock");
+    assert.equal(hostSocketPresent(sock, "win32"), false);
+    assert.equal(hostSocketPresent(sock, "linux"), false);
+    writeFileSync(addressFile(sock), JSON.stringify({ port: 4312, token: "abc" }));
+    // The kernel's boot check: a Windows host has nothing at the path itself.
+    assert.equal(hostSocketPresent(sock, "win32"), true);
+    assert.equal(hostSocketPresent(sock, "linux"), false);
+    writeFileSync(sock, "");
+    assert.equal(hostSocketPresent(sock, "linux"), true);
+    writeFileSync(addressFile(sock), "{}");
+    assert.equal(hostSocketPresent(sock, "win32"), false);
 });
