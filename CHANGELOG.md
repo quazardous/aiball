@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.51.0] — 2026-09-30
+
 ### Added
 
 - `claude_loop.*_seconds` take the duration notation (`1m`, `90s`); a bare
