@@ -19,7 +19,7 @@ import {
     updateMessageStatus,
 } from "./db.js";
 import { deliverToOutbox } from "./outbox.js";
-import { fanOutPings } from "./notifications.js";
+import { fanOutMentions, fanOutPings } from "./notifications.js";
 import { broadcast } from "./ws.js";
 
 /**
@@ -49,6 +49,7 @@ export function autoApproveStaleDecisionsOnClose(
         if (promoted) {
             deliverToOutbox(promoted);
             fanOutPings(promoted);
+            fanOutMentions(promoted); // #3396 — at approval, as in applyModeration
             broadcast({ type: "message_decided", data: promoted });
         }
     }

@@ -191,8 +191,15 @@ export function fanOutPings(msg: Message, opts?: { except?: string | null }): vo
  *
  * Self-mention is filtered. Existing pings (from the normal subscriber
  * fan-out) dedup naturally via insertPing's onConflictDoNothing.
+ *
+ * #3396 — only for an APPROVED ticket or comment, like the subscribers' pings
+ * (#697): called at submit, it woke the agent a pending ticket mentioned,
+ * before any moderation. Every path that approves a message calls it; a
+ * rejected message never reaches it.
  */
 export function fanOutMentions(msg: Message): void {
+    if (msg.status !== "approved") return;
+    if (msg.kind !== "ticket_created" && msg.kind !== "comment_added") return;
     const mentions = extractMentions(msg.body, msg.by_agent);
     if (mentions.length === 0) return;
     const knownProjects = new Set(listProjects());

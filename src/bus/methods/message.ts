@@ -13,7 +13,7 @@ import { earnOnClose } from "../../db/wait-credit.js";
 import { getInboxAgg } from "../../db/inbox-agg.js";
 import { milestoneOpenRefusal, openTicketsIn } from "../../db/milestones.js";
 import { emitLifecycle } from "../../event-bus.js";
-import { fanOutPings, notifyDecision } from "../../notifications.js";
+import { fanOutMentions, fanOutPings, notifyDecision } from "../../notifications.js";
 import { seesLevel } from "../../db/consumers.js";
 import {
     deleteComment,
@@ -411,6 +411,7 @@ defineMethod({
     const approvedDecorated = withTagsOne(approved);
     deliverToOutbox(approved);
     fanOutPings(approved);
+    fanOutMentions(approved); // #3396 — at approval, as in applyModeration
     notifyDecision(approved, consumerIdOf(caller));
     broadcast({ type: "message_decided", data: approvedDecorated });
     emitLifecycle({ op: "decided", message: approvedDecorated });

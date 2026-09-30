@@ -1028,10 +1028,6 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // still pending; rejection cleanup is a future iteration if needed.
     if (msg.kind === "ticket_created" || msg.kind === "comment_added") {
         postRelationEvents(msg, input);
-        // Force-deliver pings to `@<name>` mentions (per #B.71). Agent
-        // names get a direct ping; project names fan out to the
-        // project's owners + followers.
-        fanOutMentions(msg);
     }
 
     const ownerLifecycle = isOwnerLifecycleEvent(input);
@@ -1062,6 +1058,10 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
             deliverToOutbox(msg);
             // #921 — opt-out for auto-emitted redundant messages.
             if (!opts.skipFanOut) fanOutPings(msg);
+            // Force-deliver pings to `@<name>` mentions (per #B.71): an agent
+            // gets a direct ping, a project its owners and followers.
+            // #3396 — once approved, never while the message awaits moderation.
+            fanOutMentions(msg);
             // …and announce the auto-approval so subscribers transition state
             // (status: pending → approved) without polling. #980 N2 — muted
             // for a silent auto-close (the decision event already announced).

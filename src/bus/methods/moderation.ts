@@ -15,7 +15,7 @@
 import { deletePingsForMessage, updateMessageStatus, type Message, type MessageStatus } from "../../db.js";
 import { postRejectRelationEvents } from "../../messages.js";
 import { emitLifecycle } from "../../event-bus.js";
-import { fanOutPings, notifyDecision } from "../../notifications.js";
+import { fanOutMentions, fanOutPings, notifyDecision } from "../../notifications.js";
 import { deliverToOutbox } from "../../outbox.js";
 import { broadcast } from "../../ws.js";
 import { withTagsOne } from "../../queries/decorate.js";
@@ -27,6 +27,8 @@ export function applyModeration(existing: Message, status: MessageStatus, decide
         deliverToOutbox(updated);
         // #B.245 — fanOutPings self-gates on scope=="internal".
         fanOutPings(updated);
+        // #3396 — the ones it mentions hear it now, not before its moderation.
+        fanOutMentions(updated);
     } else if (status === "rejected") {
         // At-insertion fan-out had already delivered pings to subscribers.
         // The message will never be approved, so wipe those pings so it

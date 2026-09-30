@@ -34,6 +34,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A mention (`@agent`) in a ticket or a comment awaiting moderation no longer
+  wakes its target: it is delivered when the message is approved, never when
+  it is rejected.
 - An agent's backlog is read faster (about a third less on a project with
   many closed tickets): a client that follows backlogs asks for them at every
   event, and each read held the daemon.
