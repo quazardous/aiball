@@ -15,10 +15,10 @@
  *     the daemon and quits, the runner runs the steps and relaunches the tray,
  *     which starts the daemon again — whether the update succeeded or not.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type SpawnOptions } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { type InstallInfo, type UpdateStep, updateCommand, updateSteps } from "./install-info.js";
 
 export interface GitState {
@@ -141,6 +141,29 @@ export async function runUpdate(
 
 function psq(s: string): string {
     return `'${s.replace(/'/g, "''")}'`;
+}
+
+/**
+ * How the Windows runner is started (#1586). Spawned detached as
+ * `powershell.exe -File …`, Windows PowerShell has no console: it exits at
+ * once, code 0, without running the script — `aiball update` said "started in
+ * the background" and nothing ran. `cmd /c start` gives it a console of its
+ * own, which `-WindowStyle Hidden` hides, and it outlives this process. The
+ * command line is built verbatim, so a runner path holding a space stays one
+ * argument.
+ *
+ * It starts in the runner's own folder, not in this process's: that one is the
+ * install dir, and a PowerShell process keeps the folder it was started in
+ * whatever `Set-Location` it runs — Windows then refuses to move the install
+ * dir aside, and the update stops there.
+ */
+export function windowsRunnerSpawn(runner: string): { exe: string; args: string[]; options: SpawnOptions } {
+    const inner = `start "" /b powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${runner}"`;
+    return {
+        exe: "cmd.exe",
+        args: ["/d", "/s", "/c", `"${inner}"`],
+        options: { cwd: win32.dirname(runner), detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true },
+    };
 }
 
 /**

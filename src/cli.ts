@@ -259,7 +259,7 @@ program
     .option("--dry-run", "Say what would run, and which loops the restart disconnects, without running it")
     .action(async (opts: { yes?: boolean; dryRun?: boolean }, cmd) => {
         const { readInstallInfo } = await import("./install-info.js");
-        const { planUpdate, readGitState, runUpdate, updatePaths, windowsRunnerScript } = await import("./update-run.js");
+        const { planUpdate, readGitState, runUpdate, updatePaths, windowsRunnerScript, windowsRunnerSpawn } = await import("./update-run.js");
         const g = gOpts(cmd);
         const info = readInstallInfo();
         const plan = planUpdate(info, info.mode === "dev" && info.source ? readGitState(info.source) : null);
@@ -296,7 +296,8 @@ program
             const runner = join(tmpdir(), `aiball-update-${Date.now()}.ps1`);
             const tray = join(import.meta.dirname, "..", "bin", "aiball-tray.cmd");
             writeFileSync(runner, "\uFEFF" + windowsRunnerScript(plan, paths, tray));
-            spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", runner], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+            const start = windowsRunnerSpawn(runner);
+            spawn(start.exe, start.args, start.options).unref();
             return out({ ...summary, runner, started: true }, g, () => `update started in the background — log: ${paths.log}`);
         }
         const status = await runUpdate(plan, paths);
