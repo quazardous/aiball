@@ -3,8 +3,9 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { conversationHolder, foreignAgentRefusal } from "./start-guards.js";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { conversationHolder, foreignAgentRefusal, startFolder, takeLaunchCwd } from "./start-guards.js";
 
 const root = mkdtempSync(join(tmpdir(), "aiball-3360-"));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -31,4 +32,33 @@ test("a conversation another agent's running loop is on is not resumed; one's ow
     assert.equal(conversationHolder("S1", "claude-aiball-dev", alive, root, plateOf), null, "its own loop");
     assert.equal(conversationHolder("S3", "someone", alive, root, plateOf), null, "a stopped loop holds nothing");
     assert.equal(conversationHolder("S9", "someone", alive, root, plateOf), null);
+});
+
+// The launcher moves the process into the install root before the CLI runs:
+// a start without `--cwd` took that root for its folder, and ran every loop
+// in aiball's own folder, on its conversation.
+test("a loop starts where the command was typed, or in --cwd relative to it", () => {
+    const typed = join(root, "typed");
+    assert.equal(startFolder(undefined, typed), typed);
+    assert.equal(startFolder("sub", typed), resolve(typed, "sub"));
+    assert.equal(startFolder(root, typed), root, "an absolute --cwd stands");
+});
+
+test("the recorded folder is read once and dropped: a child never inherits it", () => {
+    const env: NodeJS.ProcessEnv = { AIBALL_LAUNCH_CWD: "/typed/here" };
+    assert.equal(takeLaunchCwd(env), "/typed/here");
+    assert.equal("AIBALL_LAUNCH_CWD" in env, false);
+    assert.equal(takeLaunchCwd(env), process.cwd(), "without the launcher: this process's folder");
+});
+
+test("through the launcher: --cwd is resolved from the folder the command was typed in", () => {
+    const typed = join(root, "typed-e2e");
+    mkdirSync(typed, { recursive: true });
+    const bin = resolve(import.meta.dirname, "..", "..", "bin", "claude-loop");
+    // A folder inherited from another loop's shell must not win either.
+    const r = spawnSync(process.execPath, [bin, "start", "--cwd", "not-there"], {
+        cwd: typed, encoding: "utf8", env: { ...process.env, AIBALL_LAUNCH_CWD: "/inherited", AIBALL_CWD: "/inherited" },
+    });
+    assert.notEqual(r.status, 0);
+    assert.ok((r.stderr + r.stdout).includes(`--cwd path does not exist: ${join(typed, "not-there")}`), r.stderr + r.stdout);
 });

@@ -99,6 +99,10 @@ export async function launch(entryRel) {
     // MCP welcome resolver) starts from here. The TS side reads AIBALL_CWD and
     // falls back to process.cwd().
     process.env.AIBALL_CWD = process.cwd();
+    // The same folder, for `claude-loop start` alone: it reads and drops this
+    // one, so a loop never starts in a folder inherited from another loop's
+    // shell (AIBALL_CWD is exported inside every loop).
+    process.env.AIBALL_LAUNCH_CWD = process.cwd();
 
     const home = aiballHome();
 
