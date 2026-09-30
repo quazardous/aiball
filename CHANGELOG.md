@@ -34,6 +34,12 @@ dates are YYYY-MM-DD.
   `.vbs` wrapper, which started nothing there.
 - `install.ps1` no longer says "install complete" when the daemon it started
   never answered: it says so, names the log, and exits with an error.
+- On Windows, `aiball update` no longer destroys the install it upgrades. It
+  runs `install.ps1` under Windows PowerShell 5.1, which could not remove the
+  previous install (paths longer than 260 characters) and left it half removed,
+  the daemon stopped. The previous install is now set aside, removed once the
+  new one is in place, and put back when the install fails; removals no longer
+  depend on the length of a path. Uninstalling under PowerShell 5.1 works too.
 
 ## [0.51.1] — 2026-09-30
 
