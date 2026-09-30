@@ -420,6 +420,17 @@ aiball uses Node's native test runner (`vitest`-style suites under
   `npx tsx --test src/<file>.test.ts`. CI (`#527`) covers Rust on
   Windows; the Linux lane runs the whole Node suite on every push.
 
+**What lives outside the install directory.** An upgrade replaces the
+install directory and nothing else. Anything the installer puts elsewhere
+that points into it — a command on the `PATH`, a service unit, a shortcut, a
+shell extension — survives the upgrade as it was, and breaks the day what it
+points at moves. So each of these is either **indirect** (a link that follows
+whatever is at the other end, under a name that does not change) or
+**written again by the installer at every run**. Removing or renaming a file
+under `bin/` is a change to every machine that already has aiball: say so in
+the pull request, and run the upgrade test (`bash tests/run-upgrade.sh`),
+which installs the latest release and updates it to your commit.
+
 Skipping a test (`.skip`, `xfail`) is acceptable as a tracker for a
 known follow-up — but write down the WHY and the condition for
 unskipping in a comment or a ticket, otherwise the skip rots and

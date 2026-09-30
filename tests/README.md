@@ -24,6 +24,17 @@ the one entry point for anything heavier than a single test file:
 - `AIBALL_TEST_SRC=/path/to/checkout` points the unit run at another copy of
   the code, e.g. a change not deployed to the live checkout yet.
 - `all` runs unit, then e2e, then sim; the exit code is non-zero if any failed.
+- **upgrade** (`bash tests/run-docker.sh upgrade`, or `bash tests/run-upgrade.sh`)
+  is the one test that does not start from an empty folder. In a container with
+  nothing of aiball's, it installs the latest release with `./install.sh`, starts
+  the daemon and files a ticket, publishes the commit under test as a new release
+  upstream, runs `aiball update`, and checks that the commands on the `PATH`
+  answer as the new version, that the daemon starts on the old data with every
+  migration applied, and that the ticket is still there. It tests `HEAD`, not the
+  working tree, and needs the network (both versions install their
+  dependencies). It does not cover a restart by systemd, the `--symlink` install,
+  Windows, or an npm package installed over another. It runs in `full` and in
+  CI, not in `critical`.
 
 Do not run the full `npm test` on a host that also runs the live daemon. On
 the host, run only the file you touched: `npx tsx --test src/<file>.test.ts`.

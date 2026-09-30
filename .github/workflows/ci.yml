@@ -74,6 +74,19 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash tests/run-e2e.sh
 
+  # An upgrade on a machine that already had aiball: the latest release is
+  # installed and used, then updated to this commit with `aiball update`. Every
+  # other job starts from an empty folder.
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The releases are tags: the test installs the latest one first.
+          fetch-depth: 0
+      - run: bash tests/run-upgrade.sh
+
   frontend-build:
     runs-on: ubuntu-latest
     steps:

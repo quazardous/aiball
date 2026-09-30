@@ -32,6 +32,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- An upgrade is tested: in a container that never had aiball, the latest
+  release is installed and used, then updated to the commit under test with
+  `aiball update`, and the commands, the daemon, the migrations and the data
+  are checked. Every other test started from an empty folder.
 - Where things run is said in one vocabulary (`hub`, `node:<label>`,
   `tcp:<address>`): a consumer's entry carries the `machine` its loop is
   connected from, a session the `machine` that holds it, and `bus.whoami` the

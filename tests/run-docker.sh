@@ -14,8 +14,12 @@
 #                                              AIBALL_TEST_BASE (default origin/main), e2e, fullstack
 #                                              and the simulator's scenarios marked `critical: true`;
 #                                              exit code = worst
+#   bash tests/run-docker.sh upgrade           the latest release installed and used, then updated to
+#                                              this checkout's HEAD with `aiball update`
+#                                              (tests/upgrade); needs the network
 #   bash tests/run-docker.sh full              before a release or after a large change: unit, e2e,
-#                                              fullstack and every scenario (`all` is the same)
+#                                              fullstack, every scenario and the upgrade (`all` is the
+#                                              same)
 #
 # The simulator plays its scenarios over AIBALL_SIM_SHARDS boards side by side
 # (default 4), each capped at AIBALL_SIM_CPUS cores (default 2).
@@ -121,6 +125,12 @@ run_checks() {
 
 run_sim_critical() { run_sim --critical; }
 
+# #1585 — an upgrade on a machine that already had aiball, in its own container.
+run_upgrade() {
+    echo "=== upgrade (latest release -> HEAD of ${AIBALL_TEST_SRC:-$PWD}) ==="
+    bash tests/run-upgrade.sh
+}
+
 # #3380 — before a deploy, the unit tests of backward compatibility and of what
 # changed (tests/select-critical.ts); the whole suite is CI's (`unit`, `full`).
 run_unit_critical() {
@@ -204,6 +214,7 @@ case "$what" in
     sim) run_sim "$@" ;;
     fullstack) run_fullstack ;;
     checks) run_checks ;;
+    upgrade) run_upgrade ;;
     critical)
         code=0
         timed build_images || code=1
@@ -219,6 +230,7 @@ case "$what" in
         timed run_e2e || code=1
         timed run_fullstack || code=1
         timed run_sim || code=1
+        timed run_upgrade || code=1
         echo "=== full profile: ${SECONDS} s ==="
         exit $code
         ;;
