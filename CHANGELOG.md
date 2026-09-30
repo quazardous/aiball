@@ -41,6 +41,9 @@ dates are YYYY-MM-DD.
 - An agent's backlog is read faster (about a third less on a project with
   many closed tickets): a client that follows backlogs asks for them at every
   event, and each read held the daemon.
+- Posting a message no longer recomputes every connected agent's queue on
+  the spot: each agent's queue is brought up to date when that agent next
+  reads it. A post held the daemon five times less on a busy board.
 
 ## [0.52.0] — 2026-09-30
 

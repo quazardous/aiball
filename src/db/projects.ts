@@ -9,7 +9,8 @@ import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm
 import {
     getCachedDecisionGate,
     getCachedActionable,
-    repairEntries,
+    markDirty,
+    setFlagsRepairers,
     clearFlagsCache,
     flagsCacheIsCold,
     peekActionable,
@@ -2193,9 +2194,10 @@ function flagsRepairScope(ticketIds: readonly number[]): number[] {
  * of the TTL. Every call site used to sit on the function's first line, which
  * was harmless when this only emptied a map.
  *
- * With `ticketIds`, the entries are repaired rather than dropped: for each
- * cached consumer the affected scope is recomputed (4-6 ms per ticket against
- * ~400 ms for the board) and patched into the sets in place. All three sets
+ * With `ticketIds`, the entries are repaired rather than dropped: each cached
+ * consumer's entry is marked, and at its next read the affected scope is
+ * recomputed (4-6 ms per ticket against ~400 ms for the board) and patched
+ * into the sets in place. All three sets
  * move together — `openIds`, `actionableIds` and `gatedByBlockerIds` are read
  * side by side by the same callers, and repairing one while leaving another
  * stale would make them disagree about the same ticket.
@@ -2211,30 +2213,32 @@ export function invalidateFlagsCache(ticketIds?: readonly number[]): void {
         clearFlagsCache();
         return;
     }
-    const scope = flagsRepairScope(ticketIds);
-    const freshGate = decisionGateByTicketUncached(scope);
-    repairEntries<ActionableTicketSet, Map<number, boolean>>(
-        (consumerId, val) => {
-            const fresh = computeActionableTicketIdsUncached(consumerId, scope);
-            for (const id of scope) {
-                patchSet(val.openIds, id, fresh.openIds.has(id));
-                patchSet(val.actionableIds, id, fresh.actionableIds.has(id));
-                patchSet(val.gatedByBlockerIds, id, fresh.gatedByBlockerIds.has(id));
-            }
-            return fresh.nextChangeMs;
-        },
-        (gate) => {
-            for (const id of scope) {
-                // Absent means "no decision signal", which reads as not gated —
-                // so a ticket whose last decision was removed must be DELETED
-                // from the map, not left behind holding its old `true`.
-                const v = freshGate.get(id);
-                if (v === undefined) gate.delete(id);
-                else gate.set(id, v);
-            }
-        },
-    );
+    // #3383 — marked here, repaired at the next read of each entry.
+    markDirty(flagsRepairScope(ticketIds));
 }
+
+setFlagsRepairers<ActionableTicketSet, Map<number, boolean>>({
+    actionable: (consumerId, val, scope) => {
+        const fresh = computeActionableTicketIdsUncached(consumerId, scope);
+        for (const id of scope) {
+            patchSet(val.openIds, id, fresh.openIds.has(id));
+            patchSet(val.actionableIds, id, fresh.actionableIds.has(id));
+            patchSet(val.gatedByBlockerIds, id, fresh.gatedByBlockerIds.has(id));
+        }
+        return fresh.nextChangeMs;
+    },
+    decisionGate: (gate, scope) => {
+        const freshGate = decisionGateByTicketUncached(scope);
+        for (const id of scope) {
+            // Absent means "no decision signal", which reads as not gated —
+            // so a ticket whose last decision was removed must be DELETED
+            // from the map, not left behind holding its old `true`.
+            const v = freshGate.get(id);
+            if (v === undefined) gate.delete(id);
+            else gate.set(id, v);
+        }
+    },
+});
 
 // #3388 — the actionable sets and the decision gate hear the writes instead of
 // being called by each one: the tickets a write names are repaired for every

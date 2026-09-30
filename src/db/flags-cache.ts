@@ -29,10 +29,68 @@
  * #3331 — a YAML change now empties the cache itself (`clearFlagsOnConfigChange`
  * in projects.ts), so the net went from 60 s to 10 min: every loop paid a full
  * rebuild (~350 ms) each minute, most of what held the event loop.
+ *
+ * #3383 — a write no longer repairs the entries: it marks the tickets it
+ * touched on each live entry (`markDirty`), and the entry is repaired when it
+ * is next READ. A write repaired every cached consumer at once (~6 ms each,
+ * three times per posted message: most of what `message.post` cost), most of
+ * them for a reader that would not ask before the next write. A reader still
+ * never sees a value older than the last write.
  */
 export const CEILING_MS = 600_000;
 
-interface Entry { val: unknown; at: number; until: number }
+interface Entry { val: unknown; at: number; until: number; dirty: Set<number> | null }
+
+/** An entry with more dirty tickets than this is dropped: a rebuild costs less than the repair. */
+const MAX_DIRTY = 200;
+
+/**
+ * How the owner repairs one entry for the tickets named: the actionable set of
+ * `consumerId` (answering those tickets' own deadline, a claim just taken or a
+ * snooze just set, null when none), and the decision gate.
+ */
+export interface FlagsRepairers<A, D> {
+    actionable: (consumerId: string | undefined, val: A, ticketIds: readonly number[]) => number | null;
+    decisionGate: (val: D, ticketIds: readonly number[]) => void;
+}
+let repairers: FlagsRepairers<unknown, unknown> | null = null;
+
+/** The owner (projects.ts) says how its entries are repaired; without it a dirty entry is dropped. */
+export function setFlagsRepairers<A, D>(r: FlagsRepairers<A, D>): void {
+    repairers = r as FlagsRepairers<unknown, unknown>;
+}
+
+/** The decision gate if it is live, repaired for the tickets written since; null otherwise. */
+function liveDecisionGate(nowMs: number): Entry | null {
+    if (!decisionGate) return null;
+    if (nowMs >= decisionGate.until || (decisionGate.dirty && !repairers)) { decisionGate = null; return null; }
+    if (decisionGate.dirty) {
+        const ids = [...decisionGate.dirty];
+        decisionGate.dirty = null;
+        repairers!.decisionGate(decisionGate.val, ids);
+    }
+    return decisionGate;
+}
+
+/**
+ * A consumer's entry if it is live, repaired for the tickets written since.
+ * The repair can only bring the expiry FORWARD (the repaired tickets' own
+ * deadline): naming some tickets proves nothing about the rest of the board,
+ * so the ceiling still bounds how long a value lives without a full rebuild.
+ */
+function liveActionable(key: string, nowMs: number): Entry | null {
+    const hit = actionable.get(key);
+    if (!hit) return null;
+    if (nowMs >= hit.until || (hit.dirty && !repairers)) { actionable.delete(key); return null; }
+    if (hit.dirty) {
+        const ids = [...hit.dirty];
+        hit.dirty = null;
+        const deadline = repairers!.actionable(key === ANON ? undefined : key, hit.val, ids);
+        if (deadline != null && deadline < hit.until) hit.until = deadline;
+        if (nowMs >= hit.until) { actionable.delete(key); return null; }
+    }
+    return hit;
+}
 
 let decisionGate: Entry | null = null;
 const actionable = new Map<string, Entry>();
@@ -45,9 +103,10 @@ function expiry(nowMs: number, deadline: number | null | undefined): number {
 
 /** Cross-consumer decision-gate map, cached. `build` runs on miss. */
 export function getCachedDecisionGate<T>(build: () => T, nowMs: number = Date.now()): T {
-    if (decisionGate && nowMs < decisionGate.until) return decisionGate.val as T;
+    const hit = liveDecisionGate(nowMs);
+    if (hit) return hit.val as T;
     const val = build();
-    decisionGate = { val, at: nowMs, until: expiry(nowMs, null) };
+    decisionGate = { val, at: nowMs, until: expiry(nowMs, null), dirty: null };
     return val;
 }
 
@@ -58,11 +117,12 @@ export function getCachedDecisionGate<T>(build: () => T, nowMs: number = Date.no
  * and never seeds the cache from that partial answer.
  */
 export function peekDecisionGate<T>(nowMs: number = Date.now()): T | null {
-    return decisionGate && nowMs < decisionGate.until ? decisionGate.val as T : null;
+    const hit = liveDecisionGate(nowMs);
+    return hit ? hit.val as T : null;
 }
 export function peekActionable<T>(consumerId: string | undefined, nowMs: number = Date.now()): T | null {
-    const hit = actionable.get(consumerId ?? ANON);
-    return hit && nowMs < hit.until ? hit.val as T : null;
+    const hit = liveActionable(consumerId ?? ANON, nowMs);
+    return hit ? hit.val as T : null;
 }
 
 /**
@@ -77,41 +137,29 @@ export function getCachedActionable<T>(
     deadlineOf: (val: T) => number | null = () => null,
 ): T {
     const key = consumerId ?? ANON;
-    const hit = actionable.get(key);
-    if (hit && nowMs < hit.until) return hit.val as T;
+    const hit = liveActionable(key, nowMs);
+    if (hit) return hit.val as T;
     const val = build();
-    actionable.set(key, { val, at: nowMs, until: expiry(nowMs, deadlineOf(val)) });
+    actionable.set(key, { val, at: nowMs, until: expiry(nowMs, deadlineOf(val)), dirty: null });
     return val;
 }
 
 /**
- * #2165 — hand every LIVE entry to its owner so it can be repaired in place.
- * Expired entries are dropped instead: repairing one would resurrect a value
- * whose OTHER, time-dependent parts (an expired claim window, a snooze that
- * came due) the write says nothing about.
- *
- * A repair does NOT push the expiry back, for the same reason — the ceiling
- * bounds how long a value may live without a full rebuild, and naming one
- * ticket proves nothing about the rest of the board. It can only bring it
- * FORWARD: `repairActionable` returns the repaired tickets' own deadline (a
- * claim just taken, a snooze just set), and the entry expires at the earlier.
+ * #2165 / #3383 — a write touched these tickets: every LIVE entry remembers
+ * them and is repaired at its next read. Expired entries are dropped instead:
+ * repairing one would resurrect a value whose OTHER, time-dependent parts (an
+ * expired claim window, a snooze that came due) the write says nothing about.
  */
-export function repairEntries<A, D>(
-    repairActionable: (consumerId: string | undefined, val: A) => number | null,
-    repairDecisionGate: (val: D) => void,
-    nowMs: number = Date.now(),
-): void {
-    if (decisionGate) {
-        if (nowMs >= decisionGate.until) decisionGate = null;
-        else repairDecisionGate(decisionGate.val as D);
-    }
+export function markDirty(ticketIds: readonly number[], nowMs: number = Date.now()): void {
+    const mark = (e: Entry): boolean => {
+        if (nowMs >= e.until) return false;
+        e.dirty ??= new Set();
+        for (const id of ticketIds) e.dirty.add(id);
+        return e.dirty.size <= MAX_DIRTY;
+    };
+    if (decisionGate && !mark(decisionGate)) decisionGate = null;
     for (const [key, hit] of [...actionable]) {
-        if (nowMs >= hit.until) {
-            actionable.delete(key);
-            continue;
-        }
-        const deadline = repairActionable(key === ANON ? undefined : key, hit.val as A);
-        if (deadline != null && deadline < hit.until) hit.until = deadline;
+        if (!mark(hit)) actionable.delete(key);
     }
 }
 
