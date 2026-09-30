@@ -11,8 +11,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const SRC = import.meta.dirname;
-// Native binaries, not shebang scripts: the session host (Unix-only for now) and
-// the PTY proxy, whose `--version` the machine check reads.
+// Native binaries, not shebang scripts: the session host and the PTY proxy,
+// whose `--version` the machine check reads.
 const SKIP = new Set([join("sessions", "hosts.ts"), "machine-check.ts"]);
 
 function sources(dir: string): string[] {
