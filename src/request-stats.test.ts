@@ -92,3 +92,42 @@ test("a stall names the call that ran during it", async () => {
     assert.equal(requestStatsReport().stalls[0]!.ms, stall!.ms, "kept in the report, newest first");
     assert.equal(checkStall(Date.now()), null, "no stall right after: the tick is on time");
 });
+
+// #3405 — what each client asks for, and how much comes back.
+test("a bus call's params are kept as a shape: identifiers as they are, a text by its size only, a secret masked", async () => {
+    const { paramsShape } = await import("./request-stats.js");
+    assert.equal(paramsShape({ project: "aiball", limit: 500, open: true, tags: ["a", "b"], filter: { x: 1 } }), "filter={}&limit=500&open=true&project=aiball&tags=[2]");
+    assert.equal(paramsShape({ body: "a private text\nof two lines", title: "with spaces" }), "body=<text 27>&title=<text 11>");
+    assert.equal(paramsShape({ token: "abc", idempotency_key: "k1" }), "idempotency_key=***&token=***");
+    assert.equal(paramsShape(undefined), "");
+});
+
+test("the calls of a method are grouped by caller and shape, with the rows and the size of the answer", async () => {
+    const { defineMethod } = await import("./bus/methods.js");
+    const { handleFrame } = await import("./bus/rpc.js");
+    const { requestStatsReport } = await import("./request-stats.js");
+    const { z } = await import("zod");
+    defineMethod({ name: "test.shape_probe", who: ["human", "agent"], params: z.object({ limit: z.number().optional() }), run: (_c, p) => ({ rows: Array.from({ length: p.limit ?? 1 }, (_, i) => ({ i })) }) });
+    const caller = { consumer_id: "shape-agent", kind: "agent", token_kind: "agent", transport: "uds", token: null, relayed: false } as const;
+    const wide = await handleFrame(caller, JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test.shape_probe", params: { limit: 3 } }));
+    await handleFrame(caller, JSON.stringify({ jsonrpc: "2.0", id: 2, method: "test.shape_probe", params: { limit: 3 } }));
+    await handleFrame(caller, JSON.stringify({ jsonrpc: "2.0", id: 3, method: "test.shape_probe" }));
+    const mine = requestStatsReport().shapes.filter((h) => h.route === "BUS test.shape_probe");
+    assert.equal(mine.length, 2, "two shapes: limit=3, and no params");
+    const three = mine.find((h) => h.query === "limit=3")!;
+    assert.equal(three.count, 2);
+    assert.equal(three.consumer, "shape-agent");
+    assert.equal(three.rows, 3);
+    assert.equal(three.bytes, wide!.length, "the size of the serialised answer");
+    assert.equal(mine.find((h) => h.query === "")!.rows, 1);
+});
+
+test("a stall names what the call was asked for", async () => {
+    const { beginCall, checkStall, resetStallsForTests } = await import("./request-stats.js");
+    resetStallsForTests();
+    const end = beginCall("BUS test.block", { consumer: "blocker", agent: null, query: "limit=500" });
+    const until = Date.now() + 700;
+    while (Date.now() < until) { /* hold the event loop */ }
+    end();
+    assert.equal(checkStall(Date.now())!.calls[0]!.query, "limit=500");
+});

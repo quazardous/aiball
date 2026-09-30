@@ -322,8 +322,10 @@ defineMethod({
 /**
  * #3243 — what keeps this daemon busy: per HTTP route and bus method, how many
  * calls, their total and worst time, the slow ones with their caller, the
- * event loop's delay, and its stalls with the calls that ran during them. What
- * GET /api/debug/requests answers.
+ * event loop's delay, and its stalls with the calls that ran during them.
+ * #3405 — Also `shapes`: the bus calls grouped by caller and by what they ask
+ * for (the params as a short line, texts by their size only), with the rows and
+ * the size of the latest answer. What GET /api/debug/requests answers.
  */
 defineMethod({
     name: "debug.requests",

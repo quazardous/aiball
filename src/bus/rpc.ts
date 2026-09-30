@@ -5,7 +5,7 @@
 import { RPC_ERRORS, type RpcError, type RpcId, type RpcResponse } from "../bus-protocol.js";
 import { ERROR_CODES } from "../domain.js";
 import { accessRefusal, getMethod, Refusal, type Caller } from "./methods.js";
-import { beginCall } from "../request-stats.js";
+import { beginCall, paramsShape, rowsOf } from "../request-stats.js";
 
 /** Past this many calls, a batch is refused whole. */
 export const MAX_BATCH = 100;
@@ -59,9 +59,12 @@ export async function runOne(caller: Caller, msg: unknown): Promise<RpcResponse 
         }));
     }
     // #3243 — every method call counted and timed with the HTTP routes, named in a stall.
-    const end = beginCall(`BUS ${m.name}`, { consumer: caller.consumer_id ?? null, agent: caller.machine ?? caller.transport ?? null });
+    // #3405 — with what it was asked for, and how much it answers: which client asks what.
+    const end = beginCall(`BUS ${m.name}`, { consumer: caller.consumer_id ?? null, agent: caller.machine ?? caller.transport ?? null, query: paramsShape(req.params), shaped: true });
+    let rows: number | null | undefined;
     try {
         const result = await m.run(caller, parsed.data);
+        rows = rowsOf(result);
         return answer({ jsonrpc: "2.0", id, result: result === undefined ? null : result });
     } catch (e) {
         if (e instanceof Refusal) return answer(fail(id, refusalError(e)));
@@ -72,9 +75,12 @@ export async function runOne(caller: Caller, msg: unknown): Promise<RpcResponse 
             data: { code: ERROR_CODES.INTERNAL, status: 500 },
         }));
     } finally {
-        end();
+        sizedBy.set(req, end({ rows }));
     }
 }
+
+/** #3405 — per call, what takes the size of its answer once the frame is serialised. */
+const sizedBy = new WeakMap<object, (bytes: number) => void>();
 
 /** One frame: a call or a batch. Null when nothing is to be answered. */
 export async function handleFrame(caller: Caller, text: string): Promise<string | null> {
@@ -90,7 +96,10 @@ export async function handleFrame(caller: Caller, text: string): Promise<string 
     }
     if (!Array.isArray(msg)) {
         const r = await runOne(caller, msg);
-        return r ? JSON.stringify(r) : null;
+        const text = r ? JSON.stringify(r) : null;
+        // The size of a single call's answer; a batch's is not split between its calls.
+        if (text && msg && typeof msg === "object") sizedBy.get(msg)?.(text.length);
+        return text;
     }
     if (msg.length === 0 || msg.length > MAX_BATCH) {
         return JSON.stringify(fail(null, {

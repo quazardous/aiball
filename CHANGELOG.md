@@ -12,7 +12,14 @@ Notable changes to aiball — the MCP surface, HTTP API, UI, and CLI.
 - **No internal tracker IDs** (`#NNN`) — aiball's tracker isn't
   externally browsable; cite-without-link is just noise.
 - **Version bump = SemVer**: any `### Added` entry is at least
-  MINOR; `### Fixed` alone is PATCH; breaking change is MAJOR.
+  MINOR; `### Changed
+
+- The daemon's request statistics (`debug.requests`) say what each client
+  asks the bus for and how much comes back: calls grouped by caller and
+  parameters, with the rows and the size of the answer. A stalled event
+  loop's log line names the parameters too.
+
+### Fixed` alone is PATCH; breaking change is MAJOR.
 
 **Versioning**: the source of truth is the repo-root `package.json`. The
 running version is surfaced via `aiball --version`, `GET /api/health`,

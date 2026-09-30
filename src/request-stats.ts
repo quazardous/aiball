@@ -4,7 +4,8 @@
  * counts, per route (method + path with ids folded), how many requests ran,
  * their total and worst duration, and the requests still running. #3243 — the
  * bus's methods too (`BUS <method>`), and the stalls of the event loop with the
- * calls that ran during them. An indicator only: nothing acts on it. Read it
+ * calls that ran during them. #3405 — and, per caller, what each bus call asks
+ * for and how much it answers (`shapes`). An indicator only: nothing acts on it. Read it
  * with GET /api/debug/requests, or the bus's `debug.requests`.
  */
 import type { Request, Response, NextFunction } from "express";
@@ -44,6 +45,49 @@ export function maskedQuery(url: string): string {
     return url.slice(i + 1).replace(/(^|&)(token|access_token)=[^&]*/gi, "$1$2=***");
 }
 const since = new Date().toISOString();
+
+/**
+ * #3405 — a bus call's params as a short line, to tell WHAT a client asks for
+ * (a board-wide inbox, a backlog of 500): numbers, booleans and identifier-like
+ * strings as they are; any other value by its kind and size only, so a body, a
+ * title or a token never reaches these stats, which anyone on the socket reads.
+ */
+export function paramsShape(params: unknown): string {
+    if (!params || typeof params !== "object" || Array.isArray(params)) return "";
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
+        if (v === undefined) continue;
+        if (/token|password|secret|key/i.test(k)) parts.push(`${k}=***`);
+        else if (v === null || typeof v === "number" || typeof v === "boolean") parts.push(`${k}=${String(v)}`);
+        else if (typeof v === "string") parts.push(/^[\w.:@/-]{0,40}$/.test(v) ? `${k}=${v}` : `${k}=<text ${v.length}>`);
+        else if (Array.isArray(v)) parts.push(`${k}=[${v.length}]`);
+        else parts.push(`${k}={}`);
+    }
+    return parts.sort().join("&").slice(0, 200);
+}
+
+/** #3405 — the calls of one method grouped by who asks and what for: how often, how long, how much comes back. */
+interface ShapeStat {
+    route: string;
+    query: string;
+    consumer: string | null;
+    agent: string | null;
+    count: number;
+    totalMs: number;
+    maxMs: number;
+    /** Of the latest answer: its rows (a list, or an object's `rows`), its size once serialised; null when not known. */
+    rows: number | null;
+    bytes: number | null;
+}
+const SHAPES_KEPT = 400;
+const shapes = new Map<string, ShapeStat>();
+
+/** The rows of an answer: a list's length, or that of its `rows`; null otherwise. */
+export function rowsOf(result: unknown): number | null {
+    if (Array.isArray(result)) return result.length;
+    const rows = (result as { rows?: unknown } | null)?.rows;
+    return Array.isArray(rows) ? rows.length : null;
+}
 let inFlight = 0;
 
 /**
@@ -71,16 +115,19 @@ export function routeKey(method: string, url: string): string {
  * stall of the event loop can name the calls that were running during it.
  * Returns what ends it. A streaming response (SSE) is counted, not timed.
  */
-export function beginCall(key: string, who: { consumer: string | null | (() => string | null); agent: string | null; query?: string }): (opts?: { streaming?: boolean }) => void {
+export function beginCall(key: string, who: { consumer: string | null | (() => string | null); agent: string | null; query?: string; shaped?: boolean }): (opts?: { streaming?: boolean; rows?: number | null }) => (bytes: number) => void {
     const consumerNow = (): string | null => (typeof who.consumer === "function" ? who.consumer() : who.consumer);
     const started = process.hrtime.bigint();
     const startedMs = Date.now();
-    const call: RunningCall = { key, consumer: consumerNow(), startedMs };
+    const call: RunningCall = { key, consumer: consumerNow(), startedMs, query: who.query ?? "" };
     running.add(call);
     inFlight++;
     let done = false;
+    let shape: ShapeStat | null = null;
+    /** #3405 — said once the answer is serialised: its size, on the call's shape. */
+    const sized = (bytes: number): void => { if (shape) shape.bytes = bytes; };
     return (opts = {}) => {
-        if (done) return;
+        if (done) return sized;
         done = true;
         inFlight--;
         running.delete(call);
@@ -96,10 +143,26 @@ export function beginCall(key: string, who: { consumer: string | null | (() => s
                 slow.push({ at: new Date().toISOString(), ms: Math.round(ms), route: key, query: who.query ?? "", consumer: consumerNow(), agent: who.agent });
                 if (slow.length > SLOW_KEPT) slow.shift();
             }
-            finished.push({ key, consumer: consumerNow(), startedMs, endedMs: Date.now() });
+            finished.push({ key, consumer: consumerNow(), startedMs, endedMs: Date.now(), query: who.query ?? "" });
             if (finished.length > FINISHED_KEPT) finished.shift();
+            if (who.shaped) {
+                const consumer = consumerNow();
+                const shapeKey = `${key}\0${who.query ?? ""}\0${consumer ?? ""}\0${who.agent ?? ""}`;
+                shape = shapes.get(shapeKey) ?? null;
+                if (!shape && shapes.size < SHAPES_KEPT) {
+                    shape = { route: key, query: who.query ?? "", consumer, agent: who.agent, count: 0, totalMs: 0, maxMs: 0, rows: null, bytes: null };
+                    shapes.set(shapeKey, shape);
+                }
+                if (shape) {
+                    shape.count++;
+                    shape.totalMs += ms;
+                    shape.maxMs = Math.max(shape.maxMs, ms);
+                    if (opts.rows !== undefined) shape.rows = opts.rows;
+                }
+            }
         }
         stats.set(key, s);
+        return sized;
     };
 }
 
@@ -119,10 +182,10 @@ export function requestStatsMiddleware(req: Request, res: Response, next: NextFu
 }
 
 /** A call running now. */
-interface RunningCall { key: string; consumer: string | null; startedMs: number }
+interface RunningCall { key: string; consumer: string | null; startedMs: number; query: string }
 const running = new Set<RunningCall>();
 /** Calls that ended lately, with when they ran: what a stall is matched against. */
-interface FinishedCall { key: string; consumer: string | null; startedMs: number; endedMs: number }
+interface FinishedCall { key: string; consumer: string | null; startedMs: number; endedMs: number; query: string }
 const FINISHED_KEPT = 500;
 const finished: FinishedCall[] = [];
 
@@ -136,7 +199,8 @@ const finished: FinishedCall[] = [];
 export interface Stall {
     at: string;
     ms: number;
-    calls: { call: string; consumer: string | null; ms: number }[];
+    /** `query`: a bus call's params as `paramsShape` writes them; "" for none. */
+    calls: { call: string; consumer: string | null; ms: number; query: string }[];
 }
 const STALL_TICK_MS = 100;
 const STALLS_KEPT = 50;
@@ -155,13 +219,13 @@ export function checkStall(now: number): Stall | null {
     lastTick = now;
     if (late <= stallThresholdMs()) return null;
     const calls = [
-        ...finished.filter((c) => c.endedMs >= windowStart && c.startedMs <= now).map((c) => ({ call: c.key, consumer: c.consumer, ms: c.endedMs - c.startedMs })),
-        ...[...running].map((c) => ({ call: c.key, consumer: c.consumer, ms: now - c.startedMs })),
+        ...finished.filter((c) => c.endedMs >= windowStart && c.startedMs <= now).map((c) => ({ call: c.key, consumer: c.consumer, ms: c.endedMs - c.startedMs, query: c.query })),
+        ...[...running].map((c) => ({ call: c.key, consumer: c.consumer, ms: now - c.startedMs, query: c.query })),
     ].sort((a, b) => b.ms - a.ms).slice(0, 10);
     const stall: Stall = { at: new Date(windowStart).toISOString(), ms: Math.round(late), calls };
     stalls.push(stall);
     if (stalls.length > STALLS_KEPT) stalls.shift();
-    console.log(`[stall] the event loop was held ${stall.ms} ms at ${stall.at}${calls.length ? `, during: ${calls.map((c) => `${c.call} (${c.consumer ?? "?"}, ${c.ms} ms)`).join("; ")}` : ", no call running"}`);
+    console.log(`[stall] the event loop was held ${stall.ms} ms at ${stall.at}${calls.length ? `, during: ${calls.map((c) => `${c.call}${c.query ? ` {${c.query}}` : ""} (${c.consumer ?? "?"}, ${c.ms} ms)`).join("; ")}` : ", no call running"}`);
     return stall;
 }
 
@@ -191,7 +255,7 @@ function eventLoopDelay(): EventLoopDelay {
     };
 }
 
-export function requestStatsReport(): { since: string; in_flight: number; event_loop: EventLoopDelay; stalls: Stall[]; slow: SlowRequest[]; routes: Array<{ route: string; count: number; total_ms: number; avg_ms: number; max_ms: number; over_100ms: number; over_1s: number }> } {
+export function requestStatsReport(): { since: string; in_flight: number; event_loop: EventLoopDelay; stalls: Stall[]; slow: SlowRequest[]; shapes: Array<{ route: string; query: string; consumer: string | null; agent: string | null; count: number; total_ms: number; avg_ms: number; max_ms: number; rows: number | null; bytes: number | null }>; routes: Array<{ route: string; count: number; total_ms: number; avg_ms: number; max_ms: number; over_100ms: number; over_1s: number }> } {
     const routes = [...stats.entries()].map(([route, s]) => ({
         route,
         count: s.count,
@@ -202,5 +266,11 @@ export function requestStatsReport(): { since: string; in_flight: number; event_
         over_1s: s.over1s,
     })).sort((a, b) => b.total_ms - a.total_ms);
     // Newest first: the one being chased is usually the last.
-    return { since, in_flight: inFlight, event_loop: eventLoopDelay(), stalls: [...stalls].reverse(), slow: [...slow].reverse(), routes };
+    // #3405 — the heaviest shapes first: which client asks what, how often, for how much.
+    const byShape = [...shapes.values()].map((h) => ({
+        route: h.route, query: h.query, consumer: h.consumer, agent: h.agent,
+        count: h.count, total_ms: Math.round(h.totalMs), avg_ms: Math.round(h.totalMs / h.count), max_ms: Math.round(h.maxMs),
+        rows: h.rows, bytes: h.bytes,
+    })).sort((a, b) => b.total_ms - a.total_ms).slice(0, 60);
+    return { since, in_flight: inFlight, event_loop: eventLoopDelay(), stalls: [...stalls].reverse(), slow: [...slow].reverse(), shapes: byShape, routes };
 }
