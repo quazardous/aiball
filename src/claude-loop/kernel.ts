@@ -206,6 +206,28 @@ import { ClockStepDetector } from "./clock-step.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
+
+// #412: timer log routed through the level logger (tag `claude-loop:<name>`,
+// stdout → redirected to loop.log by the launcher). Existing calls map to
+// `info` so default output is unchanged (now carrying the LEVEL token); use
+// `logger.debug(…)` for new diagnostic lines (dropped at the default `info`).
+// #B.198: ts stays at the head so `--log` can reorder as `<ts> [tag] body`.
+// The pid belongs in the tag, not just in the boot line. Every kernel writes
+// to the SAME `loop.log` (the launcher redirects stdout there and a reload
+// respawns into the same file), so when two of them overlap the journal
+// interleaves two stories with no way to tell them apart. That is not
+// hypothetical: a reload was observed producing two boots seconds apart, and
+// the resulting log showed `proxy connected` / `proxy link lost` in pairs
+// within the same millisecond — which reads as one kernel flapping, and is
+// actually two kernels each reporting once. An hour went into that ambiguity.
+// A pid on every line makes the question one `grep` wide.
+const logger = createLogger({ tag: `claude-loop:${name}#${process.pid}` });
+function log(msg: string): void {
+    logger.info(msg);
+}
+// Declared here, before anything below runs: the start-up code that claims the
+// loop logs when it kills an older kernel, and a `const` read before its
+// declaration throws — the new kernel died right there, leaving none.
 // #393: the loop's root (stable for its lifetime) — pushed with each state
 // heartbeat so the daemon can mark the project "local". Read once from the plate.
 const loopCwd = (() => { try { return sd ? readPlate(sd).cwd : undefined; } catch { return undefined; } })();
@@ -316,25 +338,6 @@ if (claimed.killed.length > 0) {
 // the LoopState service now reads `loop-start-ts` from the state-dir
 // (shared marker, same as the hooks). Kept the constant declaration
 // noted here for grep history.
-
-// #412: timer log routed through the level logger (tag `claude-loop:<name>`,
-// stdout → redirected to loop.log by the launcher). Existing calls map to
-// `info` so default output is unchanged (now carrying the LEVEL token); use
-// `logger.debug(…)` for new diagnostic lines (dropped at the default `info`).
-// #B.198: ts stays at the head so `--log` can reorder as `<ts> [tag] body`.
-// The pid belongs in the tag, not just in the boot line. Every kernel writes
-// to the SAME `loop.log` (the launcher redirects stdout there and a reload
-// respawns into the same file), so when two of them overlap the journal
-// interleaves two stories with no way to tell them apart. That is not
-// hypothetical: a reload was observed producing two boots seconds apart, and
-// the resulting log showed `proxy connected` / `proxy link lost` in pairs
-// within the same millisecond — which reads as one kernel flapping, and is
-// actually two kernels each reporting once. An hour went into that ambiguity.
-// A pid on every line makes the question one `grep` wide.
-const logger = createLogger({ tag: `claude-loop:${name}#${process.pid}` });
-function log(msg: string): void {
-    logger.info(msg);
-}
 
 // #3066 — the terminal Claude runs in: the session host when its control
 // socket is given (the daemon started this kernel for it), tmux otherwise.

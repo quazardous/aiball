@@ -64,6 +64,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop's kernel no longer dies at start when it takes the loop over from an
+  older kernel still running (a reload crossing another): it logged that
+  before its logger existed, and crashed after killing the old one, leaving
+  the loop with no kernel — Claude running, no wake, a bar that no longer
+  moved.
 - On Windows, a loop's kernel no longer spends half a core and a second to
   answer. It drove the multiplexer through `tmux`, which there is psmux's
   alias and takes several times longer to start than `psmux` itself; it now
