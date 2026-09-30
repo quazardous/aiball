@@ -23,6 +23,17 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Changed
+
+- `aiball`, `aiball-mcp` and `claude-loop` refuse to run in a folder whose
+  `.aiball.yaml` names an agent (or a project) when the shell carries another
+  one in `AIBALL_AGENT` / `AIBALL_PROJECT` — a loop's shell taken to another
+  project. Before, the shell's identity won without a word, and the command
+  acted as the wrong agent. `--as <agent>` runs it on purpose, with a warning;
+  a script sets `AIBALL_ALLOW_FOREIGN_AGENT=1`. Not refused: a loop's own
+  folder (its crew agents, its MCP server), `aiball --human`, `check`,
+  `version`, and `claude-loop start`.
+
 ### Fixed
 
 - On a Windows without the VBScript engine (an optional feature now), the

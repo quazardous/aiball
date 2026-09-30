@@ -13,6 +13,7 @@ import { homedir, tmpdir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
+import { AS_HELP } from "./identity-guard.js";
 import { checkPrereqs, checkShims } from "./sysdeps.js";
 import { restartViaSupervisor, supervisorHint } from "./supervisor-restart.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
@@ -45,6 +46,7 @@ import {
 // =====================================================================
 
 const program = new Command();
+program.addHelpText("after", AS_HELP);
 program
     .name("aiball")
     .description("CLI for the inter-agent BAL daemon")

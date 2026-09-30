@@ -120,5 +120,9 @@ export async function launch(entryRel) {
 
     const { register } = await import("tsx/esm/api");
     register();
+    // A command typed in a folder that names its agent, from a shell carrying
+    // another agent's identity, stops here (src/identity-guard.ts).
+    const { enforceFolderIdentity } = await import(pathToFileURL(join(ROOT, "src/identity-guard.ts")).href);
+    enforceFolderIdentity(entryRel);
     await import(pathToFileURL(join(ROOT, entryRel)).href);
 }

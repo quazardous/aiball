@@ -51,6 +51,11 @@ const INHERITED = ["AIBALL_AGENT", "AIBALL_PROJECT", "AIBALL_CWD", "AIBALL_PROJE
 for (const k of Object.keys(process.env)) {
     if ((k.startsWith("CL_") && !KEEP.has(k)) || INHERITED.includes(k)) delete process.env[k];
 }
+// #3389 — a developer's checkout holds a git-ignored `.aiball.yaml` naming its
+// agent; CI and Docker have none. The commands the tests launch from the
+// checkout, under identities of their own, must not be refused here and pass
+// there. The tests of the rule itself take this off.
+process.env.AIBALL_ALLOW_FOREIGN_AGENT = "1";
 process.env.AIBALL_SOCK = "";
 process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-test-home-"));
 process.env.CLAUDE_LOOP_STATE_ROOT = mkdtempSync(join(tmpdir(), "aiball-test-loops-"));
