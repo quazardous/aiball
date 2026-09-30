@@ -5,7 +5,25 @@
  * conversation — two Claudes on one conversation.
  */
 import { existsSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { readPlate, stateDirFor, STATE_ROOT, type Plate } from "./state.js";
+
+/**
+ * The folder the command was typed in. The launcher records it before it moves
+ * into the install root, so `process.cwd()` is no longer it by the time the CLI
+ * runs. Read once and dropped from the environment: a process started from this
+ * one must not take it for its own. Without the launcher, this process's folder.
+ */
+export function takeLaunchCwd(env: NodeJS.ProcessEnv = process.env): string {
+    const recorded = env.AIBALL_LAUNCH_CWD;
+    delete env.AIBALL_LAUNCH_CWD;
+    return recorded || process.cwd();
+}
+
+/** The folder a loop starts in: `--cwd`, relative to where the command was typed, else that folder. */
+export function startFolder(optCwd: string | undefined, launchCwd: string): string {
+    return optCwd ? resolve(launchCwd, optCwd) : launchCwd;
+}
 
 /** A folder whose .aiball.yaml names its agent runs that agent, or a crew of it. Null: allowed. */
 export function foreignAgentRefusal(o: { agent: string | undefined; folderAgent: string; agentSource: string; role: string | undefined; cwd: string }): string | null {

@@ -93,7 +93,7 @@ import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { loopName } from "./loop-name.js";
-import { conversationHolder, foreignAgentRefusal } from "./start-guards.js";
+import { conversationHolder, foreignAgentRefusal, startFolder, takeLaunchCwd } from "./start-guards.js";
 import { afterTmuxAttach, type LoopWhereabouts } from "./attach-end.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
@@ -539,8 +539,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // spawning a loop for a known project root from the UI) instead of the
     // invoker's cwd. Threads through ctx.cwd → plate.cwd, tmux `-c`, config
     // resolution, and the conflict checks below.
-    const startCwd = opts.cwd ? resolve(opts.cwd) : undefined;
-    if (startCwd && !existsSync(startCwd)) {
+    // Where the command was typed, not `process.cwd()`: the launcher has moved
+    // this process into the install root, and every loop would start there.
+    const startCwd = startFolder(opts.cwd, takeLaunchCwd());
+    if (opts.cwd && !existsSync(startCwd)) {
         die(`--cwd path does not exist: ${startCwd}`);
     }
     // #557 : `--init` = `claude-loop init` + start, en un coup. Bootstrap se
@@ -586,18 +588,18 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #394 volet A: a persisted remote config (`claude-loop init`) makes a plain
     // `claude-loop start` reconnect to the same REMOTE aiball without re-passing
     // flags. Explicit flags still win (only fill what wasn't passed).
-    const localRemote = readLocalRemote(startCwd ?? process.cwd());
+    const localRemote = readLocalRemote(startCwd);
     if (localRemote) {
         opts.aiballUrl ??= localRemote.url;
         opts.aiballToken ??= localRemote.token;
         opts.consumer ??= localRemote.consumer;
         opts.project ??= localRemote.project;
     }
-    // #3360 — the folder is `--cwd`, else this process's: never an inherited
-    // AIBALL_CWD. That variable is for the hooks and the MCP INSIDE a loop; a
-    // process started from a loop's shell (tvty, a restart) carried it, and a
-    // loop started in the other loop's folder, on its conversation.
-    const ctx = resolveProjectContext({ cwd: startCwd ?? process.cwd() });
+    // #3360 — the folder is `--cwd`, else where the command was typed: never an
+    // inherited AIBALL_CWD. That variable is for the hooks and the MCP INSIDE a
+    // loop; a process started from a loop's shell (tvty, a restart) carried it,
+    // and a loop started in the other loop's folder, on its conversation.
+    const ctx = resolveProjectContext({ cwd: startCwd });
     // #3135 — where Claude runs: the flag, else the configured mode. A loop on a
     // remote daemon has no host here (the session host is the local daemon's).
     const onHost = opts.host ?? (ctx.claude_loop.session === "host" && !opts.aiballUrl);
