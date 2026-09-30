@@ -248,14 +248,21 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
     }
     const nowStr = new Date().toISOString();
 
-    const tagsMap = tagsForMessages(created.map((m) => m.id));
-    const childCounts = subTicketCounts(created.map((m) => m.id));
+    // #3383 — a closed ticket is never in a backlog (the `closed` rule drops it
+    // below), and on aiball that is most of a project. Everything from here reads
+    // per ticket — tags, sub-tickets, unread pings, claims, token usage, last
+    // activity — so the backlog path reads the open ones only: a client that
+    // follows an agent's backlog asks for it at every event of the board.
+    const pool = onlyBacklog ? created.filter((m) => !closedSet.has(m.id)) : created;
+
+    const tagsMap = tagsForMessages(pool.map((m) => m.id));
+    const childCounts = subTicketCounts(pool.map((m) => m.id));
     // #371 david: every row carries its per-consumer work-landscape flags —
     // `unread` (≥1 unseen ping for this consumer) and `actionable` (in this
     // consumer's actionable pool). Computed once; the ordering below tiers
     // the list by them (unread → actionable → other-open → rest).
     const consumerId = agentId;
-    const unreadMap = ticketUnreadFlags(consumerId, created.map((m) => m.id));
+    const unreadMap = ticketUnreadFlags(consumerId, pool.map((m) => m.id));
     const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
     // #432: projects this consumer owns (role=owner). A claimable ticket must
     // live in one of these — claiming a follower-only project's broadcast would
@@ -299,7 +306,7 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
     // la règle BacklogRules `claimed-by-other` pour exclure ces tickets
     // du backlog/wake du consumer courant (= ils appartiennent à l'autre).
     const claimedByOtherIds = new Set<number>();
-    for (const m of created) {
+    for (const m of pool) {
         const isLiveClaim = m.claimant != null && isAssignmentLive(m.claimed_at, claimNowMs, assignWindowMs);
         if (isLiveClaim && m.claimant === consumerId) {
             ownClaimIds.add(m.id);
@@ -312,7 +319,7 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
         }
     }
     // #404: per-ticket token-effort tally (empty until the capture side lands).
-    const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
+    const tokenUsageMap = getTicketTokenUsage(pool.map((m) => m.id));
     // #405/#408/#532 (sfbsdy + neg428) : SPLIT visibility vs sort tiebreak.
     // - `crossAgentHotFocus` → drives the VISIBLE 🔥 flag (everyone sees same,
     //   union of any agent's recent activity + tickets currently claimed).
@@ -339,7 +346,7 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
         + (9 - (PRIORITY_WEIGHT[m.priority ?? "normal"] ?? 2));
     /** The rows a cheap-filter query could still put on the page. */
     const cheapCandidates = () => {
-        let cand = created;
+        let cand = pool;
         if (onlyOpen) {
             cand = cand.filter((m) => {
                 const pu = m.postponed_until ?? null;
@@ -365,7 +372,7 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
     const selfHotFocus = isHuman(consumerId)
         ? new Set<number>()
         : computeHotFocus(
-            ticketSelfLastActivity(consumerId, (contenders ?? created).map((m) => m.id)),
+            ticketSelfLastActivity(consumerId, (contenders ?? pool).map((m) => m.id)),
             Date.now(),
             hotWinMs,
         );

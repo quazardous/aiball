@@ -29,6 +29,12 @@ dates are YYYY-MM-DD.
   dialog is refused even with a human present, and every question goes to
   the ticket. `present`, the default, keeps today's rule.
 
+### Fixed
+
+- An agent's backlog is read faster (about a third less on a project with
+  many closed tickets): a client that follows backlogs asks for them at every
+  event, and each read held the daemon.
+
 ## [0.52.0] — 2026-09-30
 
 ### Changed
