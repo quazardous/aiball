@@ -34,7 +34,7 @@ import { presenceRunning } from "../live-presence.js";
 import { tagsForMessages } from "./tags.js";
 import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
 import { isStepMeta, keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
-import { getConfig } from "./config-overrides.js";
+import { forgetConfigOverrides, getConfig } from "./config-overrides.js";
 import { parseMeta } from "../questions.js";
 import { gateEdges } from "../critical-ticket.js";
 
@@ -1060,6 +1060,8 @@ export function renameProject(oldName: string, newName: string): ProjectRenameRe
     });
     // #2165 — every ticket changed project, which per-agent work filters read.
     invalidateFlagsCache();
+    // #3383 — the overrides moved to the new name in the table.
+    forgetConfigOverrides();
     // #2168 — both names, not just the old one: the map is keyed by project,
     // so the entry left under `oldTrim` is now bogus and anything already
     // cached under `newTrim` no longer describes the same set of tickets.

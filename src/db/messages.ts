@@ -383,6 +383,8 @@ export function listMessages(filters: {
         if (filters.project) conds.push(eq(schema.tickets.project, filters.project));
         if (filters.by_agent) conds.push(eq(schema.tickets.byAgent, filters.by_agent));
         if (filters.ticket_id !== undefined) conds.push(eq(schema.tickets.id, filters.ticket_id));
+        // #3383 — the closed tickets stay in the database; the fold below keeps the rule in one place.
+        if (filters.open) conds.push(ticketIsOpenSql());
         let q = db.select().from(schema.tickets).$dynamic();
         if (conds.length) q = q.where(and(...conds));
         // #B.222: sort by urgency hint first (urgent > high > normal > low),
@@ -875,7 +877,7 @@ export function insertRelationEvent(opts: {
  * don't go through moderation (the audit lives in the message log).
  */
 import { inverseRelationKind, relationAxis, type RelationAxis, type RelationKind } from "../relations.js";
-import { closedTicketIds } from "./ticket-closed.js";
+import { closedTicketIds, ticketIsOpenSql } from "./ticket-closed.js";
 export function insertTypedRelation(opts: {
     source_ticket_id: number;
     target_ticket_id: number;

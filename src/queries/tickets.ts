@@ -6,6 +6,7 @@
  * moved to the bus (#3063, #3068).
  */
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
+import { closedTicketIdsOf } from "../db/ticket-closed.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
 import type { Request } from "express";
 import {
@@ -223,29 +224,15 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
         kind: "ticket_created",
         project,
         by_agent: byAgent,
+        // #3383 — a backlog holds open tickets only: the closed ones are not loaded.
+        open: onlyBacklog || undefined,
     });
 
-    const closes = listMessages({
-        status: "approved",
-        kind: "ticket_closed",
-        project,
-    });
-    // #371 follow-up: net closed state must replay reopen too, else a
-    // reopened ticket still reads `closed: true` (this handler only checked
-    // ticket_closed, unlike /inbox which replays the full lifecycle). The
-    // new tiering surfaced it — #305 was reopened yet sorted into the open
-    // tier while still flagged closed. Replay closed+reopened in id order.
-    const reopens = listMessages({
-        status: "approved",
-        kind: "ticket_reopened",
-        project,
-    });
-    const closedSet = new Set<number>();
-    for (const ev of [...closes, ...reopens].sort((a, b) => a.id - b.id)) {
-        if (ev.ticket_id == null) continue;
-        if (ev.kind === "ticket_closed") closedSet.add(ev.ticket_id);
-        else closedSet.delete(ev.ticket_id);
-    }
+    // #371 follow-up: the net closed state replays reopen too, else a reopened
+    // ticket still reads `closed: true`. #3383 — read from the lifecycle events
+    // alone: listing them as messages loaded every close of the project, body
+    // and all, at each read.
+    const closedSet = closedTicketIdsOf(project);
     const nowStr = new Date().toISOString();
 
     // #3383 — a closed ticket is never in a backlog (the `closed` rule drops it

@@ -10,11 +10,52 @@
  * folded it on their own, and only one of them did, which is how poll counted
  * 19 pending tickets and listed 29.
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
 import { parseMeta } from "../questions.js";
 import { resolvesTicket } from "../ticket-transitions.js";
+
+/**
+ * #3383 — the same rule as a condition on a `tickets` query: the ticket's
+ * latest approved lifecycle event is not a close. It lets a reader of the open
+ * tickets leave the closed ones in the database instead of loading every row
+ * (bodies included) to drop most of them.
+ */
+export function ticketIsOpenSql() {
+    return sql`COALESCE((
+        SELECT lc.kind FROM ${schema.messages} lc
+        WHERE lc.ticket_id = ${schema.tickets.id}
+          AND lc.status = 'approved'
+          AND lc.kind IN ('ticket_closed', 'ticket_reopened')
+        ORDER BY lc.id DESC LIMIT 1
+    ), '') <> 'ticket_closed'`;
+}
+
+/**
+ * #3383 — the closed tickets of a project (of the board without one), read
+ * from the lifecycle events alone: three columns, no message body.
+ */
+export function closedTicketIdsOf(project?: string): Set<number> {
+    const rows = getDb()
+        .select({ id: schema.messages.id, ticketId: schema.messages.ticketId, kind: schema.messages.kind })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+            eq(schema.messages.status, "approved"),
+            project ? eq(schema.tickets.project, project) : undefined,
+        ))
+        .orderBy(schema.messages.id)
+        .all();
+    const closed = new Set<number>();
+    for (const ev of rows) {
+        if (ev.ticketId == null) continue;
+        if (ev.kind === "ticket_closed") closed.add(ev.ticketId);
+        else closed.delete(ev.ticketId);
+    }
+    return closed;
+}
 
 export function closedTicketIds(ticketIds: readonly number[]): Set<number> {
     const closed = new Set<number>();

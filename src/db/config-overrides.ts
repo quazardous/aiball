@@ -40,11 +40,29 @@ function parseStored(json: string): ConfigValue | undefined {
     return undefined;
 }
 
+/**
+ * #3383 — every override, kept in memory: the table is a few rows, and reading
+ * it one key at a time cost a query per key and per layer (a backlog read asks
+ * for some thirty). Dropped by the two writers below; the ceiling is the net
+ * for a row written past them (another process, a restored database).
+ */
+const OVERRIDES_CEILING_MS = 10_000;
+let overrides: { byLayerKey: Map<string, string>; until: number } | null = null;
+
 function readOverride(project: string, key: string): ConfigValue | undefined {
-    const row = getDb().select().from(schema.configOverrides)
-        .where(and(eq(schema.configOverrides.project, project), eq(schema.configOverrides.key, key)))
-        .get();
-    return row ? parseStored(row.value) : undefined;
+    const now = Date.now();
+    if (!overrides || now >= overrides.until) {
+        const byLayerKey = new Map<string, string>();
+        for (const r of getDb().select().from(schema.configOverrides).all()) byLayerKey.set(`${r.project}\0${r.key}`, r.value);
+        overrides = { byLayerKey, until: now + OVERRIDES_CEILING_MS };
+    }
+    const stored = overrides.byLayerKey.get(`${project}\0${key}`);
+    return stored !== undefined ? parseStored(stored) : undefined;
+}
+
+/** A write that went past the two writers below (a project renamed, a test's own row): read the table again. */
+export function forgetConfigOverrides(): void {
+    overrides = null;
 }
 
 /** #590 — read one (source × layer) value for an entry. Returns undefined
@@ -190,6 +208,7 @@ export function setConfigOverride(
         target: [schema.configOverrides.project, schema.configOverrides.key],
         set: { value: encoded, updatedAt: now, updatedBy: updatedBy ?? null },
     }).run();
+    overrides = null;
 }
 
 /** Remove an override at a layer (revert to the layer below). */
@@ -197,4 +216,5 @@ export function deleteConfigOverride(project: string, key: string): void {
     getDb().delete(schema.configOverrides)
         .where(and(eq(schema.configOverrides.project, project), eq(schema.configOverrides.key, key)))
         .run();
+    overrides = null;
 }
