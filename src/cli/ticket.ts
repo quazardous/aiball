@@ -18,6 +18,7 @@ import {
     withProject,
 } from "./_helpers.js";
 import { parseMilestoneArg, parseTicketIds, resolveMilestone } from "./milestone-args.js";
+import { readBody } from "./body-arg.js";
 
 /**
  * #2180 — what `ticket approve-children` should do, as a pure verdict so a test
@@ -54,6 +55,15 @@ export function planChildrenSweep(input: {
     };
 }
 
+/** The body the options name; a contradiction or an unreadable source ends the command. */
+function bodyOrDie(opts: { body?: string; bodyFile?: string }): string | undefined {
+    try {
+        return readBody(opts);
+    } catch (e) {
+        return die((e as Error).message);
+    }
+}
+
 export function registerTicketCommands(program: Command): void {
     const ticket = program.command("ticket").description("Create / list / inspect tickets");
 
@@ -62,7 +72,8 @@ export function registerTicketCommands(program: Command): void {
         .description("Create a new ticket")
         .requiredOption("--title <title>", "Ticket title")
         .option("--project <project>", "Project (default $AIBALL_PROJECT)")
-        .option("--body <body>", "Ticket body")
+        .option("--body <body>", "Ticket body; \"-\" reads it from standard input (a text of several lines: see --body-file)")
+        .option("--body-file <path>", "Read the ticket body from this file: a text of several lines, which a Windows shell cuts at its first line break when passed as an argument")
         .option("--by <agent>", "Post as this consumer (the identity sent; default: resolved consumer id)")
         .option("--plan", "The body proposes how the work should go: the ticket carries a pending plan")
 
@@ -70,11 +81,12 @@ export function registerTicketCommands(program: Command): void {
             const globalOpts = gOpts(cmd);
             const client = buildClient(globalOpts, opts.by);
             const project = withProject(client, opts.project);
+            const body = bodyOrDie(opts);
             const res = await client.postMessage({
                 project,
                 kind: "ticket_created",
                 title: opts.title,
-                ...(opts.body ? { body: opts.body } : {}),
+                ...(body ? { body } : {}),
                 ...(opts.plan ? { decision_kind: "plan" } : {}),
             });
             out(res, globalOpts, (v) => fmtPostReceipt(v, "ticket"));
@@ -84,7 +96,8 @@ export function registerTicketCommands(program: Command): void {
         .command("comment")
         .description("Post a comment on a ticket")
         .requiredOption("--id <id>", "Ticket id")
-        .requiredOption("--body <body>", "Comment body")
+        .option("--body <body>", "Comment body; \"-\" reads it from standard input")
+        .option("--body-file <path>", "Read the comment body from this file (a text of several lines)")
         .option("--project <project>", "Ignored: the daemon files it in the ticket's project")
         .option("--parent <id>", "Parent message id (default: ticket id)")
         .option("--by <agent>", "Post as this consumer (the identity sent)")
@@ -96,9 +109,11 @@ export function registerTicketCommands(program: Command): void {
             const client = buildClient(gOpts(cmd), opts.by);
             const ticketId = Number(opts.id);
             const parent = opts.parent ? Number(opts.parent) : ticketId;
+            const body = bodyOrDie(opts);
+            if (!body) die("a comment needs its text: --body <text>, --body - (standard input) or --body-file <path>");
             const res = await client.postMessage({
                 kind: "comment_added",
-                body: opts.body,
+                body,
                 ticket_id: ticketId,
                 parent_id: parent,
                 ...(opts.keep ? { handback: false } : opts.handback ? { handback: true } : {}),

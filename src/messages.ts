@@ -950,7 +950,7 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // guard; comments/lifecycle inherit the parent ticket's project.
     if (input.kind === "ticket_created") {
         if (!getProject(input.project)) {
-            const err = new Error(`project "${input.project}" does not exist — create it first (Projects panel or 'aiball project create')`);
+            const err = new Error(`project "${input.project}" does not exist — create it first (Projects panel or 'aiball project init <name>')`);
             (err as { code?: string }).code = ERROR_CODES.PROJECT_NOT_FOUND;
             throw err;
         }
