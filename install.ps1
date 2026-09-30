@@ -271,6 +271,28 @@ function Log($msg)  { Write-Host "[aiball] $msg" -ForegroundColor Cyan }
 function Warn($msg) { Write-Host "[aiball] $msg" -ForegroundColor Yellow }
 function Die($msg)  { Write-Host "[aiball] $msg" -ForegroundColor Red; exit 1 }
 
+# Removes a directory tree whatever the length of its paths. Windows PowerShell
+# 5.1's Remove-Item stops on a path longer than 260 characters, and an npm
+# install with nested dependencies always has some: `aiball update`, which runs
+# this script under 5.1, left the install half removed (#1586). robocopy has no
+# such limit: it mirrors an empty directory over the tree. Throws when the
+# directory is still there afterwards (a process holds a file in it).
+function Remove-Tree([string] $path) {
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    try { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop } catch { }
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    $empty = Join-Path ([System.IO.Path]::GetTempPath()) "aiball-empty-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $empty | Out-Null
+    try {
+        & robocopy.exe $empty $path /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+        $global:LASTEXITCODE = 0   # robocopy's codes below 8 are successes
+        Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+    } finally {
+        Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $path) { throw "could not remove ${path}: a process holds a file in it" }
+}
+
 function Require-Cmd($name) {
     if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
         Die "missing prerequisite: $name. Install via winget (see docs\WIN-INSTALL.md)."
@@ -454,10 +476,10 @@ if ($Uninstall -and $Prefix) {
     # the service and the machine's own install are someone else's.
     Remove-AiballTask
     Stop-AiballOnPort $Port
-    foreach ($d in @($PrefixBin, $PrefixLib, $LogDir, $ConfigHome)) {
+    foreach ($d in @($PrefixBin, $PrefixLib, "$PrefixLib.previous", $LogDir, $ConfigHome)) {
         if (Test-Path $d) {
             $item = Get-Item $d -Force
-            if ($item.LinkType -eq 'SymbolicLink') { $item.Delete() } else { Remove-Item -Recurse -Force $d }
+            if ($item.LinkType -eq 'SymbolicLink') { $item.Delete() } else { Remove-Tree $d }
             Log "removed $d"
         }
     }
@@ -512,9 +534,14 @@ if ($Uninstall) {
             $item.Delete()
             Log "removed install symlink: $PrefixLib (source dir untouched: $($item.Target))"
         } else {
-            Remove-Item -Recurse -Force $PrefixLib
+            Remove-Tree $PrefixLib
             Log "removed install dir: $PrefixLib"
         }
+    }
+    # The copy an interrupted upgrade set aside.
+    if (Test-Path "$PrefixLib.previous") {
+        Remove-Tree "$PrefixLib.previous"
+        Log "removed the previous install set aside: $PrefixLib.previous"
     }
 
     # Logs may live in either location depending on whether the install
@@ -702,13 +729,29 @@ if (-not $Minimal) {
         if (Test-TaskExists $TaskName) { try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop } catch { } }
         Stop-AiballOnPort $Port
 
+        # Replaced whole, not installed over: npm keeps a package.json and a
+        # lock in the prefix, and a lock inherited from the previous install
+        # would pin what this one resolves. The previous install is SET ASIDE
+        # first and removed only once the new one is in place (#1586): removed
+        # first, a failure left nothing behind the commands on the PATH.
+        $previousLib = "$PrefixLib.previous"
+        $hasPrevious = $false
         if (Test-Path $PrefixLib) {
-            # Removed whole, not installed over: npm keeps a package.json and a
-            # lock in the prefix, and a lock inherited from the previous install
-            # would pin what this one resolves.
-            Log "removing the previous install at $PrefixLib"
-            try { Remove-Item -Recurse -Force $PrefixLib -ErrorAction Stop }
-            catch { Die "could not remove $PrefixLib ($($_.Exception.Message)). A claude-loop running from this install holds its files: stop the loops, then re-run." }
+            if (Test-Path $previousLib) {
+                try { Remove-Tree $previousLib }
+                catch { Die "$($_.Exception.Message). It is the copy an earlier upgrade set aside: delete it, then re-run. Nothing was changed." }
+            }
+            Log "setting the previous install aside: $previousLib"
+            try { Rename-Item -LiteralPath $PrefixLib -NewName (Split-Path $previousLib -Leaf) -ErrorAction Stop }
+            catch {
+                Die ("could not move $PrefixLib aside ($($_.Exception.Message)). Something still runs from this install " +
+                     "(a claude-loop and its PTY proxy, a terminal open in that folder): stop it, then re-run. " +
+                     "Nothing was changed; start aiball again with: Start-ScheduledTask -TaskName $TaskName")
+            }
+            $hasPrevious = $true
+        } elseif (Test-Path $previousLib) {
+            # An interrupted upgrade left it: still what to fall back on.
+            $hasPrevious = $true
         }
         New-Item -ItemType Directory -Force -Path $PrefixLib | Out-Null
 
@@ -719,7 +762,27 @@ if (-not $Minimal) {
         Log "installing $(Split-Path $tgz -Leaf) into $PrefixLib"
         npm install --prefix $PrefixLib --install-strategy=nested --no-audit --no-fund $tgz
         if ($LASTEXITCODE -ne 0) {
-            Die "npm install of $tgz failed (exit $LASTEXITCODE). The daemon needs the deps to run -- fix the error above and re-run install.ps1."
+            $npmExit = $LASTEXITCODE
+            $putBack = ''
+            if ($hasPrevious) {
+                try {
+                    Remove-Tree $PrefixLib
+                    Rename-Item -LiteralPath $previousLib -NewName (Split-Path $PrefixLib -Leaf) -ErrorAction Stop
+                    $putBack = " The previous install was put back; start it again with: Start-ScheduledTask -TaskName $TaskName"
+                } catch {
+                    $putBack = " The previous install could NOT be put back ($($_.Exception.Message)): it is at $previousLib"
+                }
+            }
+            Die "npm install of $tgz failed (exit $npmExit). The daemon needs the deps to run -- fix the error above and re-run install.ps1.$putBack"
+        }
+        if ($hasPrevious) {
+            try {
+                Remove-Tree $previousLib
+                Log "removed the previous install"
+            } catch {
+                Warn "the new install is in place, but the previous one could not be removed: $previousLib"
+                Warn "  $($_.Exception.Message) -- delete that folder by hand"
+            }
         }
         if ($packDir) { Remove-Item -Recurse -Force $packDir -ErrorAction SilentlyContinue }
     }
