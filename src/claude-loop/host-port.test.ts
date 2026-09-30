@@ -7,9 +7,9 @@
 import { test, after } from "node:test";
 import { until } from "../tests/lib.js";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { sessionHostSkip } from "../tests/session-host-bin.js";
+import { removeHostHome, sessionHostSkip } from "../tests/session-host-bin.js";
 
 const home = mkdtempSync("/tmp/aiball-3066b-");
 process.env.AIBALL_HOME = home;
@@ -22,7 +22,7 @@ const { hostPort } = await import("./terminal-port.js");
 const cleanups: (() => void | Promise<void>)[] = [];
 after(async () => {
     for (const c of cleanups) await c();
-    rmSync(home, { recursive: true, force: true });
+    await removeHostHome(home);
 });
 
 test("the host port reads the screen and types, beside the daemon's own connection", { skip }, async () => {

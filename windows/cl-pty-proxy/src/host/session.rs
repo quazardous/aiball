@@ -7,7 +7,6 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -18,6 +17,14 @@ use serde_json::{json, Value};
 
 use crate::frames;
 use crate::core::{Decider, Unit, Verdict};
+use crate::os::Stream;
+
+/// What `host.stop` asks for once the hangup was not enough.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StopSignal {
+    Int,
+    Term,
+}
 
 /// A client further behind than this gets a fresh snapshot instead of the backlog.
 pub const CLIENT_QUEUE_MAX: usize = 4 * 1024 * 1024;
@@ -80,7 +87,7 @@ impl Client {
     }
 
     /// The writer thread: sends queued frames in order until closed.
-    fn run_writer(self: Arc<Self>, mut sock: UnixStream) {
+    fn run_writer(self: Arc<Self>, mut sock: Stream) {
         loop {
             let frame = {
                 let mut q = self.q.lock().unwrap();
@@ -113,6 +120,8 @@ struct Pty {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    /// The process group's leader, for the signals (Unix).
+    #[cfg_attr(windows, allow(dead_code))]
     pid: Option<u32>,
 }
 
@@ -141,6 +150,13 @@ struct Inner {
     restarting: bool,
     /// #3333 — the command exited and no restart was asked: the session is over.
     over: bool,
+    /// #3425 — the command's processes (Windows): what its process group is on Unix.
+    #[cfg(windows)]
+    job: Option<crate::os::Job>,
+    /// #3425 — ConPTY's opening question (where is the cursor?) not answered
+    /// yet, and how much output went by without it (Windows).
+    #[cfg(windows)]
+    cursor_query: Option<usize>,
 }
 
 /// What the control channel is told, as it happens.
@@ -190,6 +206,10 @@ impl Session {
                 claude: ClaudeState { running: false, pid: None, started_at: None, exit_code: None },
                 restarting: false,
                 over: false,
+                #[cfg(windows)]
+                job: None,
+                #[cfg(windows)]
+                cursor_query: None,
             }),
             exited: Condvar::new(),
             decider: Mutex::new(decider),
@@ -249,9 +269,24 @@ impl Session {
         let writer = pair.master.take_writer().map_err(|e| format!("writer: {e}"))?;
         let pid = child.process_id();
         let killer = child.clone_killer();
+        // #3425 — what the command starts goes with it, and with the host.
+        #[cfg(windows)]
+        {
+            inner.job = pid.and_then(|pid| match crate::os::Job::for_pid(pid) {
+                Ok(job) => Some(job),
+                Err(e) => {
+                    eprintln!("cl-session-host: the command's processes are not held together: {e}");
+                    None
+                }
+            });
+        }
         inner.pty = Some(Pty { master: pair.master, writer, killer, pid });
         inner.claude = ClaudeState { running: true, pid, started_at: Some(now_iso()), exit_code: None };
         inner.over = false;
+        #[cfg(windows)]
+        {
+            inner.cursor_query = Some(0);
+        }
         // A restart: the screen starts afresh, and each stream client with a snapshot of it.
         let was_restart = std::mem::take(&mut inner.restarting);
         if was_restart {
@@ -284,8 +319,12 @@ impl Session {
             };
             let bytes = &buf[..n];
             let mut inner = self.inner.lock().unwrap();
+            #[cfg(windows)]
+            let answered = answer_cursor_query(&mut inner, bytes);
+            #[cfg(windows)]
+            let bytes: &[u8] = answered.as_deref().unwrap_or(bytes);
             inner.parser.process(bytes);
-            inner.seq += n as u64;
+            inner.seq += bytes.len() as u64;
             inner.screen_rev += 1;
             let seq = inner.seq;
             let frame = frames::encode_seq(frames::OUTPUT, seq, bytes);
@@ -310,6 +349,12 @@ impl Session {
     fn on_exit(&self, code: i64) {
         let mut inner = self.inner.lock().unwrap();
         inner.pty = None;
+        // #3425 — what the command left running ends with it, as its group does
+        // when its terminal hangs up on Unix.
+        #[cfg(windows)]
+        {
+            inner.job = None;
+        }
         inner.claude.running = false;
         inner.claude.exit_code = Some(code);
         let restarting = inner.restarting;
@@ -340,7 +385,12 @@ impl Session {
     /// ends an interactive shell, one that ignores SIGTERM (#3158) — then
     /// `signal` a moment later if it is still there, then SIGKILL past
     /// `timeout`. With `restart`, clients stay attached for the next `start`.
-    pub fn stop(&self, signal: i32, timeout: Duration, restart: bool) -> Option<i64> {
+    #[cfg(unix)]
+    pub fn stop(&self, signal: StopSignal, timeout: Duration, restart: bool) -> Option<i64> {
+        let signal = match signal {
+            StopSignal::Int => libc::SIGINT,
+            StopSignal::Term => libc::SIGTERM,
+        };
         let mut inner = self.inner.lock().unwrap();
         if !inner.claude.running {
             return inner.claude.exit_code;
@@ -372,6 +422,63 @@ impl Session {
                 }
                 if let Some(p) = inner.pty.as_mut() {
                     let _ = p.killer.kill();
+                }
+                inner = self.exited.wait_timeout(inner, Duration::from_secs(5)).unwrap().0;
+                break;
+            }
+            inner = self.exited.wait_timeout(inner, left).unwrap().0;
+        }
+        inner.claude.exit_code
+    }
+
+    /// #3425 — Windows has no signals to send. `INT` is a Ctrl-C typed into the
+    /// console, a moment before the rest; the hangup is the pseudo-console
+    /// closing, which sends its processes `CTRL_CLOSE` (Windows ends them a few
+    /// seconds later if they do not go by themselves); past `timeout`, the
+    /// command's job is ended, everything it started with it.
+    #[cfg(windows)]
+    pub fn stop(&self, signal: StopSignal, timeout: Duration, restart: bool) -> Option<i64> {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.claude.running {
+            return inner.claude.exit_code;
+        }
+        inner.restarting = restart;
+        let deadline = Instant::now() + timeout;
+        if signal == StopSignal::Int {
+            if let Some(p) = inner.pty.as_mut() {
+                let _ = p.writer.write_all(b"\x03");
+                let _ = p.writer.flush();
+            }
+            let after_int = (Instant::now() + HANGUP_GRACE).min(deadline);
+            while inner.claude.running {
+                let left = after_int.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    break;
+                }
+                inner = self.exited.wait_timeout(inner, left).unwrap().0;
+            }
+        }
+        let mut killer = None;
+        if inner.claude.running {
+            if let Some(Pty { master, writer, killer: k, .. }) = inner.pty.take() {
+                killer = Some(k);
+                // Closed outside the lock: before Windows 11 24H2, closing a
+                // pseudo-console waits until its output is read, and the reader
+                // takes this lock.
+                drop(inner);
+                drop(writer);
+                drop(master);
+                inner = self.inner.lock().unwrap();
+            }
+        }
+        while inner.claude.running {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                if let Some(job) = inner.job.as_ref() {
+                    job.terminate();
+                }
+                if let Some(k) = killer.as_mut() {
+                    let _ = k.kill();
                 }
                 inner = self.exited.wait_timeout(inner, Duration::from_secs(5)).unwrap().0;
                 break;
@@ -500,7 +607,7 @@ impl Session {
     // ---- clients -------------------------------------------------------------
 
     /// Attach a client after its `hello`: it gets `welcome`, then its first view.
-    pub fn attach(self: &Arc<Self>, sock: UnixStream, hello: &Value, pid: u32) -> Arc<Client> {
+    pub fn attach(self: &Arc<Self>, sock: Stream, hello: &Value, pid: u32) -> Arc<Client> {
         let interactive = hello["mode"].as_str() != Some("readonly");
         let stream = hello["view"].as_str() != Some("screen");
         let want = size_of(&hello["size"]);
@@ -517,7 +624,7 @@ impl Session {
             q: Mutex::new(Queue { frames: VecDeque::new(), bytes: 0, closed: false }),
             cv: Condvar::new(),
         });
-        let writer = sock.try_clone().expect("clone a unix stream");
+        let writer = sock.try_clone().expect("clone a stream");
         let c = client.clone();
         thread::spawn(move || c.run_writer(writer));
         let history = history_len(inner.parser.screen_mut());
@@ -743,11 +850,39 @@ fn screen_frame(inner: &Inner, opts: &Value) -> Vec<u8> {
     }))
 }
 
+/// #3425 — portable-pty opens ConPTY with `PSEUDOCONSOLE_INHERIT_CURSOR`:
+/// ConPTY's first output asks where the cursor is (`ESC[6n`) and shows nothing
+/// more until a terminal answers. Under tmux the terminal does; a host may
+/// have no client yet, so it answers from its own screen, and the question is
+/// not passed on (a client answering it later would type the answer into the
+/// command). The bytes without it, when it was there; past 64 KiB of output
+/// without it, it is not looked for any more.
+#[cfg(windows)]
+fn answer_cursor_query(inner: &mut Inner, bytes: &[u8]) -> Option<Vec<u8>> {
+    const QUERY: &[u8] = b"\x1b[6n";
+    let seen = inner.cursor_query?;
+    let Some(at) = bytes.windows(QUERY.len()).position(|w| w == QUERY) else {
+        inner.cursor_query = Some(seen + bytes.len()).filter(|&n| n < 64 * 1024);
+        return None;
+    };
+    inner.cursor_query = None;
+    let mut out = bytes[..at].to_vec();
+    out.extend_from_slice(&bytes[at + QUERY.len()..]);
+    // It is ConPTY's first output: the screen is as the host last knew it.
+    let (row, col) = inner.parser.screen().cursor_position();
+    if let Some(p) = inner.pty.as_mut() {
+        let _ = p.writer.write_all(format!("\x1b[{};{}R", row + 1, col + 1).as_bytes());
+        let _ = p.writer.flush();
+    }
+    Some(out)
+}
+
 /// #3158 — how long a hangup gets before the stop signal follows.
 const HANGUP_GRACE: Duration = Duration::from_secs(1);
 
 /// #3141 — `signal` to the command's process group, and to the command itself
 /// should it have left the group.
+#[cfg(unix)]
 fn signal_group(pid: u32, signal: i32) {
     unsafe {
         libc::kill(-(pid as i32), signal);

@@ -17,7 +17,7 @@
  * and node: a whole screen as text), `error` (passing), `unavailable` (the
  * screen cannot be followed: nothing more comes).
  */
-import { connect, type Socket } from "node:net";
+import { connectHost, withToken } from "./host-socket.js";
 import { FRAME, FrameReader, frame } from "./claude-loop/host-attach.js";
 import { captureOnce, MAX_KEYS_BYTES, paneTarget, resolveLoopName, sendLoopKeys, type PaneGeometry } from "./pane.js";
 import { getConsumer } from "./db.js";
@@ -98,7 +98,7 @@ function hostScreen(agent: string, opts: OpenScreen, emit: (e: ScreenEvent) => v
         emit({ kind: "unavailable", error: "the session is gone" });
         return null;
     }
-    const sock: Socket = connect(link.attachSocket());
+    const { socket: sock, token } = connectHost(link.attachSocket());
     const reader = new FrameReader();
     let size: Size | null = null;
     let pending: Buffer[] = [];
@@ -122,14 +122,14 @@ function hostScreen(agent: string, opts: OpenScreen, emit: (e: ScreenEvent) => v
     };
 
     sock.on("connect", () => {
-        sock.write(frame(FRAME.hello, JSON.stringify({
+        sock.write(frame(FRAME.hello, JSON.stringify(withToken({
             version: 1,
             client: "web",
             mode: opts.typing ? "interactive" : "readonly",
             view: "stream",
             scrollback: 0,
             ...(opts.typing && opts.size ? { size: opts.size } : {}),
-        })));
+        }, token))));
     });
     sock.on("data", (chunk: Buffer) => {
         for (const f of reader.push(chunk)) {

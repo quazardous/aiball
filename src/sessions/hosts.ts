@@ -9,13 +9,17 @@ import { hostDirName, MAX_SOCKET_PATH } from "../session-dir.js";
 import { spawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { connect, type Socket } from "node:net";
+import { type Socket } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AIBALL_HOME } from "../paths.js";
+import { connectHost, controlAuthLine } from "../host-socket.js";
 
 /** A Unix socket's path is at most about 100 bytes. */
 export { MAX_SOCKET_PATH } from "../session-dir.js";
+
+/** #3425 — the host's own `--detach` exit status when it could not leave the daemon's job. */
+const DETACHED_IN_JOB = 3;
 
 export const SESSION_NAME = /^[A-Za-z0-9._-]{1,64}$/;
 
@@ -29,11 +33,11 @@ export function hostDirFor(key: { agent?: string; name?: string }): string {
 }
 
 /** The binary: `CL_SESSION_HOST_BIN`, or this checkout's release build. */
-export function sessionHostBin(): string {
+export function sessionHostBin(platform: NodeJS.Platform = process.platform): string {
     const override = process.env.CL_SESSION_HOST_BIN?.trim();
     if (override) return override;
     const here = dirname(fileURLToPath(import.meta.url));
-    return resolve(here, "..", "..", "windows", "cl-pty-proxy", "target", "release", "cl-session-host");
+    return resolve(here, "..", "..", "windows", "cl-pty-proxy", "target", "release", platform === "win32" ? "cl-session-host.exe" : "cl-session-host");
 }
 
 export interface HostInfo {
@@ -77,10 +81,13 @@ export class HostLink extends EventEmitter {
 
     static open(info: HostInfo, timeoutMs = 3000): Promise<HostLink> {
         return new Promise((resolveOpen, reject) => {
-            const sock = connect(join(info.dir, "control.sock"));
+            const { socket: sock, token } = connectHost(join(info.dir, "control.sock"));
             const timer = setTimeout(() => { sock.destroy(); reject(new Error("host did not answer")); }, timeoutMs);
             sock.once("connect", async () => {
                 clearTimeout(timer);
+                // #3425 — first, on a host with a token (Windows); nothing on Unix.
+                const auth = controlAuthLine(token);
+                if (auth) sock.write(auth);
                 const link = new HostLink(info, sock);
                 try {
                     const hello = await link.call<{ claude: { running: boolean }; clients: number }>("host.hello");
@@ -211,19 +218,30 @@ function systemdRunFound(): boolean {
     return systemdRun;
 }
 
-/** Spawn the host (detached) and wait for its host.json. */
-async function spawnHost(cmd: string, args: string[], o: StartHost, dir: string, env: Record<string, string>): Promise<void> {
+/**
+ * Spawn the host (detached) and wait for its host.json. #3425 — with
+ * `detaches`, what is spawned starts the host and exits (Windows'
+ * `--detach`): its exit is expected, only a failing one ends the wait.
+ */
+async function spawnHost(cmd: string, args: string[], o: StartHost, dir: string, env: Record<string, string>, detaches = false): Promise<void> {
     // A spawn that fails (a missing cwd reads as ENOENT) is an 'error' event:
     // unheard, it kills the daemon.
-    const child = spawn(cmd, args, { cwd: o.cwd, env, detached: true, stdio: "ignore" });
+    const child = spawn(cmd, args, { cwd: o.cwd, env, detached: true, stdio: "ignore", windowsHide: true });
     let spawnError: Error | null = null;
     child.on("error", (e) => { spawnError = e; });
     child.unref();
     const deadline = Date.now() + 5000;
+    let told = false;
     while (!existsSync(join(dir, "host.json"))) {
         if (spawnError) throw new Error(`the session host could not start: ${(spawnError as Error).message}`);
         if (Date.now() > deadline) throw new Error("the session host did not come up");
-        if (child.exitCode !== null) throw new Error(`the session host exited (${child.exitCode})`);
+        if (child.exitCode !== null && !(detaches && (child.exitCode === 0 || child.exitCode === DETACHED_IN_JOB))) {
+            throw new Error(`the session host exited (${child.exitCode})`);
+        }
+        if (detaches && child.exitCode === DETACHED_IN_JOB && !told) {
+            told = true;
+            console.error("[sessions] the session host could not leave the daemon's job: it ends when the daemon does");
+        }
         await new Promise((r) => setTimeout(r, 25));
     }
 }
@@ -231,7 +249,9 @@ async function spawnHost(cmd: string, args: string[], o: StartHost, dir: string,
 /** Start a host, detached; resolves once it answers on its control channel. */
 export async function startHost(o: StartHost): Promise<HostLink> {
     const dir = hostDirFor(o);
-    if (join(dir, "control.sock").length > MAX_SOCKET_PATH) {
+    const win = process.platform === "win32";
+    // A loopback port has no path to fit (#3425).
+    if (!win && join(dir, "control.sock").length > MAX_SOCKET_PATH) {
         throw new Error(`the host's socket path would be longer than ${MAX_SOCKET_PATH} bytes: ${dir}`);
     }
     const bin = sessionHostBin();
@@ -244,7 +264,15 @@ export async function startHost(o: StartHost): Promise<HostLink> {
     // #3333 — an agent's host ends with its Claude: left empty, it read as a
     // live loop and a start that joined it waited forever.
     if (o.agent) args.push("--exit-with-command");
+    // #3425 — the host leaves the daemon's job itself: what the scope is on Linux.
+    if (win) args.push("--detach");
     args.push("--", ...o.argv);
+    if (win) {
+        await spawnHost(bin, args, o, dir, o.env, true);
+        const started = readInfo(dir);
+        if (!started) throw new Error("the session host wrote no host.json");
+        return HostLink.open(started);
+    }
     const scoped = hostScope(dir, o.env);
     try {
         await spawnHost(scoped ? scoped.cmd : bin, scoped ? [...scoped.args, bin, ...args] : args, o, dir, scoped?.env ?? o.env);

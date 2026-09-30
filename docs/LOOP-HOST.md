@@ -2,7 +2,7 @@
 
 > **Status: a design, not yet implemented.** This page fixes the protocol
 > before it is coded, so that clients (tvty first) can be written against it.
-> Version 1 of the protocol. The Unix side only; Windows is open (see the end).
+> Version 1 of the protocol, on Unix and on Windows (see *Transport*).
 
 Today a loop's session lives in tmux: `claude-loop` starts claude inside a tmux
 session, and you watch or drive it with `tmux attach`. The PTY proxy
@@ -34,7 +34,16 @@ client elsewhere (the web UI, a remote tvty).
   mode `0600`. It is separate from `loop.sock`, which is the kernel's control
   channel, so the raw output stream never mixes with it.
 - The same trust boundary as `loop.sock`: whoever can open the loop's state
-  directory can attach ([`SECURITY.md`](./SECURITY.md)). There is no token.
+  directory can attach ([`SECURITY.md`](./SECURITY.md)). On Unix there is no
+  token.
+- **On Windows** there is no Unix socket every client can reach. The socket is
+  still named by its path, but nothing is at the path: beside it,
+  `<socket>.addr` holds `{ "port": N, "token": "…" }`. The client connects to
+  `127.0.0.1:<port>` and says the token in its `hello` (`token`, below). A
+  loopback port is open to every local process: a `hello` without the token,
+  or with a wrong one, ends the connection before anything is sent, not even
+  an `error`. The directory's ACL keeps `<socket>.addr` to its user (the
+  session host's side: [`SESSION-HOST.md`](./SESSION-HOST.md)).
 - **Frames**, both ways: `[type: u8][length: u32, big-endian][payload]`. A
   control frame's payload is UTF-8 JSON. `snapshot` and `output` start with an
   8-byte big-endian sequence number, then raw bytes; `input` is raw bytes.
@@ -77,6 +86,8 @@ The client opens with `hello`:
 - `size`: the size this client would like (`interactive` only; see *Size*).
 - `screen`: with `view: "screen"`, an optional window and format, e.g.
   `{ "rows": 30, "cols": 100, "from": "bottom", "format": "ansi" }`.
+- `token`: on Windows, the token of `<socket>.addr` (see *Transport*). On Unix
+  it is not sent, and ignored if it is.
 
 The proxy answers `welcome`:
 
@@ -204,8 +215,6 @@ that typed or pasted (see above: not a mouse or focus report) or took focus
 
 ## What stays open
 
-- **Windows**: whether psmux remains the host there, or the proxy holds the
-  session on ConPTY too. This protocol is written for Unix.
 - **The web UI** attaches through the daemon, which is the `stream` client
   here and relays the snapshot, the output and the keys on the bus
   (`agent.<id>.screen`, `agent.pane_keys`, [`API-BUS.md`](./API-BUS.md)):
