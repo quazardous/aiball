@@ -23,6 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- `claude-loop start` without `--cwd` starts the loop where the command was
+  typed. In 0.51.0 it started in aiball's install folder, as that folder's
+  agent.
+- On Windows, the tray of an install made from the package no longer crashes
+  on `Get-TrayTooltip`: the script it loads, `bin/aiball-tray-version.ps1`, was
+  left out of the package; only an install from a checkout had it.
+
 ## [0.51.0] — 2026-09-30
 
 ### Added
@@ -120,9 +129,6 @@ dates are YYYY-MM-DD.
 - A loop's session host ends with its Claude. Before, a host left without it
   read as a live loop, and `claude-loop start --force` waited on it forever.
   A client attaching to a session that has ended is told so at once.
-- On Windows, the tray of an install made from the package no longer crashes
-  on `Get-TrayTooltip`: the script it loads, `bin/aiball-tray-version.ps1`, was
-  left out of the package; only an install from a checkout had it.
 - An agent that may not claim (a crew agent, `--no-claim`) wakes for a ticket
   assigned to it. It used to wake only on an unread ping, so once the
   assignment was read the ticket stayed in its backlog: the bar counted down
