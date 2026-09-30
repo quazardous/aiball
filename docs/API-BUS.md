@@ -71,7 +71,12 @@ machine holds a session (`machine` in a consumer's `session` and in
 
 A client takes for its own what runs on **its** machine: the consumers and the
 sessions whose `machine` is the one `bus.whoami` answers. A session is attachable
-from its machine only: its socket, or its tmux session, is there. A consumer's
+from its machine only: its socket, or its tmux session, is there. Behind a node,
+a consumer's `session` comes from the hub and is empty for the node's own agents:
+the node's sessions are read in `session.list` and `session.<name>.state`, which
+the node serves for its machine. Each row there carries `agent` (null for a
+session without one), `machine` and what attaches it (`attach.socket`), so a
+client joins it to its agent by `agent`. A consumer's
 `remote` is older and says something else: whether the consumer was last seen
 from outside **the hub's** machine. Behind a node it reads the wrong way round
 (the hub's agents `false`, the node's own `true`); compare `machine` instead.
