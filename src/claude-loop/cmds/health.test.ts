@@ -109,6 +109,13 @@ test("checkLoopSock: no reply → fail", () => {
     assert.equal(c.status, "fail");
 });
 
+// #3416 — a kernel that answers late is slow, not dead.
+test("checkLoopSock: a late reply → warn, and says the kernel is busy", () => {
+    const c = checkLoopSock(869, false, { bootComplete: true });
+    assert.equal(c.status, "warn");
+    assert.match(c.detail, /slowly \(869ms/);
+});
+
 test("checkLoopSock: reply within budget → ok", () => {
     const c = checkLoopSock(12, false, { bootComplete: true });
     assert.equal(c.status, "ok");

@@ -52,6 +52,7 @@ import { stripMarkdown } from "./markdown-strip.js";
 import { computeLoopView, isHumanPresentHold, isInBootGrace } from "./loop-state.js";
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
+import { resolveMuxCmd } from "./mux-cmd.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
@@ -74,7 +75,8 @@ export function takeAfterRestartNote(name: string): boolean {
     return true;
 }
 
-export const MUX_CMD = process.env.MUX_CMD ?? "tmux";
+// #3416 — on Windows a bare `tmux` is psmux's slow alias: see mux-cmd.ts.
+export const MUX_CMD = resolveMuxCmd(process.env.MUX_CMD);
 
 /**
  * #3246 — the state root, read at each call: the daemon's side, whose tests

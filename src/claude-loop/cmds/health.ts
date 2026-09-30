@@ -136,7 +136,12 @@ interface LiveLoopState {
     lastSseEventAtMs?: number | null;
     sseConnected?: boolean | null;
 }
-async function queryUdsLoopState(sd: string, timeoutMs = 500): Promise<{ live: LiveLoopState | null; latencyMs: number; sockMissing: boolean }> {
+/**
+ * #3416 — 2 s, not 500 ms: a kernel busy reading its screen answers late, and
+ * the four checks that need its reply then called a working loop dead. A slow
+ * answer is reported as one (checkLoopSock), not as no answer.
+ */
+async function queryUdsLoopState(sd: string, timeoutMs = 2_000): Promise<{ live: LiveLoopState | null; latencyMs: number; sockMissing: boolean }> {
     const sock = loopSockPath(sd);
     // #1181 — same fix as inspect: win32 has no socket FILE, so this reported
     // `loop.sock socket file missing` on every healthy Windows loop, and the
@@ -165,9 +170,14 @@ async function queryUdsLoopState(sd: string, timeoutMs = 500): Promise<{ live: L
     }
 }
 
+const SLOW_REPLY_MS = 500;
+
 export function checkLoopSock(latencyMs: number, sockMissing: boolean, live: LiveLoopState | null): HealthCheck {
     if (sockMissing) return { name: "loop.sock", status: "fail", detail: "socket file missing" };
     if (live === null) return { name: "loop.sock", status: "fail", detail: `no reply within ${latencyMs}ms (timer down or hung)` };
+    // A healthy kernel answers in tens of milliseconds: past half a second its
+    // event loop is busy, and the wake path and the hooks wait on it too.
+    if (latencyMs > SLOW_REPLY_MS) return { name: "loop.sock", status: "warn", detail: `responding, slowly (${latencyMs}ms round-trip): the kernel is busy` };
     return { name: "loop.sock", status: "ok", detail: `responding (${latencyMs}ms round-trip)` };
 }
 
