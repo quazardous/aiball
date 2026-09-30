@@ -32,6 +32,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The message to every agent and the release of every hold take a scope:
+  `machine` reaches the loops of the caller's machine (a proxy node answers
+  it for its own loops, where these were refused), `all`, the default,
+  every connected loop as before. With `all`, a loop on another machine gets
+  the message and its hold is reported failed, with the reason.
 - An upgrade is tested: in a container that never had aiball, the latest
   release is installed and used, then updated to the commit under test with
   `aiball update`, and the commands, the daemon, the migrations and the data

@@ -1729,7 +1729,7 @@
     },
     {
       "name": "loops.message_all",
-      "description": "A message to every agent loop running here (or the ones named), typed into each session at once; with `hold`, each loop is then held (NOT AFK ∞) so no wake starts new work while the operator is away. One line per loop in the daemon's log and in the answer.",
+      "description": "A message to every agent loop running here (or the ones named), typed into each session at once; with `hold`, each loop is then held (NOT AFK ∞) so no wake starts new work while the operator is away. One line per loop in the daemon's log and in the answer. `scope`: `all` (the default) reaches every connected loop, `machine` the loops of the caller's machine. A proxy node answers `machine` itself, for its own loops; `all` is not open through a node. The message reaches a loop on any machine; a hold reaches a loop through its socket, so with `all` a loop on another machine gets the message and its hold `failed`, with why.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1746,6 +1746,17 @@
           "name": "message",
           "required": false,
           "schema": {}
+        },
+        {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "machine",
+              "all"
+            ]
+          }
         }
       ],
       "result": {
@@ -1755,17 +1766,29 @@
       "x-callers": [
         "human"
       ],
-      "x-relayed": false
+      "x-relayed": false,
+      "x-node-local": true
     },
     {
       "name": "loops.release_all",
-      "description": "On return: lift the hold on every agent loop, or the ones named.",
+      "description": "On return: lift the hold on every agent loop, or the ones named. `scope` as for `loops.message_all`: `machine` for the caller's machine's loops (a proxy node answers it for its own), `all` (the default) for every connected loop, of which only this machine's can be released.",
       "paramStructure": "by-name",
       "params": [
         {
           "name": "consumers",
           "required": false,
           "schema": {}
+        },
+        {
+          "name": "scope",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "machine",
+              "all"
+            ]
+          }
         }
       ],
       "result": {
@@ -1775,7 +1798,8 @@
       "x-callers": [
         "human"
       ],
-      "x-relayed": false
+      "x-relayed": false,
+      "x-node-local": true
     },
     {
       "name": "mention.suggestions",

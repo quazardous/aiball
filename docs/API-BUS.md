@@ -386,8 +386,8 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `consumer.delete` | human, agent | `DELETE /api/consumers/:consumer_id` |
 | `consumer.stop_loop` | human; through a proxy node, only for a loop of its machine | `POST /api/consumers/:consumer_id/loop-stop` |
 | `consumer.prompt` | human; through a proxy node, only for a loop of its machine | `POST /api/consumers/:consumer_id/prompt` |
-| `loops.message_all` | human, never through a proxy node | `POST /api/loops/message-all` |
-| `loops.release_all` | human, never through a proxy node | `POST /api/loops/release-all` |
+| `loops.message_all` | human; through a proxy node with `scope: "machine"` only | `POST /api/loops/message-all` — a message typed into every agent loop (or the ones in `consumers`), held too with `hold`. `scope`: `all` (the default) reaches every connected loop, `machine` the loops of the caller's machine — a node answers it itself, for its own loops. The message reaches a loop on any machine; a hold goes through the loop's socket, so with `all` a loop on another machine has `hold: "failed"` and why in `hold_error`. Answers `{ action, scope, results }`, one line per loop |
+| `loops.release_all` | human; through a proxy node with `scope: "machine"` only | `POST /api/loops/release-all` — lifts the hold, with the same `scope` and `consumers`; answers `{ action, scope, results }` |
 | `project.launch` | human | `POST /api/projects/:name/launch` — one of the project's known roots only |
 | `launcher.list` | human, agent | `GET /api/launchers` |
 | `launcher.run` | human | `POST /api/launchers/:id/run` — a launcher that cannot start is a 500 |

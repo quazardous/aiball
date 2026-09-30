@@ -6,13 +6,14 @@ import { flag } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { deleteConsumer, getConsumer, isHuman, listConsumers, pingCountsByConsumer, updateConsumer, upsertConsumer, type Consumer, type ConsumerKind } from "../../db.js";
 import { spoolPrompt, drainPrompts } from "../../loop-prompts.js";
-import { pickHoldTargets, type LoopHoldResult } from "../../loop-hold.js";
+import { pickHoldTargets, type LoopHoldResult, type LoopScope } from "../../loop-hold.js";
+import { runningLoopAgents } from "./loop.js";
 import { AGENT_TYPES, type AgentType } from "../../db/consumers.js";
 import { broadcast } from "../../ws.js";
 import { cachedCounters, markCountersDirty, refreshCounters } from "../../agent-counters.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
 import { isPresent, presenceMachine, presenceRunning } from "../../live-presence.js";
-import { machineName } from "../../machine-name.js";
+import { machineName, thisMachine } from "../../machine-name.js";
 import { emitControl } from "../../event-bus.js";
 import { listWaitCreditMoves, listWaitCredits, waitCreditBalance, waitCreditEnabled, type WaitCreditRow } from "../../db/wait-credit.js";
 import { unreadPingCount } from "../../db/pings.js";
@@ -435,13 +436,38 @@ defineMethod({
     },
 });
 
-/** #2333 — the agent loops an all-loops control reaches: the live ones, or the ones named. */
-function holdTargets(requested: unknown): string[] {
-    const named = Array.isArray(requested) ? requested.filter((x): x is string => typeof x === "string") : null;
+const namedOf = (requested: unknown): string[] | null =>
+    (Array.isArray(requested) ? requested.filter((x): x is string => typeof x === "string") : null);
+
+/**
+ * #2333 — the agent loops an all-loops control reaches: the live ones, or the
+ * ones named. #3417 — with `scope: "machine"`, those connected from this
+ * daemon's own machine only.
+ */
+function holdTargets(requested: unknown, scope: LoopScope): string[] {
     return pickHoldTargets(
-        listConsumers().map((c) => ({ consumer_id: c.consumer_id, kind: c.kind, present: presenceRunning(c.consumer_id) })),
-        named,
+        listConsumers().map((c) => ({ consumer_id: c.consumer_id, kind: c.kind, present: presenceRunning(c.consumer_id), machine: machineName(presenceMachine(c.consumer_id)) })),
+        namedOf(requested),
+        scope === "machine" ? thisMachine() : null,
     );
+}
+
+/** #3417 — on a proxy node: the loops that run on its machine, or the ones named among them. */
+function nodeTargets(requested: unknown): string[] {
+    const named = namedOf(requested);
+    const wanted = named && named.length > 0 ? new Set(named) : null;
+    return runningLoopAgents().filter((a) => !wanted || wanted.has(a));
+}
+
+/** #3417 — which loops: `machine` (the caller's machine's), or `all` (the default: every connected loop). */
+const loopScope = z.enum(["machine", "all"]).optional();
+/** A node answers an all-loops control itself when it is for its own machine; `all` is relayed, and refused upstream. */
+const forThisMachine = (p: unknown): boolean => (p as { scope?: unknown }).scope === "machine";
+
+/** #3417 — a hold reaches a loop through its socket, on its own machine: why one elsewhere is not held. */
+function holdElsewhere(consumerId: string): string | null {
+    const machine = machineName(presenceMachine(consumerId));
+    return machine && machine !== thisMachine() ? `its loop runs on ${machine}: a hold reaches the loops of this machine (${thisMachine()}) only` : null;
 }
 
 /**
@@ -449,44 +475,80 @@ function holdTargets(requested: unknown): string[] {
  * typed into each session at once; with `hold`, each loop is then held (NOT
  * AFK ∞) so no wake starts new work while the operator is away. One line per
  * loop in the daemon's log and in the answer.
+ *
+ * #3417 — `scope`: `all` (the default) reaches every connected loop, `machine`
+ * the loops of the caller's machine. A proxy node answers `machine` itself,
+ * for its own loops; `all` is not open through a node. The message reaches a
+ * loop on any machine; a hold reaches a loop through its socket, so with `all`
+ * a loop on another machine gets the message and its hold `failed`, with why.
  */
 defineMethod({
     name: "loops.message_all",
     ...LOOP_CONTROL,
-    params: z.object({ message: z.unknown().optional(), hold: z.unknown().optional(), consumers: z.unknown().optional() }),
-    run: (_c, p) => {
+    nodeLocal: forThisMachine,
+    params: z.object({ message: z.unknown().optional(), hold: z.unknown().optional(), consumers: z.unknown().optional(), scope: loopScope }),
+    run: async (caller, p) => {
         const message = typeof p.message === "string" ? p.message.trim() : "";
         if (!message) throw new Refusal(400, "message required");
         const hold = p.hold === true;
-        const results: LoopHoldResult[] = holdTargets(p.consumers).map((consumer_id) => {
+        const scope: LoopScope = p.scope ?? "all";
+        const action = hold ? "message-and-hold" : "message";
+        if (onNode(caller)) {
+            // The node's own loops, through their sockets: nothing is spooled, the loops are here.
+            const results: LoopHoldResult[] = [];
+            for (const consumer_id of nodeTargets(p.consumers)) {
+                const sent = await sendControlToLoop(consumer_id, { action: "prompt", text: message });
+                if (!sent.ok || !sent.delivered) continue; // no loop answers on its socket: not running after all
+                const result: LoopHoldResult = { consumer_id, prompt: "delivered" };
+                if (hold) {
+                    const held = sendAfkToLoop(consumer_id, "arm_inf");
+                    result.hold = held.ok ? "armed" : "failed";
+                    if (!held.ok) result.hold_error = held.error;
+                }
+                console.error(`[loops-message-all] ${consumer_id} prompt=${result.prompt}${hold ? ` hold=${result.hold}` : ""} (node, scope=machine)`);
+                results.push(result);
+            }
+            return { action, scope, results };
+        }
+        const results: LoopHoldResult[] = holdTargets(p.consumers, scope).map((consumer_id) => {
             const delivered = deliverLoopPrompt(consumer_id, message);
             const result: LoopHoldResult = { consumer_id, prompt: delivered ? "delivered" : "spooled" };
             if (hold) {
-                const held = sendAfkToLoop(consumer_id, "arm_inf");
+                const elsewhere = holdElsewhere(consumer_id);
+                const held = elsewhere ? { ok: false as const, error: elsewhere } : sendAfkToLoop(consumer_id, "arm_inf");
                 result.hold = held.ok ? "armed" : "failed";
                 if (!held.ok) result.hold_error = held.error;
             }
             console.error(`[loops-message-all] ${consumer_id} prompt=${result.prompt}${hold ? ` hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}` : ""}`);
             return result;
         });
-        return { action: hold ? "message-and-hold" : "message", results };
+        return { action, scope, results };
     },
 });
 
-/** #2333 — on return: lift the hold on every agent loop, or the ones named. */
+/**
+ * #2333 — on return: lift the hold on every agent loop, or the ones named.
+ * #3417 — `scope` as for `loops.message_all`: `machine` for the caller's
+ * machine's loops (a proxy node answers it for its own), `all` (the default)
+ * for every connected loop, of which only this machine's can be released.
+ */
 defineMethod({
     name: "loops.release_all",
     ...LOOP_CONTROL,
-    params: z.object({ consumers: z.unknown().optional() }),
-    run: (_c, p) => {
-        const results: LoopHoldResult[] = holdTargets(p.consumers).map((consumer_id) => {
-            const released = sendAfkToLoop(consumer_id, "off");
+    nodeLocal: forThisMachine,
+    params: z.object({ consumers: z.unknown().optional(), scope: loopScope }),
+    run: (caller, p) => {
+        const scope: LoopScope = p.scope ?? "all";
+        const targets = onNode(caller) ? nodeTargets(p.consumers) : holdTargets(p.consumers, scope);
+        const results: LoopHoldResult[] = targets.map((consumer_id) => {
+            const elsewhere = onNode(caller) ? null : holdElsewhere(consumer_id);
+            const released = elsewhere ? { ok: false as const, error: elsewhere } : sendAfkToLoop(consumer_id, "off");
             const result: LoopHoldResult = { consumer_id, hold: released.ok ? "released" : "failed" };
             if (!released.ok) result.hold_error = released.error;
             console.error(`[loops-release-all] ${consumer_id} hold=${result.hold}${result.hold_error ? ` (${result.hold_error})` : ""}`);
             return result;
         });
-        return { action: "release", results };
+        return { action: "release", scope, results };
     },
 });
 

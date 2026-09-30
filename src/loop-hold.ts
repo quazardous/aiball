@@ -10,7 +10,12 @@ export interface LoopCandidate {
     kind: string;
     /** Live-presence verdict: true = a loop is connected now. */
     present: boolean | null;
+    /** #3417 — the machine its loop is connected from (`hub`, `node:<label>`…); null when not known. */
+    machine?: string | null;
 }
+
+/** #3417 — which loops an all-loops control reaches: the caller's machine's, or every one. */
+export type LoopScope = "machine" | "all";
 
 /** One loop's outcome in a message-all / release-all. */
 export interface LoopHoldResult {
@@ -25,12 +30,14 @@ export interface LoopHoldResult {
 /**
  * The agent loops an all-loops control reaches: every consumer with a loop
  * connected right now that is not a human or the system — narrowed to `named`
- * when the caller lists some. Sorted, so the reply reads the same every time.
+ * when the caller lists some, and to the loops of `machine` when one is given
+ * (#3417: `scope: "machine"`). Sorted, so the reply reads the same every time.
  */
-export function pickHoldTargets(candidates: readonly LoopCandidate[], named?: readonly string[] | null): string[] {
+export function pickHoldTargets(candidates: readonly LoopCandidate[], named?: readonly string[] | null, machine?: string | null): string[] {
     const wanted = named && named.length > 0 ? new Set(named) : null;
     return candidates
         .filter((c) => c.kind !== "human" && c.kind !== "system" && c.present === true)
+        .filter((c) => !machine || c.machine === machine)
         .filter((c) => !wanted || wanted.has(c.consumer_id))
         .map((c) => c.consumer_id)
         .sort();

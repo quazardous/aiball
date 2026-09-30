@@ -115,6 +115,11 @@ function loopViews(): LoopView[] {
     return markSuperseded(listLoopPlates().sort((a, b) => b.at - a.at).map(loopView));
 }
 
+/** #3417 — the agents whose loop runs on this machine: what an all-loops control reaches with `scope: "machine"` on a node. */
+export function runningLoopAgents(): string[] {
+    return [...new Set(loopViews().filter((l) => l.running && l.agent).map((l) => l.agent!))].sort();
+}
+
 function withoutAt<T extends { at: number }>(v: T): Omit<T, "at"> {
     const { at: _at, ...rest } = v;
     return rest;
