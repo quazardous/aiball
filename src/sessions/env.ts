@@ -13,6 +13,13 @@ let login: Record<string, string> | null = null;
 /** The login shell's environment, read once; the daemon's own when the shell fails. */
 export function loginEnv(): Record<string, string> {
     if (login) return login;
+    // Windows has no login shell to ask, and no need: the daemon is started in
+    // the user's own session (the logon task or the tray), so its environment
+    // is already the user's. The poorer environment is systemd's.
+    if (process.platform === "win32") {
+        login = { ...(process.env as Record<string, string>) };
+        return login;
+    }
     const shell = process.env.SHELL || "/bin/sh";
     const r = spawnSync(shell, ["-lc", "env -0"], { encoding: "utf8", timeout: 10_000 });
     const out: Record<string, string> = {};

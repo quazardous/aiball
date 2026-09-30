@@ -25,6 +25,14 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `aiball ticket new` and `aiball ticket comment` take their text from a file
+  (`--body-file <path>`) or from standard input (`--body -`). On Windows, a
+  text of several lines given as an argument kept only its first line: the
+  commands are `.cmd` shims, and cmd.exe cuts an argument at a line break.
+- On Windows, where PowerShell may run scripts, `install.ps1` writes
+  `aiball.ps1`, `aiball-mcp.ps1` and `claude-loop.ps1` beside the `.cmd`
+  shims: PowerShell prefers them, and they pass arguments whole. Where the
+  execution policy forbids scripts it writes none, and says so.
 - The wake of an accepted plan says who executes it: "the ticket is yours"
   to the agent that holds the ticket, "<agent> executes it, not you" to the
   others. Two agents had started the same release.

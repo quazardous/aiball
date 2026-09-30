@@ -134,8 +134,16 @@ Windows they are protected only by the user profile's permissions.
   restarts the daemon during the restore.
 - **The mouse wheel over Claude** in a loop scrolls the pane only with a psmux
   newer than 3.3.8. With 3.3.8, enter copy-mode with `prefix + [`.
-- **Multi-line arguments** to the `aiball.cmd` shim are cut at the first line
-  break by cmd.exe. Run `node bin\aiball …` for those.
+- **An argument of several lines** is cut at its first line break by cmd.exe,
+  which runs the `aiball.cmd` shim. For a ticket's or a comment's text, give it
+  from a file or a pipe, which carry it whole from any shell:
+  `aiball ticket new --title … --body-file note.md`, or
+  `Get-Content note.md -Raw | aiball ticket new --title … --body -`.
+  Where PowerShell may run scripts, the installer also writes `aiball.ps1`
+  beside `aiball.cmd`, which PowerShell prefers and which passes arguments
+  whole. It writes none where the execution policy forbids scripts
+  (`Restricted`, the default of Windows PowerShell 5.1): PowerShell would pick
+  the `.ps1`, refuse it, and not fall back to the `.cmd`.
 
 ## Writing code that runs on Windows
 
