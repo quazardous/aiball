@@ -31,6 +31,12 @@ dates are YYYY-MM-DD.
 - On Windows, the tray of an install made from the package no longer crashes
   on `Get-TrayTooltip`: the script it loads, `bin/aiball-tray-version.ps1`, was
   left out of the package; only an install from a checkout had it.
+- On a Windows without the VBScript engine (an optional feature now), the
+  daemon and the tray start after `install.ps1` or `aiball install --service`:
+  they are launched through `conhost.exe --headless`, no longer `wscript` and a
+  `.vbs` wrapper, which started nothing there.
+- `install.ps1` no longer says "install complete" when the daemon it started
+  never answered: it says so, names the log, and exits with an error.
 
 ## [0.51.0] — 2026-09-30
 
