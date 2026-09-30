@@ -13,6 +13,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
+import { onTicketChanged } from "./ticket-change.js";
 import { parseMeta } from "../questions.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 
@@ -33,28 +34,42 @@ export function ticketIsOpenSql() {
 }
 
 /**
- * #3383 — the closed tickets of a project (of the board without one), read
- * from the lifecycle events alone: three columns, no message body.
+ * #3383 / #3405 — every closed ticket of the board, read from the lifecycle
+ * events alone (three columns, no message body) and kept until a ticket
+ * changes: the backlog, the unread count and the wake rules each replayed
+ * those events at every call, several times a second across the loops. The
+ * caller gets its own copy; the ceiling is the net for a close written without
+ * `ticketChanged`.
  */
-export function closedTicketIdsOf(project?: string): Set<number> {
-    const rows = getDb()
-        .select({ id: schema.messages.id, ticketId: schema.messages.ticketId, kind: schema.messages.kind })
-        .from(schema.messages)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(and(
-            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
-            eq(schema.messages.status, "approved"),
-            project ? eq(schema.tickets.project, project) : undefined,
-        ))
-        .orderBy(schema.messages.id)
-        .all();
-    const closed = new Set<number>();
-    for (const ev of rows) {
-        if (ev.ticketId == null) continue;
-        if (ev.kind === "ticket_closed") closed.add(ev.ticketId);
-        else closed.delete(ev.ticketId);
+const CLOSED_CEILING_MS = 60_000;
+let allClosed: { ids: Set<number>; until: number } | null = null;
+onTicketChanged(() => { allClosed = null; });
+
+/** Tests — force a cold cache. */
+export function resetClosedTicketIdsForTests(): void {
+    allClosed = null;
+}
+
+export function allClosedTicketIds(nowMs: number = Date.now()): Set<number> {
+    if (!allClosed || nowMs >= allClosed.until) {
+        const rows = getDb()
+            .select({ ticketId: schema.messages.ticketId, kind: schema.messages.kind })
+            .from(schema.messages)
+            .where(and(
+                inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+                eq(schema.messages.status, "approved"),
+            ))
+            .orderBy(schema.messages.id)
+            .all();
+        const ids = new Set<number>();
+        for (const ev of rows) {
+            if (ev.ticketId == null) continue;
+            if (ev.kind === "ticket_closed") ids.add(ev.ticketId);
+            else ids.delete(ev.ticketId);
+        }
+        allClosed = { ids, until: nowMs + CLOSED_CEILING_MS };
     }
-    return closed;
+    return new Set(allClosed.ids);
 }
 
 export function closedTicketIds(ticketIds: readonly number[]): Set<number> {

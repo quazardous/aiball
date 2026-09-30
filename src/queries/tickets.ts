@@ -6,7 +6,7 @@
  * moved to the bus (#3063, #3068).
  */
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
-import { closedTicketIdsOf } from "../db/ticket-closed.js";
+import { allClosedTicketIds } from "../db/ticket-closed.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
 import type { Request } from "express";
 import {
@@ -232,7 +232,8 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
     // ticket still reads `closed: true`. #3383 — read from the lifecycle events
     // alone: listing them as messages loaded every close of the project, body
     // and all, at each read.
-    const closedSet = closedTicketIdsOf(project);
+    // The board's, not the project's alone: it is only ever asked about this list's tickets.
+    const closedSet = allClosedTicketIds();
     const nowStr = new Date().toISOString();
 
     // #3383 — a closed ticket is never in a backlog (the `closed` rule drops it

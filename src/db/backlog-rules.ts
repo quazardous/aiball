@@ -22,13 +22,15 @@
  * To retarget an existing rule : edit one `excludesFrom`.
  * To audit : `rules.rulesFor(target)` lists every rule that affects it.
  */
-import { and, asc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { mentions } from "../mentions.js";
 import { getDb, nowIso } from "./connection.js";
 import { getConsumer } from "./consumers.js";
 import { activeFocus, focusHides, type WakeFocus } from "../wake-focus.js";
 import { focusRelatives } from "./focus-relatives.js";
+import { onTicketChanged } from "./ticket-change.js";
+import { allClosedTicketIds } from "./ticket-closed.js";
 
 export type Target =
     | "unread-list"
@@ -273,24 +275,8 @@ export function buildBacklogRulesCtx(
     let closedIds = opts.closedIds;
     if (!closedIds) {
         // Net-closed = last lifecycle event approved per ticket = ticket_closed.
-        // Replay in id order ; reopen drops the id from the set.
-        const events = db.select({
-            ticket_id: schema.messages.ticketId,
-            kind: schema.messages.kind,
-        })
-            .from(schema.messages)
-            .where(and(
-                inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
-                eq(schema.messages.status, "approved"),
-            ))
-            .orderBy(asc(schema.messages.id))
-            .all();
-        closedIds = new Set<number>();
-        for (const ev of events) {
-            if (ev.ticket_id == null) continue;
-            if (ev.kind === "ticket_closed") closedIds.add(ev.ticket_id);
-            else closedIds.delete(ev.ticket_id);
-        }
+        // #3405 — kept between two writes of the board (`allClosedTicketIds`).
+        closedIds = allClosedTicketIds();
     }
     let snoozedIds = opts.snoozedIds;
     if (!snoozedIds) {
@@ -365,6 +351,30 @@ function wakeFocusFor(consumerId: string, nowMs: number): Map<string, WakeFocus>
  * would have bought the same answer at the price of a schema change.
  */
 function ticketsMentioning(agent: string): Set<number> {
+    const now = Date.now();
+    const hit = mentioning.get(agent);
+    if (hit && now < hit.until) return hit.ids;
+    const ids = readTicketsMentioning(agent);
+    mentioning.set(agent, { ids, until: now + MENTIONING_CEILING_MS });
+    return ids;
+}
+
+/**
+ * #3405 — kept per agent until a ticket changes. The scan reads every body of
+ * the base (~30 ms), and a specialist's loop asks at each `ping.count`, every
+ * few seconds: between two writes of the board the answer cannot change. The
+ * ceiling is the net for a body written without `ticketChanged`.
+ */
+const MENTIONING_CEILING_MS = 60_000;
+const mentioning = new Map<string, { ids: Set<number>; until: number }>();
+onTicketChanged(() => mentioning.clear());
+
+/** Tests — force a cold cache. */
+export function resetTicketsMentioningForTests(): void {
+    mentioning.clear();
+}
+
+function readTicketsMentioning(agent: string): Set<number> {
     const db = getDb();
     const like = `%@${agent}%`;
     const rows = db.all<{ ticket_id: number; body: string | null }>(sql`
