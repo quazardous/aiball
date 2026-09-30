@@ -909,3 +909,56 @@ test("#2770 the critical ending is in every shipped tone and in the fallback", a
     assert.ok(readFileSync(new URL("./state.ts", import.meta.url).pathname, "utf8").includes(clause));
     assert.doesNotMatch(shipped, /\{critical_id:/, "the old line before every backlog wake is gone");
 });
+
+// #3397 — an accepted plan says who executes it: "execute" is an order, and the
+// same event reaches the plan's author, the reporter and the agent it was handed to.
+async function planAcceptedWake(ticket: Record<string, unknown>): Promise<string> {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 1 }),
+            unread: async () => ({ messages: [{ id: 801, kind: "plan_accepted", ticket_id: 3391, hashid: "p1", by_agent: "david" }] }),
+            getTicket: async () => ({ ticket: { title: "Release", ...ticket } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    return res.phrase;
+}
+
+test("#3397 plan accepted, the reader holds the ticket → execute, it is yours", async () => {
+    const phrase = await planAcceptedWake({ holder: "claude-test", held_as: "assigned" });
+    assert.match(phrase, /The plan was ACCEPTED — execute, the ticket is yours on #3391: Release by david/);
+});
+
+test("#3397 plan accepted, another agent holds the ticket → it executes, no order to the reader", async () => {
+    const assigned = await planAcceptedWake({ holder: "other-agent", held_as: "assigned" });
+    assert.match(assigned, /The plan was ACCEPTED — other-agent executes it \(assigned\), not you on #3391/);
+    assert.doesNotMatch(assigned, /— execute/);
+    assert.match(await planAcceptedWake({ holder: "other-agent", held_as: "claim" }), /other-agent executes it \(its claim\), not you/);
+});
+
+test("#3397 plan accepted, nobody holds the ticket → the phrase of before", async () => {
+    const phrase = await planAcceptedWake({ holder: null, held_as: null });
+    assert.match(phrase, /The plan was ACCEPTED — execute on #3391: Release by david/);
+    assert.doesNotMatch(phrase, /yours|not you/);
+});
+
+test("#3397 the compact line of a bundle names who executes too", async () => {
+    const bundle = (ticket: Record<string, unknown>) => buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 2 }),
+            unread: async () => ({
+                messages: [
+                    { id: 801, kind: "plan_accepted", ticket_id: 920, hashid: "p1", by_agent: "david" },
+                    { id: 802, kind: "comment_added", ticket_id: 920, hashid: "c2", by_agent: "david", body: "go" },
+                ],
+            }),
+            getTicket: async () => ({ ticket: { title: "decided", ...ticket } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match((await bundle({ holder: "other-agent", held_as: "assigned" })).phrase, /plan ACCEPTED → other-agent \(#p1\) by david/);
+    assert.match((await bundle({ holder: "claude-test", held_as: "claim" })).phrase, /plan ACCEPTED → you \(#p1\) by david/);
+    assert.match((await bundle({})).phrase, /plan ACCEPTED \(#p1\) by david/);
+});

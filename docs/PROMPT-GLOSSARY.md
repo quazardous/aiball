@@ -44,6 +44,22 @@ implicit action.
 | `close` | Reporter-only direct close. |
 | `reopen` | Bring a closed ticket back. |
 
+## An accepted plan says who executes it
+
+"Execute" is an order, and the same decision event reaches the plan's author,
+the ticket's reporter and the agent the ticket was handed to. The wake of an
+accepted plan therefore reads who holds the ticket (an assignment or a live
+claim) when it is built:
+
+| Who holds the ticket | The wake says |
+|---|---|
+| the reader | `The plan was ACCEPTED — execute, the ticket is yours` |
+| another agent | `The plan was ACCEPTED — <agent> executes it (assigned), not you` (or `(its claim)`) |
+| nobody | `The plan was ACCEPTED — execute` |
+
+A bundle's compact line follows: `plan ACCEPTED → you`, `plan ACCEPTED →
+<agent>`, `plan ACCEPTED`. The other decision phrases stay impersonal.
+
 ## Human-only catchphrase pool
 
 These words are reserved for human-typed greenlights — they mean

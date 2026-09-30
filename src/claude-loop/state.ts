@@ -2418,6 +2418,8 @@ export async function buildContextPhrase(
             const body = typeof m?.body === "string" ? m.body : "";
             const base = m?.kind === "comment_added" && body.trim()
                 ? stripMarkdown(body)
+                // #3397 — the compact form of an accepted plan names who executes it too.
+                : m?.kind === "plan_accepted" ? planAcceptedLabel(headHolder, client.agentId)
                 : (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
             const ref = typeof m?.hashid === "string" && m.hashid ? ` (#${m.hashid})` : "";
             const by = m?.by_agent ? ` by ${m.by_agent}` : "";
@@ -2438,6 +2440,10 @@ export async function buildContextPhrase(
         let headDecisionEvent = "";
         let headDecisionDecider = "";
         let headDecisionRefHashid = "";
+        // #3397 — who holds the head's ticket, read with its title below: an
+        // accepted plan says who executes it.
+        let headHolder: string | null = null;
+        let headHeldAs: string | null = null;
         if (unreadKind && DECISION_EVENT_VERBS[unreadKind] && !isBundleMode) {
             headDecisionEvent = DECISION_EVENT_VERBS[unreadKind];
             headDecisionDecider = unreadHead?.by_agent ?? "";
@@ -2481,10 +2487,17 @@ export async function buildContextPhrase(
             if (!head.title && !isTicketRoot) {
                 try {
                     const t = await client.getTicket(head.id, { summary: true }) as {
-                        ticket?: { title?: string | null; claimable?: boolean; actionable?: boolean };
+                        ticket?: { title?: string | null; claimable?: boolean; actionable?: boolean; holder?: string | null; held_as?: string | null };
                     };
                     const title = t.ticket?.title;
                     if (typeof title === "string" && title) head = { ...head, title };
+                    headHolder = t.ticket?.holder ?? null;
+                    headHeldAs = t.ticket?.held_as ?? null;
+                    // #3397 — "execute" is an order: said to the agent that holds
+                    // the ticket, and to whoever reads it when nobody does.
+                    if (headDecisionEvent && unreadKind === "plan_accepted") {
+                        headDecisionEvent = planAcceptedPhrase(headHolder, headHeldAs, client.agentId);
+                    }
                     // #1350 — piggyback the actionable + claimable flags (same
                     // fetch, no extra round-trip) for the fyi marker on this
                     // event wake (fires on `actionable && !claimable`).
@@ -3590,4 +3603,23 @@ export interface WakeHint {
      * Non persisté dans `lastWakeHintPath` (pas utile pour la coalescence).
      */
     comment_body?: string;
+}
+
+/**
+ * #3397 — the wake of an accepted plan says who executes it. "Execute" is an
+ * order, and the same event reaches the plan's author, the reporter and the
+ * agent the ticket was handed to: read by the wrong one, two agents started the
+ * same release. With a holder (an assignment or a live claim) the phrase names
+ * it; with none it stays the impersonal one (#1577).
+ */
+export function planAcceptedPhrase(holder: string | null, heldAs: string | null, reader: string): string {
+    if (!holder) return "The plan was ACCEPTED — execute";
+    if (holder === reader) return "The plan was ACCEPTED — execute, the ticket is yours";
+    return `The plan was ACCEPTED — ${holder} executes it (${heldAs === "claim" ? "its claim" : "assigned"}), not you`;
+}
+
+/** #3397 — the same, in a bundle's compact line. */
+export function planAcceptedLabel(holder: string | null, reader: string): string {
+    if (!holder) return "plan ACCEPTED";
+    return holder === reader ? "plan ACCEPTED → you" : `plan ACCEPTED → ${holder}`;
 }

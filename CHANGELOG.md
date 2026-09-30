@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The wake of an accepted plan says who executes it: "the ticket is yours"
+  to the agent that holds the ticket, "<agent> executes it, not you" to the
+  others. Two agents had started the same release.
 - `claude_loop.questions: ticket_only` (global or per project): the choice
   dialog is refused even with a human present, and every question goes to
   the ticket. `present`, the default, keeps today's rule.
