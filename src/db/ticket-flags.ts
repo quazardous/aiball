@@ -32,7 +32,6 @@ import { idScope } from "./scope-ids.js";
 
 import {
     computeActionableTicketIds,
-    lastActorExclusions,
     decisionGateByTicket,
     decisionGateProposerByTicket,
     backlogCooldownExclusions,
@@ -357,8 +356,9 @@ export function buildTicketFlagsContext(args: {
     // exactly those ids, so compute about them. It was the last board-wide
     // read left on a mutation's path: measured at 483 ms for one ticket, on a
     // daemon that blocks every other caller while it runs.
-    const { openIds, actionableIds, gatedByBlockerIds } = computeActionableTicketIds(consumerId, ticketIds);
-    const lastActorMeIds = lastActorExclusions(consumerId, ticketIds);
+    // #3383 — the last-actor exclusions come with the sets: the same rule over
+    // the same tickets, already computed (and cached) with them.
+    const { openIds, actionableIds, gatedByBlockerIds, awaitingOtherIds: lastActorMeIds } = computeActionableTicketIds(consumerId, ticketIds);
     const decisionGated = decisionGateByTicket(ticketIds);
     const cooledIds = cooldownSec > 0
         // #2377 — the blocked set decides which tickets stay sunk longer.

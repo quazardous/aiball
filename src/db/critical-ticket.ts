@@ -5,11 +5,16 @@
  *
  * "Open" is what the actionable gate calls a blocker: approved and not closed.
  * A snoozed ticket is asleep, not done, so it still holds and is still held.
+ *
+ * #3383 — kept per project until a ticket changes: it reads every relation of
+ * the board, and each backlog read asked for it again (a third of a warm
+ * read). Only `quiet` depends on the clock, and is computed at each read.
  */
 import { and, asc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
 import { gateEdges, pickCritical, quietFor } from "../critical-ticket.js";
+import { onTicketChanged } from "./ticket-change.js";
 
 export interface CriticalTicket {
     id: number;
@@ -21,7 +26,29 @@ export interface CriticalTicket {
     quiet: string;
 }
 
+/** A project's pick without its clock-dependent part, and when it last moved. */
+type Kept = { pick: Omit<CriticalTicket, "quiet">; movedMs: number } | null;
+
+/** The net for a write that does not say `ticketChanged` (a title edited in place). */
+const CEILING_MS = 60_000;
+const kept = new Map<string, { val: Kept; until: number }>();
+onTicketChanged(() => kept.clear());
+
+/** Tests — force a cold cache. */
+export function resetCriticalTicketCacheForTests(): void {
+    kept.clear();
+}
+
 export function projectCriticalTicket(project: string, nowMs: number = Date.now()): CriticalTicket | null {
+    let hit = kept.get(project);
+    if (!hit || nowMs >= hit.until) {
+        hit = { val: readCritical(project), until: nowMs + CEILING_MS };
+        kept.set(project, hit);
+    }
+    return hit.val ? { ...hit.val.pick, quiet: quietFor(hit.val.movedMs, nowMs) } : null;
+}
+
+function readCritical(project: string): Kept {
     const db = getDb();
     const rows = db.select({
         sourceTicketId: schema.messages.ticketId,
@@ -72,10 +99,7 @@ export function projectCriticalTicket(project: string, nowMs: number = Date.now(
     if (!pick) return null;
     const t = byId.get(pick.id)!;
     return {
-        id: pick.id,
-        title: t.title ?? "",
-        holds: pick.holds,
-        last_moved_at: t.lastActorAt ?? null,
-        quiet: quietFor(movedMs(pick.id), nowMs),
+        pick: { id: pick.id, title: t.title ?? "", holds: pick.holds, last_moved_at: t.lastActorAt ?? null },
+        movedMs: movedMs(pick.id),
     };
 }

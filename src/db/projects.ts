@@ -1602,6 +1602,11 @@ export interface ActionableTicketSet {
      *  backlog (= "bloqué — vérifier la chaîne, le blocker peut être
      *  snoozed ou oublié"). */
     gatedByBlockerIds: Set<number>;
+    /** #3383 — the tickets `lastActorExclusions` excludes for this consumer
+     *  (it acted last and a counterpart exists), kept with the sets above so a
+     *  reader of the cached value does not recompute them; empty without a
+     *  consumer. */
+    awaitingOtherIds: Set<number>;
     /** #2682 — epoch-ms of the next moment these sets change with no write: a
      *  snooze in scope coming due, or another agent's live claim expiring. Null
      *  when nothing in scope is pending on the clock. Drives the cache expiry. */
@@ -1912,6 +1917,7 @@ export function computeActionableTicketIds(
                 openIds: keep(warm.openIds),
                 actionableIds: keep(warm.actionableIds),
                 gatedByBlockerIds: keep(warm.gatedByBlockerIds),
+                awaitingOtherIds: keep(warm.awaitingOtherIds),
                 nextChangeMs: warm.nextChangeMs,
             };
         }
@@ -2139,10 +2145,11 @@ function computeActionableTicketIdsUncached(
             openIds: keep(openIds),
             actionableIds: keep(actionableIds),
             gatedByBlockerIds: keep(gatedByBlocker),
+            awaitingOtherIds: keep(awaitingOtherSet ?? new Set<number>()),
             nextChangeMs,
         };
     }
-    return { openIds, actionableIds, gatedByBlockerIds: gatedByBlocker, nextChangeMs };
+    return { openIds, actionableIds, gatedByBlockerIds: gatedByBlocker, awaitingOtherIds: awaitingOtherSet ?? new Set<number>(), nextChangeMs };
 }
 
 // =====================================================================
@@ -2224,6 +2231,7 @@ setFlagsRepairers<ActionableTicketSet, Map<number, boolean>>({
             patchSet(val.openIds, id, fresh.openIds.has(id));
             patchSet(val.actionableIds, id, fresh.actionableIds.has(id));
             patchSet(val.gatedByBlockerIds, id, fresh.gatedByBlockerIds.has(id));
+            patchSet(val.awaitingOtherIds, id, fresh.awaitingOtherIds.has(id));
         }
         return fresh.nextChangeMs;
     },

@@ -44,6 +44,9 @@ dates are YYYY-MM-DD.
 - Posting a message no longer recomputes every connected agent's queue on
   the spot: each agent's queue is brought up to date when that agent next
   reads it. A post held the daemon five times less on a busy board.
+- A backlog read repeated right after another takes a third of the time: the
+  project's critical ticket is kept until a ticket changes, and who acted
+  last comes with the agent's queue instead of being read again.
 
 ## [0.52.0] — 2026-09-30
 
