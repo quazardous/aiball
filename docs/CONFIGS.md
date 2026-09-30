@@ -35,6 +35,25 @@ Different blocks merge differently — that's the "russian doll" part.
 
 (autopoll applies no default — a null agent means "stay silent".)
 
+**A command typed in another agent's folder is refused.** Inside a loop's shell,
+`AIBALL_AGENT` and `AIBALL_PROJECT` are the loop's: taken to another project's
+folder, they would win over its `.aiball.yaml`, and the command would act as
+the wrong agent, in the wrong project. So `aiball`, `aiball-mcp` and
+`claude-loop` stop when the folder's `.aiball.yaml` names an agent (or a
+project) and the shell carries another one:
+
+```
+aiball: REFUSED — this folder is wbox-win's (…/wbox-mcp/.aiball.yaml),
+  but this shell carries aiball-win (AIBALL_AGENT, from the loop cl-aiball-e2688e).
+```
+
+- Not refused: a folder with no `.aiball.yaml` or naming no agent; the shell of
+  a loop running in that folder (its crew agents, its MCP server);
+  `aiball --human`; what only reports (`check`, `version`, `--help`);
+  `claude-loop start`, which drops an inherited identity by itself.
+- On purpose: `--as <agent>`, naming the agent the shell carries — the command
+  runs, with a warning. For a script: `AIBALL_ALLOW_FOREIGN_AGENT=1`.
+
 ### Autopoll — `autopoll:` — *per-project only*
 Read from `.aiball.yaml` (defaults when the file/block is absent). Pilot
 from the CLI: `aiball autopoll enable|disable|tone <t>|throttle <n>`.

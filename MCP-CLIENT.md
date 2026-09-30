@@ -70,7 +70,7 @@ Why not the `.mcp.json` env block? It used to be the documented place, but it sp
 | Var | Required? | Effect |
 | --- | --- | --- |
 | `AIBALL_PROJECT` | env override | Wins over `.aiball.yaml`. Use when you need a one-off scope (`AIBALL_PROJECT=other aiball ticket new`). |
-| `AIBALL_AGENT` | env override | Wins over `.aiball.yaml`. Use when running scripts as a different identity. |
+| `AIBALL_AGENT` | env override | Wins over `.aiball.yaml`. Use when running scripts as a different identity. In a folder whose `.aiball.yaml` names another agent the command is refused, unless `--as <agent>` or `AIBALL_ALLOW_FOREIGN_AGENT=1` (see `docs/CONFIGS.md`). |
 | `AIBALL_URL` | rarely | Defaults to `http://127.0.0.1:7777`. Override for non-default port. |
 
 Setting `AIBALL_PROJECT` (env or yaml) also auto-subscribes the agent to that project at MCP startup, so new approved messages start landing in the outbox feed immediately.

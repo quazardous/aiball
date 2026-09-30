@@ -30,6 +30,7 @@ import { isBarHost, type BarHost } from "../agent-bar.js";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
+import { AS_HELP } from "../identity-guard.js";
 import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
 import { applyBootstrapOptions } from "../cli/bootstrap-options.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
@@ -2392,7 +2393,8 @@ async function main(): Promise<void> {
         .name("claude-loop")
         .description("Wrap a Claude Code session in a tmux loop that wakes itself when idle (#B.63)")
         .version(AIBALL_VERSION, "-v, --version", "print the aiball version and exit")
-        .helpOption("-h, --help", "Show help");
+        .helpOption("-h, --help", "Show help")
+        .addHelpText("after", AS_HELP);
     program.addCommand(buildStartCommand((opts) => cmdStart({ ...opts, claudeArgs: passthrough })).name("start"));
     program.command("list").description("List all known loops").action(cmdList);
     // #1435 slice 2 — multi-agent crew lifecycle. `crew create <name>`
