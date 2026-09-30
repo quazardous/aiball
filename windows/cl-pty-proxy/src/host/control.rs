@@ -3,28 +3,45 @@
 //! and the loop kernel: each gets its own answers, and every one hears the
 //! notifications. A daemon that restarts simply connects again; its old
 //! connection died with it.
+//!
+//! #3425 — where the host has a token (Windows, host/os.rs), a controller's
+//! first line is `host.auth { token }`; any other first line, or a wrong
+//! token, ends the connection unanswered, and a controller hears no
+//! notification before it is in. Without a token, nothing changes on the wire.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::session::{parse_size, Session};
+use crate::os::{self, Listener, Stream};
+use crate::session::{parse_size, Session, StopSignal};
 
 /// What the host does when asked to go away: its caller exits the process.
 pub type Shutdown = Arc<dyn Fn() + Send + Sync>;
 
 /// One controller's connection: its answers and the notifications share it.
-type Conn = Arc<Mutex<UnixStream>>;
+type Conn = Arc<Mutex<Stream>>;
 
 pub struct Control {
     session: Arc<Session>,
     controllers: Arc<Mutex<Vec<Conn>>>,
     shutdown: Shutdown,
     hello: Value,
+    token: Option<String>,
+}
+
+/// #3425 — a controller's first line on a host with a token: `None` ends the
+/// connection unanswered; `Some(reply)` lets it in, with the answer to send
+/// when the call had an id.
+fn auth_reply(first: &str, token: &str) -> Option<Option<Value>> {
+    let req: Value = serde_json::from_str(first).ok()?;
+    if req["method"].as_str() != Some("host.auth") || !os::token_matches(req["params"]["token"].as_str(), token) {
+        return None;
+    }
+    Some(req.get("id").cloned().map(|id| json!({ "jsonrpc": "2.0", "id": id, "result": {} })))
 }
 
 /// One line to one controller; false once its connection is gone.
@@ -40,28 +57,41 @@ fn broadcast(controllers: &Mutex<Vec<Conn>>, v: &Value) {
 }
 
 impl Control {
-    pub fn new(session: Arc<Session>, hello: Value, shutdown: Shutdown) -> Arc<Self> {
+    pub fn new(session: Arc<Session>, hello: Value, shutdown: Shutdown, token: Option<String>) -> Arc<Self> {
         let controllers: Arc<Mutex<Vec<Conn>>> = Arc::new(Mutex::new(Vec::new()));
         let c = controllers.clone();
         session.set_notify(Some(Arc::new(move |method: &str, params: Value| {
             broadcast(&c, &json!({ "jsonrpc": "2.0", "method": method, "params": params }));
         })));
-        Arc::new(Control { session, controllers, shutdown, hello })
+        Arc::new(Control { session, controllers, shutdown, hello, token })
     }
 
-    pub fn serve(self: Arc<Self>, listener: UnixListener) {
+    pub fn serve(self: Arc<Self>, listener: Listener) {
         for conn in listener.incoming() {
             let Ok(sock) = conn else { continue };
+            os::no_delay(&sock);
             let Ok(writer) = sock.try_clone() else { continue };
             let conn: Conn = Arc::new(Mutex::new(writer));
-            self.controllers.lock().unwrap().push(conn.clone());
+            // With a token, a controller is in once its first line said it.
+            if self.token.is_none() {
+                self.controllers.lock().unwrap().push(conn.clone());
+            }
             let me = self.clone();
             thread::spawn(move || me.read(sock, conn));
         }
     }
 
-    fn read(&self, sock: UnixStream, conn: Conn) {
-        for text in BufReader::new(sock).lines() {
+    fn read(&self, sock: Stream, conn: Conn) {
+        let mut lines = BufReader::new(sock).lines();
+        if let Some(token) = &self.token {
+            let Some(Ok(first)) = lines.next() else { return };
+            let Some(reply) = auth_reply(&first, token) else { return };
+            if let Some(r) = reply {
+                send(&conn, &r);
+            }
+            self.controllers.lock().unwrap().push(conn.clone());
+        }
+        for text in lines {
             let Ok(text) = text else { break };
             if text.trim().is_empty() {
                 continue;
@@ -115,8 +145,8 @@ impl Control {
             }
             "host.stop" => {
                 let signal = match p["signal"].as_str() {
-                    Some("INT") => libc::SIGINT,
-                    _ => libc::SIGTERM,
+                    Some("INT") => StopSignal::Int,
+                    _ => StopSignal::Term,
                 };
                 let timeout = Duration::from_millis(p["timeout_ms"].as_u64().unwrap_or(10_000));
                 let restart = p["restart"].as_bool().unwrap_or(false);
@@ -130,8 +160,11 @@ impl Control {
                     Err((409, "an interactive client owns the size".into()))
                 }
             }
+            // #3425 — a host with a token checked it on the first line; later, and
+            // on a host without one, there is nothing to check.
+            "host.auth" => Ok(json!({})),
             "host.shutdown" => {
-                s.stop(libc::SIGTERM, Duration::from_secs(10), false);
+                s.stop(StopSignal::Term, Duration::from_secs(10), false);
                 s.close_all();
                 let shutdown = self.shutdown.clone();
                 // After the answer has gone out.
@@ -162,6 +195,29 @@ impl Control {
                 sent = rev;
                 last_ctrl = std::time::Instant::now();
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_first_line_must_be_host_auth_with_the_token() {
+        let ok = auth_reply(r#"{"jsonrpc":"2.0","id":1,"method":"host.auth","params":{"token":"t0k"}}"#, "t0k");
+        assert_eq!(ok, Some(Some(json!({ "jsonrpc": "2.0", "id": 1, "result": {} }))));
+        // A notification lets the controller in, with nothing to answer.
+        let note = auth_reply(r#"{"jsonrpc":"2.0","method":"host.auth","params":{"token":"t0k"}}"#, "t0k");
+        assert_eq!(note, Some(None));
+        for bad in [
+            r#"{"jsonrpc":"2.0","id":1,"method":"host.auth","params":{"token":"bad"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"host.auth","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"method":"host.hello","params":{"token":"t0k"}}"#,
+            "not json",
+            "",
+        ] {
+            assert_eq!(auth_reply(bad, "t0k"), None, "{bad}");
         }
     }
 }

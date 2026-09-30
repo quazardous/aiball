@@ -834,6 +834,9 @@ try {
 # runs while ignoring what the loop now sends it. Without cargo, the release's
 # own binary is downloaded instead. Every failure here is a warning -- the daemon
 # runs without it, only the loops need it. -NoClaudeLoop opts out.
+# The session host (cl-session-host.exe, a loop with `session: host`) comes from
+# the same crate: built with the proxy, or downloaded beside it, and replaced
+# with it.
 function Get-ProxyVersion($exe) {
     # A binary older than `--version` takes the flag for a program to launch, so
     # it runs without the CL_* environment (inside a loop that would point it at
@@ -859,22 +862,29 @@ function Get-ProxyVersion($exe) {
 if (-not $NoClaudeLoop) {
     $proxyDir = Join-Path $AppDir 'windows\cl-pty-proxy'
     $proxyExe = Join-Path $proxyDir 'target\release\cl-pty-proxy.exe'
+    $hostExe = Join-Path $proxyDir 'target\release\cl-session-host.exe'
     $appVersion = (Get-Content -Raw (Join-Path $AppDir 'package.json') | ConvertFrom-Json).version
     $builtFrom = if (Test-Path $proxyExe) { Get-ProxyVersion $proxyExe } else { $null }
 
-    if ($builtFrom -eq $appVersion) {
+    if ($builtFrom -eq $appVersion -and (Test-Path $hostExe)) {
         Log "Rust PTY proxy up to date (v$builtFrom)"
     } elseif (Test-Path (Join-Path $proxyDir 'Cargo.toml')) {
         if (Test-Path $proxyExe) {
-            $was = if ($builtFrom) { "v$builtFrom" } else { 'a build older than version reporting' }
+            $was = if ($builtFrom -eq $appVersion) { "up to date, but the session host is missing" } elseif ($builtFrom) { "v$builtFrom" } else { 'a build older than version reporting' }
             Log "Rust PTY proxy is $was, this install is v$appVersion - replacing it"
         }
         # A running loop holds the .exe open, so it cannot be overwritten; Windows
         # does allow renaming it, and the loop keeps running on the renamed file.
+        # A running session host holds its own the same way.
         $aside = "$proxyExe.old"
         if (Test-Path $proxyExe) {
             Remove-Item -Force $aside -ErrorAction SilentlyContinue
             try { Move-Item -Force $proxyExe $aside } catch { Warn "could not move the old proxy aside: $($_.Exception.Message)" }
+        }
+        $hostAside = "$hostExe.old"
+        if (Test-Path $hostExe) {
+            Remove-Item -Force $hostAside -ErrorAction SilentlyContinue
+            try { Move-Item -Force $hostExe $hostAside } catch { Warn "could not move the old session host aside: $($_.Exception.Message)" }
         }
 
         # On PATH, or where rustup puts it before a new shell picks the PATH up.
@@ -897,6 +907,18 @@ if (-not $NoClaudeLoop) {
                 Warn "download failed: $($_.Exception.Message)"
                 Warn "  install Rust (winget install Rustlang.Rustup), then re-run install.ps1 to build it"
             }
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/quazardous/aiball/releases/download/v$appVersion/cl-session-host-windows-x86_64.exe" -OutFile $hostExe
+            } catch {
+                Warn "session host download failed: $($_.Exception.Message)"
+            }
+        }
+
+        if (Test-Path $hostExe) {
+            Remove-Item -Force $hostAside -ErrorAction SilentlyContinue   # still in use by a host: left for next time
+        } else {
+            if (Test-Path $hostAside) { Move-Item -Force $hostAside $hostExe -ErrorAction SilentlyContinue }
+            Warn "no session host - a loop with 'session: host' will not start (tmux mode is unaffected)"
         }
 
         if (Test-Path $proxyExe) {

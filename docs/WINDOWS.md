@@ -123,13 +123,17 @@ A token claude-loop was given (`claude-loop init --aiball-url <url>
   at each start from the above.
 
 The file modes aiball sets on these files (`0600`) mean nothing on NTFS: on
-Windows they are protected only by the user profile's permissions.
+Windows they are protected only by the user profile's permissions. The session
+host is the exception: it gives its own folder an ACL for its user alone.
 
 ## Not working on Windows yet
 
-- **Session host mode** (`session: host`) relies on Unix sockets, so loops run
-  in tmux mode (psmux): that is the default on Windows for now. A config that
-  sets `session: host` explicitly fails to start a loop (`session.host` refused).
+- **Session host mode is not the default yet.** Loops run in tmux mode (psmux)
+  unless their configuration says `claude_loop.session: host` (or
+  `claude-loop start --host`). The session host runs on Windows, on loopback
+  ports with a token instead of Unix sockets
+  ([`SESSION-HOST.md`](./SESSION-HOST.md)); it becomes the default once it has
+  been through tvty's attach on Windows.
 - **Restoring a backup** while the tray runs: quit the tray first, or it
   restarts the daemon during the restore.
 - **The mouse wheel over Claude** in a loop scrolls the pane only with a psmux

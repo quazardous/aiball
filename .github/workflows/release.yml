@@ -86,9 +86,13 @@ jobs:
           - os: ubuntu-latest
             bin: cl-pty-proxy
             asset: cl-pty-proxy-linux-x86_64
+            host: cl-session-host
+            host_asset: cl-session-host-linux-x86_64
           - os: windows-latest
             bin: cl-pty-proxy.exe
             asset: cl-pty-proxy-windows-x86_64.exe
+            host: cl-session-host.exe
+            host_asset: cl-session-host-windows-x86_64.exe
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,15 +102,21 @@ jobs:
         with:
           workspaces: windows/cl-pty-proxy
       # --bin: the crate also builds `fake-claude-log`, a test helper we don't ship.
+      # The session host ships beside the proxy: an install without cargo
+      # downloads both.
       - name: cargo build --release
-        run: cargo build --release --bin cl-pty-proxy --manifest-path windows/cl-pty-proxy/Cargo.toml
-      - name: stage asset
+        run: cargo build --release --bin cl-pty-proxy --bin cl-session-host --manifest-path windows/cl-pty-proxy/Cargo.toml
+      - name: stage assets
         shell: bash
-        run: cp "windows/cl-pty-proxy/target/release/${{ matrix.bin }}" "${{ matrix.asset }}"
+        run: |
+          cp "windows/cl-pty-proxy/target/release/${{ matrix.bin }}" "${{ matrix.asset }}"
+          cp "windows/cl-pty-proxy/target/release/${{ matrix.host }}" "${{ matrix.host_asset }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.host_asset }}
 
   publish:
     needs: [guard, build-proxy]
@@ -127,10 +137,10 @@ jobs:
         run: |
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "→ release ${TAG} exists, re-uploading assets"
-            gh release upload "${TAG}" dist/cl-pty-proxy-* --clobber
+            gh release upload "${TAG}" dist/cl-pty-proxy-* dist/cl-session-host-* --clobber
           else
             gh release create "${TAG}" \
               --title "${TAG}" \
               --notes-file dist/release-notes.md \
-              dist/cl-pty-proxy-*
+              dist/cl-pty-proxy-* dist/cl-session-host-*
           fi

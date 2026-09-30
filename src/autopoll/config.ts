@@ -568,11 +568,10 @@ export type LoopSession = "host" | "tmux";
  * Where a loop's Claude runs when nothing says otherwise: the daemon's session
  * host, except on Windows.
  *
- * TEMPORARY: the session host (the process, its control channel, attaching to
- * it) is built on Unix domain sockets, and a Windows daemon listens on TCP only
- * — every host start there failed (`session.host` refused). Windows defaults to
- * tmux (psmux) until the session host runs on Windows; then this goes back to
- * `host` everywhere. An explicit `claude_loop.session: host` is still honoured.
+ * TEMPORARY: the session host runs on Windows since #3425 (loopback ports with
+ * a token), chosen by hand with `claude_loop.session: host`; Windows defaults
+ * to tmux (psmux) until it has been through tvty's attach there, then this
+ * goes back to `host` everywhere.
  */
 export function defaultLoopSession(platform: NodeJS.Platform = process.platform): LoopSession {
     return platform === "win32" ? "tmux" : "host";

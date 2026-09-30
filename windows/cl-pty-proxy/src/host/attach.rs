@@ -1,27 +1,31 @@
 //! #3066 — `attach.sock`: clients (tvty, a plain terminal, the web through the
 //! daemon) per docs/LOOP-HOST.md. One reader thread per client; its writes go
-//! through the client's own queue (session.rs).
+//! through the client's own queue (session.rs). #3425 — where the host has a
+//! token (Windows, host/os.rs), a `hello` without it ends the connection
+//! before anything is sent.
 
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::thread;
 
 use serde_json::{json, Value};
 
 use crate::frames;
+use crate::os::{self, Listener, Stream};
 use crate::session::{parse_size, Session};
 
 pub const PROTOCOL_VERSION: u64 = 1;
 
-pub fn serve(listener: UnixListener, session: Arc<Session>) {
+pub fn serve(listener: Listener, session: Arc<Session>, token: Option<String>) {
+    let token: Arc<Option<String>> = Arc::new(token);
     for conn in listener.incoming() {
         let Ok(sock) = conn else { continue };
-        let session = session.clone();
-        thread::spawn(move || handle(sock, session));
+        os::no_delay(&sock);
+        let (session, token) = (session.clone(), token.clone());
+        thread::spawn(move || handle(sock, session, token.as_deref()));
     }
 }
 
-fn refuse(sock: &mut UnixStream, code: &str, error: &str, extra: Value) {
+fn refuse(sock: &mut Stream, code: &str, error: &str, extra: Value) {
     let mut body = json!({ "code": code, "error": error });
     if let (Some(b), Some(e)) = (body.as_object_mut(), extra.as_object()) {
         for (k, v) in e {
@@ -31,14 +35,26 @@ fn refuse(sock: &mut UnixStream, code: &str, error: &str, extra: Value) {
     let _ = frames::write_frame(sock, &frames::encode_json(frames::ERROR, &body));
 }
 
-fn handle(mut sock: UnixStream, session: Arc<Session>) {
+/// A `hello` a host with a token takes: the right token, said in it.
+pub fn hello_admitted(hello: Option<&Value>, token: Option<&str>) -> bool {
+    match token {
+        None => true,
+        Some(t) => os::token_matches(hello.and_then(|h| h["token"].as_str()), t),
+    }
+}
+
+fn handle(mut sock: Stream, session: Arc<Session>, token: Option<&str>) {
     // The first frame is `hello`; anything else ends the connection.
-    let hello: Value = match frames::read_frame(&mut sock) {
-        Ok((frames::HELLO, payload)) => match serde_json::from_slice(&payload) {
-            Ok(v) => v,
-            Err(_) => return refuse(&mut sock, "BAD_HELLO", "hello is not JSON", json!({})),
-        },
+    let hello: Option<Value> = match frames::read_frame(&mut sock) {
+        Ok((frames::HELLO, payload)) => serde_json::from_slice(&payload).ok(),
         _ => return,
+    };
+    // A client without the token hears nothing, not even why.
+    if !hello_admitted(hello.as_ref(), token) {
+        return;
+    }
+    let Some(hello) = hello else {
+        return refuse(&mut sock, "BAD_HELLO", "hello is not JSON", json!({}));
     };
     if hello["version"].as_u64() != Some(PROTOCOL_VERSION) {
         return refuse(&mut sock, "VERSION_UNSUPPORTED", "this host speaks version 1", json!({ "versions": [PROTOCOL_VERSION] }));
@@ -80,4 +96,24 @@ fn handle(mut sock: UnixStream, session: Arc<Session>) {
         }
     }
     session.detach(&client);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn without_a_token_every_hello_is_admitted() {
+        assert!(hello_admitted(Some(&json!({ "version": 1 })), None));
+        assert!(hello_admitted(None, None));
+    }
+
+    #[test]
+    fn with_a_token_only_a_hello_that_says_it_is() {
+        assert!(hello_admitted(Some(&json!({ "version": 1, "token": "t0k" })), Some("t0k")));
+        assert!(!hello_admitted(Some(&json!({ "version": 1, "token": "bad" })), Some("t0k")));
+        assert!(!hello_admitted(Some(&json!({ "version": 1 })), Some("t0k")));
+        assert!(!hello_admitted(Some(&json!({ "version": 1, "token": 7 })), Some("t0k")));
+        assert!(!hello_admitted(None, Some("t0k")));
+    }
 }

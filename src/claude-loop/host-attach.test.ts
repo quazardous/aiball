@@ -8,11 +8,11 @@ import { test, after } from "node:test";
 import { until } from "../tests/lib.js";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { DetachKeys, attachHost, copyBar } from "./host-attach.js";
-import { sessionHostSkip } from "../tests/session-host-bin.js";
+import { removeHostHome, sessionHostSkip } from "../tests/session-host-bin.js";
 
 const home = mkdtempSync("/tmp/aiball-3066-attach-");
 process.env.AIBALL_HOME = home;
@@ -23,7 +23,7 @@ const { startHost } = await import("../sessions/hosts.js");
 const cleanups: (() => void | Promise<void>)[] = [];
 after(async () => {
     for (const c of cleanups) await c();
-    rmSync(home, { recursive: true, force: true });
+    await removeHostHome(home);
 });
 
 test("the detach keys: Ctrl-B D leaves, Ctrl-B Ctrl-B is one Ctrl-B, anything else goes through", () => {

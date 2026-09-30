@@ -51,6 +51,14 @@ a scope of its own (`systemd-run --user --scope`, unit
 `aiball-host-<dir>-<time>`). If the user manager does not answer, the host
 starts as before, in the daemon's cgroup.
 
+On Windows the daemon runs in a job (the tray's, the scheduled task's), and a
+job can end every process in it when the daemon goes. So the daemon starts the
+host with `--detach`: the host starts itself again with
+`CREATE_BREAKAWAY_FROM_JOB` (and no console), then exits, and the daemon waits
+for the new host's `host.json` as it would. If the job does not allow leaving
+it, the host starts in it all the same, the first one exits with status `3`,
+and the daemon logs that this host ends when the daemon does.
+
 Each host keeps its files in `$AIBALL_HOME/hosts/<agent>/`:
 
 | File | What |
@@ -58,22 +66,42 @@ Each host keeps its files in `$AIBALL_HOME/hosts/<agent>/`:
 | `host.json` | `{ agent, pid, cwd, started_at, version }`, written once the sockets listen |
 | `attach.sock` | clients, per [`LOOP-HOST.md`](./LOOP-HOST.md), mode `0600` |
 | `control.sock` | the daemon, described below, mode `0600` |
+| `attach.sock.addr`, `control.sock.addr` | Windows, in place of the two sockets: `{ "port", "token" }` |
 
 A Unix socket's path is at most about 100 bytes: the daemon checks
-`<dir>/control.sock` fits before it starts a host.
+`<dir>/control.sock` fits before it starts a host (not on Windows, where the
+sockets are ports).
+
+**On Windows**, there is no Unix socket every client can reach, so the host
+listens on the loopback, on a port the system picks, one for each socket, and
+writes where, with a token, beside the path the socket would have:
+`<dir>/attach.sock.addr`, `<dir>/control.sock.addr`, each
+`{ "port": N, "token": "…" }` (a new token for each, each time the host
+starts). The sockets keep their names in the contract: a session still says
+`attach: { socket: "<dir>/attach.sock" }`, and a client on Windows reads
+`<socket>.addr` instead of opening the path. A loopback port is open to every
+local process, so the token is what a client must say before anything is sent
+to it: in its `hello` on attach ([`LOOP-HOST.md`](./LOOP-HOST.md)), as
+`host.auth` on control (below).
 
 The host is the `cl-session-host` binary, built with `cl-pty-proxy`:
 `cl-session-host --dir <dir> --agent <id> | --name <name> [--rows R --cols C]
-[--exit-with-command] [-- argv…]` — with an argv it starts the command at once,
-otherwise it waits for `host.start`. An agent's host is started with
-`--exit-with-command`: when its command ends and no restart was asked, the host
-removes its files and exits. A host left without its command would read as a
-live loop.
+[--exit-with-command] [--detach] [-- argv…]` — with an argv it starts the
+command at once, otherwise it waits for `host.start`. An agent's host is
+started with `--exit-with-command`: when its command ends and no restart was
+asked, the host removes its files and exits. A host left without its command
+would read as a live loop. `--detach` is Windows' way out of the daemon's job
+(above).
 
 On start, the daemon reads every `host.json`, checks the pid is alive and
 answers on `control.sock`, and takes control again; a dead host's directory is
 removed. Whoever can open the directory can attach or control: the same
-same-user boundary as today's `loop.sock` ([`SECURITY.md`](./SECURITY.md)).
+same-user boundary as today's `loop.sock` ([`SECURITY.md`](./SECURITY.md)). On
+Windows the host sets that boundary itself: it gives its directory a protected
+ACL (full access for its user, nobody else, nothing inherited from above),
+which the address files inherit. Where the directory lies gives no protection
+of its own: an install outside the profile (`install.ps1 -Prefix`, a
+`%PROGRAMDATA%` install) inherits whatever its parent allows.
 
 ## One host per agent
 
@@ -91,10 +119,21 @@ kernel: each gets its own answers, and every one hears the notifications. A
 daemon that restarts connects again; its old connection died with it.
 Nothing on this channel carries Claude's raw output.
 
+**On Windows, the first line is `host.auth`**, with the token of
+`control.sock.addr`: `{ "jsonrpc": "2.0", "method": "host.auth", "params": {
+"token": "…" } }`. The daemon, the loop kernel and Claude's hooks send it as a
+notification (no id, so nothing to answer); with an id, the answer is `{}`. Any
+other first line, or a wrong token, ends the connection without an answer, and
+a controller hears no notification before it is in. On Unix nothing is sent
+and nothing changes on the wire: a host started before this still runs after a
+daemon update, and does not know the method. A later `host.auth`, and one on a
+Unix host, is accepted and does nothing.
+
 ### The daemon calls
 
 | Method | Params | Result |
 |---|---|---|
+| `host.auth` | `{ token }` | `{}` — Windows, the first line (above) |
 | `host.hello` | — | `{ version, agent, pid, cwd, claude: { pid, running, started_at, exit_code }, size: {rows, cols}, clients }` |
 | `host.inject` | `{ text }` | `{}` — writes `text` to Claude's input, as the kernel's wakes do today |
 | `host.screen` | — | `{ text, cursor: {x, y}, rows, cols, seq }` — the visible screen, as `getScreen` today |
@@ -114,6 +153,15 @@ Nothing on this channel carries Claude's raw output.
 
 The kernel reads the screen from `host.screen_changed` rather than by polling:
 the watchers (busy, prompt, dialogs, compacting) run on each change.
+
+**`host.stop` on Windows**, which has no signals to send. The command runs in a
+job of its own, which is what its process group is on Unix: what it starts
+goes with it, and the whole job ends if the host itself dies, however it ends.
+`INT` is a Ctrl-C typed into the console, a second before the rest; the hangup
+is the pseudo-console closing, which sends its processes `CTRL_CLOSE` (Windows
+ends them a few seconds later if they do not go by themselves); past the
+timeout, the job is ended. Whatever the command left running when it exits is
+ended with it.
 
 ## What clients call, on the bus
 
@@ -150,5 +198,17 @@ get `exited { restarting: true }`, as `LOOP-HOST.md` says.
 ## Windows
 
 The host holds ConPTY on Windows as `cl-pty-proxy` already does
-([`PTY-PROXY-WINDOWS.md`](./PTY-PROXY-WINDOWS.md)); it comes after the Unix
-host has proven itself, and replaces psmux there.
+([`PTY-PROXY-WINDOWS.md`](./PTY-PROXY-WINDOWS.md)), and replaces psmux there.
+What differs, all above: the sockets are loopback ports with a token in
+`<socket>.addr`, `control.sock` starts with `host.auth`, the host sets its
+directory's ACL, the command runs in a job, and the host leaves the daemon's
+job with `--detach`.
+
+ConPTY opens by asking where the cursor is (`ESC[6n`) and shows nothing until
+a terminal answers. Under psmux the terminal does; a host may have no client
+yet, so it answers that first question itself from its screen, and does not
+pass it on.
+
+Until tmux mode stops being the default there, a loop runs on the host when
+its configuration says `claude_loop.session: host`
+([`WINDOWS.md`](./WINDOWS.md)).

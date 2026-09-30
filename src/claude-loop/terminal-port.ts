@@ -6,7 +6,8 @@
  * these: it holds a `TerminalPort`.
  */
 import { spawnSync } from "node:child_process";
-import { createConnection, type Socket } from "node:net";
+import { type Socket } from "node:net";
+import { connectHost, controlAuthLine } from "../host-socket.js";
 import { captureCursorSync } from "../pane.js";
 import { injectRawBytes, injectWakePhrase, MUX_CMD } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
@@ -140,11 +141,14 @@ export function hostPort(opts: {
     };
 
     const ready = new Promise<void>((resolve, reject) => {
-        const s = createConnection(opts.controlSocket);
+        const { socket: s, token } = connectHost(opts.controlSocket);
         sock = s;
         let buf = "";
         s.setEncoding("utf8");
         s.on("connect", () => {
+            // #3425 — first, on a host with a token (Windows); nothing on Unix.
+            const auth = controlAuthLine(token);
+            if (auth) s.write(auth);
             open = true;
             opts.onLink?.(true);
             call("host.screen").then((v) => { latest = screenOf(v); resolve(); }, reject);

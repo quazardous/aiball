@@ -10,7 +10,7 @@
  * copy: the keys go nowhere and the size stays the other clients'; Ctrl-C or
  * Ctrl-D leaves it too, as Ctrl-B D does (they would reach nothing anyway).
  */
-import { connect, type Socket } from "node:net";
+import { connectHost, withToken } from "../host-socket.js";
 
 export const FRAME = {
     hello: 0x01, welcome: 0x02, snapshot: 0x03, output: 0x04, input: 0x05, resize: 0x06,
@@ -102,7 +102,7 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
     // whatever Claude writes, and the terminal's title (pushed, popped on leaving).
     const bar = () => { if (readonly) io.stdout.write(copyBar(io.stdout.rows || 24, io.stdout.columns || 80, label)); };
     return new Promise((resolve) => {
-        const sock: Socket = connect(socketPath);
+        const { socket: sock, token } = connectHost(socketPath);
         const reader = new FrameReader();
         const keys = new DetachKeys();
         let done = false;
@@ -129,7 +129,7 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
             resolve(end);
         };
         sock.on("connect", () => {
-            sock.write(frame(FRAME.hello, JSON.stringify({ version: 1, client: "claude-loop", mode: readonly ? "readonly" : "interactive", view: "stream", scrollback: 0, size: size() })));
+            sock.write(frame(FRAME.hello, JSON.stringify(withToken({ version: 1, client: "claude-loop", mode: readonly ? "readonly" : "interactive", view: "stream", scrollback: 0, size: size() }, token))));
             if (io.stdin.isTTY) io.stdin.setRawMode?.(true);
             io.stdin.on("data", onKeys);
             io.stdin.resume();

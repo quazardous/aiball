@@ -73,7 +73,9 @@ jobs:
       # null and greyed ghost-suggestions passed for real input) — the guard
       # belongs on the platform where it broke. Both are pure functions, no
       # mux spawned.
-      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts" "src/cli/install.test.ts" "src/sysdeps.test.ts" "src/cursor-args.test.ts" "src/claude-loop/pane-watchers/prompt-input-watcher.test.ts"
+      # host-socket: how a client reaches a session host on Windows (the
+      # loopback port and token in `<socket>.addr`), on the system it is for.
+      - run: node --import tsx --test "src/claude-loop/ipc-events.test.ts" "src/claude-loop/transport/transport-contract.test.ts" "src/cli/install.test.ts" "src/sysdeps.test.ts" "src/cursor-args.test.ts" "src/claude-loop/pane-watchers/prompt-input-watcher.test.ts" "src/host-socket.test.ts"
 
   # #1571 — the parity check that makes "aiball supports Windows" verifiable
   # instead of declared. Everything above runs from the checkout; this job runs
