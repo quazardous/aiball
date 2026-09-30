@@ -4,7 +4,6 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { delimiter, join } from "node:path";
 import { onWindowsPath, resolveMuxCmd } from "./mux-cmd.js";
 
 const yes = () => true;
@@ -31,11 +30,12 @@ test("elsewhere tmux is tmux, whatever is installed", () => {
 });
 
 test("psmux is looked for as psmux.exe in the PATH's folders, without starting anything", () => {
-    const dirs = ["C:\\a", "C:\\b"];
+    // Literal Windows spellings: the test must say the same on the Linux CI,
+    // where the platform's own separators are `:` and `/`.
     const seen: string[] = [];
-    const exists = (p: string) => { seen.push(p); return p === join("C:\\b", "psmux.exe"); };
-    assert.equal(onWindowsPath("psmux", dirs.join(delimiter), exists), true);
-    assert.deepEqual(seen, [join("C:\\a", "psmux.exe"), join("C:\\b", "psmux.exe")]);
+    const exists = (p: string) => { seen.push(p); return p === "C:\\b\\psmux.exe"; };
+    assert.equal(onWindowsPath("psmux", "C:\\a;C:\\b", exists), true);
+    assert.deepEqual(seen, ["C:\\a\\psmux.exe", "C:\\b\\psmux.exe"]);
     assert.equal(onWindowsPath("psmux", "", exists), false);
     assert.equal(onWindowsPath("psmux", undefined, () => false), false);
 });

@@ -13,11 +13,15 @@
  * else in `MUX_CMD` (a path, another name) is taken as given.
  */
 import { existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { win32 } from "node:path";
 
-/** Is `<name>.exe` in one of the PATH's folders? No process is started to find out. */
+/**
+ * Is `<name>.exe` in one of the PATH's folders? No process is started to find
+ * out. A Windows PATH, read with Windows' own rules (`;` between folders, `\`
+ * inside them) whatever platform runs this: the question is only asked there.
+ */
 export function onWindowsPath(name: string, pathVar: string | undefined = process.env.PATH, exists: (p: string) => boolean = existsSync): boolean {
-    return (pathVar ?? "").split(delimiter).some((dir) => dir !== "" && exists(join(dir, `${name}.exe`)));
+    return (pathVar ?? "").split(win32.delimiter).some((dir) => dir !== "" && exists(win32.join(dir, `${name}.exe`)));
 }
 
 export function resolveMuxCmd(
