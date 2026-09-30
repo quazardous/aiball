@@ -9,7 +9,8 @@ documented, what a new client needs to connect, and what does not work yet.
 |---|---|---|
 | Daemon transport | Unix socket, no token | **TCP only** (`127.0.0.1:7777`), every client sends a token |
 | Supervisor | systemd user unit | a logon scheduled task starts the **tray**, which owns the daemon |
-| Multiplexer | tmux | **psmux** (it also installs a `tmux` alias) |
+| Where Claude runs (default) | the session host: Unix sockets, a systemd scope | the session host: **loopback ports with a token** (`<socket>.addr`), out of the daemon's job ([`SESSION-HOST.md`](./SESSION-HOST.md)) |
+| Multiplexer (`session: tmux`) | tmux | **psmux** (it also installs a `tmux` alias) |
 | Loop shell | bash | **Git Bash**, never WSL's `bash` |
 | PTY proxy | `cl-pty-proxy` | `cl-pty-proxy.exe`, required: `claude-loop start` refuses without it |
 | Installer | `install.sh` | `install.ps1` (pwsh 7; `aiball update` runs it under Windows PowerShell 5.1) |
@@ -128,12 +129,6 @@ host is the exception: it gives its own folder an ACL for its user alone.
 
 ## Not working on Windows yet
 
-- **Session host mode is not the default yet.** Loops run in tmux mode (psmux)
-  unless their configuration says `claude_loop.session: host` (or
-  `claude-loop start --host`). The session host runs on Windows, on loopback
-  ports with a token instead of Unix sockets
-  ([`SESSION-HOST.md`](./SESSION-HOST.md)); it becomes the default once it has
-  been through tvty's attach on Windows.
 - **Restoring a backup** while the tray runs: quit the tray first, or it
   restarts the daemon during the restore.
 - **The mouse wheel over Claude** in a loop scrolls the pane only with a psmux
