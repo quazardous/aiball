@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A ticket filed with a level, moved to a milestone or given a new owner
+  shows in the right agents' lists at once; their cached lists could lag by
+  up to ten minutes.
 - On a Windows without the VBScript engine (an optional feature now), the
   daemon and the tray start after `install.ps1` or `aiball install --service`:
   they are launched through `conhost.exe --headless`, no longer `wscript` and a

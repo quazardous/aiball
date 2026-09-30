@@ -16,6 +16,7 @@ import {
     peekDecisionGate,
 } from "./flags-cache.js";
 import { clearInboxAgg } from "./inbox-agg-cache.js";
+import { onTicketChanged } from "./ticket-change.js";
 import { idScope, shouldScope } from "./scope-ids.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
@@ -2234,6 +2235,14 @@ export function invalidateFlagsCache(ticketIds?: readonly number[]): void {
         },
     );
 }
+
+// #3388 — the actionable sets and the decision gate hear the writes instead of
+// being called by each one: the tickets a write names are repaired for every
+// cached consumer; a write that cannot name them drops everything. Registered
+// with the module that fills these caches, so an entry can only exist where
+// this listens. What is not a ticket's write (a tag, a subscription, a rule, a
+// consumer, the config) still clears them itself.
+onTicketChanged((change) => invalidateFlagsCache(change.everything ? undefined : change.ticket_ids));
 
 function patchSet(set: Set<number>, id: number, present: boolean): void {
     if (present) set.add(id);

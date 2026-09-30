@@ -9,7 +9,6 @@
 import { ticketChanged } from "./ticket-change.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
-import { invalidateFlagsCache } from "./projects.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { listTypedRelationsForTicket } from "./messages.js";
@@ -335,7 +334,6 @@ export function setTicketAssignment(
     });
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
-    invalidateFlagsCache([ticket_id]);
     ticketChanged({ ticket_ids: [ticket_id], thread: null });
     return out;
 }
@@ -353,7 +351,6 @@ export function setTicketClaim(ticket_id: number, claimant: string, at: string =
         .run();
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
-    invalidateFlagsCache([ticket_id]);
     ticketChanged({ ticket_ids: [ticket_id], thread: null });
 }
 
@@ -384,7 +381,6 @@ export function releaseTicketAssignment(ticket_id: number): void {
         .run();
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
-    invalidateFlagsCache([ticket_id]);
     ticketChanged({ ticket_ids: [ticket_id], thread: null });
 }
 
@@ -396,7 +392,6 @@ export function releaseTicketClaim(ticket_id: number): void {
         .run();
     // #1168 — claim/assign change the actionable held-by-other set.
     // #2165 — AFTER the write: the repair reads the row it is told about.
-    invalidateFlagsCache([ticket_id]);
     ticketChanged({ ticket_ids: [ticket_id], thread: null });
 }
 
@@ -495,7 +490,6 @@ export function setTicketPostpone(ticketId: number, until: string | null): boole
     // #2165 — `postponed_until` decides membership of `openIds` outright, and
     // this path never invalidated anything. It went unnoticed while any other
     // write emptied the whole cache; a repair heals only what it is told about.
-    invalidateFlagsCache([ticketId]);
     ticketChanged({ ticket_ids: [ticketId], thread: null });
     return res.changes > 0;
 }

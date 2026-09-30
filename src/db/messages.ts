@@ -9,7 +9,6 @@
 import { decisionGesture, type DecisionKind, movesLastActor } from "../ticket-transitions.js";
 import { and, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import { ticketChanged } from "./ticket-change.js";
-import { invalidateFlagsCache } from "./projects.js";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "../schema.js";
 import {
@@ -295,7 +294,6 @@ export function insertMessage(m: NewMessage): Message {
     // #2165 — and it moves the flags of that thread alone, plus anything its
     // relations gate. Naming it repairs those entries instead of emptying the
     // per-consumer actionable sets on every single comment.
-    invalidateFlagsCache(touchedTicketIds(result));
     threadChanged(result);
     return result;
 }
@@ -554,7 +552,6 @@ export function updateMessageStatus(
     // #3331 — the one thread repaired, not the whole map cleared: nearly every
     // post is auto-approved through here, and a cleared map made the next read
     // rebuild the whole project's aggregate (~180 ms).
-    invalidateFlagsCache(touchedTicketIds(out));
     threadChanged(out);
     return out;
 }
@@ -610,7 +607,6 @@ export function editMessage(
     fields: EditMessageFields,
 ): Message | null {
     const out = applyMessageEdit(id, fields);
-    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
     threadChanged(out);
     return out;
 }
@@ -718,7 +714,6 @@ export function deleteComment(id: number, by: string): Message | null {
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
-    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
     threadChanged(out);
     return out;
 }
@@ -793,7 +788,6 @@ export function moveTicket(
     // (#447) narrow the actionable pool by project AND tag, so changing a
     // thread's project re-evaluates the filter for every ticket it carries —
     // a blast radius this function cannot enumerate.
-    invalidateFlagsCache();
     // #3388 — a thread that changed project: this function cannot name every copy it moves.
     ticketChanged({ ticket_ids: [], thread: null, everything: true });
     return out;
@@ -928,7 +922,6 @@ export function insertTypedRelation(opts: {
     });
     // #2165 — a `depends_on` / `blocks` relation gates its dependent the moment
     // it lands, on BOTH ends. Another hole the old blanket clear was hiding.
-    invalidateFlagsCache([opts.source_ticket_id, opts.target_ticket_id]);
     // #3331 — the event is on the source ticket's thread: its latest activity moved.
     ticketChanged(out
         ? { ticket_ids: [opts.source_ticket_id, opts.target_ticket_id], thread: { ticket_id: opts.source_ticket_id, project: out.project } }
@@ -1449,7 +1442,6 @@ export function reclassifyMessageDecision(
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
-    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
     threadChanged(out);
     return out;
 }
@@ -1498,7 +1490,6 @@ export function promoteMessageToDecision(
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
-    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
     threadChanged(out);
     return out;
 }
@@ -1537,7 +1528,6 @@ export function removeMessageDecision(messageId: number): Message | null {
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
-    invalidateFlagsCache(touchedTicketIds(out)); // #2165 — after the write
     threadChanged(out);
     return out;
 }
@@ -1598,7 +1588,6 @@ function rewriteStepMeta(messageId: number, change: (meta: ReturnType<typeof par
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
-    invalidateFlagsCache(touchedTicketIds(out)); // after the write, like the decision tags
     threadChanged(out);
     return out;
 }
@@ -1950,7 +1939,6 @@ export function applyMessageDecision(
     // and it invalidated NOTHING until now. The staleness was invisible: some
     // other write usually cleared the cache first, and the TTL closed the gap
     // within five seconds. Found by the repair layer's own tests.
-    invalidateFlagsCache(touchedTicketIds(out));
     threadChanged(out);
     return out;
 }
