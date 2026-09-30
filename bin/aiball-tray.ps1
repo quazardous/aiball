@@ -37,12 +37,14 @@ if (-not $createdNew) {
 }
 
 # --- resolve daemon launcher + port ----------------------------------------
-# The launcher (+ hidden .vbs wrapper) is written by install.ps1 into
-# %LOCALAPPDATA%\aiball. We reuse it to start the daemon so the command + env
-# (port, log rolling, AIBALL_HOME) live in ONE place.
+# The launcher is written by install.ps1 into %LOCALAPPDATA%\aiball. We reuse
+# it to start the daemon so the command + env (port, log rolling, AIBALL_HOME)
+# live in ONE place.
 $aiballLocal = Join-Path $env:LOCALAPPDATA 'aiball'
-$daemonVbs   = Join-Path $aiballLocal 'daemon-launcher.vbs'
 $daemonCmd   = Join-Path $aiballLocal 'daemon-launcher.cmd'
+# No window, and no VBScript: that engine is an optional Windows feature now,
+# and a wscript + .vbs wrapper started nothing on a machine without it (#3384).
+$hiddenExe   = Join-Path $env:SystemRoot 'System32\conhost.exe'
 
 # #2089 -- heartbeat. The daemon restarts itself after a pairing by simply
 # stopping, and letting the supervision below start it again. It must only do
@@ -133,11 +135,9 @@ function Set-TrayIcon([bool]$proxy, [bool]$remoteUp) {
 function Start-Daemon {
     # Idempotent: never spawn a second daemon if one already answers.
     if (Test-DaemonUp) { return }
-    if (Test-Path $daemonVbs) {
-        # wscript + .vbs = no console flash (SW_HIDE), same path the task used.
-        Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$daemonVbs`"" -WindowStyle Hidden
-    } elseif (Test-Path $daemonCmd) {
-        Start-Process -FilePath $daemonCmd -WindowStyle Hidden
+    if (Test-Path $daemonCmd) {
+        # conhost --headless = no console window, the same way the task starts it.
+        Start-Process -FilePath $hiddenExe -ArgumentList "--headless cmd.exe /d /c `"$daemonCmd`"" -WindowStyle Hidden
     }
     # else: no launcher (e.g. portable/dev run) -- tray just reflects health.
 }
@@ -193,18 +193,9 @@ $AutostartValName = 'aiball-tray'
 $AutostartTask    = 'aiball-daemon'   # mirrors install.ps1 $TaskName
 
 function Get-AutostartCommand {
-    # Prefer the .vbs tray wrapper (wscript SW_HIDE = no console flash).
-    # install.ps1 writes it to %LOCALAPPDATA%\aiball (per-user) or
-    # %PROGRAMDATA%\aiball\logs (-System install).
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'aiball\tray-launcher.vbs'),
-        (Join-Path $env:PROGRAMDATA  'aiball\logs\tray-launcher.vbs')
-    )
-    foreach ($v in $candidates) {
-        if (Test-Path $v) { return "wscript.exe `"$v`"" }
-    }
-    # Fallback: launch aiball-tray.cmd directly (brief console flash).
-    return "`"$(Join-Path $PSScriptRoot 'aiball-tray.cmd')`""
+    # conhost --headless: the tray's launcher with no console flash at logon.
+    $trayCmd = Join-Path $PSScriptRoot 'aiball-tray.cmd'
+    return "`"$hiddenExe`" --headless cmd.exe /d /c `"$trayCmd`""
 }
 
 function Test-AutostartRun {
