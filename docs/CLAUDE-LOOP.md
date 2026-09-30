@@ -382,6 +382,16 @@ reload, `TERM` = stop. A running loop can also be **stopped remotely** from the
 aiball web UI (the Consumers page shows a stop button on each live loop) — handy
 when you have no shell on the loop's host.
 
+The kernel also reloads **on its own** in two cases, both without touching
+Claude's session: when it is idle and the installed code has moved since it
+started, and when the system clock is set back (Windows correcting its clock
+after an update, say). Its delays are wall-clock readings held in memory, and a
+clock set back would leave each of them waiting for the size of the step; the
+log says `system clock set back Ns` before the reload. A clock set forward, or a
+machine back from sleep, is only logged. What was already due at a given time
+before the step — an AFK hold, a cooldown — keeps that time: it ends that much
+later, shows in the bar, and F9 lifts it.
+
 ---
 
 ## check-cmd contract

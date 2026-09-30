@@ -202,6 +202,7 @@ import { fetchWakeContext, pingIsDeliverable } from "./wake-context.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { heartbeatShouldWake } from "./heartbeat-fallback.js";
+import { ClockStepDetector } from "./clock-step.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
@@ -1886,6 +1887,26 @@ async function mainSse(): Promise<void> {
         tmuxClientsSaid = key;
         void client().pushClients(c.clients, c.interactive).catch(() => { tmuxClientsSaid = ""; });
     };
+    // #3416 — the system clock stepped. Set back, every wall-clock delay this
+    // kernel holds in memory would wait for the size of the step (a loop stayed
+    // disconnected two hours): said in the log, then the kernel reloads in
+    // place, as `claude-loop reload` does — Claude's session is untouched. Set
+    // forward (or back from sleep), the delays come due at once: said, no more.
+    const clockSteps = new ClockStepDetector();
+    const clockStepTimer = setInterval(() => {
+        const step = clockSteps.check(Date.now(), performance.now());
+        if (step === null) return;
+        const secs = Math.round(step / 1000);
+        if (step > 0) {
+            log(`system clock stepped forward ${secs}s (a resume from sleep, or the clock set): nothing to do`);
+            return;
+        }
+        log(`system clock set back ${-secs}s: reloading the kernel, whose delays would otherwise wait that long`);
+        clearInterval(clockStepTimer);
+        respawnKernel(`system clock set back ${-secs}s`);
+    }, 1000);
+    clockStepTimer.unref?.();
+
     const watchdog = setInterval(() => {
         if (!term.alive()) {
             clearInterval(watchdog);

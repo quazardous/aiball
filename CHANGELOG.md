@@ -68,6 +68,9 @@ dates are YYYY-MM-DD.
   reconnection delay was read on the wall clock: a clock corrected by two
   hours (Windows, after an update) left the loop disconnected, its bar red,
   until it was reloaded.
+- A loop's kernel notices the system clock being set back, says so in its log
+  and reloads in place: every delay it holds in memory would otherwise wait
+  for the size of the step.
 - A mention (`@agent`) in a ticket or a comment awaiting moderation no longer
   wakes its target: it is delivered when the message is approved, never when
   it is rejected.
