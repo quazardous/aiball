@@ -17,6 +17,8 @@
  */
 import { agentCooldownSec } from "./agent-cooldown.js";
 import { onLifecycle } from "./event-bus.js";
+import { onTicketChanged } from "./db/ticket-change.js";
+import { getMessage } from "./db/messages.js";
 import { onPingsChanged, unreadPingCount } from "./db/pings.js";
 import { getConsumer, listConsumers } from "./db/consumers.js";
 import { listProjectSubscribers } from "./db/subscriptions.js";
@@ -203,6 +205,23 @@ onLifecycle((ev) => {
     const projects = [m.project, ev.old_project].filter((p): p is string => !!p);
     for (const project of projects) {
         for (const agent of agentsConcerned(project, [m.assignee, m.claimant])) markCountersDirty(agent);
+    }
+});
+
+// #3388 — a write on a ticket's own row (a claim, an assignment, a snooze, a
+// level) raises no lifecycle event, and moved an agent's counters without a
+// word: they stayed as they were until the next message. A thread's write is
+// already heard above.
+onTicketChanged((change) => {
+    if (change.everything) {
+        for (const agent of cache.keys()) markCountersDirty(agent);
+        return;
+    }
+    if (change.thread) return;
+    for (const id of change.ticket_ids) {
+        const t = getMessage(id);
+        if (!t?.project) continue;
+        for (const agent of agentsConcerned(t.project, [t.assignee, t.claimant])) markCountersDirty(agent);
     }
 });
 

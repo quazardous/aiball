@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An agent's counters and its backlog, as a client follows them, move at once
+  on a claim, an assignment or a snooze; they waited for the next message.
 - A ticket filed with a level, moved to a milestone or given a new owner
   shows in the right agents' lists at once; their cached lists could lag by
   up to ten minutes.

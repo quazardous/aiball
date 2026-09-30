@@ -135,3 +135,24 @@ test("a loop that comes back: its bar is live again at once, not at its next dif
     await loop.call("bus.subscribe", { subject: "agent.other.events" });
     await until("the bar live again", () => bars.length > n && bars.at(-1)?.stale === false);
 });
+
+// #3388 — a write on the ticket's own row raises no lifecycle event; the
+// counters hear it as a ticket change.
+test("a snooze, which raises no lifecycle event, pushes the counters again", async () => {
+    const { setTicketPostpone } = await import("../db/tickets.js");
+    const loop = await as("worker");
+    const boss = await as("boss");
+    const pushed: Counters[] = [];
+    let eventsSub = "";
+    loop.onNotification((m, p) => {
+        const e = p as { subscription: string; data: { event: string; data: Counters } };
+        if (m === "bus.event" && e.subscription === eventsSub && e.data.event === "counters") pushed.push(e.data.data);
+    });
+    eventsSub = (await loop.call<{ id: string }>("bus.subscribe", { subject: "agent.worker.events" })).id;
+    const t = await boss.call<{ id: number }>("message.post", { kind: "ticket_created", project: "counted", title: "to snooze", body: "b" });
+    await until("the new ticket counted", () => pushed.length > 0);
+    const before = pushed.at(-1)!;
+    pushed.length = 0;
+    setTicketPostpone(t.id, new Date(Date.now() + 3_600_000).toISOString());
+    await until("the snooze counted", () => pushed.some((c) => c.open === before.open - 1 || c.actionable === before.actionable - 1), 8000);
+});

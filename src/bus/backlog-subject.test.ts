@@ -67,3 +67,26 @@ test("a wake sinks a ticket, its rest ends, a new ticket comes in: each is an ev
     const t2 = await boss.call<{ id: number }>("message.post", { kind: "ticket_created", project: "sinking", title: "two", body: "b" });
     await until("the new ticket heard", () => heard.some((c) => c.includes(t2.id)), 5000);
 });
+
+// #3388 — a write on the ticket's own row raises no lifecycle event; the
+// backlog hears it as a ticket change.
+test("a snooze, which raises no lifecycle event, takes the ticket out of the watched backlog", async () => {
+    const { setTicketPostpone } = await import("../db/tickets.js");
+    const boss = await BusClient.connect({ socket: sockPath, consumer: "boss" });
+    clients.push(boss);
+    const t = await boss.call<{ id: number }>("message.post", { kind: "ticket_created", project: "sinking", title: "snoozed", body: "b" });
+    const heard: number[][] = [];
+    let subId = "";
+    boss.onNotification((m, p) => {
+        const e = p as { subscription: string; data: { changed: number[] } };
+        if (m === "bus.event" && e.subscription === subId) heard.push(e.data.changed);
+    });
+    const sub = await boss.call<{ id: string; value: Backlog }>("bus.subscribe", { subject: "agent.idle-lead.backlog" });
+    subId = sub.id;
+    // The ticket's own arrival first, so that what is heard next is the snooze.
+    const other = await boss.call<{ id: number }>("message.post", { kind: "ticket_created", project: "sinking", title: "marker", body: "b" });
+    await until("the marker heard", () => heard.some((c) => c.includes(other.id)), 5000);
+    heard.length = 0;
+    setTicketPostpone(t.id, new Date(Date.now() + 3_600_000).toISOString());
+    await until("the snooze heard", () => heard.some((c) => c.includes(t.id)), 5000);
+});

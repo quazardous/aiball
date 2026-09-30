@@ -13,7 +13,8 @@
  */
 import { defineSubject, publish, type Subscription } from "../subscriptions.js";
 import { Refusal, type Caller } from "../methods.js";
-import { getConsumer } from "../../db.js";
+import { getConsumer, getMessage } from "../../db.js";
+import { onTicketChanged } from "../../db/ticket-change.js";
 import { listTicketsFor } from "../../queries/tickets.js";
 import { agentCooldownSec } from "../../agent-cooldown.js";
 import { onLifecycle } from "../../event-bus.js";
@@ -78,13 +79,32 @@ export function backlogTouched(agent: string): void {
 
 // A ticket event in a watched agent's project: read its backlog again, once the burst is over.
 onLifecycle((ev) => {
-    const projects = new Set([(ev.message as { project?: string | null }).project, ev.old_project].filter((p): p is string => !!p));
+    touch(new Set([(ev.message as { project?: string | null }).project, ev.old_project].filter((p): p is string => !!p)));
+});
+
+/** Read again, once the burst is over, the backlog of each watched agent of these projects (null: of every one). */
+function touch(projects: Set<string> | null): void {
     for (const [agent, w] of watches) {
-        if (w.project && !projects.has(w.project)) continue;
+        if (projects && w.project && !projects.has(w.project)) continue;
         if (w.debounce) clearTimeout(w.debounce);
         w.debounce = setTimeout(() => { w.debounce = null; refresh(agent); }, DEBOUNCE_MS);
         w.debounce.unref?.();
     }
+}
+
+// #3388 — a write on a ticket's own row (a claim, an assignment, a snooze)
+// raises no lifecycle event, and moved a ticket in or out of a backlog without
+// a word. A thread's write is already heard above.
+onTicketChanged((change) => {
+    if (watches.size === 0) return;
+    if (change.everything) return touch(null);
+    if (change.thread) return;
+    const projects = new Set<string>();
+    for (const id of change.ticket_ids) {
+        const project = getMessage(id)?.project;
+        if (project) projects.add(project);
+    }
+    if (projects.size) touch(projects);
 });
 
 function watch(agent: string): Watch {
