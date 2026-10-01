@@ -53,6 +53,7 @@ import { computeLoopView, isHumanPresentHold, isInBootGrace } from "./loop-state
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
 import { resolveMuxCmd } from "./mux-cmd.js";
+import { muxRun } from "./mux-async.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
@@ -3175,7 +3176,7 @@ export async function injectWakePhrase(
                     // DO NOT re-send the phrase via tmux — that double-types.
                     // A stand-alone Enter is the SAME channel (submit), not
                     // a fallback. Submit + return.
-                    spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+                    await muxRun(["send-keys", "-t", paneTarget, "Enter"]);
                     return true;
                 }
                 // #974 — loop.sock présent = proxy censé vivant (c'est le
@@ -3190,14 +3191,15 @@ export async function injectWakePhrase(
     // paste-buffer + Enter standalone. Path normal documenté pour ces
     // loops, PAS un fallback dégradé (#974).
     const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-    const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, phrase], { stdio: "ignore" });
+    // #3461 — without holding the process: a psmux call is ~100 ms on Windows.
+    const setBuf = await muxRun(["set-buffer", "-b", bufName, phrase]);
     if (!setBuf.error && setBuf.status === 0) {
-        spawnSync(MUX_CMD, ["paste-buffer", "-b", bufName, "-d", "-t", paneTarget], { stdio: "ignore" });
+        await muxRun(["paste-buffer", "-b", bufName, "-d", "-t", paneTarget]);
     } else {
-        spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, phrase], { stdio: "ignore" });
+        await muxRun(["send-keys", "-t", paneTarget, phrase]);
     }
     await new Promise<void>((res) => setTimeout(res, 200));
-    spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+    await muxRun(["send-keys", "-t", paneTarget, "Enter"]);
     return true;
 }
 

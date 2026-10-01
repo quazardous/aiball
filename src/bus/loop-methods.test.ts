@@ -33,10 +33,11 @@ plate("cl-old", { consumer: "old-crew" });
 plate("cl-rc", { agent: "rc-one", remote_control: "phone" });
 
 const human = testCaller("boss", { kind: "human" });
-const list = () => getMethod("loop.list")!.run(human, {}) as Array<Record<string, unknown>>;
+// #3461 — answered once tmux has said which sessions exist, without holding the daemon.
+const list = async () => (await getMethod("loop.list")!.run(human, {})) as Array<Record<string, unknown>>;
 const restart = getMethod("loop.restart")!;
-test("loop.list: every loop of the machine, stopped ones included, with its agent, mode and what to open", () => {
-    const byName = Object.fromEntries(list().map((l) => [l.name, l]));
+test("loop.list: every loop of the machine, stopped ones included, with its agent, mode and what to open", async () => {
+    const byName = Object.fromEntries((await list()).map((l) => [l.name, l]));
     assert.deepEqual(Object.keys(byName).sort(), ["cl-h1", "cl-old", "cl-rc", "cl-t1"]);
     assert.deepEqual(byName["cl-t1"], { name: "cl-t1", cwd: "/w/cl-t1", agent: "t-one", project: "demo", role: "crew", mode: "tmux", running: false, remote_control: false, model: null, tmux: tmuxName("cl-t1"), clients: null, interactive: null, started_at: "2026-09-28T00:00:00Z", last_seen_at: null, superseded: false });
     assert.equal(byName["cl-rc"].remote_control, "phone", "#3254 — Claude's Remote Control, as the loop started");
@@ -45,9 +46,9 @@ test("loop.list: every loop of the machine, stopped ones included, with its agen
     assert.equal(byName["cl-old"].agent, "old-crew", "an older plate names its agent by consumer");
 });
 
-test("a loop in tmux whose session is there is running", () => {
+test("a loop in tmux whose session is there is running", async () => {
     spawnSync("tmux", ["new-session", "-d", "-s", tmuxName("cl-t1"), "sleep 60"], { stdio: "ignore" });
-    assert.equal(list().find((l) => l.name === "cl-t1")?.running, true);
+    assert.equal((await list()).find((l) => l.name === "cl-t1")?.running, true);
 });
 
 test("loop.restart refuses: a loop not here, both or neither of name/agent, over TCP, and a running loop whose Claude works", async () => {
@@ -83,7 +84,7 @@ test("loop.list dates each loop and marks a stopped loop its agent has replaced"
     const { markSuperseded } = await import("./methods/loop.js");
     plate("cl-dup-old", { agent: "dup", created_at: "2026-09-29T14:59:59Z" });
     plate("cl-dup-new", { agent: "dup", host_agent: "dup", created_at: "2026-09-29T15:03:33Z" });
-    const byName = Object.fromEntries(list().map((l) => [l.name, l]));
+    const byName = Object.fromEntries((await list()).map((l) => [l.name, l]));
     assert.equal(byName["cl-dup-old"].started_at, "2026-09-29T14:59:59Z");
     assert.equal(byName["cl-dup-new"].started_at, "2026-09-29T15:03:33Z");
     assert.equal(byName["cl-dup-old"].last_seen_at, null, "no log: never seen");

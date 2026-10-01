@@ -18,6 +18,7 @@ import { remoteControl } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
 import { loopStateRoot, MUX_CMD, tmuxAlive, tmuxClientList, tmuxClients, tmuxName } from "../../claude-loop/state.js";
+import { tmuxSessions } from "../../claude-loop/mux-async.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
 import { tmuxClientsOf } from "../../sessions/tmux-clients.js";
 import { isPresent } from "../../live-presence.js";
@@ -85,11 +86,20 @@ export function markSuperseded(loops: Array<Omit<LoopView, "superseded"> & { at:
     });
 }
 
-function loopView(e: LoopEntry): Omit<LoopView, "superseded"> & { at: number } {
+/**
+ * #3461 — the tmux sessions of this machine, read just now from one `ls` that
+ * does not hold the daemon: a `has-session` per loop, synchronous, froze it
+ * ~100 ms a loop on Windows, every 30 s and on every change. Never kept: a
+ * view built from an older answer would miss a session started since. Null
+ * when tmux cannot say: the views then ask per loop, as before.
+ */
+type LiveTmux = Set<string> | null;
+
+function loopView(e: LoopEntry, live: LiveTmux = null): Omit<LoopView, "superseded"> & { at: number } {
     const agent = plateAgent(e.plate);
     const mode = e.plate.host_agent ? "host" : "tmux";
     const link = mode === "host" && agent ? sessionFor({ agent }) : undefined;
-    const running = mode === "host" ? !!link?.running : tmuxAlive(e.name);
+    const running = mode === "host" ? !!link?.running : live ? live.has(tmuxName(e.name)) : tmuxAlive(e.name);
     return {
         name: e.name,
         cwd: e.plate.cwd ?? null,
@@ -111,8 +121,13 @@ function loopView(e: LoopEntry): Omit<LoopView, "superseded"> & { at: number } {
 }
 
 /** Every loop of this machine as a client shows it, the latest first. */
-function loopViews(): LoopView[] {
-    return markSuperseded(listLoopPlates().sort((a, b) => b.at - a.at).map(loopView));
+function loopViews(live: LiveTmux = null): LoopView[] {
+    return markSuperseded(listLoopPlates().sort((a, b) => b.at - a.at).map((e) => loopView(e, live)));
+}
+
+/** #3461 — every loop's view, its tmux sessions read once without holding the daemon. */
+async function loopViewsNow(): Promise<LoopView[]> {
+    return loopViews(await tmuxSessions());
 }
 
 /** #3417 — the agents whose loop runs on this machine: what an all-loops control reaches with `scope: "machine"` on a node. */
@@ -147,9 +162,9 @@ defineMethod({
     name: "loop.list",
     ...HUMAN_HERE,
     params: z.object({}),
-    run: (caller) => {
+    run: async (caller) => {
         localOnly(caller);
-        return loopViews();
+        return loopViewsNow();
     },
 });
 
@@ -197,11 +212,12 @@ defineMethod({
             await new Promise((r) => setTimeout(r, 250));
             const now = listLoopPlates().find((e) => e.name === loop.name);
             if (now && now.plate.created_at !== loop.plate.created_at) {
-                const view = loopView(now);
+                const live = await tmuxSessions();
+                const view = loopView(now, live);
                 const up = view.mode === "host"
                     ? view.running
                     : view.running && !!view.agent && isPresent(view.agent) && !!tmuxSessionView(view.agent);
-                if (view.mode === mode && up) return loopViews().find((v) => v.name === now.name) ?? { ...withoutAt(view), superseded: false };
+                if (view.mode === mode && up) return loopViews(live).find((v) => v.name === now.name) ?? { ...withoutAt(view), superseded: false };
             }
             if (child.exitCode !== null && child.exitCode !== 0) {
                 throw new Refusal(500, `claude-loop restart exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
@@ -320,8 +336,8 @@ const loopState: {
 } = { subs: 0, sent: new Map(), watcher: null, safety: null, debounce: null, offBroadcast: null };
 
 /** Views again; publish those that changed, `null` for those gone. */
-function publishLoopChanges(): void {
-    const now = new Map(loopViews().map((v) => [v.name, v]));
+async function publishLoopChanges(): Promise<void> {
+    const now = new Map((await loopViewsNow()).map((v) => [v.name, v]));
     for (const [name, v] of now) {
         const json = JSON.stringify(v);
         if (loopState.sent.get(name) === json) continue;
@@ -337,7 +353,7 @@ function publishLoopChanges(): void {
 
 function scheduleLoopChanges(): void {
     if (loopState.subs === 0 || loopState.debounce) return;
-    loopState.debounce = setTimeout(() => { loopState.debounce = null; publishLoopChanges(); }, LOOP_DEBOUNCE_MS);
+    loopState.debounce = setTimeout(() => { loopState.debounce = null; void publishLoopChanges().catch(() => { /* the safety tick tries again */ }); }, LOOP_DEBOUNCE_MS);
     loopState.debounce.unref?.();
 }
 
@@ -354,7 +370,7 @@ function startLoopWatch(): void {
     loopState.offBroadcast = onBroadcast((ev) => {
         if (ev.type === "consumer_changed" || ev.type === "agent_bar") scheduleLoopChanges();
     });
-    loopState.safety = setInterval(publishLoopChanges, LOOP_SAFETY_MS);
+    loopState.safety = setInterval(() => { void publishLoopChanges().catch(() => { /* the next tick tries again */ }); }, LOOP_SAFETY_MS);
     loopState.safety.unref?.();
 }
 
@@ -394,6 +410,6 @@ defineSubject({
 });
 
 /** Tests only: compute and publish the changes now. */
-export function publishLoopChangesForTests(): void {
-    publishLoopChanges();
+export function publishLoopChangesForTests(): Promise<void> {
+    return publishLoopChanges();
 }
