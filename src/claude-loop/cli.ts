@@ -99,7 +99,7 @@ import { conversationHolder, foreignAgentRefusal, startFolder, takeLaunchCwd } f
 import { afterTmuxAttach, type LoopWhereabouts } from "./attach-end.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
-import { dropInheritedLoopEnv } from "./inherited-env.js";
+import { dropClaudeSessionEnv, dropInheritedLoopEnv, UNSET_CLAUDE_SESSION_SH } from "./inherited-env.js";
 import { COPY_MARK } from "./bar-render.js";
 import { parseRemoteControl, remoteControlPlan, type RemoteControl } from "./remote-control.js";
 
@@ -533,6 +533,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     if (inherited) {
         process.stdout.write(`claude-loop: started from inside the loop at ${inherited.from}: its CL_* and AIBALL_* identity are not carried over\n`);
     }
+    // #3460 — nor a Claude Code session's markers, when started from its shell.
+    const markers = dropClaudeSessionEnv(process.env);
+    if (markers.length) {
+        process.stdout.write(`claude-loop: started from a Claude Code session: its markers are not carried over (${markers.join(", ")})\n`);
+    }
 
     // #B.154: ProjectContext resolves cwd + AIBALL_AGENT +
     // AIBALL_PROJECT from .mcp.json once, then writes them back to
@@ -921,6 +926,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // drag-select is the mux's too. Same override rule as above: set before
         // env.local, so it can be unset there.
         `export CLAUDE_CODE_DISABLE_MOUSE=1`,
+        // #3460 — a Claude Code session's markers are not this Claude's: under
+        // them it takes itself for that session's child and keeps no
+        // transcript. Cleared here, right before Claude, because a tmux server
+        // started from such a session hands them to every pane it opens.
+        UNSET_CLAUDE_SESSION_SH,
         // CLI-only flags (no yaml backing, no shell override) :
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.

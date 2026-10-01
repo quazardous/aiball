@@ -78,3 +78,29 @@ export function dropInheritedLoopEnv(
     }
     return { from, dropped };
 }
+
+/**
+ * #3460 — the markers a Claude Code session leaves in the shells it runs: who
+ * it is (`CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`), that it is one (`CLAUDECODE`,
+ * `CLAUDE_CODE_CHILD_SESSION`, which turns transcript saving off in a Claude
+ * started under it), how to reach it (`CLAUDE_CODE_MESSAGING_*`, a token
+ * included). A loop started from such a shell is not that session's child.
+ * A closed list: the rest of `CLAUDE_CODE_*` holds settings meant for every
+ * Claude (`CLAUDE_CODE_USE_BEDROCK`), the loop's own among them.
+ */
+export const CLAUDE_SESSION_ENV = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_(SESSION_[A-Z0-9_]+|CHILD_SESSION|ENTRYPOINT|EXECPATH|BRIDGE_[A-Z0-9_]+|MESSAGING_[A-Z0-9_]+))$/;
+
+/** Drop the Claude Code session markers from `env`; the names dropped. */
+export function dropClaudeSessionEnv(env: NodeJS.ProcessEnv): string[] {
+    const dropped = Object.keys(env).filter((k) => CLAUDE_SESSION_ENV.test(k));
+    for (const k of dropped) delete env[k];
+    return dropped;
+}
+
+/**
+ * The same, in the loop's env file, sourced right before Claude: a tmux server
+ * started from a Claude session hands its markers to every pane it opens,
+ * whatever the environment of the `start` that asked for it.
+ */
+export const UNSET_CLAUDE_SESSION_SH =
+    `__cl_re='${CLAUDE_SESSION_ENV.source}'; for __cl_v in $(compgen -e); do [[ $__cl_v =~ $__cl_re ]] && unset "$__cl_v"; done; unset __cl_re __cl_v`;

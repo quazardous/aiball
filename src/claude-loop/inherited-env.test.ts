@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dropInheritedLoopEnv, parentRecord } from "./inherited-env.js";
+import { CLAUDE_SESSION_ENV, dropClaudeSessionEnv, dropInheritedLoopEnv, parentRecord, UNSET_CLAUDE_SESSION_SH } from "./inherited-env.js";
+import { spawnSync } from "node:child_process";
 
 const dir = mkdtempSync(join(tmpdir(), "aiball-3175-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -59,4 +60,25 @@ test("the record: env, then env.local over it, quotes undone", () => {
     writeFileSync(join(dir, "env.local"), "export CL_CHECK_CMD='true'\n");
     assert.deepEqual(parentRecord(dir), { CL_CHECK_CMD: "true", AIBALL_AGENT: "it's" });
     assert.equal(parentRecord(join(dir, "none")), null);
+});
+
+// #3460 — a loop started from a Claude Code session's shell is not that session's child.
+const SESSION_MARKERS = {
+    CLAUDECODE: "1", CLAUDE_PID: "42", CLAUDE_CODE_CHILD_SESSION: "1", CLAUDE_CODE_SESSION_ID: "s", CLAUDE_CODE_SESSION_ATTENDED: "1",
+    CLAUDE_CODE_ENTRYPOINT: "cli", CLAUDE_CODE_EXECPATH: "/x", CLAUDE_CODE_BRIDGE_SESSION_ID: "b",
+    CLAUDE_CODE_MESSAGING_SOCKET: "/s", CLAUDE_CODE_MESSAGING_TOKEN: "t",
+};
+const MEANT = { CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CODE_DISABLE_MOUSE: "1", CLAUDE_CODE_OAUTH_TOKEN: "o", CLAUDE_EFFORT: "high", PATH: "/bin" };
+
+test("#3460 a Claude Code session's markers are dropped; settings meant for every Claude stay", () => {
+    const env: NodeJS.ProcessEnv = { ...SESSION_MARKERS, ...MEANT };
+    assert.deepEqual(dropClaudeSessionEnv(env).sort(), Object.keys(SESSION_MARKERS).sort());
+    assert.deepEqual(env, MEANT);
+});
+
+test("#3460 the env file's line clears the same markers in bash, whatever the tmux server handed down", { skip: process.platform === "win32" && "bash path differs" }, () => {
+    const r = spawnSync("bash", ["-c", `${UNSET_CLAUDE_SESSION_SH}; env`], { env: { ...SESSION_MARKERS, ...MEANT }, encoding: "utf8" });
+    const names = r.stdout.split("\n").map((l) => l.split("=")[0]!).filter((n) => /^CLAUDE/.test(n)).sort();
+    assert.deepEqual(names, Object.keys(MEANT).filter((k) => /^CLAUDE/.test(k)).sort());
+    assert.ok(names.every((n) => !CLAUDE_SESSION_ENV.test(n)));
 });

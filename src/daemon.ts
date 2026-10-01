@@ -18,6 +18,7 @@ import { registerAutomationRuntime } from "./automation/runtime.js";
 import { loadProxy, loadProxyTokens, startProxyWsClient } from "./proxy.js";
 import { attachProxyWs } from "./proxy-ws.js";
 import { checkForUpdatesAtBoot } from "./api/version-routes.js";
+import { dropClaudeSessionEnv } from "./claude-loop/inherited-env.js";
 
 /**
  * #407 — SIGUSR2 = reload config in place, no downtime (driven by `aiball
@@ -97,6 +98,10 @@ const SOCK_PATH = (() => {
 })();
 
 function main(): void {
+    // #3460 — a daemon started from a Claude Code session's shell would hand its
+    // markers to every session it starts (`session.start`, `loop.restart`).
+    const markers = dropClaudeSessionEnv(process.env);
+    if (markers.length) console.log(`[daemon] started from a Claude Code session: its markers are dropped (${markers.join(", ")})`);
     ensureDirs(); // make sure UPLOADS_DIR etc. exist before serving them
     // What proves a client of this machine over TCP, where the socket is not
     // used (Windows): created once, kept across restarts.

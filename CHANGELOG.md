@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop started from a Claude Code session's terminal keeps its Claude's
+  history: the session's markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`,
+  its id and messaging token…) reached the agent's Claude, which took itself
+  for that session's child and saved no transcript. `claude-loop start`, the
+  daemon and the loop's own environment now drop them; the other
+  `CLAUDE_CODE_*` settings are kept.
 - A loop in tmux mode answers its keys, F9 and its timers on time, and the
   daemon no longer stalls every 30 s: the calls to tmux on their hot paths
   (reading the screen, checking the session is there, painting the bar,
