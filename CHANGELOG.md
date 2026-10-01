@@ -45,6 +45,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An agent's unread events no longer pile up when they cannot wake it (a
+  ticket another agent holds): nothing delivered them, so they stayed unread
+  and the loop's event count only climbed. They now ride in the agent's next
+  wake as one line ("FYI, no action asked: …") and are marked read with it,
+  and the bar's `e:` counts only the events that will wake it.
 - A loop whose Claude is restarted from tvty (after an update) comes back:
   the restart its kernel ran on itself was refused by the check against
   another agent's folder, since it ran from aiball's own folder with the

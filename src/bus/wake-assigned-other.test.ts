@@ -100,3 +100,13 @@ test("the counters say how many unread pings wake the agent, apart from the unre
     assert.equal(then.events, after.events + 1);
     assert.equal(then.wakes, after.wakes + 1, "a ticket that wakes it counts in both");
 });
+
+test("#3480 what informs the lead without waking it is listed apart, for its next wake to carry", () => {
+    const t = file("crew work, lead informed", { assignee: "crew" });
+    const fyi = (run("unread.list", testCaller("lead"), { consumer_id: "lead", for: "fyi" }) as { messages: { id: number }[] }).messages.map((m) => m.id);
+    assert.ok(fyi.includes(t), "listed for the lead's next wake");
+    assert.ok(!ids("lead", true).includes(t), "and still not a wake of its own");
+    const woken = file("for everyone");
+    const fyiAfter = (run("unread.list", testCaller("lead"), { consumer_id: "lead", for: "fyi" }) as { messages: { id: number }[] }).messages.map((m) => m.id);
+    assert.ok(!fyiAfter.includes(woken), "what wakes it is not an FYI");
+});

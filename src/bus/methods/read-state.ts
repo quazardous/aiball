@@ -47,13 +47,14 @@ defineMethod({
         project,
         limit: z.coerce.number().int().optional(),
         since: z.string().optional(),
-        /** #3449 — `wake`: only what may wake the consumer's loop (its wake FIFO). */
-        for: z.enum(["wake"]).optional(),
+        /** #3449 — `wake`: only what may wake the consumer's loop (its wake FIFO).
+         *  #3480 — `fyi`: what it may read but that wakes it not. */
+        for: z.enum(["wake", "fyi"]).optional(),
     }),
     run: (caller, p) => {
         const consumer_id = whose(caller, p.consumer_id);
         const proj = p.project ?? null;
-        const messages = listUnread(consumer_id, proj, p.limit ?? 100, p.since, p.for === "wake" ? "fifo-wake" : "unread-list");
+        const messages = listUnread(consumer_id, proj, p.limit ?? 100, p.since, p.for === "wake" ? "fifo-wake" : p.for === "fyi" ? "fyi" : "unread-list");
         // Cached per author: one FIFO page repeats a handful.
         const humanBy = new Map<string, boolean>();
         const awaiting = ticketsAwaitingModeration(messages.map((m) => m.ticket_id ?? m.id));

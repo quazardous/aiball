@@ -962,3 +962,35 @@ test("#3397 the compact line of a bundle names who executes too", async () => {
     assert.match((await bundle({ holder: "claude-test", held_as: "claim" })).phrase, /plan ACCEPTED → you \(#p1\) by david/);
     assert.match((await bundle({})).phrase, /plan ACCEPTED \(#p1\) by david/);
 });
+
+test("#3480 what informs without waking rides along in a wake that happens anyway, and is marked read with it", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            pingsCount: async () => ({ unread: 1 }),
+            unread: async (_p: unknown, _l: unknown, _s: unknown, opts: { forWake?: boolean; fyi?: boolean } = {}) => opts.fyi
+                ? { messages: [{ id: 801, kind: "comment_added", ticket_id: 3454, project: "tvty" }, { id: 802, kind: "ticket_closed", ticket_id: 3463, project: "tvty" }] }
+                : { messages: [{ id: 501, kind: "comment_added", ticket_id: 920, hashid: "qctwhw", body: "please look at this" }] },
+            getTicket: async () => ({ ticket: { title: "my ticket", actionable: true, claimable: true } }),
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.match(res.phrase, /please look at this/);
+    assert.match(res.phrase, /FYI, no action asked: \[tvty\] #3463 closed · \[tvty\] #3454 reply\./);
+    assert.deepEqual([...(res.extraSeenIds ?? [])].sort(), [801, 802], "marked read with the wake");
+});
+
+test("#3480 nothing else to deliver: no wake for an FYI alone", async () => {
+    const res = await buildContextPhrase(
+        stubClient({
+            listProjectsDetailed: async () => [{ name: "aiball", open_count: 0, actionable_count: 0 }],
+            unread: async (_p: unknown, _l: unknown, _s: unknown, opts: { fyi?: boolean } = {}) => opts.fyi
+                ? { messages: [{ id: 801, kind: "comment_added", ticket_id: 3454, project: "tvty" }] }
+                : { messages: [] },
+        }),
+        null,
+        PINGS_YAML,
+    );
+    assert.equal(res.hasContent, false);
+    assert.doesNotMatch(res.phrase, /FYI, no action asked/);
+});

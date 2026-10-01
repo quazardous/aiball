@@ -545,10 +545,11 @@ export function listUnread(
     project: string | null | undefined,
     limit = 100,
     since?: string,
-    /** #3449 — `fifo-wake`: what may wake the consumer's loop, not all it may read. */
-    target: "unread-list" | "fifo-wake" = "unread-list",
+    /** #3449 — `fifo-wake`: what may wake the consumer's loop, not all it may read.
+     *  #3480 — `fyi`: what it may read but that wakes it not. */
+    target: "unread-list" | "fifo-wake" | "fyi" = "unread-list",
 ): Message[] {
-    const msgs = fetchUnread(consumer_id, project, target).messages;
+    const msgs = target === "fyi" ? unreadNotWaking(consumer_id, project) : fetchUnread(consumer_id, project, target).messages;
     const filtered = since ? msgs.filter((m) => m.created_at >= since) : msgs;
     return enrichWithTicketSummary(filtered.slice(0, limit));
 }
@@ -592,6 +593,17 @@ export function unreadCount(consumer_id: string, project: string | null | undefi
  * pass through the rules engine. The caller picks the Target — same
  * fetch, different filter set.
  */
+/**
+ * #3480 — the unread events a consumer may read but that never wake it (a
+ * ticket another agent holds): nothing delivers them, so they rode along in no
+ * wake and stayed unread for ever. The loop now carries them in its next wake,
+ * as one line, and marks them read.
+ */
+function unreadNotWaking(consumer_id: string, project: string | null | undefined): Message[] {
+    const waking = new Set(fetchUnread(consumer_id, project, "fifo-wake").messages.map((m) => m.id));
+    return fetchUnread(consumer_id, project, "unread-list").messages.filter((m) => !waking.has(m.id));
+}
+
 function fetchUnread(
     consumer_id: string,
     project: string | null | undefined,

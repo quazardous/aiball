@@ -5185,7 +5185,8 @@
           "schema": {
             "type": "string",
             "enum": [
-              "wake"
+              "wake",
+              "fyi"
             ]
           }
         },

@@ -1428,7 +1428,9 @@ function applyCounters(c: { open: number; actionable: number; backlog: number; e
     // #3449 — the countdown arms on the pings that wake, not every unread one:
     // a ping the daemon marks `wakes: false` is never delivered.
     wakeEvents = c.wakes ?? c.events;
-    setIpcCounters({ open: c.open, backlog: c.backlog, events: c.events });
+    // #3480 — `e:` counts what waits to wake the agent; what only informs it
+    // rides along in its next wake, and would otherwise only climb.
+    setIpcCounters({ open: c.open, backlog: c.backlog, events: c.wakes ?? c.events });
     // #1055 S4 — surface the counters on the kernel bus.
     getKernelBus().emit("counters:refreshed", { open: c.open, backlog: c.backlog, events: c.events });
     // #1355 — arm the countdown on the actionable count (mirror of the

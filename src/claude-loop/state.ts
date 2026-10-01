@@ -9,6 +9,7 @@
  * - `loop.pid`   — pid of the detached loop process
  * - `loop.log`   — stdout/stderr of the loop
  */
+import { renderFyiLine, type FyiEvent } from "./fyi-line.js";
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { DECISION_KINDS, type DecisionKind } from "../decisions.js";
@@ -3075,7 +3076,7 @@ export async function buildContextPhrase(
             : (unreadHead?.id ?? null);
         // Same reasoning for the bundle extras and the diag: they describe the
         // FIFO head's ticket, which is not what we rendered.
-        const effExtraSeenIds = hintAnchored ? [] : bundleExtraSeenIds;
+        let effExtraSeenIds = hintAnchored ? [] : bundleExtraSeenIds;
         const effWakeTicketId = hintAnchored ? (eventHint?.ticketId ?? null) : wakeTicketId;
         const effBundleTicketCount = hintAnchored ? 1 : bundleTicketCount;
         // hasContent flags whether one of the actionable branches fired
@@ -3087,6 +3088,22 @@ export async function buildContextPhrase(
         // can start the per-consumer cooldown clock. Only when the
         // backlog branch actually fired (not on FIFO / lifecycle).
         const backlogTicketId = (backlogMode && head?.id) ? head.id : null;
+        // #3480 — the events it may read but that never wake it ride along in
+        // a wake that happens anyway, as one line, and are marked read with it.
+        if (hasContent) {
+            try {
+                const r = await client.unread(null, 50, undefined, { fyi: true }) as { messages?: FyiEvent[] };
+                // Never what waits to wake it: the two lists are apart on the
+                // daemon, and a wake is not the place to blur them.
+                const waking = new Set(unreadMsgs.map((m) => m?.id));
+                const fyi = (r?.messages ?? []).filter((m) => typeof m?.id === "number" && !waking.has(m.id));
+                const line = renderFyiLine(fyi);
+                if (line) {
+                    cta = `${cta} ${line}`;
+                    effExtraSeenIds = [...effExtraSeenIds, ...fyi.map((m) => m.id)];
+                }
+            } catch { /* an older daemon, or none: the wake goes as it is */ }
+        }
         if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId, extraSeenIds: effExtraSeenIds, wakeTicketId: effWakeTicketId, bundleTicketCount: effBundleTicketCount };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))

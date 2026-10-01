@@ -768,14 +768,14 @@ export class AiballClient {
     /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO.
      *  #798 — `since` is an ISO 8601 cutoff. Filters messages whose
      *  `created_at` is >= since. */
-    unread(project: string | null | undefined, limit = 100, since?: string, opts: { forWake?: boolean } = {}) {
+    unread(project: string | null | undefined, limit = 100, since?: string, opts: { forWake?: boolean; fyi?: boolean } = {}) {
         return this.call("unread.list", {
             consumer_id: this.agentId,
             ...(project ? { project } : {}),
             limit,
             ...(since ? { since } : {}),
             // #3449 — the loop's wake reads only what may wake it.
-            ...(opts.forWake ? { for: "wake" } : {}),
+            ...(opts.forWake ? { for: "wake" } : opts.fyi ? { for: "fyi" } : {}),
         });
     }
     markMessageSeen(message_id: number) {
