@@ -221,12 +221,14 @@ impl Drop for Job {
 }
 
 /// `--detach`: start this host again, out of the caller's job and console,
-/// and say how it went. The daemon runs in a job (the tray's, the scheduled
-/// task's) that ends every process in it with the daemon: a host left there
-/// would die with each restart, the Claude in it too. Breaking away is refused
-/// when the job does not allow it: the host then starts in it all the same,
-/// and says so. What systemd-run --scope does on Linux. The new host's pid,
-/// and whether it left the job.
+/// and say how it went. The daemon may run in a job that ends every process in
+/// it when it closes: a host left there would die with it, the Claude in it
+/// too. Breaking away is refused when the job does not allow it: the host then
+/// starts in it all the same, and says so. #3467 — the usual case is the Task
+/// Scheduler's job (the tray started at logon), which refuses breaking away but
+/// ends nothing when the task ends, is deleted or is stopped: there the host
+/// lives on. What systemd-run --scope does on Linux. The new host's pid, and
+/// whether it left the job.
 #[cfg(windows)]
 pub fn detach(args: &[String]) -> io::Result<(u32, bool)> {
     use std::os::windows::process::CommandExt;
@@ -247,7 +249,7 @@ pub fn detach(args: &[String]) -> io::Result<(u32, bool)> {
     match spawn(base | CREATE_BREAKAWAY_FROM_JOB) {
         Ok(child) => Ok((child.id(), true)),
         Err(e) => {
-            eprintln!("cl-session-host: cannot leave the caller's job ({e}): the host starts in it, and ends with it");
+            eprintln!("cl-session-host: cannot leave the caller's job ({e}): the host starts in it, and ends only if that job ends its processes");
             spawn(base).map(|c| (c.id(), false))
         }
     }

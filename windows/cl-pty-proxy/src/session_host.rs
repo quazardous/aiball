@@ -176,7 +176,8 @@ fn run() -> i32 {
 }
 
 /// Exit status of a `--detach` whose host could not leave the caller's job:
-/// it runs, but ends with the caller (src/sessions/hosts.ts says so).
+/// it runs inside it, and ends only if that job ends its processes
+/// (src/sessions/hosts.ts says so).
 #[cfg(windows)]
 const DETACHED_IN_JOB: i32 = 3;
 

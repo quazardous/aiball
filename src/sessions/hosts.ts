@@ -18,7 +18,7 @@ import { connectHost, controlAuthLine } from "../host-socket.js";
 /** A Unix socket's path is at most about 100 bytes. */
 export { MAX_SOCKET_PATH } from "../session-dir.js";
 
-/** #3425 — the host's own `--detach` exit status when it could not leave the daemon's job. */
+/** #3425 — the host's own `--detach` exit status when it could not leave the daemon's job (it runs inside it, #3467). */
 const DETACHED_IN_JOB = 3;
 
 export const SESSION_NAME = /^[A-Za-z0-9._-]{1,64}$/;
@@ -240,7 +240,10 @@ async function spawnHost(cmd: string, args: string[], o: StartHost, dir: string,
         }
         if (detaches && child.exitCode === DETACHED_IN_JOB && !told) {
             told = true;
-            console.error("[sessions] the session host could not leave the daemon's job: it ends when the daemon does");
+            // #3467 — not "it ends with the daemon": the usual job here is the Task
+            // Scheduler's (the tray started at logon), which forbids leaving it but
+            // ends nothing; the host outlives the daemon's restarts all the same.
+            console.error("[sessions] the session host stays in the job the daemon runs in (it may not leave it): it ends only if that job ends its processes");
         }
         await new Promise((r) => setTimeout(r, 25));
     }

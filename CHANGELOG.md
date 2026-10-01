@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- On Windows, the daemon's log no longer says a session host "ends when the
+  daemon does" when it could not leave the daemon's job. That job is usually
+  the Task Scheduler's (the tray started at logon): it forbids leaving it but
+  ends nothing, so the host outlives the daemon's restarts. The log now says
+  the host stays in that job, and `docs/SESSION-HOST.md` says what was tried.
+
 - A loop started from a Claude Code session's terminal keeps its Claude's
   history: the session's markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`,
   its id and messaging token…) reached the agent's Claude, which took itself
