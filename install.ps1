@@ -1229,8 +1229,13 @@ if ($Service) {
         -Argument (Get-HiddenArgs $taskTarget) `
         -WorkingDirectory $AppDir
     $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    # The battery: the defaults refuse to start the task on battery and stop it
+    # when the machine goes on battery, so a laptop logged on unplugged had no
+    # tray and no daemon.
     $settings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
         -RestartCount 5 `
         -RestartInterval (New-TimeSpan -Minutes 1) `
         -ExecutionTimeLimit (New-TimeSpan -Hours 0)   # 0 = unlimited
