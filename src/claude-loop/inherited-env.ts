@@ -104,3 +104,19 @@ export function dropClaudeSessionEnv(env: NodeJS.ProcessEnv): string[] {
  */
 export const UNSET_CLAUDE_SESSION_SH =
     `__cl_re='${CLAUDE_SESSION_ENV.source}'; for __cl_v in $(compgen -e); do [[ $__cl_v =~ $__cl_re ]] && unset "$__cl_v"; done; unset __cl_re __cl_v`;
+
+/**
+ * #3462 — the environment a kernel gives the `claude-loop restart` / `reload`
+ * it runs on itself: none of its loop's identity. That command starts in the
+ * install root, whose `.aiball.yaml` names its own agent: carrying the loop's
+ * `AIBALL_AGENT`, it was refused as a foreign agent's shell (#3389), and the
+ * loop was left with no kernel (tvty-claude's restart for an update). The
+ * plate holds everything a restart needs; a reload reads the loop's env file.
+ */
+export function selfControlEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const own = { ...env };
+    for (const k of Object.keys(own)) {
+        if (k.startsWith("CL_") || (INHERITED_IDENTITY_KEYS as readonly string[]).includes(k)) delete own[k];
+    }
+    return own;
+}

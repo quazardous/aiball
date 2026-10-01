@@ -82,3 +82,27 @@ test("#3460 the env file's line clears the same markers in bash, whatever the tm
     assert.deepEqual(names, Object.keys(MEANT).filter((k) => /^CLAUDE/.test(k)).sort());
     assert.ok(names.every((n) => !CLAUDE_SESSION_ENV.test(n)));
 });
+
+// #3462 — a kernel's own restart/reload carries none of its loop's identity:
+// started from the install root, it was refused as a foreign agent's shell.
+test("#3462 a kernel's own restart runs without its loop's identity, with what reaches the daemon", async () => {
+    const { selfControlEnv } = await import("./inherited-env.js");
+    const kernel: NodeJS.ProcessEnv = {
+        CL_STATE_DIR: "/s/cl-tvty", CL_NAME: "cl-tvty", CL_HOST_CONTROL: "/h/control.sock", CL_CLAUDE_CMD: "claude",
+        AIBALL_AGENT: "tvty-claude", AIBALL_PROJECT: "tvty", AIBALL_CWD: "/w/tvty",
+        AIBALL_SOCK: "/home/x/.local/share/aiball/sock", AIBALL_HOME: "/home/x/.local/share/aiball", PATH: "/bin",
+    };
+    const own = selfControlEnv(kernel);
+    assert.deepEqual(Object.keys(own).sort(), ["AIBALL_HOME", "AIBALL_SOCK", "PATH"]);
+    assert.equal(kernel.AIBALL_AGENT, "tvty-claude", "the kernel's own environment is not touched");
+});
+
+test("#3462 the identity guard lets such a restart through in another agent's folder", async () => {
+    const { selfControlEnv } = await import("./inherited-env.js");
+    const { judgeIdentity } = await import("../identity-guard.js");
+    const env = selfControlEnv({ AIBALL_AGENT: "tvty-claude", AIBALL_PROJECT: "tvty", CL_STATE_DIR: "/s" });
+    const folder = { file: "/w/aiball/.aiball.yaml", agent: "claude-aiball-dev", project: "aiball" };
+    const facts = { command: "claude-loop", folder, ownLoop: false, loopName: null, as: undefined, allow: false };
+    assert.equal(judgeIdentity({ ...facts, envAgent: "tvty-claude", envProject: "tvty" }).kind, "refused", "what happened to tvty-claude");
+    assert.equal(judgeIdentity({ ...facts, envAgent: env.AIBALL_AGENT, envProject: env.AIBALL_PROJECT }).kind, "ok");
+});

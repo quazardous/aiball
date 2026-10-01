@@ -45,6 +45,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop whose Claude is restarted from tvty (after an update) comes back:
+  the restart its kernel ran on itself was refused by the check against
+  another agent's folder, since it ran from aiball's own folder with the
+  loop's identity, and the loop was left with no kernel. The kernel now runs
+  its own restart and reload without its loop's identity.
 - On a Windows laptop, the tray and the daemon start at logon on battery, and
   going on battery no longer stops their scheduled task: `install.ps1`
   registered it with Windows' defaults, which refuse both. Run `install.ps1`
