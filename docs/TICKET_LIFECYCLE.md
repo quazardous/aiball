@@ -337,6 +337,11 @@ at the human's expense); with it, a waiting thread re-surfaces about once per
 window instead of every heartbeat. A gated thread is therefore never silent
 *forever* — its silence is bounded by the cooldown.
 
+The window is `tickets.backlog.rest` (an hour by default; global, then the
+agent's project). A loop started with `CL_BACKLOG_COOLDOWN_SEC` applies that
+instead. A caller that sets no window of its own asks `cooldown_sec=auto` and
+gets the agent's.
+
 The window is lifted as soon as the thread moves — but only when someone
 *else* moves it. The wake asks the woken agent for a gesture, so its own reply
 is an answer, not news: it leaves the ticket cooled, and the thread comes back
@@ -447,7 +452,7 @@ boolean checks on the result.
 | `is_claim` | bool | I hold a live claim on this ticket (claimant=me, within window). |
 | `hot` | bool | Cross-agent visibility flag — at least one agent has been active on this thread recently. |
 | `backlog_tier` | -1\|0\|1\|2\|3\|4\|null | Lower = higher focus. -1 = **critical** (the project's open ticket holding back the most open tickets, when it is in my pool — its own wake, before the rest; it sinks like any head); 0 = **hot** (cross-agent activity within the hot window — overrides the tiers below); 1 = actionable (ball in my court); 2 = follow-up (they spoke last but a decision gate holds `actionable` — soft surface); 3 = waiting on them (I was the last actor, no decision pending); 4 = blocked (open `depends_on` blocker — check the chain); null = not in my backlog (closed / snoozed / **assigned to another agent**). |
-| `backlog_cooled_until` | string\|null | When the loop just woke on this ticket and the cooldown is still open, the ISO timestamp when the row will resurface. Always null when `cooldown_sec` query param is 0 or unset. |
+| `backlog_cooled_until` | string\|null | When the loop just woke on this ticket and the cooldown is still open, the ISO timestamp when the row will resurface. Always null when `cooldown_sec` query param is 0 or unset; `auto` applies the agent's window. |
 | `gated_by_decision` | bool | A `then:plan` or `then:resolved` proposal is sitting unresolved on the thread — the ticket is in awaiting-validation state. |
 | `last_actor` | string\|null | The consumer who last acted on the thread (denormalised). |
 | `last_actor_at` | string\|null | ISO timestamp of the last action. |

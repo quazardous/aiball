@@ -370,6 +370,18 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "How long a claim holds against another agent's claim, counted from its holder's last action on the ticket — working on it keeps the protection alive. Another agent's claim inside that window is refused; past it the ticket can be taken over, and the thread records it. An assignment always wins over a claim. 0 = no protection.",
     },
     {
+        key: "tickets.backlog.rest",
+        min: 0,
+        max: 604800,
+        step: 300,
+        scope: "global+project",
+        type: "duration",
+        default: 3600,
+        label: "How long a ticket rests after a backlog wake",
+        description:
+            "After a backlog wake named a ticket, how long it stays out of the agent's next backlog wakes while nobody else moves on it. A blocked ticket rests `blocked_multiplier` times longer, a ticket whose last action is a step only `after_step`. A loop started with CL_BACKLOG_COOLDOWN_SEC applies that instead. 0 = no rest.",
+    },
+    {
         key: "tickets.backlog.depth",
         scope: "global+project",
         type: "enum",

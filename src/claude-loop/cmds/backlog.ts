@@ -124,7 +124,8 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
         // que `claude-loop backlog` (sans --cooled) affiche. Sans ça,
         // counter compte ALL = cooled inclus, list = uniquement
         // non-cooled → désynchro user-visible.
-        const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
+        // #3472 — without the variable, the daemon's `tickets.backlog.rest` (`auto`).
+        const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] || "auto";
         const [projects, backlogRows, unread] = await Promise.all([
             client.listProjectsDetailed(),
             client.listTickets({
@@ -204,7 +205,7 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
         project: ctx.project,
         backlog: "1",
         limit: String(limit),
-        cooldown_sec: String(process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600"),
+        cooldown_sec: process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] || "auto",
     }) as TicketRow[] | { tickets?: TicketRow[] };
     const allTickets: TicketRow[] = Array.isArray(rows) ? rows : (rows.tickets ?? []);
     // Default : exclude cooled tickets (= ancien comportement quand l'API

@@ -38,6 +38,10 @@ dates are YYYY-MM-DD.
   dependency, no longer wakes it: it stays in its backlog, marked, and comes
   back when someone moves on it or its blocker closes. `blocked` keeps the
   previous behaviour.
+- How long a ticket rests after a backlog wake named it is a setting too,
+  `tickets.backlog.rest` (an hour by default, global or per project). It was
+  the loop's environment alone (`CL_BACKLOG_COOLDOWN_SEC`), which still wins
+  when it is set.
 
 ### Fixed
 

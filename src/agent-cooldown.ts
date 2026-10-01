@@ -6,8 +6,10 @@
  * asked, so a client and the bar see the rest the loop really applies.
  */
 import { onPresenceStop } from "./live-presence.js";
+import { getConfig } from "./db/config-overrides.js";
+import { getConsumer } from "./db/consumers.js";
 
-/** The rest a loop applies when it says none: the loop's own default. */
+/** The rest when neither the loop nor the config says one. */
 export const DEFAULT_BACKLOG_COOLDOWN_SEC = 3600;
 
 const said = new Map<string, number>();
@@ -17,9 +19,15 @@ export function setAgentCooldown(agent: string, sec: number): void {
     said.set(agent, sec);
 }
 
-/** The rest `agent`'s loop applies: what it said, else the default. */
+/**
+ * The rest `agent`'s backlog applies: what its loop said (CL_BACKLOG_COOLDOWN_SEC),
+ * else #3472 `tickets.backlog.rest` for the agent's project, global as fallback.
+ */
 export function agentCooldownSec(agent: string): number {
-    return said.get(agent) ?? DEFAULT_BACKLOG_COOLDOWN_SEC;
+    const loop = said.get(agent);
+    if (loop !== undefined) return loop;
+    const v = Number(getConfig("tickets.backlog.rest", getConsumer(agent)?.project ?? null));
+    return Number.isFinite(v) && v >= 0 ? v : DEFAULT_BACKLOG_COOLDOWN_SEC;
 }
 
 // A loop that is gone says nothing any more: the next one says its own.

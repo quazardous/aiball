@@ -69,3 +69,31 @@ test("a loop that says 600 s: consumer.backlog applies it, and the counters coun
     const explicit = (Date.parse(r.rows.find((x) => x.id === ticket)!.backlog_cooled_until!) - Date.now()) / 1000;
     assert.ok(explicit > 0 && explicit <= 60, `the asked 60 s: ${explicit}`);
 });
+
+// #3472 — without the loop's word, the rest is `tickets.backlog.rest`: global, then the agent's project.
+test("#3472 the rest is tickets.backlog.rest when the loop says none; the loop's word wins", async () => {
+    const { agentCooldownSec, setAgentCooldown, resetAgentCooldownsForTests } = await import("./agent-cooldown.js");
+    const { setConfigOverride } = await import("./db/config-overrides.js");
+    const { listTicketsFor } = await import("./queries/tickets.js");
+    const { setConsumerState } = await import("./db/consumers.js");
+    upsertConsumer({ consumer_id: "cfg-agent", kind: "agent" });
+    // An agent's project is the one its loop says it works in.
+    setConsumerState("cfg-agent", "idle", undefined, undefined, "/w", "p-3472");
+    setConsumerState("rest-agent", "idle", undefined, undefined, "/w", "p-3321");
+    resetAgentCooldownsForTests();
+    assert.equal(agentCooldownSec("cfg-agent"), 3600, "the shipped default");
+    setConfigOverride("", "tickets.backlog.rest", 1200);
+    assert.equal(agentCooldownSec("cfg-agent"), 1200, "the global setting");
+    setConfigOverride("p-3472", "tickets.backlog.rest", 7200);
+    assert.equal(agentCooldownSec("cfg-agent"), 7200, "its project's setting");
+    setAgentCooldown("cfg-agent", 60);
+    assert.equal(agentCooldownSec("cfg-agent"), 60, "a loop started with CL_BACKLOG_COOLDOWN_SEC");
+    resetAgentCooldownsForTests();
+    // `cooldown_sec=auto` applies it: the ticket just named rests for the project's 2 h.
+    const { recordBacklogWake } = await import("./db/projects.js");
+    recordBacklogWake("rest-agent", ticket);
+    setConfigOverride("p-3321", "tickets.backlog.rest", 7200);
+    const rows = listTicketsFor("rest-agent", { backlog: "1", cooldown_sec: "auto" }, { noClaimHint: false }) as Array<{ id: number; backlog_cooled_until: string | null }>;
+    const until = rows.find((r) => r.id === ticket)?.backlog_cooled_until;
+    assert.ok(until && Date.parse(until) - Date.now() > 6000 * 1000, `rests about 2 h, got ${until}`);
+});

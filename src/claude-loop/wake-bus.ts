@@ -16,10 +16,16 @@
 import type { AiballClient } from "../client.js";
 import { CL_ENV } from "./env-vars.js";
 
-/** #3321 — this loop's backlog rest (`CL_BACKLOG_COOLDOWN_SEC`, 3600 s by default), as its backlog applies it. */
-function backlogCooldownSec(): number {
-    const v = Math.floor(Number(process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? 3600));
-    return Number.isFinite(v) && v >= 0 ? v : 3600;
+/**
+ * #3321 — this loop's backlog rest, said to the daemon when it opens its events.
+ * #3472 — only when `CL_BACKLOG_COOLDOWN_SEC` sets one: otherwise the daemon
+ * applies `tickets.backlog.rest`.
+ */
+function backlogCooldownSec(): number | undefined {
+    const raw = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC];
+    if (raw === undefined || raw === "") return undefined;
+    const v = Math.floor(Number(raw));
+    return Number.isFinite(v) && v >= 0 ? v : undefined;
 }
 
 /** Wake hint from a `sse:ping` event — the SSE payload as-is. */

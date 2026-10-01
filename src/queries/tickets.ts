@@ -5,6 +5,7 @@
  * rows, and the relations' stages on a thread. No route: the ticket routes
  * moved to the bus (#3063, #3068).
  */
+import { agentCooldownSec } from "../agent-cooldown.js";
 import { waitCreditBalance, waitCreditEnabled, waitCreditRules } from "../db/wait-credit.js";
 import { allClosedTicketIds } from "../db/ticket-closed.js";
 import { milestoneRankOf, milestonesOf } from "../db/milestones.js";
@@ -442,8 +443,11 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
     // 5-6 independent Sets and combine them inline; the route now
     // delegates to `computeTicketFlags(row, ctx)`. Adding a new
     // condition means editing the pure fn, not the route.
-    const cooldownSec = typeof query.cooldown_sec === "string"
-        && Number.isFinite(Number(query.cooldown_sec))
+    // #3472 — `auto`: the rest this agent's backlog applies (its loop's word,
+    // else `tickets.backlog.rest`), for a caller that sets none itself.
+    const cooldownSec = query.cooldown_sec === "auto"
+        ? agentCooldownSec(consumerId)
+        : typeof query.cooldown_sec === "string" && Number.isFinite(Number(query.cooldown_sec))
         ? Math.max(0, Number(query.cooldown_sec))
         : 0;
     const flagsCtx = buildTicketFlagsContext({

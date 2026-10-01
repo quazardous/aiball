@@ -2690,7 +2690,9 @@ export async function buildContextPhrase(
                 // when actionable_count is zero.
                 // #786 — pass the per-loop cooldown so the daemon excludes
                 // tickets we just named and that haven't moved since.
-                const cooldownSec = Math.max(0, Number(process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? 3600));
+                // #3472 — without CL_BACKLOG_COOLDOWN_SEC, the daemon's `tickets.backlog.rest` (`auto`).
+                const cooldownEnv = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC];
+                const cooldownSec = cooldownEnv === undefined || cooldownEnv === "" ? "auto" : Math.max(0, Number(cooldownEnv));
                 // #910 david : pull plus que `limit:1` puis filter en local
                 // les tickets en cooldown (`backlog_cooled_until` set). Le
                 // daemon ne filtre PAS les cooled côté API (intentionnel
@@ -2708,7 +2710,7 @@ export async function buildContextPhrase(
                     ...(project ? { project } : {}),
                     backlog: "1",
                     limit: "500",
-                    cooldown_sec: cooldownSec > 0 ? String(cooldownSec) : undefined,
+                    cooldown_sec: cooldownSec === "auto" ? "auto" : cooldownSec > 0 ? String(cooldownSec) : undefined,
                 });
                 type BacklogRow = {
                     id: number;
