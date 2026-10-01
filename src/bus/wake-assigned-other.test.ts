@@ -2,7 +2,8 @@
  * #3449 — a project's owner hears every event of the project, but a ticket
  * assigned to another agent is one to read, not one to be woken for: the
  * ping stays unread, it is not in the wake FIFO, and its live event says
- * `wakes: false`. A ticket that names the owner still wakes it.
+ * `wakes: false`. A ticket that names the owner, or that it follows (filed,
+ * wrote on), still wakes it.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -65,4 +66,12 @@ test("a ticket assigned to nobody wakes every owner, as before", () => {
     const t = file("anyone");
     assert.ok(ids("lead", true).includes(t));
     assert.ok(ids("crew", true).includes(t));
+});
+
+test("a ticket the lead follows wakes it: a reply on a ticket it wrote on", () => {
+    const t = file("the lead joins in", { assignee: "crew" });
+    assert.ok(!ids("lead", true).includes(t), "not followed yet: no wake");
+    run("message.post", testCaller("lead"), { kind: "comment_added", ticket_id: t, parent_id: t, body: "noted", summary_until: "s", handback: true, commits: null });
+    const reply = run("message.post", boss, { kind: "comment_added", ticket_id: t, parent_id: t, body: "thanks" }) as { id: number };
+    assert.ok(ids("lead", true).includes(reply.id), "the boss's reply wakes the lead, who wrote on it");
 });

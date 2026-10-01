@@ -63,6 +63,8 @@ export interface BacklogRulesCtx {
     mentionsMeIds: Set<number>;
     /** #3449 — whether a ticket names this consumer (`@id`), its body or a comment; asked only of tickets assigned to another. */
     namesMe?: (ticketId: number) => boolean;
+    /** #3449 — whether this consumer follows a ticket (filed it, wrote on it, subscribed); asked only of tickets assigned to another. */
+    followsTicket?: (ticketId: number) => boolean;
     /** #2525 — the wake focus in force on each project this consumer owns, for
      *  an AGENT owner only. Absent project = no focus. Optional so a caller
      *  that built a ctx before #2525 changes nothing. */
@@ -158,14 +160,16 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         excludesFrom: new Set<Target>(["backlog-tier"]),
     },
     {
-        // #3449 — the wake side of `assigned-to-other`, with one exception: a
-        // ticket that names me (`@me`) still wakes me, assigned or not. Naming
-        // someone is a deliberate call. A project's owner hears every event of
-        // the project; a ticket given to another agent is one to read, not one
-        // to be woken for.
-        name: "assigned-to-other-unless-named",
+        // #3449 — the wake side of `assigned-to-other`. A project's owner hears
+        // every event of the project; a ticket given to another agent is one to
+        // read, not one to be woken for. Two exceptions: a ticket that names me
+        // (`@me`) — naming someone is a deliberate call — and a ticket I follow
+        // (I filed it, or wrote on it): its replies are for me.
+        name: "assigned-to-other-unless-mine",
         when: (ctx, item) =>
-            item.assignee != null && item.assignee !== ctx.consumerId && !(ctx.namesMe?.(item.ticketId) ?? false),
+            item.assignee != null && item.assignee !== ctx.consumerId
+            && !(ctx.namesMe?.(item.ticketId) ?? false)
+            && !(ctx.followsTicket?.(item.ticketId) ?? false),
         excludesFrom: new Set<Target>(["fifo-wake"]),
     },
     {
@@ -279,10 +283,14 @@ export function buildBacklogRulesCtx(
     const mentionsMeIds = canClaim ? new Set<number>() : ticketsMentioning(consumerId);
     const focusByProject = wakeFocusFor(consumerId, nowMs);
     const namesMe = namesMeOf(consumerId, canClaim ? null : mentionsMeIds);
+    const followsTicket = (ticketId: number): boolean => !!getDb().select({ c: schema.ticketSubscriptions.consumerId })
+        .from(schema.ticketSubscriptions)
+        .where(and(eq(schema.ticketSubscriptions.ticketId, ticketId), eq(schema.ticketSubscriptions.consumerId, consumerId)))
+        .get();
     if (opts.closedIds && opts.snoozedIds) {
         return {
             consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds,
-            claimedByOtherIds, canClaim, mentionsMeIds, namesMe, focusByProject,
+            claimedByOtherIds, canClaim, mentionsMeIds, namesMe, followsTicket, focusByProject,
         };
     }
     const db = getDb();
@@ -304,7 +312,7 @@ export function buildBacklogRulesCtx(
             .all();
         snoozedIds = new Set(rows.map((r) => r.id));
     }
-    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds, namesMe, focusByProject };
+    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds, namesMe, followsTicket, focusByProject };
 }
 
 /**
