@@ -12,6 +12,8 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { DetachKeys, attachHost, copyBar } from "./host-attach.js";
+import { sampleBar } from "./attach-bar.fixture.js";
+import type { AgentBar } from "../agent-bar.js";
 import { removeHostHome, sessionHostSkip } from "../tests/session-host-bin.js";
 
 const home = mkdtempSync("/tmp/aiball-3066-attach-");
@@ -159,4 +161,39 @@ test("#3166 — the copy bar: on the last row, in reverse video, cut to the widt
     const text = (cols: number) => copyBar(1, cols, "cl-x").replace(/^\x1b7\x1b\[1;1H\x1b\[0;7m/, "").replace(/\x1b\[0m\x1b8$/, "");
     const width = (t: string) => [...t].reduce((n, ch) => n + (/\p{Extended_Pictographic}/u.test(ch) ? 2 : 1), 0);
     for (const cols of [10, 40, 200]) assert.equal(width(text(cols)), cols, `exactly ${cols} cells`);
+});
+
+test("#3469 — the loop's bar: on the last row, Claude a row smaller, kept above it, the bar's watch stopped on leaving", { skip }, async () => {
+    const link = await startHost({ name: "attach-bar", argv: ["cat"], cwd: home, size: { rows: 20, cols: 70 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+    cleanups.push(async () => { await link.call("host.shutdown").catch(() => {}); link.close(); });
+
+    const stdin = new PassThrough();
+    let shown = "";
+    const stdout = Object.assign(new EventEmitter(), {
+        columns: 70,
+        rows: 20,
+        write(chunk: string | Buffer) { shown += chunk.toString(); return true; },
+    });
+    let stopped = 0;
+    let push: (v: { bar: AgentBar; stale: boolean } | null) => void = () => {};
+    const ended = attachHost(join(link.info.dir, "attach.sock"), { stdin, stdout: stdout as never }, {
+        watchBar: (onBar) => { push = onBar; onBar(null); return () => { stopped++; }; },
+        barSetup: { colors: { island_fg: "colour250", bar_fg: "colour16", afk_label_fg: "colour238", prompt_input_fg: "colour208", busy_bg: "colour33", idle_bg: "colour34", boot_bg: "colour178", link_down_bg: "colour196" }, name: "cl-bar", afkKey: "F9", detach: "C-b d" },
+    });
+
+    await until("attached", async () => ((await link.call("host.hello")) as { clients: number }).clients === 1);
+    assert.equal(((await link.call("host.hello")) as { size: { rows: number } }).size.rows, 19, "Claude gets the rows above the bar");
+    assert.ok(shown.includes("\x1b[1;19r"), "its output scrolls above the bar");
+    push({ bar: sampleBar({ afk: { mode: "wait_inf", expires_at: null } }), stale: false });
+    await until("tmux's bar drawn on the last row", () => shown.includes("\x1b[20;1H") && shown.includes("웃∞") && shown.includes("DETACH:"));
+
+    stdout.rows = 30;
+    stdout.emit("resize");
+    await until("the size followed, a row kept for the bar", async () => ((await link.call("host.hello")) as { size: { rows: number } }).size.rows === 29);
+    assert.ok(shown.includes("\x1b[1;29r"));
+
+    stdin.write("\x02d");
+    assert.deepEqual(await ended, { reason: "detached" });
+    assert.equal(stopped, 1, "the bar's watch is stopped");
+    assert.ok(shown.lastIndexOf("\x1b[r") > shown.lastIndexOf("\x1b[1;29r"), "the whole screen scrolls again");
 });

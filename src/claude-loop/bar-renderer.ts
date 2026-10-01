@@ -140,7 +140,7 @@ export interface BarSnapshot {
  *  `claude-loop`. Le caller (paint) gère fg/bg dans la format string. */
 const LONG_TASKS: ReadonlySet<string> = new Set(["compacting", "resuming"]);
 
-function renderMarkerSegment(
+export function renderMarkerSegment(
     loopStatus: LoopStatus,
     info: string | null,
     healthPromptVisible: boolean,
@@ -588,114 +588,116 @@ export class BarRenderer {
             this.spawn(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
         };
         const changedSet = new Set(changed);
-        // loopStatus change → status-bg + status-left template (le bg
-        // est inline dans la format string) + status-fg + @cl_state.
+        // #3469 — the values come from `barOptionValues`, shared with the
+        // session host's `claude-loop attach`; only the changed groups go out.
+        const v = barOptionValues(next, barColors());
         if (changedSet.has("loopStatus") || changedSet.has("stateTag")) {
-            const col = barColors();
-            // #1039 — a lost link (proxy↔timer OR loop↔daemon) paints the bar
-            // RED (overrides per-state bg) so the broken state is visible.
-            // #1072 — not-logged-in paints ORANGE (colour208, same as ZEN) and
-            // takes PRIORITY over the RED overlay : it's the state the human can
-            // fix immediately (run /login).
-            // #1116 — api-unreachable shares the ORANGE overlay + priority with
-            // not-logged-in : both are "no point waking, here's why" states.
-            const bg = (next.trustDialog || next.notLoggedIn || next.limitReached || next.apiUnreachable)
-                ? "colour208"
-                : (next.linkDown || next.daemonDown) ? col.link_down_bg : stateBg(col, next.loopStatus);
-            setOpt("status-bg", bg);
-            setOpt("status-fg", col.bar_fg);
-            // #950 david `<chat>` : @cl_state vit maintenant DANS le bloc
-            // fond noir (colour16) à côté de `claude-loop` — meilleur
-            // contraste. Plus de crochets / colons, tokens space-separated
-            // (cf. renderMarkerSegment).
-            // #1072 — surface WHY the bar is orange so the human knows to /login.
-            const stateTagStr = next.trustDialog
-                ? "⚠ trust this folder? · attach to answer"
-                : next.notLoggedIn
-                ? "⚠ not logged in · /login"
-                : next.limitReached
-                ? `⚠ usage limit reached · held${next.limitResetsText ? ` · resets ${next.limitResetsText}` : ""}`
-                // #3362 — no update or restart hint here: an update Claude Code
-                // installed is the agent bar's news (`alerts.restart_needed`), for
-                // a host to offer the restart; the tmux bar leaves it out.
-                : next.apiUnreachable ? "⚠ API unreachable · retrying"
-                : next.stateTag;
-            setOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] ${stateTagStr}`);
-            // status-left : @cl_state collé à `claude-loop`, AVANT la
-            // fade-out glyph. Les counters restent sur le status-bg
-            // coloré à droite.
-            setOpt(
-                "status-left",
-                `${COPY_MARK}#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
-            );
+            setOpt("status-bg", v["status-bg"]);
+            setOpt("status-fg", v["status-fg"]);
+            setOpt("@cl_state", v["@cl_state"]);
+            setOpt("status-left", v["status-left"]);
         }
-        if (changedSet.has("zenActive")) {
-            setOpt(
-                "@cl_zen",
-                next.zenActive
-                    ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
-                    : "",
-            );
-        }
-        if (changedSet.has("proxyAlive")) {
-            setOpt("@cl_proxy", next.proxyAlive ? `#[fg=colour250] ⇄` : "");
-        }
-        // #862 Slice 4 — `_paint_word` côté proxy supprimé. Le BarRenderer
-        // est maintenant le SEUL writer de `@cl_human` (proxy alive ou mort).
-        if (changedSet.has("humanWord")) {
-            setOpt("@cl_human", next.humanWord);
-        }
-        if (changedSet.has("counters")) {
-            const c = next.counters;
-            const parts: string[] = [];
-            // #911 david `hsd3vw` : counters TOUJOURS affichés. Si le
-            // fetch a échoué (counters null) OU est en cold-boot avant
-            // le 1er succès, fallback `o:- b:- e:-` pour que l'opérateur
-            // sache que la zone existe mais que les données ne sont
-            // pas encore là.
-            parts.push(`o:${c?.open ?? "-"}`);
-            parts.push(`b:${c?.backlog ?? "-"}`);
-            parts.push(`e:${c?.events ?? "-"}`);
-            // #891 — countdowns harmonisés dans la zone compteurs :
-            //   - 🚀Ns +Ns pendant boot (prioritaire, mutually exclusive)
-            //   - 📨 post-boot = indicateur STANDING (#1041) : visible dès
-            //     qu'il y a du travail en attente (events FIFO > 0 OU backlog
-            //     > 0), countdown ou pas. Le `Ns` n'est qu'un suffixe optionnel
-            //     (idle + tempo armé), précédé d'un espace : `📨 10s`.
-            if (next.bootElapsedSec !== null) {
-                parts.push(`🚀${next.bootElapsedSec}s`);
-                if (next.bootRemainingSec !== null) parts.push(`+${next.bootRemainingSec}s`);
-            } else {
-                const hasPending = (c?.events ?? 0) > 0 || (c?.backlog ?? 0) > 0;
-                if (hasPending || next.nextWakeInSec !== null) {
-                    parts.push(
-                        next.nextWakeInSec !== null ? `📨 ${next.nextWakeInSec}s` : "📨",
-                    );
-                }
-            }
-            const col = barColors();
-            setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
-        }
-        if (changedSet.has("promptGlyph")) {
-            // david `<chat>` 2026-06-14 : `❯` AVANT le mot `claude` ;
-            // un espace est inclus dans la valeur quand non-vide pour
-            // garder le bloc compact quand la prompt-zone disparaît.
-            const v = next.promptGlyph ? ` ${next.promptGlyph}` : "";
-            setOpt("@cl_prompt", v);
-        }
-        if (changedSet.has("typingGlyph")) {
-            // david `<chat>` 2026-06-14 : `⌨` indépendant — affiché
-            // SI typing, sans écraser le wait/loop dans @cl_human.
-            // Positioned entre @cl_prompt et @cl_human. La valeur
-            // est déjà préfixée des color tags par `typingGlyphChunk`.
-            const v = next.typingGlyph ? ` ${next.typingGlyph}` : "";
-            setOpt("@cl_typing", v);
-        }
-        if (changedSet.has("afkGlyph")) {
-            // #962 — bonhomme glyph + color/suffix selon le mode AFK.
-            // Valeur déjà préfixée des color tags + leading space par
-            // `afkGlyphChunk` ; vide en boot grace.
-            setOpt("@cl_afk_glyph", next.afkGlyph);
+        if (changedSet.has("zenActive")) setOpt("@cl_zen", v["@cl_zen"]);
+        if (changedSet.has("proxyAlive")) setOpt("@cl_proxy", v["@cl_proxy"]);
+        // #862 Slice 4 — the BarRenderer is the ONLY writer of `@cl_human`.
+        if (changedSet.has("humanWord")) setOpt("@cl_human", v["@cl_human"]);
+        if (changedSet.has("counters")) setOpt("@cl_counts", v["@cl_counts"]);
+        if (changedSet.has("promptGlyph")) setOpt("@cl_prompt", v["@cl_prompt"]);
+        if (changedSet.has("typingGlyph")) setOpt("@cl_typing", v["@cl_typing"]);
+        if (changedSet.has("afkGlyph")) setOpt("@cl_afk_glyph", v["@cl_afk_glyph"]);
+    }
+}
+
+/** The bar's colours, as the project config sets them. */
+export type BarColors = ReturnType<typeof barColors>;
+
+/** #3469 — the tmux options the bar is made of, by name. */
+export interface BarOptions {
+    "status-bg": string;
+    "status-fg": string;
+    "@cl_state": string;
+    "status-left": string;
+    "@cl_zen": string;
+    "@cl_proxy": string;
+    "@cl_human": string;
+    "@cl_counts": string;
+    "@cl_prompt": string;
+    "@cl_typing": string;
+    "@cl_afk_glyph": string;
+}
+
+/**
+ * #3469 — every option of the bar for one snapshot, pure: what `paint` writes
+ * into tmux, and what `claude-loop attach` draws itself on the session host,
+ * so both bars are the same one.
+ */
+export function barOptionValues(next: BarSnapshot, col: BarColors): BarOptions {
+    // #1039 — a lost link (proxy↔timer OR loop↔daemon) paints the bar
+    // RED (overrides per-state bg) so the broken state is visible.
+    // #1072 — not-logged-in paints ORANGE (colour208, same as ZEN) and
+    // takes PRIORITY over the RED overlay : it's the state the human can
+    // fix immediately (run /login).
+    // #1116 — api-unreachable shares the ORANGE overlay + priority with
+    // not-logged-in : both are "no point waking, here's why" states.
+    const bg = (next.trustDialog || next.notLoggedIn || next.limitReached || next.apiUnreachable)
+        ? "colour208"
+        : (next.linkDown || next.daemonDown) ? col.link_down_bg : stateBg(col, next.loopStatus);
+    // #950 — @cl_state lives in the black (colour16) block next to `claude`,
+    // tokens space-separated (cf. renderMarkerSegment).
+    // #1072 — surface WHY the bar is orange so the human knows to /login.
+    const stateTagStr = next.trustDialog
+        ? "⚠ trust this folder? · attach to answer"
+        : next.notLoggedIn
+        ? "⚠ not logged in · /login"
+        : next.limitReached
+        ? `⚠ usage limit reached · held${next.limitResetsText ? ` · resets ${next.limitResetsText}` : ""}`
+        // #3362 — no update or restart hint here: an update Claude Code
+        // installed is the agent bar's news (`alerts.restart_needed`), for
+        // a host to offer the restart; the tmux bar leaves it out.
+        : next.apiUnreachable ? "⚠ API unreachable · retrying"
+        : next.stateTag;
+    const c = next.counters;
+    // #911 — counters ALWAYS shown; `-` before the first read.
+    const parts = [`o:${c?.open ?? "-"}`, `b:${c?.backlog ?? "-"}`, `e:${c?.events ?? "-"}`];
+    // #891 — 🚀Ns +Ns during boot; after it, 📨 standing while work waits,
+    // with the next wake's countdown when one is armed (#1041).
+    if (next.bootElapsedSec !== null) {
+        parts.push(`🚀${next.bootElapsedSec}s`);
+        if (next.bootRemainingSec !== null) parts.push(`+${next.bootRemainingSec}s`);
+    } else {
+        const hasPending = (c?.events ?? 0) > 0 || (c?.backlog ?? 0) > 0;
+        if (hasPending || next.nextWakeInSec !== null) {
+            parts.push(next.nextWakeInSec !== null ? `📨 ${next.nextWakeInSec}s` : "📨");
         }
     }
+    return {
+        "status-bg": bg,
+        "status-fg": col.bar_fg,
+        "@cl_state": `#[fg=${col.island_fg},bg=colour16] ${stateTagStr}`,
+        // @cl_state right after `claude`, before the fade-out glyph; the
+        // counters stay on the coloured status-bg to the right.
+        "status-left": `${COPY_MARK}#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+        "@cl_zen": next.zenActive ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] ` : "",
+        "@cl_proxy": next.proxyAlive ? `#[fg=colour250] ⇄` : "",
+        "@cl_human": next.humanWord,
+        "@cl_counts": `#[fg=${col.bar_fg}] ${parts.join(" ")}`,
+        // `❯` BEFORE `claude`; a leading space when shown keeps the block compact.
+        "@cl_prompt": next.promptGlyph ? ` ${next.promptGlyph}` : "",
+        // `⌨` on its own, shown IF typing, without overwriting wait/loop.
+        "@cl_typing": next.typingGlyph ? ` ${next.typingGlyph}` : "",
+        // #962 — already prefixed with its colour tags and leading space.
+        "@cl_afk_glyph": next.afkGlyph,
+    };
+}
+
+/**
+ * #3469 — the bar's right side: the zen chip, the loop's name, how to detach,
+ * and the AFK key (`AFK:OFF` when the loop has none). Static for a session:
+ * `claude-loop start` writes it into tmux once, `claude-loop attach` draws it.
+ */
+export function statusRightFormat(col: Pick<BarColors, "afk_label_fg" | "bar_fg">, afkKeyDisp: string | null, detachDisp: string): string {
+    const afkStatic = afkKeyDisp !== null
+        ? `#[fg=${col.afk_label_fg}]AFK:#[fg=${col.bar_fg}]${afkKeyDisp}`
+        : `#[fg=${col.afk_label_fg}]AFK:OFF`;
+    return `#{@cl_zen}#[fg=${col.bar_fg}]#{@cl_name} #[fg=${col.afk_label_fg}]· DETACH:#[fg=${col.bar_fg}]${detachDisp} #[fg=${col.afk_label_fg}]· ${afkStatic} `;
 }

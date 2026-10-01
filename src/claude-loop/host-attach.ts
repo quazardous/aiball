@@ -10,6 +10,7 @@
  * copy: the keys go nowhere and the size stays the other clients'; Ctrl-C or
  * Ctrl-D leaves it too, as Ctrl-B D does (they would reach nothing anyway).
  */
+import { attachBarRow, RESET_SCROLL_REGION, scrollRegion, type AttachBarSetup, type AttachBarView } from "./attach-bar.js";
 import { connectHost, withToken } from "../host-socket.js";
 
 export const FRAME = {
@@ -95,18 +96,35 @@ export interface AttachIo {
 /** Why the attach ended: the user detached, the session ended, or the host refused or went away. */
 export type AttachEnd = { reason: "detached" } | { reason: "exited"; code: number | null } | { reason: "closed" | "error"; message: string };
 
-export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: boolean; label?: string } = {}): Promise<AttachEnd> {
+/** #3469 — hear the loop's bar: `onBar` at once with the current one, then on each change; returns how to stop. */
+export type WatchBar = (onBar: (view: AttachBarView | null) => void) => () => void;
+
+export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: boolean; label?: string; watchBar?: WatchBar; barSetup?: Omit<AttachBarSetup, "readonly">; now?: () => number } = {}): Promise<AttachEnd> {
     const readonly = opts.readonly === true;
     const label = opts.label ?? "the session";
+    const now = opts.now ?? Date.now;
+    // #3469 — with the loop's bar: drawn on the last row, Claude kept above it.
+    const withBar = opts.watchBar !== undefined && opts.barSetup !== undefined;
+    let barView: AttachBarView | null = null;
     // #3166 — a copy says so: the bar on the last row, drawn again after
     // whatever Claude writes, and the terminal's title (pushed, popped on leaving).
-    const bar = () => { if (readonly) io.stdout.write(copyBar(io.stdout.rows || 24, io.stdout.columns || 80, label)); };
+    const bar = () => {
+        const rows = io.stdout.rows || 24;
+        const cols = io.stdout.columns || 80;
+        if (withBar) io.stdout.write(attachBarRow(rows, cols, barView, now(), { ...opts.barSetup!, readonly }));
+        else if (readonly) io.stdout.write(copyBar(rows, cols, label));
+    };
+    const keepAbove = () => { if (withBar) io.stdout.write(scrollRegion(io.stdout.rows || 24)); };
     return new Promise((resolve) => {
         const { socket: sock, token } = connectHost(socketPath);
         const reader = new FrameReader();
         const keys = new DetachKeys();
         let done = false;
-        const size = () => ({ rows: io.stdout.rows || 24, cols: io.stdout.columns || 80 });
+        // #3469 — Claude gets the rows above the bar.
+        const size = () => ({ rows: Math.max(1, (io.stdout.rows || 24) - (withBar ? 1 : 0)), cols: io.stdout.columns || 80 });
+        let stopBar: (() => void) | null = null;
+        let tick: ReturnType<typeof setInterval> | null = null;
+        const onBarResize = () => { keepAbove(); bar(); };
         const onResize = () => sock.write(frame(FRAME.resize, JSON.stringify(size())));
         const onKeys = (chunk: Buffer | string) => {
             const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
@@ -123,6 +141,10 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
             if (io.stdin.isTTY) io.stdin.setRawMode?.(false);
             io.stdin.pause();
             io.stdout.off?.("resize", bar);
+            io.stdout.off?.("resize", onBarResize);
+            stopBar?.();
+            if (tick) clearInterval(tick);
+            if (withBar) io.stdout.write(RESET_SCROLL_REGION);
             io.stdout.write(RESTORE);
             if (readonly) io.stdout.write("\x1b[23;0t");
             sock.destroy();
@@ -134,8 +156,15 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
             io.stdin.on("data", onKeys);
             io.stdin.resume();
             if (!readonly) io.stdout.on("resize", onResize);
-            if (readonly) {
-                io.stdout.write(`\x1b[22;0t\x1b]0;👁 COPY — ${label}\x07`);
+            if (readonly) io.stdout.write(`\x1b[22;0t\x1b]0;👁 COPY — ${label}\x07`);
+            if (withBar) {
+                keepAbove();
+                io.stdout.on("resize", onBarResize);
+                stopBar = opts.watchBar!((v) => { barView = v; bar(); });
+                // The countdowns move by themselves.
+                tick = setInterval(bar, 1000);
+                tick.unref?.();
+            } else if (readonly) {
                 io.stdout.on("resize", bar);
             }
         });

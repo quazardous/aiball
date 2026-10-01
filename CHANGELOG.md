@@ -25,6 +25,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `claude-loop attach` on a loop running on the session host shows the
+  loop's bar again, on the terminal's last row: the same bar as tmux's status
+  line, glyphs, colours and right side included (AFK and its countdown, busy
+  or idle, the next wake, the counters, the alerts). In tmux it was tmux's
+  status line; on the host nothing drew it, so F9 showed nothing. Claude gets
+  the rows above it.
 - On Windows, the daemon's log no longer says a session host "ends when the
   daemon does" when it could not leave the daemon's job. That job is usually
   the Task Scheduler's (the tray started at logon): it forbids leaving it but

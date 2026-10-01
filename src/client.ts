@@ -1005,6 +1005,39 @@ export class AiballClient {
             conn?.close();
         };
     }
+    /**
+     * #3469 — hear an agent's bar (`agent.<id>.bar`): `onBar` at once with the
+     * current one (null when the loop published none), then on each change.
+     * On a connection of its own, closed by the returned stop; a failure ends
+     * the watch quietly (the caller keeps the last bar it had).
+     */
+    watchAgentBar(agent: string, onBar: (view: { bar: AgentBar; stale: boolean } | null) => void): () => void {
+        let stopped = false;
+        let conn: BusClient | null = null;
+        const headers = this.identityHeaders();
+        void (async () => {
+            try {
+                conn = await BusClient.connect(this.socketPath
+                    ? { socket: this.socketPath, headers }
+                    : { url: this.url, token: this.token ?? undefined, headers });
+                if (stopped) { conn.close(); return; }
+                let subscription: string | null = null;
+                conn.onNotification((method, params) => {
+                    const p = params as { subscription?: string; data?: { bar: AgentBar; stale: boolean } | null } | null;
+                    if (method === "bus.event" && p && subscription !== null && p.subscription === subscription) onBar(p.data ?? null);
+                });
+                const r = await conn.call<{ id: string; value: { bar: AgentBar; stale: boolean } | null }>("bus.subscribe", { subject: `agent.${agent}.bar` });
+                subscription = r.id;
+                onBar(r.value ?? null);
+            } catch {
+                /* no bar: the attach goes on without one */
+            }
+        })();
+        return () => {
+            stopped = true;
+            conn?.close();
+        };
+    }
     /** #800 — project optional. Omitted = cross-project consumer-scoped count. */
     unreadCount(project: string | null | undefined) {
         return this.call<{ count: number }>("unread.count", { consumer_id: this.agentId, ...(project ? { project } : {}) });

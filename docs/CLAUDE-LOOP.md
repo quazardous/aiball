@@ -364,7 +364,7 @@ claude-loop list                       # alive/dead + state summary
 claude-loop status [name]              # connection type, default agent, daemon reachability
 claude-loop tail <name> --lines 30     # last N lines of the claude pane
 claude-loop tail <name> --timer        # detached timer's stdout log
-claude-loop attach <name> [--read-only] # attach in tmux or on the session host; --read-only watches a copy (detach: Ctrl-B D)
+claude-loop attach <name> [--read-only] # attach in tmux or on the session host; --read-only watches a copy (detach: Ctrl-B D); on the host, the loop's bar is drawn on the last row
 claude-loop wake <name>                # force the next tick (bypass check-cmd)
 claude-loop reload [name]              # respawn the timer in place (keeps claude)
 claude-loop restart [name] --resume    # hard restart, resuming Claude's conversation whatever the start config says

@@ -30,6 +30,8 @@ import { mouseSetupCommands } from "./mouse-setup.js";
 import { isBarHost, type BarHost } from "../agent-bar.js";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
+import { statusRightFormat } from "./bar-renderer.js";
+import { loadConfig } from "../autopoll/config.js";
 import { AIBALL_VERSION } from "../version.js";
 import { AS_HELP } from "../identity-guard.js";
 import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
@@ -1355,9 +1357,6 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // de la zone claude (`@cl_afk_glyph`, peint par BarRenderer). Plus de
     // user-option `@cl_afk_state` ; plus d'export `CL_AFK_*` consommé
     // on the proxy side (already removed there, #862 Slice 4).
-    const afkStatic = afkSpecJson
-        ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
-        : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
     // #749 david — `#{@cl_zen}` segment surface the wake kill-switch in
     // the bar. Empty when off (no visual noise) ; bright "ZEN" chip when
     // on. Painted by `cmdZen` (instant on toggle) and refreshed by
@@ -1373,7 +1372,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // david 2026-06-14 : `AFK:F9` complètement à droite, après le hint
     // DETACH. #964 david : séparateur `·` aussi devant AFK pour
     // symétrie avec DETACH. Ordre : `<zen> <name> · DETACH:<key> · AFK:F9`.
-    const keysHint = `#{@cl_zen}#[fg=${ctx.colors.bar_fg}]#{@cl_name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} #[fg=${ctx.colors.afk_label_fg}]· ${afkStatic} `;
+    // #3469 — shared with `claude-loop attach` on the session host.
+    const keysHint = statusRightFormat(ctx.colors, afkSpecJson ? afkKeyDisp : null, detachDisp);
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
     // #619 david `ge2emb` : suppress the tmux window-status list (the
@@ -1653,7 +1653,17 @@ async function attachLoop(resolved: string, opts: { readonly: boolean }): Promis
     if (!hostedByDaemon) await readHostedByDaemon(null);
     const agent = liveHostAgent(sd) ?? daemonHostAgent(sd);
     if (!agent) die(`loop '${resolved}' not alive`);
-    const end = await attachHost(hostedByDaemon?.get(agent) ?? hostAttachSocket(sd, agent), { stdin: process.stdin, stdout: process.stdout }, { readonly: opts.readonly, label: resolved });
+    // #3469 — the loop's bar on the last row, the same as tmux's status line:
+    // its colours and AFK key from the loop's folder, attach's own detach keys.
+    const barClient = new AiballClient({ agentId: agent });
+    const loopCfg = loadConfig(readPlate(sd).cwd ?? undefined);
+    const afkKey = loopCfg.claude_loop.afk_key.trim();
+    const end = await attachHost(hostedByDaemon?.get(agent) ?? hostAttachSocket(sd, agent), { stdin: process.stdin, stdout: process.stdout }, {
+        readonly: opts.readonly,
+        label: resolved,
+        watchBar: (onBar) => barClient.watchAgentBar(agent, onBar),
+        barSetup: { colors: loopCfg.colors, name: resolved, afkKey: afkKey ? afkKey.toUpperCase() : null, detach: "C-b d" },
+    });
     const why = end.reason === "detached" ? `detached from '${resolved}' — Claude carries on on the host`
         : end.reason === "exited" ? `the session of '${resolved}' ended (code ${end.code ?? "?"})`
         : `the host of '${resolved}' ${end.reason === "error" ? "refused" : "closed"} the attach${end.message ? `: ${end.message}` : ""}`;
