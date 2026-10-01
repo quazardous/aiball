@@ -325,7 +325,22 @@ export interface ProxyWsClientHandle {
     isOpen: () => boolean;
 }
 
-export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
+/**
+ * #3468 — this node's own sessions, for its hub: the agents' ones, and how to
+ * hear them change. Given by the daemon (src/daemon.ts), so this module does
+ * not import the session registry.
+ */
+export interface NodeSessionsSource {
+    list(): Array<{ agent: string | null }>;
+    onChange(fn: () => void): () => void;
+}
+
+/** #3468 — the frame that tells the hub every agent session this node's host holds. */
+export function buildSessionsPushFrame(sessions: Array<{ agent: string | null }>): { kind: "node_sessions_push"; sessions: unknown[] } {
+    return { kind: "node_sessions_push", sessions: sessions.filter((s) => s.agent) };
+}
+
+export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessionsSource): ProxyWsClientHandle {
     // Convertit l'URL http(s):// → ws(s):// pour le canal WS.
     let wsUrl: string;
     try {
@@ -397,6 +412,9 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
             // gates the owner fan-out (#752 B) without the deprecated
             // `x-aiball-no-claim` header. Re-sent on every (re)connect.
             pushConfigIfAny();
+            // #3468 — and the agents' sessions its host holds: the hub forgot
+            // them when the last connection closed.
+            pushSessions();
         });
         ws.on("unexpected-response", (_req, res) => {
             console.warn(`[proxy WS] handshake refused by upstream: HTTP ${res.statusCode} (check node token + that ${wsUrl} reaches a daemon on the new code)`);
@@ -433,6 +451,19 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
     function send(frame: Record<string, unknown>): void {
         try { ws?.send(JSON.stringify(frame)); } catch { /* socket dead, close reprendra */ }
     }
+
+    // #3468 — every agent session this node's host holds, all at once.
+    function pushSessions(): void {
+        if (!nodeSessions || !ws || ws.readyState !== WebSocket.OPEN) return;
+        try { ws.send(JSON.stringify(buildSessionsPushFrame(nodeSessions.list()))); } catch { /* socket dead — next connect re-pushes */ }
+    }
+    // Said again when they change; a burst (start, then clients) goes as one.
+    let sessionsDebounce: NodeJS.Timeout | null = null;
+    const stopSessionsWatch = nodeSessions?.onChange(() => {
+        if (sessionsDebounce) clearTimeout(sessionsDebounce);
+        sessionsDebounce = setTimeout(() => { sessionsDebounce = null; pushSessions(); }, 100);
+        sessionsDebounce.unref?.();
+    });
 
     // #775 — read the project `.aiball.yaml` and push its consumer config to the
     // upstream (no-op when `projectYaml` is unset or the file declares no agent).
@@ -555,6 +586,8 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
             if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
             if (cfgWatchDebounce) { clearTimeout(cfgWatchDebounce); cfgWatchDebounce = null; }
             if (cfgWatcher) { try { cfgWatcher.close(); } catch { /* noop */ } cfgWatcher = null; }
+            stopSessionsWatch?.();
+            if (sessionsDebounce) { clearTimeout(sessionsDebounce); sessionsDebounce = null; }
             if (ws) {
                 try { ws.close(1000, "shutdown"); } catch { /* noop */ }
             }

@@ -125,6 +125,16 @@ consumer). So:
   not opening a delegation endpoint to third parties.
 - Keep `proxy.token` **chmod 600**; **never commit** it.
 
+**What a node says of its sessions** (`node_sessions_push`: the agents'
+sessions its own host holds) is kept by the hub only as far as it can check it:
+- the machine is the node's (`node:<label>` from its token), whatever the frame
+  says;
+- a session shows only for an agent whose loop is live through that same node
+  (its presence's machine): a node cannot put a session on an agent that runs
+  elsewhere;
+- a node token restricted to projects speaks only for their agents;
+- all of it is forgotten when the node's connection closes.
+
 ### How a node gets its token
 
 Two ways, and both end with a human deciding.

@@ -84,7 +84,17 @@ export function viewOf(link: HostLink): SessionView {
     };
 }
 
+/** #3468 — told whenever a session starts, changes or goes: a proxy node tells its hub. */
+const changeListeners = new Set<() => void>();
+export function onSessionsChanged(fn: () => void): () => void {
+    changeListeners.add(fn);
+    return () => changeListeners.delete(fn);
+}
+
 function announce(link: HostLink, gone = false): void {
+    for (const fn of changeListeners) {
+        try { fn(); } catch { /* a listener never stops the announce */ }
+    }
     const view = gone ? null : viewOf(link);
     if (link.info.agent) {
         broadcast({ type: "consumer_changed", data: { consumer_id: link.info.agent, session: view } });

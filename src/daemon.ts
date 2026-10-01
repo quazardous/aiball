@@ -7,7 +7,7 @@ import { DAEMON_PID_PATH } from "./paths.js";
 import { reloadConfig } from "./config-reload.js";
 import { attachBus } from "./bus/server.js";
 import { attachBusRelay } from "./bus/relay.js";
-import { initSessions } from "./sessions/registry.js";
+import { initSessions, listSessionViews, onSessionsChanged } from "./sessions/registry.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
 import { ensureMachineSecret } from "./machine-secret.js";
@@ -181,7 +181,8 @@ function main(): void {
         // l'ancien HTTP heartbeat #502, simplifie d'un cran.
         const px = loadProxy();
         if (px) {
-            startProxyWsClient(px);
+            // #3468 — with this node's own sessions, which its hub cannot see.
+            startProxyWsClient(px, { list: listSessionViews, onChange: onSessionsChanged });
             console.log(`proxy WS client → ${px.url}/ws/proxy-node (persistent, with reconnect)`);
         }
     });

@@ -35,7 +35,14 @@ import * as schema from "./schema.js";
 import { eq } from "drizzle-orm";
 import { AIBALL_VERSION, AIBALL_COMMIT } from "./version.js";
 import { upsertNodeProjectConfig, type NodeProjectConfigConsumer } from "./db/node-project-config.js";
-import { upsertConsumer, updateConsumer } from "./db/consumers.js";
+import { getConsumer, upsertConsumer, updateConsumer } from "./db/consumers.js";
+import { clearNodeSessions, setNodeSessions, tokenProjects } from "./sessions/node-sessions.js";
+import { broadcast } from "./ws.js";
+
+/** #3468 — an agent's entry may have changed: `agent.<id>.state` says it again. */
+function agentsChanged(agents: string[]): void {
+    for (const a of agents) broadcast({ type: "consumer_changed", data: { consumer_id: a } });
+}
 
 /** Path WS dédié au canal node↔upstream (distinct du `/ws` browser). */
 export const PROXY_WS_PATH = "/ws/proxy-node";
@@ -331,6 +338,20 @@ export function attachProxyWs(server: Server): void {
                     console.log(`[proxy WS] node_project_config_push from id=${nid}: project=${project} consumers=${consumers.length}`);
                 }
             }
+            // #3468 — the agents' sessions this node's own host holds, all at once.
+            if (frame.kind === "node_sessions_push") {
+                const sessions = (frame as unknown as { sessions?: unknown }).sessions;
+                if (!Array.isArray(sessions)) {
+                    console.warn(`[proxy WS] node_sessions_push from id=${nid}: sessions not an array, dropped`);
+                } else if (!row.label) {
+                    // Its machine would be `node:?`, shared by every node without a label.
+                    console.warn(`[proxy WS] node_sessions_push from id=${nid}: a node without a label cannot say whose machine its sessions are on, dropped`);
+                } else {
+                    const r = setNodeSessions(nid, row.label, tokenProjects(row.projects), sessions, (a) => getConsumer(a)?.project ?? null);
+                    if (r.refused.length) console.warn(`[proxy WS] node_sessions_push from id=${nid}: refused for ${r.refused.join(", ")} (not of the node token's projects)`);
+                    agentsChanged(r.changed);
+                }
+            }
             if (typeof frame.request_id === "string") {
                 const handler = responseHandlers.get(frame.request_id);
                 if (handler) handler(frame);
@@ -346,7 +367,11 @@ export function attachProxyWs(server: Server): void {
         ws.on("close", (code, reason) => {
             const lifetimeSec = ((Date.now() - conn.last_frame_ms) / 1000).toFixed(1);
             console.log(`[proxy WS] node disconnected: id=${nid} label=${row.label ?? "(unset)"} code=${code} reason=${reason?.toString() || "(none)"} silent_for=${lifetimeSec}s`);
-            if (nodes.get(nid) === conn) nodes.delete(nid);
+            if (nodes.get(nid) === conn) {
+                nodes.delete(nid);
+                // #3468 — its sessions went with it. Not when a newer connection took over.
+                agentsChanged(clearNodeSessions(nid));
+            }
         });
         ws.on("error", () => {
             try { ws.terminate(); } catch { /* noop */ }
@@ -375,6 +400,7 @@ export function attachProxyWs(server: Server): void {
                 const silentSec = ((now - conn.last_frame_ms) / 1000).toFixed(1);
                 console.log(`[proxy WS] dead socket swept from map: id=${nid} state=${stateName} silent_for=${silentSec}s (close event never fired — TCP RST ?)`);
                 nodes.delete(nid);
+                agentsChanged(clearNodeSessions(nid));
                 continue;
             }
             if (now - conn.last_frame_ms > STALE_MS) {
@@ -382,6 +408,7 @@ export function attachProxyWs(server: Server): void {
                 console.log(`[proxy WS] terminating stale node: id=${nid} silent_for=${silentSec}s (no frame in ${STALE_MS / 1000}s window)`);
                 try { conn.socket.terminate(); } catch { /* noop */ }
                 nodes.delete(nid);
+                agentsChanged(clearNodeSessions(nid));
                 continue;
             }
             try {
