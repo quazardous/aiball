@@ -77,6 +77,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- On a fresh Windows, loops start: `cl-session-host.exe` and
+  `cl-pty-proxy.exe` no longer need `VCRUNTIME140.dll`, the Visual C++
+  runtime a fresh Windows does not have (both exited at once with
+  0xC0000135, so no loop started, host or tmux). The runtime is now linked
+  into them; the rest of the C runtime comes with Windows 10 and 11.
 - A ticket assigned to another agent no longer wakes the project's other
   owners: it stays in their unread events, and still wakes them when it names
   them (`@agent`). The rule was written for this and never applied to the
