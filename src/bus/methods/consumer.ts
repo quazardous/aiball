@@ -12,6 +12,7 @@ import { AGENT_TYPES, type AgentType } from "../../db/consumers.js";
 import { broadcast } from "../../ws.js";
 import { cachedCounters, markCountersDirty, refreshCounters } from "../../agent-counters.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
+import { nodeSessionFor } from "../../sessions/node-sessions.js";
 import { isPresent, presenceMachine, presenceRunning } from "../../live-presence.js";
 import { machineName, thisMachine } from "../../machine-name.js";
 import { emitControl } from "../../event-bus.js";
@@ -71,10 +72,26 @@ function entryContext() {
  * pushed on `agent.<id>.state`; the others wait for an event that concerns
  * them, or `consumer.counters`.
  */
+/**
+ * #3468 — an agent with a session on this daemon's host and one on a node's:
+ * an agent has one live loop, so this is a state to look at, said once per
+ * agent and machine rather than settled in silence (the hub's own is shown).
+ */
+const doubleSaid = new Set<string>();
+function warnDoubleSession(agent: string, nodeMachine: string): void {
+    const key = `${agent}@${nodeMachine}`;
+    if (doubleSaid.has(key)) return;
+    doubleSaid.add(key);
+    console.warn(`[sessions] ${agent} has a session on this daemon's host and one on ${nodeMachine}: the hub's is shown`);
+}
+
 function consumerEntry(c: Consumer, ctx: ReturnType<typeof entryContext>) {
     const session = sessionFor({ agent: c.consumer_id });
+    // #3468 — a session a proxy node's host holds, for an agent whose loop runs through it.
+    const onNode = c.kind === "agent" ? nodeSessionFor(c.consumer_id, presenceMachine(c.consumer_id)) : null;
+    if (session && onNode) warnDoubleSession(c.consumer_id, onNode.machine);
     const counters = c.kind === "agent" ? cachedCounters(c.consumer_id) : null;
-    if (c.kind === "agent" && !counters && (session || isPresent(c.consumer_id))) markCountersDirty(c.consumer_id);
+    if (c.kind === "agent" && !counters && (session || onNode || isPresent(c.consumer_id))) markCountersDirty(c.consumer_id);
     return {
         ...c,
         present: presenceRunning(c.consumer_id),
@@ -84,7 +101,8 @@ function consumerEntry(c: Consumer, ctx: ReturnType<typeof entryContext>) {
         ping_unseen: ctx.pings.get(c.consumer_id)?.unseen ?? 0,
         wait_credit: c.kind === "human" ? null : (ctx.credits.get(c.consumer_id) ?? []),
         // #3135 — on the host, its session; in tmux, where to reach the loop.
-        session: session ? viewOf(session) : c.kind === "agent" ? tmuxSessionView(c.consumer_id) : null,
+        // #3468 — on a proxy node's host, the session that node said.
+        session: session ? viewOf(session) : onNode ?? (c.kind === "agent" ? tmuxSessionView(c.consumer_id) : null),
         counters,
     };
 }

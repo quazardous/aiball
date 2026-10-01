@@ -118,6 +118,14 @@ with `HOST_BUSY`, naming where it runs. Where it runs is published with the
 agent (`agent.<id>.state`: `host: "claude-loop" | "daemon"`), and a host's
 `attach.socket` in the agent's bar, as `LOOP-HOST.md` says.
 
+**On a proxy node**, the host is the node's own, and its hub cannot see it. The
+node tells its hub the agents' sessions it holds (`node_sessions_push` on its
+connection to the hub, at each connection and whenever a session starts,
+changes or goes), and the hub puts each in its agent's entry
+(`agent.<id>.state`, `session`, with `machine: "node:<label>"`). The hub takes
+its own host's session first; one an agent has on both is logged. What the hub
+keeps of what a node says is in [`SECURITY.md`](./SECURITY.md).
+
 ## The control channel
 
 `control.sock` speaks **JSON-RPC 2.0, one message per line** (newline-delimited

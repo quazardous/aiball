@@ -31,6 +31,13 @@ dates are YYYY-MM-DD.
   or idle, the next wake, the counters, the alerts). In tmux it was tmux's
   status line; on the host nothing drew it, so F9 showed nothing. Claude gets
   the rows above it.
+- An agent whose loop runs on a proxy node's session host has its session
+  in its entry (`agent.<id>.state`, `session`) on the hub, as an agent on
+  the hub's own host does. It read `session: null` there while the node's
+  `session.list` showed it, and tvty found no session to attach to. The
+  node now tells its hub the sessions its host holds; the hub keeps them
+  only for agents whose loop runs through that node, with the node's
+  machine, and forgets them when the node goes.
 - On Windows, the daemon's log no longer says a session host "ends when the
   daemon does" when it could not leave the daemon's job. That job is usually
   the Task Scheduler's (the tray started at logon): it forbids leaving it but
