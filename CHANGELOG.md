@@ -23,6 +23,17 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- How deep the backlog wakes an agent is a setting,
+  `tickets.backlog.depth` (global or per project, shown in tvty's options):
+  `followup`, `waiting` or `blocked`, the deepest tier a backlog wake may name
+  it for. Critical, hot and actionable tickets always wake it. By default
+  (`followup`) a ticket where the agent spoke last, or one held by an open
+  dependency, no longer wakes it: it stays in its backlog, marked, and comes
+  back when someone moves on it or its blocker closes. `blocked` keeps the
+  previous behaviour.
+
 ### Fixed
 
 - On a Windows laptop, the tray and the daemon start at logon on battery, and

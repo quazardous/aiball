@@ -34,6 +34,8 @@ interface TicketRow {
     hot?: boolean;
     last_actor?: string | null;
     backlog_cooled_until?: string | null;
+    /** #3472 — under the project's backlog depth: shown, never named by a wake. */
+    backlog_below_depth?: boolean;
 }
 
 interface UnreadMessage {
@@ -97,9 +99,10 @@ function fmtCooledUntil(iso: string): string {
 function fmtTicket(t: TicketRow): string {
     // `*` = unread (au moins 1 ping pas vu)
     // `⏳HH:MM` = en cooldown (backlog wake fired, ré-éligible à backlog_cooled_until)
+    // `·` = under the project's backlog depth (#3472): it never wakes the agent
     const marker = t.backlog_cooled_until
         ? `⏳${fmtCooledUntil(t.backlog_cooled_until)}`
-        : t.unread ? "*" : " ";
+        : t.backlog_below_depth ? "·" : t.unread ? "*" : " ";
     const prio = t.priority && t.priority !== "normal" ? `(${t.priority}) ` : "";
     const title = t.title ?? "";
     const last = t.last_actor ? ` ← ${t.last_actor}` : "";
@@ -138,7 +141,8 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
             : (backlogRows.tickets ?? []);
         // Mirror `claude-loop backlog` (default sans --cooled) : exclude
         // les tickets en cooldown via `backlog_cooled_until` set.
-        const backlogTickets = allBacklogTickets.filter((t) => !t.backlog_cooled_until);
+        // #3472 — nor those under the backlog depth: the bar's `b:` counts what a wake can name.
+        const backlogTickets = allBacklogTickets.filter((t) => !t.backlog_cooled_until && !t.backlog_below_depth);
         const backlog = backlogTickets.length;
         const events = unread.count ?? 0;
         if (opts.json) {
@@ -229,6 +233,10 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     if (tickets.length === 0) {
         process.stdout.write(`(backlog empty — nothing in your court)\n`);
         return;
+    }
+    // #3472 — what the project's `tickets.backlog.depth` leaves out of the wakes.
+    if (tickets.some((t) => t.backlog_below_depth)) {
+        process.stdout.write(`(· = under the backlog depth: shown, never wakes you — tickets.backlog.depth)\n`);
     }
     // #2770 david — a tier of its own, ahead of the rest: the project's open
     // ticket holding back the most open tickets.

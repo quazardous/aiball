@@ -5,7 +5,7 @@
 // hand it. Adding a new flag = add a row here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeTicketFlags, type TicketFlagsContext, type TicketFlagsRow } from "./ticket-flags.js";
+import { backlogDepthTier, computeTicketFlags, type TicketFlagsContext, type TicketFlagsRow } from "./ticket-flags.js";
 
 const NOW_MS = Date.parse("2026-06-04T14:00:00Z");
 
@@ -386,4 +386,32 @@ test("actionable wins over lastActorMe for tier (impossible state, but checked)"
         }),
     );
     assert.equal(flags.backlog_tier, 1);
+});
+
+// #3472 — `tickets.backlog.depth`: the deepest tier a backlog wake may name.
+test("#3472 the depth's three notches, followup by default", () => {
+    assert.equal(backlogDepthTier("followup"), 2);
+    assert.equal(backlogDepthTier("waiting"), 3);
+    assert.equal(backlogDepthTier("blocked"), 4);
+    assert.equal(backlogDepthTier(undefined), 2);
+    assert.equal(backlogDepthTier("nonsense"), 2);
+});
+
+test("#3472 under the depth: shown in the backlog, marked; actionable never is", () => {
+    const at = (depth: "followup" | "waiting" | "blocked", ctx: Partial<TicketFlagsContext>) =>
+        computeTicketFlags(buildRow(), buildCtx({ ...ctx, depthOf: () => backlogDepthTier(depth) }));
+    const waiting = { lastActorMeIds: new Set([1]) };
+    const blocked = { gatedByBlockerIds: new Set([1]) };
+    const actionable = { actionableIds: new Set([1]) };
+    // I spoke last: in the backlog (tier 3), out of the wakes unless the depth reaches it.
+    assert.equal(at("followup", waiting).backlog_tier, 3);
+    assert.equal(at("followup", waiting).backlog_below_depth, true);
+    assert.equal(at("waiting", waiting).backlog_below_depth, false);
+    // Blocked: only `blocked` lets it wake.
+    assert.equal(at("waiting", blocked).backlog_below_depth, true);
+    assert.equal(at("blocked", blocked).backlog_below_depth, false);
+    // Ball in my court: whatever the depth.
+    assert.equal(at("followup", actionable).backlog_below_depth, false);
+    // Without the setting (an older caller): every tier wakes, as before.
+    assert.equal(computeTicketFlags(buildRow(), buildCtx(waiting)).backlog_below_depth, false);
 });

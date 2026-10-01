@@ -2728,6 +2728,8 @@ export async function buildContextPhrase(
                     last_actor_at?: string | null;
                     /** #2458 — this consumer's previous backlog wake on it. */
                     backlog_last_wake_at?: string | null;
+                    /** #3472 — under the project's backlog depth: shown, never named. */
+                    backlog_below_depth?: boolean;
                     /** #2640 — this consumer's wait credit on the row's project. */
                     wait_credit_minutes?: number | null;
                     /** #2646 — how credit is earned there, in the project's amounts. */
@@ -2749,8 +2751,9 @@ export async function buildContextPhrase(
                 // / tier-3 I-was-last-actor reminders) — those are legitimate
                 // own reminders and are non-claimable by construction. Fail-open:
                 // undefined flags (older daemon) keep the current behavior.
+                // #3472 — nor a ticket under the project's backlog depth.
                 const top = rows.find(
-                    (r) => !r.backlog_cooled_until && !(r.actionable === true && r.claimable === false),
+                    (r) => !r.backlog_cooled_until && r.backlog_below_depth !== true && !(r.actionable === true && r.claimable === false),
                 );
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };

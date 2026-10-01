@@ -76,3 +76,22 @@ test("a backlog wake drops the count at once, and the end of the rest brings it 
         off();
     }
 });
+
+// #3472 — `b:` counts what a wake can name: not a ticket under the project's backlog depth.
+test("the backlog leaves out a ticket under the depth: the agent spoke last, depth followup; waiting counts it", async () => {
+    const { computeCounters } = await import("./agent-counters.js");
+    const { createProject } = await import("./db/projects.js");
+    const { upsertSubscription } = await import("./db/subscriptions.js");
+    const { submitMessage } = await import("./messages.js");
+    const { setConfigOverride } = await import("./db/config-overrides.js");
+    upsertConsumer({ consumer_id: "boss", kind: "human" });
+    upsertConsumer({ consumer_id: "lead-3472", kind: "agent", project: "p-3472" } as never);
+    createProject({ name: "p-3472" });
+    upsertSubscription("lead-3472", "p-3472", "owner");
+    const t = submitMessage({ project: "p-3472", kind: "ticket_created", title: "asked by the boss", body: "b", by_agent: "boss" }) as { id: number };
+    // The lead answers a question back: it spoke last, the move is the boss's.
+    submitMessage({ project: "p-3472", kind: "comment_added", ticket_id: t.id, parent_id: t.id, body: "which one?", by_agent: "lead-3472", meta: JSON.stringify({ handback: true, summary_until: "s" }) } as never);
+    assert.equal(computeCounters("lead-3472").backlog, 0, "followup (the default): its own last word does not wake it");
+    setConfigOverride("p-3472", "tickets.backlog.depth", "waiting");
+    assert.equal(computeCounters("lead-3472").backlog, 1, "waiting: it does");
+});

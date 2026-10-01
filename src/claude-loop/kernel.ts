@@ -1624,9 +1624,14 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             // never fires (zero regression). State is persisted on EVERY drained
             // tick so backoff/stale/once track when the landscape appeared.
             const strat = parseDrainedStrategy(cfg.drained_strategy);
+            // #3472 — and something a wake can name: with every backlog row
+            // resting or under the backlog depth, a drained wake has no head
+            // and only says so. Fail-open before the first counters.
+            const nameable = (getIpcState().counters?.backlog ?? 1) > 0;
             const drainable = strat.kind !== "silent"
                 && gate.openCount === 0
                 && gate.totalOpenCount > 0
+                && nameable
                 && gate.landscapeHash !== undefined;
             if (drainable) {
                 const dec = decideDrainedWake({

@@ -39,6 +39,7 @@ import {
     type ActionableTicketSet,
 } from "./projects.js";
 import { assignWindowSec } from "../autopoll/config.js";
+import { getConfig } from "./config-overrides.js";
 import { ticketUnreadFlags } from "./pings.js";
 import { projectCriticalTicket, type CriticalTicket } from "./critical-ticket.js";
 import {
@@ -95,6 +96,9 @@ export interface TicketFlags {
      *  or not; null outside the backlog. Lets the loop see a ticket coming
      *  back too soon after its previous wake. */
     backlog_last_wake_at: string | null;
+    /** #3472 — in the backlog, but under the project's `tickets.backlog.depth`:
+     *  shown, never named by a wake. */
+    backlog_below_depth: boolean;
     gated_by_decision: boolean;
     last_actor: string | null;
     last_actor_at: string | null;
@@ -177,6 +181,9 @@ export interface TicketFlagsContext {
     /** When > 0, `cooledWakeAt[id] + cooldownSec > nowMs` populates
      *  `backlog_cooled_until` on the row. 0 disables the surface. */
     cooldownSec: number;
+    /** #3472 — the deepest tier that may wake, per project (`tickets.backlog.depth`).
+     *  Omitted → every tier wakes, as before. */
+    depthOf?: (project: string) => BacklogTier;
 }
 
 /** Shape of the ticket row this fn consumes (subset of `schema.Ticket`). */
@@ -298,6 +305,7 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         critical,
         backlog_cooled_until,
         backlog_last_wake_at: backlog_tier !== null ? (ctx.lastWakeAt?.get(t.id) ?? null) : null,
+        backlog_below_depth: backlog_tier !== null && backlog_tier > (ctx.depthOf?.(t.project) ?? 4),
         gated_by_decision,
         last_actor,
         last_actor_at,
@@ -472,9 +480,27 @@ export function buildTicketFlagsContext(args: {
                 return memo.get(project)!;
             };
         })(),
+        // #3472 — read once per project, as the critical ticket is.
+        depthOf: (() => {
+            const memo = new Map<string, BacklogTier>();
+            return (project: string) => {
+                if (!memo.has(project)) memo.set(project, backlogDepthTier(getConfig("tickets.backlog.depth", project)));
+                return memo.get(project)!;
+            };
+        })(),
         nowMs,
         cooldownSec,
     };
+}
+
+/**
+ * #3472 — `tickets.backlog.depth`, the deepest tier a backlog wake may name:
+ * `followup` (2, the default), `waiting` (3, the agent spoke last) or `blocked`
+ * (4, everything). Critical, hot and actionable always wake.
+ */
+export const BACKLOG_DEPTHS = { followup: 2, waiting: 3, blocked: 4 } as const;
+export function backlogDepthTier(v: unknown): BacklogTier {
+    return typeof v === "string" && v in BACKLOG_DEPTHS ? BACKLOG_DEPTHS[v as keyof typeof BACKLOG_DEPTHS] : BACKLOG_DEPTHS.followup;
 }
 
 /**

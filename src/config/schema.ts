@@ -370,6 +370,16 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "How long a claim holds against another agent's claim, counted from its holder's last action on the ticket — working on it keeps the protection alive. Another agent's claim inside that window is refused; past it the ticket can be taken over, and the thread records it. An assignment always wins over a claim. 0 = no protection.",
     },
     {
+        key: "tickets.backlog.depth",
+        scope: "global+project",
+        type: "enum",
+        options: ["followup", "waiting", "blocked"],
+        default: "followup",
+        label: "How deep the backlog wakes an agent",
+        description:
+            "The deepest backlog tier a wake may name an agent for, when it has no event to read. Critical, hot and actionable tickets always wake it. followup: also a ticket where someone answered but the agent's own pending decision holds it. waiting: also a ticket where the agent spoke last and nothing moved since. blocked: also a ticket held by an open dependency (it comes back anyway when its blocker closes). A ticket under the setting stays in the backlog, shown; it just wakes no one.",
+    },
+    {
         key: "tickets.backlog.blocked_multiplier",
         min: 1,
         max: 20,

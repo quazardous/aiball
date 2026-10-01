@@ -62,8 +62,10 @@ export function computeCounters(agent: string): AgentCounters {
     // #3312 — the agent's own standing (`can_claim` on its row), not a no-claim hint:
     // with the hint, every unassigned ticket left the count, whoever the agent.
     const rows = listTicketsFor(agent, query, { noClaimHint: false });
-    const list = Array.isArray(rows) ? (rows as Array<{ backlog_cooled_until?: string | null }>) : [];
-    const backlog = list.filter((t) => !t.backlog_cooled_until).length;
+    const list = Array.isArray(rows) ? (rows as Array<{ backlog_cooled_until?: string | null; backlog_below_depth?: boolean }>) : [];
+    // #3472 — what a wake can name: neither resting nor under the backlog depth
+    // (a count that includes them arms a countdown with nothing at its end).
+    const backlog = list.filter((t) => !t.backlog_cooled_until && t.backlog_below_depth !== true).length;
     // The earliest rest to end: the count moves then, with no event to say so.
     let restEnds: number | null = null;
     for (const t of list) {

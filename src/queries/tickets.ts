@@ -552,6 +552,8 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
             critical: flags.critical,
             backlog_cooled_until: flags.backlog_cooled_until,
             backlog_last_wake_at: flags.backlog_last_wake_at,
+            // #3472 — under the project's backlog depth: shown, never named by a wake.
+            backlog_below_depth: flags.backlog_below_depth,
             wait_credit_minutes: flags.backlog_tier !== null ? waitCreditOf(m.project) : null,
             wait_credit_rules: flags.backlog_tier !== null && waitCreditOf(m.project) !== null ? waitRulesOf(m.project) : null,
             gated_by_decision: flags.gated_by_decision,

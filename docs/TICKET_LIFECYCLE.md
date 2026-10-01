@@ -403,11 +403,24 @@ A ticket whose last action is a step (`then: continue`) is cooled only briefly,
 5 minutes by default (`tickets.backlog.after_step`, 0 = not at all): a
 step says there is work to do now, so the pause only turns the queue over.
 
-**Why keep the waiting tiers, not drop them:** a ball-in-their-court ticket
-isn't done — it's waiting on a human/reporter who may go silent. Surfacing it
-in the wake (below tier 1) keeps it visible to the agent: a periodic "look #N —
-still waiting on them" reminder, useful for nudging the reporter or for the
-agent to decide it's stale enough to close itself.
+**How deep the backlog wakes** is a setting, `tickets.backlog.depth` (global,
+then per project): the deepest tier a wake may name.
+
+| `depth` | wakes for |
+|---|---|
+| `followup` (default) | critical, hot, actionable, follow-up |
+| `waiting` | the same, and the tickets where the agent spoke last |
+| `blocked` | every tier, blocked ones included |
+
+A ticket under the depth stays in the backlog: listed (`claude-loop backlog`
+marks it `·`), carried with `backlog_below_depth: true`, left out of the bar's
+`b:`. It just names no wake. A blocked ticket still comes back when its blocker
+closes (`dependency_closed`); a waiting one when someone moves on it.
+
+The waiting tiers are kept in the backlog, not dropped: a ball-in-their-court
+ticket isn't done, it waits on someone who may go silent. With `depth: waiting`
+or `blocked` the agent is reminded of it now and then; with the default it is
+not, and a human sees it on the board.
 
 **Within a tier**, the work-order keys from §5 apply: priority desc → own
 claim → assignment → hot → id asc.
