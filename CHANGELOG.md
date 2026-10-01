@@ -82,10 +82,11 @@ dates are YYYY-MM-DD.
   runtime a fresh Windows does not have (both exited at once with
   0xC0000135, so no loop started, host or tmux). The runtime is now linked
   into them; the rest of the C runtime comes with Windows 10 and 11.
-- A ticket assigned to another agent no longer wakes the project's other
-  owners: it stays in their unread events, and still wakes them when it names
-  them (`@agent`) or when they follow it (filed it, wrote on it). The rule was written for this and never applied to the
-  wake.
+- A ticket assigned to or claimed by another agent no longer wakes the
+  project's other owners: it stays in their unread events, and still wakes
+  them when it names them (`@agent`) or when they follow it (filed it, wrote
+  on it) — a crew agent included. The rules were written for this and never
+  applied to the wake.
 - A loop's kernel no longer dies at start when it takes the loop over from an
   older kernel still running (a reload crossing another): it logged that
   before its logger existed, and crashed after killing the old one, leaving

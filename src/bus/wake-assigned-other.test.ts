@@ -75,3 +75,15 @@ test("a ticket the lead follows wakes it: a reply on a ticket it wrote on", () =
     const reply = run("message.post", boss, { kind: "comment_added", ticket_id: t, parent_id: t, body: "thanks" }) as { id: number };
     assert.ok(ids("lead", true).includes(reply.id), "the boss's reply wakes the lead, who wrote on it");
 });
+
+test("a specialist's ticket, assigned to the crew, still wakes it on a reply", () => {
+    upsertConsumer({ consumer_id: "spec", kind: "agent" });
+    run("consumer.update", boss, { consumer_id: "spec", can_claim: false });
+    upsertSubscription("spec", P, "owner");
+    const t = (run("message.post", testCaller("spec"), { project: P, kind: "ticket_created", title: "filed by spec", body: "b" }) as { id: number }).id;
+    run("ticket.assign", boss, { id: t, assignee: "crew" });
+    const other = file("not spec's", { assignee: "crew" });
+    const reply = run("message.post", boss, { kind: "comment_added", ticket_id: t, parent_id: t, body: "on it" }) as { id: number };
+    assert.ok(ids("spec", true).includes(reply.id), "the reply on its own ticket wakes the specialist");
+    assert.ok(!ids("spec", true).includes(other), "a ticket it does not follow does not");
+});

@@ -27,6 +27,8 @@ function mkCtx(opts: Partial<BacklogRulesCtx> = {}): BacklogRulesCtx {
         // case keeps asserting the behaviour it was written for.
         canClaim: opts.canClaim ?? true,
         mentionsMeIds: opts.mentionsMeIds ?? new Set(),
+        namesMe: opts.namesMe,
+        followsTicket: opts.followsTicket,
     };
 }
 
@@ -258,4 +260,16 @@ test("#1573 a legacy ctx without the new fields does not fire the rule", () => {
     const legacy = { consumerId: "me", nowMs: Date.now(), closedIds: new Set<number>(),
         snoozedIds: new Set<number>(), claimedByOtherIds: new Set<number>() } as unknown as BacklogRulesCtx;
     assert.equal(rule.when(legacy, { ticketId: 1, assignee: null }), false);
+});
+
+test("#3449 a ticket I follow still wakes me when another agent claimed it, or when I am a specialist", () => {
+    const follows = (id: number) => id === 42;
+    const claimed = mkCtx({ claimedByOtherIds: new Set([42, 43]), followsTicket: follows });
+    assert.equal(defaultBacklogRules.excludes(claimed, { ticketId: 42 }, "fifo-wake"), false);
+    assert.equal(defaultBacklogRules.excludes(claimed, { ticketId: 42 }, "backlog-tier"), true, "the work stays the claimant's");
+    assert.equal(defaultBacklogRules.excludes(claimed, { ticketId: 43 }, "fifo-wake"), true);
+    const spec = mkCtx({ consumerId: "spec", canClaim: false, followsTicket: follows });
+    assert.equal(defaultBacklogRules.excludes(spec, { ticketId: 42, assignee: "crew" }, "fifo-wake"), false);
+    assert.equal(defaultBacklogRules.excludes(spec, { ticketId: 42, assignee: "crew" }, "backlog-tier"), true);
+    assert.equal(defaultBacklogRules.excludes(spec, { ticketId: 43, assignee: "crew" }, "fifo-wake"), true);
 });

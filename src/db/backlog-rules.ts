@@ -61,9 +61,9 @@ export interface BacklogRulesCtx {
      *  (the rule that reads it is inert otherwise), so a normal consumer
      *  pays nothing for it. */
     mentionsMeIds: Set<number>;
-    /** #3449 — whether a ticket names this consumer (`@id`), its body or a comment; asked only of tickets assigned to another. */
+    /** #3449 — whether a ticket names this consumer (`@id`), its body or a comment; asked only of tickets another agent holds. */
     namesMe?: (ticketId: number) => boolean;
-    /** #3449 — whether this consumer follows a ticket (filed it, wrote on it, subscribed); asked only of tickets assigned to another. */
+    /** #3449 — whether this consumer follows a ticket (filed it, wrote on it, subscribed); asked only of tickets another agent holds. */
     followsTicket?: (ticketId: number) => boolean;
     /** #2525 — the wake focus in force on each project this consumer owns, for
      *  an AGENT owner only. Absent project = no focus. Optional so a caller
@@ -89,6 +89,12 @@ export interface RuleItem {
     assignee?: string | null;
     /** #2525 — the ticket's project, for the wake focus. */
     project?: string | null;
+}
+
+/** #3449 — a ticket that names me, or that I follow (filed it, wrote on it):
+ *  its events are for me even when another agent holds the work. */
+function isMine(ctx: BacklogRulesCtx, item: RuleItem): boolean {
+    return (ctx.namesMe?.(item.ticketId) ?? false) || (ctx.followsTicket?.(item.ticketId) ?? false);
 }
 
 export interface BacklogRule {
@@ -167,9 +173,7 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         // (I filed it, or wrote on it): its replies are for me.
         name: "assigned-to-other-unless-mine",
         when: (ctx, item) =>
-            item.assignee != null && item.assignee !== ctx.consumerId
-            && !(ctx.namesMe?.(item.ticketId) ?? false)
-            && !(ctx.followsTicket?.(item.ticketId) ?? false),
+            item.assignee != null && item.assignee !== ctx.consumerId && !isMine(ctx, item),
         excludesFrom: new Set<Target>(["fifo-wake"]),
     },
     {
@@ -182,7 +186,15 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         // Defensive : ctx.claimedByOtherIds peut être undefined si un caller
         // legacy passe un BacklogRulesCtx avant la migration #900 (CLI cache).
         when: (ctx, item) => ctx.claimedByOtherIds?.has(item.ticketId) ?? false,
-        excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
+        excludesFrom: new Set<Target>(["backlog-tier"]),
+    },
+    {
+        // #3449 — the wake side of `claimed-by-other`, with the exceptions of
+        // `assigned-to-other-unless-mine`: a claim moves the work, not the
+        // conversation; whoever filed the ticket or wrote on it is still woken.
+        name: "claimed-by-other-unless-mine",
+        when: (ctx, item) => (ctx.claimedByOtherIds?.has(item.ticketId) ?? false) && !isMine(ctx, item),
+        excludesFrom: new Set<Target>(["fifo-wake"]),
     },
     {
         // #1573 — le PENDANT de `assigned-to-other`, pour un consumer
@@ -207,7 +219,18 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
             // Defensive, comme claimed-by-other : un caller legacy peut passer
             // un ctx construit avant #1573.
             && !(ctx.mentionsMeIds?.has(item.ticketId) ?? false),
-        excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
+        excludesFrom: new Set<Target>(["backlog-tier"]),
+    },
+    {
+        // #3449 — the wake side of `unassigned-for-no-claim`: a specialist
+        // who filed the ticket or wrote on it is still woken by its replies.
+        name: "unassigned-for-no-claim-unless-mine",
+        when: (ctx, item) =>
+            ctx.canClaim === false
+            && item.assignee !== ctx.consumerId
+            && !(ctx.mentionsMeIds?.has(item.ticketId) ?? false)
+            && !isMine(ctx, item),
+        excludesFrom: new Set<Target>(["fifo-wake"]),
     },
     {
         // #2525 david — a project's wake focus narrows what wakes its owner
