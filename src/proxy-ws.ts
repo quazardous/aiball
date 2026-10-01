@@ -343,8 +343,11 @@ export function attachProxyWs(server: Server): void {
                 const sessions = (frame as unknown as { sessions?: unknown }).sessions;
                 if (!Array.isArray(sessions)) {
                     console.warn(`[proxy WS] node_sessions_push from id=${nid}: sessions not an array, dropped`);
+                } else if (!row.label) {
+                    // Its machine would be `node:?`, shared by every node without a label.
+                    console.warn(`[proxy WS] node_sessions_push from id=${nid}: a node without a label cannot say whose machine its sessions are on, dropped`);
                 } else {
-                    const r = setNodeSessions(nid, row.label ?? null, tokenProjects(row.projects), sessions, (a) => getConsumer(a)?.project ?? null);
+                    const r = setNodeSessions(nid, row.label, tokenProjects(row.projects), sessions, (a) => getConsumer(a)?.project ?? null);
                     if (r.refused.length) console.warn(`[proxy WS] node_sessions_push from id=${nid}: refused for ${r.refused.join(", ")} (not of the node token's projects)`);
                     agentsChanged(r.changed);
                 }

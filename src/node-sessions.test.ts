@@ -27,6 +27,7 @@ const { attachFor } = await import("./agent-bar.js");
 
 const OPEN = issueToken({ kind: "node", label: "n-open" }).token;
 const NARROW = issueToken({ kind: "node", label: "n-narrow", projects: JSON.stringify(["p-ok"]) }).token;
+const UNLABELLED = issueToken({ kind: "node" }).token;
 for (const [a, p] of [["a-one", "p-ok"], ["a-two", "p-ok"], ["a-other", "p-no"], ["a-hub", "p-ok"]] as const) {
     upsertConsumer({ consumer_id: a, kind: "agent" });
     setConsumerState(a, "idle", undefined, undefined, "/w", p);
@@ -111,6 +112,16 @@ test("a later push replaces the earlier one whole: a session no longer said is g
         await sleep(80);
         assert.ok(sessionOf("a-one"));
         ws.send(JSON.stringify(buildSessionsPushFrame([])));
+        await sleep(80);
+        assert.equal(sessionOf("a-one"), null);
+    });
+    presenceDisconnect("a-one");
+});
+
+test("a node without a label is not heard: its machine would be shared by every such node", async () => {
+    presenceConnect("a-one", "terminal", "node:?");
+    await withNode(UNLABELLED, async (ws) => {
+        ws.send(JSON.stringify(buildSessionsPushFrame([view("a-one")])));
         await sleep(80);
         assert.equal(sessionOf("a-one"), null);
     });
