@@ -28,6 +28,31 @@ fn main() {
             "unknown".to_string()
         });
     println!("cargo:rustc-env=AIBALL_VERSION={version}");
+
+    static_vcruntime();
+}
+
+/// #3444 — on Windows, the Visual C++ runtime goes into the binaries instead
+/// of `VCRUNTIME140.dll`, which a fresh Windows does not have: there the host
+/// and the proxy exited at once (0xC0000135, a DLL not found) and no loop
+/// started. The rest of the C runtime (the UCRT, `api-ms-win-crt-*`) stays a
+/// DLL: it is part of Windows 10 and 11. Microsoft's "hybrid CRT"; what the
+/// `static_vcruntime` crate does.
+///
+/// Here rather than `+crt-static` in `.cargo/config.toml`: cargo reads that
+/// file from the directory it runs in, and the release, the CI and
+/// `install.ps1` all build from elsewhere with `--manifest-path`. A build
+/// script runs for every build.
+fn static_vcruntime() {
+    let msvc = env::var("CARGO_CFG_TARGET_ENV").map(|e| e == "msvc").unwrap_or(false);
+    // With `+crt-static` the whole C runtime is static already.
+    let crt_static = env::var("CARGO_CFG_TARGET_FEATURE").map(|f| f.split(',').any(|x| x == "crt-static")).unwrap_or(false);
+    if !msvc || crt_static {
+        return;
+    }
+    // Rust links the release runtime in every profile: its static twin.
+    println!("cargo:rustc-link-arg=/NODEFAULTLIB:vcruntime.lib");
+    println!("cargo:rustc-link-arg=/DEFAULTLIB:libvcruntime.lib");
 }
 
 /// The value of the first `"version": "<value>"` pair.
