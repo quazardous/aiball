@@ -125,6 +125,11 @@ export function installParentTmuxWatchdog(opts: {
     intervalMs?: number;
     onDead: () => void;
     spawnFn?: SpawnSyncFn;
+    /**
+     * #3461 — the probe without holding the process (the kernel's): true when
+     * the session is confidently gone. A tick waits for the last one.
+     */
+    probeAsync?: () => Promise<boolean>;
     setIntervalFn?: typeof setInterval;
     clearIntervalFn?: typeof clearInterval;
 }): WatchdogHandle {
@@ -132,13 +137,23 @@ export function installParentTmuxWatchdog(opts: {
     const setIntervalImpl = opts.setIntervalFn ?? setInterval;
     const clearIntervalImpl = opts.clearIntervalFn ?? clearInterval;
     let fired = false;
+    let probing = false;
+    const dead = (): void => {
+        fired = true;
+        try { opts.onDead(); } catch { /* swallow */ }
+    };
     const tick = (): void => {
         if (fired) return;
-        const dead = probeParentTmuxAtBoot(opts.muxCmd, opts.sessionName, opts.spawnFn);
-        if (dead) {
-            fired = true;
-            try { opts.onDead(); } catch { /* swallow */ }
+        if (opts.probeAsync) {
+            if (probing) return;
+            probing = true;
+            void opts.probeAsync()
+                .then((gone) => { if (gone && !fired) dead(); })
+                .catch(() => { /* transient: the next tick probes again */ })
+                .finally(() => { probing = false; });
+            return;
         }
+        if (probeParentTmuxAtBoot(opts.muxCmd, opts.sessionName, opts.spawnFn)) dead();
     };
     const handle = setIntervalImpl(tick, intervalMs);
     return {

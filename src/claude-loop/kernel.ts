@@ -43,7 +43,7 @@
  */
 import { PhaseReport } from "./phase-report.js";
 import { appendFileSync, existsSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
@@ -100,8 +100,8 @@ import {
     type WakeEventHint,
     writeBarHost,
     type LoopServer,
-    tmuxClients,
 } from "./state.js";
+import { muxRun, tmuxClientsAsync } from "./mux-async.js";
 import { paneDiffGuessesTyping } from "./typing-fallback.js";
 import { compareScreens, recordScreenComparison, type ScreenReading } from "./screen-compare.js";
 import { isBarHost } from "../agent-bar.js";
@@ -194,7 +194,7 @@ import {
     PROOF_COMPACTING,
     type BusyProofs,
 } from "./busy-stack.js";
-import { BarRenderer, type SpawnFn } from "./bar-renderer.js";
+import { BarRenderer, queuedSpawn } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus, type ControlEvent } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
@@ -531,11 +531,11 @@ function askProxyScreen(server: LoopServer): Promise<ScreenReading | null> {
 /** #3048 — one comparison: tmux, the proxy, tmux again; counted only if tmux held still. */
 async function compareProxyScreen(server: LoopServer): Promise<void> {
     if (!sd) return;
-    const before = capturePane();
+    const before = await capturePane();
     const cursorBefore = lastCursor;
     const proxy = await askProxyScreen(server);
     if (!proxy) return; // no proxy, or one without a screen model (Windows, older build)
-    const after = capturePane();
+    const after = await capturePane();
     if (after !== before || JSON.stringify(lastCursor) !== JSON.stringify(cursorBefore)) {
         recordScreenComparison(sd, null);
         return;
@@ -551,8 +551,9 @@ async function compareProxyScreen(server: LoopServer): Promise<void> {
 // #993 — the cursor comes with the text: it tells real typed input apart from
 // Claude's greyed ghost-suggestions in the prompt box (typed text is left of
 // the cursor, suggestion right); null → watchers fall back to text-only.
-function capturePane(): string {
-    const { text, cursor } = term.screen();
+// #3461 — read without holding the kernel: a psmux call is ~100 ms on Windows.
+async function capturePane(): Promise<string> {
+    const { text, cursor } = await term.readScreen();
     lastCursor = cursor;
     logPaneCapture(sd, text, lastCursor);
     return text;
@@ -1043,9 +1044,19 @@ function crossResumePicker(): void {
     })();
 }
 
-function refreshPaneMarkers(): void {
+/**
+ * #3461 — one probe at a time: a caller arriving while one runs waits for that
+ * one instead of starting another, so a slow multiplexer never piles reads up.
+ */
+let paneProbe: Promise<void> | null = null;
+function refreshPaneMarkers(): Promise<void> {
+    paneProbe ??= probePaneMarkers().catch(() => { /* best-effort */ }).finally(() => { paneProbe = null; });
+    return paneProbe;
+}
+
+async function probePaneMarkers(): Promise<void> {
     if (!sd) return;
-    const paneText = capturePane();
+    const paneText = await capturePane();
     if (!paneText) return;
     const ipc = getIpcState();
     const isBoot = ipc.bootComplete !== true;
@@ -1286,7 +1297,7 @@ let humanChipShown = false;
 function recentlySentKeys(): boolean {
     return Date.now() - lastSendAt < 3000;
 }
-function detectHumanTyping(): void {
+async function detectHumanTyping(): Promise<void> {
     try {
         // #269: when the PTY proxy fronts claude it feeds the human-typing
         // marker directly (live, busy included) and wake injection bypasses
@@ -1317,7 +1328,7 @@ function detectHumanTyping(): void {
             prevPaneTail = "";
             return;
         }
-        const pane = capturePane();
+        const pane = await capturePane();
         if (!pane) return;
         const tail = pane
             .split("\n")
@@ -1583,7 +1594,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // wake, and what a manual wake may skip. Pane markers are refreshed first so
     // the gate sees the just-observed state (tryWake can fire from SSE
     // out-of-band).
-    refreshPaneMarkers();
+    await refreshPaneMarkers();
     const verdict = wakeViewVerdict(readLoopStateInput(sd!, { manualWake }), panicMode);
     if (verdict.panicBypass) {
         log(`panic (${reason}) — bypassing busy gate (${verdict.reason})`);
@@ -1726,7 +1737,7 @@ async function mainSse(): Promise<void> {
     // picker/transient is up, claude is at the prompt → seed idle-since
     // to now. The bus is the SSOT (`readIdleSinceMs` checks it first);
     // the wake gate unblocks on the next tick.
-    refreshPaneMarkers();
+    await refreshPaneMarkers();
     if (sd && readIdleSinceMs(sd) === null && getIpcState().paneReady === true) {
         // #881 — TurnController acteur : SESSION_START transitionne
         // unknown→no_turn (ou no_turn→no_turn reenter), bridge écrit ipc.idleSinceMs.
@@ -1868,13 +1879,15 @@ async function mainSse(): Promise<void> {
     // #264: near-live human-typing detection poll (bicolor bar chip).
     // Independent of the wake heartbeat — fast cadence so the chip
     // tracks typing closely. Fail-safe (detectHumanTyping never throws).
+    // #3461 — its pane read does not hold the kernel; one at a time.
+    let typingProbe: Promise<void> | null = null;
     setInterval(() => {
         // Two independent jobs on one cadence: the pane-diff fallback (skipped
         // under a live proxy) and the chip repaint (needed in BOTH modes — the
         // proxy sets the marker but nobody else clears the glyph). Keeping them
         // as separate calls is the point: #1180's guard on the first one used to
         // silence the second (see repaintTypingChip).
-        detectHumanTyping();
+        typingProbe ??= detectHumanTyping().finally(() => { typingProbe = null; });
         repaintTypingChip();
     }, HUMAN_POLL_MS);
     // #783 phase 3 + 5 — fast watchdog at 2s. Two responsibilities:
@@ -1893,9 +1906,9 @@ async function mainSse(): Promise<void> {
     // changes, so a client (tvty) knows another holds the loop. On the host,
     // the host says it itself (`host.clients`).
     let tmuxClientsSaid = "";
-    const pushTmuxClientsIfChanged = (): void => {
+    const pushTmuxClientsIfChanged = async (): Promise<void> => {
         if (term.kind !== "tmux" || !name) return;
-        const c = tmuxClients(name);
+        const c = await tmuxClientsAsync(tmuxName(name));
         if (!c) return;
         const key = `${c.clients}/${c.interactive}`;
         if (key === tmuxClientsSaid) return;
@@ -1922,14 +1935,18 @@ async function mainSse(): Promise<void> {
     }, 1000);
     clockStepTimer.unref?.();
 
+    // #3461 — its tmux calls do not hold the kernel; a tick waits for the last.
+    let watchdogTick: Promise<void> | null = null;
     const watchdog = setInterval(() => {
-        if (!term.alive()) {
-            clearInterval(watchdog);
-            cleanShutdown("watchdog:tmux-gone");
-            return;
-        }
-        selfReloadIfStale();
-        pushTmuxClientsIfChanged();
+        watchdogTick ??= (async () => {
+            if (!(await term.isAlive())) {
+                clearInterval(watchdog);
+                cleanShutdown("watchdog:tmux-gone");
+                return;
+            }
+            selfReloadIfStale();
+            await pushTmuxClientsIfChanged();
+        })().catch(() => { /* the next tick tries again */ }).finally(() => { watchdogTick = null; });
     }, 2000);
 
     // #627 — view-push loop. The timer owns the LoopState rules ;
@@ -2210,7 +2227,7 @@ async function mainSse(): Promise<void> {
     // #3030 — the same bar, as data, pushed to the daemon on change (throttled
     // in BarRenderer) so hosts other than tmux can draw it. Best effort: a
     // failed push is retried on the next change, and never touches tmux.
-    const barRenderer = new BarRenderer(sd!, name!, spawnSync as SpawnFn, (bar) => {
+    const barRenderer = new BarRenderer(sd!, name!, queuedSpawn(), (bar) => {
         client().pushAgentBar(bar).catch(() => { /* daemon unreachable: next change retries */ });
     });
     barRenderer.start();
@@ -2227,7 +2244,7 @@ async function mainSse(): Promise<void> {
     const armFastProbe = (): void => {
         if (fastProbeTimer) return;
         fastProbeTimer = setInterval(() => {
-            try { refreshPaneMarkers(); } catch { /* best-effort */ }
+            void refreshPaneMarkers();
             // #647 Slice 4 follow-up (david `a9njm5`) : pendant boot le
             // heartbeat 30s n'a pas tourné encore → setTmuxStatus du tick
             // ne fire pas. Faut peindre la barre depuis paneService ICI
@@ -2686,6 +2703,11 @@ async function mainSse(): Promise<void> {
             muxCmd: MUX_CMD,
             sessionName: tname,
             intervalMs: 5000,
+            // #3461 — gone only on a clear answer; a spawn error is transient, as at boot.
+            probeAsync: async () => {
+                const r = await muxRun(["has-session", "-t", tname]);
+                return !r.error && r.status !== 0;
+            },
             onDead: () => {
                 log(`runtime watchdog: tmux session '${tname}' is gone — kernel self-exiting`);
                 process.exit(0);
@@ -2889,7 +2911,7 @@ async function mainSse(): Promise<void> {
     const armPaneProbe = (ms: number): void => {
         if (paneProbeTimer) clearInterval(paneProbeTimer);
         paneProbeTimer = setInterval(() => {
-            try { refreshPaneMarkers(); } catch { /* best-effort */ }
+            void refreshPaneMarkers();
         }, ms);
         paneProbeRateMs = ms;
     };
@@ -2910,7 +2932,7 @@ async function mainSse(): Promise<void> {
     // machine, fed by `pushViewIfChanged` every second + on every marker
     // change). Before, two parallel signals could diverge during /compact
     // (settledStatus said busy, computePhase said idle — bug A on #712).
-    while (term.alive()) {
+    while (await term.isAlive()) {
         // #B.205: when busy-defer is armed, cap the heartbeat sleep at
         // the defer deadline so the post-defer work-check happens
         // promptly. Without this, an `idle:wait` armed for 5s could
@@ -3026,7 +3048,7 @@ async function mainPoll(): Promise<void> {
     // Same startup safety net as SSE mode (#B.148): drain any
     // pre-existing work right away instead of waiting `interval`s.
     await tryWake("startup");
-    while (term.alive()) {
+    while (await term.isAlive()) {
         // #B.205: cap sleep at busy-defer deadline (see mainSse note).
         const defer = readBusyDefer(sd!);
         const sleepMs = defer ? Math.min(interval * 1000, defer.activeMs) : interval * 1000;

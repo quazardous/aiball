@@ -242,3 +242,49 @@ test("watchdog: default intervalMs = 5000", () => {
     });
     assert.equal(timers[0].ms, 5000);
 });
+
+test("#3461 watchdog: an async probe runs one at a time and fires onDead once when gone", async () => {
+    const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
+    let probes = 0;
+    let answer: (gone: boolean) => void = () => {};
+    let deadCalls = 0;
+    installParentTmuxWatchdog({
+        muxCmd: "tmux",
+        sessionName: "cl-test",
+        intervalMs: 5000,
+        onDead: () => { deadCalls++; },
+        probeAsync: () => { probes++; return new Promise<boolean>((r) => { answer = r; }); },
+        setIntervalFn,
+        clearIntervalFn,
+    });
+    timers[0].cb();
+    timers[0].cb(); // the first probe has not answered: no second one
+    assert.equal(probes, 1);
+    answer(true);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(deadCalls, 1);
+    timers[0].cb(); // latched
+    await new Promise((r) => setImmediate(r));
+    assert.equal(probes, 1);
+    assert.equal(deadCalls, 1);
+});
+
+test("#3461 watchdog: a failing async probe is transient, the next tick probes again", async () => {
+    const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
+    let probes = 0;
+    let deadCalls = 0;
+    installParentTmuxWatchdog({
+        muxCmd: "tmux",
+        sessionName: "cl-test",
+        onDead: () => { deadCalls++; },
+        probeAsync: async () => { probes++; throw new Error("spawn"); },
+        setIntervalFn,
+        clearIntervalFn,
+    });
+    timers[0].cb();
+    await new Promise((r) => setImmediate(r));
+    timers[0].cb();
+    await new Promise((r) => setImmediate(r));
+    assert.equal(probes, 2);
+    assert.equal(deadCalls, 0);
+});

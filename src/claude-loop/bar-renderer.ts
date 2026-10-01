@@ -17,6 +17,7 @@
  */
 import { modelShortName } from "../model-name.js";
 import { spawnSync } from "node:child_process";
+import { muxQueue } from "./mux-async.js";
 import { existsSync } from "node:fs";
 import { getIpcState, onIpcChanged } from "./ipc-state.js";
 import {
@@ -384,6 +385,17 @@ function countersEqual(
 /** Spawn-tmux callable injection — vrai `spawnSync` en prod, mock dans
  *  les tests. */
 export type SpawnFn = (cmd: string, args: string[], opts: { stdio: "ignore" }) => unknown;
+
+/**
+ * #3461 — the kernel's writer: each option goes to the multiplexer without
+ * the kernel waiting, in the order asked (a later value is never overwritten
+ * by an earlier write finishing last). A `spawnSync` per option held the
+ * kernel ~100 ms each on Windows, every second while a countdown ran.
+ */
+export function queuedSpawn(): SpawnFn {
+    const queue = muxQueue();
+    return (_cmd, args) => { queue.push(args); };
+}
 
 /**
  * BarRenderer = pur observer de `ipcState` qui debounce + diff + paint

@@ -8,8 +8,9 @@
 import { spawnSync } from "node:child_process";
 import { type Socket } from "node:net";
 import { connectHost, controlAuthLine } from "../host-socket.js";
-import { captureCursorSync } from "../pane.js";
+import { captureCursor, captureCursorSync } from "../pane.js";
 import { injectRawBytes, injectWakePhrase, MUX_CMD } from "./state.js";
+import { muxRun } from "./mux-async.js";
 import { CL_ENV } from "./env-vars.js";
 
 export interface ScreenSnapshot {
@@ -22,8 +23,12 @@ export interface TerminalPort {
     readonly kind: "tmux" | "host";
     /** Whether Claude's terminal is still there. */
     alive(): boolean;
-    /** The visible screen; empty text when it cannot be read. */
+    /** The visible screen; empty text when it cannot be read. Blocks on tmux: for a one-off process (a hook). */
     screen(): ScreenSnapshot;
+    /** #3461 — `alive`, without holding the process while the multiplexer answers: the kernel's. */
+    isAlive(): Promise<boolean>;
+    /** #3461 — `screen`, without holding the process while the multiplexer answers: the kernel's. */
+    readScreen(): Promise<ScreenSnapshot>;
     /** A wake phrase, then Enter, delivered as the loop's own (never a human's) keys. */
     inject(phrase: string, onWillInject?: () => void): Promise<boolean>;
     /** Raw bytes to Claude: a key such as Esc, Enter or an arrow. */
@@ -44,21 +49,28 @@ const SPAWN_RETRY_LIMIT = 5;
 export function tmuxPort(opts: { session: string; stateDir: string | undefined; log: (msg: string) => void }): TerminalPort {
     const pane = `${opts.session}.0`;
     let consecutiveSpawnErr = 0;
+    /** One liveness answer, from a probe that ran or not. */
+    const judge = (r: { status: number | null; error?: Error }): boolean => {
+        if (r.error) {
+            consecutiveSpawnErr++;
+            if (consecutiveSpawnErr <= SPAWN_RETRY_LIMIT) {
+                opts.log(`tmux probe spawn error (${r.error.message}, streak ${consecutiveSpawnErr}/${SPAWN_RETRY_LIMIT}) — treating session as alive`);
+                return true;
+            }
+            opts.log(`tmux probe spawn error persisting (${SPAWN_RETRY_LIMIT}× in a row) — declaring session gone`);
+            return false;
+        }
+        consecutiveSpawnErr = 0;
+        return r.status === 0;
+    };
     return {
         kind: "tmux",
-        alive() {
-            const r = spawnSync(MUX_CMD, ["has-session", "-t", opts.session], { stdio: "ignore" });
-            if (r.error) {
-                consecutiveSpawnErr++;
-                if (consecutiveSpawnErr <= SPAWN_RETRY_LIMIT) {
-                    opts.log(`tmux probe spawn error (${r.error.message}, streak ${consecutiveSpawnErr}/${SPAWN_RETRY_LIMIT}) — treating session as alive`);
-                    return true;
-                }
-                opts.log(`tmux probe spawn error persisting (${SPAWN_RETRY_LIMIT}× in a row) — declaring session gone`);
-                return false;
-            }
-            consecutiveSpawnErr = 0;
-            return r.status === 0;
+        alive: () => judge(spawnSync(MUX_CMD, ["has-session", "-t", opts.session], { stdio: "ignore" })),
+        isAlive: async () => judge(await muxRun(["has-session", "-t", opts.session])),
+        // The text and the cursor at once: two calls, side by side.
+        async readScreen() {
+            const [text, cursor] = await Promise.all([muxRun(["capture-pane", "-t", pane, "-p"]), captureCursor(pane)]);
+            return { text: text.status === 0 ? text.stdout : "", cursor };
         },
         screen() {
             try {
@@ -194,7 +206,10 @@ export function hostPort(opts: {
         ready,
         // The kernel's main loop asks at once, before the connection is up.
         alive: () => !lost && !exited,
+        isAlive: async () => !lost && !exited,
         screen: () => latest,
+        // Already here: the host pushes its screen.
+        readScreen: async () => latest,
         async inject(phrase, onWillInject) {
             try { onWillInject?.(); } catch { /* the caller's markers are best effort */ }
             // As over loop.sock: the phrase, then Enter on its own after 200 ms,

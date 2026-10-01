@@ -25,6 +25,15 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop in tmux mode answers its keys, F9 and its timers on time, and the
+  daemon no longer stalls every 30 s: the calls to tmux on their hot paths
+  (reading the screen, checking the session is there, painting the bar,
+  injecting a wake, listing this machine's loops) no longer hold the
+  process while tmux answers. On Windows, where a psmux call costs about
+  100 ms, the kernel handled keys in bursts, its timers ran 2 to 3 s late,
+  and the daemon froze 0.5 to 2 s at each listing. The daemon now lists
+  every tmux session in one call instead of one per loop.
+
 - A failed loop restart can be read again: `~/.claude-loop/restart.log`,
   where a restart writes what went wrong, was deleted by the next loop start
   (it was swept with the broken state folders). A loop that restarts itself
