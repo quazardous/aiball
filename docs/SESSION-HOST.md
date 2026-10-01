@@ -51,13 +51,20 @@ a scope of its own (`systemd-run --user --scope`, unit
 `aiball-host-<dir>-<time>`). If the user manager does not answer, the host
 starts as before, in the daemon's cgroup.
 
-On Windows the daemon runs in a job (the tray's, the scheduled task's), and a
-job can end every process in it when the daemon goes. So the daemon starts the
-host with `--detach`: the host starts itself again with
-`CREATE_BREAKAWAY_FROM_JOB` (and no console), then exits, and the daemon waits
-for the new host's `host.json` as it would. If the job does not allow leaving
-it, the host starts in it all the same, the first one exits with status `3`,
-and the daemon logs that this host ends when the daemon does.
+On Windows the daemon may run in a job, and a job can end every process in it
+when it closes. So the daemon starts the host with `--detach`: the host starts
+itself again with `CREATE_BREAKAWAY_FROM_JOB` (and no console), then exits, and
+the daemon waits for the new host's `host.json` as it would. If the job does
+not allow leaving it, the host starts in it all the same, the first one exits
+with status `3`, and the daemon logs that the host stays in that job.
+
+The usual case is the tray started at logon: the Task Scheduler runs its task in
+a job that forbids leaving it, so every host stays in it. That job ends nothing
+on its own: tried with a host started from a scheduled task, the host lives on
+when the task ends, when it is deleted, and when it is stopped while it runs
+(`Stop-ScheduledTask`). A daemon restart (`aiball restart`) leaves the hosts and
+their Claude running. Logging off ends them, as it ends every process of the
+user.
 
 Each host keeps its files in `$AIBALL_HOME/hosts/<agent>/`:
 
