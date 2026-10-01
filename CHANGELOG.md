@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- On a Windows laptop, the tray and the daemon start at logon on battery, and
+  going on battery no longer stops their scheduled task: `install.ps1`
+  registered it with Windows' defaults, which refuse both. Run `install.ps1`
+  again to correct an existing install.
 - `claude-loop attach` on a loop running on the session host shows the
   loop's bar again, on the terminal's last row: the same bar as tmux's status
   line, glyphs, colours and right side included (AFK and its countdown, busy
