@@ -29,11 +29,12 @@
  *
  * Always emits `{}` and exits 0 — it must never affect a turn.
  */
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "../log.js";
 import { CL_ENV } from "./env-vars.js";
 import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
+import { queryLoopState } from "./hook-verdict.js";
 import { sendEventOnce } from "./ipc-events.js";
 
 function emit(): never {
@@ -85,6 +86,62 @@ async function readStdin(): Promise<string> {
     return Buffer.concat(chunks).toString("utf8");
 }
 
+/**
+ * #1315 — `idle_prompt` as an independent witness that the session is at rest.
+ *
+ * Measured before this was written, which changed what it is for. Across four
+ * loops on 2026-08-27, `idle_prompt` landed 61.0-61.4 s after the last `Stop`,
+ * four times out of four; the `Stop`s that produced none were each followed by
+ * another `Stop` inside that minute, resetting the count. So it is NOT a
+ * turn-end corroboration — `Stop` already marks that, exactly, a minute
+ * earlier. It is an inactivity threshold: "nothing has happened for ~60 s".
+ *
+ * That makes it useless for sharpening busy -> idle, and useful for the
+ * opposite: catching the moment our own busy flag is LYING. The pane-scraped
+ * latch goes stale in practice — `clearing stale paneBusy latch` appears 20
+ * times in one day across the loops — and today that is only noticed when
+ * `turn:settled` happens to fire. Claude Code reporting a minute of quiet
+ * while our phase still reads busy is proof the latch is stale, from a source
+ * that cannot be fooled by pane text.
+ *
+ * Reads through `queryLoopState`, NOT `readLoopStateInput` directly. A hook is
+ * a fresh subprocess, so its `ipcState` is empty until the UDS round-trip
+ * mirrors the timer's into it; reading directly returns safe defaults, which
+ * here means `paneBusy: false` and a detector that can never fire. The first
+ * version of this did exactly that and its smoke test "passed" — the reassuring
+ * line was the default, not a reading.
+ *
+ * Which is also why an unreachable timer is reported as UNKNOWN rather than as
+ * agreement. `queryLoopState` degrades silently to those same defaults, so
+ * "idle" from a dead socket and "idle" from a live one are indistinguishable
+ * downstream — and only one of them is evidence.
+ *
+ * This REPORTS and changes nothing. No rule is rewritten, no latch is cleared:
+ * a detector earns trust in the log before anything acts on it, and a hook must
+ * never affect a turn.
+ */
+async function reportQuiescenceMismatch(type: string): Promise<void> {
+    if (type !== "idle_prompt") return;
+    try {
+        if (!existsSync(loopSockPath(sd!))) {
+            logger.info(`notification idle_prompt: loop state UNKNOWN (no timer socket) — not evidence either way`);
+            return;
+        }
+        const state = await queryLoopState(sd!);
+        if (state.phase === "busy") {
+            logger.info(
+                `notification idle_prompt WHILE state=busy — the busy latch is stale`
+                + ` (claude reports ~60s of quiet ; nothing is cleared here)`,
+            );
+        } else {
+            logger.info(`notification idle_prompt agrees with state=${state.phase}`);
+        }
+    } catch (e) {
+        // Never let an observation break the hook.
+        logger.info(`notification idle_prompt: state read failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+
 try {
     const raw = (await readStdin()).trim();
     // Parse for greppable fields, but never let a parse failure lose the bytes:
@@ -103,6 +160,7 @@ try {
         : "?";
     const keys = parsed ? Object.keys(parsed).sort().join(",") : "-";
     logger.info(`notification type=${type} keys=[${keys}] raw=${JSON.stringify(raw)}`);
+    await reportQuiescenceMismatch(type);
     await flushToTimer();
 } catch (e) {
     logger.info(`notification READ FAILED: ${e instanceof Error ? e.message : String(e)}`);

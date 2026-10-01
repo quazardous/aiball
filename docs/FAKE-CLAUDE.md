@@ -55,6 +55,59 @@ bin/fake-claude --list-screens
 
 Exit: `Ctrl+Q` or `Ctrl+C` (textual standard binding).
 
+## Firing hooks
+
+Painting a screen exercises the pane scrapers. It does **not** exercise the
+hook events — `Stop`, `Notification`, `SessionStart` — which is the half of
+the runtime that deterministic-signal work depends on, and the half nobody can
+provoke on demand: an API failure or a quota pause will not happen because you
+want one.
+
+A `hook:` step fires a real handler the way Claude Code would — the payload on
+stdin, `CL_STATE_DIR` / `CL_NAME` in the environment:
+
+```yaml
+steps:
+  - hook: Stop
+  - sleep: 61
+  - hook:
+      event: Notification
+      matcher: ""            # optional — pins ONE branch; omit to fire all
+      payload:
+        notification_type: idle_prompt
+        message: "Claude is waiting for your input"
+```
+
+The command is read from the `claude-settings.json` claude-loop generated in
+the state dir, never reconstructed: a reimplementation would drift from the
+real wiring, and the drift would look like a passing test. Requires running
+under claude-loop, since that is what creates the state dir.
+
+Two things to know before firing one, both learned by getting them wrong:
+
+- **You run the handlers the settings point at, not the ones you are editing.**
+  Reading the real `claude-settings.json` is what keeps the simulator honest,
+  and it also means a branch's version of a hook is not what fires unless the
+  settings were generated *from that branch*. Copying a live loop's settings
+  into a scratch state dir runs the installed code and silently proves nothing
+  about your change.
+
+  The remedy is to generate the file where the scenario will read it, from the
+  checkout under test — `buildHookSettings(HOOKS, …)` with that checkout as the
+  root, written to `$CL_STATE_DIR/claude-settings.json`. Then the commands
+  point at the branch, and what fires is what you wrote.
+- **A real hook talks to the real daemon.** `Stop` in particular queries the
+  board and can decide to wake — from a scenario, against production. Fire it
+  against a state dir you are willing to have side effects in, and do not
+  assume "it is only a simulator" buys you isolation.
+
+**Write scenarios from a captured trace, not from the docs.** Generate a real
+log first, read what actually happened, then ask how to reproduce it. The
+shipped `hook-idle-prompt.yaml` is built that way, and its comments carry the
+timeline it came from — including the discriminating case an invented scenario
+would have missed, where a second `Stop` inside the minute cancels the
+notification entirely.
+
 ## Built-in screens
 
 Available without declaring anything in your scenario:
