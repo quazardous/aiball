@@ -55,6 +55,7 @@ import { classifyCompacting as classifyCompactingRaw } from "./compacting-detect
 import { parseGates, runGates } from "./gates.js";
 import { resolveMuxCmd } from "./mux-cmd.js";
 import { muxRun } from "./mux-async.js";
+import { parseClientCounts, parseClientList, type ClientEntry } from "./mux-clients.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
@@ -93,19 +94,19 @@ export function loopStateRoot(): string {
  * #3340 — the clients attached to the loop's tmux session: how many, and how
  * many have the controls (not `client_readonly`). Null when tmux cannot say.
  */
-export function tmuxClients(name: string): { clients: number; interactive: number } | null {
+export function tmuxClients(name: string): { clients: number; interactive: number | null } | null {
     const r = spawnSync(MUX_CMD, ["list-clients", "-t", tmuxName(name), "-F", "#{client_readonly}"], { encoding: "utf8" });
     if (r.error || r.status !== 0) return null;
-    const flags = r.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-    return { clients: flags.length, interactive: flags.filter((f) => f === "0").length };
+    // #3477 — `interactive` null under psmux, which cannot say who is read-only.
+    return parseClientCounts(r.stdout);
 }
 
 /** #3343 — each client attached to the loop's tmux session: its tmux name, its process, whether it may type. */
-export function tmuxClientList(name: string): { client: string; pid: number; readonly: boolean }[] {
+export function tmuxClientList(name: string): ClientEntry[] | null {
     const r = spawnSync(MUX_CMD, ["list-clients", "-t", tmuxName(name), "-F", "#{client_name} #{client_pid} #{client_readonly}"], { encoding: "utf8" });
     if (r.error || r.status !== 0) return [];
-    return r.stdout.split("\n").map((l) => l.trim().split(" ")).filter((f) => f.length === 3)
-        .map(([client, pid, ro]) => ({ client: client!, pid: Number(pid), readonly: ro === "1" }));
+    // #3477 — null under psmux: it cannot tell its clients apart.
+    return parseClientList(r.stdout);
 }
 
 /** #3246 — whether the loop's tmux session exists: the one probe, for the CLI and the daemon. */

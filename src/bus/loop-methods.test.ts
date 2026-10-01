@@ -118,14 +118,14 @@ test("loop.clients_readonly and loop.clients_detach act on the other clients onl
     const kids = [0, 1].map(() => spawn("tmux", ["-C", "attach", "-t", tmuxName("cl-cli")], { stdio: ["pipe", "ignore", "ignore"] }));
     try {
         const deadline = Date.now() + 5000;
-        while (tmuxClientList("cl-cli").length < 2) {
+        while ((tmuxClientList("cl-cli") ?? []).length < 2) {
             assert.ok(Date.now() < deadline, "the two clients never attached");
             await new Promise((r) => setTimeout(r, 50));
         }
-        const keep = tmuxClientList("cl-cli")[0]!.pid;
+        const keep = (tmuxClientList("cl-cli") ?? [])[0]!.pid;
         const ro = getMethod("loop.clients_readonly")!.run(human, { name: "cl-cli", keep_pid: keep }) as Record<string, unknown>;
         assert.deepEqual(ro, { name: "cl-cli", clients: 2, interactive: 1 });
-        assert.equal(tmuxClientList("cl-cli").find((c) => c.pid === keep)?.readonly, false, "the caller's own keeps the controls");
+        assert.equal((tmuxClientList("cl-cli") ?? []).find((c) => c.pid === keep)?.readonly, false, "the caller's own keeps the controls");
         const again = getMethod("loop.clients_readonly")!.run(human, { name: "cl-cli", keep_pid: keep }) as Record<string, unknown>;
         assert.equal(again.interactive, 1, "twice is still a copy: switch-client -r toggles, only writable ones are switched");
         const det = getMethod("loop.clients_detach")!.run(human, { name: "cl-cli", keep_pid: keep }) as Record<string, unknown>;

@@ -7,6 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import { resolveMuxCmd } from "./mux-cmd.js";
+import { parseClientCounts } from "./mux-clients.js";
 
 /** The multiplexer, resolved as state.ts does (not imported from it: state.ts uses this module). */
 const MUX_CMD = resolveMuxCmd(process.env.MUX_CMD);
@@ -57,11 +58,11 @@ export function muxQueue(run: (args: string[]) => Promise<unknown> = muxRun): { 
  * the controls (not `client_readonly`). Null when tmux cannot say. The
  * session's name is the loop's (`tmuxName` is the identity).
  */
-export async function tmuxClientsAsync(session: string, run: (args: string[]) => Promise<MuxResult> = muxRun): Promise<{ clients: number; interactive: number } | null> {
+export async function tmuxClientsAsync(session: string, run: (args: string[]) => Promise<MuxResult> = muxRun): Promise<{ clients: number; interactive: number | null } | null> {
     const r = await run(["list-clients", "-t", session, "-F", "#{client_readonly}"]);
     if (r.error || r.status !== 0) return null;
-    const flags = r.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
-    return { clients: flags.length, interactive: flags.filter((f) => f === "0").length };
+    // #3477 — `interactive` null under psmux, which cannot say who is read-only.
+    return parseClientCounts(r.stdout);
 }
 
 /** The tmux sessions that exist now, in one call; null when tmux cannot say (no server is not that: none). */

@@ -240,7 +240,10 @@ function otherTmuxClients(caller: Caller, p: { name?: string; agent?: string; ke
     const view = loopView(loop);
     if (view.mode !== "tmux") throw new Refusal(409, `${loop.name} runs on the session host: its clients take the controls there`, ERROR_CODES.CONFLICT);
     if (!view.running) throw new Refusal(404, `the loop ${loop.name} does not run`, ERROR_CODES.LOOP_NOT_FOUND);
-    return { loop, others: tmuxClientList(loop.name).filter((c) => c.pid !== p.keep_pid) };
+    const all = tmuxClientList(loop.name);
+    // #3477 — psmux cannot tell its clients apart: refused, not answered as done.
+    if (all === null) throw new Refusal(501, "psmux cannot tell its clients apart (list-clients ignores -F): no client was changed", ERROR_CODES.NOT_IMPLEMENTED);
+    return { loop, others: all.filter((c) => c.pid !== p.keep_pid) };
 }
 
 const clientsParams = z.object({ name: z.string().optional(), agent: z.string().optional(), keep_pid: z.number().int().optional() });

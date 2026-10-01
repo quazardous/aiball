@@ -8,7 +8,8 @@ import { onPresenceStop } from "../live-presence.js";
 
 export interface TmuxClients {
     clients: number;
-    interactive: number;
+    /** #3477 — null when the multiplexer cannot say who has the controls (psmux). */
+    interactive: number | null;
 }
 
 const said = new Map<string, TmuxClients>();
