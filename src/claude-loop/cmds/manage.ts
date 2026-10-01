@@ -631,8 +631,15 @@ export function pruneCandidates(entries: string[], isLoopDir: (name: string) => 
  * loop of the machine whenever any loop started (a `loop.restart`, a
  * `session.start`). Stopped loops go with `prune` (which asks) or `rm`.
  */
-export function startSweepTargets(entries: string[], hasPlate: (name: string) => boolean, alive: (name: string) => boolean): string[] {
-    return entries.filter((name) => !name.startsWith(".") && !hasPlate(name) && !alive(name));
+export function startSweepTargets(
+    entries: string[],
+    hasPlate: (name: string) => boolean,
+    alive: (name: string) => boolean,
+    isDir: (name: string) => boolean,
+): string[] {
+    // #3459 — a directory only: the root's own files (`restart.log`, which says
+    // why a restart failed) have no plate either, and went with every start.
+    return entries.filter((name) => !name.startsWith(".") && isDir(name) && !hasPlate(name) && !alive(name));
 }
 
 export async function cmdPrune(): Promise<void> {

@@ -3053,6 +3053,7 @@ async function mainPoll(): Promise<void> {
  * once the child really spawned, its output in a log outside the state dir
  * that `rm` deletes. `extra` goes to `restart` (#3074: `--resume`).
  */
+const loopLog = (m: string): void => log(m);
 function hardRestart(why: string, extra: string[]): void {
     if (!name) { process.exit(0); }
     const logPath = join(STATE_ROOT, "restart.log");
@@ -3062,10 +3063,13 @@ function hardRestart(why: string, extra: string[]): void {
         tag: name,
         write: (line) => { try { appendFileSync(logPath, line); } catch { /* nowhere */ } },
     });
-    const log = (m: string): void => restartLog.info(m);
+    // #3459 — said in the loop's own log too, where one looks first: the root's
+    // restart.log is the helper's, and a failure there went unread.
+    const log = (m: string): void => { restartLog.info(m); loopLog(m); };
     try {
         const bin = join(installRoot(), "bin", "claude-loop");
         const out = openSync(logPath, "a"); // restart child's stdout+stderr → the log
+        loopLog(`${why} → spawning 'claude-loop restart ${[name!, ...extra].join(" ")}' (its output: ${logPath})`);
         const child = spawn(process.execPath, [bin, "restart", name!, ...extra], { detached: true, stdio: ["ignore", out, out] });
         child.unref();
         child.on("spawn", () => { log(`${why} → restart child pid ${child.pid} spawned`); process.exit(0); });

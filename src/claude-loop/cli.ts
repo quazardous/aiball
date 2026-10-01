@@ -20,6 +20,7 @@ import {
     readFileSync,
     readdirSync,
     rmSync,
+    statSync,
     writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -327,6 +328,7 @@ function pruneDeadStateDirs(): void {
         readdirSync(STATE_ROOT),
         (name) => existsSync(platePath(stateDirFor(name))),
         (name) => loopAlive(name),
+        (name) => { try { return statSync(stateDirFor(name)).isDirectory(); } catch { return false; } },
     );
     for (const name of targets) {
         try { rmSync(stateDirFor(name), { recursive: true, force: true }); }

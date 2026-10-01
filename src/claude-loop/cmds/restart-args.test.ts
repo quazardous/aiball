@@ -161,8 +161,10 @@ test("#3239 — prune offers the dead loops only: never a hidden lock, the root'
 
 test("#3281 — a start clears only broken state dirs (no plate), never a stopped loop kept for its restart", async () => {
     const { startSweepTargets } = await import("./manage.js");
-    const entries = [".start-lock-a1", "cl-stopped", "cl-broken", "cl-running", "cl-broken-running"];
+    const entries = [".start-lock-a1", "restart.log", "cl-stopped", "cl-broken", "cl-running", "cl-broken-running"];
     const plates = new Set(["cl-stopped", "cl-running"]);
     const alive = new Set(["cl-running", "cl-broken-running"]);
-    assert.deepEqual(startSweepTargets(entries, (n) => plates.has(n), (n) => alive.has(n)), ["cl-broken"]);
+    const files = new Set(["restart.log"]);
+    // #3459 — the root's log is a file: it outlives every start.
+    assert.deepEqual(startSweepTargets(entries, (n) => plates.has(n), (n) => alive.has(n), (n) => !files.has(n)), ["cl-broken"]);
 });
