@@ -66,6 +66,8 @@ client elsewhere (the web UI, a remote tvty).
 | `0x0c` | `error` | proxy → client | JSON `{code, error}` |
 | `0x0d` | `history_request` | client → proxy | JSON `{before, count}` |
 | `0x0e` | `history` | proxy → client | JSON `{first, lines}` |
+| `0x0f` | `detach_others` | client → proxy | JSON `{}` |
+| `0x10` | `detached_others` | proxy → client | JSON `{count}` |
 
 A proxy ignores a frame type it does not know; a client does the same.
 
@@ -93,10 +95,14 @@ The proxy answers `welcome`:
 
 ```json
 { "version": 1, "loop": "cl-aiball-89c365", "consumer": "claude-aiball-dev",
-  "size": { "rows": 40, "cols": 120 }, "pid": 12345, "history_lines": 5000 }
+  "size": { "rows": 40, "cols": 120 }, "pid": 12345, "history_lines": 5000,
+  "features": ["detach_others"] }
 ```
 
 `history_lines` is how many lines of history the proxy keeps (see *History*).
+`features` lists what the proxy does beyond the frames every version-1 proxy
+knows: `detach_others` (see *Closing the other clients*). A client offers a
+feature only when the proxy lists it, since an older proxy ignores the frame.
 
 **Versions.** The proxy speaks its version and every older one it still
 supports. If it cannot speak the client's `version`, it sends `error`
@@ -201,6 +207,15 @@ that typed or pasted (see above: not a mouse or focus report) or took focus
   window to the clients it has; with none left, the size stays as it is.
 - A client smaller than the size in force still receives the whole screen; it
   is up to the client to crop or scroll.
+
+## Closing the other clients
+
+An `interactive` client may close every other client of the session: it sends
+`detach_others`. Each other client, read-only copies included, gets `closed`
+with `reason: "detached_by_other"`, then its connection ends. The session and
+the sender carry on, and the sender gets `detached_others` with how many were
+closed. A `readonly` client that sends it gets `error` (`code: "READ_ONLY"`)
+and nobody is closed.
 
 ## Liveness and end
 

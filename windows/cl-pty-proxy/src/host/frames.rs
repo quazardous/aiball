@@ -20,6 +20,10 @@ pub const CLOSED: u8 = 0x0b;
 pub const ERROR: u8 = 0x0c;
 pub const HISTORY_REQUEST: u8 = 0x0d;
 pub const HISTORY: u8 = 0x0e;
+/// #3474 — a client with the controls closes every other attach of the session.
+pub const DETACH_OTHERS: u8 = 0x0f;
+/// #3474 — the answer to `detach_others`: how many were closed.
+pub const DETACHED_OTHERS: u8 = 0x10;
 
 /// A frame larger than this ends the connection: nothing legitimate is that big.
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;

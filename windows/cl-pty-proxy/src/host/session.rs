@@ -635,6 +635,9 @@ impl Session {
             "size": { "rows": inner.size.0, "cols": inner.size.1 },
             "pid": pid,
             "history_lines": history,
+            // #3474 — what this host does beyond version 1's frames, for a client
+            // to offer it only where it works.
+            "features": ["detach_others"],
         })));
         if stream {
             let scrollback = hello["scrollback"].as_u64().unwrap_or(0) as usize;
@@ -674,6 +677,22 @@ impl Session {
         }
         drop(inner);
         self.tell_clients();
+    }
+
+    /// #3474 — every other client leaves: told why (`closed`, `detached_by_other`),
+    /// then detached as if it had gone (its writer sends what is queued, then
+    /// shuts the socket). The caller stays, the session goes on. How many left.
+    pub fn detach_others(&self, keep: &Arc<Client>) -> usize {
+        let others: Vec<Arc<Client>> = {
+            let inner = self.inner.lock().unwrap();
+            inner.clients.values().filter(|c| c.id != keep.id).cloned().collect()
+        };
+        let closed = frames::encode_json(frames::CLOSED, &json!({ "reason": "detached_by_other" }));
+        for c in &others {
+            c.push(closed.clone());
+            self.detach(c);
+        }
+        others.len()
     }
 
     fn tell_clients(&self) {

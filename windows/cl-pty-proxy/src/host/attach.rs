@@ -78,6 +78,15 @@ fn handle(mut sock: Stream, session: Arc<Session>, token: Option<&str>) {
                 let e = frames::encode_json(frames::ERROR, &json!({ "code": "READ_ONLY", "error": "a readonly client does not type or resize" }));
                 client.send(e);
             }
+            // #3474 — a copy puts no one out.
+            frames::DETACH_OTHERS if !client.interactive => {
+                let e = frames::encode_json(frames::ERROR, &json!({ "code": "READ_ONLY", "error": "a readonly client does not close the others" }));
+                client.send(e);
+            }
+            frames::DETACH_OTHERS => {
+                let count = session.detach_others(&client);
+                client.send(frames::encode_json(frames::DETACHED_OTHERS, &json!({ "count": count })));
+            }
             frames::INPUT => session.input(&client, &payload),
             frames::RESIZE => {
                 if let Some(size) = serde_json::from_slice::<Value>(&payload).ok().and_then(|v| parse_size(&v)) {

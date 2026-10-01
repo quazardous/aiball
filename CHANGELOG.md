@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A client attached to a loop on the session host can close the other
+  clients attached to it, read-only copies included, without stopping the
+  session (`detach_others` on the attach socket, announced in the host's
+  welcome). tvty uses it for a "close the others" button; a client closed this
+  way, `claude-loop attach` included, says it was detached by another client.
 - How deep the backlog wakes an agent is a setting,
   `tickets.backlog.depth` (global or per project, shown in tvty's options):
   `followup`, `waiting` or `blocked`, the deepest tier a backlog wake may name

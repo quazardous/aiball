@@ -11,7 +11,8 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { DetachKeys, attachHost, copyBar } from "./host-attach.js";
+import { DetachKeys, FRAME, FrameReader, attachHost, copyBar, frame } from "./host-attach.js";
+import { connectHost, withToken } from "../host-socket.js";
 import { sampleBar } from "./attach-bar.fixture.js";
 import type { AgentBar } from "../agent-bar.js";
 import { removeHostHome, sessionHostSkip } from "../tests/session-host-bin.js";
@@ -196,4 +197,47 @@ test("#3469 — the loop's bar: on the last row, Claude a row smaller, kept abov
     assert.deepEqual(await ended, { reason: "detached" });
     assert.equal(stopped, 1, "the bar's watch is stopped");
     assert.ok(shown.lastIndexOf("\x1b[r") > shown.lastIndexOf("\x1b[1;29r"), "the whole screen scrolls again");
+});
+
+test("#3474 — a client with the controls closes the others, copies included; a copy puts no one out", { skip }, async () => {
+    const link = await startHost({ name: "close-others", argv: ["cat"], cwd: home, size: { rows: 20, cols: 70 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+    cleanups.push(async () => { await link.call("host.shutdown").catch(() => {}); link.close(); });
+    const sock = join(link.info.dir, "attach.sock");
+    const clients = async () => ((await link.call("host.hello")) as { clients: number }).clients;
+
+    /** A raw client: its frames as they come, and how to send one. */
+    const raw = (mode: "interactive" | "readonly") => {
+        const { socket, token } = connectHost(sock);
+        const reader = new FrameReader();
+        const got: Array<{ type: number; json: Record<string, unknown> }> = [];
+        socket.on("data", (c: Buffer) => {
+            for (const f of reader.push(c)) {
+                if ([FRAME.welcome, FRAME.closed, FRAME.error, FRAME.detached_others].includes(f.type as never)) got.push({ type: f.type, json: JSON.parse(f.payload.toString("utf8")) });
+            }
+        });
+        let ended = false;
+        socket.on("close", () => { ended = true; });
+        socket.on("connect", () => socket.write(frame(FRAME.hello, JSON.stringify(withToken({ version: 1, client: "test", mode, view: "stream", scrollback: 0, size: { rows: 20, cols: 70 } }, token)))));
+        return { got, send: (type: number) => socket.write(frame(type, "{}")), ended: () => ended, close: () => socket.destroy() };
+    };
+
+    const keeper = raw("interactive");
+    const other = raw("interactive");
+    const copy = raw("readonly");
+    cleanups.push(() => { keeper.close(); other.close(); copy.close(); });
+    await until("three attached", async () => (await clients()) === 3);
+    assert.deepEqual(keeper.got.find((g) => g.type === FRAME.welcome)?.json.features, ["detach_others"], "the welcome says the host can");
+
+    copy.send(FRAME.detach_others);
+    await until("the copy refused", () => copy.got.some((g) => g.type === FRAME.error && g.json.code === "READ_ONLY"));
+    assert.equal(await clients(), 3, "a copy puts no one out");
+
+    keeper.send(FRAME.detach_others);
+    await until("the answer", () => keeper.got.some((g) => g.type === FRAME.detached_others));
+    assert.deepEqual(keeper.got.find((g) => g.type === FRAME.detached_others)?.json, { count: 2 });
+    for (const c of [other, copy]) {
+        await until("told why, then let go", () => c.got.some((g) => g.type === FRAME.closed && g.json.reason === "detached_by_other") && c.ended());
+    }
+    await until("one client left", async () => (await clients()) === 1);
+    assert.equal(((await link.call("host.hello")) as { claude: { running: boolean } }).claude.running, true, "the session goes on");
 });

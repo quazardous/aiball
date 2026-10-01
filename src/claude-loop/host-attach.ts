@@ -16,6 +16,8 @@ import { connectHost, withToken } from "../host-socket.js";
 export const FRAME = {
     hello: 0x01, welcome: 0x02, snapshot: 0x03, output: 0x04, input: 0x05, resize: 0x06,
     size: 0x08, exited: 0x0a, closed: 0x0b, error: 0x0c,
+    // #3474 — a client with the controls closes every other attach.
+    detach_others: 0x0f, detached_others: 0x10,
 } as const;
 
 const CTRL_B = 0x02;
@@ -183,7 +185,9 @@ export function attachHost(socketPath: string, io: AttachIo, opts: { readonly?: 
                     if (!e.restarting) finish({ reason: "exited", code: e.code ?? null });
                 } else if (f.type === FRAME.closed || f.type === FRAME.error) {
                     const e = JSON.parse(f.payload.toString("utf8")) as { reason?: string; error?: string };
-                    finish({ reason: f.type === FRAME.closed ? "closed" : "error", message: e.error ?? e.reason ?? "" });
+                    // #3474 — another client with the controls closed this one: said plainly.
+                    const why = e.reason === "detached_by_other" ? "detached by another client" : e.error ?? e.reason ?? "";
+                    finish({ reason: f.type === FRAME.closed ? "closed" : "error", message: why });
                 }
             }
         });
