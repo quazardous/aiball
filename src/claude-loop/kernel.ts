@@ -1411,8 +1411,11 @@ let postBootRemindersSent = false;
 // wake countdown arms on) are the daemon's: computed there on the events that
 // move them, given with the hello and pushed when a number changes. The loop
 // only paints them.
-function applyCounters(c: { open: number; actionable: number; backlog: number; events: number } | null | undefined): void {
+function applyCounters(c: { open: number; actionable: number; backlog: number; events: number; wakes?: number } | null | undefined): void {
     if (!c) return;
+    // #3449 — the countdown arms on the pings that wake, not every unread one:
+    // a ping the daemon marks `wakes: false` is never delivered.
+    wakeEvents = c.wakes ?? c.events;
     setIpcCounters({ open: c.open, backlog: c.backlog, events: c.events });
     // #1055 S4 — surface the counters on the kernel bus.
     getKernelBus().emit("counters:refreshed", { open: c.open, backlog: c.backlog, events: c.events });
@@ -1426,6 +1429,8 @@ function applyCounters(c: { open: number; actionable: number; backlog: number; e
 // path. Cleared on consumption and on `turn:started` (a new turn supersedes a
 // stale pending event).
 let pendingWakeHint: WakeHint | undefined;
+// #3449 — the unread pings that wake this agent, from the daemon's counters.
+let wakeEvents = 0;
 // #2255 — external signals waiting for delivery. Priority over the ticket FIFO,
 // same gates as any wake; removed and acked once injected.
 const pendingSignals = new SignalQueue();
@@ -1481,7 +1486,7 @@ function recomputeNextWake(): void {
     // "syndrome event fantôme". `backlog` here is already the NON-COOLED count.
     const actionableOpen = getIpcState().actionableOpen ?? 0;
     const somethingToDrain = wakeCountdownArmable({
-        events: c?.events ?? 0,
+        events: wakeEvents,
         actionableOpen,
         backlog: c?.backlog ?? 0,
         signals: pendingSignals.size(),

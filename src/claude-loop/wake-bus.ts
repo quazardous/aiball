@@ -44,6 +44,8 @@ export interface CountersEvent {
     actionable: number;
     backlog: number;
     events: number;
+    /** #3449 — the unread pings that wake it; absent from an older daemon. */
+    wakes?: number;
 }
 
 /** Hello envelope sent by the daemon on first connect, with the counters as they are. */

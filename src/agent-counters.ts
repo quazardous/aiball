@@ -1,8 +1,8 @@
 /**
  * #3133 — an agent's counters, computed by the daemon: `open` (open tickets in
  * its project), `actionable` (those in its court), `backlog` (what the backlog
- * picker could hand it now, cooled-down threads left out) and `events` (its
- * unread pings). The same numbers its loop used to fetch with three requests,
+ * picker could hand it now, cooled-down threads left out), `events` (its
+ * unread pings) and `wakes` (those of them that wake it). The same numbers its loop used to fetch with three requests,
  * now for every agent, loop or not.
  *
  * Computed only when something that moves them happened: a ticket's lifecycle
@@ -32,6 +32,8 @@ export interface AgentCounters {
     actionable: number;
     backlog: number;
     events: number;
+    /** #3449 — the unread pings that wake it: `events` less those it only reads (a ticket another agent holds). */
+    wakes: number;
     computed_at: string;
 }
 
@@ -69,7 +71,7 @@ export function computeCounters(agent: string): AgentCounters {
         if (Number.isFinite(at) && (restEnds === null || at < restEnds)) restEnds = at;
     }
     restEndsAt.set(agent, restEnds);
-    return { open, actionable, backlog, events: unreadPingCount(agent), computed_at: new Date().toISOString() };
+    return { open, actionable, backlog, events: unreadPingCount(agent), wakes: unreadPingCount(agent, "fifo-wake"), computed_at: new Date().toISOString() };
 }
 
 /** #3337 — per agent, when the earliest backlog rest its last computation saw ends. */
@@ -101,7 +103,7 @@ export function backlogWakeRecorded(agent: string): void {
 }
 
 const same = (a: AgentCounters | undefined, b: AgentCounters) =>
-    !!a && a.open === b.open && a.actionable === b.actionable && a.backlog === b.backlog && a.events === b.events;
+    !!a && a.open === b.open && a.actionable === b.actionable && a.backlog === b.backlog && a.events === b.events && a.wakes === b.wakes;
 
 /** Compute now, keep, and tell who listens when a number changed. */
 export function refreshCounters(agent: string): AgentCounters {

@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- A loop's countdown no longer runs for events that will not wake it: an
+  unread event on a ticket another agent holds armed it, and it counted down
+  to nothing, again and again. The agent's counters now say how many of its
+  unread events wake it (`wakes`), and the countdown follows that number.
+
 ## [0.53.0] — 2026-10-01
 
 ### Added

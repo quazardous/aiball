@@ -70,7 +70,7 @@ test("the loop gets its counters with the hello, then each change; a watcher get
     });
     const hello = await loop.call<{ id: string; value: { counters: Counters } }>("bus.subscribe", { subject: "agent.worker.events" });
     eventsSub = hello.id;
-    assert.deepEqual({ ...hello.value.counters, computed_at: undefined }, { open: 0, actionable: 0, backlog: 0, events: 0, computed_at: undefined });
+    assert.deepEqual({ ...hello.value.counters, computed_at: undefined }, { open: 0, actionable: 0, backlog: 0, events: 0, wakes: 0, computed_at: undefined });
     stateSub = (await boss.call<{ id: string }>("bus.subscribe", { subject: "agent.worker.state" })).id;
 
     // A ticket filed on its project by a human: open, in its court, a ping.

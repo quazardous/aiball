@@ -87,3 +87,16 @@ test("a specialist's ticket, assigned to the crew, still wakes it on a reply", (
     assert.ok(ids("spec", true).includes(reply.id), "the reply on its own ticket wakes the specialist");
     assert.ok(!ids("spec", true).includes(other), "a ticket it does not follow does not");
 });
+
+test("the counters say how many unread pings wake the agent, apart from the unread ones", async () => {
+    const { computeCounters } = await import("../agent-counters.js");
+    const before = computeCounters("lead");
+    file("crew only", { assignee: "crew" });
+    const after = computeCounters("lead");
+    assert.equal(after.events, before.events + 1, "one more unread ping");
+    assert.equal(after.wakes, before.wakes, "but no more that wake: the countdown has nothing to arm on");
+    file("anyone's");
+    const then = computeCounters("lead");
+    assert.equal(then.events, after.events + 1);
+    assert.equal(then.wakes, after.wakes + 1, "a ticket that wakes it counts in both");
+});
