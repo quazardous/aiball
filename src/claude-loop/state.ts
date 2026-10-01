@@ -1177,7 +1177,7 @@ export async function checkHasWork(
         const c = client ?? new AiballClient();
         try {
             const [pingsR, projects] = await Promise.all([
-                c.pingsCount() as Promise<{ unread?: number }>,
+                c.pingsCount({ forWake: true }) as Promise<{ unread?: number }>,
                 // #379: ask for the landscape so the actionable dedup is
                 // set-aware (hash) and the drained branch has its primitive.
                 c.listProjectsDetailed({ landscape: true, project }).catch(() => []) as Promise<Array<{
@@ -2063,7 +2063,7 @@ export async function buildContextPhrase(
         // (no prune-on-consult), so the claimable-head was a safer bet.
         // With Phase A's prune, the unread FIFO drains naturally.
         const [pingsR, projects, unreadR, consumerR, standingR] = await Promise.all([
-            client.pingsCount() as Promise<{ unread?: number }>,
+            client.pingsCount({ forWake: true }) as Promise<{ unread?: number }>,
             client.listProjectsDetailed() as Promise<Array<{
                 name: string;
                 open_count?: number;
@@ -2080,7 +2080,7 @@ export async function buildContextPhrase(
             // wake. The head stays messages[0] (oldest, ASC by id); the rest
             // of the window lets us group. This also revives the #1163
             // decision digest, which never fired under the old limit=1.
-            (client.unread(null, WAKE_BUNDLE_FETCH_LIMIT) as Promise<{
+            (client.unread(null, WAKE_BUNDLE_FETCH_LIMIT, undefined, { forWake: true }) as Promise<{
                 messages?: Array<{
                     id: number;
                     kind?: string;

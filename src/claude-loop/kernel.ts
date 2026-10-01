@@ -1773,6 +1773,11 @@ async function mainSse(): Promise<void> {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
         getKernelBus().emit("daemon:ping", { ticketId: p.ticket_id });
+        // #3449 — an event for this agent to read, not to wake on (a ticket assigned to another agent).
+        if (p.wakes === false) {
+            log(`SSE ping received: ${JSON.stringify(p)} → no wake (the daemon says it is not this agent's to wake on)`);
+            return;
+        }
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
         // #999 — model (a) : an SSE event does NOT fire a wake directly.

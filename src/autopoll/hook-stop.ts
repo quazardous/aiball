@@ -128,7 +128,8 @@ async function main(): Promise<void> {
     // Pings count — cheap probe.
     let count = 0;
     try {
-        const r = (await client.pingsCount()) as { unread: number };
+        // #3449 — what may wake this agent, not every unread event it may read.
+        const r = (await client.pingsCount({ forWake: true })) as { unread: number };
         count = typeof r?.unread === "number" ? r.unread : 0;
     } catch {
         emit({}); // daemon unreachable — never block

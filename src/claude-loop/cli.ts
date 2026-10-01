@@ -2039,7 +2039,7 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
             if (!aiballClient) aiballClient = new AiballClient();
             try {
                 const [r, projects] = await Promise.all([
-                    aiballClient.pingsCount() as Promise<{ consumer_id: string; unread: number }>,
+                    aiballClient.pingsCount({ forWake: true }) as Promise<{ consumer_id: string; unread: number }>,
                     aiballClient.listProjectsDetailed().catch(() => []) as Promise<Array<{
                         name: string;
                         open_count?: number;

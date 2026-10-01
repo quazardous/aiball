@@ -768,12 +768,14 @@ export class AiballClient {
     /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO.
      *  #798 — `since` is an ISO 8601 cutoff. Filters messages whose
      *  `created_at` is >= since. */
-    unread(project: string | null | undefined, limit = 100, since?: string) {
+    unread(project: string | null | undefined, limit = 100, since?: string, opts: { forWake?: boolean } = {}) {
         return this.call("unread.list", {
             consumer_id: this.agentId,
             ...(project ? { project } : {}),
             limit,
             ...(since ? { since } : {}),
+            // #3449 — the loop's wake reads only what may wake it.
+            ...(opts.forWake ? { for: "wake" } : {}),
         });
     }
     markMessageSeen(message_id: number) {
@@ -819,8 +821,8 @@ export class AiballClient {
             ...(opts.all === true ? { all: true } : {}),
         });
     }
-    pingsCount() {
-        return this.call<{ unread: number }>("ping.count", { consumer_id: this.agentId });
+    pingsCount(opts: { forWake?: boolean } = {}) {
+        return this.call<{ unread: number }>("ping.count", { consumer_id: this.agentId, ...(opts.forWake ? { for: "wake" } : {}) });
     }
 
     /** #397: fetch a single consumer (incl. `micro_prompt`). Used by the wake

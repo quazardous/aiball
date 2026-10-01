@@ -28,6 +28,8 @@ export interface PingHint {
     comment_id?: number;
     comment_hashid?: string;
     intent?: "panic" | "request" | "question" | "fyi";
+    /** #3449 — false: an unread event, not a wake (a ticket assigned to another agent). */
+    wakes?: false;
 }
 
 /** Subset of control events the WakeBus surfaces. */

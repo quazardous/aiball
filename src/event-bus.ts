@@ -32,6 +32,8 @@ export interface PingEvent {
     comment_id?: number;
     comment_hashid?: string;
     intent?: Intent;
+    /** #3449 — false: an unread event for the recipient, not a wake (a ticket assigned to another agent). Absent: it wakes. */
+    wakes?: false;
 }
 
 const bus = new EventEmitter();

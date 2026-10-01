@@ -175,6 +175,8 @@ export function insertPing(
             comment_id: isTicket ? undefined : msg.id,
             comment_hashid: isTicket ? undefined : (msg.hashid ?? undefined),
             intent,
+            // #3449 — said only when it is no: an older loop reads a ping as a wake.
+            ...(pingWakes(recipient, msg, actor ?? null) ? {} : { wakes: false }),
         });
         pingsChanged(recipient);
     }
@@ -543,8 +545,10 @@ export function listUnread(
     project: string | null | undefined,
     limit = 100,
     since?: string,
+    /** #3449 — `fifo-wake`: what may wake the consumer's loop, not all it may read. */
+    target: "unread-list" | "fifo-wake" = "unread-list",
 ): Message[] {
-    const msgs = fetchUnread(consumer_id, project, "unread-list").messages;
+    const msgs = fetchUnread(consumer_id, project, target).messages;
     const filtered = since ? msgs.filter((m) => m.created_at >= since) : msgs;
     return enrichWithTicketSummary(filtered.slice(0, limit));
 }
@@ -799,6 +803,23 @@ export function listPings(opts: {
     return sliced;
 }
 
-export function unreadPingCount(recipient: string): number {
-    return fetchUnread(recipient, null, "unread-count").total;
+export function unreadPingCount(recipient: string, target: "unread-count" | "fifo-wake" = "unread-count"): number {
+    return fetchUnread(recipient, null, target).total;
+}
+
+/**
+ * #3449 — whether a ping just written may wake its recipient's loop, by the
+ * rules of the `fifo-wake` target: a ticket assigned to another agent is still
+ * an unread event for a project's owner, never a wake. Ping events carry the
+ * verdict (`wakes: false`) so a loop does not have to ask.
+ */
+function pingWakes(recipient: string, msg: { id: number; kind: MessageKind; ticket_id?: number | null }, actor: string | null): boolean {
+    const isTicket = msg.kind === "ticket_created";
+    const ticketId = isTicket ? msg.id : msg.ticket_id;
+    if (!ticketId) return true;
+    const t = getDb().select({ id: schema.tickets.id, byAgent: schema.tickets.byAgent, assignee: schema.tickets.assignee, project: schema.tickets.project })
+        .from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
+    if (!t) return true;
+    const item = isTicket ? ticketRowToRuleItem(t) : messageRowToRuleItem({ byAgent: actor, kind: msg.kind }, t);
+    return !defaultBacklogRules.excludes(buildBacklogRulesCtx(recipient), item, "fifo-wake");
 }

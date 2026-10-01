@@ -47,11 +47,13 @@ defineMethod({
         project,
         limit: z.coerce.number().int().optional(),
         since: z.string().optional(),
+        /** #3449 — `wake`: only what may wake the consumer's loop (its wake FIFO). */
+        for: z.enum(["wake"]).optional(),
     }),
     run: (caller, p) => {
         const consumer_id = whose(caller, p.consumer_id);
         const proj = p.project ?? null;
-        const messages = listUnread(consumer_id, proj, p.limit ?? 100, p.since);
+        const messages = listUnread(consumer_id, proj, p.limit ?? 100, p.since, p.for === "wake" ? "fifo-wake" : "unread-list");
         // Cached per author: one FIFO page repeats a handful.
         const humanBy = new Map<string, boolean>();
         const awaiting = ticketsAwaitingModeration(messages.map((m) => m.ticket_id ?? m.id));
@@ -174,10 +176,11 @@ defineMethod({
 defineMethod({
     name: "ping.count",
     who: ["human", "agent"],
-    params: z.object({ consumer_id: z.string().optional() }),
+    params: z.object({ consumer_id: z.string().optional(), for: z.enum(["wake"]).optional() }),
     run: (caller, p) => {
         const consumer_id = whose(caller, p.consumer_id);
-        return { consumer_id, unread: unreadPingCount(consumer_id) };
+        // #3449 — `wake`: only the pings that may wake the consumer's loop.
+        return { consumer_id, unread: unreadPingCount(consumer_id, p.for === "wake" ? "fifo-wake" : "unread-count") };
     },
 });
 

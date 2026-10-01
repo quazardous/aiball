@@ -2701,6 +2701,16 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "for",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "wake"
+            ]
+          }
         }
       ],
       "result": {
@@ -5167,6 +5177,16 @@
           "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "for",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "wake"
+            ]
           }
         },
         {

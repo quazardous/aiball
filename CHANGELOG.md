@@ -77,6 +77,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A ticket assigned to another agent no longer wakes the project's other
+  owners: it stays in their unread events, and still wakes them when it names
+  them (`@agent`). The rule was written for this and never applied to the
+  wake.
 - A loop's kernel no longer dies at start when it takes the loop over from an
   older kernel still running (a reload crossing another): it logged that
   before its logger existed, and crashed after killing the old one, leaving

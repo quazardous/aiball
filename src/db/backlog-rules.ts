@@ -61,6 +61,8 @@ export interface BacklogRulesCtx {
      *  (the rule that reads it is inert otherwise), so a normal consumer
      *  pays nothing for it. */
     mentionsMeIds: Set<number>;
+    /** #3449 — whether a ticket names this consumer (`@id`), its body or a comment; asked only of tickets assigned to another. */
+    namesMe?: (ticketId: number) => boolean;
     /** #2525 — the wake focus in force on each project this consumer owns, for
      *  an AGENT owner only. Absent project = no focus. Optional so a caller
      *  that built a ctx before #2525 changes nothing. */
@@ -153,7 +155,18 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         name: "assigned-to-other",
         when: (ctx, item) =>
             item.assignee != null && item.assignee !== ctx.consumerId,
-        excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
+        excludesFrom: new Set<Target>(["backlog-tier"]),
+    },
+    {
+        // #3449 — the wake side of `assigned-to-other`, with one exception: a
+        // ticket that names me (`@me`) still wakes me, assigned or not. Naming
+        // someone is a deliberate call. A project's owner hears every event of
+        // the project; a ticket given to another agent is one to read, not one
+        // to be woken for.
+        name: "assigned-to-other-unless-named",
+        when: (ctx, item) =>
+            item.assignee != null && item.assignee !== ctx.consumerId && !(ctx.namesMe?.(item.ticketId) ?? false),
+        excludesFrom: new Set<Target>(["fifo-wake"]),
     },
     {
         // #900 david : "ouvre un ticket sur ça ça devrait pas te fire".
@@ -265,10 +278,11 @@ export function buildBacklogRulesCtx(
     // Only a specialist reads this set, so only a specialist pays for it.
     const mentionsMeIds = canClaim ? new Set<number>() : ticketsMentioning(consumerId);
     const focusByProject = wakeFocusFor(consumerId, nowMs);
+    const namesMe = namesMeOf(consumerId, canClaim ? null : mentionsMeIds);
     if (opts.closedIds && opts.snoozedIds) {
         return {
             consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds,
-            claimedByOtherIds, canClaim, mentionsMeIds, focusByProject,
+            claimedByOtherIds, canClaim, mentionsMeIds, namesMe, focusByProject,
         };
     }
     const db = getDb();
@@ -290,7 +304,7 @@ export function buildBacklogRulesCtx(
             .all();
         snoozedIds = new Set(rows.map((r) => r.id));
     }
-    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds, focusByProject };
+    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds, namesMe, focusByProject };
 }
 
 /**
@@ -394,6 +408,33 @@ function readTicketsMentioning(agent: string): Set<number> {
         if (mentions(r.body, agent)) out.add(r.ticket_id);
     }
     return out;
+}
+
+/**
+ * #3449 — whether a ticket names `agent`, asked one ticket at a time and
+ * remembered for the context's life: only tickets assigned to someone else
+ * are asked about, a handful. A specialist already holds the board-wide set.
+ */
+function namesMeOf(agent: string, known: Set<number> | null): (ticketId: number) => boolean {
+    if (known) return (id) => known.has(id);
+    const seen = new Map<number, boolean>();
+    return (ticketId) => {
+        let v = seen.get(ticketId);
+        if (v === undefined) {
+            const like = `%@${agent}%`;
+            const rows = getDb().all<{ body: string | null }>(sql`
+                SELECT ${schema.tickets.body} AS body FROM ${schema.tickets}
+                 WHERE ${schema.tickets.id} = ${ticketId} AND ${schema.tickets.body} LIKE ${like}
+                UNION ALL
+                SELECT ${schema.messages.body} AS body FROM ${schema.messages}
+                 WHERE ${schema.messages.ticketId} = ${ticketId} AND ${schema.messages.body} LIKE ${like}
+                   AND ${schema.messages.status} = 'approved'
+            `);
+            v = rows.some((r) => mentions(r.body, agent));
+            seen.set(ticketId, v);
+        }
+        return v;
+    };
 }
 
 /** Singleton with the default rule set. */
