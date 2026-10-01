@@ -12,14 +12,7 @@ Notable changes to aiball — the MCP surface, HTTP API, UI, and CLI.
 - **No internal tracker IDs** (`#NNN`) — aiball's tracker isn't
   externally browsable; cite-without-link is just noise.
 - **Version bump = SemVer**: any `### Added` entry is at least
-  MINOR; `### Changed
-
-- The daemon's request statistics (`debug.requests`) say what each client
-  asks the bus for and how much comes back: calls grouped by caller and
-  parameters, with the rows and the size of the answer. A stalled event
-  loop's log line names the parameters too.
-
-### Fixed` alone is PATCH; breaking change is MAJOR.
+  MINOR; `### Fixed` alone is PATCH; breaking change is MAJOR.
 
 **Versioning**: the source of truth is the repo-root `package.json`. The
 running version is surfaced via `aiball --version`, `GET /api/health`,
@@ -29,6 +22,8 @@ dates are YYYY-MM-DD.
 ---
 
 ## [Unreleased]
+
+## [0.53.0] — 2026-10-01
 
 ### Added
 
@@ -74,6 +69,13 @@ dates are YYYY-MM-DD.
   dialog is refused even with a human present, and every question goes to
   the ticket. `present`, the default, keeps today's rule. A folder's settings
   list it, so a client's options page shows and changes it.
+
+### Changed
+
+- The daemon's request statistics (`debug.requests`) say what each client
+  asks the bus for and how much comes back: calls grouped by caller and
+  parameters, with the rows and the size of the answer. A stalled event
+  loop's log line names the parameters too.
 
 ### Fixed
 
