@@ -6,7 +6,7 @@
  * clients attach to the host's own socket.
  */
 import { hostDirName, MAX_SOCKET_PATH } from "../session-dir.js";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { type Socket } from "node:net";
@@ -14,6 +14,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AIBALL_HOME } from "../paths.js";
 import { connectHost, controlAuthLine } from "../host-socket.js";
+import { ownScope, type Scoped } from "../systemd-scope.js";
 
 /** A Unix socket's path is at most about 100 bytes. */
 export { MAX_SOCKET_PATH } from "../session-dir.js";
@@ -195,27 +196,11 @@ export interface StartHost {
  * #3333 — under systemd, a host goes in a scope of its own: in the daemon's
  * cgroup, a restart of the service (`systemctl --user restart aiball`) killed
  * every host and the Claude in it, though a host is meant to outlive the
- * daemon. `systemd-run --scope` moves itself into the scope, then becomes the
- * host (exec): the pid is the host's. Null outside a systemd service, or
- * without systemd-run.
+ * daemon (systemd-scope.ts). Null outside a systemd service, or without
+ * systemd-run.
  */
-export function hostScope(dir: string, env: Record<string, string>, daemonEnv: NodeJS.ProcessEnv = process.env, hasSystemdRun: () => boolean = systemdRunFound): { cmd: string; args: string[]; env: Record<string, string> } | null {
-    if (process.platform !== "linux" || !daemonEnv.INVOCATION_ID || !hasSystemdRun()) return null;
-    const unit = `aiball-host-${basename(dir).replace(/[^A-Za-z0-9_.-]/g, "_")}-${Date.now()}`;
-    // systemd-run reaches the user manager through these; the host's own
-    // environment may not carry them.
-    const bus: Record<string, string> = {};
-    for (const k of ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"]) {
-        const v = env[k] ?? daemonEnv[k];
-        if (v) bus[k] = v;
-    }
-    return { cmd: "systemd-run", args: ["--user", "--scope", "--quiet", "--collect", `--unit=${unit}`, "--"], env: { ...env, ...bus } };
-}
-
-let systemdRun: boolean | null = null;
-function systemdRunFound(): boolean {
-    systemdRun ??= spawnSync("systemd-run", ["--version"], { stdio: "ignore" }).status === 0;
-    return systemdRun;
+export function hostScope(dir: string, env: Record<string, string>, daemonEnv: NodeJS.ProcessEnv = process.env, hasSystemdRun?: () => boolean): Scoped | null {
+    return ownScope("aiball-host", basename(dir), env, daemonEnv, hasSystemdRun);
 }
 
 /**

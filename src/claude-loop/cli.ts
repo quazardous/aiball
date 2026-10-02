@@ -10,13 +10,12 @@
  * | wake | reload | check | status | trace | prune`. Anything after `--`
  * is passed verbatim to the spawned `claude`.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { commandExists } from "../sysdeps.js";
 import {
     copyFileSync,
     existsSync,
     mkdtempSync,
-    openSync,
     readFileSync,
     readdirSync,
     rmSync,
@@ -68,7 +67,6 @@ import {
     readPlate,
     sendShutdownToTimer,
     stateDirFor,
-    loopLogPath,
     proxyAlivePath,
     loopPidPath,
     tmuxName,
@@ -93,6 +91,7 @@ import { isKnownSubcommand } from "./subcommands.js";
 import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
+import { spawnKernel } from "./kernel-spawn.js";
 import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
@@ -507,24 +506,7 @@ function resolveCurrentLoopName(): string {
  * session host's control socket).
  */
 function startKernel(sd: string, root: string, tsxBin: string, extraEnv: Record<string, string> = {}): void {
-    const logFd = openSync(loopLogPath(sd), "a");
-    const loopScript = join(root, "src/claude-loop/kernel.ts");
-    // Same resolution as the claude launch: a bare `bash` here reaches the WSL
-    // launcher from a PowerShell-launched `claude-loop`, which opens a console,
-    // fails to source a Windows path, and dies — leaving loop.log EMPTY. The
-    // loop then sits in boot forever with nothing to read (#1584).
-    const child = spawn(resolveBashCmd(), [
-        "-lc",
-        // #B.228 — tsx by its absolute path, so the timer can be respawned
-        // from any cwd (`claude-loop reload` from a project dir without tsx).
-        `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; exec ${tsxBin} ${shQuote(loopScript)}`,
-    ], {
-        detached: true,
-        stdio: ["ignore", logFd, logFd],
-        env: { ...process.env, ...extraEnv },
-    });
-    child.unref();
-    writeFileSync(loopPidPath(sd), String(child.pid) + "\n");
+    spawnKernel(sd, root, tsxBin, { ...process.env, ...extraEnv });
 }
 
 async function cmdStart(opts: StartOpts): Promise<void> {

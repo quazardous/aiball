@@ -15,7 +15,7 @@
  */
 import { AiballClient } from "../../client.js";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pidAlive } from "../start-lock.js";
@@ -31,7 +31,6 @@ import {
     readPlate,
     writePlate,
     stateDirFor,
-    loopLogPath,
     loopPidPath,
     readKernelPids,
     writeKernelPids,
@@ -53,6 +52,7 @@ import { remoteControlFlags, type RemoteControl } from "../remote-control.js";
 // A bare `bash` can resolve to WSL's launcher on Windows (#1584): reload and
 // restart then failed silently, with an empty log.
 import { resolveBashCmd } from "../resolve-bash.js";
+import { spawnKernel } from "../kernel-spawn.js";
 import { dropInheritedLoopEnv } from "../inherited-env.js";
 
 function die(msg: string): never {
@@ -472,12 +472,6 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     } catch { /* no plate / not a git checkout — leave staleness as-is */ }
 
     const root = installRoot();
-    const logFd = openSync(loopLogPath(sd), "a");
-    // The detached timer entrypoint is kernel.ts (NOT timer.ts — that file
-    // doesn't exist; the cold-start path spawns kernel.ts too, cli.ts). Pointing
-    // reload at timer.ts crashed the respawn with ERR_MODULE_NOT_FOUND → the
-    // old timer was SIGKILL'd but no new one came up → loop dead on every reload.
-    const timerScript = join(root, "src/claude-loop/kernel.ts");
     // #B.228: call tsx via absolute path so reload works from any cwd
     // (npx --no-install would fail when reload is invoked from a project
     // dir without tsx in its own node_modules, same as the SessionStart
@@ -488,23 +482,11 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     // in afk-service.ts etc.). Null = nothing to preserve, cold boot.
     // #1059 — REATTACH marks the new kernel as resuming a live claude (no
     // bootstrap re-inject ; seed NOT-AFK-10min if the AFK snapshot is lost).
-    const spawnEnv = reloadSpawnEnv(process.env, snapshotsJson);
-    const child = spawn(resolveBashCmd(), [
-        "-lc",
-        // #991 — preserve + re-source the volatile env.local across a reload
-        // (timer respawn keeps the debug-session shell overrides).
-        `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; exec ${tsxBin} ${shQuote(timerScript)}`,
-    ], {
-        detached: true,
-        stdio: ["ignore", logFd, logFd],
-        env: spawnEnv,
-    });
-    child.unref();
-    writeFileSync(loopPidPath(sd), String(child.pid) + "\n");
+    const pid = spawnKernel(sd, root, tsxBin, reloadSpawnEnv(process.env, snapshotsJson));
 
     const killed = oldPid !== null ? ` (killed old pid ${oldPid})` : "";
     const restored = snapshotsJson ? " (xstate snapshots restored)" : "";
-    process.stdout.write(`timer for '${name}' respawned${killed}${restored} — new pid ${child.pid}\n`);
+    process.stdout.write(`timer for '${name}' respawned${killed}${restored} — new pid ${pid}\n`);
 }
 
 /**

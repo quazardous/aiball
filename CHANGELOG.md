@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- Restarting the daemon (`aiball restart`) no longer stops the agents' loops
+  started through it: their kernel now lives outside the daemon's service,
+  like the session host, and reconnects after the restart instead of
+  stopping its loop and Claude with it.
+
 ## [0.54.1] — 2026-10-02
 
 ### Added

@@ -57,6 +57,15 @@ a scope of its own (`systemd-run --user --scope`, unit
 `aiball-host-<dir>-<time>`). If the user manager does not answer, the host
 starts as before, in the daemon's cgroup.
 
+The same goes for a loop's kernel. A session started through the daemon
+(`session.start`) runs `claude-loop start` from the daemon, so its kernel would
+be born in the service's cgroup too: a restart would send it SIGTERM, which a
+kernel takes for "stop the loop", Claude with it. So a kernel started from
+inside a systemd unit goes in a scope of its own as well (unit
+`aiball-kernel-<loop>-<time>`). Across a restart it loses the daemon for a few
+seconds and reconnects, as after any lost link. If the user manager does not
+start a scope, the kernel starts as before.
+
 On Windows the daemon may run in a job, and a job can end every process in it
 when it closes. So the daemon starts the host with `--detach`: the host starts
 itself again with `CREATE_BREAKAWAY_FROM_JOB` (and no console), then exits, and
