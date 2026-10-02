@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.54.0] — 2026-10-02
+
 ### Added
 
 - A client attached to a loop on the session host can close the other
@@ -82,7 +84,8 @@ dates are YYYY-MM-DD.
   daemon does" when it could not leave the daemon's job. That job is usually
   the Task Scheduler's (the tray started at logon): it forbids leaving it but
   ends nothing, so the host outlives the daemon's restarts. The log now says
-  the host stays in that job, and `docs/SESSION-HOST.md` says what was tried.
+  the host stays in that job, and the session host's documentation says what
+  was tried.
 
 - A loop started from a Claude Code session's terminal keeps its Claude's
   history: the session's markers (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`,
