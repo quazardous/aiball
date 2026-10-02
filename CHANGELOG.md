@@ -30,6 +30,12 @@ dates are YYYY-MM-DD.
   its tabs with it. Its name stays the session's key, and the label lasts as
   long as the session, daemon restarts included.
 
+### Fixed
+
+- The web UI shows the version the daemon runs, read from it, instead of
+  the one it was built at: a release that did not touch the UI left it
+  showing an older number (0.50.0 under 0.54.0).
+
 ## [0.54.0] — 2026-10-02
 
 ### Added

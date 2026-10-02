@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { splitProjects } from "../lib/project-activity";
+import { withBase } from "../lib/base";
 
 export interface ProjectListItem {
     label: string;
@@ -88,10 +89,31 @@ function onProjectsSummaryClick(e: Event) {
     if (window.innerWidth > 720) e.preventDefault();
 }
 
-// #341: aiball version, injected at build time from the repo-root
-// package.json (see vite.config.ts `define`). Falls back gracefully if
-// the define is somehow absent (dev server without the constant).
-const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ : "dev";
+// #341: the UI's own version, injected at build time from the repo-root
+// package.json (see vite.config.ts `define`).
+const uiVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ : "dev";
+// The version shown is the daemon's, read from /api/health: the UI is only
+// rebuilt when its own code changes, so its build-time number fell behind
+// every release that did not touch it (0.50.0 shown under 0.54.0). Read at
+// load and every ten minutes; the build's number until the first answer.
+const daemonVersion = ref<string | null>(null);
+async function readDaemonVersion(): Promise<void> {
+    try {
+        const r = await fetch(withBase("/api/health"));
+        const v = ((await r.json()) as { version?: unknown }).version;
+        if (typeof v === "string" && v) daemonVersion.value = v;
+    } catch { /* the daemon unreachable: keep the last known */ }
+}
+const appVersion = computed(() => daemonVersion.value ?? uiVersion);
+const versionTitle = computed(() => daemonVersion.value && daemonVersion.value !== uiVersion
+    ? `aiball ${daemonVersion.value} (this page was built at ${uiVersion}: nothing in it changed since)`
+    : `aiball ${appVersion.value}`);
+let versionTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+    void readDaemonVersion();
+    versionTimer = setInterval(() => void readDaemonVersion(), 10 * 60_000);
+});
+onUnmounted(() => { if (versionTimer) clearInterval(versionTimer); });
 </script>
 
 <template>
@@ -306,9 +328,9 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             </button>
         </div>
 
-        <!-- Version footer (#341). Source: repo-root package.json, injected
-             at build time via vite `define` (__AIBALL_VERSION__). -->
-        <div class="sidebar-version" :title="`aiball ${appVersion}`">
+        <!-- Version footer (#341): the daemon's version (/api/health), the
+             build's (__AIBALL_VERSION__) until it answers. -->
+        <div class="sidebar-version" :title="versionTitle">
             aiball v{{ appVersion }}
         </div>
     </aside>
