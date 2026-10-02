@@ -893,8 +893,8 @@ export class AiballClient {
      * heartbeats again on the next tick.
      */
     /** #3340 — the clients attached to this agent's tmux loop: how many, how many with the controls. */
-    pushClients(clients: number, interactive: number) {
-        return this.call<{ consumer_id: string; clients: number; interactive: number }>("consumer.push_clients", { consumer_id: this.agentId, clients, interactive });
+    pushClients(clients: number, interactive: number | null) {
+        return this.call<{ consumer_id: string; clients: number; interactive: number | null }>("consumer.push_clients", { consumer_id: this.agentId, clients, interactive });
     }
 
     pushState(

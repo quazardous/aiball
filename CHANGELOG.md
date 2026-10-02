@@ -45,6 +45,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- On Windows (psmux), `loop.clients_readonly` and `loop.clients_detach` no
+  longer answer as done while changing nothing: psmux ignores
+  `list-clients -F`, so its clients cannot be told apart, and both are now
+  refused (`NOT_IMPLEMENTED`). How many of a psmux loop's clients have the
+  controls is said as unknown (`interactive: null`) instead of a false 0;
+  `consumer.push_clients` accepts that null.
 - An agent's unread events no longer pile up when they cannot wake it (a
   ticket another agent holds): nothing delivered them, so they stayed unread
   and the loop's event count only climbed. They now ride in the agent's next

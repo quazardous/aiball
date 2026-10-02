@@ -129,6 +129,12 @@ host is the exception: it gives its own folder an ACL for its user alone.
 
 ## Not working on Windows yet
 
+- **Taking the controls from the other terminals of a loop in tmux mode**
+  (`loop.clients_readonly`, `loop.clients_detach`, tvty's "Close the other"):
+  psmux 3.3.8 cannot tell its clients apart (`list-clients` ignores `-F`), so
+  both are refused (`NOT_IMPLEMENTED`) rather than answered as done, and how
+  many clients have the controls is unknown (`interactive: null`). A loop on
+  the session host, the default, is not concerned.
 - **Restoring a backup** while the tray runs: quit the tray first, or it
   restarts the daemon during the restore.
 - **The mouse wheel over Claude** in a loop scrolls the pane only with a psmux

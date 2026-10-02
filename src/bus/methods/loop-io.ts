@@ -43,11 +43,12 @@ defineMethod({
 defineMethod({
     name: "consumer.push_clients",
     who: ["agent"],
-    params: z.object({ consumer_id: z.string(), clients: z.number().int().min(0), interactive: z.number().int().min(0) }),
+    // #3477 — `interactive` null when the multiplexer cannot say (psmux).
+    params: z.object({ consumer_id: z.string(), clients: z.number().int().min(0), interactive: z.number().int().min(0).nullable() }),
     run: (caller, p) => {
         const me = consumerIdOf(caller);
         if (p.consumer_id !== me) throw new Refusal(403, "can only push clients for your own consumer_id");
-        if (p.interactive > p.clients) throw new Refusal(400, "interactive cannot exceed clients");
+        if (p.interactive !== null && p.interactive > p.clients) throw new Refusal(400, "interactive cannot exceed clients");
         if (setTmuxClients(me, { clients: p.clients, interactive: p.interactive })) {
             broadcast({ type: "consumer_changed", data: { consumer_id: me, session: tmuxSessionView(me) } });
         }
