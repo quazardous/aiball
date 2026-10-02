@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.54.1] — 2026-10-02
+
 ### Added
 
 - A terminal without Claude on the session host can be given a label
