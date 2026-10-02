@@ -182,3 +182,25 @@ test("session.host: local callers only, and one session per agent", { skip }, as
     await own.call("session.stop", { agent: "hosted", wait: true });
     assert.equal(listSessionViews().filter((v) => v.agent === "hosted").length, 0, "its own loop's rm stops it");
 });
+
+test("#3481 a label for a session without an agent: given, heard, kept across a daemon restart, taken away; never its key", { skip }, async () => {
+    const boss = await as("boss");
+    const events: Array<{ subject: string; data: { session: { label: string | null } | null } }> = [];
+    const ws = (boss as unknown as { ws: { on(e: string, f: (d: unknown) => void): void } }).ws;
+    ws.on("message", (d) => { const m = JSON.parse(String(d)); if (m.method === "bus.event") events.push(m.params.data ? { subject: m.params.subject, data: m.params.data } : m.params); });
+    await boss.call("bus.subscribe", { subject: "session.*.state" });
+    await boss.call("session.start", { name: "term-9", argv: ["cat"], cwd: home });
+    const labelled = await boss.call<{ name: string; label: string | null }>("session.label", { name: "term-9", label: "  build watch  " });
+    assert.deepEqual([labelled.name, labelled.label], ["term-9", "build watch"], "trimmed; the name stays the key");
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(events.some((e) => e.subject === "session.term-9.state" && e.data.session?.label === "build watch"), "every client hears it");
+    assert.equal((await boss.call<Array<{ name: string; label: string | null }>>("session.list")).find((s) => s.name === "term-9")?.label, "build watch");
+    forgetSessionsForTests(); // a daemon restart
+    await initSessions();
+    assert.equal(listSessionViews().find((s) => s.name === "term-9")?.label, "build watch", "kept with the host's files");
+    assert.equal((await boss.call<{ label: string | null }>("session.label", { name: "term-9", label: null })).label, null, "null takes it away");
+    assert.equal((await refused(boss.call("session.label", { name: "term-9", label: "   " }))).status, 400);
+    assert.equal((await refused(boss.call("session.label", { name: "nobody", label: "x" }))).status, 404);
+    assert.equal((await refused((await as("worker")).call("session.label", { name: "term-9", label: "x" }))).code, "MODERATOR_ONLY", "a human's gesture");
+    await boss.call("session.stop", { name: "term-9", wait: true });
+});

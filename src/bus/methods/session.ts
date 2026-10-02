@@ -13,7 +13,7 @@ import { defineSubject } from "../subscriptions.js";
 import { ERROR_CODES } from "../../domain.js";
 import { hostDirFor, SESSION_NAME } from "../../sessions/hosts.js";
 import { sessionEnv } from "../../sessions/env.js";
-import { listSessionViews, sessionFor, startSession, stopSession, viewOf } from "../../sessions/registry.js";
+import { listSessionViews, sessionFor, setSessionLabel, startSession, stopSession, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
 import { listConsumers } from "../../db/consumers.js";
 import { tmuxSessionView } from "../../sessions/registry.js";
@@ -222,6 +222,26 @@ defineMethod({
         }
         const exit_code = await stopSession(link);
         return { agent: p.agent ?? null, name: p.name ?? null, exit_code };
+    },
+});
+
+/**
+ * #3481 — a label for a session without an agent (a terminal opened from tvty),
+ * shown by every client in place of its name; `null` takes it away. The name
+ * stays the key: the host's dir, its socket, `session.stop`.
+ */
+defineMethod({
+    name: "session.label",
+    ...HUMAN_HERE,
+    params: z.object({ name: z.string(), label: z.string().max(200).nullable() }),
+    run: (_caller, p) => {
+        const link = sessionFor({ name: p.name });
+        if (!link) {
+            if (sessionFor({ agent: p.name })) throw new Refusal(409, "an agent's session is named by its agent: it takes no label", ERROR_CODES.CONFLICT);
+            throw new Refusal(404, "no such session on this daemon", ERROR_CODES.NOT_FOUND);
+        }
+        if (p.label !== null && p.label.trim() === "") throw new Refusal(400, "a label is not empty: null takes it away");
+        return setSessionLabel(link, p.label);
     },
 });
 

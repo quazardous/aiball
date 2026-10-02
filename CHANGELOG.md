@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- A terminal without Claude on the session host can be given a label
+  (`session.label`), shown by every client in place of its name: tvty renames
+  its tabs with it. Its name stays the session's key, and the label lasts as
+  long as the session, daemon restarts included.
+
 ## [0.54.0] — 2026-10-02
 
 ### Added

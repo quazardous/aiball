@@ -46,6 +46,7 @@ export function sessionOfFrame(raw: unknown, machine: string): SessionView | nul
         clients: num(o.clients, 0),
         interactive: typeof o.interactive === "number" ? o.interactive : null,
         attach: { socket },
+        label: null,
     };
 }
 

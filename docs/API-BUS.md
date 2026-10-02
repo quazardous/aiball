@@ -252,7 +252,8 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `loop.clients_detach` | human, local only, this machine's | — the same, detaching those clients instead |
 | `loop.restart` | human, local only, this machine's | — restarts a loop from its plate, its conversation resumed (`fresh`: a fresh one): where it ran, or in `mode` to move it between the session host and tmux; answers its `loop.list` view once it is back. A running loop whose Claude works is refused (`NOT_IDLE`) unless `force`. `remote_control` changes Claude's Remote Control for this start and the next; without it the loop keeps its own |
 | `loop.wake` | human, local only, this machine's | — wakes a loop now, as `claude-loop wake` does: it tries a wake at its next heartbeat for the events waiting, without waiting for its tempo; `{ name, requested: true }`. A loop that does not run is `LOOP_NOT_FOUND`; a loop whose Claude works is refused (`NOT_IDLE`) unless `force` |
-| `session.list` | human, agent, this machine's | — every session this daemon hosts |
+| `session.list` | human, agent, this machine's | — every session this daemon hosts; a session without an agent carries its `label` (or null) |
+| `session.label` | human, this machine's | — `{ name, label }`: a label for a session without an agent, shown in place of its name; `null` takes it away. The name stays the key. An agent's session is refused (`CONFLICT`); answers the session's view, and `session.<name>.state` says it to every client |
 | `inbox.list` | human, agent | `GET /api/inbox` — the result is `{ total, rows }`: the rows (with `view: "turn"`, the pilot's fields; see [`API-INBOX.md`](./API-INBOX.md)) and the count HTTP sends as `X-Total-Count` |
 | `ticket.get` | human, agent | `GET /api/tickets/:id` — flags (`full`, `brief`, `digest`, `include_deleted`) are booleans |
 | `tag.list` | human, agent | `GET /api/tags` |

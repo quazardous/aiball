@@ -37,6 +37,12 @@ own. Their changes (started, clients, exited, stopped) come on the subject
 `session.<name>.state`; `session.*.state` gives them all, those started later
 included.
 
+A human may give such a session a **label** (`session.label { name, label }`,
+`null` takes it away): what clients show in place of its name. The name stays
+its key (its folder, its sockets, `session.stop`). The daemon keeps the label
+beside the host's files, so it lasts as long as the session, daemon restarts
+included. An agent's session takes none: its name is the agent.
+
 ## The host outlives the daemon
 
 The daemon restarts on every deploy, and on every change to its code in a dev
@@ -74,6 +80,7 @@ Each host keeps its files in `$AIBALL_HOME/hosts/<agent>/`:
 | `attach.sock` | clients, per [`LOOP-HOST.md`](./LOOP-HOST.md), mode `0600` |
 | `control.sock` | the daemon, described below, mode `0600` |
 | `attach.sock.addr`, `control.sock.addr` | Windows, in place of the two sockets: `{ "port", "token" }` |
+| `label` | a session without an agent: the label a human gave it, written by the daemon |
 
 A Unix socket's path is at most about 100 bytes: the daemon checks
 `<dir>/control.sock` fits before it starts a host (not on Windows, where the

@@ -3654,6 +3654,43 @@
       "x-machine": true
     },
     {
+      "name": "session.label",
+      "description": "A label for a session without an agent (a terminal opened from tvty), shown by every client in place of its name; `null` takes it away. The name stays the key: the host's dir, its socket, `session.stop`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "label",
+          "required": true,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
       "name": "session.list",
       "description": "Every session this daemon hosts: agent or name, cwd, running, clients, and the socket clients attach to.",
       "paramStructure": "by-name",

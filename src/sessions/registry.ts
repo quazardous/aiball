@@ -4,6 +4,8 @@
  * agent's on `agent.<id>.state` (through `consumer_changed`), a named one's on
  * `session.<name>.state`.
  */
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { discoverHosts, startHost, type HostLink, type StartHost } from "./hosts.js";
 import { broadcast } from "../ws.js";
 import { publish } from "../bus/subscriptions.js";
@@ -31,6 +33,8 @@ export interface SessionView {
     clients: number;
     interactive: number | null;
     attach: { socket: string };
+    /** #3481 — a name a human gave a session without an agent (`session.label`); null when none, always for an agent's. */
+    label: string | null;
 }
 
 /**
@@ -81,7 +85,35 @@ export function viewOf(link: HostLink): SessionView {
         clients: link.clients,
         interactive: link.interactive,
         attach: { socket: link.attachSocket() },
+        label: link.info.agent ? null : labels.get(link) ?? null,
     };
+}
+
+/**
+ * #3481 — a session's label, kept beside its host's files (`<dir>/label`) so it
+ * outlives a daemon restart as the host does, and goes with the host's dir.
+ */
+const labels = new WeakMap<HostLink, string | null>();
+const LABEL_MAX = 64;
+const labelFile = (link: HostLink) => join(link.info.dir, "label");
+
+function readLabel(link: HostLink): string | null {
+    try {
+        const v = readFileSync(labelFile(link), "utf8").trim();
+        return v ? v.slice(0, LABEL_MAX) : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Give a session without an agent a label, or (`null`) take it away. Its key, `name`, never changes. */
+export function setSessionLabel(link: HostLink, label: string | null): SessionView {
+    const v = label === null ? null : label.trim().slice(0, LABEL_MAX) || null;
+    if (v === null) rmSync(labelFile(link), { force: true });
+    else writeFileSync(labelFile(link), `${v}\n`);
+    labels.set(link, v);
+    announce(link);
+    return viewOf(link);
 }
 
 /** #3468 — told whenever a session starts, changes or goes: a proxy node tells its hub. */
@@ -105,6 +137,7 @@ function announce(link: HostLink, gone = false): void {
 
 function track(link: HostLink): void {
     const key = keyOf(link.info);
+    if (!link.info.agent) labels.set(link, readLabel(link));
     byKey.set(key, link);
     link.on("host.clients", () => announce(link));
     link.on("host.exited", () => announce(link));
