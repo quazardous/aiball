@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- The denied tool calls a loop counts now reach its clients: the daemon
+  dropped them from the bar the loop pushes, so only the loop's own tmux
+  line showed them.
+
 ## [0.55.0] — 2026-10-03
 
 ### Added

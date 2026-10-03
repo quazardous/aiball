@@ -135,3 +135,16 @@ test("#3044 — a bar without host (a loop started before the field) draws in tm
     assert.equal((parseAgentBar(old) as { host: string }).host, "tmux");
     assert.match(String((parseAgentBar(bar({ host: "web" })) as { error: string }).error), /host/);
 });
+
+test("#3507 — the denied tool calls: pushed, kept and read back; a loop started before the field sends none; a malformed one is refused", async () => {
+    const denials = { last_hour: 3, total: 5, last_at: "2026-10-03T09:00:00.000Z", last_reason: "Auto-Mode Bypass" };
+    assert.equal((await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ denials }) })).status, 200);
+    assert.deepEqual(((await call(HUMAN, "consumer.bar", { consumer_id: "worker" })).json.bar as { denials: unknown }).denials, denials, "what a client reads");
+    assert.equal((parseAgentBar(bar({ denials: null })) as { denials: unknown }).denials, null, "none in the last hour");
+    assert.ok(!("denials" in (parseAgentBar(bar()) as object)), "a loop started before the field: absent, as sent");
+    for (const bad of [{ ...denials, last_hour: -1 }, { ...denials, total: "5" }, { ...denials, last_at: "2 min ago" }, { ...denials, last_reason: 7 }, "3"]) {
+        const r = await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ denials: bad }) });
+        assert.equal(r.status, 400, JSON.stringify(bad));
+        assert.match(String(r.json.error), /denials/);
+    }
+});

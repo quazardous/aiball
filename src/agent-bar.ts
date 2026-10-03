@@ -141,6 +141,13 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     // #3291 — absent from loops started before the field.
     const rc = b.remote_control;
     if (!(rc === undefined || (isObj(rc) && isBool(rc.on)))) return { error: "remote_control must be { on: boolean }" };
+    // #3500 — absent from loops started before the field; #3507 — checked and kept here, or no client ever saw it.
+    const dn = b.denials;
+    if (!(dn === undefined || dn === null || (isObj(dn) && isCountOrNull(dn.last_hour) && dn.last_hour !== null
+        && isCountOrNull(dn.total) && dn.total !== null && typeof dn.last_at === "string" && isDateOrNull(dn.last_at)
+        && (dn.last_reason === null || typeof dn.last_reason === "string")))) {
+        return { error: "denials must be null or { last_hour, total: counts, last_at: ISO date, last_reason: string | null }" };
+    }
     if (!isBool(b.proxy_alive) || !isBool(b.zen)) return { error: "proxy_alive and zen must be booleans" };
     const c = b.counters;
     if (!(c === null || (isObj(c) && isCountOrNull(c.open) && isCountOrNull(c.backlog) && isCountOrNull(c.events)))) {
@@ -172,6 +179,7 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         limit_resets: isObj(lr) ? { text: lr.text as string, at: (lr.at as string | null) ?? null } : null,
         model: isObj(md) ? { id: md.id as string, name: md.name as string } : null,
         remote_control: { on: isObj(rc) && rc.on === true },
+        ...(dn === undefined ? {} : { denials: isObj(dn) ? { last_hour: dn.last_hour as number, total: dn.total as number, last_at: dn.last_at as string, last_reason: (dn.last_reason as string | null) ?? null } : null }),
         proxy_alive: b.proxy_alive,
         zen: b.zen,
         counters: c === null ? null : { open: (c as Record<string, number | null>).open!, backlog: (c as Record<string, number | null>).backlog!, events: (c as Record<string, number | null>).events! },
