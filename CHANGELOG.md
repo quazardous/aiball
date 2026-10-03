@@ -27,7 +27,8 @@ dates are YYYY-MM-DD.
 
 - A loop can start on a conversation Claude Code already has in its folder:
   `claude-loop start --resume-session <id|latest>`, and `resume` on
-  `session.start`. The new method `session.conversations` lists a folder's
+  `session.start`; a restart can do the same (`claude-loop restart
+  --resume-session`, `resume` on `loop.restart`). The new method `session.conversations` lists a folder's
   conversations with their first prompt, so a client can offer to resume one
   on a first start. The loop then records it and resumes it on its next
   starts.

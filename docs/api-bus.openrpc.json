@@ -1658,7 +1658,7 @@
     },
     {
       "name": "loop.restart",
-      "description": "Restart a loop from its plate, its conversation resumed: where it ran, or in `mode` (the session host or tmux) to move it. `fresh` starts a fresh conversation instead. `remote_control` changes Claude's Remote Control (on, off, or on under a name) for this start and the next; without it the loop keeps its own. A loop that runs is stopped first, so it is refused while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view once it is back.",
+      "description": "Restart a loop from its plate, its conversation resumed: where it ran, or in `mode` (the session host or tmux) to move it. `fresh` starts a fresh conversation instead; `resume` (`latest` or an id) another one of the loop's folder, recorded for the next restarts — refused before anything stops when the folder has none such (`NOT_FOUND`) or another agent's loop runs on it (`CONFLICT`). `remote_control` changes Claude's Remote Control (on, off, or on under a name) for this start and the next; without it the loop keeps its own. A loop that runs is stopped first, so it is refused while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view once it is back.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1713,6 +1713,23 @@
                 "minLength": 1,
                 "maxLength": 100,
                 "pattern": "^[^-]"
+              }
+            ]
+          }
+        },
+        {
+          "name": "resume",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "latest"
+              },
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
               }
             ]
           }

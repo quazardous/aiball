@@ -503,7 +503,11 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
  * session.
  */
 /** How a restart differs from the loop's start: see `claude-loop restart --help`. */
-export interface RestartOpts { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; remoteControl?: RemoteControl }
+export interface RestartOpts {
+    resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; remoteControl?: RemoteControl;
+    /** #3505 — relaunch on this conversation of the loop's folder (`latest`, or its id), not the recorded one. */
+    resumeSession?: string;
+}
 
 /**
  * Rebuild the `start` invocation a restart must replay, from the plate alone.
@@ -543,8 +547,9 @@ export function restartStartArgs(name: string, plate: Plate, opts: RestartOpts =
         ...(project ? ["--project", project] : []),
         "--force",
         "--no-attach",
-        // #3074 — a restart for an update resumes the conversation.
-        ...(opts.resume ? ["--resume"] : []),
+        // #3505 — a conversation named for the relaunch; it says more than
+        // #3074's `--resume` (a restart for an update resumes the conversation).
+        ...(opts.resumeSession ? ["--resume-session", opts.resumeSession] : opts.resume ? ["--resume"] : []),
         // #3174 — a fresh conversation, not the recorded one.
         ...(opts.fresh ? ["--no-resume"] : []),
         // #3066, #3135 — a loop stays where it runs (host or tmux, said
@@ -560,6 +565,7 @@ export function restartStartArgs(name: string, plate: Plate, opts: RestartOpts =
 export function cmdRestart(name: string, opts: RestartOpts = {}): void {
     if (opts.host && opts.tmux) die("--host or --tmux, not both");
     if (opts.resume && opts.fresh) die("--resume or --fresh, not both");
+    if (opts.resumeSession && opts.fresh) die("--resume-session or --fresh, not both");
     const sd = stateDirFor(name);
     if (!existsSync(platePath(sd))) {
         die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);

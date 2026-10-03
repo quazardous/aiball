@@ -184,9 +184,14 @@ It is refused, rather than started fresh:
 - with `--no-resume` or `--fork`, with a session flag passed to Claude, and
   outside `auto` mode.
 
+`claude-loop restart --resume-session <uuid|latest>` relaunches a loop on such a
+conversation the same way: the one it recorded may be gone (an opened
+conversation where nothing was typed leaves no transcript), and a plain restart
+would then open a new one.
+
 A client does the same through the bus: `session.conversations` lists the
 folder's conversations and the one its loop would resume, and `session.start`
-takes `resume`.
+and `loop.restart` take `resume`.
 
 ## Core cycle
 

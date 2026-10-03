@@ -168,3 +168,11 @@ test("#3281 — a start clears only broken state dirs (no plate), never a stoppe
     // #3459 — the root's log is a file: it outlives every start.
     assert.deepEqual(startSweepTargets(entries, (n) => plates.has(n), (n) => alive.has(n), (n) => !files.has(n)), ["cl-broken"]);
 });
+
+test("#3505 — restart --resume-session relaunches on that conversation, instead of the plain --resume", () => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const args = restartStartArgs("cl-x", plate(), { resume: true, resumeSession: id });
+    assert.deepEqual(args.slice(args.indexOf("--resume-session"), args.indexOf("--resume-session") + 2), ["--resume-session", id]);
+    assert.ok(!args.includes("--resume"), "the named conversation says more than --resume");
+    assert.ok(restartStartArgs("cl-x", plate(), { resume: true }).includes("--resume"), "without it, as before");
+});

@@ -25,6 +25,7 @@ import { isPresent } from "../../live-presence.js";
 import { getConsumer } from "../../db/consumers.js";
 import { getAgentBar } from "../../agent-bar-store.js";
 import { remoteControlFlags } from "../../claude-loop/remote-control.js";
+import { pickConversation } from "../../claude-loop/claude-conversations.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
@@ -184,7 +185,10 @@ defineMethod({
 /**
  * Restart a loop from its plate, its conversation resumed: where it ran, or
  * in `mode` (the session host or tmux) to move it. `fresh` starts a fresh
- * conversation instead. `remote_control` changes Claude's Remote Control (on,
+ * conversation instead; `resume` (`latest` or an id) another one of the loop's
+ * folder, recorded for the next restarts — refused before anything stops when
+ * the folder has none such (`NOT_FOUND`) or another agent's loop runs on it
+ * (`CONFLICT`). `remote_control` changes Claude's Remote Control (on,
  * off, or on under a name) for this start and the next; without it the loop
  * keeps its own. A loop that runs is stopped first, so it is refused
  * while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view
@@ -200,11 +204,25 @@ defineMethod({
         fresh: z.boolean().optional(),
         force: z.boolean().optional(),
         remote_control: remoteControl.optional(),
+        /** #3505 — relaunch on this conversation of the loop's folder: its latest, or its id. */
+        resume: z.union([z.literal("latest"), z.string().uuid()]).optional(),
     }),
     run: async (caller, p) => {
         localOnly(caller);
         if (!p.name === !p.agent) throw new Refusal(400, "name or agent: one of them", ERROR_CODES.BAD_REQUEST);
+        if (p.resume && p.fresh) throw new Refusal(400, "resume or fresh: one names the conversation, the other asks for a new one", ERROR_CODES.BAD_REQUEST);
         const loop = findLoop(p);
+        // #3505 — checked here, so a refusal says why instead of the relaunch's exit code.
+        let resume: string | null = null;
+        if (p.resume) {
+            const cwd = loop.plate.cwd;
+            if (!cwd) throw new Refusal(409, `the loop ${loop.name} has no folder on record to resume a conversation in`, ERROR_CODES.CONFLICT);
+            const pick = pickConversation(cwd, p.resume);
+            if ("error" in pick) throw new Refusal(404, pick.error, ERROR_CODES.NOT_FOUND);
+            const holder = (await runningConversations()).get(pick.id);
+            if (holder && holder !== plateAgent(loop.plate)) throw new Refusal(409, `the conversation ${pick.id} is ${holder}'s: its loop runs on it`, ERROR_CODES.CONFLICT);
+            resume = pick.id;
+        }
         const before = loopView(loop);
         if (before.running && !p.force && before.agent) {
             const phase = getAgentBar(before.agent)?.bar.phase;
@@ -214,7 +232,7 @@ defineMethod({
         }
         const mode = p.mode ?? before.mode;
         const child = spawn(process.execPath, [CLAUDE_LOOP_BIN,
-            "restart", loop.name, p.fresh ? "--fresh" : "--resume", `--${mode}`,
+            "restart", loop.name, ...(resume ? ["--resume-session", resume] : [p.fresh ? "--fresh" : "--resume"]), `--${mode}`,
             ...remoteControlFlags(p.remote_control),
         ], { cwd: loop.plate.cwd ?? undefined, detached: true, stdio: "ignore" });
         child.unref();

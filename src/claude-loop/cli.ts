@@ -2459,10 +2459,12 @@ async function main(): Promise<void> {
         .option("--host", "#3066: relaunch on the aiball daemon's session host (with --resume: move a tmux loop onto the host, its conversation kept). Without --host or --tmux, a loop stays where it runs.")
         .option("--tmux", "#3135: relaunch in tmux (with --resume: move a loop off the host, its conversation kept).")
         .option("--fresh", "#3174: relaunch with a fresh conversation instead of resuming the recorded one (a resumed conversation keeps the tools it started with)")
+        .option("--resume-session <id|latest>", "#3505: relaunch on this conversation of the loop's folder (its id, or latest: the most recent one) instead of the recorded one, and record it for the next restarts.")
         .option("--remote-control [name]", "#3254: relaunch with Remote Control, named after the agent or <name>; kept for the next restarts.")
         .option("--no-remote-control", "#3254: relaunch without Remote Control; kept for the next restarts.")
-        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; remoteControl?: boolean | string }, command: Command) => cmdRestart(name ?? resolveCurrentLoopName(), {
+        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; resumeSession?: string; remoteControl?: boolean | string }, command: Command) => cmdRestart(name ?? resolveCurrentLoopName(), {
             resume: opts.resume === true, host: opts.host === true, tmux: opts.tmux === true, fresh: opts.fresh === true,
+            resumeSession: opts.resumeSession,
             remoteControl: command.getOptionValueSource?.("remoteControl") === "cli" ? parseRemoteControl(opts.remoteControl) ?? undefined : undefined,
         }));
     program.command("stop [name]")
