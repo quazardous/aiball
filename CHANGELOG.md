@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.56.0] — 2026-10-03
+
 ### Added
 
 - A loop can answer repeated permission denials with a prompt you configure
