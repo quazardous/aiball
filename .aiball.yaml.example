@@ -170,6 +170,20 @@ claude_loop:
   #   persistent[:PT30M]  — every eligible tick spaced by ≥ the param.
   drained_strategy: "once"
 
+  # What the loop sends when Claude Code's permission system keeps denying
+  # its Claude (the auto mode classifier has false positives). Empty by
+  # default: nothing is sent. Sent like a wake, only when a wake could be
+  # (no AFK hold, zen, typing, usage limit, boot or busy). The words are
+  # yours: they are typed into Claude's prompt as you wrote them.
+  on_repetitive_denied:
+    threshold: 3       # denials in the last hour before the loop answers
+    prompt: ""         # sent as it is; empty = nothing
+    command: null      # or a command: gets the context as JSON on stdin
+                       # ({agent, project, cwd, tool, reason, last_hour,
+                       # recent}), its stdout is the prompt (10 s timeout);
+                       # wins over prompt
+    max_per_hour: 2    # at most this many prompts an hour
+
   # Minimum log level for the timer + hooks (PSR-3 / RFC 5424). Levels:
   # debug | info | notice | warning | error | critical | alert | emergency.
   log_level: "info"

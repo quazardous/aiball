@@ -246,7 +246,7 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             if (hookKind === "PermissionDenied") {
                 const tool = typeof event.tool_name === "string" ? event.tool_name : null;
                 const reason = typeof event.reason === "string" ? event.reason : null;
-                recordIpcDenial(atMs, reason);
+                recordIpcDenial(atMs, reason, tool);
                 return { kind: "denial-recorded", tool, reason };
             }
             return { kind: "unknown", raw: `hook:${String(hookKind)}` };

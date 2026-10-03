@@ -75,7 +75,7 @@ export interface AgentBar {
         catalog?: "models.dev" | "litellm";
     } | null;
     /** #3500 — the tool calls Claude Code's permission system denied (the auto mode classifier, a deny rule): how many in the last hour, since the loop's start, when the last came and why; null when none in the last hour. Optional: absent from loops started before it. */
-    denials?: { last_hour: number; total: number; last_at: string; last_reason: string | null } | null;
+    denials?: { last_hour: number; total: number; last_at: string; last_reason: string | null; /** #3509 — the prompts sent for repeated denials in the last hour; absent before it. */ sent?: number } | null;
     /** #3291 — whether Claude is in Remote Control now, as its status line shows it (the flag at start or a `/rc` in the session). Optional: absent from loops started before it. */
     remote_control?: { on: boolean };
     /** The PTY proxy fronting claude is alive. */
@@ -145,8 +145,9 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     const dn = b.denials;
     if (!(dn === undefined || dn === null || (isObj(dn) && isCountOrNull(dn.last_hour) && dn.last_hour !== null
         && isCountOrNull(dn.total) && dn.total !== null && typeof dn.last_at === "string" && isDateOrNull(dn.last_at)
-        && (dn.last_reason === null || typeof dn.last_reason === "string")))) {
-        return { error: "denials must be null or { last_hour, total: counts, last_at: ISO date, last_reason: string | null }" };
+        && (dn.last_reason === null || typeof dn.last_reason === "string")
+        && (dn.sent === undefined || (isCountOrNull(dn.sent) && dn.sent !== null))))) {
+        return { error: "denials must be null or { last_hour, total: counts, last_at: ISO date, last_reason: string | null, sent?: count }" };
     }
     if (!isBool(b.proxy_alive) || !isBool(b.zen)) return { error: "proxy_alive and zen must be booleans" };
     const c = b.counters;
@@ -179,7 +180,7 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         limit_resets: isObj(lr) ? { text: lr.text as string, at: (lr.at as string | null) ?? null } : null,
         model: isObj(md) ? { id: md.id as string, name: md.name as string } : null,
         remote_control: { on: isObj(rc) && rc.on === true },
-        ...(dn === undefined ? {} : { denials: isObj(dn) ? { last_hour: dn.last_hour as number, total: dn.total as number, last_at: dn.last_at as string, last_reason: (dn.last_reason as string | null) ?? null } : null }),
+        ...(dn === undefined ? {} : { denials: isObj(dn) ? { last_hour: dn.last_hour as number, total: dn.total as number, last_at: dn.last_at as string, last_reason: (dn.last_reason as string | null) ?? null, ...(dn.sent === undefined ? {} : { sent: dn.sent as number }) } : null }),
         proxy_alive: b.proxy_alive,
         zen: b.zen,
         counters: c === null ? null : { open: (c as Record<string, number | null>).open!, backlog: (c as Record<string, number | null>).backlog!, events: (c as Record<string, number | null>).events! },

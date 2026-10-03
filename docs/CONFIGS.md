@@ -69,7 +69,7 @@ child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
 `1m`, `90s`, or a bare number of seconds),
 `wake_in_flight_ttl_ms`, `input_hot_ttl_ms`, `pane_probe_fast_ms`,
 `pane_probe_slow_ms`, `esc_takeover`, `mouse`, `bar`, `session`, `afk_key`, `afk_window_ms`, `wait`,
-`drained_strategy`, `log_level`, `permission_mode`, `gates`. See
+`drained_strategy`, `on_repetitive_denied`, `log_level`, `permission_mode`, `gates`. See
 [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
 
 `mouse` (`on` | `off`) is also read from the **global** config, since it is

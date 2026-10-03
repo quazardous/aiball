@@ -28,7 +28,7 @@
  * the timer becomes the sole writer + the markers can disappear in V4).
  */
 
-import { emptyDenialLog, withDenial, type DenialLog } from "./denials.js";
+import { emptyDenialLog, withDenial, withDeniedPromptSent, type DenialLog } from "./denials.js";
 
 export interface IpcState {
     /** Last in-memory boot-complete flag, mutated when a SessionStart
@@ -514,8 +514,14 @@ export function setIpcLimitReached(reached: boolean, resets: { text: string; at:
 }
 
 /** #3500 — a tool call the permission system denied (the PermissionDenied hook). */
-export function recordIpcDenial(atMs: number, reason: string | null): void {
-    state.denials = withDenial(state.denials, atMs, reason);
+export function recordIpcDenial(atMs: number, reason: string | null, tool: string | null = null): void {
+    state.denials = withDenial(state.denials, atMs, reason, tool);
+    notifyIpcChanged();
+}
+
+/** #3509 — the `on_repetitive_denied` prompt was sent. */
+export function recordIpcDeniedPromptSent(atMs: number): void {
+    state.denials = withDeniedPromptSent(state.denials, atMs);
     notifyIpcChanged();
 }
 

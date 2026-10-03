@@ -1085,7 +1085,20 @@ line shows `⛔3·2m` after the counters (3 in the last hour, the last 2 minutes
 and the bar publishes `denials` (`{ last_hour, total, last_at, last_reason }`:
 `total` since the loop's start, `last_reason` as Claude Code gives it), null once an
 hour has gone by without one. Each denial is a line in `loop.log` with the tool and
-the reason. The loop does nothing else about it: no retry, nothing posted.
+the reason.
+
+What the loop does about repeated denials is yours to say, and nothing by
+default. `claude_loop.on_repetitive_denied` (global or per project) names a
+prompt to send once `threshold` denials came in the last hour: `prompt`, a text
+sent as it is, or `command`, a command that gets the context as JSON on stdin
+(`agent`, `project`, `cwd`, the last `tool` and `reason`, `last_hour`, and the
+hour's `recent` denials) and whose stdout is the prompt; it runs in the loop's
+folder, for 10 s at most, and one that fails or prints nothing sends nothing.
+The prompt is sent like a wake, only when a wake could be (no AFK hold, zen,
+typing, usage limit, boot or busy), at most `max_per_hour` times an hour, so a
+denial → prompt → denial cycle stops; armed and not sent within the hour, it is
+dropped. Each send is a `loop.log` line, and the bar's `denials.sent` counts the
+hour's, so what the loop said in your place shows.
 
 The loop pushes on change, at most once a second (a burst ends on its last value).
 A human, or the agent itself, reads it with `GET /api/consumers/<agent>/bar`, and

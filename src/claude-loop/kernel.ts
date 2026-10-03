@@ -181,7 +181,10 @@ import {
     setIpcResumeSessionPicker,
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
+    recordIpcDeniedPromptSent,
 } from "./ipc-state.js";
+import { DENIAL_WINDOW_MS, denialsInLastHour } from "./denials.js";
+import { deniedContext, deniedPromptBlocker, deniedPromptConfigured, resolveDeniedPrompt } from "./denied-prompt.js";
 import { bootReminderFor, POST_RESTART_REMINDER, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
@@ -1536,6 +1539,39 @@ function recomputeNextWake(): void {
         setIpcNextWakeAt(null);
     }
 }
+/**
+ * #3509 — the prompt armed for repeated denials (`claude_loop.on_repetitive_denied`),
+ * waiting for the wake gate to let it through; dropped once an hour old.
+ */
+let pendingDeniedPrompt: { text: string; source: "prompt" | "command"; atMs: number } | null = null;
+let resolvingDeniedPrompt = false;
+
+async function armDeniedPrompt(): Promise<void> {
+    if (pendingDeniedPrompt || resolvingDeniedPrompt) return;
+    const odc = cfg.on_repetitive_denied;
+    const now = Date.now();
+    const denials = getIpcState().denials;
+    const blocker = deniedPromptBlocker(odc, denials, now);
+    if (blocker) {
+        if (deniedPromptConfigured(odc)) log(`denied-prompt: not armed — ${blocker}`);
+        return;
+    }
+    resolvingDeniedPrompt = true;
+    try {
+        const ctx = deniedContext({ agent: process.env.AIBALL_AGENT ?? null, project: loopProject ?? null, cwd: loopCwd ?? process.cwd() }, denialsInLastHour(denials, now).denied);
+        const p = await resolveDeniedPrompt(odc, ctx);
+        if ("none" in p) {
+            log(`denied-prompt: nothing to send — ${p.none}`);
+            return;
+        }
+        pendingDeniedPrompt = { ...p, atMs: Date.now() };
+        log(`denied-prompt: armed (${p.source}, ${ctx.last_hour} denials in the last hour) → '${p.text.slice(0, 120)}'`);
+    } finally {
+        resolvingDeniedPrompt = false;
+    }
+    void tryWake("denied-prompt");
+}
+
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
     if (!wakeSvc.isIdle()) {
@@ -1604,6 +1640,23 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     } else if (!verdict.proceed) {
         log(`skip wake (${reason}) — ${verdict.reason}`);
         return false;
+    }
+    // #3509 — the prompt for repeated denials goes first, through the same
+    // gate as any wake (above), and needs no work on the board.
+    if (pendingDeniedPrompt && Date.now() - pendingDeniedPrompt.atMs > DENIAL_WINDOW_MS) {
+        log("denied-prompt: dropped — armed over an hour ago, the gate never opened");
+        pendingDeniedPrompt = null;
+    }
+    if (pendingDeniedPrompt) {
+        const { text, source } = pendingDeniedPrompt;
+        pendingDeniedPrompt = null;
+        setIpcWakeRequested(null);
+        getTurnService().turnStarted(Date.now());
+        await sendKeys(text);
+        recordIpcDeniedPromptSent(Date.now());
+        setIpcStateTagInfo(null);
+        log(`wake (${reason}) → denied-prompt (${source}) '${text.slice(0, 120)}'`);
+        return true;
     }
     let gateHash: string | undefined;
     if (!manualWake) {
@@ -2031,6 +2084,8 @@ async function mainSse(): Promise<void> {
             }
             const verdict = dispatchProxyEvent(sd!, event);
             log(formatVerdictLogLine(verdict));
+            // #3509 — repeated denials: arm the configured prompt, sent as a wake.
+            if (verdict.kind === "denial-recorded") void armDeniedPrompt();
         },
         // #1039 — IPC link state → BarRenderer paints RED when down. KEY the
         // signal on the PROXY peer specifically (not raw client connect/close) :

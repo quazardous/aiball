@@ -52,7 +52,7 @@ test("the PermissionDenied hook event is counted, logged, and reaches the agent 
     assert.equal(formatVerdictLogLine(v), 'proxy-event: permission denied (tool=Bash) reason="Auto-Mode Bypass"');
     assert.equal(getIpcState().denials.total, 1);
     const bar = computeAgentBar(sd, now);
-    assert.deepEqual(bar.denials, { last_hour: 1, total: 1, last_at: new Date(now - 1000).toISOString(), last_reason: "Auto-Mode Bypass" });
+    assert.deepEqual(bar.denials, { last_hour: 1, total: 1, last_at: new Date(now - 1000).toISOString(), last_reason: "Auto-Mode Bypass", sent: 0 });
 });
 
 const COL: BarColors = { island_fg: "colour250", bar_fg: "colour16", afk_label_fg: "colour238", prompt_input_fg: "colour208", busy_bg: "colour33", idle_bg: "colour34", boot_bg: "colour178", link_down_bg: "colour196" };

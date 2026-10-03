@@ -142,7 +142,9 @@ test("#3507 — the denied tool calls: pushed, kept and read back; a loop starte
     assert.deepEqual(((await call(HUMAN, "consumer.bar", { consumer_id: "worker" })).json.bar as { denials: unknown }).denials, denials, "what a client reads");
     assert.equal((parseAgentBar(bar({ denials: null })) as { denials: unknown }).denials, null, "none in the last hour");
     assert.ok(!("denials" in (parseAgentBar(bar()) as object)), "a loop started before the field: absent, as sent");
-    for (const bad of [{ ...denials, last_hour: -1 }, { ...denials, total: "5" }, { ...denials, last_at: "2 min ago" }, { ...denials, last_reason: 7 }, "3"]) {
+    const withSent = { ...denials, sent: 2 };
+    assert.deepEqual((parseAgentBar(bar({ denials: withSent })) as { denials: unknown }).denials, withSent, "#3509 — the prompts sent, kept");
+    for (const bad of [{ ...denials, sent: -1 }, { ...denials, last_hour: -1 }, { ...denials, total: "5" }, { ...denials, last_at: "2 min ago" }, { ...denials, last_reason: 7 }, "3"]) {
         const r = await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ denials: bad }) });
         assert.equal(r.status, 400, JSON.stringify(bad));
         assert.match(String(r.json.error), /denials/);
