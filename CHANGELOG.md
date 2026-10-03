@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.55.0] — 2026-10-03
+
 ### Added
 
 - A loop can start on a conversation Claude Code already has in its folder:
