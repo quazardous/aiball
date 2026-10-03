@@ -29,7 +29,7 @@ import { CL_ENV } from "./env-vars.js";
 import { SESSION_ID_FILE, isValidUuid, recordSessionEntry } from "./session-id.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
 import { sendEventOnce } from "./ipc-events.js";
-import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
+import { LOOP_SOCK_KIND, loopSockPath, readPlate, writePlate } from "./state.js";
 import { createLogger } from "../log.js";
 
 function emit(): never {
@@ -90,6 +90,16 @@ if (process.env.AIBALL_SESSION_MODE === "auto" && sessionId && isValidUuid(sessi
         recordSessionEntry(join(projectCwd, SESSION_ID_FILE), key, sessionId);
         log(`auto: persisted session id ${sessionId} → ${SESSION_ID_FILE} [${key}]`);
     } catch (e) { log(`auto: persist session id failed ${(e as Error).message ?? e}`); }
+}
+
+// #3489 — the plate says which conversation the loop runs on: a fresh one (no
+// id at start) and one after `/clear` are known only here. A start that would
+// resume it (#3360), and `session.conversations`' held_by, read it there.
+if (sd && sessionId && isValidUuid(sessionId)) {
+    try {
+        const plate = readPlate(sd);
+        if (plate.session_id !== sessionId) writePlate(sd, { ...plate, session_id: sessionId });
+    } catch (e) { log(`plate: record session id failed ${(e as Error).message ?? e}`); }
 }
 
 if (source === "startup" || source === "resume" || source === "compact" || source === "clear") {

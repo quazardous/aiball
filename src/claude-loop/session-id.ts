@@ -203,6 +203,12 @@ export interface SessionResolveInput {
      * records the new id, which later starts resume.
      */
     fresh?: boolean;
+    /**
+     * #3489 — `auto` only: resume this conversation (`--resume-session`,
+     * `session.start`'s `resume`), checked by the caller against the folder.
+     * It wins over the recorded one.
+     */
+    pick?: string | null;
 }
 
 export interface SessionResolvePlan {
@@ -286,6 +292,7 @@ export function resolveSession(input: SessionResolveInput): SessionResolvePlan {
     }
 
     if (mode === "auto") {
+        if (input.pick) return { mode: "auto", sessionId: input.pick, args: ["--resume", input.pick], warning: null };
         if (input.fresh) return { mode: "auto", sessionId: null, args: [], warning: null };
         return resolveAuto(readPersistedId, sessionExists, input.forkFrom ?? null);
     }

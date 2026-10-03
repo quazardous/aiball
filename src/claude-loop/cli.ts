@@ -22,7 +22,7 @@ import {
     statSync,
     writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mouseSetupCommands } from "./mouse-setup.js";
@@ -37,7 +37,7 @@ import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
 import { applyBootstrapOptions } from "../cli/bootstrap-options.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import { cmdCrewCreate, cmdCrewList } from "./crew.js";
-import { resolveSession, normalizeSessionMode, SESSION_ID_FILE, parseSessionFile, sessionEntry, sessionKeyFor, type SessionResolvePlan } from "./session-id.js";
+import { resolveSession, normalizeSessionMode, SESSION_ID_FILE, parseSessionFile, recordSessionEntry, sessionEntry, sessionKeyFor, type SessionResolvePlan } from "./session-id.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
@@ -92,6 +92,7 @@ import { cmdBug } from "./cmds/bug.js";
 import { CL_ENV } from "./env-vars.js";
 import { resolveBashCmd } from "./resolve-bash.js";
 import { spawnKernel } from "./kernel-spawn.js";
+import { hasClaudeSessions, pickConversation, sessionExists } from "./claude-conversations.js";
 import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
@@ -275,6 +276,8 @@ interface StartOpts {
     crew?: string;
     /** #2523 — with `--crew`: the first start forks the main loop's session. */
     fork?: boolean;
+    /** #3489 — resume this conversation of the folder (`latest`, or its id), over the recorded one. */
+    resumeSession?: string;
     /** #2180 — set the agent's type on its record BEFORE claude boots (the MCP
      *  server reads it at start-up). */
     type?: "coder" | "cto";
@@ -334,61 +337,6 @@ function pruneDeadStateDirs(): void {
     for (const name of targets) {
         try { rmSync(stateDirFor(name), { recursive: true, force: true }); }
         catch { /* ignore */ }
-    }
-}
-
-/**
- * #616 (david arf8xs) — does claude have any prior conversation
- * recorded for this cwd ? claude stores sessions under
- * `~/.claude/projects/<encoded-cwd>/*.jsonl`. The encoding replaces
- * every NON-alphanumeric character (slash, underscore, dot, …) by
- * `-`, then prepends a leading `-`. Confirmed by david's `azuc5s`
- * repro on `/home/david/work/test_no_resume_auto` →
- * `~/.claude/projects/-home-david-work-test-no-resume-auto/` (the
- * underscores collapsed to dashes alongside the slashes).
- *
- * Used by the always_resume injection : if the dir is missing or
- * empty, `claude --resume` would block on an empty picker — skip the
- * auto-inject and let the user start fresh. Best-effort : returns
- * `true` on any IO error so a permissions glitch falls back to the
- * pre-#616 behaviour (inject --resume, claude figures it out).
- */
-/**
- * Directory where claude stores this cwd's sessions:
- * `~/.claude/projects/<encoded-cwd>`. #620 (aiball-win) : the encoder just
- * collapses every non-alnum char to `-` (matches claude's own encoder) — on
- * Unix the leading `/` maps to `-` by the same rule, so output is identical
- * cross-platform. The old strip-leading-slash-then-prepend was Unix-only and
- * broke on Windows drive letters (`C:\\Users\\…`).
- */
-function claudeProjectDir(cwd: string): string {
-    const encoded = resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-");
-    return join(homedir(), ".claude", "projects", encoded);
-}
-
-function hasClaudeSessions(cwd: string): boolean {
-    try {
-        const dir = claudeProjectDir(cwd);
-        if (!existsSync(dir)) return false;
-        return readdirSync(dir).some((f) => f.endsWith(".jsonl"));
-    } catch {
-        return true;
-    }
-}
-
-/**
- * #1549 — does a SPECIFIC session id already have a transcript for this cwd ?
- * The session's `<uuid>.jsonl` is written by claude the moment the session
- * exists, so this tells `resolveSession` whether to `--resume <id>` (exists)
- * or create it fresh via `--session-id <id>`. Best-effort : false on any IO
- * error, so a glitch degrades to "create" (claude then errors clearly if the
- * id is actually taken, rather than us silently resuming the wrong thing).
- */
-function sessionExists(cwd: string, id: string): boolean {
-    try {
-        return existsSync(join(claudeProjectDir(cwd), `${id}.jsonl`));
-    } catch {
-        return false;
     }
 }
 
@@ -603,6 +551,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // copy of the main agent, not a crew.
     const mainAgent = ctx.agent;
     if (opts.fork && !opts.crew) die("--fork goes with --crew: only a crew agent starts from the main loop's session");
+    if (opts.resumeSession && opts.noResume) die("--resume-session or --no-resume: one names the conversation, the other asks for a fresh one");
+    if (opts.resumeSession && opts.fork) die("--resume-session or --fork: one resumes a conversation, the other forks the main loop's");
     if (opts.crew) {
         if (opts.consumer && opts.consumer !== opts.crew) die(`--crew ${opts.crew} and --agent ${opts.consumer} name two different agents — --crew already sets the agent`);
         if (opts.role === "lead") die("--crew and --role lead contradict each other");
@@ -711,6 +661,17 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const effectiveSessionMode =
         ctx.role === "crew" ? "auto" : normalizeSessionMode(ctx.claude.session_mode);
     const sessionKey = sessionKeyFor(ctx.role, ctx.agent);
+    // #3489 — a conversation named at start: it must be the folder's, and it
+    // wins over the recorded one. Refused rather than started fresh.
+    let picked: string | null = null;
+    if (opts.resumeSession) {
+        if (effectiveSessionMode !== "auto") die(`--resume-session: claude.session_mode=${effectiveSessionMode} ties the loop to its own session id`);
+        const userSetSession = opts.claudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--session-id" || a.startsWith("--session-id="));
+        if (userSetSession) die("--resume-session: Claude's arguments already name a session");
+        const pick = pickConversation(cwd, opts.resumeSession);
+        if ("error" in pick) die(`--resume-session: ${pick.error}`);
+        picked = pick.id;
+    }
     const sessionPlan: SessionResolvePlan = resolveSession({
         mode: effectiveSessionMode,
         configuredId: ctx.claude.session_id,
@@ -719,6 +680,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         readPersistedId: () => readPersistedSessionId(cwd, sessionKey),
         forkFrom: opts.fork && ctx.role === "crew" ? readPersistedSessionId(cwd, "default") : null,
         fresh: opts.noResume === true,
+        pick: picked,
     });
     if (sessionPlan.warning) {
         process.stderr.write(`claude-loop: ${sessionPlan.warning}\n`);
@@ -729,6 +691,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         const holder = conversationHolder(sessionPlan.sessionId, ctx.agent, loopAlive);
         if (holder) die(`the conversation ${sessionPlan.sessionId} is ${holder.agent}'s: its loop ${holder.name} runs on it. Start ${ctx.agent} in its own folder, or with --no-resume for a fresh conversation.`);
     }
+    // #3489 — recorded now, not by the SessionStart hook alone: the next
+    // starts resume it, even if this one never gets that far.
+    if (picked) recordSessionEntry(join(cwd, SESSION_ID_FILE), sessionKey, picked);
 
     // #B.216 david (979632): auto-register the project with the aiball
     // daemon so `claude-loop start` in any dir surfaces a fresh entry
@@ -2285,6 +2250,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
         .option("--agent <id>", "#420: alias for --consumer (the loop's agent identity). Set a distinct one to run several loops in the same dir.")
         .option("--crew <name>", "#2523: start a crew agent in this folder, next to its main loop — assignment-only, its own session, told at start that it waits for explicit requests. Same as --agent <name> --role crew.")
+        .option("--resume-session <id|latest>", "#3489: resume this conversation of the folder (its id, or latest: the most recent one) instead of the recorded one, and record it for the next starts. Refused when the folder has no such conversation, or another agent's loop runs on it.")
         .option("--fork", "#2523: with --crew, the first start forks the main loop's session (its context, a new id) instead of starting empty.")
         .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
         // #1435: multi-agent role sugar — lead (owner + can-claim, today's
@@ -2317,7 +2283,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             role?: string;
-            crew?: string; fork?: boolean;
+            crew?: string; fork?: boolean; resumeSession?: string;
             type?: string; denyCode?: boolean;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
@@ -2349,6 +2315,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 role: opts.role === "lead" || opts.role === "crew" ? opts.role : undefined,
                 crew: opts.crew,
                 fork: opts.fork === true,
+                resumeSession: opts.resumeSession,
                 type: opts.type === "coder" || opts.type === "cto" ? opts.type : undefined,
                 denyCode: opts.denyCode === true,
                 cwd: opts.cwd,

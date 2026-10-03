@@ -24,3 +24,8 @@ test("a mode the caller chose is passed as it is", () => {
     assert.deepEqual(loopStartArgs({ cwd: "/w/p", mode: "host" }).slice(0, 2), ["start", "--host"]);
     assert.deepEqual(loopStartArgs({ cwd: "/w/p", mode: "tmux", crew: "c-two" }), ["start", "--tmux", "--no-attach", "--cwd", "/w/p", "--crew", "c-two"]);
 });
+
+test("#3489 — a conversation to resume goes to the loop's start as --resume-session", () => {
+    const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    assert.deepEqual(loopStartArgs({ cwd: "/w/p", agent: "p-claude", resume: id }).slice(-2), ["--resume-session", id]);
+});

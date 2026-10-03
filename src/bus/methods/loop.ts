@@ -135,6 +135,19 @@ export function runningLoopAgents(): string[] {
     return [...new Set(loopViews().filter((l) => l.running && l.agent).map((l) => l.agent!))].sort();
 }
 
+/** #3489 — the conversations the running loops of this machine are on: its id → the loop's agent. */
+export async function runningConversations(): Promise<Map<string, string>> {
+    const live = await tmuxSessions();
+    const out = new Map<string, string>();
+    for (const e of listLoopPlates()) {
+        const id = e.plate.session_id;
+        if (!id) continue;
+        const v = loopView(e, live);
+        if (v.running && v.agent) out.set(id, v.agent);
+    }
+    return out;
+}
+
 function withoutAt<T extends { at: number }>(v: T): Omit<T, "at"> {
     const { at: _at, ...rest } = v;
     return rest;

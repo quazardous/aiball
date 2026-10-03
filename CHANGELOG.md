@@ -23,6 +23,15 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- A loop can start on a conversation Claude Code already has in its folder:
+  `claude-loop start --resume-session <id|latest>`, and `resume` on
+  `session.start`. The new method `session.conversations` lists a folder's
+  conversations with their first prompt, so a client can offer to resume one
+  on a first start. The loop then records it and resumes it on its next
+  starts.
+
 ### Fixed
 
 - Restarting the daemon (`aiball restart`) no longer stops the agents' loops

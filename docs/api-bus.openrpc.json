@@ -3577,6 +3577,46 @@
       ]
     },
     {
+      "name": "session.conversations",
+      "description": "The conversations Claude Code keeps for a folder, the most recently written first (at most `limit`): their id, when, the first thing the user typed, and which running loop's agent is on one (`held_by`: a start would refuse it). `tracked` is the one the folder's loop would resume on its own (`.aiball-session_id`): the main loop's, or `crew`'s; null when none, or when its transcript is gone. A client asks before a first start whether to resume one (`session.start`'s `resume`).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "crew",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
       "name": "session.host",
       "description": "#3066 3c — `claude-loop start --host` asks for its host here: the command it prepared (Claude, its settings and hooks), run in an agent's session on this daemon's host. The command's environment gets `CL_HOST_CONTROL`, so Claude's hooks drive the host; the answer gives it to the kernel the loop starts next. Local callers only: the command runs on this machine.",
       "paramStructure": "by-name",
@@ -3795,6 +3835,23 @@
                 "minLength": 1,
                 "maxLength": 100,
                 "pattern": "^[^-]"
+              }
+            ]
+          }
+        },
+        {
+          "name": "resume",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "latest"
+              },
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
               }
             ]
           }

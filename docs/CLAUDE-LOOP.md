@@ -164,6 +164,30 @@ claude-loop start --crew reviewer --fork   # first start: a fork of the main loo
 editing the same files collide. `claude-loop crew create <name> --start` gives
 a crew agent an isolated worktree instead.
 
+### Starting on a conversation the folder already has
+
+With `claude.session_mode: auto` (the default), a loop resumes only the
+conversation it recorded in `.aiball-session_id`. In a folder where Claude Code
+was used by hand, the first start opens a new one. `--resume-session` names the
+conversation to resume instead:
+
+```sh
+claude-loop start --resume-session latest       # the folder's most recent conversation
+claude-loop start --resume-session <uuid>       # that one
+```
+
+The id is recorded under the loop's entry at once, so the next starts resume it.
+It is refused, rather than started fresh:
+
+- when the folder has no such conversation, or none at all for `latest`;
+- when another agent's running loop is on it;
+- with `--no-resume` or `--fork`, with a session flag passed to Claude, and
+  outside `auto` mode.
+
+A client does the same through the bus: `session.conversations` lists the
+folder's conversations and the one its loop would resume, and `session.start`
+takes `resume`.
+
 ## Core cycle
 
 ```

@@ -18,6 +18,10 @@ import { isPresent } from "../../live-presence.js";
 import { listConsumers } from "../../db/consumers.js";
 import { tmuxSessionView } from "../../sessions/registry.js";
 import { remoteControlFlags } from "../../claude-loop/remote-control.js";
+import { listConversations, pickConversation, sessionExists } from "../../claude-loop/claude-conversations.js";
+import { parseSessionFile, sessionEntry, sessionKeyFor, SESSION_ID_FILE } from "../../claude-loop/session-id.js";
+import { readFileSync } from "node:fs";
+import { runningConversations } from "./loop.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
@@ -37,6 +41,9 @@ async function busySession(agent: string): Promise<boolean> {
     await stopSession(link);
     return false;
 }
+
+/** #3489 — a conversation to resume: the folder's latest, or its id. */
+const resumeParam = z.union([z.literal("latest"), z.string().uuid()]);
 
 const size = z.object({ rows: z.number().int().min(1).max(1000), cols: z.number().int().min(1).max(1000) }).optional();
 
@@ -70,8 +77,11 @@ defineMethod({
         mode: z.enum(["host", "tmux"]).optional(),
         /** #3254 — Claude with Remote Control: on, off, or on under a name. */
         remote_control: remoteControl.optional(),
+        /** #3489 — an agent's loop: resume this conversation of the folder (`latest`, or its id). */
+        resume: resumeParam.optional(),
     }),
     run: async (caller, p) => {
+        if (p.name && p.resume) throw new Refusal(400, "resume is an agent loop's: a named session runs no Claude");
         if (p.name && p.mode) throw new Refusal(400, "mode is an agent loop's: a named session runs on the host");
         if (p.name && p.remote_control !== undefined) throw new Refusal(400, "remote_control is an agent loop's: a named session runs no Claude");
         if (p.name && (p.agent || p.crew)) throw new Refusal(400, "name is a session without an agent: not with agent or crew");
@@ -87,10 +97,19 @@ defineMethod({
             // #3066 3c — the loop's own start prepares Claude (settings, hooks,
             // state) as for tmux, then asks back for the host (session.host)
             // and starts the kernel on it: one way to prepare Claude, not two.
+            // #3489 — checked here, so a refusal says why instead of the loop's exit code.
+            let resume: string | undefined;
+            if (p.resume) {
+                const pick = pickConversation(p.cwd, p.resume);
+                if ("error" in pick) throw new Refusal(404, pick.error, ERROR_CODES.NOT_FOUND);
+                const holder = (await runningConversations()).get(pick.id);
+                if (holder && holder !== named) throw new Refusal(409, `the conversation ${pick.id} is ${holder}'s: its loop runs on it`, ERROR_CODES.CONFLICT);
+                resume = pick.id;
+            }
             const env = sessionEnv(p.env, isMachineLocal(caller));
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
-            const args = loopStartArgs(p);
+            const args = loopStartArgs({ ...p, resume });
             const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, ...args], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
             // Without a listener a failed spawn is an uncaught 'error' event:
             // it took the whole daemon down, as project.launch once did (#3103).
@@ -146,12 +165,13 @@ defineMethod({
  * from a terminal — the folder's configured mode, and tmux for a folder bound
  * to a remote daemon (whose session host is not this one).
  */
-export function loopStartArgs(p: { cwd: string; mode?: "host" | "tmux"; agent?: string; crew?: string; project?: string; remote_control?: boolean | string }): string[] {
+export function loopStartArgs(p: { cwd: string; mode?: "host" | "tmux"; agent?: string; crew?: string; project?: string; remote_control?: boolean | string; resume?: string }): string[] {
     return [
         "start", ...(p.mode ? [`--${p.mode}`] : []), "--no-attach", "--cwd", p.cwd,
         ...(p.agent ? ["--agent", p.agent] : []),
         ...(p.crew ? ["--crew", p.crew] : []),
         ...(p.project ? ["--project", p.project] : []),
+        ...(p.resume ? ["--resume-session", p.resume] : []),
         ...remoteControlFlags(p.remote_control),
     ];
 }
@@ -266,5 +286,35 @@ defineSubject({
         const views = listSessionViews().filter((v) => v.name !== null);
         if (sub.parts[1] !== "*") return views.find((v) => v.name === sub.parts[1]) ?? null;
         return Object.fromEntries(views.map((v) => [v.name!, v]));
+    },
+});
+
+/**
+ * #3489 — the conversations Claude Code keeps for a folder, the most recently
+ * written first (at most `limit`): their id, when, the first thing the user
+ * typed, and which running loop's agent is on one (`held_by`: a start would
+ * refuse it). `tracked` is the one the folder's loop would resume on its own
+ * (`.aiball-session_id`): the main loop's, or `crew`'s; null when none, or
+ * when its transcript is gone. A client asks before a first start whether to
+ * resume one (`session.start`'s `resume`).
+ */
+defineMethod({
+    name: "session.conversations",
+    ...HUMAN_HERE,
+    params: z.object({
+        cwd: z.string().min(1),
+        crew: z.string().regex(SESSION_NAME).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+    }),
+    run: async (caller, p) => {
+        // What the user typed in their conversations: this machine's callers only.
+        if (!isMachineLocal(caller)) throw new Refusal(403, "a folder of this machine: local callers only", ERROR_CODES.FORBIDDEN);
+        let text: string | null = null;
+        try { text = readFileSync(join(p.cwd, SESSION_ID_FILE), "utf8"); } catch { /* none recorded */ }
+        const recorded = text === null ? null : sessionEntry(parseSessionFile(text).file, sessionKeyFor(p.crew ? "crew" : "lead", p.crew ?? null));
+        const tracked = recorded && sessionExists(p.cwd, recorded.toLowerCase()) ? recorded.toLowerCase() : null;
+        const held = await runningConversations();
+        const conversations = listConversations(p.cwd, p.limit ?? 20).map((c) => ({ ...c, held_by: held.get(c.id) ?? null }));
+        return { tracked, conversations };
     },
 });
