@@ -23,7 +23,7 @@ import {
 } from "./state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
-import { getIpcState, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
+import { getIpcState, recordIpcDenial, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
 import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
 import { getHookWatcher, type HookWatcherEvent, type SessionStartSource } from "./hook-watcher.js";
 
@@ -36,6 +36,7 @@ export type DispatchVerdict =
     | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_wake_at" | "set_wake_requested" | "set_wake_in_flight" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
     | { kind: "hook-event"; hookEvent: HookWatcherEvent }
+    | { kind: "denial-recorded"; tool: string | null; reason: string | null }
     | { kind: "unknown"; raw: string }
     | { kind: "error"; message: string };
 
@@ -241,6 +242,13 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 getHookWatcher().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
+            // #3500 — a tool call the permission system denied: counted for the bar.
+            if (hookKind === "PermissionDenied") {
+                const tool = typeof event.tool_name === "string" ? event.tool_name : null;
+                const reason = typeof event.reason === "string" ? event.reason : null;
+                recordIpcDenial(atMs, reason);
+                return { kind: "denial-recorded", tool, reason };
+            }
             return { kind: "unknown", raw: `hook:${String(hookKind)}` };
         }
         return { kind: "unknown", raw: `${String(kind)}:${String(eventKind)}` };
@@ -259,6 +267,7 @@ export function formatVerdictLogLine(v: DispatchVerdict): string {
         case "marker-touched":       return `proxy-event: marker '${v.name}' applied`;
         case "afk-service-set":      return `proxy-event: AfkService → ${v.mode}${v.expiryMs !== null ? ` (expiry=${new Date(v.expiryMs).toISOString()})` : ""}`;
         case "hook-event":           return `proxy-event: HookWatcher ← ${v.hookEvent.type}${v.hookEvent.type === "hook:session_start" ? ` (source=${v.hookEvent.source})` : v.hookEvent.type === "hook:pretooluse" ? ` (tool=${v.hookEvent.toolName})` : v.hookEvent.type === "hook:user_prompt_submit" ? ` (from_auto_wake=${v.hookEvent.fromAutoWake})` : ""}`;
+        case "denial-recorded":      return `proxy-event: permission denied (tool=${v.tool ?? "?"}) reason=${JSON.stringify(v.reason)}`;
         case "unknown":              return `proxy-event: unknown '${v.raw}'`;
         case "error":                return `proxy-event handler error: ${v.message}`;
     }

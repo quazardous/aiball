@@ -1073,6 +1073,15 @@ the words does not trip it; the fast mode's limit and the `NN% of your weekly li
 warning do not either. The human lets the hold go; the alert lifts when Claude works
 again.
 
+When Claude Code's permission system denies a tool call (the auto mode classifier
+above all, and deny rules), Claude stops on the refusal, often with nothing else to
+show for it. Its `PermissionDenied` hook counts these denials with time: the tmux
+line shows `⛔3·2m` after the counters (3 in the last hour, the last 2 minutes ago),
+and the bar publishes `denials` (`{ last_hour, total, last_at, last_reason }`:
+`total` since the loop's start, `last_reason` as Claude Code gives it), null once an
+hour has gone by without one. Each denial is a line in `loop.log` with the tool and
+the reason. The loop does nothing else about it: no retry, nothing posted.
+
 The loop pushes on change, at most once a second (a burst ends on its last value).
 A human, or the agent itself, reads it with `GET /api/consumers/<agent>/bar`, and
 the bus announces each change on the subject `agent.<id>.bar`. A bar is `stale` once its loop

@@ -74,6 +74,8 @@ export interface AgentBar {
         /** #3288 — where the price and `newer` come from: an open list, kept by its community. */
         catalog?: "models.dev" | "litellm";
     } | null;
+    /** #3500 — the tool calls Claude Code's permission system denied (the auto mode classifier, a deny rule): how many in the last hour, since the loop's start, when the last came and why; null when none in the last hour. Optional: absent from loops started before it. */
+    denials?: { last_hour: number; total: number; last_at: string; last_reason: string | null } | null;
     /** #3291 — whether Claude is in Remote Control now, as its status line shows it (the flag at start or a `/rc` in the session). Optional: absent from loops started before it. */
     remote_control?: { on: boolean };
     /** The PTY proxy fronting claude is alive. */

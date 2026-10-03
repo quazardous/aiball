@@ -66,6 +66,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         zenActive: false,
         counters: null,
         nextWakeInSec: null,
+        denialChip: "",
         bootElapsedSec: null,
         bootRemainingSec: null,
         afkGlyph: "",

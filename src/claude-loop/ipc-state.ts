@@ -28,6 +28,8 @@
  * the timer becomes the sole writer + the markers can disappear in V4).
  */
 
+import { emptyDenialLog, withDenial, type DenialLog } from "./denials.js";
+
 export interface IpcState {
     /** Last in-memory boot-complete flag, mutated when a SessionStart
      *  event lands. `null` = no event yet (the timer just started and
@@ -206,6 +208,9 @@ export interface IpcState {
      *  While set, the wake gate refuses every wake and the bar says it. */
     limitReached: boolean;
     limitResets: { text: string; at: string | null } | null;
+    /** #3500 — the tool calls Claude Code's permission system denied (the
+     *  PermissionDenied hook), counted with time: the bar's `⛔N·age` chip. */
+    denials: DenialLog;
     /** #3283 — the model Claude ran its last turn on (the transcript's id);
      *  null before the first turn ends. Set by the Stop hook. */
     model: string | null;
@@ -301,6 +306,7 @@ const state: IpcState = {
     notLoggedIn: false,
     limitReached: false,
     limitResets: null,
+    denials: emptyDenialLog(),
     model: null,
     remoteControl: false,
     restartNeeded: false,
@@ -504,6 +510,12 @@ export function setIpcLimitReached(reached: boolean, resets: { text: string; at:
     if (state.limitReached === reached && JSON.stringify(state.limitResets) === JSON.stringify(next)) return;
     state.limitReached = reached;
     state.limitResets = next;
+    notifyIpcChanged();
+}
+
+/** #3500 — a tool call the permission system denied (the PermissionDenied hook). */
+export function recordIpcDenial(atMs: number, reason: string | null): void {
+    state.denials = withDenial(state.denials, atMs, reason);
     notifyIpcChanged();
 }
 
@@ -766,6 +778,7 @@ export function resetIpcStateForTests(): void {
     state.notLoggedIn = false;
     state.limitReached = false;
     state.limitResets = null;
+    state.denials = emptyDenialLog();
     state.model = null;
     state.remoteControl = false;
     state.restartNeeded = false;

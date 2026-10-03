@@ -58,6 +58,9 @@ export const HOOKS: HookSpec[] = [
     // is the fact the rest of that ticket is waiting on. Registering it against
     // the types the docs list would answer the question with its own premise.
     { event: "Notification", module: "../notification-hook.js" },
+    // #3500 — a tool call the permission system denied (the auto mode
+    // classifier, a deny rule): counted with time for the bar. Observes only.
+    { event: "PermissionDenied", module: "../permission-denied-hook.js" },
 ];
 
 /** One `{matcher?, hooks}` entry in a Claude Code `settings.hooks[event]` array. */

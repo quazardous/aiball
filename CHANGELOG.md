@@ -34,6 +34,10 @@ dates are YYYY-MM-DD.
 - A client can forget a stopped loop through the bus (`loop.remove`), as
   `claude-loop rm` does from a terminal; the project's folder, its tickets
   and its agent stay.
+- A loop counts the tool calls Claude Code's permission system denies its
+  Claude (the auto mode classifier, deny rules): the bar shows how many in
+  the last hour and how long ago the last one was, and the agent's bar
+  publishes them, so an agent stuck on a refusal can be seen.
 
 ### Fixed
 

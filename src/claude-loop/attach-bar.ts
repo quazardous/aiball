@@ -15,6 +15,7 @@ import type { AgentBar } from "../agent-bar.js";
 import { COPY_MARK } from "./bar-render.js";
 import { barOptionValues, renderMarkerSegment, statusRightFormat, type BarColors, type BarOptions, type BarSnapshot } from "./bar-renderer.js";
 import { formatAfkGlyph } from "./state.js";
+import { denialChip } from "./denials.js";
 
 /** The bar as the daemon serves it: the loop's facts, and whether its loop is gone. */
 export interface AttachBarView {
@@ -63,6 +64,7 @@ export function snapshotFromAgentBar(view: AttachBarView, nowMs: number, col: Ba
         zenActive: b.zen,
         counters: b.counters,
         nextWakeInSec: b.phase === "idle" ? secondsUntil(b.next_wake_at, nowMs) : null,
+        denialChip: denialChip(b.denials, nowMs),
         bootElapsedSec: booting && Number.isFinite(bootStarted) ? Math.max(0, Math.floor((nowMs - bootStarted) / 1000)) : null,
         bootRemainingSec: booting ? secondsUntil(b.boot?.deadline_at ?? null, nowMs) : null,
         afkGlyph: formatAfkGlyph(afkChunk),

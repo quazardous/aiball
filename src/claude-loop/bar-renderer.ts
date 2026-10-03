@@ -15,6 +15,7 @@
  * (`setTmuxStatus` / `setTmuxCounters` / `setTmuxAfkState`). #2311 — this
  * header still described slice 1.
  */
+import { denialChip, denialSummary } from "./denials.js";
 import { modelShortName } from "../model-name.js";
 import { spawnSync } from "node:child_process";
 import { muxQueue } from "./mux-async.js";
@@ -68,6 +69,9 @@ export interface BarSnapshot {
      *  pas idle / busy / unknown / pas d'event à drainer. Rendu après les
      *  counters comme `📨Ns`. */
     nextWakeInSec: number | null;
+    /** #3500 — `⛔N·age`: the tool calls denied in the last hour and the last
+     *  one's age, after the counters; empty when none. */
+    denialChip: string;
     /** #891 — boot elapsed et remaining (seconds). `null` hors boot.
      *  Rendus dans la zone compteurs comme `🚀Ns +Ns`, prioritaires
      *  sur nextWakeInSec. */
@@ -253,6 +257,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         zenActive,
         counters,
         nextWakeInSec,
+        denialChip: denialChip(denialSummary(ipc.denials, input.nowMs), input.nowMs),
         bootElapsedSec,
         bootRemainingSec,
         afkGlyph,
@@ -313,6 +318,8 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
         next_wake_at: phase === "idle" && ipc.nextWakeAtMs !== null && ipc.nextWakeAtMs > nowMs ? iso(ipc.nextWakeAtMs) : null,
         // #3268 — when the reached limit lifts, as said; null when none is reached.
         limit_resets: ipc.limitReached ? ipc.limitResets ?? null : null,
+        // #3500 — the tool calls the permission system denied, the last hour's.
+        denials: denialSummary(ipc.denials, nowMs),
         // #3283 — the model Claude ran its last turn on, and its short name.
         model: ipc.model ? { id: ipc.model, name: modelShortName(ipc.model) } : null,
         // #3291 — whether Claude is in Remote Control, whatever turned it on.
@@ -365,6 +372,7 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.zenActive !== next.zenActive) changed.push("zenActive");
     if (!countersEqual(prev.counters, next.counters)) changed.push("counters");
     if (prev.nextWakeInSec !== next.nextWakeInSec) changed.push("counters");
+    if (prev.denialChip !== next.denialChip) changed.push("counters");
     if (prev.bootElapsedSec !== next.bootElapsedSec) changed.push("counters");
     if (prev.bootRemainingSec !== next.bootRemainingSec) changed.push("counters");
     if (prev.afkGlyph !== next.afkGlyph) changed.push("afkGlyph");
@@ -670,6 +678,8 @@ export function barOptionValues(next: BarSnapshot, col: BarColors): BarOptions {
             parts.push(next.nextWakeInSec !== null ? `📨 ${next.nextWakeInSec}s` : "📨");
         }
     }
+    // #3500 — the denied tool calls, with time: Claude may be stuck on one.
+    if (next.denialChip) parts.push(next.denialChip);
     return {
         "status-bg": bg,
         "status-fg": col.bar_fg,
