@@ -212,7 +212,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         default: true,
         label: "Wait credit",
         description:
-            "true (default) = a step's resume_on.timer spends an agent's wait credit, earned by proof of work. false = waits are free and uncapped (still at most tickets.step_after_max_minutes), nothing is earned, spent or refunded, and replies and wakes say nothing about credit.",
+            "true (default) = a step's resume_on.timer spends an agent's wait credit, earned by proof of work. false = waits are free and uncapped (still at most tickets.steps.max_wait), nothing is earned, spent or refunded, and replies and wakes say nothing about credit.",
     },
     {
         key: "tickets.wait_credit.refund",

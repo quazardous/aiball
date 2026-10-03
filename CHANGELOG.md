@@ -38,6 +38,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The wait credit setting's description named a setting by its old name
+  (the step's longest wait): it names the current one.
+
 - The denied tool calls a loop counts now reach its clients: the daemon
   dropped them from the bar the loop pushes, so only the loop's own tmux
   line showed them.
