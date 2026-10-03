@@ -174,7 +174,9 @@ claude_loop:
   # its Claude (the auto mode classifier has false positives). Empty by
   # default: nothing is sent. Sent like a wake, only when a wake could be
   # (no AFK hold, zen, typing, usage limit, boot or busy). The words are
-  # yours: they are typed into Claude's prompt as you wrote them.
+  # yours: they are typed into Claude's prompt as you wrote them. The same
+  # keys can be set on the board (global or per project, e.g. from tvty);
+  # the board's project value wins over this file.
   on_repetitive_denied:
     threshold: 3       # denials in the last hour before the loop answers
     prompt: ""         # sent as it is; empty = nothing

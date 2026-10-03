@@ -19,7 +19,6 @@
  *   project: skybot
  * ```
  */
-import { ON_REPETITIVE_DENIED_DEFAULT, parseOnRepetitiveDenied, type OnRepetitiveDenied } from "../claude-loop/denied-prompt.js";
 import { parseMouse } from "../claude-loop/mouse-setup.js";
 import { parseRemoteControl, type RemoteControl } from "../claude-loop/remote-control.js";
 import { isBarHost, type BarHost } from "../agent-bar.js";
@@ -289,11 +288,6 @@ export interface AiballConfig {
          *  then quiet until the landscape moves). Drives CL_DRAINED_STRATEGY;
          *  parsed by drained-strategy.ts. */
         drained_strategy: string;
-        /** #3509: what the loop sends when Claude Code's permission system
-         *  keeps denying its Claude — a static prompt, or an external
-         *  command's output — through the wake gate, at most `max_per_hour`.
-         *  Empty by default: nothing is sent. Parsed by denied-prompt.ts. */
-        on_repetitive_denied: OnRepetitiveDenied;
         /** #412: minimum log level (PSR-3 / RFC5424: debug…emergency). Messages
          *  below it are dropped. Drives CL_LOG_LEVEL (timer + hooks). Default
          *  `info`; an unknown name degrades to the default at the logger. */
@@ -490,8 +484,6 @@ const DEFAULTS: AiballConfig = {
         // human), then quiet until the landscape moves. Tune per-project via
         // `.aiball.yaml claude_loop.drained_strategy` (`silent` disables it).
         drained_strategy: "once",
-        // #3509: nothing sent on repeated denials unless a prompt or command is set.
-        on_repetitive_denied: { ...ON_REPETITIVE_DENIED_DEFAULT },
         // #412: PSR-style level threshold; messages below it are dropped. info default.
         log_level: "info",
         // `--permission-mode` for claude. Empty = omit the flag → interactive
@@ -969,10 +961,6 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // by parseDrainedStrategy — an unknown spec degrades to silent).
             if (typeof cl.drained_strategy === "string" && cl.drained_strategy.trim()) {
                 cfg.claude_loop.drained_strategy = cl.drained_strategy.trim();
-            }
-            // #3509: the answer to repeated denials; a malformed field keeps its default.
-            if (cl.on_repetitive_denied !== undefined) {
-                cfg.claude_loop.on_repetitive_denied = parseOnRepetitiveDenied(cl.on_repetitive_denied);
             }
             // #412: log level threshold (validated at the logger — an unknown
             // name degrades to the default `info`).

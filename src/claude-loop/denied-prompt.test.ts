@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ON_REPETITIVE_DENIED_DEFAULT, deniedContext, deniedPromptBlocker, parseOnRepetitiveDenied, resolveDeniedPrompt } from "./denied-prompt.js";
+import { ON_REPETITIVE_DENIED_DEFAULT, deniedContext, deniedPromptBlocker, parseOnRepetitiveDenied, resolveDeniedPrompt, resolveOnRepetitiveDenied } from "./denied-prompt.js";
 import { emptyDenialLog, withDenial, withDeniedPromptSent } from "./denials.js";
 
 const T0 = Date.parse("2026-10-03T12:00:00Z");
@@ -61,4 +61,21 @@ test("a command that fails, prints nothing or hangs sends nothing, and says why"
     assert.deepEqual(await resolveDeniedPrompt(cmd("echo hi; exit 3"), ctx), { none: "command exited 3" });
     assert.deepEqual(await resolveDeniedPrompt(cmd("true"), ctx), { none: "command printed nothing" });
     assert.deepEqual(await resolveDeniedPrompt(cmd("sleep 5"), ctx, "/bin/sh", 200), { none: "command timed out after 200 ms" });
+});
+
+test("the config: the board's project value, the project's yaml, the board's global value, the global yaml, the default", () => {
+    const files: Record<string, Record<string, string | number>> = {
+        project: { "claude_loop.on_repetitive_denied.prompt": "from the folder", "claude_loop.on_repetitive_denied.threshold": 4 },
+        global: { "claude_loop.on_repetitive_denied.prompt": "from the machine", "claude_loop.on_repetitive_denied.max_per_hour": 5 },
+    };
+    const file = (layer: "project" | "global", key: string) => files[layer]![key];
+    const board = new Map([
+        ["claude_loop.on_repetitive_denied.prompt", { global: "board global", project: null }],
+        ["claude_loop.on_repetitive_denied.threshold", { global: 9, project: 6 }],
+        ["claude_loop.on_repetitive_denied.command", { global: "", project: null }],
+    ]);
+    assert.deepEqual(resolveOnRepetitiveDenied(board, file), { threshold: 6, prompt: "from the folder", command: null, max_per_hour: 5 },
+        "threshold: the board's project value; prompt: the folder's file over the board's global; max: the global file; an empty command is none");
+    assert.deepEqual(resolveOnRepetitiveDenied(null, file), { threshold: 4, prompt: "from the folder", command: null, max_per_hour: 5 }, "the daemon silent: the files alone");
+    assert.deepEqual(resolveOnRepetitiveDenied(null, () => undefined), ON_REPETITIVE_DENIED_DEFAULT, "nothing anywhere: the default, which sends nothing");
 });

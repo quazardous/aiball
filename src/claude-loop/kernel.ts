@@ -184,7 +184,8 @@ import {
     recordIpcDeniedPromptSent,
 } from "./ipc-state.js";
 import { DENIAL_WINDOW_MS, denialsInLastHour } from "./denials.js";
-import { deniedContext, deniedPromptBlocker, deniedPromptConfigured, resolveDeniedPrompt } from "./denied-prompt.js";
+import { DENIED_KEY_PREFIX, deniedContext, deniedPromptBlocker, deniedPromptConfigured, resolveDeniedPrompt, resolveOnRepetitiveDenied, type BoardValues, type OnRepetitiveDenied } from "./denied-prompt.js";
+import { readFileValue } from "../config/file-reader.js";
 import { bootReminderFor, POST_RESTART_REMINDER, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
@@ -1546,9 +1547,22 @@ function recomputeNextWake(): void {
 let pendingDeniedPrompt: { text: string; source: "prompt" | "command"; atMs: number } | null = null;
 let resolvingDeniedPrompt = false;
 
+/** The board's values for this loop's project and the yaml files, resolved; the files alone when the daemon does not answer. */
+async function deniedPromptConfig(): Promise<OnRepetitiveDenied> {
+    let board: Map<string, BoardValues> | null = null;
+    try {
+        const r = await client().configManaged(loopProject ?? null);
+        board = new Map(r.config.filter((c) => c.key.startsWith(DENIED_KEY_PREFIX)).map((c) => [c.key, { global: c.global, project: c.project }]));
+    } catch (e) {
+        log(`denied-prompt: the board's config did not answer (${(e as Error).message}) — the yaml files alone apply`);
+    }
+    return resolveOnRepetitiveDenied(board, (layer, key) => readFileValue(layer, key, loopCwd ?? process.cwd()));
+}
+
 async function armDeniedPrompt(): Promise<void> {
     if (pendingDeniedPrompt || resolvingDeniedPrompt) return;
-    const odc = cfg.on_repetitive_denied;
+    // #3509 — read now, not at start: a change on the board applies at the next denial.
+    const odc = await deniedPromptConfig();
     const now = Date.now();
     const denials = getIpcState().denials;
     const blocker = deniedPromptBlocker(odc, denials, now);

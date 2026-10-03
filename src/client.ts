@@ -765,6 +765,10 @@ export class AiballClient {
             upstream?: Record<string, Array<{ kind: string; ref: string; default?: boolean }>>;
         }>("config.get");
     }
+    /** #3509 — the board's config for a project, each key's global and project values (`config.managed`). */
+    configManaged(project: string | null) {
+        return this.call<{ project: string | null; config: Array<{ key: string; global: string | number | boolean | null; project: string | number | boolean | null }> }>("config.managed", { project: project ?? "" });
+    }
     /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO.
      *  #798 — `since` is an ISO 8601 cutoff. Filters messages whose
      *  `created_at` is >= since. */

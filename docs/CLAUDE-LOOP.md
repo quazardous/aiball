@@ -1088,7 +1088,7 @@ hour has gone by without one. Each denial is a line in `loop.log` with the tool 
 the reason.
 
 What the loop does about repeated denials is yours to say, and nothing by
-default. `claude_loop.on_repetitive_denied` (global or per project) names a
+default. `claude_loop.on_repetitive_denied` names a
 prompt to send once `threshold` denials came in the last hour: `prompt`, a text
 sent as it is, or `command`, a command that gets the context as JSON on stdin
 (`agent`, `project`, `cwd`, the last `tool` and `reason`, `last_hour`, and the
@@ -1099,6 +1099,15 @@ typing, usage limit, boot or busy), at most `max_per_hour` times an hour, so a
 denial → prompt → denial cycle stops; armed and not sent within the hour, it is
 dropped. Each send is a `loop.log` line, and the bar's `denials.sent` counts the
 hour's, so what the loop said in your place shows.
+
+The four settings are board config keys too
+(`claude_loop.on_repetitive_denied.threshold`, `.max_per_hour`, `.prompt`,
+`.command`; global and per project, set by a human only), so a client such as
+tvty shows and changes them. The loop reads them when a denial reaches the
+threshold, without a restart, in this order: the board's value for its project,
+its `.aiball.yaml`, the board's global value, the global config. With the daemon
+silent, the files alone apply. A `command` set on the board runs on the loop's
+machine, a remote one included.
 
 The loop pushes on change, at most once a second (a burst ends on its last value).
 A human, or the agent itself, reads it with `GET /api/consumers/<agent>/bar`, and

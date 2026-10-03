@@ -28,7 +28,9 @@ dates are YYYY-MM-DD.
 - A loop can answer repeated permission denials with a prompt you configure
   (`claude_loop.on_repetitive_denied`): a static text, or what an external
   command makes of the context. Off by default, sent only when a wake could
-  be, a few times an hour at most, and counted in the bar.
+  be, a few times an hour at most, and counted in the bar. Its settings are
+  board config keys too, global and per project, so tvty shows and changes
+  them; a change applies at the next denial.
 
 ### Fixed
 

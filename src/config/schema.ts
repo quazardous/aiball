@@ -417,6 +417,65 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
             "How long a backlog wake keeps a ticket out of the wake pool when its last action is a step (then: continue), instead of the whole cooldown. Short on purpose: the step says there is work to do now, and the pause only lets the queue turn over. 0 = never sink it.",
     },
 
+    // #3509 — what a loop sends when Claude Code's permission system keeps
+    // denying its Claude. Read by the loop when a denial reaches the threshold
+    // (no restart): the board's value for its project, its `.aiball.yaml`,
+    // the board's global value, the global config, in that order. Protected:
+    // the text is typed into Claude's prompt, and `command` runs on the loop's
+    // machine.
+    {
+        key: "claude_loop.on_repetitive_denied.threshold",
+        min: 1,
+        max: 100,
+        step: 1,
+        unit: "count",
+        scope: "global+project",
+        type: "number",
+        default: 3,
+        protected: true,
+        sources: ["db", "file"],
+        label: "Denials before the loop answers",
+        description:
+            "How many tool calls Claude Code's permission system must deny an agent in the last hour before its loop sends the prompt below (or the command's output). Nothing is sent while both are empty.",
+    },
+    {
+        key: "claude_loop.on_repetitive_denied.max_per_hour",
+        min: 0,
+        max: 60,
+        step: 1,
+        unit: "count",
+        scope: "global+project",
+        type: "number",
+        default: 2,
+        protected: true,
+        sources: ["db", "file"],
+        label: "Prompts sent per hour, at most",
+        description:
+            "At most this many prompts an hour for repeated denials, so a denial, prompt, denial cycle stops. 0 = never send.",
+    },
+    {
+        key: "claude_loop.on_repetitive_denied.prompt",
+        scope: "global+project",
+        type: "string",
+        default: "",
+        protected: true,
+        sources: ["db", "file"],
+        label: "Prompt sent on repeated denials",
+        description:
+            "Typed into Claude's prompt as it is, like a wake and only when a wake could be (no AFK hold, zen, typing, usage limit, boot or busy). Empty = nothing (the default).",
+    },
+    {
+        key: "claude_loop.on_repetitive_denied.command",
+        scope: "global+project",
+        type: "string",
+        default: "",
+        protected: true,
+        sources: ["db", "file"],
+        label: "Command that writes the prompt",
+        description:
+            "A shell command run on the loop's machine, in its folder, for 10 s at most. It gets the denials as JSON on stdin (agent, project, cwd, tool, reason, last_hour, recent); what it prints is the prompt. It wins over the prompt above. Empty = none.",
+    },
+
     // #590 — autopoll FILE entries (migrated from autopoll/config.ts DEFAULTS).
     // `autopoll.enabled` stays special-cased in loadConfig (derived from file
     // presence) and is NOT modelled here — see #590 case #2.

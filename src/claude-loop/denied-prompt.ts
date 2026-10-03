@@ -41,6 +41,34 @@ export function parseOnRepetitiveDenied(raw: unknown): OnRepetitiveDenied {
     };
 }
 
+/** The config keys (`claude_loop.on_repetitive_denied.<field>`), set on the board or in the yaml. */
+export const DENIED_KEY_PREFIX = "claude_loop.on_repetitive_denied.";
+const DENIED_FIELDS = ["threshold", "max_per_hour", "prompt", "command"] as const;
+
+type Value = string | number | boolean;
+/** A key's board values, as `config.managed` gives them. */
+export interface BoardValues { global: Value | null; project: Value | null }
+
+/**
+ * The config as `getConfig` resolves it, layer first: the board's value for
+ * the project, the project's `.aiball.yaml`, the board's global value, the
+ * global config, then the default. `board` is null when the daemon did not
+ * answer: the files alone apply. An empty `command` is none.
+ */
+export function resolveOnRepetitiveDenied(
+    board: Map<string, BoardValues> | null,
+    fileValue: (layer: "project" | "global", key: string) => Value | undefined,
+): OnRepetitiveDenied {
+    const raw: Record<string, unknown> = {};
+    for (const f of DENIED_FIELDS) {
+        const key = DENIED_KEY_PREFIX + f;
+        const b = board?.get(key);
+        const v = b?.project ?? fileValue("project", key) ?? b?.global ?? fileValue("global", key);
+        if (v !== undefined && v !== null) raw[f] = v;
+    }
+    return parseOnRepetitiveDenied(raw);
+}
+
 /** Whether a configured prompt exists at all. */
 export function deniedPromptConfigured(cfg: OnRepetitiveDenied): boolean {
     return cfg.command !== null || cfg.prompt.trim() !== "";
