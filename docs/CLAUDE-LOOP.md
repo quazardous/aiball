@@ -1063,6 +1063,13 @@ once when the daemon starts, without a key, from models.dev (LiteLLM's price tab
 as a fallback), and kept in `$AIBALL_HOME/models-catalog.json` for a start without
 network. Both lists are kept by their communities: a price or a release may lag.
 
+`marker.info` is the bar's transient word (`compacting`, `retry 3`, …), in
+English; `marker.info_code` says it as data for a client that writes it in its own
+language: `{ code }` for `resuming`, `compacting`, `wait`, `interrupted`, `user`;
+`picker` with `which` (`session` | `mode`); `error` with `kind` (`rate_limit` |
+`overloaded` | `api`); `retry` with `attempt`; `other` for a word to show raw from
+`info`; null with no word. A client meeting a code it does not know shows `info`.
+
 `remote_control` is `{ on }`: whether Claude is in Remote Control now, as Claude
 Code's status line shows it (a `/rc` at its end, below the input box), whatever
 turned it on — the folder's setting at start or a `/rc` typed in the session. What

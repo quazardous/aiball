@@ -68,3 +68,17 @@ test("a human's gesture on this machine: not over TCP", async () => {
     const tcp = testCaller("boss", { kind: "human", transport: "tcp" });
     assert.equal((await refused(() => run({ cwd: folder() }, tcp))).status, 403);
 });
+
+test("#3514 — each step says its facts as data, for a client that writes the line in its own language", () => {
+    const d = folder();
+    const r = run({ cwd: d, project: "p-3514", agent: "a-3514", private: true }) as unknown as { steps: Array<{ file: string; action: string; detail: Record<string, unknown> }> };
+    assert.deepEqual(r.steps.map((s) => s.detail), [
+        { path: join(d, ".mcp.json"), what: "mcp_entry" },
+        { path: join(d, ".aiball.yaml"), what: "file", set: { "autopoll.enabled": true, project_type: "private", "consumer.agent": "a-3514", "consumer.project": "p-3514" } },
+    ]);
+    const again = run({ cwd: d, agent: "a-other" }) as unknown as { steps: Array<{ detail: Record<string, unknown> }> };
+    assert.deepEqual(again.steps.map((s) => s.detail), [
+        { path: join(d, ".mcp.json"), what: "mcp_entry", hint: "force" },
+        { path: join(d, ".aiball.yaml"), what: "consumer", set: { "consumer.agent": "a-other" } },
+    ]);
+});

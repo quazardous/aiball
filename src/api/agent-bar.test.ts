@@ -150,3 +150,16 @@ test("#3507 — the denied tool calls: pushed, kept and read back; a loop starte
         assert.match(String(r.json.error), /denials/);
     }
 });
+
+test("#3514 — the info word as data: pushed, kept and read back; a loop started before it sends none; a malformed one is refused", async () => {
+    const marker = { info: "retry 3", health_prompt: false, resume_picker: false, resume_mode_picker: false, info_code: { code: "retry", attempt: 3 } };
+    assert.equal((await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ marker }) })).status, 200);
+    assert.deepEqual(((await call(HUMAN, "consumer.bar", { consumer_id: "worker" })).json.bar as { marker: unknown }).marker, marker, "what a client reads");
+    const { info_code: _ic, ...old } = marker;
+    assert.ok(!("info_code" in (parseAgentBar(bar({ marker: old })) as { marker: object }).marker), "a loop started before it: absent");
+    for (const bad of [{ code: "" }, { code: 3 }, { code: "retry", attempt: { n: 3 } }, "retry"]) {
+        const r = await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ marker: { ...marker, info_code: bad } }) });
+        assert.equal(r.status, 400, JSON.stringify(bad));
+        assert.match(String(r.json.error), /info_code/);
+    }
+});

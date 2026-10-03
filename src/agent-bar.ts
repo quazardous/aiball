@@ -42,6 +42,18 @@ export function attachFor(o: { hostControl?: string | null; remoteUrl?: string |
     return { socket: null, reason: "no_socket" };
 }
 
+/**
+ * #3514 — the bar's info word as a code and its parameters: `resuming`,
+ * `compacting`, `wait`, `interrupted`, `user`; `picker` with `which`
+ * (`session` | `mode`); `error` with `kind` (`rate_limit` | `overloaded` |
+ * `api`); `retry` with `attempt`; `other` for a word a client should show raw
+ * (`marker.info`). A client meeting a code it does not know shows `info`.
+ */
+export interface BarInfoCode {
+    code: string;
+    [param: string]: string | number;
+}
+
 export interface AgentBar {
     /** What claude is doing. */
     phase: BarPhase;
@@ -58,7 +70,11 @@ export interface AgentBar {
      * (`retry 3`, `compacting`, `resuming`, `wait`, `interrupted`) and the
      * dialogs waiting for an answer.
      */
-    marker: { info: string | null; health_prompt: boolean; resume_picker: boolean; resume_mode_picker: boolean };
+    marker: {
+        info: string | null; health_prompt: boolean; resume_picker: boolean; resume_mode_picker: boolean;
+        /** #3514 — `info` as data, for a client that writes it in its own language; null when no word. Optional: absent from loops started before it. */
+        info_code?: BarInfoCode | null;
+    };
     /** Conditions a host should show loudly. */
     alerts: { link_down: boolean; daemon_down: boolean; not_logged_in: boolean; trust_dialog: boolean; api_unreachable: boolean; restart_needed: boolean; restart_pending: boolean; limit_reached: boolean };
     /** #3268 — when a reached usage limit lifts, as Claude Code says it (`at` when it can be read as a moment); null when none is reached. */
@@ -118,6 +134,12 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     if (!isObj(m) || !(m.info === null || typeof m.info === "string") || !isBool(m.health_prompt) || !isBool(m.resume_picker) || !isBool(m.resume_mode_picker)) {
         return { error: "marker must be { info: string | null, health_prompt, resume_picker, resume_mode_picker }" };
     }
+    // #3514 — optional: absent from loops started before it.
+    const ic = m.info_code;
+    if (!(ic === undefined || ic === null || (isObj(ic) && typeof ic.code === "string" && ic.code
+        && Object.values(ic).every((v) => typeof v === "string" || (typeof v === "number" && Number.isFinite(v)))))) {
+        return { error: "marker.info_code must be null or { code: string, ...params: string | number }" };
+    }
     const a = b.alerts;
     if (!isObj(a) || !isBool(a.link_down) || !isBool(a.daemon_down) || !isBool(a.not_logged_in) || !isBool(a.trust_dialog) || !isBool(a.api_unreachable)
         // #3074 — optional: a loop started before it existed does not send it.
@@ -175,7 +197,10 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         afk: { mode: b.afk.mode as BarAfkMode, expires_at: b.afk.expires_at as string | null },
         prompt: { visible: b.prompt.visible as boolean, has_input: b.prompt.has_input as boolean },
         human_typing: b.human_typing,
-        marker: { info: m.info as string | null, health_prompt: m.health_prompt as boolean, resume_picker: m.resume_picker as boolean, resume_mode_picker: m.resume_mode_picker as boolean },
+        marker: {
+            info: m.info as string | null, health_prompt: m.health_prompt as boolean, resume_picker: m.resume_picker as boolean, resume_mode_picker: m.resume_mode_picker as boolean,
+            ...(m.info_code === undefined ? {} : { info_code: m.info_code === null ? null : { ...(m.info_code as BarInfoCode) } }),
+        },
         alerts: { link_down: a.link_down as boolean, daemon_down: a.daemon_down as boolean, not_logged_in: a.not_logged_in as boolean, trust_dialog: a.trust_dialog as boolean, api_unreachable: a.api_unreachable as boolean, restart_needed: a.restart_needed === true, restart_pending: a.restart_pending === true, limit_reached: a.limit_reached === true },
         limit_resets: isObj(lr) ? { text: lr.text as string, at: (lr.at as string | null) ?? null } : null,
         model: isObj(md) ? { id: md.id as string, name: md.name as string } : null,

@@ -43,7 +43,27 @@ export interface ProjectInitInput {
 export interface InitStep {
     file: ".mcp.json" | ".aiball.yaml";
     action: "created" | "added" | "rewritten" | "patched" | "overwrote" | "kept";
+    /** The line in English, for a terminal; a client writes its own from `action`, `file` and `detail`. */
     message: string;
+    /** #3514 — what `message` says, as data. */
+    detail: InitStepDetail;
+}
+
+/**
+ * #3514 — a step's facts, for a client that writes the line in its own
+ * language: the file's `path`; `what` the step is about (the MCP entry, the
+ * whole file, `consumer`, `project_type`, `claude.deny_tools`); the keys `set`
+ * and their values; the `previous` value a patch replaced; `hint: "force"`
+ * when re-running with `--force` (`force: true`) would overwrite what was kept;
+ * `others_kept` when the other MCP servers stayed.
+ */
+export interface InitStepDetail {
+    path: string;
+    what: "mcp_entry" | "file" | "consumer" | "project_type" | "deny_tools";
+    set?: Record<string, string | number | boolean | string[]>;
+    previous?: string | null;
+    hint?: "force";
+    others_kept?: true;
 }
 
 /** Why a folder was not set up: the HTTP status and code a client reacts on. */
@@ -113,13 +133,13 @@ function mcpStep(input: ProjectInitInput, write: (path: string, text: string) =>
     const servers = json.mcpServers as Record<string, unknown>;
     const had = "aiball" in servers;
     if (had && !input.force) {
-        return { file: ".mcp.json", action: "kept", message: `${path}: aiball entry already present — re-run with --force to overwrite (drops legacy env block)` };
+        return { file: ".mcp.json", action: "kept", message: `${path}: aiball entry already present — re-run with --force to overwrite (drops legacy env block)`, detail: { path, what: "mcp_entry", hint: "force" } };
     }
     servers.aiball = { command: "aiball-mcp" };
     write(path, JSON.stringify(json, null, 2) + "\n");
-    if (!existed) return { file: ".mcp.json", action: "created", message: `created ${path} with the aiball MCP entry` };
-    if (!had) return { file: ".mcp.json", action: "added", message: `${path}: added aiball MCP entry (other servers preserved)` };
-    return { file: ".mcp.json", action: "rewritten", message: `${path}: aiball entry rewritten to canonical form (legacy env block dropped if any)` };
+    if (!existed) return { file: ".mcp.json", action: "created", message: `created ${path} with the aiball MCP entry`, detail: { path, what: "mcp_entry" } };
+    if (!had) return { file: ".mcp.json", action: "added", message: `${path}: added aiball MCP entry (other servers preserved)`, detail: { path, what: "mcp_entry", others_kept: true } };
+    return { file: ".mcp.json", action: "rewritten", message: `${path}: aiball entry rewritten to canonical form (legacy env block dropped if any)`, detail: { path, what: "mcp_entry" } };
 }
 
 function yamlSteps(input: ProjectInitInput, write: (path: string, text: string) => void): InitStep[] {
@@ -135,7 +155,7 @@ function yamlSteps(input: ProjectInitInput, write: (path: string, text: string) 
         if (hasIdentity) steps.push(patchIdentityStep(yamlPath, input, write));
         if (hasProjectType) steps.push(patchProjectTypeStep(yamlPath, "private", write));
         if (hasDenyCode) steps.push(patchDenyToolsStep(yamlPath, write));
-        if (steps.length === 0) steps.push({ file: ".aiball.yaml", action: "kept", message: `${yamlPath}: already exists — re-run with --force to overwrite` });
+        if (steps.length === 0) steps.push({ file: ".aiball.yaml", action: "kept", message: `${yamlPath}: already exists — re-run with --force to overwrite`, detail: { path: yamlPath, what: "file", hint: "force" } });
         return steps;
     }
     const consumerLines = hasIdentity
@@ -153,14 +173,15 @@ function yamlSteps(input: ProjectInitInput, write: (path: string, text: string) 
         + "autopoll:\n"
         + "  enabled: true\n");
     const tags: string[] = ["autopoll enabled"];
-    if (input.private === true) tags.push("project_type: private");
-    if (input.agent) tags.push(`consumer.agent: ${input.agent}`);
-    if (input.project) tags.push(`consumer.project: ${input.project}`);
-    if (input.noClaim !== undefined) tags.push(`consumer.no_claim: ${input.noClaim}`);
-    if (input.role !== undefined) tags.push(`consumer.role: ${input.role}`);
-    if (hasDenyCode) tags.push("claude.deny_tools: file and shell tools");
+    const set: NonNullable<InitStepDetail["set"]> = { "autopoll.enabled": true };
+    if (input.private === true) { tags.push("project_type: private"); set.project_type = "private"; }
+    if (input.agent) { tags.push(`consumer.agent: ${input.agent}`); set["consumer.agent"] = input.agent; }
+    if (input.project) { tags.push(`consumer.project: ${input.project}`); set["consumer.project"] = input.project; }
+    if (input.noClaim !== undefined) { tags.push(`consumer.no_claim: ${input.noClaim}`); set["consumer.no_claim"] = input.noClaim; }
+    if (input.role !== undefined) { tags.push(`consumer.role: ${input.role}`); set["consumer.role"] = input.role; }
+    if (hasDenyCode) { tags.push("claude.deny_tools: file and shell tools"); set["claude.deny_tools"] = [...CODE_TOOLS]; }
     const overwrote = yamlExists && input.force === true;
-    return [{ file: ".aiball.yaml", action: overwrote ? "overwrote" : "created", message: `${overwrote ? "overwrote" : "created"} ${yamlPath} (${tags.join(", ")})` }];
+    return [{ file: ".aiball.yaml", action: overwrote ? "overwrote" : "created", message: `${overwrote ? "overwrote" : "created"} ${yamlPath} (${tags.join(", ")})`, detail: { path: yamlPath, what: "file", set } }];
 }
 
 type Doc = ReturnType<typeof parseDocument>;
@@ -190,22 +211,23 @@ export function patchIdentityStep(path: string, input: Pick<ProjectInitInput, "a
     const doc = readDoc(path);
     const consumer = mappingAt(doc, "consumer", path);
     const changed: string[] = [];
-    if (input.agent) { consumer.set("agent", input.agent); changed.push(`agent=${input.agent}`); }
-    if (input.project) { consumer.set("project", input.project); changed.push(`project=${input.project}`); }
-    if (input.noClaim !== undefined) { consumer.set("no_claim", input.noClaim); changed.push(`no_claim=${input.noClaim}`); }
-    if (input.role !== undefined) { consumer.set("role", input.role); changed.push(`role=${input.role}`); }
+    const set: NonNullable<InitStepDetail["set"]> = {};
+    if (input.agent) { consumer.set("agent", input.agent); changed.push(`agent=${input.agent}`); set["consumer.agent"] = input.agent; }
+    if (input.project) { consumer.set("project", input.project); changed.push(`project=${input.project}`); set["consumer.project"] = input.project; }
+    if (input.noClaim !== undefined) { consumer.set("no_claim", input.noClaim); changed.push(`no_claim=${input.noClaim}`); set["consumer.no_claim"] = input.noClaim; }
+    if (input.role !== undefined) { consumer.set("role", input.role); changed.push(`role=${input.role}`); set["consumer.role"] = input.role; }
     write(path, String(doc));
-    return { file: ".aiball.yaml", action: "patched", message: `${path}: patched consumer (${changed.join(", ")})` };
+    return { file: ".aiball.yaml", action: "patched", message: `${path}: patched consumer (${changed.join(", ")})`, detail: { path, what: "consumer", set } };
 }
 
 /** Set the top-level `project_type:` in an existing `.aiball.yaml`; nothing written when it already is. */
 export function patchProjectTypeStep(path: string, value: string, write: (path: string, text: string) => void = writeFileSync): InitStep {
     const doc = readDoc(path);
     const prev = doc.get("project_type");
-    if (prev === value) return { file: ".aiball.yaml", action: "kept", message: `${path}: project_type already '${value}' (no change)` };
+    if (prev === value) return { file: ".aiball.yaml", action: "kept", message: `${path}: project_type already '${value}' (no change)`, detail: { path, what: "project_type", set: { project_type: value } } };
     doc.set("project_type", value);
     write(path, String(doc));
-    return { file: ".aiball.yaml", action: "patched", message: `${path}: patched project_type='${value}'${prev ? ` (was '${prev}')` : ""}` };
+    return { file: ".aiball.yaml", action: "patched", message: `${path}: patched project_type='${value}'${prev ? ` (was '${prev}')` : ""}`, detail: { path, what: "project_type", set: { project_type: value }, previous: prev === undefined || prev === null ? null : String(prev) } };
 }
 
 /** Set `claude.deny_tools` in an existing `.aiball.yaml`. */
@@ -214,5 +236,5 @@ export function patchDenyToolsStep(path: string, write: (path: string, text: str
     const claude = mappingAt(doc, "claude", path);
     claude.set("deny_tools", doc.createNode([...CODE_TOOLS], { flow: true }));
     write(path, String(doc));
-    return { file: ".aiball.yaml", action: "patched", message: `${path}: patched claude.deny_tools (${CODE_TOOLS.join(", ")})` };
+    return { file: ".aiball.yaml", action: "patched", message: `${path}: patched claude.deny_tools (${CODE_TOOLS.join(", ")})`, detail: { path, what: "deny_tools", set: { "claude.deny_tools": [...CODE_TOOLS] } } };
 }

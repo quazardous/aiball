@@ -90,7 +90,7 @@ export interface TicketFlags {
      * whose `backlog_tier !== null`. */
     backlog_tier: BacklogTier | null;
     /** #2770 — set on the project's critical ticket, whatever its tier. */
-    critical: { holds: number; quiet: string } | null;
+    critical: { holds: number; quiet: string; quiet_since: string } | null;
     backlog_cooled_until: string | null;
     /** #2458 — when this consumer's backlog wake last named the ticket, cooled
      *  or not; null outside the backlog. Lets the loop see a ticket coming
@@ -223,7 +223,7 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
     const excludedFromBacklog = defaultBacklogRules.excludes(ctx.rulesCtx, ruleItem, "backlog-tier");
     let backlog_tier: BacklogTier | null = null;
     const criticalHere = ctx.criticalOf?.(t.project) ?? null;
-    const critical = criticalHere && criticalHere.id === t.id ? { holds: criticalHere.holds, quiet: criticalHere.quiet } : null;
+    const critical = criticalHere && criticalHere.id === t.id ? { holds: criticalHere.holds, quiet: criticalHere.quiet, quiet_since: criticalHere.quiet_since } : null;
     if (!excludedFromBacklog) {
         // #885 david : ajouter un tier "follow-up" pour les threads où
         // l'autre a répondu en dernier mais une décision pending gate

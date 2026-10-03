@@ -26,10 +26,12 @@ export interface CriticalTicket {
     last_moved_at: string | null;
     /** `3 d` once it has been quiet a full day; "" before that. */
     quiet: string;
+    /** #3514 — since when it has been quiet (its last move, or its creation), for a client to write the delay itself. */
+    quiet_since: string;
 }
 
 /** A project's pick without its clock-dependent part, and when it last moved. */
-type Kept = { pick: Omit<CriticalTicket, "quiet">; movedMs: number } | null;
+type Kept = { pick: Omit<CriticalTicket, "quiet" | "quiet_since">; movedMs: number } | null;
 
 /** The board's gates and the tickets they join: what every project's pick is computed from. */
 interface Board {
@@ -57,7 +59,7 @@ export function projectCriticalTicket(project: string, nowMs: number = Date.now(
         kept = pickFor(board, project);
         board.picks.set(project, kept);
     }
-    return kept ? { ...kept.pick, quiet: quietFor(kept.movedMs, nowMs) } : null;
+    return kept ? { ...kept.pick, quiet: quietFor(kept.movedMs, nowMs), quiet_since: new Date(kept.movedMs).toISOString() } : null;
 }
 
 function readBoard(until: number): Board {

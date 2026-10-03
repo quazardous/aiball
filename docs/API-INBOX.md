@@ -58,7 +58,7 @@ whose meaning changes bumps it, and is listed under [Changes](#changes).
 | `latest_is_step` | boolean | The thread's last word is a step (`then: continue`). |
 | `step_resume_at` | ISO date \| null | When that step's author comes back. |
 | `stalled_step` | boolean | That step has gone quiet longer than the project allows. |
-| `critical` | object \| null | This is the project's critical ticket: `{ holds, quiet }`. |
+| `critical` | object \| null | This is the project's critical ticket: `{ holds, quiet, quiet_since }`. `quiet` is the delay in English (`3 d`, empty under a day); `quiet_since` the moment it last moved (or was created), for a client to write the delay itself. |
 
 **Activity, for the caller:**
 

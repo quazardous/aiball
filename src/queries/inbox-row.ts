@@ -275,7 +275,7 @@ export function buildInboxRow(t: Message, ctx: InboxRowContext) {
         /** #2770 david — flag the project's critical ticket in the list. */
         critical: (() => {
             const c = live ? ctx.criticalOf?.(t.project) ?? null : null;
-            return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet } : null;
+            return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet, quiet_since: c.quiet_since } : null;
         })(),
         stalled_step: live && isStepStalled(
             agg.lastStepAt || null,

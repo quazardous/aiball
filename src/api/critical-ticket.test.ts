@@ -87,7 +87,8 @@ test("the critical ticket is a tier of its own, ahead of the rest, with the back
     const rows = await backlog();
     assert.equal(rows[0]?.id, root, `the critical ticket heads the backlog: ${JSON.stringify(rows.map((r) => [r.id, r.backlog_tier]))}`);
     assert.equal(rows[0].backlog_tier, -1);
-    assert.deepEqual(rows[0].critical, { holds: 2, quiet: "" });
+    assert.deepEqual(rows[0].critical, { holds: 2, quiet: "", quiet_since: rows[0].critical.quiet_since });
+    assert.ok(Number.isFinite(Date.parse(rows[0].critical.quiet_since)), "#3514 — since when, as a date");
     assert.equal(rows.find((r) => r.id === hot)?.critical, null, "only the critical ticket carries it");
     assert.equal(rows.find((r) => r.id === w1)?.backlog_tier, 4, "what it holds stays blocked");
 
@@ -112,9 +113,12 @@ test("the web inbox row and the ticket header flag the critical ticket", async (
 
     const inbox = (await call("inbox.list", { project: R })).json;
     const rows: any[] = inbox.rows;
-    assert.deepEqual(rows.find((r) => r.id === root)?.critical, { holds: 2, quiet: "" }, JSON.stringify(inbox).slice(0, 300));
+    const crit = rows.find((r) => r.id === root)?.critical;
+    assert.deepEqual(crit, { holds: 2, quiet: "", quiet_since: crit?.quiet_since }, JSON.stringify(inbox).slice(0, 300));
+    assert.ok(Number.isFinite(Date.parse(crit!.quiet_since)));
     assert.equal(rows.find((r) => r.id === w1)?.critical, null);
 
-    assert.deepEqual((await call("ticket.get", { id: root })).json.ticket.critical, { holds: 2, quiet: "" });
+    const got = (await call("ticket.get", { id: root })).json.ticket.critical;
+    assert.deepEqual(got, { holds: 2, quiet: "", quiet_since: crit!.quiet_since }, "the same moment on the detail");
     assert.equal((await call("ticket.get", { id: w1 })).json.ticket.critical, null);
 });

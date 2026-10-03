@@ -218,7 +218,7 @@ defineMethod({
         // #2770 david — flag the project's critical ticket on its detail too.
         critical: (() => {
             const c = !closed && t.status === "approved" ? projectCriticalTicket(t.project) : null;
-            return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet } : null;
+            return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet, quiet_since: c.quiet_since } : null;
         })(),
         tags: listMessageTags(t.id),
         // #B.104: sidecar metadata (question-answer audit, etc.).

@@ -31,6 +31,10 @@ dates are YYYY-MM-DD.
   be, a few times an hour at most, and counted in the bar. Its settings are
   board config keys too, global and per project, so tvty shows and changes
   them; a change applies at the next denial.
+- A few texts aiball wrote in English now come as data too, for a client
+  that translates its interface: the critical ticket's quiet delay (since
+  when), the bar's transient word (a code and its parameters), and the
+  steps of a project's setup (what each did). The English text stays.
 
 ### Fixed
 

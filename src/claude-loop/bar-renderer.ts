@@ -15,6 +15,7 @@
  * (`setTmuxStatus` / `setTmuxCounters` / `setTmuxAfkState`). #2311 — this
  * header still described slice 1.
  */
+import { infoCodeOf } from "./info-code.js";
 import { denialChip, denialSummary } from "./denials.js";
 import { modelShortName } from "../model-name.js";
 import { spawnSync } from "node:child_process";
@@ -297,6 +298,8 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
             health_prompt: ipc.healthPromptVisible === true,
             resume_picker: ipc.resumeSessionPickerActive === true,
             resume_mode_picker: ipc.resumeModePickerActive === true,
+            // #3514 — the same word as data, for a client that translates it.
+            info_code: infoCodeOf(ipc.stateTagInfo),
         },
         alerts: {
             link_down: ipc.linkDown === true,
