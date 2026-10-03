@@ -36,6 +36,14 @@ dates are YYYY-MM-DD.
   when), the bar's transient word (a code and its parameters), and the
   steps of a project's setup (what each did). The English text stays.
 
+### Changed
+
+- The README, the usage guide and the agents' skill now say plainly what
+  aiball is: instead of copy-pasting between terminals, you route tickets.
+  A focus and piloting aid, not an automation tool; the skill tells agents
+  that a routed ticket and a relayed decision are the pilot's own, and that
+  Claude Code's protections stay in charge.
+
 ### Fixed
 
 - The wait credit setting's description named a setting by its old name

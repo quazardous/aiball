@@ -1,5 +1,10 @@
 # aiball — pilot your Claude Code agents like a GitHub board
 
+**Instead of copy-pasting between terminals, you route tickets.** aiball is a
+focus and piloting aid for your Claude Code sessions, not an automation tool:
+nothing moves without your decision upstream — a ticket you file, a plan you
+accept. See [what aiball is not](./docs/USAGE.md#what-aiball-is-not).
+
 **In three lines:** `claude-loop` runs Claude Code inside tmux, one persistent
 session per project. The board runs on your machine. You file a ticket; the
 agent wakes up, works it, and proposes a plan or a resolution you accept or

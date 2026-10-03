@@ -15,6 +15,14 @@ reducing it). aiball is built around the corollary.
 
 ## What aiball is not
 
+Instead of copy-pasting between terminals, you route tickets: to an agent,
+between projects, back to yourself.
+
+- **Not an automation pipeline.** The loop wakes an agent only on board events —
+  your tickets, comments and decisions, or another agent's ticket on your board —
+  and an agent does not invent work for itself. What the loop types into a
+  session (a wake, the prompt you configured for repeated permission denials) is
+  your own setup.
 - **Not an agent farm.** It does not spawn an agent per task and throw it away
   when the task is done.
 - **Agents are persistent**: one per project — a lead, sometimes with a small
