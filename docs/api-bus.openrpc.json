@@ -1628,6 +1628,35 @@
       "x-machine": true
     },
     {
+      "name": "loop.remove",
+      "description": "Forget a stopped loop, as `claude-loop rm` does: its state dir goes, and it leaves `loop.list` (`loop.<name>.state` turns `null` at once). A loop that runs is refused (`CONFLICT`): it is stopped first. A host session of its agent left without its command goes too. The project's folder, its `.aiball.yaml` and `.aiball-session_id`, its tickets and the agent stay: a client forgets the agent with `consumer.delete`, and starts a fresh conversation with `fresh`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
       "name": "loop.restart",
       "description": "Restart a loop from its plate, its conversation resumed: where it ran, or in `mode` (the session host or tmux) to move it. `fresh` starts a fresh conversation instead. `remote_control` changes Claude's Remote Control (on, off, or on under a name) for this start and the next; without it the loop keeps its own. A loop that runs is stopped first, so it is refused while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view once it is back.",
       "paramStructure": "by-name",

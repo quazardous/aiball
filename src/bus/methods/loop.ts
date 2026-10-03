@@ -9,7 +9,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { isMachineLocal } from "../../machine-secret.js";
 import { join, resolve } from "node:path";
-import { statSync, watch, type FSWatcher } from "node:fs";
+import { rmSync, statSync, watch, type FSWatcher } from "node:fs";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { defineSubject, publish } from "../subscriptions.js";
@@ -19,7 +19,7 @@ import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
 import { loopStateRoot, MUX_CMD, tmuxAlive, tmuxClientList, tmuxClients, tmuxName } from "../../claude-loop/state.js";
 import { tmuxSessions } from "../../claude-loop/mux-async.js";
-import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
+import { sessionFor, stopSession, tmuxSessionView, viewOf } from "../../sessions/registry.js";
 import { tmuxClientsOf } from "../../sessions/tmux-clients.js";
 import { isPresent } from "../../live-presence.js";
 import { getConsumer } from "../../db/consumers.js";
@@ -237,6 +237,37 @@ defineMethod({
             }
             if (Date.now() > deadline) throw new Refusal(504, `the loop ${loop.name} did not come back in 60 s`, ERROR_CODES.INTERNAL);
         }
+    },
+});
+
+/**
+ * #3499 — forget a stopped loop, as `claude-loop rm` does: its state dir goes,
+ * and it leaves `loop.list` (`loop.<name>.state` turns `null` at once). A loop
+ * that runs is refused (`CONFLICT`): it is stopped first. A host session of its
+ * agent left without its command goes too. The project's folder, its
+ * `.aiball.yaml` and `.aiball-session_id`, its tickets and the agent stay: a
+ * client forgets the agent with `consumer.delete`, and starts a fresh
+ * conversation with `fresh`.
+ */
+defineMethod({
+    name: "loop.remove",
+    ...HUMAN_HERE,
+    params: z.object({ name: z.string().optional(), agent: z.string().optional() }),
+    run: async (caller, p) => {
+        localOnly(caller);
+        if (!p.name === !p.agent) throw new Refusal(400, "name or agent: one of them", ERROR_CODES.BAD_REQUEST);
+        const loop = findLoop(p);
+        if (loopView(loop, await tmuxSessions()).running) {
+            throw new Refusal(409, `the loop ${loop.name} runs: stop it before forgetting it`, ERROR_CODES.CONFLICT);
+        }
+        const hostAgent = loop.plate.host_agent;
+        const leftover = hostAgent ? sessionFor({ agent: hostAgent }) : undefined;
+        if (leftover && !leftover.running) await stopSession(leftover);
+        rmSync(join(loopStateRoot(), loop.name), { recursive: true, force: true });
+        // Said now, not on the next watch or safety tick.
+        loopState.sent.delete(loop.name);
+        publish(`loop.${loop.name}.state`, null);
+        return { removed: loop.name };
     },
 });
 

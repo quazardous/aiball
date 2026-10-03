@@ -31,6 +31,9 @@ dates are YYYY-MM-DD.
   conversations with their first prompt, so a client can offer to resume one
   on a first start. The loop then records it and resumes it on its next
   starts.
+- A client can forget a stopped loop through the bus (`loop.remove`), as
+  `claude-loop rm` does from a terminal; the project's folder, its tickets
+  and its agent stay.
 
 ### Fixed
 
