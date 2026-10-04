@@ -226,11 +226,13 @@ defineMethod({
         const whenIdle = p.when_idle === true;
         if (p.cancel === true && whenIdle) throw new Refusal(400, "cancel withdraws an order: not with when_idle", ERROR_CODES.BAD_REQUEST);
         if (p.cancel === true) {
-            if (onNode(caller)) return controlOnNode(p.name, { action: "restart_claude", cancel: true }, () => ({ consumer_id: p.name, cancelled: null }));
+            if (onNode(caller)) return cancelOnNode(p.name);
             if (!isPresent(p.name)) throw new Refusal(404, `no running claude-loop answers for ${p.name}`, ERROR_CODES.LOOP_NOT_FOUND);
+            // Sent only to a loop whose bar says a restart waits: a loop started
+            // before `cancel` existed reads the control as a restart order, and
+            // only its own pending order makes it ignore a second one.
             const waiting = getAgentBar(p.name)?.bar.alerts.restart_pending === true;
-            // Sent either way: an order armed a moment ago may not show in the bar yet.
-            emitControl(p.name, { action: "restart_claude", cancel: true });
+            if (waiting) emitControl(p.name, { action: "restart_claude", cancel: true });
             return { consumer_id: p.name, cancelled: waiting };
         }
         if (onNode(caller)) return restartOnNode(p.name, whenIdle);
@@ -260,6 +262,24 @@ async function restartOnNode(name: string, whenIdle: boolean): Promise<{ consume
     const sent = await sendControlToLoop(name, { action: "restart_claude", ...(whenIdle ? { when_idle: true } : {}) });
     if (!sent.ok) refuseUnreached(sent);
     return { consumer_id: name, queued: sent.delivered, ...(whenIdle ? { when_idle: true as const } : {}) };
+}
+
+/**
+ * #3540 — `cancel` answered by a proxy node: the loop says on its socket
+ * whether a restart waits. A kernel too old to say (`restartPending` absent)
+ * is not sent the control, which it would read as a restart order:
+ * `cancelled: null`.
+ */
+async function cancelOnNode(name: string): Promise<RestartAnswer> {
+    const where = localLoopDir(name);
+    if (!where.ok) refuseUnreached(where);
+    const live = await fetchLiveLoopStateUds(where.sd, 1000);
+    if (!live) throw new Refusal(404, `no running claude-loop answers for ${name}`, ERROR_CODES.LOOP_NOT_FOUND);
+    if (live.restartPending === undefined) return { consumer_id: name, cancelled: null };
+    if (!live.restartPending) return { consumer_id: name, cancelled: false };
+    const sent = await sendControlToLoop(name, { action: "restart_claude", cancel: true });
+    if (!sent.ok) refuseUnreached(sent);
+    return { consumer_id: name, cancelled: sent.delivered };
 }
 
 /** #3293 — a loop control sent by a proxy node to a loop of its machine: the answer it gives. */

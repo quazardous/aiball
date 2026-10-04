@@ -1041,6 +1041,8 @@ export interface LiveLoopSnapshot {
     bootComplete: boolean | null;
     bootActiveModules?: string[];
     busyDeferUntilMs: number | null;
+    /** #3540 — a restart held until idle waits; absent from kernels before it. */
+    restartPending?: boolean;
 }
 
 /** #972 — applique un `LiveLoopSnapshot` reçu via UDS sur l'ipcState
@@ -3429,6 +3431,8 @@ export function createLoopServer(
                     bootComplete: ipc.bootComplete,
                     bootActiveModules: ipc.bootActiveModules,
                     busyDeferUntilMs: ipc.busyDeferUntilMs,
+                    // #3540 — a restart held until idle: what a proxy node checks before cancelling it.
+                    restartPending: ipc.restartPending,
                     lastViewPushAtMs: ipc.lastViewPushAtMs,
                     lastSseEventAtMs: ipc.lastSseEventAtMs,
                     sseConnected: ipc.sseConnected,
