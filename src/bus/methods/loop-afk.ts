@@ -98,7 +98,7 @@ export function isLocalLoop(consumerId: unknown): boolean {
  */
 export async function sendControlToLoop(
     consumerId: string,
-    control: { action: "kill" | "restart_claude" | "prompt"; when_idle?: boolean; text?: string },
+    control: { action: "kill" | "restart_claude" | "prompt"; when_idle?: boolean; cancel?: boolean; text?: string },
 ): Promise<{ ok: true; loop: string; delivered: boolean } | { ok: false; status: number; error: string; code: ErrorCode }> {
     const where = localLoopDir(consumerId);
     if (!where.ok) return where;

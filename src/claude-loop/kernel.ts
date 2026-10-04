@@ -201,6 +201,7 @@ import {
 import { BarRenderer, queuedSpawn } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus, type ControlEvent } from "./wake-bus.js";
+import { waitForRestart } from "./restart-wait.js";
 import { CL_ENV } from "./env-vars.js";
 import { selfControlEnv } from "./inherited-env.js";
 import { fetchWakeContext, pingIsDeliverable } from "./wake-context.js";
@@ -1852,6 +1853,7 @@ async function mainSse(): Promise<void> {
         // session exactly like a wake (sendKeys sets the wake-in-flight +
         // coalesce markers so the timer doesn't auto-wake on top of it).
         // #3074 — restart Claude for an update, on a human's order (idle first).
+        else if (c.action === "restart_claude" && c.cancel === true) cancelRestartClaude();
         else if (c.action === "restart_claude") void restartClaudeForUpdate(c.when_idle === true);
         else if (c.action === "prompt" && typeof c.text === "string") {
             const preview = c.text.length > 80 ? c.text.slice(0, 80) + "…" : c.text;
@@ -3184,6 +3186,16 @@ function hardRestart(why: string, extra: string[]): void {
 /** #3074 — how long a restart for an update waits for Claude to go idle. */
 const RESTART_IDLE_WAIT_MS = 5 * 60_000;
 let restartPending = false;
+let restartCancelled = false;
+
+/** #3540 — a human withdrew the held order: the wait ends, Claude is not restarted. */
+function cancelRestartClaude(): void {
+    if (!restartPending) {
+        log("restart_claude: cancel asked, no restart was waiting");
+        return;
+    }
+    restartCancelled = true;
+}
 
 /**
  * #3074 — restart Claude for an update it installed, on a human's order from
@@ -3199,15 +3211,20 @@ let restartPending = false;
 async function restartClaudeForUpdate(whenIdle: boolean): Promise<void> {
     if (restartPending || !name) return;
     restartPending = true;
+    restartCancelled = false;
     if (whenIdle) setIpcRestartPending(true);
-    const until = whenIdle ? Infinity : Date.now() + RESTART_IDLE_WAIT_MS;
-    while (getIpcState().paneBusy !== false) {
-        if (Date.now() > until) {
-            log("restart_claude: Claude never went idle within the wait — not restarted");
-            restartPending = false;
-            return;
-        }
-        await sleep(2000);
+    const end = await waitForRestart({
+        busy: () => getIpcState().paneBusy !== false,
+        cancelled: () => restartCancelled,
+        untilMs: whenIdle ? Infinity : Date.now() + RESTART_IDLE_WAIT_MS,
+    });
+    if (end !== "idle") {
+        log(end === "cancelled"
+            ? "restart_claude: cancelled by a human — Claude is not restarted"
+            : "restart_claude: Claude never went idle within the wait — not restarted");
+        restartPending = false;
+        setIpcRestartPending(false);
+        return;
     }
     try {
         writeFileSync(afterRestartNotePath(name), JSON.stringify({ reason: "update", at: new Date().toISOString() }));

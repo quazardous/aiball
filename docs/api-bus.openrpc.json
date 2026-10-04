@@ -1039,7 +1039,7 @@
     },
     {
       "name": "consumer.restart_claude",
-      "description": "Restart an agent's Claude after it installed an update of itself (the bar says `alerts.restart_needed`). A loop control. Refused while Claude works (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts Claude resuming its conversation, and tells the agent once it is back. `when_idle`: ordered while Claude works, the restart is held by the loop until its next idle, however long; its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing.",
+      "description": "Restart an agent's Claude after it installed an update of itself (the bar says `alerts.restart_needed`). A loop control. Refused while Claude works (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts Claude resuming its conversation, and tells the agent once it is back. `when_idle`: ordered while Claude works, the restart is held by the loop until its next idle, however long; its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing. `cancel`: withdraw the held order. The loop does not restart Claude, `restart_pending` goes back to false (`restart_needed` stays). Answers `cancelled`: whether the agent's bar said a restart was waiting (null through a proxy node, which holds no bar); without one it is a no-op, not an error.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1047,6 +1047,13 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "cancel",
+          "required": false,
+          "schema": {
+            "type": "boolean"
           }
         },
         {

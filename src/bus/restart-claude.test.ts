@@ -80,3 +80,21 @@ test("#3117 when_idle: while Claude works the order goes through, marked when_id
     off();
     presenceDisconnect("idler");
 });
+
+upsertConsumer({ consumer_id: "canceller", kind: "agent" });
+
+test("#3540 cancel: withdraws the held order, says whether one was waiting, a no-op otherwise; not with when_idle", () => {
+    const got: unknown[] = [];
+    const off = onControl("canceller", (c) => got.push(c));
+    assert.equal(refusal(() => m.run(human, { name: "canceller", cancel: true, when_idle: true })).status, 400);
+    assert.equal(refusal(() => m.run(human, { name: "canceller", cancel: true })).code, "LOOP_NOT_FOUND");
+    presenceConnect("canceller", "terminal");
+    const pending = bar("busy") as unknown as { alerts: Record<string, boolean> };
+    setAgentBar("canceller", { ...pending, alerts: { ...pending.alerts, restart_pending: true } } as never);
+    assert.deepEqual(m.run(human, { name: "canceller", cancel: true }), { consumer_id: "canceller", cancelled: true });
+    setAgentBar("canceller", bar("busy"));
+    assert.deepEqual(m.run(human, { name: "canceller", cancel: true }), { consumer_id: "canceller", cancelled: false }, "nothing waiting: no error");
+    assert.deepEqual(got, [{ action: "restart_claude", cancel: true }, { action: "restart_claude", cancel: true }], "sent either way: an order armed a moment ago may not show yet");
+    off();
+    presenceDisconnect("canceller");
+});

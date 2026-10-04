@@ -210,15 +210,29 @@ const MAX_NAME_LEN = 64;
  * #3117 — `when_idle`: ordered while Claude works, the restart is held by the
  * loop until its next idle, however long; its bar says `alerts.restart_pending`
  * meanwhile, and a second order changes nothing.
+ *
+ * #3540 — `cancel`: withdraw the held order. The loop does not restart Claude,
+ * `restart_pending` goes back to false (`restart_needed` stays). Answers
+ * `cancelled`: whether the agent's bar said a restart was waiting (null through
+ * a proxy node, which holds no bar); without one it is a no-op, not an error.
  */
 defineMethod({
     name: "consumer.restart_claude",
     ...LOOP_CONTROL,
     nodeLocal: (p) => isLocalLoop((p as { name?: unknown }).name),
-    params: z.object({ name: z.string(), when_idle: flag }),
-    run: (caller, p) => {
+    params: z.object({ name: z.string(), when_idle: flag, cancel: flag }),
+    run: (caller, p): RestartAnswer | Promise<RestartAnswer> => {
         if (!p.name || p.name.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(p.name)) throw new Refusal(400, "bad consumer id");
         const whenIdle = p.when_idle === true;
+        if (p.cancel === true && whenIdle) throw new Refusal(400, "cancel withdraws an order: not with when_idle", ERROR_CODES.BAD_REQUEST);
+        if (p.cancel === true) {
+            if (onNode(caller)) return controlOnNode(p.name, { action: "restart_claude", cancel: true }, () => ({ consumer_id: p.name, cancelled: null }));
+            if (!isPresent(p.name)) throw new Refusal(404, `no running claude-loop answers for ${p.name}`, ERROR_CODES.LOOP_NOT_FOUND);
+            const waiting = getAgentBar(p.name)?.bar.alerts.restart_pending === true;
+            // Sent either way: an order armed a moment ago may not show in the bar yet.
+            emitControl(p.name, { action: "restart_claude", cancel: true });
+            return { consumer_id: p.name, cancelled: waiting };
+        }
         if (onNode(caller)) return restartOnNode(p.name, whenIdle);
         if (!isPresent(p.name)) throw new Refusal(404, `no running claude-loop answers for ${p.name}`, ERROR_CODES.LOOP_NOT_FOUND);
         const phase = getAgentBar(p.name)?.bar.phase;
@@ -229,6 +243,9 @@ defineMethod({
         return { consumer_id: p.name, queued: true, ...(whenIdle ? { when_idle: true } : {}) };
     },
 });
+
+/** What `consumer.restart_claude` answers: the order queued, or (#3540) its withdrawal. */
+type RestartAnswer = { consumer_id: string; queued?: boolean; when_idle?: true; cancelled?: boolean | null };
 
 /** #3293 — `consumer.restart_claude` answered by a proxy node, for a loop of its machine. */
 async function restartOnNode(name: string, whenIdle: boolean): Promise<{ consumer_id: string; queued: boolean; when_idle?: true }> {

@@ -71,9 +71,10 @@ export type ControlEvent =
     /**
      * #3074 — restart Claude once idle, resuming the conversation. #3117 —
      * `when_idle`: ordered while Claude works, it waits for the next idle
-     * however long, instead of giving up after a few minutes.
+     * however long, instead of giving up after a few minutes. #3540 —
+     * `cancel`: withdraw the order the loop holds.
      */
-    | { action: "restart_claude"; when_idle?: boolean };
+    | { action: "restart_claude"; when_idle?: boolean; cancel?: boolean };
 
 /** #2255 — an external signal pushed to a recipient's live SSE stream. */
 export interface SignalEvent {

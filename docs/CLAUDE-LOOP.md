@@ -1246,3 +1246,6 @@ conversation, and once
 Claude is live again tells the agent so — the `post_restart_reminder` entry of the
 pings template. The note that carries this across the restart sits beside the
 state dir (`<state root>/<name>.after-restart`), since a restart deletes the dir.
+A human can withdraw an order while it waits (`consumer.restart_claude` with
+`cancel`): the loop does not restart Claude, `restart_pending` goes back to false
+and `restart_needed` stays, the update still being installed.

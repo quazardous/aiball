@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- A restart of Claude held until its next idle can be cancelled
+  (`consumer.restart_claude` with `cancel`): the loop does not restart it,
+  and the bar goes back to saying an update is installed.
+
 ## [0.56.0] — 2026-10-03
 
 ### Added
