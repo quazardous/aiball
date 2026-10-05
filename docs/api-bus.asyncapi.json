@@ -2,7 +2,7 @@
   "asyncapi": "3.0.0",
   "info": {
     "title": "aiball bus subjects",
-    "version": "0.56.0",
+    "version": "0.57.0",
     "description": "bus.subscribe gives a subject's value, then bus.event notifications with each change as data. See docs/API-BUS.md."
   },
   "channels": {

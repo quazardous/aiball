@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.57.0] — 2026-10-05
+
 ### Added
 
 - An agent's hold (held or free) is kept by aiball even while its loop is
