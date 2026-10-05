@@ -507,6 +507,8 @@ export interface RestartOpts {
     resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; remoteControl?: RemoteControl;
     /** #3505 — relaunch on this conversation of the loop's folder (`latest`, or its id), not the recorded one. */
     resumeSession?: string;
+    /** #3611 — the session host's starting size, `<cols>x<rows>`. */
+    size?: string;
 }
 
 /**
@@ -550,6 +552,7 @@ export function restartStartArgs(name: string, plate: Plate, opts: RestartOpts =
         // #3505 — a conversation named for the relaunch; it says more than
         // #3074's `--resume` (a restart for an update resumes the conversation).
         ...(opts.resumeSession ? ["--resume-session", opts.resumeSession] : opts.resume ? ["--resume"] : []),
+        ...(opts.size ? ["--size", opts.size] : []),
         // #3174 — a fresh conversation, not the recorded one.
         ...(opts.fresh ? ["--no-resume"] : []),
         // #3066, #3135 — a loop stays where it runs (host or tmux, said

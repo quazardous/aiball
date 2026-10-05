@@ -29,3 +29,7 @@ test("#3489 — a conversation to resume goes to the loop's start as --resume-se
     const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     assert.deepEqual(loopStartArgs({ cwd: "/w/p", agent: "p-claude", resume: id }).slice(-2), ["--resume-session", id]);
 });
+
+test("#3611 — the view's size goes to the loop's start as --size", () => {
+    assert.deepEqual(loopStartArgs({ cwd: "/w/p", agent: "p-claude", size: { rows: 59, cols: 152 } }).slice(-2), ["--size", "152x59"]);
+});

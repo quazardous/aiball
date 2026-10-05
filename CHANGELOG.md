@@ -23,6 +23,13 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- An agent's session no longer starts at 80×24 when the daemon starts it: it
+  starts at the size it had last, or at the one a client passes (`size` on
+  `session.start` and `loop.restart`, `--size` on `claude-loop start` and
+  `restart`), so Claude does not redraw its conversation at 80 columns.
+
 ## [0.57.0] — 2026-10-05
 
 ### Added

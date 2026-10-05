@@ -176,3 +176,9 @@ test("#3505 — restart --resume-session relaunches on that conversation, instea
     assert.ok(!args.includes("--resume"), "the named conversation says more than --resume");
     assert.ok(restartStartArgs("cl-x", plate(), { resume: true }).includes("--resume"), "without it, as before");
 });
+
+test("#3611 — restart --size starts the relaunched host at that size", () => {
+    const args = restartStartArgs("cl-x", plate(), { resume: true, size: "152x59" });
+    assert.deepEqual(args.slice(args.indexOf("--size"), args.indexOf("--size") + 2), ["--size", "152x59"]);
+    assert.ok(!restartStartArgs("cl-x", plate()).includes("--size"));
+});

@@ -119,7 +119,7 @@ defineMethod({
             const env = sessionEnv(p.env, isMachineLocal(caller));
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
-            const args = loopStartArgs({ ...p, resume });
+            const args = loopStartArgs({ ...p, resume, size: p.size });
             const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, ...args], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
             // Without a listener a failed spawn is an uncaught 'error' event:
             // it took the whole daemon down, as project.launch once did (#3103).
@@ -175,13 +175,15 @@ defineMethod({
  * from a terminal — the folder's configured mode, and tmux for a folder bound
  * to a remote daemon (whose session host is not this one).
  */
-export function loopStartArgs(p: { cwd: string; mode?: "host" | "tmux"; agent?: string; crew?: string; project?: string; remote_control?: boolean | string; resume?: string }): string[] {
+export function loopStartArgs(p: { cwd: string; mode?: "host" | "tmux"; agent?: string; crew?: string; project?: string; remote_control?: boolean | string; resume?: string; size?: { rows: number; cols: number } }): string[] {
     return [
         "start", ...(p.mode ? [`--${p.mode}`] : []), "--no-attach", "--cwd", p.cwd,
         ...(p.agent ? ["--agent", p.agent] : []),
         ...(p.crew ? ["--crew", p.crew] : []),
         ...(p.project ? ["--project", p.project] : []),
         ...(p.resume ? ["--resume-session", p.resume] : []),
+        // #3611 — the view's size: the loop's host starts at it.
+        ...(p.size ? ["--size", `${p.size.cols}x${p.size.rows}`] : []),
         ...remoteControlFlags(p.remote_control),
     ];
 }

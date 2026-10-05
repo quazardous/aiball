@@ -43,6 +43,19 @@ its key (its folder, its sockets, `session.stop`). The daemon keeps the label
 beside the host's files, so it lasts as long as the session, daemon restarts
 included. An agent's session takes none: its name is the agent.
 
+## The size a session starts at
+
+A host starts at a size (`--rows`, `--cols`); a program inside draws at it until
+a client resizes. A loop started from a terminal gives that terminal's size. A
+loop started by the daemon has none, so an agent's session starts at the size it
+had last: the daemon asks the host its size when a client leaves and before it
+stops the session (a restart goes through there), and keeps it in its own folder
+by agent. A caller that knows better passes it: `size` on `session.start` and
+`loop.restart`, `--size <cols>x<rows>` on `claude-loop start` and `restart`.
+Without either, as before, 80×24. A window resized while a client stays
+attached, then a session that ends on its own (Claude exits), keeps the size of
+the last client to leave.
+
 ## The host outlives the daemon
 
 The daemon restarts on every deploy, and on every change to its code in a dev

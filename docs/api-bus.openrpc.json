@@ -1784,6 +1784,29 @@
               }
             ]
           }
+        },
+        {
+          "name": "size",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "cols": {
+                "type": "integer",
+                "minimum": 20,
+                "maximum": 1000
+              },
+              "rows": {
+                "type": "integer",
+                "minimum": 4,
+                "maximum": 1000
+              }
+            },
+            "required": [
+              "cols",
+              "rows"
+            ]
+          }
         }
       ],
       "result": {

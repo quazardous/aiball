@@ -202,6 +202,14 @@ function loopAlive(name: string): boolean {
  */
 /** Agent → its attach socket (null when the daemon gives none). */
 let hostedByDaemon: Map<string, string | null> | null = null;
+/** #3611 — `152x59` as `{ cols, rows }`; anything else is refused. */
+function parseSize(v: string | undefined): { cols: number; rows: number } | undefined {
+    if (v === undefined) return undefined;
+    const m = /^(\d{2,4})x(\d{1,4})$/.exec(v.trim());
+    if (!m || Number(m[2]) < 4) die(`--size: <cols>x<rows>, e.g. 152x59 (not ${v})`);
+    return { cols: Number(m![1]), rows: Number(m![2]) };
+}
+
 /** #3594 — the agent's hold, kept by aiball; `off` when the daemon cannot say. */
 async function agentAfkHold(agent: string | null): Promise<"off" | "wait_inf"> {
     if (!agent) return "off";
@@ -291,6 +299,8 @@ interface StartOpts {
     resumeSession?: string;
     /** #3594 — the hold to start in, over the agent's own. */
     afk?: "off" | "wait_inf";
+    /** #3611 — the session host's starting size, over this terminal's. */
+    size?: { cols: number; rows: number };
     /** #2180 — set the agent's type on its record BEFORE claude boots (the MCP
      *  server reads it at start-up). */
     type?: "coder" | "cto";
@@ -1228,7 +1238,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // kernel below drives the host through that socket.
     if (onHost) {
         const hostCmd = `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; source ${shQuote(trapPath)}; ${claudeCmd}`;
-        const cols = process.stdout.columns, rows = process.stdout.rows;
+        // #3611 — `--size`, else this terminal's; neither (started by the
+        // daemon), the daemon starts the host at the session's last size.
+        const cols = opts.size?.cols ?? process.stdout.columns, rows = opts.size?.rows ?? process.stdout.rows;
         let hosted: { control: string; attach: { socket: string | null } };
         try {
             hosted = await new AiballClient({ agentId: ctx.agent }).sessionHost({
@@ -2267,6 +2279,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
         .option("--agent <id>", "#420: alias for --consumer (the loop's agent identity). Set a distinct one to run several loops in the same dir.")
         .option("--crew <name>", "#2523: start a crew agent in this folder, next to its main loop — assignment-only, its own session, told at start that it waits for explicit requests. Same as --agent <name> --role crew.")
+        .option("--size <cols>x<rows>", "#3611: the session host's starting size (e.g. 152x59), over this terminal's; without either, the session's last size.")
         .option("--afk <off|wait_inf>", "#3594: start held (wait_inf) or free (off), over the agent's own hold kept by aiball; armed before the boot seals, so the loop never runs free meanwhile.")
         .option("--resume-session <id|latest>", "#3489: resume this conversation of the folder (its id, or latest: the most recent one) instead of the recorded one, and record it for the next starts. Refused when the folder has no such conversation, or another agent's loop runs on it.")
         .option("--fork", "#2523: with --crew, the first start forks the main loop's session (its context, a new id) instead of starting empty.")
@@ -2301,7 +2314,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             role?: string;
-            crew?: string; fork?: boolean; resumeSession?: string; afk?: string;
+            crew?: string; fork?: boolean; resumeSession?: string; afk?: string; size?: string;
             type?: string; denyCode?: boolean;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
@@ -2335,6 +2348,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 fork: opts.fork === true,
                 resumeSession: opts.resumeSession,
                 afk: opts.afk === "off" || opts.afk === "wait_inf" ? opts.afk : undefined,
+                size: parseSize(opts.size),
                 type: opts.type === "coder" || opts.type === "cto" ? opts.type : undefined,
                 denyCode: opts.denyCode === true,
                 cwd: opts.cwd,
@@ -2478,12 +2492,13 @@ async function main(): Promise<void> {
         .option("--host", "#3066: relaunch on the aiball daemon's session host (with --resume: move a tmux loop onto the host, its conversation kept). Without --host or --tmux, a loop stays where it runs.")
         .option("--tmux", "#3135: relaunch in tmux (with --resume: move a loop off the host, its conversation kept).")
         .option("--fresh", "#3174: relaunch with a fresh conversation instead of resuming the recorded one (a resumed conversation keeps the tools it started with)")
+        .option("--size <cols>x<rows>", "#3611: the session host's starting size for the relaunch (e.g. 152x59).")
         .option("--resume-session <id|latest>", "#3505: relaunch on this conversation of the loop's folder (its id, or latest: the most recent one) instead of the recorded one, and record it for the next restarts.")
         .option("--remote-control [name]", "#3254: relaunch with Remote Control, named after the agent or <name>; kept for the next restarts.")
         .option("--no-remote-control", "#3254: relaunch without Remote Control; kept for the next restarts.")
-        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; resumeSession?: string; remoteControl?: boolean | string }, command: Command) => cmdRestart(name ?? resolveCurrentLoopName(), {
+        .action((name: string | undefined, opts: { resume?: boolean; host?: boolean; tmux?: boolean; fresh?: boolean; resumeSession?: string; size?: string; remoteControl?: boolean | string }, command: Command) => cmdRestart(name ?? resolveCurrentLoopName(), {
             resume: opts.resume === true, host: opts.host === true, tmux: opts.tmux === true, fresh: opts.fresh === true,
-            resumeSession: opts.resumeSession,
+            resumeSession: opts.resumeSession, size: opts.size,
             remoteControl: command.getOptionValueSource?.("remoteControl") === "cli" ? parseRemoteControl(opts.remoteControl) ?? undefined : undefined,
         }));
     program.command("stop [name]")

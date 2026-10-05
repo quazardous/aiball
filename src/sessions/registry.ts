@@ -4,6 +4,7 @@
  * agent's on `agent.<id>.state` (through `consumer_changed`), a named one's on
  * `session.<name>.state`.
  */
+import { rememberSize, rememberedSize } from "./session-sizes.js";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { discoverHosts, startHost, type HostLink, type StartHost } from "./hosts.js";
@@ -139,7 +140,7 @@ function track(link: HostLink): void {
     const key = keyOf(link.info);
     if (!link.info.agent) labels.set(link, readLabel(link));
     byKey.set(key, link);
-    link.on("host.clients", () => announce(link));
+    link.on("host.clients", () => { announce(link); noteSize(link); });
     link.on("host.exited", () => announce(link));
     link.on("gone", () => {
         if (byKey.get(key) === link) byKey.delete(key);
@@ -163,7 +164,19 @@ export function listSessionViews(): SessionView[] {
     return [...byKey.values()].map(viewOf);
 }
 
+/** #3611 — an agent's session size, asked of its host and kept for its next start. */
+function noteSize(link: HostLink): void {
+    const agent = link.info.agent;
+    if (!agent) return;
+    void link.call<{ size?: unknown }>("host.hello").then((h) => rememberSize(agent, h.size)).catch(() => { /* gone meanwhile */ });
+}
+
 export async function startSession(o: StartHost): Promise<HostLink> {
+    // #3611 — without a size, an agent's session starts at its last one, not 80×24.
+    if (o.agent && !o.size) {
+        const last = rememberedSize(o.agent);
+        if (last) o = { ...o, size: last };
+    }
     const link = await startHost(o);
     track(link);
     return link;
@@ -174,6 +187,11 @@ export async function stopSession(link: HostLink): Promise<number | null> {
     const gone = new Promise<void>((resolveGone) => link.once("gone", () => resolveGone()));
     let exit: number | null = null;
     link.once("host.exited", (p: { code: number }) => { exit = p.code; });
+    // #3611 — the size it had, for its next start (a restart goes through here).
+    if (link.info.agent) {
+        const agent = link.info.agent;
+        await link.call<{ size?: unknown }>("host.hello").then((h) => rememberSize(agent, h.size)).catch(() => { /* already going */ });
+    }
     await link.call("host.shutdown").catch(() => { /* it may close before answering */ });
     await Promise.race([gone, new Promise((r) => setTimeout(r, 15_000))]);
     return exit;

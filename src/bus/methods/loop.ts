@@ -212,6 +212,8 @@ defineMethod({
         resume: z.union([z.literal("latest"), z.string().uuid()]).optional(),
         /** #3594 — the hold to start in, kept as the agent's; without it, the agent's own. */
         afk: z.enum(["off", "wait_inf"]).optional(),
+        /** #3611 — the session host's starting size; without it, the session's last one. */
+        size: z.object({ cols: z.number().int().min(20).max(1000), rows: z.number().int().min(4).max(1000) }).optional(),
     }),
     run: async (caller, p) => {
         localOnly(caller);
@@ -245,6 +247,7 @@ defineMethod({
         const mode = p.mode ?? before.mode;
         const child = spawn(process.execPath, [CLAUDE_LOOP_BIN,
             "restart", loop.name, ...(resume ? ["--resume-session", resume] : [p.fresh ? "--fresh" : "--resume"]), `--${mode}`,
+            ...(p.size ? ["--size", `${p.size.cols}x${p.size.rows}`] : []),
             ...remoteControlFlags(p.remote_control),
         ], { cwd: loop.plate.cwd ?? undefined, detached: true, stdio: "ignore" });
         child.unref();
