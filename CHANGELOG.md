@@ -29,6 +29,12 @@ dates are YYYY-MM-DD.
   (`consumer.restart_claude` with `cancel`): the loop does not restart it,
   and the bar goes back to saying an update is installed.
 
+### Changed
+
+- The README says how aiball turns vibe coding into a kanban: a ticket that
+  ends in a result, its thread the memory, instead of edits that live or die
+  with the agent's context.
+
 ## [0.56.0] — 2026-10-03
 
 ### Added

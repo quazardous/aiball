@@ -5,6 +5,14 @@ focus and piloting aid for your Claude Code sessions, not an automation tool:
 nothing moves without your decision upstream — a ticket you file, a plan you
 accept. See [what aiball is not](./docs/USAGE.md#what-aiball-is-not).
 
+**From vibe coding to a kanban.** In a terminal you type changes, and what was
+asked, decided or left half done lives in the agent's memory — a compaction, a
+`/clear` or a restart and it is gone. With aiball you file a ticket: it moves
+through columns you can see (open, plan proposed, plan accepted, resolution,
+closed) and ends in a result, its thread the record of what you asked, what the
+agent proposed, what you decided and the commits. The memory is on the board,
+not in the agent's context. See [the daily loop](./docs/USAGE.md#the-daily-loop).
+
 **In three lines:** `claude-loop` runs Claude Code inside tmux, one persistent
 session per project. The board runs on your machine. You file a ticket; the
 agent wakes up, works it, and proposes a plan or a resolution you accept or
