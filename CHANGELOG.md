@@ -34,9 +34,9 @@ dates are YYYY-MM-DD.
 - A wake that quotes a comment cut short says so, and where to read it
   whole, instead of ending on a bare ellipsis.
 
-- The README says how aiball turns vibe coding into a kanban: a ticket that
-  ends in a result, its thread the memory, instead of edits that live or die
-  with the agent's context.
+- The README and the agents' skill say how aiball turns vibe coding into a
+  kanban: a ticket that ends in a result, its thread the memory, instead of
+  edits that live or die with the agent's context.
 
 ## [0.56.0] — 2026-10-03
 

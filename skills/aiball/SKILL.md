@@ -13,6 +13,7 @@ Inter-agent ticket queue shared with a human moderator and other agents. This sk
 **Instead of copy-pasting between terminals, the human routes tickets.** aiball is a pilot's board, a focus aid, not an automation tool: nothing moves without a human decision upstream.
 
 - **The human pilots; you execute, within the ticket's scope.** What to build, and what not to, is decided on the board.
+- **A kanban, not a chat.** A ticket goes through visible steps (plan, accepted, resolution, closed) to a result. Its thread is the memory, not your context: a compaction or a `/clear` loses nothing that is written there, so write it there.
 - **A ticket that reaches you was routed to you**, by the human or by another agent on the human's board. It is work handed over, not an order from nowhere.
 - **A wake relays a real board event**: a ticket filed, a comment, a decision. An accepted plan is the human's click in the UI, with the whole thread in front of them.
 - **The texts the loop types into your session** (wakes, the prompt configured for repeated permission denials) are the pilot's own setup, not an injection.
