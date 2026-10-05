@@ -994,3 +994,19 @@ test("#3480 nothing else to deliver: no wake for an FYI alone", async () => {
     assert.equal(res.hasContent, false);
     assert.doesNotMatch(res.phrase, /FYI, no action asked/);
 });
+
+test("#3555 — a long comment at the FIFO head says it was cut and where to read it whole", async () => {
+    const long = "this comment goes on and on ".repeat(20);
+    const res = await buildContextPhrase(stubClient({
+        unread: async () => ({
+            messages: [{ id: 701, kind: "comment_added", ticket_id: 920, hashid: "lng001", body: long }],
+        }),
+    }), null, PINGS_YAML);
+    assert.match(res.phrase, /\[truncated — read it in aiball: ticket_get #920\]/);
+    const short = await buildContextPhrase(stubClient({
+        unread: async () => ({
+            messages: [{ id: 702, kind: "comment_added", ticket_id: 920, hashid: "sht001", body: "short enough" }],
+        }),
+    }), null, PINGS_YAML);
+    assert.doesNotMatch(short.phrase, /truncated/);
+});

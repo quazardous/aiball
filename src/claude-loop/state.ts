@@ -49,7 +49,7 @@ import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
-import { stripMarkdown } from "./markdown-strip.js";
+import { wakeExcerpt } from "./markdown-strip.js";
 import { computeLoopView, isHumanPresentHold, isInBootGrace } from "./loop-state.js";
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
@@ -2019,9 +2019,10 @@ export function hintHasRenderableBody(hint?: { commentBody?: string }): boolean 
  * Same fallback chain as `renderEventLine` — body, else a known label, else the
  * raw kind. Pure so "never empty" is pinned by a test rather than a comment.
  */
-export function headTextFor(body: string | null | undefined, label: string | undefined, kind: string): string {
+export function headTextFor(body: string | null | undefined, label: string | undefined, kind: string, ticketId?: number | null): string {
     const trimmed = typeof body === "string" ? body.trim() : "";
-    if (trimmed) return stripMarkdown(trimmed);
+    // #3555 — a cut body says so, and where to read it whole.
+    if (trimmed) return wakeExcerpt(trimmed, ticketId);
     return label || kind || "update";
 }
 
@@ -2421,10 +2422,10 @@ export async function buildContextPhrase(
         // same-ticket bundle (#1351) and the backlog CTA's last-event line
         // (#1363 david `futbsc` — show what happened instead of asserting
         // "<actor> is waiting on your reply", let the agent judge).
-        const renderEventLine = (m: { kind?: string; body?: string | null; hashid?: string | null; by_agent?: string | null }): string => {
+        const renderEventLine = (m: { kind?: string; body?: string | null; hashid?: string | null; by_agent?: string | null }, ticketId?: number | null): string => {
             const body = typeof m?.body === "string" ? m.body : "";
             const base = m?.kind === "comment_added" && body.trim()
-                ? stripMarkdown(body)
+                ? wakeExcerpt(body, ticketId)
                 // #3397 — the compact form of an accepted plan names who executes it too.
                 : m?.kind === "plan_accepted" ? planAcceptedLabel(headHolder, client.agentId)
                 : (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
@@ -2487,7 +2488,7 @@ export async function buildContextPhrase(
                 // Same fallback chain as `renderEventLine` (the bundle + backlog
                 // last-event line): body when there is one, else a known label,
                 // else the raw kind. Never nothing.
-                headBody = headTextFor(unreadHead.body, BUNDLE_LABELS[unreadKind], unreadKind);
+                headBody = headTextFor(unreadHead.body, BUNDLE_LABELS[unreadKind], unreadKind, ticketIdOf(unreadHead));
             }
             // Title lookup for comment heads (the unread row doesn't carry
             // the parent ticket's title). Best-effort getTicket.
@@ -2558,7 +2559,7 @@ export async function buildContextPhrase(
             const own = sameTicket.filter((m) => !isCascade(m));
             own.forEach((m, i) => {
                 const t = ticketIdOf(m);
-                out.push(naming || t !== headTicketId ? `#${t} ${renderEventLine(m)}` : renderEventLine(m));
+                out.push(naming || t !== headTicketId ? `#${t} ${renderEventLine(m, t)}` : renderEventLine(m, t));
                 // The cascade goes under the LAST line of its cause.
                 const last = !own.slice(i + 1).some((n) => ticketIdOf(n) === t);
                 if (last) {
@@ -2797,7 +2798,7 @@ export async function buildContextPhrase(
                                 comments?: Array<{ kind?: string; body?: string | null; hashid?: string; by_agent?: string | null }>;
                             };
                             const last = Array.isArray(resp.comments) ? resp.comments[0] : undefined;
-                            if (last) headLastComment = renderEventLine(last);
+                            if (last) headLastComment = renderEventLine(last, top.id);
                         } catch { /* fail-open : no last-event line, CTA stays neutral */ }
                     }
                 }

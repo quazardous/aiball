@@ -41,7 +41,23 @@ function decodeEntities(s: string): string {
  *   stripMarkdown("very long body…", 10) → "very long…"
  */
 export function stripMarkdown(src: string, maxLen = 240): string {
-    if (!src || !src.trim()) return "";
+    return stripMarkdownCut(src, maxLen).text;
+}
+
+/**
+ * #3555 — a comment body as a wake quotes it: stripped and cut like
+ * `stripMarkdown`, and when it was cut, said so with where to read it whole.
+ * A bare `…` let an agent take a cut quote for the whole comment and answer
+ * the part it saw.
+ */
+export function wakeExcerpt(src: string, ticketId: number | null | undefined, maxLen = 240): string {
+    const { text, cut } = stripMarkdownCut(src, maxLen);
+    return cut && ticketId ? `${text} [truncated — read it in aiball: ticket_get #${ticketId}]` : text;
+}
+
+/** `stripMarkdown`'s text, and whether it had to cut it. */
+function stripMarkdownCut(src: string, maxLen: number): { text: string; cut: boolean } {
+    if (!src || !src.trim()) return { text: "", cut: false };
     let html: string;
     try {
         // gfm + breaks pour que marked traite \n raisonnablement ; sync
@@ -57,11 +73,11 @@ export function stripMarkdown(src: string, maxLen = 240): string {
     const noTags = html.replace(/<[^>]+>/g, " ");
     // Decode entities + collapse whitespace runs.
     const flat = decodeEntities(noTags).replace(/\s+/g, " ").trim();
-    if (flat.length <= maxLen) return flat;
+    if (flat.length <= maxLen) return { text: flat, cut: false };
     // Truncate avec ellipse `…` (1 char). Coupe propre sur le dernier
     // word-boundary avant maxLen-1 pour ne pas tronquer au milieu d'un mot.
     const head = flat.slice(0, maxLen - 1);
     const lastSpace = head.lastIndexOf(" ");
     const cut = lastSpace > maxLen * 0.6 ? head.slice(0, lastSpace) : head;
-    return cut.trimEnd() + "…";
+    return { text: cut.trimEnd() + "…", cut: true };
 }

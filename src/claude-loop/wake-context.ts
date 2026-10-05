@@ -33,7 +33,7 @@
  * miss silencieux. commentBody reste vide dans ce cas.
  */
 import type { AiballClient } from "../client.js";
-import { stripMarkdown } from "./markdown-strip.js";
+import { wakeExcerpt } from "./markdown-strip.js";
 import type { WakeHint } from "./state.js";
 
 /**
@@ -94,7 +94,7 @@ export async function fetchWakeContext(
         let commentBody: string | undefined;
         let mentionsMe = false;
         if (rawBody) {
-            commentBody = stripMarkdown(rawBody);
+            commentBody = wakeExcerpt(rawBody, hint.ticket_id);
             // Same lookbehind shape as the formatting mention regex (#535),
             // minus `>` to also catch mentions au start de markdown paragraphs.
             const escaped = me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
