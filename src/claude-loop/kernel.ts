@@ -477,6 +477,14 @@ const seedReattachHold = shouldSeedReattachHold(
     process.env[RESPAWN_STATE_ENV_VAR],
 );
 
+/**
+ * #3594 — a cold start held (`claude-loop start --afk wait_inf`, or the
+ * agent's hold kept by aiball): armed before the boot seals, so the loop
+ * never runs free meanwhile and its bar says it from the first push. Not on
+ * a reload, which restores the hold the loop had.
+ */
+const startHeld = !reattachMode && !process.env[RESPAWN_STATE_ENV_VAR] && process.env[CL_ENV.START_AFK] === "wait_inf";
+
 // #1059 david — seed ipc.afkMode EARLY (module load, BEFORE mainSse's first
 // `tryWake("startup")` ~line 1589). The wake gate reads `ipc.afkMode`, which is
 // only written by the AFK actor bridge LATE in mainSse (~line 2073). On a
@@ -499,6 +507,9 @@ if (sd) {
         // revive sock morte (snapshot AFK perdu) : même hold anti-surprise que
         // le seed actor plus bas (#1059), posé tôt pour la gate.
         setIpcAfk("wait_10m", Date.now() + cfg.presence_hold_seconds * 1000);
+    } else if (startHeld) {
+        // #3594 — a loop started held: the very first wake sees it.
+        setIpcAfk("wait_inf", null);
     }
 }
 
@@ -2204,6 +2215,10 @@ async function mainSse(): Promise<void> {
     // live), seed NOT-AFK-10min : auto-wakes are held for 10min then auto-release
     // if nobody's there. Only when the status was actually lost (reattach without
     // an AFK snapshot) — a normal reload restores the real AFK state untouched.
+    if (startHeld) {
+        getAfkService().setInf();
+        log("start: held (AFK ∞) — the agent's hold, armed before the boot seals");
+    }
     if (seedReattachHold) {
         const expiryMs = Date.now() + cfg.presence_hold_seconds * 1000;
         getAfkService().set10m(expiryMs);

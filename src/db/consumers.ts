@@ -87,6 +87,8 @@ export interface Consumer {
      *  (suit can_claim) ; true = opt-in explicite ; false = opt-out explicite.
      *  `effective_notify_project_broadcasts` (helper) résout à un boolean. */
     notify_project_broadcasts: boolean | null;
+    /** #3594 — the agent's hold (AFK), kept while no loop runs. */
+    afk_hold: AfkHold;
     created_at: string;
     updated_at: string;
 }
@@ -132,9 +134,27 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         notify_project_broadcasts: r.notifyProjectBroadcasts == null
             ? null
             : r.notifyProjectBroadcasts === 1,
+        afk_hold: r.afkHold === "wait_inf" ? "wait_inf" : "off",
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
+}
+
+/** #3594 — an agent's hold: `off` (works on its own) or `wait_inf` (held). */
+export type AfkHold = "off" | "wait_inf";
+
+/**
+ * #3594 — set an agent's hold, kept while no loop runs. Answers the record
+ * when it changed, null when it already was (or no such consumer).
+ */
+export function setAfkHold(consumer_id: string, hold: AfkHold): Consumer | null {
+    const before = getConsumer(consumer_id);
+    if (!before || before.afk_hold === hold) return null;
+    getDb().update(schema.consumers)
+        .set({ afkHold: hold, updatedAt: new Date().toISOString() })
+        .where(eq(schema.consumers.consumerId, consumer_id))
+        .run();
+    return getConsumer(consumer_id);
 }
 
 /** Fetch the password hash directly (returned only by the auth module). */

@@ -1075,6 +1075,39 @@
       "x-node-local": true
     },
     {
+      "name": "consumer.set_afk_hold",
+      "description": "Set an agent's hold, kept while no loop runs: a loop of the agent starts in it. With a loop of this machine running, it is held or released at once, as `consumer.afk` does. Answers the hold, and `applied` when a running loop was told.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "afk",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "off",
+              "wait_inf"
+            ]
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-relayed": false
+    },
+    {
       "name": "consumer.set_bar_host",
       "description": "Who draws an agent's bar: `tmux` (its status line) or `external` (another host draws it from the bar data). Relayed to the loop, whose kernel records it; the next bar pushed carries the new `host`.",
       "paramStructure": "by-name",
@@ -1668,6 +1701,17 @@
       "description": "Restart a loop from its plate, its conversation resumed: where it ran, or in `mode` (the session host or tmux) to move it. `fresh` starts a fresh conversation instead; `resume` (`latest` or an id) another one of the loop's folder, recorded for the next restarts — refused before anything stops when the folder has none such (`NOT_FOUND`) or another agent's loop runs on it (`CONFLICT`). `remote_control` changes Claude's Remote Control (on, off, or on under a name) for this start and the next; without it the loop keeps its own. A loop that runs is stopped first, so it is refused while Claude works (`NOT_IDLE`), unless `force`. Answers the loop's view once it is back.",
       "paramStructure": "by-name",
       "params": [
+        {
+          "name": "afk",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "off",
+              "wait_inf"
+            ]
+          }
+        },
         {
           "name": "agent",
           "required": false,
@@ -3809,6 +3853,17 @@
           "schema": {
             "type": "string",
             "minLength": 1
+          }
+        },
+        {
+          "name": "afk",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "enum": [
+              "off",
+              "wait_inf"
+            ]
           }
         },
         {

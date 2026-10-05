@@ -23,6 +23,8 @@ export const CL_ENV = {
     INTERVAL: "CL_INTERVAL",
     WAIT: "CL_WAIT",
     NO_STARTUP_PING: "CL_NO_STARTUP_PING",
+    /** #3594 — the hold the loop starts in (`off` | `wait_inf`): armed before its boot seals. */
+    START_AFK: "CL_START_AFK",
     RESUME_MODE: "CL_RESUME_MODE",
     RESUME_PICK: "CL_RESUME_PICK",
     CLAUDE_CMD: "CL_CLAUDE_CMD",

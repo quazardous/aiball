@@ -15,7 +15,8 @@ import { hostDirFor, SESSION_NAME } from "../../sessions/hosts.js";
 import { sessionEnv } from "../../sessions/env.js";
 import { listSessionViews, sessionFor, setSessionLabel, startSession, stopSession, viewOf } from "../../sessions/registry.js";
 import { isPresent } from "../../live-presence.js";
-import { listConsumers } from "../../db/consumers.js";
+import { listConsumers, setAfkHold } from "../../db/consumers.js";
+import { broadcast } from "../../ws.js";
 import { tmuxSessionView } from "../../sessions/registry.js";
 import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 import { listConversations, pickConversation, sessionExists } from "../../claude-loop/claude-conversations.js";
@@ -79,9 +80,12 @@ defineMethod({
         remote_control: remoteControl.optional(),
         /** #3489 — an agent's loop: resume this conversation of the folder (`latest`, or its id). */
         resume: resumeParam.optional(),
+        /** #3594 — an agent's loop: the hold to start in, kept as the agent's; without it, the agent's own. */
+        afk: z.enum(["off", "wait_inf"]).optional(),
     }),
     run: async (caller, p) => {
         if (p.name && p.resume) throw new Refusal(400, "resume is an agent loop's: a named session runs no Claude");
+        if (p.name && p.afk) throw new Refusal(400, "afk is an agent loop's: a named session has no hold");
         if (p.name && p.mode) throw new Refusal(400, "mode is an agent loop's: a named session runs on the host");
         if (p.name && p.remote_control !== undefined) throw new Refusal(400, "remote_control is an agent loop's: a named session runs no Claude");
         if (p.name && (p.agent || p.crew)) throw new Refusal(400, "name is a session without an agent: not with agent or crew");
@@ -105,6 +109,12 @@ defineMethod({
                 const holder = (await runningConversations()).get(pick.id);
                 if (holder && holder !== named) throw new Refusal(409, `the conversation ${pick.id} is ${holder}'s: its loop runs on it`, ERROR_CODES.CONFLICT);
                 resume = pick.id;
+            }
+            // #3594 — kept before the start: the loop reads it as it starts. Only
+            // for a named agent: a folder that picks its own agent is set after.
+            if (p.afk && named) {
+                const changed = setAfkHold(named, p.afk);
+                if (changed) broadcast({ type: "consumer_changed", data: changed });
             }
             const env = sessionEnv(p.env, isMachineLocal(caller));
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));

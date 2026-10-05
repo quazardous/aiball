@@ -8,7 +8,7 @@ import { deleteConsumer, getConsumer, isHuman, listConsumers, pingCountsByConsum
 import { spoolPrompt, drainPrompts } from "../../loop-prompts.js";
 import { pickHoldTargets, type LoopHoldResult, type LoopScope } from "../../loop-hold.js";
 import { runningLoopAgents } from "./loop.js";
-import { AGENT_TYPES, type AgentType } from "../../db/consumers.js";
+import { AGENT_TYPES, setAfkHold, type AfkHold, type AgentType } from "../../db/consumers.js";
 import { broadcast } from "../../ws.js";
 import { cachedCounters, markCountersDirty, refreshCounters } from "../../agent-counters.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
@@ -311,7 +311,36 @@ defineMethod({
             : 600;
         const sent = sendAfkToLoop(consumerId, action, durationSec);
         if (!sent.ok) throw new Refusal(sent.status, sent.error, sent.code);
+        // #3594 — kept as the agent's hold too: an order that reaches a loop
+        // still booting (its socket not there yet) is not lost, the loop
+        // starts in it. A toggle's outcome is the loop's to say (its bar).
+        if (action !== "toggle") announceHold(setAfkHold(consumerId, action === "arm_inf" ? "wait_inf" : "off"));
         return { consumer_id: consumerId, loop: sent.loop, action, queued: true };
+    },
+});
+
+/** #3594 — a changed hold, said to every client (the agent list, `loop.<name>.state`). */
+function announceHold(changed: Consumer | null): void {
+    if (changed) broadcast({ type: "consumer_changed", data: changed });
+}
+
+/**
+ * #3594 — set an agent's hold, kept while no loop runs: a loop of the agent
+ * starts in it. With a loop of this machine running, it is held or released
+ * at once, as `consumer.afk` does. Answers the hold, and `applied` when a
+ * running loop was told.
+ */
+defineMethod({
+    name: "consumer.set_afk_hold",
+    ...LOOP_CONTROL,
+    params: z.object({ name: z.string(), afk: z.enum(["off", "wait_inf"]) }),
+    run: (_c, p) => {
+        if (!p.name || p.name.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(p.name)) throw new Refusal(400, "bad consumer id");
+        const c = getConsumer(p.name);
+        if (!c || c.kind === "human") throw new Refusal(404, `no agent ${p.name}`, ERROR_CODES.CONSUMER_NOT_FOUND);
+        announceHold(setAfkHold(p.name, p.afk as AfkHold));
+        const applied = isPresent(p.name) && sendAfkToLoop(p.name, p.afk === "wait_inf" ? "arm_inf" : "off").ok;
+        return { consumer_id: p.name, afk_hold: p.afk, applied };
     },
 });
 

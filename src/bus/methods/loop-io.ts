@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { flag } from "../params.js";
-import { ensureConsumer, getConsumer, setConsumerState } from "../../db/consumers.js";
+import { ensureConsumer, getConsumer, setAfkHold, setConsumerState } from "../../db/consumers.js";
 import { parseAgentBar } from "../../agent-bar.js";
 import { setAgentBar } from "../../agent-bar-store.js";
 import { listMessages } from "../../db/messages.js";
@@ -104,6 +104,12 @@ defineMethod({
         if (getConsumer(me)?.kind === "human") throw new Refusal(403, "the bar is a loop agent's, not a human's");
         const bar = parseAgentBar(p.bar);
         if ("error" in bar) throw new Refusal(400, bar.error);
+        // #3594 — the hold the loop is in becomes the agent's, kept while no
+        // loop runs. Not while it boots: the hold it starts in is armed then.
+        if (bar.phase !== "boot") {
+            const changed = setAfkHold(me, bar.afk.mode === "wait_inf" ? "wait_inf" : "off");
+            if (changed) broadcast({ type: "consumer_changed", data: changed });
+        }
         return { consumer_id: me, changed: setAgentBar(me, bar) };
     },
 });

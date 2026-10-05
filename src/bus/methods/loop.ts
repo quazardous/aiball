@@ -13,7 +13,7 @@ import { rmSync, statSync, watch, type FSWatcher } from "node:fs";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { defineSubject, publish } from "../subscriptions.js";
-import { onBroadcast } from "../../ws.js";
+import { broadcast, onBroadcast } from "../../ws.js";
 import { remoteControl } from "../params.js";
 import { ERROR_CODES } from "../../domain.js";
 import { listLoopPlates, plateAgent, type LoopEntry } from "../../pane.js";
@@ -22,7 +22,7 @@ import { tmuxSessions } from "../../claude-loop/mux-async.js";
 import { sessionFor, stopSession, tmuxSessionView, viewOf } from "../../sessions/registry.js";
 import { tmuxClientsOf } from "../../sessions/tmux-clients.js";
 import { isPresent } from "../../live-presence.js";
-import { getConsumer } from "../../db/consumers.js";
+import { getConsumer, setAfkHold } from "../../db/consumers.js";
 import { getAgentBar } from "../../agent-bar-store.js";
 import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 import { pickConversation } from "../../claude-loop/claude-conversations.js";
@@ -50,6 +50,8 @@ export interface LoopView {
     remote_control: boolean | string;
     /** #3283 — the model its Claude ran its last turn on, as its bar says; null when unknown. */
     model: { id: string; name: string } | null;
+    /** #3594 — the agent's hold: the loop starts in it, kept by aiball while it is stopped. */
+    afk_hold: "off" | "wait_inf";
     /** The tmux session to attach, for a loop in tmux. */
     tmux?: string;
     /** The host's attach socket, for a loop on the host that runs. */
@@ -106,6 +108,8 @@ function loopView(e: LoopEntry, live: LiveTmux = null): Omit<LoopView, "supersed
         cwd: e.plate.cwd ?? null,
         agent,
         project: e.plate.project ?? (agent ? getConsumer(agent)?.project ?? null : null),
+        // #3594 — the hold the loop starts in, kept by aiball while it is stopped.
+        afk_hold: agent ? getConsumer(agent)?.afk_hold ?? "off" : "off",
         role: e.plate.role ?? null,
         mode,
         running,
@@ -206,6 +210,8 @@ defineMethod({
         remote_control: remoteControl.optional(),
         /** #3505 — relaunch on this conversation of the loop's folder: its latest, or its id. */
         resume: z.union([z.literal("latest"), z.string().uuid()]).optional(),
+        /** #3594 — the hold to start in, kept as the agent's; without it, the agent's own. */
+        afk: z.enum(["off", "wait_inf"]).optional(),
     }),
     run: async (caller, p) => {
         localOnly(caller);
@@ -229,6 +235,12 @@ defineMethod({
             if (phase !== "idle") {
                 throw new Refusal(409, `Claude is ${phase ?? "in an unknown state"}: restarting now would cut its turn (wait until it is idle, or pass force)`, ERROR_CODES.NOT_IDLE);
             }
+        }
+        // #3594 — kept before the relaunch: the new loop reads it as it starts.
+        const holder = plateAgent(loop.plate);
+        if (p.afk && holder) {
+            const changed = setAfkHold(holder, p.afk);
+            if (changed) broadcast({ type: "consumer_changed", data: changed });
         }
         const mode = p.mode ?? before.mode;
         const child = spawn(process.execPath, [CLAUDE_LOOP_BIN,

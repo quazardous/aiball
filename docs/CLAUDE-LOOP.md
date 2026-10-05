@@ -316,6 +316,16 @@ stateDiagram-v2
   internal names (`loop` / `wait` / `stop`) the code and the logs use.
 - When a hold clears, the loop tries a wake — deferred while typing is still hot.
 
+**The hold is the agent's, kept by aiball.** Whether an agent is held (`wait_inf`)
+or free (`off`) outlives its loop: aiball keeps it on the agent's record, from the
+bar its loop pushes (not while it boots; a 10-minute hold counts as `off`), from a
+`consumer.afk` order, or set for an agent with no live loop
+(`consumer.set_afk_hold`). A loop starts in it: `claude-loop start` reads it, or
+takes `--afk off|wait_inf`, and the kernel arms the hold before its boot seals,
+so a held loop never runs free meanwhile and its bar says ■ from the first push.
+An order sent while a loop restarts, before its socket is there, is not lost: the
+loop starts in it.
+
 ### 3. The wake machine
 
 ```mermaid

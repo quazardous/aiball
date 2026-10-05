@@ -202,6 +202,17 @@ function loopAlive(name: string): boolean {
  */
 /** Agent → its attach socket (null when the daemon gives none). */
 let hostedByDaemon: Map<string, string | null> | null = null;
+/** #3594 — the agent's hold, kept by aiball; `off` when the daemon cannot say. */
+async function agentAfkHold(agent: string | null): Promise<"off" | "wait_inf"> {
+    if (!agent) return "off";
+    try {
+        const c = await new AiballClient({ agentId: agent }).getConsumer(agent) as { afk_hold?: unknown } | null;
+        return c?.afk_hold === "wait_inf" ? "wait_inf" : "off";
+    } catch {
+        return "off";
+    }
+}
+
 async function readHostedByDaemon(agent: string | null): Promise<void> {
     hostedByDaemon = await daemonHostedAgents(agent);
 }
@@ -278,6 +289,8 @@ interface StartOpts {
     fork?: boolean;
     /** #3489 — resume this conversation of the folder (`latest`, or its id), over the recorded one. */
     resumeSession?: string;
+    /** #3594 — the hold to start in, over the agent's own. */
+    afk?: "off" | "wait_inf";
     /** #2180 — set the agent's type on its record BEFORE claude boots (the MCP
      *  server reads it at start-up). */
     type?: "coder" | "cto";
@@ -605,6 +618,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     if (proxy.kind === "refuse") die(proxy.reason);
     const sd = stateDirFor(name);
     await readHostedByDaemon(ctx.agent);
+    // #3594 — the hold to start in: `--afk`, else the agent's own, kept by aiball.
+    const startAfk = opts.afk ?? await agentAfkHold(ctx.agent);
     if (existsSync(sd)) {
         // #602 — with the deterministic naming (#594), restarting from the
         // same (cwd, agent) always hits the SAME state-dir. If the previous
@@ -905,6 +920,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // proxy's AFK detection → `afk` marker.
         `export ${CL_ENV.AFK_SPEC}=${shQuote(afkSpecJson)}`,
         `export ${CL_ENV.AFK_WINDOW_MS}=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
+        // #3594 — the hold the kernel arms before its boot seals.
+        `export ${CL_ENV.START_AFK}=${shQuote(startAfk)}`,
         // #629 CL_BAR_PAINT_LOG, #678 CL_PANE_CAPTURE_LOG,
         // #990 CL_CAPTURE : opt-in debug logs are picked up generically by
         // `collectShellOverrideLines` (→ volatile env.local, #991) when set in
@@ -2250,6 +2267,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
         .option("--agent <id>", "#420: alias for --consumer (the loop's agent identity). Set a distinct one to run several loops in the same dir.")
         .option("--crew <name>", "#2523: start a crew agent in this folder, next to its main loop — assignment-only, its own session, told at start that it waits for explicit requests. Same as --agent <name> --role crew.")
+        .option("--afk <off|wait_inf>", "#3594: start held (wait_inf) or free (off), over the agent's own hold kept by aiball; armed before the boot seals, so the loop never runs free meanwhile.")
         .option("--resume-session <id|latest>", "#3489: resume this conversation of the folder (its id, or latest: the most recent one) instead of the recorded one, and record it for the next starts. Refused when the folder has no such conversation, or another agent's loop runs on it.")
         .option("--fork", "#2523: with --crew, the first start forks the main loop's session (its context, a new id) instead of starting empty.")
         .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
@@ -2283,7 +2301,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             role?: string;
-            crew?: string; fork?: boolean; resumeSession?: string;
+            crew?: string; fork?: boolean; resumeSession?: string; afk?: string;
             type?: string; denyCode?: boolean;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
@@ -2316,6 +2334,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 crew: opts.crew,
                 fork: opts.fork === true,
                 resumeSession: opts.resumeSession,
+                afk: opts.afk === "off" || opts.afk === "wait_inf" ? opts.afk : undefined,
                 type: opts.type === "coder" || opts.type === "cto" ? opts.type : undefined,
                 denyCode: opts.denyCode === true,
                 cwd: opts.cwd,

@@ -687,6 +687,12 @@ export const consumers = sqliteTable("consumers", {
      * opt-out explicite. Édité dans ConsumerEditPage. Migration 0044.
      */
     notifyProjectBroadcasts: integer("notify_project_broadcasts"),
+    /**
+     * #3594 — the agent's hold (AFK), kept while no loop runs: `off` or
+     * `wait_inf`. A loop starts in it; the kernel's pushed bar keeps it
+     * current. Migration 0082.
+     */
+    afkHold: text("afk_hold").notNull().default("off"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [

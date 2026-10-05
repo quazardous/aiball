@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- An agent's hold (held or free) is kept by aiball even while its loop is
+  stopped, or for an agent with no loop at all: a client shows it and
+  changes it (`consumer.set_afk_hold`), and a loop starts in it, held before
+  its boot ends. An AFK order sent while a loop restarts is no longer lost.
+
 - A restart of Claude held until its next idle can be cancelled
   (`consumer.restart_claude` with `cancel`): the loop does not restart it,
   and the bar goes back to saying an update is installed.
