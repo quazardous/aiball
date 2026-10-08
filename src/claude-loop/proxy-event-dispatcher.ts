@@ -23,7 +23,9 @@ import {
 } from "./state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
-import { getIpcState, recordIpcDenial, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
+import { getIpcState, recordIpcDenial, setIpcLastWakeAtMs, setIpcUsage, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
+import { sameUsage, usageOf } from "./usage.js";
+import type { BarUsage } from "../agent-bar.js";
 import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
 import { getHookWatcher, type HookWatcherEvent, type SessionStartSource } from "./hook-watcher.js";
 
@@ -37,6 +39,7 @@ export type DispatchVerdict =
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
     | { kind: "hook-event"; hookEvent: HookWatcherEvent }
     | { kind: "denial-recorded"; tool: string | null; reason: string | null }
+    | { kind: "usage-read"; usage: BarUsage | null; changed: boolean }
     | { kind: "unknown"; raw: string }
     | { kind: "error"; message: string };
 
@@ -249,6 +252,13 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 recordIpcDenial(atMs, reason, tool);
                 return { kind: "denial-recorded", tool, reason };
             }
+            // #3686 — the loop's status line ran: the subscription's usage, as Claude Code gave it.
+            if (hookKind === "StatusLine") {
+                const usage = usageOf(event.rate_limits, atMs);
+                const changed = !sameUsage(getIpcState().usage, usage);
+                setIpcUsage(usage);
+                return { kind: "usage-read", usage, changed };
+            }
             return { kind: "unknown", raw: `hook:${String(hookKind)}` };
         }
         return { kind: "unknown", raw: `${String(kind)}:${String(eventKind)}` };
@@ -268,6 +278,7 @@ export function formatVerdictLogLine(v: DispatchVerdict): string {
         case "afk-service-set":      return `proxy-event: AfkService → ${v.mode}${v.expiryMs !== null ? ` (expiry=${new Date(v.expiryMs).toISOString()})` : ""}`;
         case "hook-event":           return `proxy-event: HookWatcher ← ${v.hookEvent.type}${v.hookEvent.type === "hook:session_start" ? ` (source=${v.hookEvent.source})` : v.hookEvent.type === "hook:pretooluse" ? ` (tool=${v.hookEvent.toolName})` : v.hookEvent.type === "hook:user_prompt_submit" ? ` (from_auto_wake=${v.hookEvent.fromAutoWake})` : ""}`;
         case "denial-recorded":      return `proxy-event: permission denied (tool=${v.tool ?? "?"}) reason=${JSON.stringify(v.reason)}`;
+        case "usage-read":           return `proxy-event: usage ${v.usage ? `5h=${v.usage.five_hour ? `${v.usage.five_hour.used_percentage}%` : "-"} 7d=${v.usage.seven_day ? `${v.usage.seven_day.used_percentage}%` : "-"}` : "none"}${v.changed ? "" : " (unchanged)"}`;
         case "unknown":              return `proxy-event: unknown '${v.raw}'`;
         case "error":                return `proxy-event handler error: ${v.message}`;
     }

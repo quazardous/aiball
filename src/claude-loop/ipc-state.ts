@@ -29,6 +29,7 @@
  */
 
 import { emptyDenialLog, withDenial, withDeniedPromptSent, type DenialLog } from "./denials.js";
+import type { BarUsage } from "../agent-bar.js";
 
 export interface IpcState {
     /** Last in-memory boot-complete flag, mutated when a SessionStart
@@ -211,6 +212,9 @@ export interface IpcState {
     /** #3500 — the tool calls Claude Code's permission system denied (the
      *  PermissionDenied hook), counted with time: the bar's `⛔N·age` chip. */
     denials: DenialLog;
+    /** #3686 — the subscription's usage, as Claude Code last gave it to the
+     *  loop's status line; null before (or with an API key). */
+    usage: BarUsage | null;
     /** #3283 — the model Claude ran its last turn on (the transcript's id);
      *  null before the first turn ends. Set by the Stop hook. */
     model: string | null;
@@ -307,6 +311,7 @@ const state: IpcState = {
     limitReached: false,
     limitResets: null,
     denials: emptyDenialLog(),
+    usage: null,
     model: null,
     remoteControl: false,
     restartNeeded: false,
@@ -516,6 +521,12 @@ export function setIpcLimitReached(reached: boolean, resets: { text: string; at:
 /** #3500 — a tool call the permission system denied (the PermissionDenied hook). */
 export function recordIpcDenial(atMs: number, reason: string | null, tool: string | null = null): void {
     state.denials = withDenial(state.denials, atMs, reason, tool);
+    notifyIpcChanged();
+}
+
+/** #3686 — a reading of the subscription's usage, from the loop's status line. */
+export function setIpcUsage(usage: BarUsage | null): void {
+    state.usage = usage;
     notifyIpcChanged();
 }
 
@@ -785,6 +796,7 @@ export function resetIpcStateForTests(): void {
     state.limitReached = false;
     state.limitResets = null;
     state.denials = emptyDenialLog();
+    state.usage = null;
     state.model = null;
     state.remoteControl = false;
     state.restartNeeded = false;

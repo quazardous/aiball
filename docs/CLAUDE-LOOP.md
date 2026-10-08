@@ -1095,6 +1095,18 @@ the words does not trip it; the fast mode's limit and the `NN% of your weekly li
 warning do not either. The human lets the hold go; the alert lifts when Claude works
 again.
 
+`usage` is the subscription's usage (claude.ai Pro or Max), as Claude Code gives it:
+`{ five_hour, seven_day, read_at }`, each window `{ used_percentage, resets_at }`
+(0 to 100, and an ISO date) or null when Claude Code gives none for it, `read_at`
+when the loop read it; `usage` is null before the first answer and with an API key.
+Claude Code gives it in one place only, the JSON its status line command gets, so
+the loop spawns Claude with a status line of its own: it relays the reading, then
+runs yours (the first set in the folder's `.claude/settings.local.json`,
+`.claude/settings.json`, then your `~/.claude/settings.json`, read when the loop
+starts) with the same input, and its output is what you see. Without one, it shows nothing, as before. The quota
+is the account's, so every agent's bar carries the same numbers; the freshest
+`read_at` is the one to trust.
+
 When Claude Code's permission system denies a tool call (the auto mode classifier
 above all, and deny rules), Claude stops on the refusal, often with nothing else to
 show for it. Its `PermissionDenied` hook counts these denials with time: the tmux

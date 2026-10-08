@@ -54,6 +54,24 @@ export interface BarInfoCode {
     [param: string]: string | number;
 }
 
+/** #3686 — one window of the subscription's usage, as Claude Code's status line gives it. */
+export interface BarUsageWindow {
+    /** 0 to 100. */
+    used_percentage: number;
+    resets_at: string;
+}
+
+/**
+ * #3686 — the subscription's usage (claude.ai Pro/Max), as Claude Code gives it
+ * to its status line: each window null when absent, `read_at` when the loop read
+ * it. The quota is the account's, so any agent's reading is the machine's.
+ */
+export interface BarUsage {
+    five_hour: BarUsageWindow | null;
+    seven_day: BarUsageWindow | null;
+    read_at: string;
+}
+
 export interface AgentBar {
     /** What claude is doing. */
     phase: BarPhase;
@@ -92,6 +110,8 @@ export interface AgentBar {
     } | null;
     /** #3500 — the tool calls Claude Code's permission system denied (the auto mode classifier, a deny rule): how many in the last hour, since the loop's start, when the last came and why; null when none in the last hour. Optional: absent from loops started before it. */
     denials?: { last_hour: number; total: number; last_at: string; last_reason: string | null; /** #3509 — the prompts sent for repeated denials in the last hour; absent before it. */ sent?: number } | null;
+    /** #3686 — the subscription's usage (5-hour and weekly windows); null when Claude Code gives none (an API key, before the first answer). Optional: absent from loops started before it. */
+    usage?: BarUsage | null;
     /** #3291 — whether Claude is in Remote Control now, as its status line shows it (the flag at start or a `/rc` in the session). Optional: absent from loops started before it. */
     remote_control?: { on: boolean };
     /** The PTY proxy fronting claude is alive. */
@@ -118,6 +138,12 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 const isBool = (v: unknown): v is boolean => typeof v === "boolean";
 const isDateOrNull = (v: unknown): v is string | null => v === null || (typeof v === "string" && Number.isFinite(Date.parse(v)));
 const isCountOrNull = (v: unknown): v is number | null => v === null || (typeof v === "number" && Number.isInteger(v) && v >= 0);
+
+/** A checked `usage`, with its unknown fields dropped. */
+function usageCopy(u: Record<string, unknown>): BarUsage {
+    const win = (w: unknown): BarUsageWindow | null => isObj(w) ? { used_percentage: w.used_percentage as number, resets_at: w.resets_at as string } : null;
+    return { five_hour: win(u.five_hour), seven_day: win(u.seven_day), read_at: u.read_at as string };
+}
 
 /** The bar a loop pushed, or why it is refused. Unknown fields are dropped. */
 export function parseAgentBar(input: unknown): AgentBar | { error: string } {
@@ -171,6 +197,14 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         && (dn.sent === undefined || (isCountOrNull(dn.sent) && dn.sent !== null))))) {
         return { error: "denials must be null or { last_hour, total: counts, last_at: ISO date, last_reason: string | null, sent?: count }" };
     }
+    // #3686 — absent from loops started before the field.
+    const us = b.usage;
+    const isWindow = (w: unknown) => w === null || (isObj(w) && typeof w.used_percentage === "number" && Number.isFinite(w.used_percentage)
+        && w.used_percentage >= 0 && typeof w.resets_at === "string" && isDateOrNull(w.resets_at));
+    if (!(us === undefined || us === null || (isObj(us) && isWindow(us.five_hour) && isWindow(us.seven_day)
+        && typeof us.read_at === "string" && isDateOrNull(us.read_at)))) {
+        return { error: "usage must be null or { five_hour, seven_day: null | { used_percentage: number, resets_at: ISO date }, read_at: ISO date }" };
+    }
     if (!isBool(b.proxy_alive) || !isBool(b.zen)) return { error: "proxy_alive and zen must be booleans" };
     const c = b.counters;
     if (!(c === null || (isObj(c) && isCountOrNull(c.open) && isCountOrNull(c.backlog) && isCountOrNull(c.events)))) {
@@ -206,6 +240,7 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
         model: isObj(md) ? { id: md.id as string, name: md.name as string } : null,
         remote_control: { on: isObj(rc) && rc.on === true },
         ...(dn === undefined ? {} : { denials: isObj(dn) ? { last_hour: dn.last_hour as number, total: dn.total as number, last_at: dn.last_at as string, last_reason: (dn.last_reason as string | null) ?? null, ...(dn.sent === undefined ? {} : { sent: dn.sent as number }) } : null }),
+        ...(us === undefined ? {} : { usage: isObj(us) ? usageCopy(us) : null }),
         proxy_alive: b.proxy_alive,
         zen: b.zen,
         counters: c === null ? null : { open: (c as Record<string, number | null>).open!, backlog: (c as Record<string, number | null>).backlog!, events: (c as Record<string, number | null>).events! },

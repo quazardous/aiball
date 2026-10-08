@@ -323,6 +323,8 @@ export function computeAgentBar(sd: string, nowMs: number = Date.now()): AgentBa
         limit_resets: ipc.limitReached ? ipc.limitResets ?? null : null,
         // #3500 — the tool calls the permission system denied, the last hour's.
         denials: denialSummary(ipc.denials, nowMs),
+        // #3686 — the subscription's usage, as Claude Code last gave it.
+        usage: ipc.usage,
         // #3283 — the model Claude ran its last turn on, and its short name.
         model: ipc.model ? { id: ipc.model, name: modelShortName(ipc.model) } : null,
         // #3291 — whether Claude is in Remote Control, whatever turned it on.

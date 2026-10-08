@@ -43,6 +43,7 @@ import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-
 import { acquireStartLock } from "./start-lock.js";
 import { HOOKS, buildHookSettings } from "./hooks/registry.js";
 import { buildSpawnSettings } from "./spawn-settings.js";
+import { loopStatusLine, userStatusLine } from "./usage.js";
 import { applyAgentType } from "./agent-type.js";
 import { withInitCwd } from "./init-cwd.js";
 import { readFolderTrust } from "./folder-trust.js";
@@ -1070,7 +1071,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #2201 — plus the agent's tool denials when its tree declares any
     // (`claude.deny_tools`), as `permissions.deny`. Composed in a pure helper so
     // the yaml → settings chain is testable without spawning.
-    const settings = buildSpawnSettings(buildHookSettings(HOOKS, buildHookCommand), ctx.claude.deny_tools);
+    // #3686 — plus the loop's status line, which relays the subscription's usage
+    // and runs the user's own (read now, from the folder's and the user's settings).
+    const statusLine = loopStatusLine(buildHookCommand("src/claude-loop/status-line.ts"), userStatusLine(cwd));
+    const settings = buildSpawnSettings(buildHookSettings(HOOKS, buildHookCommand), ctx.claude.deny_tools, statusLine);
     const settingsJson = JSON.stringify(settings);
 
     // claude passthrough args. Shell-escape per-arg so the inline

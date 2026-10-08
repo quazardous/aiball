@@ -151,6 +151,20 @@ test("#3507 — the denied tool calls: pushed, kept and read back; a loop starte
     }
 });
 
+test("#3686 — the subscription's usage: pushed, kept and read back; a loop started before it sends none; a malformed one is refused", async () => {
+    const usage = { five_hour: { used_percentage: 23.5, resets_at: "2026-10-08T12:00:00.000Z" }, seven_day: null, read_at: "2026-10-08T09:41:07.000Z" };
+    assert.equal((await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ usage }) })).status, 200);
+    assert.deepEqual(((await call(HUMAN, "consumer.bar", { consumer_id: "worker" })).json.bar as { usage: unknown }).usage, usage, "what a client reads");
+    assert.equal((parseAgentBar(bar({ usage: null })) as { usage: unknown }).usage, null, "none given: an API key");
+    assert.ok(!("usage" in (parseAgentBar(bar()) as object)), "a loop started before the field: absent, as sent");
+    const win = usage.five_hour;
+    for (const bad of [{ ...usage, read_at: "now" }, { ...usage, five_hour: { ...win, used_percentage: -1 } }, { ...usage, five_hour: { ...win, resets_at: 1791460800 } }, { ...usage, seven_day: "41%" }, "23.5"]) {
+        const r = await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ usage: bad }) });
+        assert.equal(r.status, 400, JSON.stringify(bad));
+        assert.match(String(r.json.error), /usage/);
+    }
+});
+
 test("#3514 — the info word as data: pushed, kept and read back; a loop started before it sends none; a malformed one is refused", async () => {
     const marker = { info: "retry 3", health_prompt: false, resume_picker: false, resume_mode_picker: false, info_code: { code: "retry", attempt: 3 } };
     assert.equal((await call(WORKER, "consumer.push_bar", { consumer_id: "worker", bar: bar({ marker }) })).status, 200);

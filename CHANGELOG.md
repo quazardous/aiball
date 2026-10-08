@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- The agent bar carries the subscription's usage (the 5-hour and weekly windows:
+  percent used and when each resets), as Claude Code gives it to its status line;
+  the loop relays it through a status line of its own that still runs yours.
+
 ### Fixed
 
 - An agent's session no longer starts at 80×24 when the daemon starts it: it

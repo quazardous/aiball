@@ -2110,7 +2110,8 @@ async function mainSse(): Promise<void> {
                 return;
             }
             const verdict = dispatchProxyEvent(sd!, event);
-            log(formatVerdictLogLine(verdict));
+            // #3686 — the status line runs on every answer: log a reading only when its numbers moved.
+            if (verdict.kind !== "usage-read" || verdict.changed) log(formatVerdictLogLine(verdict));
             // #3509 — repeated denials: arm the configured prompt, sent as a wake.
             if (verdict.kind === "denial-recorded") void armDeniedPrompt();
         },
