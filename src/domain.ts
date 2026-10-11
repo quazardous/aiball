@@ -217,6 +217,10 @@ export const ERROR_CODES = {
     SUMMARY_REQUIRED: "SUMMARY_REQUIRED",
     /** #3249 — a summary_until over the project's budget. */
     SUMMARY_TOO_LONG: "SUMMARY_TOO_LONG",
+    /** #3765 — `project.rename_all` without `cwd`, for a project whose folder aiball does not know; `details.roots` is empty. */
+    NO_ROOT: "NO_ROOT",
+    /** #3765 — `project.rename_all` without `cwd`, for a project known in several folders; `details.roots` lists them. */
+    AMBIGUOUS_ROOT: "AMBIGUOUS_ROOT",
 } as const;
 export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
 

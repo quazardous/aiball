@@ -6,7 +6,9 @@
 import type { Command } from "commander";
 import { resolve } from "node:path";
 import { buildClient, die, gOpts, jsonline, userCwd } from "./_helpers.js";
-import { fmtApplied, fmtPlan, relocateEnv } from "./relocate.js";
+import { fmtApplied, fmtPlan } from "./relocate.js";
+import { relocateEnv } from "../relocate-env.js";
+import { blockerTexts } from "../relocate.js";
 
 const indent = (text: string): string => text.trimEnd().replace(/^/gm, "  ");
 
@@ -52,7 +54,7 @@ export function registerRenameAllCommand(project: Command): void {
                     else lines.push(`  ${plan.yaml.file}: consumer.project: ${plan.yaml.project}`
                         + (plan.yaml.agent ? `, consumer.agent: ${plan.yaml.agent} (the agent keeps its name)` : ""));
                     lines.push(plan.relocate ? indent(fmtPlan({ ...plan.relocate, blockers: [] })) : "  folder: left where it is");
-                    if (plan.blockers.length > 0) lines.push("cannot rename:", ...plan.blockers.map((b) => `  ✗ ${b}`));
+                    if (plan.blockers.length > 0) lines.push("cannot rename:", ...blockerTexts(plan.blockers).map((b) => `  ✗ ${b}`));
                     else lines.push("dry run — nothing changed; pass --apply to do it");
                     process.stdout.write(lines.join("\n") + "\n");
                 }

@@ -68,7 +68,7 @@ test("anything that would stop a step refuses the whole run before the first one
     ];
     for (const [m, why] of cases) {
         const plan = await planRenameAll({ oldName: "darktable-helios", newName: "helios", from: m.dir }, m.deps);
-        assert.match(plan.blockers.join("\n"), why);
+        assert.match(plan.blockers.map((b) => b.text).join("\n"), why);
         await assert.rejects(applyRenameAll(plan, m.deps));
         assert.deepEqual(m.calls, [], "nothing renamed");
         assert.ok(existsSync(m.dir), "nothing moved");
@@ -76,12 +76,12 @@ test("anything that would stop a step refuses the whole run before the first one
     }
     const down = machine("consumer:\n  project: darktable-helios\n");
     down.deps.projectNames = async () => { throw new Error("connect ENOENT"); };
-    assert.match((await planRenameAll({ oldName: "darktable-helios", newName: "helios", from: down.dir }, down.deps)).blockers.join(), /daemon cannot be reached/);
+    assert.match((await planRenameAll({ oldName: "darktable-helios", newName: "helios", from: down.dir }, down.deps)).blockers.map((b) => b.text).join(), /daemon cannot be reached/);
 });
 
 test("a folder not named after the project needs --dir or --no-move", async () => {
     const m = machine("consumer:\n  project: dth\n", { projects: ["dth"] });
-    assert.match((await planRenameAll({ oldName: "dth", newName: "helios", from: m.dir }, m.deps)).blockers.join(), /--dir/);
+    assert.match((await planRenameAll({ oldName: "dth", newName: "helios", from: m.dir }, m.deps)).blockers.map((b) => b.text).join(), /--dir/);
     const plan = await planRenameAll({ oldName: "dth", newName: "helios", from: m.dir, noMove: true }, m.deps);
     assert.deepEqual(plan.blockers, []);
     await applyRenameAll(plan, m.deps);

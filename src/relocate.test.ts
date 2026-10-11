@@ -164,7 +164,7 @@ test("apply moves the folder and every piece of state, and leaves the sibling al
 test("--state-only catches up a folder already moved by hand", () => {
     const m = machine();
     renameSync(m.oldDir, m.newDir);
-    assert.match(planRelocate(m.oldDir, m.newDir, m.env).blockers.join("\n"), /--state-only/);
+    assert.match(planRelocate(m.oldDir, m.newDir, m.env).blockers.map((b) => b.text).join("\n"), /--state-only/);
     const plan = planRelocate(m.oldDir, m.newDir, m.env, { stateOnly: true });
     assert.deepEqual(plan.blockers, []);
     const r = applyRelocate(plan);
@@ -187,12 +187,12 @@ test("--state-only also finishes a move whose history directory was renamed by h
 
 test("refuses while a loop or a process runs in the old folder, or a claude session in the new one", () => {
     const withLoop = machine({ alive: [4242] });
-    assert.match(planRelocate(withLoop.oldDir, withLoop.newDir, withLoop.env).blockers.join("\n"), /loop cl-jobbox-1 is running/);
+    assert.match(planRelocate(withLoop.oldDir, withLoop.newDir, withLoop.env).blockers.map((b) => b.text).join("\n"), /loop cl-jobbox-1 is running/);
 
     const busy = machine();
     busy.env.processCwds = () => [{ pid: 7, cwd: join(busy.oldDir, "wrap"), cmd: "cargo watch" }];
     const plan = planRelocate(busy.oldDir, busy.newDir, busy.env);
-    assert.match(plan.blockers.join("\n"), /process 7 \(cargo watch\)/);
+    assert.match(plan.blockers.map((b) => b.text).join("\n"), /process 7 \(cargo watch\)/);
     assert.throws(() => applyRelocate(plan), /cannot relocate/);
     assert.ok(existsSync(busy.oldDir), "nothing moved");
 });

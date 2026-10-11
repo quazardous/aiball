@@ -21,6 +21,7 @@ import {
     listProjectsDetailed,
     renameProject,
 } from "../../db.js";
+import { relocateConsumerRoots } from "../../db/projects.js";
 import { getProjectWakeFocus } from "../../db/settings.js";
 import { activeFocus, describeFocus } from "../../wake-focus.js";
 import { focusRelatives } from "../../db/focus-relatives.js";
@@ -132,10 +133,31 @@ defineMethod({
     },
 });
 
-/**
- * #699 — rename a project in every table that stores its name, and its
- * outbox file; the answer counts the rows each table changed.
- */
+/** The rename itself, its broadcast and its rows moved in the views. #3765 — shared by `project.rename` and `project.rename_all`. */
+function renameEverywhere(name: string, newName: string) {
+    let result: ReturnType<typeof renameProject>;
+    try {
+        result = renameProject(name, newName);
+    } catch (e) {
+        const msg = (e as Error).message ?? String(e);
+        if (msg.includes("does not exist")) throw new Refusal(404, msg);
+        if (msg.includes("already exists")) throw new Refusal(409, msg);
+        throw new Refusal(400, msg);
+    }
+    try {
+        const oldPath = outboxPath(name);
+        if (existsSync(oldPath)) {
+            writeFileSync(outboxPath(result.new_name), "");
+            unlinkSync(oldPath);
+        }
+    } catch { /* best effort: the DB is the source of truth */ }
+    broadcast({ type: "project_renamed", data: { old: result.old_name, new: result.new_name } });
+    // #3764 — and the views of the tickets hear each of them under its new name.
+    projectRenamed(result.new_name);
+    return result;
+}
+
+/** #699 — rename a project in every table that stores its name, and its outbox file; the answer counts the rows each table changed. */
 defineMethod({
     name: "project.rename",
     who: ["human", "agent"],
@@ -143,26 +165,64 @@ defineMethod({
     run: (_caller, p) => {
         const newName = typeof p.new_name === "string" ? p.new_name : "";
         if (!newName) throw new Refusal(400, "new_name required (string)");
-        let result: ReturnType<typeof renameProject>;
-        try {
-            result = renameProject(p.name, newName);
-        } catch (e) {
-            const msg = (e as Error).message ?? String(e);
-            if (msg.includes("does not exist")) throw new Refusal(404, msg);
-            if (msg.includes("already exists")) throw new Refusal(409, msg);
-            throw new Refusal(400, msg);
+        return { ...renameEverywhere(p.name, newName), ok: true };
+    },
+});
+
+/**
+ * #3765 — `aiball project rename-all` on the bus: the name, `.aiball.yaml` and
+ * the folder, planned and applied by the same rules (src/project-rename.ts).
+ * The folder is the project's root as its loops pushed it; with several or
+ * none, the refusal lists the known ones and `cwd` names it. A human's
+ * gesture, on this machine only. Dry run unless `apply`.
+ */
+defineMethod({
+    name: "project.rename_all",
+    who: ["human"],
+    machine: true,
+    params: z.object({
+        name: z.string().min(1),
+        new_name: z.string().min(1),
+        cwd: z.string().optional(),
+        dir: z.string().optional(),
+        no_move: z.boolean().optional(),
+        apply: z.boolean().optional(),
+    }),
+    run: async (caller, p) => {
+        if (!isMachineLocal(caller)) throw new Refusal(403, "a folder of this machine: local callers only", ERROR_CODES.FORBIDDEN);
+        for (const [key, value] of [["cwd", p.cwd], ["dir", p.dir]] as const) {
+            if (value !== undefined && !isAbsolute(value)) throw new Refusal(400, `${key} must be an absolute path (got '${value}')`, ERROR_CODES.BAD_REQUEST);
         }
-        try {
-            const oldPath = outboxPath(p.name);
-            if (existsSync(oldPath)) {
-                writeFileSync(outboxPath(result.new_name), "");
-                unlinkSync(oldPath);
+        let from = p.cwd;
+        if (from === undefined) {
+            // A rename already half done (the old name gone) knows its root under the new name.
+            const known = listProjects().includes(p.name) ? p.name : p.new_name;
+            const roots = [...new Set(listProjectsDetailed().filter((x) => x.name === known).flatMap((x) => x.roots ?? []))];
+            if (roots.length !== 1) {
+                throw roots.length === 0
+                    ? new Refusal(409, `no folder is known for project "${p.name}" — pass cwd`, ERROR_CODES.NO_ROOT, { roots })
+                    : new Refusal(409, `project "${p.name}" is known in several folders (${roots.join(", ")}) — pass cwd`, ERROR_CODES.AMBIGUOUS_ROOT, { roots });
             }
-        } catch { /* best effort: the DB is the source of truth */ }
-        broadcast({ type: "project_renamed", data: { old: result.old_name, new: result.new_name } });
-        // #3764 — and the views of the tickets hear each of them under its new name.
-        projectRenamed(result.new_name);
-        return { ...result, ok: true };
+            from = roots[0];
+        }
+        const { applyRenameAll, planRenameAll } = await import("../../project-rename.js");
+        const { relocateEnv } = await import("../../relocate-env.js");
+        const deps = {
+            projectNames: async () => listProjects(),
+            renameProject: async (a: string, b: string) => renameEverywhere(a, b),
+            relocateEnv: relocateEnv([]),
+        };
+        const plan = await planRenameAll({ oldName: p.name, newName: p.new_name, from, dir: p.dir, noMove: p.no_move === true }, deps);
+        const view = {
+            db: plan.db,
+            yaml: plan.yaml,
+            folder: plan.relocate ? { from: plan.relocate.old, to: plan.relocate.new, mode: plan.relocate.mode } : null,
+        };
+        if (p.apply !== true || plan.blockers.length > 0) return { applied: false, plan: view, blockers: plan.blockers };
+        const result = await applyRenameAll(plan, deps);
+        // The roots the loops pushed follow the folder.
+        const roots = plan.relocate ? relocateConsumerRoots(plan.relocate.old, plan.relocate.new) : 0;
+        return { applied: true, plan: view, blockers: [], result: { ...result, roots } };
     },
 });
 

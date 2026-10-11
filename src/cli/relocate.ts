@@ -3,61 +3,9 @@
  * this wires the real machine (home, /proc, pids) and prints the plan.
  */
 import type { Command } from "commander";
-import { existsSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { die, gOpts, jsonline } from "./_helpers.js";
-import type { ApplyResult, RelocateEnv, RelocatePlan } from "../relocate.js";
-
-/** Running processes and their cwd, from /proc — null where there is no /proc. */
-function procCwds(): Array<{ pid: number; cwd: string; cmd: string }> | null {
-    if (process.platform !== "linux" || !existsSync("/proc")) return null;
-    // This command and the shell that launched it are exempt: running
-    // `aiball relocate . ../elsewhere` from inside the folder must not refuse
-    // itself. Any other process there still blocks.
-    const self = new Set<number>();
-    for (let pid = process.pid; pid > 1 && !self.has(pid);) {
-        self.add(pid);
-        try {
-            pid = Number(readFileSync(`/proc/${pid}/stat`, "utf8").replace(/^.*\) \S+ /, "").split(" ")[0]);
-        } catch { break; }
-    }
-    const out: Array<{ pid: number; cwd: string; cmd: string }> = [];
-    for (const name of readdirSync("/proc")) {
-        if (!/^\d+$/.test(name)) continue;
-        const pid = Number(name);
-        if (self.has(pid)) continue;
-        try {
-            const cwd = readlinkSync(`/proc/${name}/cwd`);
-            const cmd = readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ").slice(0, 120);
-            out.push({ pid, cwd, cmd });
-        } catch { /* gone, or not ours */ }
-    }
-    return out;
-}
-
-function pidAlive(pid: number): boolean {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-/** The real machine: home, Claude's state, the loops, /proc. */
-export function relocateEnv(scan: string[]): RelocateEnv {
-    const home = homedir();
-    return {
-        // CLAUDE_CONFIG_DIR moves both: the state dir and the .claude.json inside it.
-        claudeDir: process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"),
-        claudeJson: process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json"),
-        loopRoot: process.env.CLAUDE_LOOP_STATE_ROOT ?? join(home, ".claude-loop"),
-        scanRoots: [join(home, ".local", "bin"), join(home, "bin"), ...scan],
-        processCwds: procCwds,
-        pidAlive,
-    };
-}
+import { blockerTexts, type ApplyResult, type RelocatePlan } from "../relocate.js";
+import { relocateEnv } from "../relocate-env.js";
 
 export function fmtPlan(p: RelocatePlan): string {
     const lines = [`relocate ${p.old} → ${p.new} (${p.mode})`];
@@ -70,7 +18,7 @@ export function fmtPlan(p: RelocatePlan): string {
     if (p.processCheckUnavailable) lines.push(`  ! running processes cannot be listed on this platform — make sure nothing runs in ${p.old}`);
     if (p.blockers.length > 0) {
         lines.push(`cannot relocate:`);
-        for (const b of p.blockers) lines.push(`  ✗ ${b}`);
+        for (const b of blockerTexts(p.blockers)) lines.push(`  ✗ ${b}`);
     }
     return lines.join("\n") + "\n";
 }

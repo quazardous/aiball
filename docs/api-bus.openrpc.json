@@ -3307,6 +3307,65 @@
       ]
     },
     {
+      "name": "project.rename_all",
+      "description": "`aiball project rename-all` on the bus: the name, `.aiball.yaml` and the folder, planned and applied by the same rules (src/project-rename.ts). The folder is the project's root as its loops pushed it; with several or none, the refusal lists the known ones and `cwd` names it. A human's gesture, on this machine only. Dry run unless `apply`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "new_name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "apply",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "cwd",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "dir",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "no_move",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
       "name": "project.set_standing_prompt",
       "description": "Set a project's standing instruction (null or empty clears it), and #2525 its wake focus: `focus_tickets` is checked whole, every ticket must belong to the project, before anything is written. No length cap: the UI's one-line input is what keeps it short. The change is broadcast (`project_standing_changed`, the new view) so a client that shows it follows an edit made elsewhere without reading every project again.",
       "paramStructure": "by-name",
@@ -5587,6 +5646,7 @@
           "codes": [
             "ALREADY_IMPORTED",
             "ALREADY_MODERATED",
+            "AMBIGUOUS_ROOT",
             "AUTHOR_MISMATCH",
             "AUTH_REQUIRED",
             "BAD_GATEWAY",
@@ -5617,6 +5677,7 @@
             "NOT_FOUND",
             "NOT_IDLE",
             "NOT_IMPLEMENTED",
+            "NO_ROOT",
             "PARENT_PENDING_MODERATION",
             "PAYLOAD_TOO_LARGE",
             "PROJECT_NOT_FOUND",

@@ -32,6 +32,9 @@ dates are YYYY-MM-DD.
   in aiball, its folder (with the state `relocate` moves) and its `.aiball.yaml`.
   It checks everything first, keeps the agent's name, and finishes a stopped run
   when run again.
+- `project.rename_all` on the bus does the same for a client such as tvty: a dry
+  run, then the rename, with each reason it cannot go ahead as data (a running
+  loop named, so the client can offer to stop it).
 
 ### Fixed
 

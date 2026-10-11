@@ -110,6 +110,8 @@ branch on the status's generic code, and a precise code only ever narrows it.
 |---|---|---|
 | `HOST_BUSY` | 409 | `session.start`: the agent's session already runs elsewhere (claude-loop, or a host), or a session of that name already runs; `details.host` says where. |
 | `NOT_IDLE` | 409 | `consumer.restart_claude`: Claude works; the restart waits until it is idle (or pass `when_idle`). `loop.restart` and `loop.wake`: Claude works (or pass `force`). |
+| `NO_ROOT` | 409 | `project.rename_all` without `cwd`: aiball knows no folder for the project; `details.roots` is empty. |
+| `AMBIGUOUS_ROOT` | 409 | `project.rename_all` without `cwd`: the project is known in several folders; `details.roots` lists them. |
 
 ## On the client side
 

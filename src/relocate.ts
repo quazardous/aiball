@@ -51,12 +51,24 @@ export interface RelocateEnv {
     pidAlive: (pid: number) => boolean;
 }
 
+/**
+ * #3765 — why a plan cannot be applied, as data: a client offers the gesture
+ * that fits (stopping a loop) beside the sentence the CLI prints (`text`).
+ */
+export type Blocker =
+    | { kind: "loop"; loop: string; text: string }
+    | { kind: "process" | "claude"; pid: number; cmd: string; cwd: string; text: string }
+    /** `state`: Claude's own files stand in the way (a history already at the new path, an unreadable .claude.json). */
+    | { kind: "name" | "folder" | "yaml" | "daemon" | "state"; text: string };
+
+export const blockerTexts = (blockers: Blocker[]): string[] => blockers.map((b) => b.text);
+
 export interface RelocatePlan {
     old: string;
     new: string;
     mode: "move" | "state-only";
     /** Reasons the plan cannot be applied. Empty = applicable. */
-    blockers: string[];
+    blockers: Blocker[];
     /** Transcript directories to rename: from → to. */
     transcriptDirs: Array<{ from: string; to: string }>;
     /** Files to rewrite and how many path values each carries. */
@@ -193,33 +205,35 @@ export function planRelocate(oldArg: string, newArg: string, env: RelocateEnv, o
     // In state-only mode the old folder is gone: keep the path as given, made
     // absolute, and resolve only its parent.
     const { old: oldPath, new: newPath } = resolvePaths(oldArg, newArg);
-    const blockers: string[] = [];
+    const blockers: Blocker[] = [];
+    const folder = (text: string) => blockers.push({ kind: "folder", text });
     const mode = opts.stateOnly ? "state-only" : "move";
 
-    if (oldPath === newPath) blockers.push("the old and new paths are the same");
-    if (under(newPath, oldPath)) blockers.push("the new path is inside the old one");
+    if (oldPath === newPath) folder("the old and new paths are the same");
+    if (under(newPath, oldPath)) folder("the new path is inside the old one");
     if (mode === "move") {
-        if (!existsSync(oldPath)) blockers.push(`${oldPath} does not exist — if it was already moved, pass --state-only`);
-        if (existsSync(newPath)) blockers.push(`${newPath} already exists`);
+        if (!existsSync(oldPath)) folder(`${oldPath} does not exist — if it was already moved, pass --state-only`);
+        if (existsSync(newPath)) folder(`${newPath} already exists`);
         const parent = dirname(newPath);
-        if (!existsSync(parent)) blockers.push(`${parent} does not exist`);
+        if (!existsSync(parent)) folder(`${parent} does not exist`);
         else if (existsSync(oldPath) && statSync(oldPath).dev !== statSync(parent).dev) {
-            blockers.push("the new path is on another filesystem — move the folder yourself, then run with --state-only");
+            folder("the new path is on another filesystem — move the folder yourself, then run with --state-only");
         }
     } else {
-        if (existsSync(oldPath)) blockers.push(`${oldPath} still exists — --state-only is for a folder already moved`);
-        if (!existsSync(newPath)) blockers.push(`${newPath} does not exist`);
+        if (existsSync(oldPath)) folder(`${oldPath} still exists — --state-only is for a folder already moved`);
+        if (!existsSync(newPath)) folder(`${newPath} does not exist`);
     }
 
     // Anything still running on the old path.
     const cwds = env.processCwds();
     const processCheckUnavailable = cwds === null;
     for (const p of cwds ?? []) {
-        if (under(p.cwd, oldPath)) blockers.push(`process ${p.pid} (${p.cmd}) runs in ${p.cwd}`);
+        const kind = /\bclaude\b/.test(p.cmd) ? "claude" as const : "process" as const;
+        if (under(p.cwd, oldPath)) blockers.push({ kind, pid: p.pid, cmd: p.cmd, cwd: p.cwd, text: `process ${p.pid} (${p.cmd}) runs in ${p.cwd}` });
         // A folder already moved may have a Claude session running in its new
         // place, writing the very history about to be renamed into.
         else if (mode === "state-only" && under(p.cwd, newPath) && /\bclaude\b/.test(p.cmd)) {
-            blockers.push(`claude (process ${p.pid}) runs in ${p.cwd} — quit it first`);
+            blockers.push({ kind: "claude", pid: p.pid, cmd: p.cmd, cwd: p.cwd, text: `claude (process ${p.pid}) runs in ${p.cwd} — quit it first` });
         }
     }
     const loops: RelocatePlan["loops"] = [];
@@ -238,7 +252,7 @@ export function planRelocate(oldArg: string, newArg: string, env: RelocateEnv, o
                 alive = Number.isFinite(pid) && pid > 0 && env.pidAlive(pid);
             }
             loops.push({ name, alive });
-            if (alive) blockers.push(`loop ${name} is running on ${cwd} — stop it first`);
+            if (alive) blockers.push({ kind: "loop", loop: name, text: `loop ${name} is running on ${cwd} — stop it first` });
             else rewrites.push({ file: plate, kind: "plate", count: countFieldPaths(plate, ["cwd", "pings_src"], oldPath) });
         }
     }
@@ -257,7 +271,7 @@ export function planRelocate(oldArg: string, newArg: string, env: RelocateEnv, o
             if (![...readCwds(dir)].some((c) => under(c, oldPath))) continue;
             // The key maps character by character, so the moved prefix maps too.
             const to = join(projectsDir, claudeProjectKey(newPath) + name.slice(oldKey.length));
-            if (existsSync(to)) blockers.push(`${to} already exists — Claude already has a history for the new path`);
+            if (existsSync(to)) blockers.push({ kind: "state", text: `${to} already exists — Claude already has a history for the new path` });
             transcriptDirs.push({ from: dir, to });
             for (const f of readdirSync(dir)) {
                 if (!f.endsWith(".jsonl")) continue;
@@ -291,7 +305,7 @@ export function planRelocate(oldArg: string, newArg: string, env: RelocateEnv, o
             const count = rewriteClaudeJsonProjects(JSON.parse(readFileSync(env.claudeJson, "utf8")) as Record<string, unknown>, oldPath, newPath);
             if (count > 0) rewrites.push({ file: env.claudeJson, kind: "claude-json", count });
         } catch {
-            blockers.push(`${env.claudeJson} is not valid JSON`);
+            blockers.push({ kind: "state", text: `${env.claudeJson} is not valid JSON` });
         }
     }
 
@@ -353,7 +367,7 @@ function rewriteFile(file: string, transform: (text: string) => { text: string; 
 }
 
 export function applyRelocate(plan: RelocatePlan, opts: { fixLinks?: boolean; now?: Date } = {}): ApplyResult {
-    if (plan.blockers.length > 0) throw new Error(`cannot relocate:\n  - ${plan.blockers.join("\n  - ")}`);
+    if (plan.blockers.length > 0) throw new Error(`cannot relocate:\n  - ${blockerTexts(plan.blockers).join("\n  - ")}`);
     const stamp = (opts.now ?? new Date()).toISOString().replace(/[:.]/g, "-");
     const result: ApplyResult = { moved: false, renamed: [], rewritten: [], skipped: [], relinked: [] };
 

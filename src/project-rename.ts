@@ -21,7 +21,7 @@ import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { patchIdentityStep } from "./project-init.js";
-import { applyRelocate, planRelocate, type ApplyResult, type RelocateEnv, type RelocatePlan } from "./relocate.js";
+import { applyRelocate, blockerTexts, planRelocate, type ApplyResult, type Blocker, type RelocateEnv, type RelocatePlan } from "./relocate.js";
 
 export interface RenameAllInput {
     oldName: string;
@@ -50,8 +50,8 @@ export interface RenameAllPlan {
     yaml: { file: string; project: string; agent: string | null } | "done";
     /** The folder move; null with `--no-move`. */
     relocate: RelocatePlan | null;
-    /** Reasons nothing can be applied. Empty = applicable. */
-    blockers: string[];
+    /** Reasons nothing can be applied, as data (#3765). Empty = applicable. */
+    blockers: Blocker[];
 }
 
 export interface RenameAllResult {
@@ -85,20 +85,21 @@ function mcpJsonAgent(dir: string): string | null {
 
 export async function planRenameAll(input: RenameAllInput, deps: RenameAllDeps): Promise<RenameAllPlan> {
     const { oldName, newName } = input;
-    const blockers: string[] = [];
+    const blockers: Blocker[] = [];
+    const block = (kind: "name" | "daemon" | "folder" | "yaml", text: string) => blockers.push({ kind, text });
     const from = resolve(input.from);
-    if (!oldName.trim() || !newName.trim()) blockers.push("the old and new names must not be empty");
-    if (oldName === newName) blockers.push("the old and new names are the same");
+    if (!oldName.trim() || !newName.trim()) block("name", "the old and new names must not be empty");
+    if (oldName === newName) block("name", "the old and new names are the same");
 
     // The daemon: the old name known and the new one free, or the rename already done.
     let db: RenameAllPlan["db"] = "rename";
     try {
         const names = new Set(await deps.projectNames());
-        if (names.has(oldName) && names.has(newName)) blockers.push(`project "${newName}" already exists — to merge into it, use: aiball project move ${oldName} ${newName}`);
+        if (names.has(oldName) && names.has(newName)) block("name", `project "${newName}" already exists — to merge into it, use: aiball project move ${oldName} ${newName}`);
         else if (!names.has(oldName) && names.has(newName)) db = "done";
-        else if (!names.has(oldName)) blockers.push(`project "${oldName}" does not exist`);
+        else if (!names.has(oldName)) block("name", `project "${oldName}" does not exist`);
     } catch (e) {
-        blockers.push(`the daemon cannot be reached: ${(e as Error).message}`);
+        block("daemon", `the daemon cannot be reached: ${(e as Error).message}`);
     }
 
     // The folder: where it goes, or where it already went.
@@ -106,7 +107,7 @@ export async function planRenameAll(input: RenameAllInput, deps: RenameAllDeps):
     if (!input.noMove) {
         if (input.dir) target = resolve(input.dir);
         else if (basename(from) === oldName) target = join(dirname(from), newName);
-        else blockers.push(`the folder is named "${basename(from)}", not "${oldName}" — pass --dir <new-dir>, or --no-move to leave it where it is`);
+        else block("folder", `the folder is named "${basename(from)}", not "${oldName}" — pass --dir <new-dir>, or --no-move to leave it where it is`);
     }
     let relocate: RelocatePlan | null = null;
     let home = from;
@@ -121,11 +122,11 @@ export async function planRenameAll(input: RenameAllInput, deps: RenameAllDeps):
     let yaml: RenameAllPlan["yaml"] = "done";
     const file = join(home, ".aiball.yaml");
     if (!existsSync(file)) {
-        blockers.push(`${file} does not exist — run this from the project folder, or pass --from <dir>`);
+        block("yaml", `${file} does not exist — run this from the project folder, or pass --from <dir>`);
     } else {
         const id = readIdentity(file);
         if ("error" in id) {
-            blockers.push(`${file} is not valid YAML: ${id.error}`);
+            block("yaml", `${file} is not valid YAML: ${id.error}`);
         } else if (id.project === newName) {
             yaml = "done";
         } else if (id.project === oldName || (id.project === null && [oldName, newName].includes(basename(home)))) {
@@ -135,7 +136,7 @@ export async function planRenameAll(input: RenameAllInput, deps: RenameAllDeps):
             const named = id.agent ?? mcpJsonAgent(home);
             yaml = { file, project: newName, agent: named ? null : `${oldName}-claude` };
         } else {
-            blockers.push(`${file} declares project "${id.project ?? basename(home)}", not "${oldName}"`);
+            block("yaml", `${file} declares project "${id.project ?? basename(home)}", not "${oldName}"`);
         }
     }
 
@@ -144,7 +145,7 @@ export async function planRenameAll(input: RenameAllInput, deps: RenameAllDeps):
 
 /** Apply a plan with no blockers: the daemon, then the file, then the folder. */
 export async function applyRenameAll(plan: RenameAllPlan, deps: Pick<RenameAllDeps, "renameProject">, opts: { fixLinks?: boolean; now?: Date } = {}): Promise<RenameAllResult> {
-    if (plan.blockers.length > 0) throw new Error(`cannot rename:\n  - ${plan.blockers.join("\n  - ")}`);
+    if (plan.blockers.length > 0) throw new Error(`cannot rename:\n  - ${blockerTexts(plan.blockers).join("\n  - ")}`);
     const stamp = (opts.now ?? new Date()).toISOString().replace(/[:.]/g, "-");
     const result: RenameAllResult = { renamed: null, yaml: null, relocated: null };
     if (plan.db === "rename") result.renamed = await deps.renameProject(plan.old, plan.new);
