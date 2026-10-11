@@ -12,16 +12,20 @@
 import { fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { RenameAllInput, RenameAllPlan, RenameAllResult } from "./project-rename.js";
+import type { RelocateEnv } from "./relocate.js";
+import { relocateEnv } from "./relocate-env.js";
 
+/** The machine's paths, as the daemon sees them: the child's own environment may differ (a test's isolation preload). */
+type Paths = Pick<RelocateEnv, "claudeDir" | "claudeJson" | "loopRoot" | "scanRoots">;
 type Job =
-    | { op: "plan"; input: RenameAllInput; names: string[] }
+    | { op: "plan"; input: RenameAllInput; names: string[]; paths?: Paths }
     | { op: "apply"; plan: RenameAllPlan };
 type Answer = { ok: true; value: unknown } | { ok: false; error: string };
 
 const CHILD_FLAG = "--aiball-rename-worker";
 
 /** Run one job in a child process; its answer, or its error. */
-export function inWorker(job: { op: "plan"; input: RenameAllInput; names: string[] }): Promise<RenameAllPlan>;
+export function inWorker(job: { op: "plan"; input: RenameAllInput; names: string[]; paths?: Paths }): Promise<RenameAllPlan>;
 export function inWorker(job: { op: "apply"; plan: RenameAllPlan }): Promise<RenameAllResult>;
 export function inWorker(job: Job): Promise<unknown> {
     return new Promise((resolve, reject) => {
@@ -35,6 +39,10 @@ export function inWorker(job: Job): Promise<unknown> {
         });
         child.once("error", reject);
         child.once("exit", (code) => { if (!answered) reject(new Error(`the rename's child process exited with ${code} before answering`)); });
+        if (job.op === "plan" && !job.paths) {
+            const { claudeDir, claudeJson, loopRoot, scanRoots } = relocateEnv([]);
+            job = { ...job, paths: { claudeDir, claudeJson, loopRoot, scanRoots } };
+        }
         child.send(job);
     });
 }
@@ -42,11 +50,10 @@ export function inWorker(job: Job): Promise<unknown> {
 async function run(job: Job): Promise<unknown> {
     const { applyRenameAll, planRenameAll } = await import("./project-rename.js");
     if (job.op === "plan") {
-        const { relocateEnv } = await import("./relocate-env.js");
         return planRenameAll(job.input, {
             projectNames: async () => job.names,
             renameProject: async () => { throw new Error("the database is renamed in the daemon"); },
-            relocateEnv: relocateEnv([]),
+            relocateEnv: { ...relocateEnv([]), ...job.paths },
         });
     }
     // The database step is done already: only the file and the folder are left.
