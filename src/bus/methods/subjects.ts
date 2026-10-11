@@ -18,6 +18,7 @@ import { drainPrompts } from "../../loop-prompts.js";
 import { presenceConnect, presenceDisconnect, presenceElsewhere } from "../../live-presence.js";
 import { onCounters, refreshCounters } from "../../agent-counters.js";
 import { wakeFocusHidesTicket } from "../../db/backlog-rules.js";
+import { listProjectTicketIds } from "../../db/tickets.js";
 import { parseMeta } from "../../questions.js";
 import { buildInboxRow, buildInboxRowContext, inboxRowDeadline, type InboxRowContext } from "../../queries/inbox-row.js";
 import { buildPilotFacts, pilotFields } from "../../queries/inbox-pilot.js";
@@ -441,6 +442,16 @@ onBroadcast((ev) => {
 export function ticketMoved(t: Pick<Message, "id" | "project">, type: string, message: unknown): void {
     publish(`ticket.${t.id}`, { type, message });
     publish("tickets", { ticket_id: t.id, project: t.project } satisfies TicketMoved);
+}
+
+/**
+ * #3764 — a project renamed: all its tickets changed project at once, and the
+ * board broadcasts only `project_renamed`. Each one is moved, so every view
+ * builds its row again: under the new name, out of the old project's view (the
+ * remove names the old project, as the view had it).
+ */
+export function projectRenamed(newName: string): void {
+    for (const id of listProjectTicketIds(newName)) publish("tickets", { ticket_id: id, project: newName } satisfies TicketMoved);
 }
 
 // ---- the methods --------------------------------------------------------------

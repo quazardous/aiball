@@ -59,6 +59,14 @@ export function listTicketIdsInProject(project: string, ids: number[]): number[]
         .all().map((r) => r.id);
 }
 
+/** #3764 — every ticket of `project`, by id. */
+export function listProjectTicketIds(project: string): number[] {
+    return getDb().select({ id: schema.tickets.id }).from(schema.tickets)
+        .where(eq(schema.tickets.project, project))
+        .orderBy(asc(schema.tickets.id))
+        .all().map((r) => r.id);
+}
+
 export function getTicketTitles(ids: number[]): Map<number, string> {
     const out = new Map<number, string>();
     if (ids.length === 0) return out;

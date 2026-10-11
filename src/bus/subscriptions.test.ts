@@ -317,3 +317,28 @@ test("#3089 a pings subscription resumed with since still gets its pings, and le
     await c.call("bus.unsubscribe", { id: two[1].id });
     assert.equal(pingSourceCountForTests("worker"), null);
 });
+
+test("#3764 — a project renamed: its rows move under the new name in every view, and a later remove names the new project", async () => {
+    createProject({ name: "p-old" });
+    upsertSubscription("boss", "p-old", "owner");
+    const t = submitMessage({ project: "p-old", kind: "ticket_created", title: "renamed", body: "b", by_agent: "boss" }).id;
+    const all = await open("boss");
+    await all.call<Sub>("bus.subscribe", { subject: "project.*.tickets", open: true });
+    const old = await open("boss");
+    await old.call<Sub>("bus.subscribe", { subject: "project.p-old.tickets", open: true });
+    await all.call("project.rename", { name: "p-old", new_name: "p-new" });
+    await all.settle();
+    await old.settle();
+    const mine = (e: Ev) => (e.data as { id?: number }).id === t || (e.data as { row?: { id: number } }).row?.id === t;
+    const moved = all.events.filter(mine).at(-1);
+    assert.equal(moved?.subject, "project.p-new.tickets", "every view: the row comes under the new name");
+    assert.equal((moved?.data as { row: { project: string } }).row.project, "p-new");
+    assert.deepEqual(old.events.filter(mine).at(-1)?.data, { op: "remove", id: t, project: "p-old" }, "the old project's view lets it go");
+    // The view now holds the row under its new project: closing it removes it there.
+    const proposal = submitMessage({ project: "p-new", kind: "comment_added", ticket_id: t, parent_id: t, body: "done", decision_kind: "resolution", summary_until: "done", by_agent: "boss" } as never);
+    await all.call("message.decide", { id: proposal.id, status: "accepted" });
+    await all.settle();
+    const gone = all.events.filter(mine).at(-1);
+    assert.deepEqual(gone?.data, { op: "remove", id: t, project: "p-new" });
+    assert.equal(gone?.subject, "project.p-new.tickets");
+});

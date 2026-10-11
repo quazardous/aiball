@@ -35,6 +35,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Renaming a project moves its tickets in the views a client is subscribed to:
+  each row comes under the new name at once, instead of only once it changes.
 - An agent's session no longer starts at 80×24 when the daemon starts it: it
   starts at the size it had last, or at the one a client passes (`size` on
   `session.start` and `loop.restart`, `--size` on `claude-loop start` and

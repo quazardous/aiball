@@ -184,7 +184,9 @@ created after the subscription, with a `value` keyed by agent or project
 its fields change with time alone — `hot` cooling, a step going stale, a claim's
 hold or a snooze ending — and the daemon pushes the row at that moment: a
 client never has to read the list again. A ticket that leaves the view (closed
-in an `open` view, moved to another project) comes as a `remove`. The view is
+in an `open` view, moved to another project) comes as a `remove`. A project
+renamed moves every one of its tickets: each row comes again under the new
+name, and leaves the old project's view as a `remove`. The view is
 always sent whole again on `since`: the rows it held could have left it while
 the client was away.
 

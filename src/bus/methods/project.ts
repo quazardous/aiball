@@ -27,6 +27,7 @@ import { focusRelatives } from "../../db/focus-relatives.js";
 import { projectCriticalTicket } from "../../db/critical-ticket.js";
 import { outboxPath } from "../../paths.js";
 import { broadcast } from "../../ws.js";
+import { projectRenamed } from "./subjects.js";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { ERROR_CODES } from "../../domain.js";
@@ -159,6 +160,8 @@ defineMethod({
             }
         } catch { /* best effort: the DB is the source of truth */ }
         broadcast({ type: "project_renamed", data: { old: result.old_name, new: result.new_name } });
+        // #3764 — and the views of the tickets hear each of them under its new name.
+        projectRenamed(result.new_name);
         return { ...result, ok: true };
     },
 });
