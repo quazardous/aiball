@@ -197,7 +197,8 @@ defineMethod({
         if (from === undefined) {
             // A rename already half done (the old name gone) knows its root under the new name.
             const known = listProjects().includes(p.name) ? p.name : p.new_name;
-            const roots = [...new Set(listProjectsDetailed().filter((x) => x.name === known).flatMap((x) => x.roots ?? []))];
+            // A loop on another machine (a node) pushes its root too: only this machine's count here.
+            const roots = [...new Set(listProjectsDetailed().filter((x) => x.name === known).flatMap((x) => x.roots ?? []))].filter((r) => isAbsolute(r));
             if (roots.length !== 1) {
                 throw roots.length === 0
                     ? new Refusal(409, `no folder is known for project "${p.name}" — pass cwd`, ERROR_CODES.NO_ROOT, { roots })

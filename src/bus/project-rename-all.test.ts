@@ -83,6 +83,12 @@ test("no known folder, or several: refused with the roots as data; cwd names it"
     const several = await refused(run({ name: "two", new_name: "three" }));
     assert.equal(several.code, "AMBIGUOUS_ROOT");
     assert.deepEqual(((several as { details?: { roots: string[] } }).details?.roots ?? []).sort(), [a, b]);
+    // Another machine's root (a Windows node) is not this machine's folder: it does not count.
+    const solo = join(home, "solo", "solo");
+    project("solo", [solo]);
+    upsertConsumer({ consumer_id: "solo-on-windows", kind: "agent" });
+    getDb().update(schema.consumers).set({ project: "solo", cwd: "C:\\Users\\x\\solo" }).where(eq(schema.consumers.consumerId, "solo-on-windows")).run();
+    assert.equal((await run({ name: "solo", new_name: "solo2" })).plan.folder?.from, solo);
     const named = await run({ name: "two", new_name: "three", cwd: a, dir: join(home, "two", "three") });
     assert.deepEqual(named.blockers, []);
     assert.equal(named.plan.folder?.from, a);
