@@ -15,6 +15,7 @@ import { getTicketStages, type TicketStage } from "./tickets.js";
 import { listTypedRelationsForTicket } from "./messages.js";
 import { listSubscriptions } from "./subscriptions.js";
 import { isHuman } from "./consumers.js";
+import { deadResumes, describeWaits, waitCycles } from "./wait-graph.js";
 import { ensureGraphFresh, MENTION_KIND, type FreshResult } from "./graph-compile.js";
 
 /**
@@ -249,6 +250,10 @@ export function ticketNeighbors(
 }
 
 export type FindingKind =
+    /** #3811 — tickets that wait on each other (`depends_on` and `resume_on` mixed): none will move first. */
+    | "wait_cycle"
+    /** #3811 — a step whose `resume_on` names a ticket closed before it: it never wakes on it. */
+    | "dead_resume"
     /** Open, but every ticket it is written about is closed — its cohort left without it. */
     | "stale_open"
     /** Open child under a closed parent. */
@@ -610,6 +615,27 @@ export function graphAudit(
             citation: adj.get(comp[0])?.values().next().value ?? null,
         });
     }
+
+    // 5 — #3811: waits that can never end. First in the list: every ticket
+    // in them sleeps, and nothing else on the board says so.
+    const stuck: Finding[] = [];
+    for (const c of waitCycles(open.map((t) => t.id))) {
+        stuck.push({
+            kind: "wait_cycle",
+            ticket_ids: c.ids,
+            detail: `these tickets wait on each other, so none will move first: ${c.edges.map((e) => describeWaits([e])).join(", ")}`,
+            citation: null,
+        });
+    }
+    for (const d of deadResumes(open.map((t) => t.id))) {
+        stuck.push({
+            kind: "dead_resume",
+            ticket_ids: [d.waiter, d.on],
+            detail: `its step resumes on #${d.on}, which was closed before it: that wake never comes (the step still ends on its own after a week)`,
+            citation: null,
+        });
+    }
+    findings.unshift(...stuck);
 
     return {
         findings: opts.limit ? findings.slice(0, opts.limit) : findings,

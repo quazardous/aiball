@@ -41,6 +41,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A step can no longer resume on a ticket that will never move: `resume_on.ticket`
+  is refused when that ticket is closed, or when it already waits on this one
+  (through `depends_on` or its own `resume_on`). `graph_audit` reports the waits
+  of this kind already on the board, first: `wait_cycle` and `dead_resume`.
 - An agent is no longer told again about tickets it was already told were closed:
   a wake delivered at the end of a turn now marks its whole group of closures as
   read, not only the first one.

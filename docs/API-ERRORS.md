@@ -83,7 +83,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `STEP_RESUME_REQUIRED` | 400 | `then: continue` without `resume_on`. |
 | `STEP_TIMER_TOO_LONG` | 400 | `resume_on.timer` above the project's maximum (`tickets.steps.max_wait`). |
 | `CONFIG_OUT_OF_RANGE` | 400 | `config.set`: a number outside the setting's range. `details` carries `min`, `max`, `step` and `unit`, as `config.managed` gives them. |
-| `STEP_RESUME_INVALID` | 400 | `resume_on.ticket` is not a ticket, or is this very one. |
+| `STEP_RESUME_INVALID` | 400 | `resume_on.ticket` is not a ticket, is this very one, is closed, or already waits on this one (down its `depends_on` and its own `resume_on`). |
 | `STEP_NOT_HOLDER` | 409 | `then: continue` from an agent that does not hold the ticket. |
 | `FORBIDDEN_CLOSE` | 403 | Closing a ticket the caller may not close. Also on `POST /api/messages/:id/accept-and-close`. |
 

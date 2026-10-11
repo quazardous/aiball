@@ -29,6 +29,7 @@ import { ERROR_CODES, PRIORITIES, DECISION_EVENT_KINDS, isDecisionEventKind, typ
 import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { purgeSeenPingsForTicket } from "./db.js";
 import { isTicketClosed } from "./db/messages.js";
+import { describeWaits, resumeWouldCycle } from "./db/wait-graph.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { DECISION_GESTURES, isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, type DecisionKind, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
@@ -90,6 +91,23 @@ export function summaryOverBudget(length: number, max: number): string {
 }
 
 /**
+ * #3811 — a `resume_on.ticket` that can never wake: the ticket is closed (only a
+ * reopen would move it), or it waits, down its `depends_on` and its own
+ * `resume_on`, on the ticket the step is posted on. Neither moves first.
+ */
+function deadResumeRefusal(ticketId: number, on: number): { error: string; code: ErrorCode } | null {
+    if (isTicketClosed(on)) {
+        return { code: ERROR_CODES.STEP_RESUME_INVALID, error: `resume_on.ticket: #${on} is closed — nothing will move it but a reopen. Resume on a timer, or depends_on the ticket you wait for` };
+    }
+    const back = resumeWouldCycle(ticketId, on);
+    if (!back) return null;
+    return {
+        code: ERROR_CODES.STEP_RESUME_INVALID,
+        error: `resume_on.ticket: #${on} already waits on this ticket (${describeWaits(back)}), so neither would ever move first. Do the step that unblocks #${on}, or resume on a timer`,
+    };
+}
+
+/**
  * #2275 / #2331 — an agent's comment must say what it does to the ticket: carry
  * a decision or a step (`then`), which implies the handback, or say explicitly
  * whether it hands the ticket back (`handback`). A `handback` that contradicts
@@ -125,7 +143,7 @@ export function withoutDecisionRefusal(msg: NewMessage, caller: string): { error
                 ? { code: ERROR_CODES.STEP_RESUME_INVALID, error: `resume_on.ticket: #${resumeTicket} is not a ticket` }
                 : resumeTicket !== undefined && resumeTicket === msg.ticket_id
                     ? { code: ERROR_CODES.STEP_RESUME_INVALID, error: "resume_on.ticket names this very ticket: a step waits on another one" }
-                    : null;
+                    : resumeTicket !== undefined && msg.ticket_id != null ? deadResumeRefusal(msg.ticket_id, resumeTicket) : null;
     const handback = handbackRefusal({
         decisionKind: msg.decision_kind,
         step: msg.step === true,

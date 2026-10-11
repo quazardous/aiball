@@ -273,7 +273,8 @@ when you pick it up again — a step without `resume_on` is refused:
   waiting, and nothing wakes you for it. A job of about 20 minutes: 10.
 - **waiting on another ticket** → `resume_on: { ticket: M }`: back when M
   moves (a reply, a decision, a close), at no credit. Add a `timer` for a
-  fallback: whichever comes first.
+  fallback: whichever comes first. M must be able to move: a closed M, or an
+  M that already waits on this ticket, is refused.
 
 **Every comment says its commits.** `commits` is required on a comment: the SHAs
 it delivers (`commits: ["9e32067"]`), or `commits: null` when it delivers none.

@@ -181,7 +181,7 @@ export const ERROR_CODES = {
     STEP_RESUME_REQUIRED: "STEP_RESUME_REQUIRED",
     /** #3039 — `resume_on.timer` above the project's maximum. */
     STEP_TIMER_TOO_LONG: "STEP_TIMER_TOO_LONG",
-    /** #3039 — `resume_on.ticket` names no ticket, or this very one. */
+    /** #3039 — `resume_on.ticket` names no ticket, or this very one. #3811 — or a closed one, or one that waits on this one. */
     STEP_RESUME_INVALID: "STEP_RESUME_INVALID",
     CONFIG_OUT_OF_RANGE: "CONFIG_OUT_OF_RANGE",
     /** #3039 — a lineage relation that would close a cycle. */
