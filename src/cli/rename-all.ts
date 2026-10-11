@@ -52,7 +52,7 @@ export function registerRenameAllCommand(project: Command): void {
                     lines.push(plan.db === "done" ? "  aiball: already renamed" : `  aiball: rename "${plan.old}" → "${plan.new}" across all tables`);
                     if (plan.yaml === "done") lines.push("  .aiball.yaml: already names the new project");
                     else lines.push(`  ${plan.yaml.file}: consumer.project: ${plan.yaml.project}`
-                        + (plan.yaml.agent ? `, consumer.agent: ${plan.yaml.agent} (the agent keeps its name)` : ""));
+                        + (plan.yaml.agent ? `, consumer.agent: ${plan.yaml.agent} (the agent keeps its name; aiball agent rename renames it)` : ""));
                     lines.push(plan.relocate ? indent(fmtPlan({ ...plan.relocate, blockers: [] })) : "  folder: left where it is");
                     if (plan.blockers.length > 0) lines.push("cannot rename:", ...blockerTexts(plan.blockers).map((b) => `  ✗ ${b}`));
                     else lines.push("dry run — nothing changed; pass --apply to do it");

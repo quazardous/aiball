@@ -423,6 +423,19 @@ aiball project rename-all darktable-helios helios --apply
 - **Starting again**: a step already done is skipped (the project already renamed, the file already patched, the folder already moved). If a run stops, fix the cause and run the same command again.
 - **Left by hand**: the remote repository, if its name follows the project, and the files the dry run lists as still mentioning the old path.
 
+### Renaming an agent
+
+`aiball project rename-all` keeps the agent's name. To rename the agent too, stop its loop, then:
+
+```bash
+aiball --human agent rename dt-helios-claude helios-claude           # dry run
+aiball --human agent rename dt-helios-claude helios-claude --apply
+```
+
+- **Everywhere**: its id in every table, its history included (its comments, its decisions, its claims and assignments), so its tickets stay its own under the new name. Its loops' plate and env, its session host's folder and `consumer.agent` in their `.aiball.yaml` follow, each rewritten file with a `.bak-rename-<date>` copy.
+- **Onto an existing agent**: when the new name already exists (an agent renamed by hand in `.aiball.yaml`, whose claims stayed on the old name), the old one is merged into it.
+- **Refusals**: while one of its loops or its session host runs, for a human, or for a name that does not exist. Run it again to finish a run that stopped.
+
 ## What's NOT in the Linux path
 
 - **macOS launchd unit**. The installer skips it (no `launchctl`

@@ -1038,6 +1038,43 @@
       ]
     },
     {
+      "name": "consumer.rename",
+      "description": "Rename an agent: its id rewritten in every table, history included, in one transaction; onto an agent that exists already, merged into it. A dry run unless `apply`: the rows it would change per `table.column`, and why it cannot (`refusals`, the old agent's loop still connected among them). The machine's side (the loop's plate and env, its session host, the folder's `.aiball.yaml`) is `aiball agent rename`'s. A human's gesture.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "consumer_id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "new_id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "apply",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
       "name": "consumer.restart_claude",
       "description": "Restart an agent's Claude after it installed an update of itself (the bar says `alerts.restart_needed`). A loop control. Refused while Claude works (`NOT_IDLE`: a turn is never cut); the loop waits for idle again, restarts Claude resuming its conversation, and tells the agent once it is back. `when_idle`: ordered while Claude works, the restart is held by the loop until its next idle, however long; its bar says `alerts.restart_pending` meanwhile, and a second order changes nothing. `cancel`: withdraw the held order. The loop does not restart Claude, `restart_pending` goes back to false (`restart_needed` stays). Answers `cancelled`: whether the agent's bar said a restart was waiting (null through a proxy node, which holds no bar); without one it is a no-op, not an error.",
       "paramStructure": "by-name",

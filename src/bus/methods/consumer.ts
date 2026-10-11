@@ -9,6 +9,7 @@ import { spoolPrompt, drainPrompts } from "../../loop-prompts.js";
 import { pickHoldTargets, type LoopHoldResult, type LoopScope } from "../../loop-hold.js";
 import { runningLoopAgents } from "./loop.js";
 import { AGENT_TYPES, setAfkHold, type AfkHold, type AgentType } from "../../db/consumers.js";
+import { agentRenameFacts, agentRenameRefusals, renameAgent } from "../../db/agent-rename.js";
 import { broadcast } from "../../ws.js";
 import { cachedCounters, markCountersDirty, refreshCounters } from "../../agent-counters.js";
 import { sessionFor, tmuxSessionView, viewOf } from "../../sessions/registry.js";
@@ -465,6 +466,31 @@ defineMethod({
         deleteConsumer(p.consumer_id);
         broadcast({ type: "consumer_changed", data: { consumer_id: p.consumer_id, deleted: true } });
         return { consumer_id: p.consumer_id, deleted: true };
+    },
+});
+
+/**
+ * #3760 — rename an agent: its id rewritten in every table, history included,
+ * in one transaction; onto an agent that exists already, merged into it. A
+ * dry run unless `apply`: the rows it would change per `table.column`, and why
+ * it cannot (`refusals`, the old agent's loop still connected among them).
+ * The machine's side (the loop's plate and env, its session host, the
+ * folder's `.aiball.yaml`) is `aiball agent rename`'s. A human's gesture.
+ */
+defineMethod({
+    name: "consumer.rename",
+    who: ["human"],
+    params: z.object({ consumer_id: z.string().min(1), new_id: z.string().min(1), apply: z.boolean().optional() }),
+    run: (_c, p) => {
+        const facts = agentRenameFacts(p.consumer_id, p.new_id);
+        const refusals = agentRenameRefusals(p.consumer_id, p.new_id, facts);
+        if (isPresent(p.consumer_id)) refusals.push(`a loop of ${p.consumer_id} is connected — stop it first`);
+        if (p.apply !== true || refusals.length > 0) return { applied: false, merge: facts.new.exists, rows: facts.rows, refusals };
+        const result = renameAgent(p.consumer_id, p.new_id);
+        console.log(`[consumer] renamed ${p.consumer_id} → ${p.new_id}${result.merged ? " (merged into the existing agent)" : ""}: ${Object.entries(result.rows).map(([k, n]) => `${k}=${n}`).join(" ")}`);
+        broadcast({ type: "consumer_changed", data: { consumer_id: p.consumer_id, deleted: true, renamed_to: p.new_id } });
+        broadcast({ type: "consumer_changed", data: { consumer_id: p.new_id, renamed_from: p.consumer_id } });
+        return { applied: true, merge: result.merged, rows: result.rows, refusals: [] };
     },
 });
 

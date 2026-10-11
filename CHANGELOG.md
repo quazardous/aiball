@@ -35,6 +35,9 @@ dates are YYYY-MM-DD.
 - `project.rename_all` on the bus does the same for a client such as tvty: a dry
   run, then the rename, with each reason it cannot go ahead as data (a running
   loop named, so the client can offer to stop it).
+- `aiball agent rename <old> <new>` renames an agent everywhere: its id in every
+  table, history included, its loops and its session host; onto an agent that
+  already exists (renamed by hand), it merges the old one into it.
 
 ### Fixed
 

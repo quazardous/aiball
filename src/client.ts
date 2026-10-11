@@ -1098,7 +1098,11 @@ export class AiballClient {
      * Cascades via the daemon's transactional helper (db/projects.ts:
      * renameProject). 404 / 409 / 400 surface as `http()` errors.
      */
-    renameProject(oldName: string, newName: string) {
+    /** #3760 — rename an agent in every table (a dry run unless `apply`). */
+    renameConsumer(oldId: string, newId: string, apply: boolean) {
+        return this.call<{ applied: boolean; merge: boolean; rows: Record<string, number>; refusals: string[] }>("consumer.rename", { consumer_id: oldId, new_id: newId, apply });
+    }
+        renameProject(oldName: string, newName: string) {
         return this.call<{
             ok: boolean;
             old_name: string;

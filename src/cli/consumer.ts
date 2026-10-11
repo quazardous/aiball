@@ -66,6 +66,53 @@ export function registerConsumerCommands(program: Command): void {
             out(r, gOpts(cmd), (x) => `agent ${id}: type ${x.agent_type ?? "?"}, can-claim ${x.can_claim ?? "?"}\n  the MCP server reads the type at start-up: restart the agent's loop for it to apply`);
         });
 
+    // #3760 — rename an agent: the daemon's tables (consumer.rename), then the
+    // machine's side (src/agent-rename-machine.ts). Human only.
+    agent
+        .command("rename <old> <new>")
+        .description(
+            "Rename an agent everywhere: its id in every table (history included; onto an existing agent, merged into it), "
+            + "its loops' plate and env, its session host's folder and consumer.agent in their .aiball.yaml. Dry run by default; "
+            + "--apply does it. Refused while one of its loops or its host runs. Human only (run with --human).",
+        )
+        .option("--apply", "Carry the plan out (default: dry run)")
+        .action(async (oldId: string, newId: string, opts: { apply?: boolean }, cmd) => {
+            const { agentMachineEnv, applyAgentMachine, planAgentMachine } = await import("../agent-rename-machine.js");
+            const client = buildClient(gOpts(cmd));
+            const machine = planAgentMachine(oldId, newId, agentMachineEnv());
+            const db = await client.renameConsumer(oldId, newId, false);
+            // A rename that stopped after the tables: the old id is gone, the new one holds it all.
+            const dbDone = db.refusals.length === 1 && /does not exist/.test(db.refusals[0]) && machine.loops.length + machine.yamls.length > 0;
+            const blockers = [...(dbDone ? [] : db.refusals), ...machine.blockers];
+            const lines = [`rename agent ${oldId} → ${newId}${db.merge ? ` (merged into the existing ${newId})` : ""}`];
+            if (dbDone) lines.push("  aiball: already renamed");
+            else lines.push(`  aiball: ${Object.entries(db.rows).map(([k, n]) => `${k}=${n}`).join(" ") || "no rows"}`);
+            for (const l of machine.loops) lines.push(`  loop ${l.name}: plate and env`);
+            for (const y of machine.yamls) lines.push(`  ${y}: consumer.agent: ${newId}`);
+            if (machine.host) lines.push(`  session host: ${machine.host.from} → ${machine.host.to}`);
+            for (const n of machine.notes) lines.push(`  ! ${n}`);
+            if (!opts.apply || blockers.length > 0) {
+                if (blockers.length > 0) lines.push("cannot rename:", ...blockers.map((b) => `  ✗ ${b}`));
+                else lines.push("dry run — nothing changed; pass --apply to do it");
+                out({ applied: false, db, machine }, gOpts(cmd), () => lines.join("\n"));
+                if (blockers.length > 0) process.exit(1);
+                return;
+            }
+            try {
+                const applied = dbDone ? null : await client.renameConsumer(oldId, newId, true);
+                if (applied && applied.refusals.length > 0) die(`agent rename: ${applied.refusals.join("; ")}`);
+                const done = applyAgentMachine(oldId, newId, machine);
+                out({ applied: true, db: applied, machine: done }, gOpts(cmd), () => [
+                    `renamed agent ${oldId} → ${newId}`,
+                    ...done.rewritten.map((r) => `  rewrote ${r.file} (backup ${r.backup})`),
+                    ...(done.movedHost ? [`  moved ${done.movedHost.from} → ${done.movedHost.to}`] : []),
+                    `start its loop again: claude-loop start (or restart) in its folder`,
+                ].join("\n"));
+            } catch (e) {
+                die(`agent rename: ${(e as Error).message}\nfix it, then run the same command again: the steps already done are skipped`);
+            }
+        });
+
     program
         .command("whoami")
         .description("Print the consumer_id used here (identity only — for daemon health use `aiball status`, for full config audit use `aiball check`)")
