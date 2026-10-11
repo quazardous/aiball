@@ -18,7 +18,7 @@ test("a parent started as bin/aiball-daemon starts it (tsx registered in process
     writeFileSync(join(dir, ".aiball.yaml"), "consumer:\n  project: alpha\n");
     const worker = fileURLToPath(new URL("./project-rename-worker.ts", import.meta.url));
     const script = `
-        const { register } = await import("tsx/esm/api");
+        const { register } = await import(${JSON.stringify(import.meta.resolve("tsx/esm/api"))});
         register();
         const { inWorker } = await import(${JSON.stringify(worker)});
         const plan = await inWorker({ op: "plan", input: { oldName: "alpha", newName: "beta", from: ${JSON.stringify(dir)} }, names: ["alpha"],
@@ -26,12 +26,11 @@ test("a parent started as bin/aiball-daemon starts it (tsx registered in process
         process.stdout.write(JSON.stringify({ db: plan.db, to: plan.relocate?.new, blockers: plan.blockers.length }));
         process.exit(0);
     `;
-    // Bare flags, as the launcher's daemon has them: no tsx anywhere. The script sits in the checkout, so it finds tsx.
-    const repo = fileURLToPath(new URL("..", import.meta.url));
-    const file = join(repo, `.tmp-3765-launcher-${process.pid}.mjs`);
+    // Bare flags, as the launcher's daemon has them: no tsx anywhere. The script imports tsx by its path, so it
+    // can sit in a temporary folder (the checkout is read-only in the test container).
+    const file = join(root, "launcher.mjs");
     writeFileSync(file, script);
-    let r;
-    try { r = spawnSync(process.execPath, [file], { cwd: repo, encoding: "utf8", timeout: 60_000 }); } finally { rmSync(file, { force: true }); }
+    const r = spawnSync(process.execPath, [file], { cwd: root, encoding: "utf8", timeout: 60_000 });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), { db: "rename", to: join(root, "p", "beta"), blockers: 0 });
 });
