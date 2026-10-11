@@ -219,3 +219,18 @@ test("a file that changes while it is rewritten is left alone and reported", () 
         syncBuiltinESMExports();
     }
 });
+
+test("#3765 — a transcript is read line by line: a line and a character across the chunks, the last line without a newline", async () => {
+    const { forEachLine } = await import("./relocate.js");
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "aiball-3765-lines-")));
+    ROOTS.push(root);
+    const file = join(root, "big.jsonl");
+    // "é" is 2 bytes in UTF-8: placed so that it straddles the 1 MB chunk boundary.
+    const first = "a".repeat((1 << 20) - 1) + "é" + "b".repeat(10);
+    const lines = [first, JSON.stringify({ cwd: "/x/é" }), "x".repeat(1_500_000), "tail without newline"];
+    writeFileSync(file, lines.join("\n"));
+    const seen: Array<[string, boolean]> = [];
+    forEachLine(file, (line, last) => seen.push([line, last]));
+    assert.deepEqual(seen.map(([l]) => l), lines);
+    assert.deepEqual(seen.map(([, last]) => last), [false, false, false, true]);
+});

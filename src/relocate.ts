@@ -21,20 +21,25 @@
  * file that changes while it is rewritten is left alone and reported.
  */
 import {
+    closeSync,
     copyFileSync,
     existsSync,
     lstatSync,
+    openSync,
     readdirSync,
     readFileSync,
     readlinkSync,
+    readSync,
     realpathSync,
     renameSync,
     statSync,
     symlinkSync,
     unlinkSync,
     writeFileSync,
+    writeSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 export interface RelocateEnv {
     /** `~/.claude` */
@@ -158,21 +163,51 @@ export function rewriteClaudeJsonProjects(json: Record<string, unknown>, oldPath
     return Object.keys(projects).filter((k) => under(k, oldPath)).length;
 }
 
+/**
+ * #3765 — each line of a file, read in chunks: a transcript can be larger than
+ * the longest string Node makes (512 MB), and reading it whole threw. The last
+ * line is visited with `last` true, so a rewrite keeps whether it ended in "\n".
+ */
+export function forEachLine(file: string, visit: (line: string, last: boolean) => void): void {
+    const fd = openSync(file, "r");
+    try {
+        const buf = Buffer.alloc(1 << 20);
+        const decoder = new StringDecoder("utf8");
+        let rest = "";
+        for (let n = readSync(fd, buf, 0, buf.length, null); n > 0; n = readSync(fd, buf, 0, buf.length, null)) {
+            const lines = (rest + decoder.write(buf.subarray(0, n))).split("\n");
+            rest = lines.pop()!;
+            for (const line of lines) visit(line, false);
+        }
+        rest += decoder.end();
+        if (rest !== "") visit(rest, true);
+    } finally {
+        closeSync(fd);
+    }
+}
+
 function readCwds(dir: string): Set<string> {
     const cwds = new Set<string>();
     for (const f of readdirSync(dir)) {
         if (!f.endsWith(".jsonl")) continue;
-        const text = readFileSync(join(dir, f), "utf8");
-        // #3299 — decoded: a Windows path is escaped in the JSON text.
-        for (const m of text.matchAll(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
-            try { cwds.add(JSON.parse(`"${m[1]}"`) as string); } catch { /* not a JSON string */ }
-        }
+        forEachLine(join(dir, f), (line) => {
+            if (!line.includes('"cwd"')) return;
+            // #3299 — decoded: a Windows path is escaped in the JSON text.
+            for (const m of line.matchAll(/"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+                try { cwds.add(JSON.parse(`"${m[1]}"`) as string); } catch { /* not a JSON string */ }
+            }
+        });
     }
     return cwds;
 }
 
 function countFieldPaths(file: string, fields: string[], oldPath: string): number {
-    return rewriteFieldPaths(readFileSync(file, "utf8"), fields, oldPath, oldPath).count;
+    const needle = JSON.stringify(oldPath).slice(1, -1);
+    let count = 0;
+    forEachLine(file, (line) => {
+        if (line.includes(needle)) count += rewriteFieldPaths(line, fields, oldPath, oldPath).count;
+    });
+    return count;
 }
 
 function walk(root: string, visit: (path: string, isLink: boolean) => void, depth = 6): void {
@@ -366,6 +401,36 @@ function rewriteFile(file: string, transform: (text: string) => { text: string; 
     return { count, backup };
 }
 
+/** #3765 — the same, line by line, for a file too large to hold as one string (a transcript). */
+function rewriteLines(file: string, transform: (line: string) => { text: string; count: number }, stamp: string): { count: number; backup: string } | { reason: string } {
+    const before = statSync(file);
+    const tmp = `${file}.tmp-relocate-${stamp}`;
+    const out = openSync(tmp, "w", before.mode & 0o777);
+    let count = 0;
+    try {
+        forEachLine(file, (line, last) => {
+            const r = transform(line);
+            count += r.count;
+            writeSync(out, last ? r.text : r.text + "\n");
+        });
+    } finally {
+        closeSync(out);
+    }
+    if (count === 0) {
+        unlinkSync(tmp);
+        return { reason: "nothing to rewrite" };
+    }
+    const backup = `${file}.bak-relocate-${stamp}`;
+    copyFileSync(file, backup);
+    const after = statSync(file);
+    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+        unlinkSync(tmp);
+        return { reason: "changed while it was being rewritten — left as is, run again" };
+    }
+    renameSync(tmp, file);
+    return { count, backup };
+}
+
 export function applyRelocate(plan: RelocatePlan, opts: { fixLinks?: boolean; now?: Date } = {}): ApplyResult {
     if (plan.blockers.length > 0) throw new Error(`cannot relocate:\n  - ${blockerTexts(plan.blockers).join("\n  - ")}`);
     const stamp = (opts.now ?? new Date()).toISOString().replace(/[:.]/g, "-");
@@ -394,8 +459,8 @@ export function applyRelocate(plan: RelocatePlan, opts: { fixLinks?: boolean; no
                 const count = rewriteClaudeJsonProjects(json, plan.old, plan.new);
                 return { text: JSON.stringify(json, null, 2), count };
             }, stamp)
-            : rewriteFile(file, (text) => rewriteFieldPaths(
-                text,
+            : rewriteLines(file, (line) => rewriteFieldPaths(
+                line,
                 r.kind === "history" ? ["project"] : r.kind === "plate" ? ["cwd", "pings_src"] : ["cwd"],
                 plan.old,
                 plan.new,

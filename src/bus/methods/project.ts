@@ -206,21 +206,18 @@ defineMethod({
             }
             from = roots[0];
         }
-        const { applyRenameAll, planRenameAll } = await import("../../project-rename.js");
-        const { relocateEnv } = await import("../../relocate-env.js");
-        const deps = {
-            projectNames: async () => listProjects(),
-            renameProject: async (a: string, b: string) => renameEverywhere(a, b),
-            relocateEnv: relocateEnv([]),
-        };
-        const plan = await planRenameAll({ oldName: p.name, newName: p.new_name, from, dir: p.dir, noMove: p.no_move === true }, deps);
+        // #3765 — the machine's reads and writes in a worker: Claude's history can be hundreds of MB.
+        const { inWorker } = await import("../../project-rename-worker.js");
+        const plan = await inWorker({ op: "plan", input: { oldName: p.name, newName: p.new_name, from, dir: p.dir, noMove: p.no_move === true }, names: listProjects() });
         const view = {
             db: plan.db,
             yaml: plan.yaml,
             folder: plan.relocate ? { from: plan.relocate.old, to: plan.relocate.new, mode: plan.relocate.mode } : null,
         };
         if (p.apply !== true || plan.blockers.length > 0) return { applied: false, plan: view, blockers: plan.blockers };
-        const result = await applyRenameAll(plan, deps);
+        const renamed = plan.db === "rename" ? renameEverywhere(p.name, p.new_name) : null;
+        const files = await inWorker({ op: "apply", plan });
+        const result = { ...files, renamed };
         // The roots the loops pushed follow the folder.
         const roots = plan.relocate ? relocateConsumerRoots(plan.relocate.old, plan.relocate.new) : 0;
         return { applied: true, plan: view, blockers: [], result: { ...result, roots } };
