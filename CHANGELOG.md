@@ -41,6 +41,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A full disk no longer takes the daemon or the loops down: a write that fails for
+  want of space is lost and said once a minute, and they carry on once space is back.
 - A loop on the session host whose kernel died while its Claude ran on (a daemon
   crash takes them down together) comes back: the daemon reloads it at start,
   `claude-loop reload` and `loop.reload` reload it by hand, and `loop.list` says

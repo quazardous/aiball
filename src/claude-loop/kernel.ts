@@ -41,6 +41,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
+import { surviveDiskFull } from "../disk-full.js";
 import { PhaseReport } from "./phase-report.js";
 import { appendFileSync, existsSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -3252,6 +3253,9 @@ async function restartClaudeForUpdate(whenIdle: boolean): Promise<void> {
 }
 
 async function main(): Promise<void> {
+    // #3774 — a full disk loses a log line or a state write, not the kernel: on
+    // 2026-10-11 every kernel died with the disk, their Claude left undriven.
+    surviveDiskFull("kernel");
     // #388: SIGHUP = hard self-restart. The timer can't rm+start itself inline
     // (rm kills its own tmux session AND this very pid mid-handler), so delegate
     // to a DETACHED `claude-loop restart <name>` that survives the teardown,

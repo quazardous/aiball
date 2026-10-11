@@ -19,6 +19,10 @@ import { loadProxy, loadProxyTokens, startProxyWsClient } from "./proxy.js";
 import { attachProxyWs } from "./proxy-ws.js";
 import { checkForUpdatesAtBoot } from "./api/version-routes.js";
 import { dropClaudeSessionEnv } from "./claude-loop/inherited-env.js";
+import { surviveDiskFull } from "./disk-full.js";
+
+// #3774 — a full disk loses a write, not the daemon (a SQLITE_FULL from a timer killed it).
+surviveDiskFull("daemon");
 
 /**
  * #407 — SIGUSR2 = reload config in place, no downtime (driven by `aiball
