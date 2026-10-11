@@ -28,6 +28,10 @@ dates are YYYY-MM-DD.
 - The agent bar carries the subscription's usage (the 5-hour and weekly windows:
   percent used and when each resets), as Claude Code gives it to its status line;
   the loop relays it through a status line of its own that still runs yours.
+- `aiball project rename-all <old> <new>` renames a project in one run: its name
+  in aiball, its folder (with the state `relocate` moves) and its `.aiball.yaml`.
+  It checks everything first, keeps the agent's name, and finishes a stopped run
+  when run again.
 
 ### Fixed
 

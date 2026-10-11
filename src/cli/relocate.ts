@@ -45,7 +45,21 @@ function pidAlive(pid: number): boolean {
     }
 }
 
-function fmtPlan(p: RelocatePlan): string {
+/** The real machine: home, Claude's state, the loops, /proc. */
+export function relocateEnv(scan: string[]): RelocateEnv {
+    const home = homedir();
+    return {
+        // CLAUDE_CONFIG_DIR moves both: the state dir and the .claude.json inside it.
+        claudeDir: process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"),
+        claudeJson: process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json"),
+        loopRoot: process.env.CLAUDE_LOOP_STATE_ROOT ?? join(home, ".claude-loop"),
+        scanRoots: [join(home, ".local", "bin"), join(home, "bin"), ...scan],
+        processCwds: procCwds,
+        pidAlive,
+    };
+}
+
+export function fmtPlan(p: RelocatePlan): string {
     const lines = [`relocate ${p.old} → ${p.new} (${p.mode})`];
     if (p.mode === "move") lines.push(`  folder: rename`);
     for (const d of p.transcriptDirs) lines.push(`  claude history dir: ${d.from} → ${d.to}`);
@@ -61,7 +75,7 @@ function fmtPlan(p: RelocatePlan): string {
     return lines.join("\n") + "\n";
 }
 
-function fmtApplied(r: ApplyResult, p: RelocatePlan): string {
+export function fmtApplied(r: ApplyResult, p: RelocatePlan): string {
     const lines = [`relocated ${p.old} → ${p.new}`];
     for (const d of r.renamed) lines.push(`  moved ${d.from} → ${d.to}`);
     for (const w of r.rewritten) lines.push(`  rewrote ${w.count} in ${w.file} (backup ${w.backup})`);
@@ -89,16 +103,7 @@ export function registerRelocateCommands(program: Command): void {
         .option("--json", "Machine-readable JSON output")
         .action(async (oldArg: string, newArg: string, opts: { apply?: boolean; stateOnly?: boolean; scan: string[]; fixLinks?: boolean; json?: boolean }, cmd: Command) => {
             const { applyRelocate, planRelocate } = await import("../relocate.js");
-            const home = homedir();
-            const env: RelocateEnv = {
-                // CLAUDE_CONFIG_DIR moves both: the state dir and the .claude.json inside it.
-                claudeDir: process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"),
-                claudeJson: process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json"),
-                loopRoot: process.env.CLAUDE_LOOP_STATE_ROOT ?? join(home, ".claude-loop"),
-                scanRoots: [join(home, ".local", "bin"), join(home, "bin"), ...opts.scan],
-                processCwds: procCwds,
-                pidAlive,
-            };
+            const env = relocateEnv(opts.scan);
             const json = opts.json || gOpts(cmd).json;
             const plan = planRelocate(oldArg, newArg, env, { stateOnly: opts.stateOnly === true });
             if (!opts.apply || plan.blockers.length > 0) {

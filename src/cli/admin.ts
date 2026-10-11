@@ -17,6 +17,7 @@ import {
     out,
     userCwd,
 } from "./_helpers.js";
+import { registerRenameAllCommand } from "./rename-all.js";
 
 
 /** #2172 — above this many tickets, `project move` demands --yes. Low on
@@ -151,6 +152,9 @@ export function registerAdminCommands(program: Command): void {
             const r = await client.renameProject(oldName, newName);
             out(r, gOpts(cmd), (x) => `project "${x.old_name}" renamed to "${x.new_name}" (tickets:${x.tickets} subs:${x.subscriptions} rules:${x.automation_rules} consumers:${x.consumers})`);
         });
+
+    // #3759 — the name, the folder and `.aiball.yaml` in one run.
+    registerRenameAllCommand(project);
 
     // #2172 — fold a project INTO another one. `rename` already covers the
     // case where the destination does not exist, and refuses outright when it

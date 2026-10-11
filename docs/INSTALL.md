@@ -408,6 +408,21 @@ aiball relocate ~/dev/projects/old/app ~/dev/projects/new/app --state-only --app
 
 Claude Code's files are internal and undocumented; the dry run is how you check a newer Claude Code has not changed them.
 
+### Renaming a project
+
+Renaming a project usually means three changes: its name in aiball, its folder, and `consumer.project` in its `.aiball.yaml`. `aiball project rename-all` does all three, from the project folder:
+
+```bash
+aiball project rename-all darktable-helios helios           # dry run: prints the plan, changes nothing
+aiball project rename-all darktable-helios helios --apply
+```
+
+- **Order**: the name in aiball first (as `aiball project rename` does), then `.aiball.yaml` (with a `.bak-relocate-<date>` copy), then the folder (as `aiball relocate` does). Everything that would stop a step is checked before the first one, so a refusal leaves nothing half renamed. A loop running in the folder is one: stop it first.
+- **Folder**: it goes to `<parent>/<new>` when it is named after the old project. Otherwise pass `--dir <new-dir>`, or `--no-move` to leave it where it is. `--from <dir>` names the project folder when you are not in it. `--scan` and `--fix-links` work as for `relocate`.
+- **The agent keeps its name**: when `.aiball.yaml` does not set `consumer.agent`, the agent's name comes from the project (`<project>-claude`), so the command writes the old one there. Without that, the renamed project would start a new agent, without the old one's tickets.
+- **Starting again**: a step already done is skipped (the project already renamed, the file already patched, the folder already moved). If a run stops, fix the cause and run the same command again.
+- **Left by hand**: the remote repository, if its name follows the project, and the files the dry run lists as still mentioning the old path.
+
 ## What's NOT in the Linux path
 
 - **macOS launchd unit**. The installer skips it (no `launchctl`
