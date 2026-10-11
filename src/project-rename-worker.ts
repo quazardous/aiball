@@ -24,12 +24,23 @@ type Answer = { ok: true; value: unknown } | { ok: false; error: string };
 
 const CHILD_FLAG = "--aiball-rename-worker";
 
+/**
+ * The child's flags: the parent's, and tsx's loader when they do not carry it.
+ * A daemon started by `bin/aiball-daemon` registers tsx through its API, in
+ * process: nothing in its `execArgv` says so, and a child forked bare could not
+ * load a `.ts` (every rename_all answered INTERNAL there). `tsx watch` passes
+ * the loader as flags, which the child inherits.
+ */
+export function childExecArgv(execArgv: string[] = process.execArgv, loader: string = import.meta.resolve("tsx/esm")): string[] {
+    return execArgv.some((a) => a.includes("tsx")) ? execArgv : [...execArgv, "--import", loader];
+}
+
 /** Run one job in a child process; its answer, or its error. */
 export function inWorker(job: { op: "plan"; input: RenameAllInput; names: string[]; paths?: Paths }): Promise<RenameAllPlan>;
 export function inWorker(job: { op: "apply"; plan: RenameAllPlan }): Promise<RenameAllResult>;
 export function inWorker(job: Job): Promise<unknown> {
     return new Promise((resolve, reject) => {
-        const child = fork(fileURLToPath(import.meta.url), [CHILD_FLAG], { serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] });
+        const child = fork(fileURLToPath(import.meta.url), [CHILD_FLAG], { execArgv: childExecArgv(), serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"] });
         let answered = false;
         child.once("message", (m: Answer) => {
             answered = true;
