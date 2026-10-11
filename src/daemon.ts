@@ -147,6 +147,9 @@ function main(): void {
     if (core || relay) {
         void initSessions()
             .then((n) => { if (n > 0) console.log(`took back ${n} session host(s)`); })
+            // #3778 — a crash takes the kernels down with the daemon, Claude in the
+            // host runs on: bring back the kernel of each loop taken back without one.
+            .then(async () => { if (core) await (await import("./bus/methods/loop.js")).respawnDeadKernels(); })
             .catch((e) => console.error("session hosts:", e));
     }
 

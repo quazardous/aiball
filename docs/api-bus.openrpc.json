@@ -1705,6 +1705,35 @@
       "x-machine": true
     },
     {
+      "name": "loop.reload",
+      "description": "Reload a loop, as `claude-loop reload` does: its kernel respawned, Claude left running, on the session host as in tmux. The way back for a loop whose Claude runs and whose kernel died (`kernel: false` in `loop.list`). A loop that does not run is `LOOP_NOT_FOUND`: that one needs `loop.restart`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "agent",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
       "name": "loop.remove",
       "description": "Forget a stopped loop, as `claude-loop rm` does: its state dir goes, and it leaves `loop.list` (`loop.<name>.state` turns `null` at once). A loop that runs is refused (`CONFLICT`): it is stopped first. A host session of its agent left without its command goes too. The project's folder, its `.aiball.yaml` and `.aiball-session_id`, its tickets and the agent stay: a client forgets the agent with `consumer.delete`, and starts a fresh conversation with `fresh`.",
       "paramStructure": "by-name",

@@ -9,7 +9,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { isMachineLocal } from "../../machine-secret.js";
 import { join, resolve } from "node:path";
-import { rmSync, statSync, watch, type FSWatcher } from "node:fs";
+import { readFileSync, rmSync, statSync, watch, type FSWatcher } from "node:fs";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { defineSubject, publish } from "../subscriptions.js";
@@ -69,6 +69,24 @@ export interface LoopView {
      */
     clients: number | null;
     interactive: number | null;
+    /**
+     * #3778 — whether the loop's kernel (its timer: wakes, bar, presence) runs.
+     * A loop that runs with no kernel has its Claude alive and nothing driving
+     * it: `loop.reload` brings the kernel back, Claude left as it is.
+     */
+    kernel: boolean;
+}
+
+/** #3778 — the loop's kernel is alive: its `loop.pid`, a live process. */
+function kernelAlive(name: string): boolean {
+    try {
+        const pid = Number(readFileSync(join(loopStateRoot(), name, "loop.pid"), "utf8").trim());
+        if (!Number.isFinite(pid) || pid <= 0) return false;
+        process.kill(pid, 0);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function lastSeenAt(name: string): string | null {
@@ -121,6 +139,7 @@ function loopView(e: LoopEntry, live: LiveTmux = null): Omit<LoopView, "supersed
         interactive: !running ? null : link ? link.interactive : agent ? tmuxClientsOf(agent)?.interactive ?? null : null,
         started_at: e.plate.created_at ?? null,
         last_seen_at: lastSeenAt(e.name),
+        kernel: running && kernelAlive(e.name),
         at: e.at,
     };
 }
@@ -389,6 +408,52 @@ defineMethod({
         return { name: loop.name, requested: true };
     },
 });
+
+/** Run `claude-loop <args>` off the daemon's loop; null when it exits 0, else why it did not. */
+function runClaudeLoop(args: string[], timeout = 30_000): Promise<string | null> {
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, ...args], { stdio: "ignore", timeout });
+        child.on("error", (e) => resolve(e.message));
+        child.on("exit", (code, signal) => resolve(code === 0 ? null : `exit ${code ?? signal}`));
+    });
+}
+
+/**
+ * #3778 — reload a loop, as `claude-loop reload` does: its kernel respawned,
+ * Claude left running, on the session host as in tmux. The way back for a loop
+ * whose Claude runs and whose kernel died (`kernel: false` in `loop.list`). A
+ * loop that does not run is `LOOP_NOT_FOUND`: that one needs `loop.restart`.
+ */
+defineMethod({
+    name: "loop.reload",
+    ...HUMAN_HERE,
+    params: z.object({ name: z.string().optional(), agent: z.string().optional() }),
+    run: async (caller, p) => {
+        localOnly(caller);
+        if (!p.name === !p.agent) throw new Refusal(400, "name or agent: one of them", ERROR_CODES.BAD_REQUEST);
+        const loop = findLoop(p);
+        if (!loopView(loop).running) throw new Refusal(404, `the loop ${loop.name} does not run: restart it`, ERROR_CODES.LOOP_NOT_FOUND);
+        const failure = await runClaudeLoop(["reload", loop.name]);
+        if (failure) throw new Refusal(500, `claude-loop reload failed: ${failure}`, ERROR_CODES.INTERNAL);
+        return withoutAt({ ...loopView(loop), superseded: false });
+    },
+});
+
+/**
+ * #3778 — at the daemon's start, after it took its session hosts back: each
+ * loop on the host whose Claude runs and whose kernel died with the daemon
+ * (a crash takes them down together) is reloaded. Returns their names.
+ */
+export async function respawnDeadKernels(): Promise<string[]> {
+    const dead = loopViews().filter((v) => v.mode === "host" && v.running && !v.kernel && !v.superseded).map((v) => v.name);
+    const done: string[] = [];
+    for (const name of dead) {
+        const failure = await runClaudeLoop(["reload", name]);
+        if (failure) console.error(`[loops] could not respawn the kernel of ${name}: ${failure}`);
+        else { console.log(`[loops] respawned the kernel of ${name}: its Claude ran on, nothing drove it`); done.push(name); }
+    }
+    return done;
+}
 
 /** The loop's launcher, next to the daemon's source. */
 const CLAUDE_LOOP_BIN = resolve(import.meta.dirname, "..", "..", "..", "bin", "claude-loop");

@@ -39,7 +39,7 @@ const restart = getMethod("loop.restart")!;
 test("loop.list: every loop of the machine, stopped ones included, with its agent, mode and what to open", async () => {
     const byName = Object.fromEntries((await list()).map((l) => [l.name, l]));
     assert.deepEqual(Object.keys(byName).sort(), ["cl-h1", "cl-old", "cl-rc", "cl-t1"]);
-    assert.deepEqual(byName["cl-t1"], { name: "cl-t1", cwd: "/w/cl-t1", agent: "t-one", project: "demo", role: "crew", mode: "tmux", running: false, remote_control: false, model: null, afk_hold: "off", tmux: tmuxName("cl-t1"), clients: null, interactive: null, started_at: "2026-09-28T00:00:00Z", last_seen_at: null, superseded: false });
+    assert.deepEqual(byName["cl-t1"], { name: "cl-t1", cwd: "/w/cl-t1", agent: "t-one", project: "demo", role: "crew", mode: "tmux", running: false, remote_control: false, model: null, afk_hold: "off", tmux: tmuxName("cl-t1"), clients: null, interactive: null, started_at: "2026-09-28T00:00:00Z", last_seen_at: null, superseded: false, kernel: false });
     assert.equal(byName["cl-rc"].remote_control, "phone", "#3254 — Claude's Remote Control, as the loop started");
     assert.equal(byName["cl-h1"].mode, "host");
     assert.equal(byName["cl-h1"].running, false, "no host runs for it");
@@ -49,6 +49,28 @@ test("loop.list: every loop of the machine, stopped ones included, with its agen
 test("a loop in tmux whose session is there is running", async () => {
     spawnSync("tmux", ["new-session", "-d", "-s", tmuxName("cl-t1"), "sleep 60"], { stdio: "ignore" });
     assert.equal((await list()).find((l) => l.name === "cl-t1")?.running, true);
+});
+
+test("#3778 — kernel: whether a running loop's kernel is alive (its loop.pid), so a client tells a loop with no one driving its Claude", async () => {
+    const pidFile = join(home, "loops", "cl-t1", "loop.pid");
+    writeFileSync(pidFile, String(process.pid));
+    assert.equal((await list()).find((l) => l.name === "cl-t1")?.kernel, true);
+    writeFileSync(pidFile, "999999999");
+    assert.equal((await list()).find((l) => l.name === "cl-t1")?.kernel, false, "a dead pid: Claude runs, nothing drives it");
+    assert.equal((await list()).find((l) => l.name === "cl-h1")?.kernel, false, "a loop that does not run has no kernel to speak of");
+});
+
+test("#3778 — loop.reload refuses a loop not here, a stopped one (that one needs a restart), and TCP", async () => {
+    const reload = getMethod("loop.reload")!;
+    assert.equal((await refused(() => reload.run(human, { name: "cl-nope" }))).code, "NOT_FOUND");
+    assert.equal((await refused(() => reload.run(human, { name: "cl-h1" }))).code, "LOOP_NOT_FOUND");
+    assert.equal((await refused(() => reload.run(human, {}))).code, "BAD_REQUEST");
+    assert.equal((await refused(() => reload.run(testCaller("boss", { kind: "human", transport: "tcp" }), { name: "cl-t1" }))).status, 403);
+});
+
+test("#3778 — at start, only host loops whose Claude runs and whose kernel died are reloaded: none here", async () => {
+    const { respawnDeadKernels } = await import("./methods/loop.js");
+    assert.deepEqual(await respawnDeadKernels(), [], "a tmux loop is not the host's to adopt, a stopped host loop has no Claude to drive");
 });
 
 test("loop.restart refuses: a loop not here, both or neither of name/agent, over TCP, and a running loop whose Claude works", async () => {
