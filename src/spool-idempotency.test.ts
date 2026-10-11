@@ -64,3 +64,17 @@ test("a replay goes through message.post's guards: an agent comment with neither
     assert.equal(comments(), before, "not posted");
     assert.equal(readdirSync(SPOOL_FAILED_DIR).length, 1, "kept in failed/ with the refusal");
 });
+
+test("#3777 — a write the client could not deliver is spooled with its author, and the drain posts it as theirs", async () => {
+    const { AiballClient } = await import("./client.js");
+    // No daemon at that address: the write falls to the spool.
+    const client = new AiballClient({ agentId: "worker", url: "http://127.0.0.1:9", timeoutMs: 300 });
+    const { by_agent: _b, ...noAuthor } = comment("spooled by the client", "key-3777-aaaa");
+    const r = await client.postMessage(noAuthor) as { queued?: boolean; file?: string };
+    assert.equal(r.queued, true);
+    const before = comments();
+    assert.equal(await drainSpool(), 1);
+    assert.equal(comments(), before + 1, "posted, not refused into failed/");
+    const last = getDb().select().from(schema.messages).where(eq(schema.messages.ticketId, ticket)).all().at(-1)!;
+    assert.equal(last.byAgent, "worker", "under the client's own name");
+});

@@ -70,6 +70,9 @@ export interface PendingListOpts {
     limit?: number;
 }
 
+/** #3777 — how long a write waits for the daemon before it is spooled. */
+const POST_TIMEOUT_MS = 15_000;
+
 export class AiballClient {
     readonly url: string;
     readonly home: string;
@@ -182,7 +185,7 @@ export class AiballClient {
      *   may have run), no `status`, so `postMessage` spools it as it spools a
      *   request cut after its bytes left.
      */
-    protected call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    protected call<T = unknown>(method: string, params: Record<string, unknown> = {}, timeoutMs: number = this.timeoutMs): Promise<T> {
         return withRetry(async () => {
             const bus = await this.bus().catch((e: Error & { code?: string }) => {
                 // The daemon answered the opening, and refused it (a token it does not know…).
@@ -191,7 +194,7 @@ export class AiballClient {
             });
             let timer: NodeJS.Timeout | undefined;
             const timeout = new Promise<never>((_r, reject) => {
-                timer = setTimeout(() => reject(new Error(`bus ${method} → timeout after ${this.timeoutMs}ms`)), this.timeoutMs);
+                timer = setTimeout(() => reject(new Error(`bus ${method} → timeout after ${timeoutMs}ms`)), timeoutMs);
                 timer.unref();
             });
             try {
@@ -334,13 +337,18 @@ export class AiballClient {
         // with the message it made, not posted twice.
         msg = { ...msg, idempotency_key: msg.idempotency_key ?? randomUUID() };
         try {
-            return await this.call("message.post", msg);
+            // #3777 — a write waits out a daemon busy for a second or two (its
+            // stalls) instead of falling to the spool at the 2 s read budget.
+            return await this.call("message.post", msg, Math.max(this.timeoutMs, POST_TIMEOUT_MS));
         } catch (e) {
             const status = (e as { status?: number }).status;
             if (typeof status === "number" && status >= 400 && status < 500) {
                 throw e;
             }
-            return this.spoolDrop(msg);
+            // #3777 — the bus knows the author by the connection; the spool has
+            // none, and its drain refuses a message without one: the comment
+            // was lost. The spooled copy names its author.
+            return this.spoolDrop({ by_agent: this.agentId, ...msg });
         }
     }
 

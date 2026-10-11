@@ -41,6 +41,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A comment an agent wrote while the daemon was slow or away is no longer lost:
+  a write waits up to 15 s, and one queued for later carries its author, so it is
+  posted once the daemon is back.
 - A full disk no longer takes the daemon or the loops down: a write that fails for
   want of space is lost and said once a minute, and they carry on once space is back.
 - A loop on the session host whose kernel died while its Claude ran on (a daemon
