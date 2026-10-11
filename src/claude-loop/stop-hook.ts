@@ -16,7 +16,7 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_SOCK_KIND, PANE_BUSY_DELAY_MS, humanPresentHold, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_SOCK_KIND, PANE_BUSY_DELAY_MS, humanPresentHold, ackDeliveredWake, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, latestModel, latestSessionFile, projectTranscriptDir } from "./token-capture.js";
@@ -299,7 +299,7 @@ function classifyTurn(): string {
         log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
         if (gate.has) {
             const phraseClient = new AiballClient();
-            const { phrase, headMessageId, backlogTicketId } = await buildContextPhrase(
+            const { phrase, headMessageId, backlogTicketId, extraSeenIds } = await buildContextPhrase(
                 phraseClient,
                 process.env.AIBALL_PROJECT ?? null,
                 pingsPath(sd!),
@@ -333,9 +333,8 @@ function classifyTurn(): string {
                     at_ms: Date.now(),
                     busy_defer_until_ms: tempoUntilMs,
                 });
-                if (headMessageId) {
-                    void phraseClient.markMessageSeen(headMessageId).catch(() => {});
-                }
+                // #3791 — the head and the rest of its bundle, as the kernel acks them.
+                ackDeliveredWake(phraseClient, { headMessageId, extraSeenIds });
                 // #786 — backlog cooldown clock (see timer.ts sendKeys).
                 if (backlogTicketId) {
                     void phraseClient.recordBacklogWake(backlogTicketId).catch(() => {});

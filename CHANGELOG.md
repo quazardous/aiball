@@ -41,6 +41,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- An agent is no longer told again about tickets it was already told were closed:
+  a wake delivered at the end of a turn now marks its whole group of closures as
+  read, not only the first one.
 - A comment an agent wrote while the daemon was slow or away is no longer lost:
   a write waits up to 15 s, and one queued for later carries its author, so it is
   posted once the daemon is back.
