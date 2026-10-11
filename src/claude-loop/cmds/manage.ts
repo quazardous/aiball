@@ -54,6 +54,7 @@ import { remoteControlFlags, type RemoteControl } from "../remote-control.js";
 import { resolveBashCmd } from "../resolve-bash.js";
 import { spawnKernel } from "../kernel-spawn.js";
 import { dropInheritedLoopEnv } from "../inherited-env.js";
+import { CL_ENV } from "../env-vars.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -372,13 +373,23 @@ export function reloadSpawnEnv(
         : { ...own, [REATTACH_ENV_VAR]: "1" };
 }
 
+/**
+ * #3778 — the session host's control socket a reloaded kernel drives, for a
+ * loop on the host: what `start` hands its kernel (`CL_HOST_CONTROL`), from
+ * the folder the plate records. Null for a tmux loop.
+ */
+export function hostKernelEnv(sd: string, onHost: boolean): Record<string, string> {
+    if (!onHost) return {};
+    const dir = readPlate(sd).host_dir;
+    if (!dir) die(`the loop at ${sd} runs on the session host but its plate records no host_dir — restart it with 'restart --resume <name> --host'`);
+    return { [CL_ENV.HOST_CONTROL]: join(dir, "control.sock") };
+}
+
 export async function cmdReload(name: string, opts?: { set?: string[] }): Promise<void> {
-    if (!tmuxAlive(name)) {
-        if (liveHostAgent(stateDirFor(name))) {
-            die(`loop '${name}' runs on the daemon's session host: reload respawns a tmux loop's timer — use 'restart --resume ${name} --host'`);
-        }
-        die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);
-    }
+    // #3778 — a loop on the session host reloads too: its kernel is respawned
+    // and drives the host again; the host and Claude in it are left running.
+    const onHost = !tmuxAlive(name) && liveHostAgent(stateDirFor(name)) !== null;
+    if (!tmuxAlive(name) && !onHost) die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);
     const sd = stateDirFor(name);
     if (!existsSync(platePath(sd))) die(`no state dir at ${sd}`);
     if (!existsSync(envPath(sd))) die(`no env file at ${envPath(sd)} — loop is broken, use rm + start`);
@@ -482,7 +493,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     // in afk-service.ts etc.). Null = nothing to preserve, cold boot.
     // #1059 — REATTACH marks the new kernel as resuming a live claude (no
     // bootstrap re-inject ; seed NOT-AFK-10min if the AFK snapshot is lost).
-    const pid = spawnKernel(sd, root, tsxBin, reloadSpawnEnv(process.env, snapshotsJson));
+    const pid = spawnKernel(sd, root, tsxBin, { ...reloadSpawnEnv(process.env, snapshotsJson), ...hostKernelEnv(sd, onHost) });
 
     const killed = oldPid !== null ? ` (killed old pid ${oldPid})` : "";
     const restored = snapshotsJson ? " (xstate snapshots restored)" : "";
