@@ -116,7 +116,7 @@ test("loop.list dates each loop and marks a stopped loop its agent has replaced"
 
     const row = (name: string, agent: string | null, running: boolean, started_at: string) => ({
         name, cwd: "/w", agent, project: null, role: null, mode: "tmux" as const, running, remote_control: false,
-        model: null, afk_hold: "off" as const, clients: null, interactive: null, started_at, last_seen_at: null, at: 0,
+        model: null, afk_hold: "off" as const, clients: null, interactive: null, started_at, last_seen_at: null, kernel: false, at: 0,
     });
     const marked = markSuperseded([
         row("later-stopped", "a", false, "2026-09-29T16:00:00Z"),
