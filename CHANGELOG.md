@@ -50,8 +50,8 @@ dates are YYYY-MM-DD.
   crash takes them down together) comes back: the daemon reloads it at start,
   `claude-loop reload` and `loop.reload` reload it by hand, and `loop.list` says
   `kernel: false` meanwhile. Claude is not restarted.
-- Renaming a project moves its tickets in the views a client is subscribed to:
-  each row comes under the new name at once, instead of only once it changes.
+- Renaming a project moves its tickets and its agents in the views a client is
+  subscribed to: each comes under the new name at once, instead of only once it changes.
 - An agent's session no longer starts at 80×24 when the daemon starts it: it
   starts at the size it had last, or at the one a client passes (`size` on
   `session.start` and `loop.restart`, `--size` on `claude-loop start` and

@@ -979,9 +979,9 @@ export interface ProjectRenameResult {
 /**
  * #3765 — a project folder moved: the roots the loops pushed (`consumers.cwd`)
  * follow it, so the project stays "local" at its new place before its loop
- * reports again. Returns how many consumers it changed.
+ * reports again. Returns the consumers it changed.
  */
-export function relocateConsumerRoots(oldPath: string, newPath: string): number {
+export function relocateConsumerRoots(oldPath: string, newPath: string): string[] {
     const db = getDb();
     const rows = db.select({ id: schema.consumers.consumerId, cwd: schema.consumers.cwd }).from(schema.consumers)
         .where(sql`${schema.consumers.cwd} = ${oldPath} OR ${schema.consumers.cwd} LIKE ${oldPath + "/%"}`)
@@ -991,7 +991,7 @@ export function relocateConsumerRoots(oldPath: string, newPath: string): number 
             .where(eq(schema.consumers.consumerId, r.id)).run();
     }
     if (rows.length > 0) invalidateProjectsDetailed();
-    return rows.length;
+    return rows.map((r) => r.id);
 }
 
 export function renameProject(oldName: string, newName: string): ProjectRenameResult {

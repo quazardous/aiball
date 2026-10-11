@@ -186,7 +186,7 @@ hold or a snooze ending — and the daemon pushes the row at that moment: a
 client never has to read the list again. A ticket that leaves the view (closed
 in an `open` view, moved to another project) comes as a `remove`. A project
 renamed moves every one of its tickets: each row comes again under the new
-name, and leaves the old project's view as a `remove`. The view is
+name, and leaves the old project's view as a `remove`; each of its agents' entries comes again on `agent.<id>.state` (and on the board's `consumer_changed`), as does an agent's whose folder `project.rename_all` moved. The view is
 always sent whole again on `since`: the rows it held could have left it while
 the client was away.
 

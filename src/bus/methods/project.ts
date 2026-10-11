@@ -19,6 +19,7 @@ import {
     getProjectStats,
     listProjects,
     listProjectsDetailed,
+    listConsumers,
     renameProject,
 } from "../../db.js";
 import { relocateConsumerRoots } from "../../db/projects.js";
@@ -133,6 +134,11 @@ defineMethod({
     },
 });
 
+/** #3780 — each of these consumers' entry changed: `agent.<id>.state` (and the board) hear it. */
+function agentsChanged(ids: string[]): void {
+    for (const consumer_id of ids) broadcast({ type: "consumer_changed", data: { consumer_id } });
+}
+
 /** The rename itself, its broadcast and its rows moved in the views. #3765 — shared by `project.rename` and `project.rename_all`. */
 function renameEverywhere(name: string, newName: string) {
     let result: ReturnType<typeof renameProject>;
@@ -154,6 +160,8 @@ function renameEverywhere(name: string, newName: string) {
     broadcast({ type: "project_renamed", data: { old: result.old_name, new: result.new_name } });
     // #3764 — and the views of the tickets hear each of them under its new name.
     projectRenamed(result.new_name);
+    // #3780 — and its agents: their entry (agent.<id>.state) names the new project.
+    agentsChanged(listConsumers().filter((c) => c.project === result.new_name).map((c) => c.consumer_id));
     return result;
 }
 
@@ -219,7 +227,10 @@ defineMethod({
         const files = await inWorker({ op: "apply", plan });
         const result = { ...files, renamed };
         // The roots the loops pushed follow the folder.
-        const roots = plan.relocate ? relocateConsumerRoots(plan.relocate.old, plan.relocate.new) : 0;
+        const moved = plan.relocate ? relocateConsumerRoots(plan.relocate.old, plan.relocate.new) : [];
+        // #3780 — their entry carries the folder too.
+        agentsChanged(moved);
+        const roots = moved.length;
         return { applied: true, plan: view, blockers: [], result: { ...result, roots } };
     },
 });

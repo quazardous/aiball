@@ -342,3 +342,19 @@ test("#3764 — a project renamed: its rows move under the new name in every vie
     assert.deepEqual(gone?.data, { op: "remove", id: t, project: "p-new" });
     assert.equal(gone?.subject, "project.p-new.tickets");
 });
+
+test("#3780 — a project renamed: its agents' entries are pushed on agent.*.state under the new project", async () => {
+    createProject({ name: "p-agents-old" });
+    upsertSubscription("boss", "p-agents-old", "owner");
+    upsertConsumer({ consumer_id: "renamed-agent", kind: "agent" });
+    const { getDb } = await import("../db/connection.js");
+    const schema = await import("../schema.js");
+    const { eq } = await import("drizzle-orm");
+    getDb().update(schema.consumers).set({ project: "p-agents-old" }).where(eq(schema.consumers.consumerId, "renamed-agent")).run();
+    const c = await open("boss");
+    await c.call<Sub>("bus.subscribe", { subject: "agent.*.state" });
+    await c.call("project.rename", { name: "p-agents-old", new_name: "p-agents-new" });
+    await c.settle();
+    const pushed = c.events.filter((e) => e.subject === "agent.renamed-agent.state").at(-1);
+    assert.equal((pushed?.data as { project?: string } | undefined)?.project, "p-agents-new");
+});
