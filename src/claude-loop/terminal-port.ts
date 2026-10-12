@@ -12,6 +12,7 @@ import { captureCursor, captureCursorSync } from "../pane.js";
 import { injectRawBytes, injectWakePhrase, MUX_CMD } from "./state.js";
 import { muxRun } from "./mux-async.js";
 import { CL_ENV } from "./env-vars.js";
+import { findPromptZone, promptInputEmpty } from "./pane-watchers/prompt-zone-watcher.js";
 
 export interface ScreenSnapshot {
     text: string;
@@ -30,7 +31,9 @@ export interface TerminalPort {
     /** #3461 — `screen`, without holding the process while the multiplexer answers: the kernel's. */
     readScreen(): Promise<ScreenSnapshot>;
     /** A wake phrase, then Enter, delivered as the loop's own (never a human's) keys. */
-    inject(phrase: string, onWillInject?: () => void): Promise<boolean>;
+    /** `onEnter` runs right before each Enter (#3923: it may come seconds after
+     *  the phrase), so the submit it causes still reads as the loop's own. */
+    inject(phrase: string, onWillInject?: () => void, onEnter?: () => void): Promise<boolean>;
     /** Raw bytes to Claude: a key such as Esc, Enter or an arrow. */
     injectRaw(bytes: string): Promise<boolean>;
     /** End the terminal, and Claude with it; resolves once the request is out (#3235). */
@@ -118,6 +121,59 @@ export function proxyEventsOfKeys(k: HostKeys): Record<string, unknown>[] {
     if (k.lone_esc) out.push({ event: "keystroke", kind: "typing", now_ms });
     if (k.reload) out.push({ event: "reload", now_ms });
     return out;
+}
+
+/** #3923 — the waits of `typeAndSubmit`, in ms. */
+export const SUBMIT_TIMING = { pollMs: 50, minGapMs: 200, landMaxMs: 3000, settleMs: 150, confirmMaxMs: 3000 };
+
+/** Text sits in Claude's input box: the box is on screen and not empty. */
+function promptHasInput(s: ScreenSnapshot): boolean {
+    const zone = findPromptZone(s.text);
+    if (!zone) return false;
+    return !promptInputEmpty(s.text, s.cursor ? { cursorX: s.cursor.x, cursorY: s.cursor.y } : undefined, zone);
+}
+
+/**
+ * #3923 — a wake phrase, then Enter, on a terminal whose screen is known.
+ *
+ * Enter used to follow the phrase after a blind 200 ms. When Claude is slow to
+ * read the phrase (a busy footer of background agents, a loaded machine), it
+ * reads both in one go, as a paste, and the Enter becomes a new line inside it:
+ * the wake sits in the prompt, never sent. So Enter waits until the phrase
+ * shows in the input box, and is sent once more when the box still holds text
+ * after it. With no input box on screen (not Claude's prompt, or a dialog),
+ * neither check can tell anything: the old 200 ms, one Enter.
+ */
+export async function typeAndSubmit(
+    io: { inject(text: string): Promise<boolean>; screen(): ScreenSnapshot; log(msg: string): void; beforeEnter?(): void },
+    phrase: string,
+    t: typeof SUBMIT_TIMING = SUBMIT_TIMING,
+): Promise<boolean> {
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const waitFor = async (cond: () => boolean, maxMs: number): Promise<boolean> => {
+        for (const end = Date.now() + maxMs; Date.now() < end; await sleep(t.pollMs)) if (cond()) return true;
+        return cond();
+    };
+    const boxShown = findPromptZone(io.screen().text) !== null;
+    const start = Date.now();
+    if (!(await io.inject(phrase))) return false;
+    if (boxShown) {
+        if (await waitFor(() => promptHasInput(io.screen()), t.landMaxMs)) await sleep(t.settleMs);
+        else io.log(`submit: the phrase did not show in the prompt within ${t.landMaxMs} ms, Enter anyway`);
+    }
+    const enter = (): Promise<boolean> => {
+        try { io.beforeEnter?.(); } catch { /* the caller's marker is best effort */ }
+        return io.inject("\r");
+    };
+    const left = t.minGapMs - (Date.now() - start);
+    if (left > 0) await sleep(left);
+    if (!(await enter())) return false;
+    if (!boxShown) return true;
+    if (await waitFor(() => !promptHasInput(io.screen()), t.confirmMaxMs)) return true;
+    io.log("submit retried: the prompt still held the phrase after Enter");
+    if (!(await enter())) return false;
+    if (!(await waitFor(() => !promptHasInput(io.screen()), t.confirmMaxMs))) io.log("submit unconfirmed: the prompt still holds the phrase after a second Enter");
+    return true;
 }
 
 export function hostPort(opts: {
@@ -210,13 +266,11 @@ export function hostPort(opts: {
         screen: () => latest,
         // Already here: the host pushes its screen.
         readScreen: async () => latest,
-        async inject(phrase, onWillInject) {
+        async inject(phrase, onWillInject, onEnter) {
             try { onWillInject?.(); } catch { /* the caller's markers are best effort */ }
-            // As over loop.sock: the phrase, then Enter on its own after 200 ms,
-            // so Claude does not take the burst for a paste.
-            if (!(await inject(phrase))) return false;
-            await new Promise<void>((r) => setTimeout(r, 200));
-            return inject("\r");
+            // The phrase, then Enter on its own once Claude has read it, so it
+            // does not take the burst for a paste (#3923).
+            return typeAndSubmit({ inject, screen: () => latest, log: (m) => opts.log(`host port: ${m}`), beforeEnter: onEnter }, phrase);
         },
         injectRaw: (bytes) => inject(bytes),
         // #3235 — the host goes with Claude, as the tmux session does: `host.stop`

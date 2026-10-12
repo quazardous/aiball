@@ -345,6 +345,14 @@ function classifyTurn(): string {
                 if (backlogTicketId) {
                     void phraseClient.recordBacklogWake(backlogTicketId).catch(() => {});
                 }
+            }, () => {
+                // #3923 — Enter may come seconds after the phrase: the submit it
+                // causes must still read as the loop's (see set_last_wake_at above).
+                const at = Date.now();
+                void sendEventOnce(loopSockPath(sd!), {
+                    kind: "proxyEvent",
+                    data: { event: "marker", name: "set_last_wake_at", at_ms: at, now_ms: at },
+                }, { timeoutMs: 200 });
             });
             // #974 — fail loud : proxy attendu mais inject KO (pas de
             // fallback tmux qui ré-armerait NOT AFK 10m). Wake droppé.

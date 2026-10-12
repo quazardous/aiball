@@ -1289,6 +1289,10 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
             pendingSignals.remove(signalId);
             void client().ackSignal(signalId).catch(() => {});
         }
+    }, () => {
+        // #3923 — Enter may come seconds after the phrase: the submit it causes
+        // must still fall inside the auto-wake window, or it reads as a human's.
+        setIpcLastWakeAtMs(Date.now());
     });
     // #974 — fail loud quand le proxy était censé recevoir l'inject mais a
     // échoué (loop.sock présent, inject KO). Pas de fallback tmux : c'est un

@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A wake typed into a busy Claude (a footer full of background agents, a loaded
+  machine) is sent again when its Enter was read as a new line: on the session
+  host, Enter now waits until the phrase shows in the prompt, and a second Enter
+  follows when the prompt still holds it.
 - A wake that bundles an agent's event with a human's comment no longer tells
   the agent that "another agent wrote this": that note now needs every bundled
   event to come from an agent.
