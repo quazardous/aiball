@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.57.1] — 2026-10-12
+
 ### Added
 
 - The agent bar carries the subscription's usage (the 5-hour and weekly windows:
