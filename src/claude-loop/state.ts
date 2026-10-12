@@ -1954,6 +1954,9 @@ export interface ContextPhraseResult {
      *  construction (=1); a value >1 would flag the "multiple tickets in one
      *  wake" bug (#1554). 0 when there's no head (idle). */
     bundleTicketCount?: number;
+    /** #3898 — set when the head is a plan accept still inside its grace: no
+     *  wake now, try again from this moment. The phrase is empty. */
+    holdUntilMs?: number;
 }
 
 /**
@@ -2047,6 +2050,26 @@ const CASCADE_EVENT_KINDS = new Set(["related_closed", "dependency_closed", "dep
 const PURE_CLOSURE_KINDS = new Set(["resolution_accepted", "wontfix_accepted", "ticket_closed", "related_closed"]);
 
 /**
+ * #3898 — a plan accept wakes its agent at once, and the comment the human
+ * types right after it ("accepted, but mind X") lands in a second wake, after
+ * the work has started. While the head is a plan accept younger than
+ * `claude_loop.accept_grace_seconds`, the wake waits; the same-ticket bundle
+ * then carries whatever came on that ticket meanwhile. Returns the moment the
+ * grace ends, or null when the wake may go now.
+ */
+export function acceptGraceHoldUntil(
+    head: { kind?: string; created_at?: string | null } | undefined,
+    graceSeconds: number,
+    nowMs: number,
+): number | null {
+    if (head?.kind !== "plan_accepted" || graceSeconds <= 0 || !head.created_at) return null;
+    const at = Date.parse(head.created_at);
+    if (!Number.isFinite(at)) return null;
+    const until = at + graceSeconds * 1000;
+    return until > nowMs ? until : null;
+}
+
+/**
  * #3791 — mark as seen what a delivered wake showed: its head and the rest of
  * its bundle (a closure run, a same-ticket digest). One helper for both paths
  * that deliver a wake, the kernel and the Stop hook: the hook acked the head
@@ -2064,6 +2087,7 @@ export async function buildContextPhrase(
     project: string | null,
     pingsAbsPath: string,
     eventHint?: WakeEventHint,
+    opts: { noHold?: boolean } = {},
 ): Promise<ContextPhraseResult> {
     const culture = pickPingPhrase(pingsAbsPath);
     try {
@@ -2156,6 +2180,12 @@ export async function buildContextPhrase(
         // ticket_id. Title only populated for ticket roots ; comment-led
         // wakes show just #ID (the agent claims & reads the parent).
         const unreadHead = Array.isArray(unreadR?.messages) ? unreadR.messages[0] : undefined;
+        // #3898 — a fresh plan accept waits out its grace, so the comment typed
+        // right after it rides in the same wake (the same-ticket bundle below).
+        const holdUntilMs = opts.noHold ? null : acceptGraceHoldUntil(unreadHead, loopConfig().claude_loop.accept_grace_seconds, Date.now());
+        if (holdUntilMs !== null) {
+            return { phrase: "", headMessageId: null, hasContent: false, backlogTicketId: null, holdUntilMs };
+        }
         const headRows: Array<{ id: number; title?: string; kind?: "comment" | "new ticket" }> = unreadHead
             ? (() => {
                 const id = unreadHead.kind === "ticket_created"

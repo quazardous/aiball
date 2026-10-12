@@ -38,6 +38,9 @@ dates are YYYY-MM-DD.
 - `aiball agent rename <old> <new>` renames an agent everywhere: its id in every
   table, history included, its loops and its session host; onto an agent that
   already exists (renamed by hand), it merges the old one into it.
+- The wake of an accepted plan waits 30 s (`claude_loop.accept_grace_seconds`),
+  so a comment typed right after accepting comes in the same wake rather than a
+  second one once the work has started.
 
 ### Fixed
 

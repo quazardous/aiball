@@ -55,10 +55,11 @@ test("autopoll.throttle may be 0 (every Stop); the old names from the table, rep
 
 test("claude_loop durations: the notation, and a bare number still seconds", () => {
     global("");
-    const c = loadConfig(project("claude_loop:\n  interval_seconds: 1m\n  wake_tempo_seconds: 15\n  boot_grace_seconds: 0\n  presence_hold_seconds: 10m\n")).claude_loop;
+    const c = loadConfig(project("claude_loop:\n  interval_seconds: 1m\n  wake_tempo_seconds: 15\n  boot_grace_seconds: 0\n  presence_hold_seconds: 10m\n  accept_grace_seconds: 1m\n")).claude_loop;
     assert.equal(c.interval_seconds, 60);
     assert.equal(c.wake_tempo_seconds, 15);
     assert.equal(c.boot_grace_seconds, 0);
     assert.equal(c.presence_hold_seconds, 600);
+    assert.equal(c.accept_grace_seconds, 60);
     assert.equal(loadConfig(project("claude_loop:\n  interval_seconds: nonsense\n")).claude_loop.interval_seconds, 30, "unreadable: the default");
 });

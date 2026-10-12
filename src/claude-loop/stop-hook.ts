@@ -299,11 +299,17 @@ function classifyTurn(): string {
         log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
         if (gate.has) {
             const phraseClient = new AiballClient();
-            const { phrase, headMessageId, backlogTicketId, extraSeenIds } = await buildContextPhrase(
+            const { phrase, headMessageId, backlogTicketId, extraSeenIds, holdUntilMs } = await buildContextPhrase(
                 phraseClient,
                 process.env.AIBALL_PROJECT ?? null,
                 pingsPath(sd!),
             );
+            // #3898 — a plan accept in its grace: go idle, the kernel's next
+            // tempo re-entry delivers it with whatever came meanwhile.
+            if (holdUntilMs !== undefined) {
+                log(`  → SKIP (plan accept in its grace, ${Math.ceil((holdUntilMs - Date.now()) / 1000)}s left) became=idle`);
+                emit();
+            }
             // #B.180: mark this send-keys as auto-wake so the
             // UserPromptSubmit hook can flag from_auto_wake=true
             // and the timer keeps idleSinceMs (no human submission).

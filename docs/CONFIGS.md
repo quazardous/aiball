@@ -65,7 +65,7 @@ Stop), `recent_tickets` (at most 20), `backlog`, `tone`
 Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
 `--check-cmd`, `--wait`/`--no-wait`) and `CL_*` env (which the loop's
 child processes read). Keys: `interval_seconds`, `wake_tempo_seconds`,
-`boot_grace_seconds`, `boot_min_seconds`, `presence_hold_seconds` (durations:
+`boot_grace_seconds`, `boot_min_seconds`, `presence_hold_seconds`, `accept_grace_seconds` (durations:
 `1m`, `90s`, or a bare number of seconds),
 `wake_in_flight_ttl_ms`, `input_hot_ttl_ms`, `pane_probe_fast_ms`,
 `pane_probe_slow_ms`, `esc_takeover`, `mouse`, `bar`, `session`, `afk_key`, `afk_window_ms`, `wait`,

@@ -701,7 +701,7 @@ function respawnKernel(reason: string): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null; extraSeenIds?: number[]; wakeTicketId?: number | null; bundleTicketCount?: number; signalId?: number }> {
+async function pickPhrase(hint?: WakeHint, noHold = false): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null; extraSeenIds?: number[]; wakeTicketId?: number | null; bundleTicketCount?: number; signalId?: number; holdUntilMs?: number }> {
     // #2255 — a pending external signal comes first (david: "la file signal est
     // prioritaire"). It is not a ticket: no head message to mark seen, no backlog
     // bookkeeping — the inject site acks the signal instead.
@@ -740,6 +740,8 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
         process.env.AIBALL_PROJECT ?? null,
         pingsPath(sd!),
         eventHint,
+        // #3898 — a wake asked by hand, or a panic, does not wait out an accept's grace.
+        { noHold },
     );
     // #848 david `chkb5z` — le post-boot reminder n'est PAS prepended.
     // Inject standalone via `turnActor.on("turn:settled")` ; pickPhrase
@@ -1737,7 +1739,13 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount, signalId } = await pickPhrase(hint);
+    const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount, signalId, holdUntilMs } = await pickPhrase(hint, manualWake || panicMode);
+    // #3898 — a plan accept younger than its grace: the next tempo re-entry
+    // tries again, and by then a follow-up comment rides in the same wake.
+    if (holdUntilMs !== undefined) {
+        log(`hold wake (${reason}) — plan accept in its grace, ${Math.ceil((holdUntilMs - Date.now()) / 1000)}s left`);
+        return false;
+    }
     // If there's nothing actionable to surface (no FIFO head, no backlog,
     // no triggered gate), don't fire — david: "si y a rien on dit rien".
     // Manual wakes and panic still go through; their content is the

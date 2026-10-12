@@ -230,6 +230,9 @@ export interface AiballConfig {
          *  arms it (or F9's first press / the reattach no-surprise seed).
          *  Hardcoded 600 since the grace collapse ; re-exposed as a knob. */
         presence_hold_seconds: number;
+        /** #3898 — how long a plan accept's wake waits, so the comment the
+         *  human types right after it comes in the same wake. 0 = no wait. */
+        accept_grace_seconds: number;
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
         wake_in_flight_ttl_ms: number;
         /** #722 — TTL window for `isInputHot`. After this many ms with no
@@ -455,6 +458,8 @@ const DEFAULTS: AiballConfig = {
         // #1132 — presence-hold (NOT AFK 10m) duration; 600s = the historical
         // collapsed grace window.
         presence_hold_seconds: 600,
+        // #3898 — a plan accept's wake waits this long for a follow-up comment.
+        accept_grace_seconds: 30,
         wake_in_flight_ttl_ms: 2000,
         // #722 — input-hot + 2-rate pane probe defaults.
         input_hot_ttl_ms: 3000,
@@ -899,6 +904,8 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #1132 — presence-hold duration knob.
             const hold = secs(cl.presence_hold_seconds);
             if (positive(hold)) cfg.claude_loop.presence_hold_seconds = hold;
+            const acceptGrace = secs(cl.accept_grace_seconds);
+            if (nonNegative(acceptGrace)) cfg.claude_loop.accept_grace_seconds = acceptGrace;
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }
