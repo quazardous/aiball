@@ -6,6 +6,7 @@
  * Extracted from db.ts (#B.332 Phase A.2).
  */
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { lastMoveAt } from "./last-move.js";
 import {
     getCachedDecisionGate,
     getCachedActionable,
@@ -1284,8 +1285,8 @@ export function ownFreshSteps(consumerId: string, ticketIds: readonly number[], 
     const movedAt = (awaited: number): number => {
         if (!awaitedMovedAt) awaitedMovedAt = new Map();
         if (!awaitedMovedAt.has(awaited)) {
-            const at = getDb().select({ at: schema.tickets.lastActorAt }).from(schema.tickets)
-                .where(eq(schema.tickets.id, awaited)).get()?.at;
+            // #3909 — moved, not merely re-parked by a step that delivered nothing.
+            const at = lastMoveAt(awaited);
             awaitedMovedAt.set(awaited, at ? Date.parse(at) : NaN);
         }
         return awaitedMovedAt.get(awaited)!;

@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A step that cites no commit no longer wakes the tickets waiting on its ticket
+  with `resume_on: { ticket }`: it only re-parks that ticket. A reply, a
+  decision, a close or a step that cites a commit still does. Queues of tickets
+  parked on each other no longer wake each other in turn.
 - A wake typed into a busy Claude (a footer full of background agents, a loaded
   machine) is sent again when its Enter was read as a new line: on the session
   host, Enter now waits until the phrase shows in the prompt, and a second Enter

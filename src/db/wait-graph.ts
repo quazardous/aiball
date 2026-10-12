@@ -14,6 +14,7 @@ import { listTypedRelationsForTicket } from "./messages.js";
 import { closedTicketIds } from "./ticket-closed.js";
 import { isStepMeta } from "../ticket-transitions.js";
 import { parseMeta } from "../questions.js";
+import { lastMoveAt } from "./last-move.js";
 
 export type WaitKind = "depends_on" | "resume_on";
 
@@ -26,7 +27,7 @@ export interface WaitEdge {
 
 /**
  * The ticket's live `resume_on` wait: its last action is a step naming another
- * ticket, and that ticket has not moved since. Null otherwise.
+ * ticket, and that ticket has not moved since (`lastMoveAt`). Null otherwise.
  */
 export function liveResumeOn(ticketId: number): { on: number; at: string } | null {
     const db = getDb();
@@ -41,8 +42,8 @@ export function liveResumeOn(ticketId: number): { on: number; at: string } | nul
     )).all().find((m) => isStepMeta(m.meta));
     const on = step ? parseMeta(step.meta).step_resume_on_ticket : undefined;
     if (!on) return null;
-    const moved = db.select({ at: schema.tickets.lastActorAt }).from(schema.tickets)
-        .where(eq(schema.tickets.id, on)).get()?.at;
+    // #3909 — moved, not merely re-parked by a step that delivered nothing.
+    const moved = lastMoveAt(on);
     if (moved && moved > t.lastActorAt) return null;
     return { on, at: t.lastActorAt };
 }
