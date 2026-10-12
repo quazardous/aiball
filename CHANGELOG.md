@@ -23,6 +23,12 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Fixed
+
+- A wake that bundles an agent's event with a human's comment no longer tells
+  the agent that "another agent wrote this": that note now needs every bundled
+  event to come from an agent.
+
 ## [0.57.1] — 2026-10-12
 
 ### Added

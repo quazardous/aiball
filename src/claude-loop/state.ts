@@ -2981,7 +2981,16 @@ export async function buildContextPhrase(
             // and treating "unknown" as "from an agent" would rewrite every
             // wake, including david's own. Empty in backlog mode, where there
             // is no unread head to have an author.
-            head_from_agent: unreadHead?.author_is_human === false ? "1" : "",
+            //
+            // #3920 — the clause follows the whole of what the wake shows. A
+            // bundle is from an agent only when every event in it is: an
+            // agent's new ticket followed by david's comment used to wear the
+            // clause, and read as if david were "another agent". A wake
+            // anchored on its hint shows the hint, whose author the head does
+            // not tell: no clause.
+            head_from_agent: !hintAnchored
+                && (isBundleMode ? sameTicket : [unreadHead]).every((m) => m?.author_is_human === false)
+                ? "1" : "",
             project_scope: scope,
             // #1215 david `go` — le CTA backlog reflète qu'un commentaire attend
             // une réponse en NOMMANT le dernier acteur (≠ moi). Remplace l'ancien

@@ -92,3 +92,38 @@ test("backlog wakes never carry it — there is no event to have an author", asy
     );
     assert.doesNotMatch(res.phrase, CLAUSE);
 });
+
+/** Several unread events on one ticket: the wake bundles them. */
+function clientWithBundle(messages: Array<Record<string, unknown>>): AiballClient {
+    return {
+        agentId: "claude-test",
+        pingsCount: async () => ({ unread: messages.length }),
+        listProjectsDetailed: async () => [{ name: "aiball", open_count: 3, actionable_count: 1 }],
+        unread: async () => ({ messages }),
+        getConsumer: async () => null,
+        listTickets: async () => [],
+        getTicket: async () => ({ ticket: { title: "quota ticket", actionable: true, claimable: true } }),
+        getProjectStandingPrompt: async () => null,
+    } as unknown as AiballClient;
+}
+
+test("#3920 a bundle with a human's comment in it does not carry it", async () => {
+    // Seen live: an agent's new ticket, then david's comment on it, bundled
+    // into one wake that ended "…by david · another agent wrote this".
+    const res = await buildContextPhrase(clientWithBundle([
+        { id: 3920, kind: "ticket_created", title: "quota ticket", by_agent: "darktable-claude", author_is_human: false },
+        { id: 3921, kind: "comment_added", ticket_id: 3920, hashid: "gyrz7p", body: "warn the agent using the benches", by_agent: "david", author_is_human: true },
+    ]), null, PINGS_YAML);
+    assert.match(res.phrase, /2 updates:/);
+    assert.match(res.phrase, /warn the agent using the benches/);
+    assert.doesNotMatch(res.phrase, CLAUSE);
+});
+
+test("#3920 a bundle written by agents only still carries it", async () => {
+    const res = await buildContextPhrase(clientWithBundle([
+        { id: 3920, kind: "ticket_created", title: "quota ticket", by_agent: "darktable-claude", author_is_human: false },
+        { id: 3921, kind: "comment_added", ticket_id: 3920, hashid: "c2", body: "agreed", by_agent: "mcu-claude", author_is_human: false },
+    ]), null, PINGS_YAML);
+    assert.match(res.phrase, /2 updates:/);
+    assert.match(res.phrase, CLAUSE);
+});
