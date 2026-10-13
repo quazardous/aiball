@@ -16,6 +16,7 @@
  * their own storage for now; they migrate onto this framework incrementally.
  */
 import { parseDuration } from "./duration.js";
+import { isTimeZoneSetting } from "../timezone.js";
 
 /** Where a key may be overridden. */
 export type ConfigScope =
@@ -69,6 +70,11 @@ export interface ConfigSchemaEntry {
      *  or `["db", "file"]` to allow either (UI override wins unless `precedence`
      *  flips it). */
     sources?: readonly ConfigSource[];
+    /** #3969 — string only: a value it refuses is no value (`config.set`
+     *  answers CONFIG_INVALID-style, a file's is ignored). */
+    validate?: (v: string) => boolean;
+    /** What a refused value should have been, for the refusal. */
+    validateHint?: string;
     /** #590 — explicit precedence when `sources.length === 2`. Default `"db"`
      *  (UI override wins over the committed yaml). Set `"file"` for the rare
      *  case where the per-tree value MUST win (e.g. a checked-in policy). */
@@ -582,6 +588,19 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         label: "Upstream: watch",
         description: "pull (default) = a coupled repo is watched and its changes announced; off = linked only. A coupling's own sync wins.",
     },
+    // #3969 — the zone agents and the web UI read times in.
+    {
+        key: "display.timezone",
+        scope: "global+project",
+        type: "string",
+        default: "auto",
+        sources: ["db", "file"],
+        validate: isTimeZoneSetting,
+        validateHint: "auto, UTC, or a zone name such as Europe/Paris",
+        label: "Time zone",
+        description:
+            "The zone times are shown in: what agents read (with the offset, e.g. 2026-10-13T12:44:47+02:00), the times their wakes quote, and the web UI. auto (default) = the zone of the machine the daemon runs on (the web UI then keeps the browser's); UTC; or a zone name such as Europe/Paris or America/New_York. Times are stored in UTC whatever this says.",
+    },
 ];
 
 const BY_KEY = new Map(CONFIG_SCHEMA.map((e) => [e.key, e] as const));
@@ -682,6 +701,6 @@ export function coerceConfigValue(entry: ConfigSchemaEntry, raw: unknown): Confi
             return entry.options?.includes(s) ? s : null;
         }
         case "string":
-            return typeof raw === "string" ? raw : null;
+            return typeof raw === "string" && (!entry.validate || entry.validate(raw)) ? raw : null;
     }
 }

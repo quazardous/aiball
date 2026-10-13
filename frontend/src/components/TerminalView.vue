@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtTime } from "../lib/time-zone";
 /**
  * #464, #3128 — an agent's live terminal, from `agent.<id>.screen` on the bus.
  *
@@ -581,7 +582,7 @@ const statusLabel = computed(() => {
     if (lastError.value) return `error : ${lastError.value}`;
     if (!connected.value) return "connecting…";
     if (lastCapturedAt.value) {
-        return `live · last frame ${new Date(lastCapturedAt.value).toLocaleTimeString()}`;
+        return `live · last frame ${fmtTime(lastCapturedAt.value)}`;
     }
     return "live";
 });

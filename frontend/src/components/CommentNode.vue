@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 import { DECISION_GESTURES, STEP_LABEL, isStepMeta } from "@shared/ticket-transitions";
 import { shortResume } from "../lib/labels";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
@@ -495,7 +496,7 @@ async function doDelete() {
             <span
                 v-if="isStep && (stepMeta.resumeAt || stepMeta.resumeOnTicket)"
                 :title="[
-                    stepMeta.resumeAt ? `the agent resumes at ${new Date(stepMeta.resumeAt).toLocaleString()}` : '',
+                    stepMeta.resumeAt ? `the agent resumes at ${fmtDateTime(stepMeta.resumeAt)}` : '',
                     stepMeta.resumeOnTicket ? `${stepMeta.resumeAt ? 'or' : 'the agent resumes'} when #${stepMeta.resumeOnTicket} moves (a reply, a decision, a close)` : '',
                 ].filter(Boolean).join(', ')"
                 style="font-size: var(--fs-2xs); margin-left: 0.3rem; color: var(--p-tag-info-color); font-weight: 600"
@@ -514,7 +515,7 @@ async function doDelete() {
                     ? `Superseded by the later ${supersededBy.kind}${supersededBy.hashid ? ' #C.' + supersededBy.hashid : ''}: only the latest decision is live, and the accept/reject pair under the composer acts on it.`
                     : decision.status === 'pending'
                     ? `${msg.by_agent ?? 'someone'} tagged this comment as a ${decision.kind} — accept/reject pair is under the composer.`
-                    : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
+                    : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + fmtDateTime(decision.decided_at) : ''}`"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #B.129 follow-up: small chip when this comment was the
@@ -549,7 +550,7 @@ async function doDelete() {
                 <template v-else>
                     <span class="comment-ref">{{ commentRef }}</span>
                     <span class="comment-date-sep">·</span>
-                    <span class="comment-date-val">{{ new Date(msg.created_at).toLocaleString() }}</span>
+                    <span class="comment-date-val">{{ fmtDateTime(msg.created_at) }}</span>
                 </template>
             </span>
         </header>

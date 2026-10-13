@@ -49,6 +49,7 @@ import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
+import { boardTimeZone, formatZoned } from "../timezone.js";
 import { wakeExcerpt } from "./markdown-strip.js";
 import { computeLoopView, isHumanPresentHold, isInBootGrace } from "./loop-state.js";
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
@@ -182,13 +183,16 @@ export function backlogRewakeMinutes(input: {
     return Math.max(1, Math.round(ageMs / 60_000));
 }
 
-export function formatWakeStamp(createdAt: string | null | undefined, nowMs: number): string {
+export function formatWakeStamp(createdAt: string | null | undefined, nowMs: number, timeZone?: string): string {
     if (!createdAt) return "";
     const at = Date.parse(createdAt);
     if (!Number.isFinite(at)) return "";
     // Also covers a future timestamp (clock skew between daemon and loop):
     // a negative age is below the threshold, so nothing renders.
     if (nowMs - at < WAKE_AGE_MIN_MS) return "";
+    // #3969 — in the board's zone, named: the stamp agrees with the offset
+    // times the agent reads, and the agent can quote it as it is.
+    if (timeZone) return formatZoned(at, timeZone);
     const d = new Date(at);
     const pad = (n: number): string => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -2038,6 +2042,13 @@ export function headTextFor(body: string | null | undefined, label: string | und
  * next wake.
  */
 const WAKE_BUNDLE_FETCH_LIMIT = 30;
+
+/** #3969 — the board's zone for the wake's stamps, asked once a minute. */
+let wakeZoneOf: (() => Promise<string>) | null = null;
+function wakeTimeZone(client: AiballClient): Promise<string> {
+    wakeZoneOf ??= boardTimeZone(() => client.getConfig(process.env.AIBALL_PROJECT ?? null));
+    return wakeZoneOf();
+}
 /** #2722 — events a closure emits on the tickets linked to it. Each carries
  *  the closed ticket as `source_ticket_id`; they are delivered in that
  *  ticket's wake rather than one wake each. */
@@ -2270,6 +2281,10 @@ export async function buildContextPhrase(
         // héritait de ses prompts (wakes m2m en français parce que
         // aiball/.aiball.yaml a un override FR).
         const cfg = loadConfig(projectCwd());
+        // #3969 — the head's stamp, in the board's zone (asked only when there is one to show).
+        const headAge = formatWakeStamp(unreadHead?.created_at, Date.now())
+            ? formatWakeStamp(unreadHead?.created_at, Date.now(), await wakeTimeZone(client))
+            : "";
         // #400 recadré (david b296px): tone is back as a SELECTION layer. A slot
         // may carry per-tone buckets `{ <tone>: … }`; renderSlot narrows to
         // slot[tone] (fallback directive). Applied uniformly, not per-placeholder.
@@ -2969,7 +2984,7 @@ export async function buildContextPhrase(
             // a real server-emitted row (`/decide` only), so its own
             // created_at IS the moment of the decision — no need to reach
             // into the original proposal's `decided_at`.
-            head_age: formatWakeStamp(unreadHead?.created_at, Date.now()),
+            head_age: headAge,
             // #1991 — the announced ticket's project, empty when it's this
             // loop's own. Rendered as a `[name]` marker immediately before the
             // ref, where the eye already looks for the ticket's identity.

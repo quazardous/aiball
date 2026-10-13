@@ -32,6 +32,8 @@ import { importUpstream, AlreadyCoupledError } from "../../upstream-import.js";
 import { exportUpstream } from "../../upstream-export.js";
 import { withTagsOne } from "../../queries/decorate.js";
 import { reloadConfig } from "../../config-reload.js";
+import { getConfig } from "../../db/config-overrides.js";
+import { resolveTimeZone } from "../../timezone.js";
 
 type TicketRow = { id: number; kind: string; by_agent?: string | null; assignee?: string | null };
 
@@ -214,14 +216,16 @@ defineMethod({
 
 /**
  * #235 — the board's configuration a client reads once at boot: formatting,
- * strategy, upload limit, and (#160) the upstream bindings per project. The
- * YAML chain is re-read on each call (defaults, global, the daemon's cwd).
+ * strategy, upload limit, (#160) the upstream bindings per project, and (#3969)
+ * the zone times are shown in, for the board or a given project. The YAML chain
+ * is re-read on each call (defaults, global, the daemon's cwd).
  */
 defineMethod({
     name: "config.get",
     who: ["human", "agent"],
-    params: z.object({}),
-    run: () => ({
+    // #3969 — a project picks its own `display.timezone` override.
+    params: z.object({ project: z.string().optional() }),
+    run: (_caller, p) => ({
         formatting: resolveFormatting({
             shippedDefaultsPath: defaultPingsPath(),
             globalConfigPath: globalConfigPath(),
@@ -230,6 +234,10 @@ defineMethod({
         strategy: getStrategy(),
         uploadMaxBytes: getUploadMaxBytes(),
         upstream: loadConfig(process.cwd()).upstream,
+        // #3969 — the zone times are shown in: the setting as written, and the
+        // zone it stands for (`auto` resolved on the daemon's machine).
+        timezone_setting: String(getConfig("display.timezone", p.project || null) ?? "auto"),
+        timezone: resolveTimeZone(getConfig("display.timezone", p.project || null)),
     }),
 });
 

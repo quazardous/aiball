@@ -24,7 +24,8 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { asText } from "./_helpers.js";
+import { asText, timeZone } from "./_helpers.js";
+import { timeZoneNote } from "../timezone.js";
 import { loadConfig } from "../autopoll/config.js";
 import { installRoot } from "../claude-loop/state.js";
 import {
@@ -78,8 +79,11 @@ export function registerWelcomeTools(server: McpServer): void {
             const { requested, fromArg, fromYaml } = resolveType(project_type);
             try {
                 const kit = buildWelcomeKit(root, requested);
+                // #3969 — the zone the board's times are in, and the one to write in.
+                const zone = await timeZone();
                 return asText({
                     ...kit,
+                    time_zone: { zone, note: timeZoneNote(zone) },
                     // Diagnostics : where the values came from. Useful when
                     // the agent / human is debugging "why did welcome give
                     // me this kit" without re-reading the yaml.

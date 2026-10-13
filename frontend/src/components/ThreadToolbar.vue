@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * Top action bar for a thread (#B.196 Layer 3 extract from ThreadView).
  * Same conceptual actions as ThreadActionsDock, but rendered as compact
@@ -89,7 +90,7 @@ const emit = defineEmits<{
             severity="info"
             size="small"
             :loading="snoozeBusy"
-            :title="`Snoozed until ${ticket.postponed_until ? new Date(ticket.postponed_until).toLocaleString() : ''} — click to bring back now.`"
+            :title="`Snoozed until ${ticket.postponed_until ? fmtDateTime(ticket.postponed_until) : ''} — click to bring back now.`"
             @click="emit('unsnooze')"
         />
         <template v-if="ticket.status === 'approved' && !ticket.closed">

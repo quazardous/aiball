@@ -49,3 +49,11 @@ test("clock skew: an event dated in the future renders nothing", () => {
     // as "-1 hours ago" or as a huge day count.
     assert.equal(formatWakeStamp(new Date(NOW + 3_600_000).toISOString(), NOW), "");
 });
+
+test("#3969 with the board's zone, the stamp is in that zone and names it", () => {
+    const at = Date.parse("2026-10-13T10:44:00Z");
+    const now = at + 48 * 3_600_000;
+    assert.equal(formatWakeStamp(new Date(at).toISOString(), now, "Europe/Paris"), "2026-10-13 12:44 CEST");
+    assert.equal(formatWakeStamp(new Date(at).toISOString(), now, "UTC"), "2026-10-13 10:44 UTC");
+    assert.equal(formatWakeStamp(new Date(at).toISOString(), at + 1000, "Europe/Paris"), "", "still nothing while fresh");
+});

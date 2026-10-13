@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * #2276 — the Signals tab of a project: the signals external systems sent it,
  * and the signal keys — who holds each one, and why.
@@ -40,7 +41,7 @@ onMounted(() => { void load(); });
 function fmt(ts: string | null): string {
     if (!ts) return "—";
     const d = new Date(ts);
-    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+    return Number.isNaN(d.getTime()) ? "—" : fmtDateTime(d);
 }
 
 /** The API error text is `METHOD path → status: {"error": "…"}`; keep the sentence. */

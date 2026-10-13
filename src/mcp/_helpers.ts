@@ -17,9 +17,13 @@ import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { captureTokenUsage, projectTranscriptDir } from "../claude-loop/token-capture.js";
 import { CL_ENV } from "../claude-loop/env-vars.js";
+import { boardTimeZone, rewriteTimes } from "../timezone.js";
 
 // #2652 — this MCP server sends `commits` on every comment it posts.
 export const client = new AiballClient({ features: ["commits"] });
+
+/** #3969 — the zone the times an agent reads are written in. */
+export const timeZone = boardTimeZone(() => client.getConfig(client.defaultProject));
 
 /**
  * #404: record the ticket the agent is currently focused on (the last
@@ -126,13 +130,15 @@ export async function asLines(meta: string[], lines: string[]) {
 }
 
 export async function asText(v: unknown) {
-    const status = await microStatus();
+    const [status, tz] = await Promise.all([microStatus(), timeZone()]);
     let payload: unknown;
     if (v && typeof v === "object" && !Array.isArray(v)) {
         payload = { _status: status, ...(v as Record<string, unknown>) };
     } else {
         payload = { _status: status, result: v };
     }
+    // #3969 — every UTC time in the board's zone, with its offset.
+    payload = rewriteTimes(payload, tz);
     return {
         content: [
             {

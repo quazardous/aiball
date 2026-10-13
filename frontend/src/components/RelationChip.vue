@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 import { computed } from "vue";
 import { RELATION_LABELS, type RelationKind } from "../lib/relations";
 import { formatTicketRef } from "../lib/formatting";
@@ -30,7 +31,7 @@ const tooltip = computed(() => {
     const kind = RELATION_LABELS[r.reciprocal
         ? (r.kind === "blocks" ? "depends_on" : r.kind === "depends_on" ? "blocks" : r.kind)
         : r.kind];
-    const when = new Date(r.last_event_at).toLocaleString();
+    const when = fmtDateTime(r.last_event_at);
     const provenance = r.reciprocal
         ? `reciprocal view of \`${kind}\` set on ${ref} by ${r.by_agent ?? "?"} on ${when}`
         : `${kind}, set by ${r.by_agent ?? "?"} on ${when}`;

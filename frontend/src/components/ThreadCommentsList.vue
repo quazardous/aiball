@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * Flat-list rendering of a thread's comments + relation rows + the
  * inline TLDR summary banner (#B.196 Layer 3 extract from ThreadView).
@@ -70,7 +71,7 @@ function decodeRelationEvent(m: Message): { verb: string; target: number | null 
             <li
                 v-else-if="item.kind === 'summary_banner' && latestSummaryUntil"
                 class="thread-summary-banner thread-summary-banner--inline"
-                :title="`Current-state summary by ${latestSummaryUntil.by ?? 'author'} at ${new Date(latestSummaryUntil.ts).toLocaleString()}. Comments below (or above in top-down) are post-summary and not yet captured.`"
+                :title="`Current-state summary by ${latestSummaryUntil.by ?? 'author'} at ${fmtDateTime(latestSummaryUntil.ts)}. Comments below (or above in top-down) are post-summary and not yet captured.`"
             >
                 <i class="pi pi-bookmark thread-summary-banner__icon" />
                 <span class="thread-summary-banner__label">tldr</span>

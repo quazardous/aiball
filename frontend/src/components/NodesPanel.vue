@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 // #424 — Nodes panel: lists proxy-node tokens (kind=node) with their label,
 // last activity and last peer IP — each row links to the node detail page.
 // Read-only list; revoke + relayed consumers live on the detail page (#452).
@@ -193,7 +194,7 @@ const { loading, error, load } = useLoader(async () => {
 function fmt(ts: string | null): string {
     if (!ts) return "—";
     const d = new Date(ts);
-    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+    return Number.isNaN(d.getTime()) ? "—" : fmtDateTime(d);
 }
 
 // #502 — la pastille est dérivée de `last_used_at` + l'horloge courante.
@@ -292,7 +293,7 @@ function sortValue(row: Row, key: string): string | number {
                     </span>
                 </dd>
                 <dt>Coming from</dt><dd>{{ pairing.requested_ip ?? "—" }} <span class="pairing__caveat">(observed by this hub)</span></dd>
-                <dt>Asked at</dt><dd>{{ new Date(pairing.created_at).toLocaleString() }}</dd>
+                <dt>Asked at</dt><dd>{{ fmtDateTime(pairing.created_at) }}</dd>
                 <dt>Status</dt><dd>{{ pairing.state }}</dd>
             </dl>
             <div v-if="pairing.state === 'pending'" class="pairing__actions">

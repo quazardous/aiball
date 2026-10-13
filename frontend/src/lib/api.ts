@@ -977,7 +977,7 @@ export const api = {
     /** #3258 — the header alone (no thread): a link's tooltip needs the title only. */
     getTicketTitle: (id: number) => call<{ ticket: { id: number; title: string } }>("ticket.get", { id }),
     /** #235 — the board's configuration: formatting patterns and upstream bindings. */
-    getConfig: () => call<{ formatting?: unknown; upstream?: unknown }>("config.get"),
+    getConfig: () => call<{ formatting?: unknown; upstream?: unknown; timezone?: string; timezone_setting?: string }>("config.get"),
     /**
      * #2112 — the payload zone, FILTERED: keys always, values only where the
      * schema declares them public, secrets reduced to a short prefix. There is

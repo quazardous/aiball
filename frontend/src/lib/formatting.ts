@@ -21,6 +21,7 @@ import { Marked, type Tokens } from "marked";
 import { ref } from "vue";
 import { highlightCode, resolveLang } from "./highlight";
 import { api } from "./api";
+import { displayTimeZone } from "./time-zone";
 
 export interface FormattingPattern {
     id: string;
@@ -212,6 +213,10 @@ export async function loadFormatting(): Promise<void> {
             patterns.value = next as FormattingPattern[];
             markedInstance.value = buildMarked(patterns.value);
         }
+        // #3969 — the board's zone, unless it is `auto` (then the browser's).
+        const setting = (data as { timezone_setting?: unknown })?.timezone_setting;
+        const zone = (data as { timezone?: unknown })?.timezone;
+        displayTimeZone.value = typeof setting === "string" && setting !== "" && setting !== "auto" && typeof zone === "string" ? zone : undefined;
         // #160 Phase 1 : also pick up upstream bindings (per-project).
         if (data?.upstream && typeof data.upstream === "object") {
             upstreamBindings.value = data.upstream as Record<string, UpstreamBinding[]>;

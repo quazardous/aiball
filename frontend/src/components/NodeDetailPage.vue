@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * Dedicated detail page for a single proxy node (#452).
  *
@@ -54,7 +55,7 @@ watch(() => props.nodeId, load, { immediate: true });
 function fmt(ts: string | null): string {
     if (!ts) return "—";
     const d = new Date(ts);
-    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+    return Number.isNaN(d.getTime()) ? "—" : fmtDateTime(d);
 }
 
 // #502 — pastille liveness : recompute toutes les 15s pour que la couleur

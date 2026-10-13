@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * The thread's cartouche row — #B.NN copyable ref + project + status
  * + lifecycle badge + author + created date. Rendered in two places
@@ -104,7 +105,7 @@ function statusSeverity(s: "pending" | "approved" | "rejected"): Severity {
         <span v-if="ticket.by_agent">by {{ ticket.by_agent }}</span>
         <span class="spacer" />
         <span :title="ticket.created_at">
-            {{ new Date(ticket.created_at).toLocaleString() }}
+            {{ fmtDateTime(ticket.created_at) }}
         </span>
     </header>
 </template>

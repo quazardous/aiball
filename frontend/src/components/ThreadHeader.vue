@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * Ticket header — title, optional state banners (resolved / closed /
  * snoozed), intent + tags meta strip, optional "edit message" + "manage"
@@ -66,10 +67,10 @@ const holds = computed(() => headerHolds(props.ticket));
 
 function claimerTooltip(t: TicketSummary): string {
     const parts = [`Claimed by ${t.claimant}`];
-    if (t.claimed_at) parts.push(new Date(t.claimed_at).toLocaleString());
+    if (t.claimed_at) parts.push(fmtDateTime(t.claimed_at));
     if (t.assignee === t.claimant) {
         parts.push("(also the assignee)");
-        if (t.assigned_at) parts.push(`assigned ${new Date(t.assigned_at).toLocaleString()}`);
+        if (t.assigned_at) parts.push(`assigned ${fmtDateTime(t.assigned_at)}`);
     }
     return parts.join(" · ");
 }
@@ -155,7 +156,7 @@ function claimerTooltip(t: TicketSummary): string {
         <span
             v-if="holds.assignee"
             class="thread-subline__item"
-            :title="`Assigned to ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
+            :title="`Assigned to ${ticket.assignee}${ticket.assigned_at ? ' · ' + fmtDateTime(ticket.assigned_at) : ''}`"
         >
             <i class="pi pi-user-plus" /> assigned to {{ ticket.assignee }}
         </span>
@@ -228,7 +229,7 @@ function claimerTooltip(t: TicketSummary): string {
             Snoozed until
             <strong>
                 {{ ticket.postponed_until
-                    ? new Date(ticket.postponed_until).toLocaleString()
+                    ? fmtDateTime(ticket.postponed_until)
                     : "" }}
             </strong>
             — hidden from the open inbox until then.

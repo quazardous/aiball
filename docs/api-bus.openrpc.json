@@ -573,9 +573,17 @@
     },
     {
       "name": "config.get",
-      "description": "The board's configuration a client reads once at boot: formatting, strategy, upload limit, and the upstream bindings per project. The YAML chain is re-read on each call (defaults, global, the daemon's cwd).",
+      "description": "The board's configuration a client reads once at boot: formatting, strategy, upload limit, the upstream bindings per project, and the zone times are shown in, for the board or a given project. The YAML chain is re-read on each call (defaults, global, the daemon's cwd).",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "project",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {}

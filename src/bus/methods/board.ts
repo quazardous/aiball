@@ -308,7 +308,7 @@ defineMethod({
         if (entry.protected && !isHuman(me)) throw new Refusal(403, `config key '${p.key}' is protected (moderator-only)`, ERROR_CODES.MODERATOR_ONLY);
         const value = coerceConfigValue(entry, raw);
         if (value === null) {
-            throw new Refusal(400, `invalid value for '${p.key}' (type ${entry.type}${entry.options ? `, one of ${entry.options.join("|")}` : ""})`);
+            throw new Refusal(400, `invalid value for '${p.key}' (type ${entry.type}${entry.options ? `, one of ${entry.options.join("|")}` : ""}${entry.validateHint ? `: ${entry.validateHint}` : ""})`);
         }
         // #3137 — a number within its range: the one a client offers is the one refused.
         if (typeof value === "number" && ((entry.min !== undefined && value < entry.min) || (entry.max !== undefined && value > entry.max))) {

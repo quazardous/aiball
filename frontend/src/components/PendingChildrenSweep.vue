@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * #2180 — approve a ticket's pending children in one gesture.
  *
@@ -114,7 +115,7 @@ async function approve() {
                 </label>
                 <span class="pending-children__meta">
                     {{ c.project }} · attached by <strong>{{ c.attached_by ?? "system" }}</strong>
-                    · {{ new Date(c.attached_at).toLocaleString() }}
+                    · {{ fmtDateTime(c.attached_at) }}
                     <span v-if="foreign(c)" class="pending-children__flag">not attached by the author</span>
                 </span>
             </li>

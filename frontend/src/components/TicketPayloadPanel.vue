@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 /**
  * #2112 — the payload zone on a ticket thread.
  *
@@ -105,7 +106,7 @@ async function doRevoke() {
         <template v-else-if="revoked">
             <p class="payload-panel__note">
                 Values destroyed<template v-if="data?.revoked_by"> by {{ data.revoked_by }}</template>
-                <template v-if="data?.revoked_at"> on {{ new Date(data.revoked_at).toLocaleString() }}</template>.
+                <template v-if="data?.revoked_at"> on {{ fmtDateTime(data.revoked_at) }}</template>.
                 <template v-if="tombstoneKeys.length">
                     It held<template v-for="(k, i) in tombstoneKeys" :key="k"><span v-if="i">,</span>
                         <code>{{ k }}</code></template>.

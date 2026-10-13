@@ -11,6 +11,7 @@
 import type { InboxRow, Intent, Priority, Strategy } from "./api";
 import type { BulkAction } from "./ticket-actions";
 import type { LifecycleStage } from "./ticket-state";
+import { fmtDateTime, fmtTime, fmtDate, dayKey } from "./time-zone";
 
 // =====================================================================
 //  Lifecycle stage → lead icon
@@ -163,19 +164,19 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
  */
 export function shortResume(iso: string): string {
     const d = new Date(iso);
-    const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const sameDay = d.toDateString() === new Date().toDateString();
-    return sameDay ? time : `${d.toLocaleDateString([], { day: "2-digit", month: "2-digit" })} ${time}`;
+    const time = fmtTime(d, { hour: "2-digit", minute: "2-digit" });
+    const sameDay = dayKey(d) === dayKey(Date.now());
+    return sameDay ? time : `${fmtDate(d, { day: "2-digit", month: "2-digit" })} ${time}`;
 }
 
 /** #2456 — the full sentence behind the short form. */
 export function stepResumeTooltip(iso: string): string {
-    return `step — the agent resumes at ${new Date(iso).toLocaleString()}`;
+    return `step — the agent resumes at ${fmtDateTime(iso)}`;
 }
 
 export function snoozedTooltip(postponed_until: string | null | undefined): string {
     if (!postponed_until) return LIFECYCLE_ICONS.snoozed.title;
-    return `snoozed until ${new Date(postponed_until).toLocaleString()}`;
+    return `snoozed until ${fmtDateTime(postponed_until)}`;
 }
 
 // =====================================================================

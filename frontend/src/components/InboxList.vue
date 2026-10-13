@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from "../lib/time-zone";
 import Tag from "primevue/tag";
 import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
@@ -321,14 +322,14 @@ function stageIcon(r: InboxRow) {
             <span
                 v-if="r.claimant"
                 class="list-row__hold"
-                :title="`Claimed by ${r.claimant}${r.claimed_at ? ' · ' + new Date(r.claimed_at).toLocaleString() : ''}`"
+                :title="`Claimed by ${r.claimant}${r.claimed_at ? ' · ' + fmtDateTime(r.claimed_at) : ''}`"
             >
                 <i class="pi pi-bookmark-fill" />
             </span>
             <span
                 v-if="r.assignee"
                 class="list-row__hold"
-                :title="`Assigned to ${r.assignee}${r.assigned_at ? ' · ' + new Date(r.assigned_at).toLocaleString() : ''}`"
+                :title="`Assigned to ${r.assignee}${r.assigned_at ? ' · ' + fmtDateTime(r.assigned_at) : ''}`"
             >
                 <i class="pi pi-user-plus" />
             </span>

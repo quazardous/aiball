@@ -23,6 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- A time zone setting, `display.timezone`: `auto` (the daemon machine's zone,
+  the default), `UTC`, or a zone name such as `Europe/Paris`, for the board or
+  a project. Agents read every time in it, with its offset
+  (`2026-10-13T12:44:47+02:00`); a wake's stamp names its zone (`12:44 CEST`);
+  `welcome` and the skill tell agents to write times to the human in it; the
+  web UI follows it unless it is `auto`. Times are still stored in UTC, and a
+  time an agent passes back (`since`) may carry any offset.
+
 ### Fixed
 
 - A step that cites no commit no longer wakes the tickets waiting on its ticket

@@ -10,6 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { asLines, asText, client, effectiveBy } from "./_helpers.js";
 import { expandToken } from "../search-synonyms.js";
+import { toUtcIso } from "../timezone.js";
 
 
 /** #2193 — how a hit is addressed: the ticket, plus the comment's hashid when
@@ -141,7 +142,8 @@ export function registerTicketReadTools(server: McpServer): void {
                 // Default (no flag) → summary mode on the API side. `full: true`
                 // explicitly opts back into bodies.
                 full: full === true ? "1" : undefined,
-                since,
+                // #3969 — a time with an offset, as the agent read it, back to UTC.
+                since: since ? toUtcIso(since) : since,
                 by_agent,
                 status,
                 title_contains,
@@ -204,7 +206,7 @@ export function registerTicketReadTools(server: McpServer): void {
                 open,
                 intent,
                 limit,
-                since,
+                since: since ? toUtcIso(since) : since,
             }) as SearchHitLine[];
             // #2193 — grep-shaped: a locator, then THE line the match sits on.
             // A comment is addressed by its hashid, never by `message_id`

@@ -768,10 +768,13 @@ export class AiballClient {
     /** #1542 — the daemon's resolved config surface. Today used to read the
      *  `upstream` binding map (which projects have a coupling target) so the
      *  MCP can gate the import/export tools on it. */
-    getConfig() {
+    getConfig(project?: string | null) {
         return this.call<{
             upstream?: Record<string, Array<{ kind: string; ref: string; default?: boolean }>>;
-        }>("config.get");
+            /** #3969 — the zone times are shown in, resolved; and the setting as written. */
+            timezone?: string;
+            timezone_setting?: string;
+        }>("config.get", project ? { project } : {});
     }
     /** #3509 — the board's config for a project, each key's global and project values (`config.managed`). */
     configManaged(project: string | null) {

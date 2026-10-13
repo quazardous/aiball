@@ -4,6 +4,7 @@
  * Extracted from InboxList.vue (#B.332 Phase D, per `#C.mf5h72`).
  */
 import { type AutomationAction, type ConditionTree, type InboxRow, type TokenUsage } from "./api";
+import { fmtDate } from "./time-zone";
 
 /**
  * #446 — token EFFORT: the genuinely NEW tokens a ticket consumed (input +
@@ -129,7 +130,7 @@ export function relativeTime(iso: string): string {
     if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m ago`;
     if (diff < day) return `${Math.floor(diff / hr)}h ago`;
     if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-    return d.toLocaleDateString();
+    return fmtDate(d);
 }
 
 /**

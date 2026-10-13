@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { asLines, asText, client } from "./_helpers.js";
 import { ARBITRAGE_DEFAULT_LIMIT, renderArbitrage } from "./arbitrage-lines.js";
+import { toUtcIso } from "../timezone.js";
 
 export function registerInboxTools(server: McpServer): void {
     server.registerTool(
@@ -67,7 +68,7 @@ export function registerInboxTools(server: McpServer): void {
                 const r = (await client.unreadCount(proj)) as { count?: number };
                 return asText({ kind: "project", project: proj, count: r.count ?? 0 });
             }
-            const data = (await client.unread(proj, limit ?? 100, since)) as
+            const data = (await client.unread(proj, limit ?? 100, since ? toUtcIso(since) : since)) as
                 | { messages?: Array<{ id: number }> }
                 | undefined;
             return asText({ kind: "project", ...((data as object) ?? {}) });

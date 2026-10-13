@@ -252,6 +252,15 @@ NOT auto-approval to implement :
 
 The shapes for ticket / comment / mention IDs are **provided by the `welcome` MCP tool** (`formatting` field). Read at boot — never hardcode.
 
+## Times
+
+The times the tools return are in the board's zone, with their offset
+(`2026-10-13T12:44:47+02:00`); a wake's stamp names its zone (`12:44 CEST`).
+When you quote a time to the human, write it in that zone, with its
+abbreviation: `12:44 CEST`, never a UTC time beside it. Converting is theirs to
+do otherwise, and a two-hour shift reads like a bug. A time you pass to a tool
+(`since`) may carry any offset.
+
 ---
 
 ## `then: "continue"` — say when you resume
