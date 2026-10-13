@@ -2678,7 +2678,12 @@ export async function buildContextPhrase(
         // renvoie ni kind ni body — le kind inconnu passait par la branche
         // « comportement inchangé » et s'ancrait sur du vide.
         const hintHasBody = hintHasRenderableBody(eventHint);
-        if (eventHint?.commentHashid && hintIsComment && hintHasBody
+        // A bundle on the hint's own ticket already lists every unread event of
+        // it, the hinted comment included: grafting the hint in front rendered
+        // that comment twice (a plan accept held in its grace, then the comment
+        // typed right after it, both in one wake).
+        const hintInBundle = isBundleMode && head?.id === eventHint?.ticketId;
+        if (eventHint?.commentHashid && hintIsComment && hintHasBody && !hintInBundle
             && !headCommentHashid && !headLifecycleVerb && !headDecisionEvent
             && head?.kind !== "new ticket") {
             headCommentHashid = eventHint.commentHashid;

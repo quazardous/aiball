@@ -40,6 +40,9 @@ dates are YYYY-MM-DD.
   screen just before reading it, so a short answer was woken again at once.
 - The Stop hook no longer sends an empty wake when the open tickets are all
   resting: it types nothing, and the loop stays idle.
+- A comment that arrives while its ticket's events wait to be woken (a plan
+  accept held in its grace) shows once in the wake, in the list of the
+  ticket's updates; it was also repeated in front of that list.
 - A step that cites no commit no longer wakes the tickets waiting on its ticket
   with `resume_on: { ticket }`: it only re-parks that ticket. A reply, a
   decision, a close or a step that cites a commit still does. Queues of tickets
