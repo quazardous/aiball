@@ -299,7 +299,7 @@ function classifyTurn(): string {
         log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
         if (gate.has) {
             const phraseClient = new AiballClient();
-            const { phrase, headMessageId, backlogTicketId, extraSeenIds, holdUntilMs } = await buildContextPhrase(
+            const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, holdUntilMs } = await buildContextPhrase(
                 phraseClient,
                 process.env.AIBALL_PROJECT ?? null,
                 pingsPath(sd!),
@@ -308,6 +308,15 @@ function classifyTurn(): string {
             // tempo re-entry delivers it with whatever came meanwhile.
             if (holdUntilMs !== undefined) {
                 log(`  → SKIP (plan accept in its grace, ${Math.ceil((holdUntilMs - Date.now()) / 1000)}s left) became=idle`);
+                emit();
+            }
+            // The kernel's rule (#825): a wake carries an event or a backlog
+            // ticket, or it does not fire. Open tickets that are all resting
+            // pass the work check and render nothing: the hook typed an empty
+            // phrase and pressed Enter.
+            if (!hasContent) {
+                setIpcStateTagInfo(interrupted ? "interrupted" : null);
+                log(`  → IDLE (nothing to wake on) became=idle${interrupted ? ":interrupted" : ""}`);
                 emit();
             }
             // #B.180: mark this send-keys as auto-wake so the

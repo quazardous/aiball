@@ -35,6 +35,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- After a wake, a turn that ends within 10 s waits out the rest of the 10 s
+  before the next wake again. The Stop hook cleared that wait on every clean
+  screen just before reading it, so a short answer was woken again at once.
+- The Stop hook no longer sends an empty wake when the open tickets are all
+  resting: it types nothing, and the loop stays idle.
 - A step that cites no commit no longer wakes the tickets waiting on its ticket
   with `resume_on: { ticket }`: it only re-parks that ticket. A reply, a
   decision, a close or a step that cites a commit still does. Queues of tickets

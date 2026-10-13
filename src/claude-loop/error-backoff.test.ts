@@ -20,6 +20,8 @@ import {
     readErrorBackoff,
     resetErrorBackoff,
 } from "./error-backoff.js";
+import { getIpcState, setIpcBusyDeferUntil } from "./ipc-state.js";
+import { readBusyDefer } from "./state.js";
 
 test("#335: detection is footer-scoped — scrollback mentions are ignored", () => {
     const filler = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
@@ -58,7 +60,24 @@ test("armErrorBackoff: same id increments, new id restarts, reset clears", () =>
 
         resetErrorBackoff(sd);
         assert.equal(readErrorBackoff(sd), null);
+        assert.equal(getIpcState().busyDeferUntilMs, null, "the error's defer goes with it");
     } finally {
+        rmSync(sd, { recursive: true, force: true });
+    }
+});
+
+test("resetErrorBackoff with no error armed keeps the post-wake tempo", () => {
+    const sd = mkdtempSync(join(tmpdir(), "cl-eb-"));
+    try {
+        // The Stop hook resets on every clean pane, then reads the tempo the
+        // last wake armed: the reset must not take it.
+        const until = Date.now() + 10_000;
+        setIpcBusyDeferUntil(until);
+        resetErrorBackoff(sd);
+        assert.equal(getIpcState().busyDeferUntilMs, until);
+        assert.ok(readBusyDefer(sd), "a Stop inside the tempo still sees it");
+    } finally {
+        setIpcBusyDeferUntil(null);
         rmSync(sd, { recursive: true, force: true });
     }
 });

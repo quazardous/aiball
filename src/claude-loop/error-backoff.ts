@@ -149,9 +149,13 @@ export function readErrorBackoff(sd: string): BackoffState | null {
  *  error-free (resume OK). #919 david `pqs8us` : drop the residual
  *  defer too. Without this, a 10-min cap arm left busy-defer pinned
  *  long after the error scrolled out of the footer, silently blocking
- *  every wake until the deadline expired. */
+ *  every wake until the deadline expired.
+ *  Only a defer an error armed: with no counter on disk the defer is the
+ *  post-wake tempo, and the Stop hook (which calls this on every clean pane,
+ *  right before it reads that tempo) wiped it, so a Stop seconds after a wake
+ *  woke claude again at once. */
 export function resetErrorBackoff(sd: string): void {
-    try { unlinkSync(errorBackoffPath(sd)); } catch { /* not armed */ }
+    try { unlinkSync(errorBackoffPath(sd)); } catch { return; /* not armed */ }
     setIpcBusyDeferUntil(null);
 }
 
