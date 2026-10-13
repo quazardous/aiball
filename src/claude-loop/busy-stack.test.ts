@@ -11,6 +11,8 @@ import {
     PROOF_ESC,
     PROOF_COMPACTING,
     type BusyProofs,
+    paneReadsIdle,
+    PANE_IDLE_TURN_FLOOR_MS,
 } from "./busy-stack.js";
 
 const T0 = 1_000_000;
@@ -108,4 +110,27 @@ test("mechanicalProofsLive: releaseAll really empties everything, mechanical inc
     const p = seenProof(seenProof(new Map(), PROOF_ESC, T0), PROOF_TURN, T0);
     assert.equal(mechanicalProofsLive(releaseAll(), T0 + 1), false);
     assert.equal(mechanicalProofsLive(p, T0 + 1), true, "(control: without release, it holds)");
+});
+
+// #4014 — the moment right after a submit: the box is back, empty, and Claude
+// has drawn nothing yet. The pane read idle within milliseconds of each submit.
+const idleBox = { idlePromptVisible: true, mechanicalLive: false };
+
+test("#4014 a turn that has shown nothing yet is not ended by an empty prompt box", () => {
+    assert.equal(paneReadsIdle({ ...idleBox, inTurn: true, turnShowedWork: false, sinceTurnStartMs: 15 }), false);
+    assert.equal(paneReadsIdle({ ...idleBox, inTurn: true, turnShowedWork: false, sinceTurnStartMs: PANE_IDLE_TURN_FLOOR_MS - 1 }), false);
+});
+
+test("#4014 once the turn showed work, the box back means the turn is done", () => {
+    assert.equal(paneReadsIdle({ ...idleBox, inTurn: true, turnShowedWork: true, sinceTurnStartMs: 800 }), true);
+});
+
+test("#4014 a turn that never shows work still ends from the pane after the floor (a lost Stop hook)", () => {
+    assert.equal(paneReadsIdle({ ...idleBox, inTurn: true, turnShowedWork: false, sinceTurnStartMs: PANE_IDLE_TURN_FLOOR_MS }), true);
+});
+
+test("#4014 out of a turn, and with work on screen, nothing changes", () => {
+    assert.equal(paneReadsIdle({ ...idleBox, inTurn: false, turnShowedWork: false, sinceTurnStartMs: 0 }), true);
+    assert.equal(paneReadsIdle({ idlePromptVisible: true, mechanicalLive: true, inTurn: true, turnShowedWork: true, sinceTurnStartMs: 60_000 }), false);
+    assert.equal(paneReadsIdle({ idlePromptVisible: false, mechanicalLive: false, inTurn: true, turnShowedWork: true, sinceTurnStartMs: 60_000 }), false);
 });

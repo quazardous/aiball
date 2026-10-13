@@ -35,6 +35,11 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The loop no longer takes the moment right after a submit (the prompt box
+  back and empty, Claude not drawing yet) for the end of the turn: it waits to
+  have seen Claude at work in that turn, or 5 s without any. A wake the Stop
+  hook sends now starts a turn too. Both left the loop thinking Claude idle
+  while it worked, and a second wake could be typed into it.
 - After a wake, a turn that ends within 10 s waits out the rest of the 10 s
   before the next wake again. The Stop hook cleared that wait on every clean
   screen just before reading it, so a short answer was woken again at once.

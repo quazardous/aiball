@@ -127,3 +127,36 @@ export function isBusy(proofs: BusyProofs, nowMs: number): boolean {
 export function releaseAll(): BusyProofs {
     return new Map();
 }
+
+/**
+ * #4014 — how long a turn may go without a mechanical proof before the
+ * pane alone may close it (a lost Stop hook, a turn too short to draw).
+ */
+export const PANE_IDLE_TURN_FLOOR_MS = 5_000;
+
+/**
+ * Does the pane read idle — the authoritative release of every proof, and
+ * the pane-side turn-end (#1012)?
+ *
+ * #4014 — right after a submit the input box is back, empty, cursor at its
+ * origin, and Claude has not drawn its spinner yet: no mechanical proof, so
+ * the pane read idle within milliseconds of every submit. The turn ended
+ * there, the tempo ran through the whole turn, and a wake was typed into a
+ * working Claude. Within a turn, the pane may only speak once a mechanical
+ * proof has shown in that turn (it then went away: Claude is done), or once
+ * the turn is older than the floor without any (the Stop hook was lost, or
+ * the turn ended before a frame showed it).
+ */
+export function paneReadsIdle(o: {
+    idlePromptVisible: boolean;
+    mechanicalLive: boolean;
+    inTurn: boolean;
+    /** A mechanical proof showed since the turn started. */
+    turnShowedWork: boolean;
+    sinceTurnStartMs: number;
+    floorMs?: number;
+}): boolean {
+    if (!o.idlePromptVisible || o.mechanicalLive) return false;
+    if (!o.inTurn) return true;
+    return o.turnShowedWork || o.sinceTurnStartMs >= (o.floorMs ?? PANE_IDLE_TURN_FLOOR_MS);
+}

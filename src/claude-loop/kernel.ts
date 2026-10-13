@@ -192,6 +192,7 @@ import {
     seenProof,
     isBusy as busyStackActive,
     releaseAll as releaseBusyProofs,
+    paneReadsIdle,
     mechanicalProofsLive,
     PROOF_TURN,
     PROOF_ESC,
@@ -1054,6 +1055,11 @@ const PICKER_CROSS_RETRY_MS = 3000;
 // holds. Module state because it accumulates across ticks. Released wholesale
 // by pane-idle + the explicit clears (Stop hook, sanity, turn:settled).
 let busyProofs: BusyProofs = new Map();
+// #4014 — when the current turn started, and whether the pane has shown Claude
+// at work since: until it has, an empty prompt box is the moment right after a
+// submit, not the end of the turn (see paneReadsIdle).
+let turnStartedAtMs = 0;
+let turnShowedWork = false;
 function crossResumePicker(): void {
     if ((process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort") return;
     lastPickerCrossAtMs = Date.now();
@@ -1116,6 +1122,8 @@ async function probePaneMarkers(): Promise<void> {
     // #1580 — la preuve CONTINUE : la ligne d'activité est là tant que claude
     // travaille, quand le hint `esc` ne l'est qu'un tick sur six.
     if (activityW.snapshot().visible) busyProofs = seenProof(busyProofs, PROOF_ACTIVITY, nowBusy);
+    // #4014 — this turn has shown Claude at work at least once.
+    if (inTurn && (escVisible || getCompactingDetector().snapshot().active || activityW.snapshot().visible)) turnShowedWork = true;
     // pane-idle (cursor back at origin, no mechanical proof left) = authoritative
     // release : drop every proof at once, no waiting for remanence.
     //
@@ -1130,7 +1138,15 @@ async function probePaneMarkers(): Promise<void> {
     // past its window holds nothing. #992's anti-stuck-busy purpose is intact —
     // it just applies after the remanence rather than before it.
     const mechanicalLive = mechanicalProofsLive(busyProofs, nowBusy);
-    if (idlePromptVisible && !mechanicalLive) busyProofs = releaseBusyProofs();
+    // #4014 — not in the first moments of a turn, before Claude draws anything.
+    const paneIdle = paneReadsIdle({
+        idlePromptVisible,
+        mechanicalLive,
+        inTurn,
+        turnShowedWork,
+        sinceTurnStartMs: nowBusy - turnStartedAtMs,
+    });
+    if (paneIdle) busyProofs = releaseBusyProofs();
     const composite = busyStackActive(busyProofs, nowBusy);
     if (composite !== getIpcState().paneBusy) setPaneBusy(sd, composite);
     // #1012 — pane-idle = 2nd source of turn-end (the Stop hook can be missed).
@@ -1141,8 +1157,8 @@ async function probePaneMarkers(): Promise<void> {
     // leaves in_turn so this won't re-fire.
     // Same predicate as the release above, and for the same reason: closing a
     // turn on a blinked-out hint would end it mid-work (#1580).
-    if (idlePromptVisible && !mechanicalLive && inTurn) {
-        log("turn-end via pane-idle (Stop hook absent/late) → turnEnded");
+    if (paneIdle && inTurn) {
+        log(`turn-end via pane-idle (Stop hook absent/late) → turnEnded (${turnShowedWork ? "work shown, then idle" : `nothing shown in ${Math.round((nowBusy - turnStartedAtMs) / 1000)}s`})`);
         getTurnService().turnEnded(Date.now());
     }
     // Picker markers are AUTHORITATIVELY the current pane scan, not just
@@ -2310,7 +2326,17 @@ async function mainSse(): Promise<void> {
     hookWatcher.on("hook:user_prompt_submit", (ev) => {
         // #898 — signal d'activité pour SanityController (reset stale clock).
         getSanityService().ticketActivity(ev.atMs);
-        if (ev.fromAutoWake) return;
+        if (ev.fromAutoWake) {
+            // #4014 — the kernel starts the turn of its own wakes before typing
+            // them; the Stop hook's wakes started none, so the loop sat in
+            // `no_turn` through them: the tempo ran, `turn:settled` cleared the
+            // busy latch, and a second wake was typed into the working Claude.
+            // Their submit starts it. After the boot only: a turn started during
+            // it reads as a human's prompt (#922).
+            const turn = getTurnService().getActor().getSnapshot();
+            if (getIpcState().loopStart && !turn.matches("in_turn")) getTurnService().turnStarted(ev.atMs);
+            return;
+        }
         // A real human submission flips claude back to busy ; an
         // auto-wake submission is the loop talking to itself.
         // #881 — délégué à TurnController via TURN_STARTED. Si TurnController
@@ -2713,6 +2739,8 @@ async function mainSse(): Promise<void> {
         });
         turnActor.on("turn:started", (ev) => {
             log(`turnMachine: turn:started atMs=${ev.atMs}`);
+            turnStartedAtMs = ev.atMs;
+            turnShowedWork = false;
             // #999 — a new turn supersedes a stale pending SSE event (the
             // human is interacting ; the deferred hint would be outdated).
             pendingWakeHint = undefined;
