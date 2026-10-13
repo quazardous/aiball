@@ -33,6 +33,17 @@ dates are YYYY-MM-DD.
   web UI follows it unless it is `auto`. Times are still stored in UTC, and a
   time an agent passes back (`since`) may carry any offset.
 
+### Changed
+
+- A wake goes 10 s after Claude's turn ends, whatever brought it, or at once
+  when the loop has been idle longer than that: an event, the end of a
+  presence hold, a plan accept. The Stop hook no longer wakes Claude the moment
+  its turn ends, and an event no longer waits up to 10 s for the next tick when
+  the loop is already idle; the bar shows that one countdown.
+- The wake of an accepted plan waits 10 s by default
+  (`claude_loop.accept_grace_seconds`), and leaves when they are up rather than
+  at the next tick after them.
+
 ### Fixed
 
 - The loop no longer takes the moment right after a submit (the prompt box
@@ -40,11 +51,6 @@ dates are YYYY-MM-DD.
   have seen Claude at work in that turn, or 5 s without any. A wake the Stop
   hook sends now starts a turn too. Both left the loop thinking Claude idle
   while it worked, and a second wake could be typed into it.
-- After a wake, a turn that ends within 10 s waits out the rest of the 10 s
-  before the next wake again. The Stop hook cleared that wait on every clean
-  screen just before reading it, so a short answer was woken again at once.
-- The Stop hook no longer sends an empty wake when the open tickets are all
-  resting: it types nothing, and the loop stays idle.
 - A comment that arrives while its ticket's events wait to be woken (a plan
   accept held in its grace) shows once in the wake, in the list of the
   ticket's updates; it was also repeated in front of that list.

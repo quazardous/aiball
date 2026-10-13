@@ -99,7 +99,7 @@ claude_loop:
   # How long the wake of an accepted plan waits (seconds), so a comment
   # typed right after accepting comes in the same wake instead of a second
   # one once the work has started. 0 = wake at once.
-  accept_grace_seconds: 30
+  accept_grace_seconds: 10
 
   # WAIT default when neither --wait nor --no-wait is passed. Global CLI
   # default stays no-wait (eager boot drain); flip true to yield boot-grace

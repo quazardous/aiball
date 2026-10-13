@@ -136,8 +136,9 @@ Guide: [`docs/REMOTE.md`](./docs/REMOTE.md).
 
 No magic. `claude-loop` runs claude inside **tmux** and installs two
 session-scoped Claude Code **hooks** (`SessionStart` + `Stop`): at every
-turn-end the Stop hook checks your backlog and, if there's work, wakes
-claude with the next ping (the loop's kernel keeps a heartbeat too). To interleave
+turn-end the Stop hook tells the loop the turn is over, and 10 s later, if
+there's work, the loop wakes claude with the next ping (or at once when it has
+been idle longer than that). To interleave
 those pings without typing over you, a small **PTY proxy** sits between
 tmux and claude and watches the input stream — it tells *your* keystrokes
 apart from claude's output, holds pings back while you're typing (a presence

@@ -459,7 +459,7 @@ const DEFAULTS: AiballConfig = {
         // collapsed grace window.
         presence_hold_seconds: 600,
         // #3898 — a plan accept's wake waits this long for a follow-up comment.
-        accept_grace_seconds: 30,
+        accept_grace_seconds: 10,
         wake_in_flight_ttl_ms: 2000,
         // #722 — input-hot + 2-rate pane probe defaults.
         input_hot_ttl_ms: 3000,

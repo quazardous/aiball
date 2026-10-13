@@ -1482,6 +1482,40 @@ function applyCounters(c: { open: number; actionable: number; backlog: number; e
 // path. Cleared on consumption and on `turn:started` (a new turn supersedes a
 // stale pending event).
 let pendingWakeHint: WakeHint | undefined;
+/**
+ * #4034 david — "10 s après busy, pour laisser respirer; si on est déjà idle
+ * depuis plus de 10 s, ça fire tout de suite". The turn machine already holds
+ * that rule: it settles WAKE_COOLDOWN_MS after the busy ends. So a drain goes
+ * at `turn:settled`, or AT ONCE when something arrives while the loop is
+ * already settled — an event, a hold released, a grace ending — instead of
+ * waiting up to a tempo for the next re-entry.
+ */
+function loopSettled(): boolean {
+    return getIpcState().loopStart === true
+        && getTurnService().getActor().getSnapshot().matches({ no_turn: "settled" });
+}
+/** The one drain, whatever calls it: the pending SSE event (if any) renders the
+ *  wake comment-centric (#999); the countdown is re-armed on what is left after
+ *  it (#1075). */
+function drainNow(source: string): void {
+    const hint = pendingWakeHint;
+    pendingWakeHint = undefined;
+    void tryWake(source, false, hint).then(() => recomputeNextWake());
+}
+/** #4034 — a plan accept held in its grace (#3898) is retried at the grace's
+ *  own end, not at the next tempo boundary after it. */
+let graceUntilMs: number | null = null;
+let graceTimer: ReturnType<typeof setTimeout> | null = null;
+function armGraceRetry(untilMs: number): void {
+    graceUntilMs = untilMs;
+    if (graceTimer) clearTimeout(graceTimer);
+    graceTimer = setTimeout(() => {
+        graceTimer = null;
+        graceUntilMs = null;
+        if (loopSettled()) drainNow("accept-grace-ended");
+        else recomputeNextWake();
+    }, Math.max(0, untilMs - Date.now()) + 50);
+}
 // #3449 — the unread pings that wake this agent, from the daemon's counters.
 let wakeEvents = 0;
 // #2255 — external signals waiting for delivery. Priority over the ticket FIFO,
@@ -1570,6 +1604,11 @@ function recomputeNextWake(): void {
         let nextAt = ctx.idleSinceMs
             + Math.ceil((now - ctx.idleSinceMs) / tempoMs) * tempoMs;
         if (nextAt <= now + 250) nextAt += tempoMs;
+        // #4034 — a plan accept in its grace leaves at the grace's end (or at
+        // the settle, if that comes later): the one deadline, one countdown.
+        if (graceUntilMs !== null && graceUntilMs > now) {
+            nextAt = snap.matches({ no_turn: "fresh" }) ? Math.max(graceUntilMs, ctx.idleSinceMs + tempoMs) : graceUntilMs;
+        }
         setIpcNextWakeAt(nextAt);
     } else {
         setIpcNextWakeAt(null);
@@ -1764,6 +1803,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // tries again, and by then a follow-up comment rides in the same wake.
     if (holdUntilMs !== undefined) {
         log(`hold wake (${reason}) — plan accept in its grace, ${Math.ceil((holdUntilMs - Date.now()) / 1000)}s left`);
+        armGraceRetry(holdUntilMs);
         return false;
     }
     // If there's nothing actionable to surface (no FIFO head, no backlog,
@@ -1947,6 +1987,14 @@ async function mainSse(): Promise<void> {
                     return;
                 }
                 pendingWakeHint = p;
+                // #4034 — idle for longer than the tunnel already: the breath
+                // after the busy is taken, the event goes now. The single drain
+                // (#999) is unchanged, it is only not made to wait for a tick.
+                if (loopSettled()) {
+                    log(`SSE ping recorded as pending hint — loop settled, draining now`);
+                    drainNow("sse:ping (settled)");
+                    return;
+                }
                 // #1041 — arm the `📨 Ns` countdown NOW (don't wait for the next turn
                 // re-entry to recompute it), so the [hint → drain] window is visible.
                 recomputeNextWake();
@@ -2791,15 +2839,13 @@ async function mainSse(): Promise<void> {
             // #999 model (a) — sole periodic drain driver. Consume any pending
             // SSE event so the wake renders comment-centric (eventHint path) ;
             // a bare tick (no pending) drains the FIFO / backlog normally.
-            const hint = pendingWakeHint;
-            pendingWakeHint = undefined;
             // #1075 — re-arm the countdown AFTER the drain so it reflects the
             // POST-wake state : if the wake emptied the queue, `somethingToDrain`
             // is now false → nextWakeAtMs=null → the `Ns` disappears (no flash to
             // 10) ; if work remains, it arms the next boundary honestly (after
             // delivery, not coincident with it). If the wake started a turn the
-            // bar's phase gate hides the countdown anyway.
-            void tryWake("turn:settled", false, hint).then(() => recomputeNextWake());
+            // bar's phase gate hides the countdown anyway. (drainNow, #4034.)
+            drainNow("turn:settled");
         });
     }
     // #1075 root cause — on a REATTACH (reload / self-reload / revive) the
@@ -2923,8 +2969,10 @@ async function mainSse(): Promise<void> {
                         log("afkMachine: input-hot expired post-afk:cleared but AFK was re-armed — skipping deferred wake");
                         return;
                     }
+                    // #4034 — still within the breath after a busy: turn:settled drains.
+                    if (!loopSettled()) { log("afkMachine: input-hot expired post-afk:cleared — turn:settled drains it (10 s after the busy)"); return; }
                     log("afkMachine: input-hot expired post-afk:cleared — firing deferred wake");
-                    void tryWake("afk-cleared-drain (input-hot expired)");
+                    drainNow("afk-cleared-drain (input-hot expired)");
                 });
                 unsubInputHot = () => sub.unsubscribe();
                 // If user re-armed AFK before input-hot expired, cancel.
@@ -2940,7 +2988,9 @@ async function mainSse(): Promise<void> {
                 log("afkMachine: afk:cleared but AFK was re-armed before tryWake — skipping");
                 return;
             }
-            void tryWake("afk-cleared-drain");
+            // #4034 — still within the breath after a busy: turn:settled drains.
+            if (!loopSettled()) { log("afkMachine: afk:cleared — turn:settled drains it (10 s after the busy)"); return; }
+            drainNow("afk-cleared-drain");
         });
         // Log lines for AFK locus events (decorations).
         afkActor.on("afk:armed_10m", (ev) => log(`afkMachine: afk:armed_10m expiry=${new Date(ev.expiryMs).toISOString()} prevMode=${ev.prevMode}`));

@@ -227,20 +227,21 @@ over `loop.sock`. See [the state diagrams](#state-diagrams) for each machine,
 and [Human presence & keystroke detection](#human-presence--keystroke-detection)
 for the checks that keep a wake off a human at the keyboard.
 
-**Wake sources.** All but the Stop hook go through `tryWake` and the checks of
-[diagram 4](#4-what-stops-a-wake); the Stop hook runs the work check itself.
+**Wake sources.** All go through `tryWake` and the checks of
+[diagram 4](#4-what-stops-a-wake). The rule they share: a wake goes 10 s after
+the turn ends, to let Claude breathe, or at once when the loop has been idle
+longer than that (the turn machine's `settled` state).
 
 | Source | When | Latency |
 |---|---|---|
-| Stop hook | just after a turn, when work is waiting | immediate |
-| `turn:settled` | 10 s after a turn ended, then every 10 s while idle | up to 10 s |
-| Live notification | a panic ping or signal pushed to the loop | immediate |
-| Presence hold released | F9, or the hold's timeout | immediate |
+| `turn:settled` | 10 s after a turn ended, then every 10 s while idle | 10 s after the turn |
+| Live notification | an event for this agent; a panic ping or a signal | at once when settled, else at `turn:settled` (panic: at once) |
+| Presence hold released | F9, or the hold's timeout | at once when settled, else at `turn:settled` |
+| Plan accept in its grace | `claude_loop.accept_grace_seconds` after the accept | at the grace's end |
 | `claude-loop wake` | manual trigger; skips the work check | next heartbeat |
 | Heartbeat | every `CL_INTERVAL` s, only when no `turn:settled` is scheduled, or the scheduled one is overdue by more than a tempo (anti-stuck) | up to `CL_INTERVAL` s |
-The Stop hook is the tightest drain: as soon as claude returns to
-the prompt with new work waiting, it re-fires without waiting for
-the timer.
+The Stop hook does not wake Claude: the Stop is the end of the busy, the
+moment the 10 s are for. It records the turn and leaves the wake to the kernel.
 
 ---
 
@@ -369,8 +370,9 @@ flowchart TD
   override (boot, presence hold, typing, busy-defer), but still stops at not
   logged in, the trust dialog and an unreachable API. A panic wake only ignores
   busy-defer, `esc to interrupt` and `/compact`.
-- **busy-defer** is armed for 10 s after each delivered wake, by the Stop hook,
-  and by the API-error backoff (5 s, doubling, capped at 10 min).
+- **busy-defer** is armed for 10 s after each delivered wake, for 5 s by the
+  Stop hook when the screen still shows Claude busy, and by the API-error
+  backoff (5 s, doubling, capped at 10 min).
 
 ---
 

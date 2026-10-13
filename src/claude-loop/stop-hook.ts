@@ -5,18 +5,17 @@
  * "ping or sleep" logic (david: "hook stop -> ping ou sleep") —
  * runs the same check-cmd as the timer:
  *
- *   - check-cmd exit 0 (= still work to drain) → immediately
- *     `tmux send-keys` a random pop phrase so claude picks up the
- *     next thing without waiting for a timer tick
- *   - check-cmd non-zero (= nothing left) → write `idle-since` so
- *     the timer takes over the watch
+ *   - #4034: it no longer wakes claude itself. The Stop ends the busy,
+ *     and the kernel wakes 10 s later (`turn:settled`), whatever waits.
+ *   - it still records the turn's tokens, the session id, an API error's
+ *     backoff, and the bar's idle tag.
  *
  * Always emits `{}` and exits 0 — never block claude's stop.
  */
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_SOCK_KIND, PANE_BUSY_DELAY_MS, humanPresentHold, ackDeliveredWake, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_SOCK_KIND, PANE_BUSY_DELAY_MS, humanPresentHold, formatPaneSnapshot, humanIsTyping, paneShowsInterrupted, snapshotPane, tmuxName } from "./state.js";
 import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, latestModel, latestSessionFile, projectTranscriptDir } from "./token-capture.js";
@@ -281,104 +280,16 @@ function classifyTurn(): string {
             log(`  → BUSY-DEFER armed until=${new Date(untilMs).toISOString()} became=idle:wait`);
             emit();
         }
-        // Respect the post-wake tempo: if a wake already fired in the
-        // last WAKE_COALESCE_WINDOW_MS the inject site has armed
-        // busy-defer. A second Stop arriving inside that window (claude
-        // emits multiple Stop events per turn for tool-then-text bursts)
-        // must NOT inject again — that's how a single FIFO event ends up
-        // sent to the agent twice.
-        const defer = readBusyDefer(sd!);
-        if (defer && defer.activeMs > 0) {
-            // #793 — idle-since lives in the bus (set via the Stop event
-            // emitted to the timer below). No file marker anymore.
-            setIpcStateTagInfo("wait");
-            log(`  → SKIP (busy-defer ${defer.activeMs}ms remaining) became=idle:wait`);
-            emit();
-        }
-        const gate = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null, sd!);
-        log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
-        if (gate.has) {
-            const phraseClient = new AiballClient();
-            const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, holdUntilMs } = await buildContextPhrase(
-                phraseClient,
-                process.env.AIBALL_PROJECT ?? null,
-                pingsPath(sd!),
-            );
-            // #3898 — a plan accept in its grace: go idle, the kernel's next
-            // tempo re-entry delivers it with whatever came meanwhile.
-            if (holdUntilMs !== undefined) {
-                log(`  → SKIP (plan accept in its grace, ${Math.ceil((holdUntilMs - Date.now()) / 1000)}s left) became=idle`);
-                emit();
-            }
-            // The kernel's rule (#825): a wake carries an event or a backlog
-            // ticket, or it does not fire. Open tickets that are all resting
-            // pass the work check and render nothing: the hook typed an empty
-            // phrase and pressed Enter.
-            if (!hasContent) {
-                setIpcStateTagInfo(interrupted ? "interrupted" : null);
-                log(`  → IDLE (nothing to wake on) became=idle${interrupted ? ":interrupted" : ""}`);
-                emit();
-            }
-            // #B.180: mark this send-keys as auto-wake so the
-            // UserPromptSubmit hook can flag from_auto_wake=true
-            // and the timer keeps idleSinceMs (no human submission).
-            // #839 Slice 2 (#766) — the wake-in-flight + last-wake-at
-            // shadow files are now written EXCLUSIVELY by the timer's
-            // dispatcher on receipt of the markers below. The hook just
-            // emits ; no more local writeFileSync.
-            const wakeAtMs = Date.now();
-            void sendEventOnce(loopSockPath(sd!), {
-                kind: "proxyEvent",
-                data: { event: "marker", name: "set_wake_in_flight", at_ms: wakeAtMs, now_ms: wakeAtMs },
-            }, { timeoutMs: 200 });
-            void sendEventOnce(loopSockPath(sd!), {
-                kind: "proxyEvent",
-                data: { event: "marker", name: "set_last_wake_at", at_ms: wakeAtMs, now_ms: wakeAtMs },
-            }, { timeoutMs: 200 });
-            const wakeDelivered = await term.inject(phrase, () => {
-                // Post-wake tempo — emit busy_defer_until via a Stop event
-                // (= same channel the pane-busy branch above uses). The
-                // dispatcher's HookService subscriber materializes the
-                // `busy-defer-until` shadow file from this signal (#839
-                // Slice 2). No local armBusyDefer call.
-                const tempoUntilMs = Date.now() + WAKE_COALESCE_WINDOW_MS;
-                void emitHookEventToTimer(sd!, {
-                    event: "hook",
-                    kind: "Stop",
-                    at_ms: Date.now(),
-                    busy_defer_until_ms: tempoUntilMs,
-                });
-                // #3791 — the head and the rest of its bundle, as the kernel acks them.
-                ackDeliveredWake(phraseClient, { headMessageId, extraSeenIds });
-                // #786 — backlog cooldown clock (see timer.ts sendKeys).
-                if (backlogTicketId) {
-                    void phraseClient.recordBacklogWake(backlogTicketId).catch(() => {});
-                }
-            }, () => {
-                // #3923 — Enter may come seconds after the phrase: the submit it
-                // causes must still read as the loop's (see set_last_wake_at above).
-                const at = Date.now();
-                void sendEventOnce(loopSockPath(sd!), {
-                    kind: "proxyEvent",
-                    data: { event: "marker", name: "set_last_wake_at", at_ms: at, now_ms: at },
-                }, { timeoutMs: 200 });
-            });
-            // #974 — fail loud : proxy attendu mais inject KO (pas de
-            // fallback tmux qui ré-armerait NOT AFK 10m). Wake droppé.
-            if (!wakeDelivered) {
-                log("wake: injectWakePhrase FAILED via proxy (loop.sock present, inject KO) — proxy bug ? wake dropped, NO tmux fallback. Investigate.");
-            }
-            setIpcStateTagInfo(null);
-            log(`  → WAKE '${phrase}' became=busy`);
-        } else {
-            // Nothing to do — mark idle so the timer can take over.
-            // #793 — idle-since lives in the bus (set via the Stop event
-            // emitted to the timer below). No file marker anymore.
-            // #345 B: garder le marqueur interrupted visible tant que le
-            // pane le montre, même hors user-grace.
-            setIpcStateTagInfo(interrupted ? "interrupted" : null);
-            log(`  → IDLE (no work) became=idle${interrupted ? ":interrupted" : ""}`);
-        }
+        // #4034 david — "10 s après busy, pour laisser respirer": the Stop is
+        // the end of the busy, the one moment a wake must NOT go. The hook used
+        // to wake claude right here when work was waiting, a second wake path
+        // beside the kernel's that skipped the breath (and, when its post-wake
+        // tempo was wiped, chained wakes seconds apart). The kernel owns the
+        // wake: the Stop puts its turn machine in `no_turn.fresh`, and
+        // `turn:settled` drains 10 s later (WAKE_COOLDOWN_MS, the one tunnel).
+        // #345 B: keep the interrupted marker visible while the pane shows it.
+        setIpcStateTagInfo(interrupted ? "interrupted" : null);
+        log(`  → IDLE (the kernel wakes at turn:settled, 10 s after the turn) became=idle${interrupted ? ":interrupted" : ""}`);
     } catch (e) {
         log(`  → ERROR ${(e as Error).message ?? String(e)}`);
     }
