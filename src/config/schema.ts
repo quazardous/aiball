@@ -385,7 +385,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         default: 3600,
         label: "How long a ticket rests after a backlog wake",
         description:
-            "After a backlog wake named a ticket, how long it stays out of the agent's next backlog wakes while nobody else moves on it. A blocked ticket rests `blocked_multiplier` times longer, a ticket whose last action is a step only `after_step`. A loop started with CL_BACKLOG_COOLDOWN_SEC applies that instead. 0 = no rest.",
+            "After a backlog wake named a ticket, how long it stays out of the agent's next backlog wakes while nobody else moves on it. A blocked ticket rests `blocked_multiplier` times longer. A step the agent posts after the wake lifts the rest at once; its `resume_on` says when it comes back. A loop started with CL_BACKLOG_COOLDOWN_SEC applies that instead. 0 = no rest.",
     },
     {
         key: "tickets.backlog.depth",
@@ -409,18 +409,6 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         label: "Backlog cooldown multiplier for blocked tickets",
         description:
             "How much longer a backlog wake keeps a BLOCKED ticket (gated by an open depends_on) out of the wake pool, compared with any other ticket. It must keep surfacing so it is not forgotten, but nothing moves on it between two wakes. 1 = same cooldown as the rest.",
-    },
-    {
-        key: "tickets.backlog.after_step",
-        min: 0,
-        max: 86400,
-        step: 60,
-        scope: "global+project",
-        type: "duration",
-        default: 300,
-        label: "Backlog cooldown after a step",
-        description:
-            "How long a backlog wake keeps a ticket out of the wake pool when its last action is a step (then: continue), instead of the whole cooldown. Short on purpose: the step says there is work to do now, and the pause only lets the queue turn over. 0 = never sink it.",
     },
 
     // #3509 — what a loop sends when Claude Code's permission system keeps
@@ -642,7 +630,6 @@ export const RENAMED_CONFIG_KEYS: Readonly<Record<string, { key: string; factor:
     "tickets.wait_credit_commit_min_minutes": { key: "tickets.wait_credit.earn.commit_min", factor: 60 },
     "tickets.claim_protect_minutes": { key: "tickets.backlog.claim_protect", factor: 60 },
     "tickets.blocked_cooldown_multiplier": { key: "tickets.backlog.blocked_multiplier", factor: 1 },
-    "tickets.sink_then_continue_minutes": { key: "tickets.backlog.after_step", factor: 60 },
     "autopoll.throttle_seconds": { key: "autopoll.throttle", factor: 1 },
     "autopoll.include_recent_tickets": { key: "autopoll.recent_tickets", factor: 1 },
 };

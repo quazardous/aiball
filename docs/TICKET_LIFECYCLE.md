@@ -404,9 +404,10 @@ between, the wake adds a line saying so and pointing at
 a step that said "at once" while it was waiting on a job. Each backlog row
 carries `backlog_last_wake_at`, the asking agent's own previous wake on it.
 
-A ticket whose last action is a step (`then: continue`) is cooled only briefly,
-5 minutes by default (`tickets.backlog.after_step`, 0 = not at all): a
-step says there is work to do now, so the pause only turns the queue over.
+A ticket whose last action is a step (`then: continue`) rests like any other
+once a wake has named it and the agent said nothing: silence is "nothing new".
+A step the agent posts after the wake lifts the rest at once, and its
+`resume_on` says when the ticket comes back.
 
 **How deep the backlog wakes** is a setting, `tickets.backlog.depth` (global,
 then per project): the deepest tier a wake may name.

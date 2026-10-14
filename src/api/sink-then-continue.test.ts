@@ -1,13 +1,12 @@
 /**
- * #2365 — the backlog wake that follows a step (`then: continue`) sinks the
- * ticket only briefly. It used to sink it for the whole cooldown, hiding the
- * work the step announced (seen live: a loop showing b:0 with six actionable
- * tickets). What must hold, over the bus:
- * - a wake after a step cools the ticket for `tickets.backlog.after_step`
- *   (5 by default), a wake after any other last action for the whole cooldown;
- * - once that short window has passed the step's ticket is a candidate again,
- *   while a ticket whose last action is a comment is still cooled;
- * - 0 minutes never sinks a step's ticket.
+ * #2365 then #4052 — a step's ticket and the backlog cooldown. #2365 sank a
+ * step's ticket 5 minutes only after a wake; since a step says when it resumes
+ * (`resume_on`), that window only re-woke stale steps the agent answered with
+ * silence, every 5 minutes, forever (#4052: 37 backlog wakes in 33 minutes).
+ * What must hold, over the bus:
+ * - a wake the agent leaves unanswered cools a step's ticket for the whole
+ *   cooldown, like a comment's;
+ * - a step the agent posts after the wake lifts the cooldown at once.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +24,6 @@ const { getDb } = await import("../db/connection.js");
 const { submitMessage } = await import("../messages.js");
 const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
-const { setConfigOverride } = await import("../db/config-overrides.js");
 const { invalidateFlagsCache } = await import("../db/projects.js");
 const schema = await import("../schema.js");
 const { and, eq } = await import("drizzle-orm");
@@ -35,11 +33,8 @@ getDb();
 upsertConsumer({ consumer_id: "boss", kind: "human" });
 upsertConsumer({ consumer_id: "worker", kind: "agent" });
 const WORKER = issueToken({ kind: "agent", consumer_id: "worker", label: "2365-w" }).token;
-for (const p of ["p-2365", "p-2365-zero"]) {
-    createProject({ name: p });
-    upsertSubscription("worker", p, "owner");
-}
-setConfigOverride("p-2365-zero", "tickets.backlog.after_step", 0);
+createProject({ name: "p-2365" });
+upsertSubscription("worker", "p-2365", "owner");
 
 after(() => {
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -88,12 +83,12 @@ function backdate(ticketId: number, messageId: number, actionAgoSec: number, wak
     invalidateFlagsCache();
 }
 
-test("a wake after a step cools the ticket for 5 minutes; after a comment, for the whole cooldown", async () => {
+test("an unanswered wake cools a step's ticket for the whole cooldown, like a comment's", async () => {
     const stepped = await held("p-2365", "a step, then a wake");
     await post("p-2365", stepped, { step: true, step_after_minutes: 0 });
     await wake(stepped);
     const step = await cooledFor("p-2365", stepped);
-    assert.ok(step > 0 && step <= 300, `cooled for ${step}s, expected at most 5 minutes`);
+    assert.ok(step > 300 && step <= COOLDOWN, `cooled for ${step}s, expected the whole cooldown`);
 
     const commented = await held("p-2365", "a question, then a wake");
     await post("p-2365", commented, { handback: true });
@@ -102,23 +97,19 @@ test("a wake after a step cools the ticket for 5 minutes; after a comment, for t
     assert.ok(comment > 300 && comment <= COOLDOWN, `cooled for ${comment}s, expected the whole cooldown`);
 });
 
-test("past the short window a step's ticket is a candidate again, a comment's is still cooled", async () => {
+test("past 5 minutes a stale step's ticket is still cooled (#4052: it came back every 5 minutes)", async () => {
     const stepped = await held("p-2365", "stepped a while ago");
     const stepId = await post("p-2365", stepped, { step: true, step_after_minutes: 0 });
     await wake(stepped);
     backdate(stepped, stepId, 7 * 60, 6 * 60);
-    assert.equal(await cooledFor("p-2365", stepped), 0, "the 5 minutes are over");
-
-    const commented = await held("p-2365", "commented a while ago");
-    const commentId = await post("p-2365", commented, { handback: true });
-    await wake(commented);
-    backdate(commented, commentId, 7 * 60, 6 * 60);
-    assert.ok(await cooledFor("p-2365", commented) > 0, "the hour is not");
+    assert.ok(await cooledFor("p-2365", stepped) > 0, "a silent answer to the wake keeps it resting");
 });
 
-test("0 minutes never sinks a step's ticket", async () => {
-    const stepped = await held("p-2365-zero", "a step on a project that never sinks them");
-    await post("p-2365-zero", stepped, { step: true, step_after_minutes: 0 });
+test("a step posted after the wake lifts the cooldown at once", async () => {
+    const stepped = await held("p-2365", "woken, then stepped");
+    const first = await post("p-2365", stepped, { step: true, step_after_minutes: 0 });
     await wake(stepped);
-    assert.equal(await cooledFor("p-2365-zero", stepped), 0);
+    backdate(stepped, first, 7 * 60, 6 * 60);
+    await post("p-2365", stepped, { step: true, step_after_minutes: 0 });
+    assert.equal(await cooledFor("p-2365", stepped), 0);
 });

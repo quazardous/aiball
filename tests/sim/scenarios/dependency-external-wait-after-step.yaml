@@ -1,9 +1,9 @@
 name: a long external wait after a step
 # Case 30 (pin down). The lead posts a step ("waiting for the test suite, about
-# 16 minutes") and nothing else. The step lifts the sink; the wake that follows
-# sinks the ticket for 5 minutes only (`tickets.backlog.after_step`), so
-# the ticket is named again every 5 minutes while the suite runs. Waiting on a
-# machine has no gesture of its own: a dated wait was not kept.
+# 16 minutes") with `resume_on: { timer: 0 }` and nothing else. The step lifts
+# the sink; the wake that follows sinks the ticket again, and it stays sunk
+# while the lead says nothing: it is no longer named every 5 minutes while the
+# suite runs (#4052). The wait itself belongs in `resume_on`.
 steps:
   - alpha-lead: ticket_new
     args: { title: Waiting for CI, body: Work whose next step waits for the test suite. }
@@ -20,4 +20,4 @@ steps:
       alpha-lead: { ticket: $ticket, act: true, wake: none }
   - sleep: 310
   - expect:
-      alpha-lead: { ticket: $ticket, act: true, wake: triage }
+      alpha-lead: { ticket: $ticket, act: true, wake: none }

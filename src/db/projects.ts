@@ -1189,8 +1189,7 @@ export function backlogCooldownExclusions(
         .where(inArray(schema.tickets.id, ticketIds))
         .all();
     const byTicket = new Map(tickets.map((t) => [t.id, t]));
-    const wakeAtByTicket = new Map(rows.map((r) => [r.ticketId, r.wakeAt]));
-    // The tickets whose last action is a step (#2365), needed twice below.
+    // The tickets whose last action is a step (#2365).
     const stepTickets = ticketsWhereLastActionIsStep([...byTicket.values()]);
     // Ticket → the cooldown window (seconds) that sinks it right now.
     const out = new Map<number, number>();
@@ -1202,25 +1201,21 @@ export function backlogCooldownExclusions(
         // so does this consumer's own word (#2386): answering the wake is
         // what the wake asked for, not news that voids its cooldown.
         // A step is the exception (#2365): it says "I carry on", so it still
-        // lifts the sink at once — that is how the agent gets its turn back.
+        // lifts the sink at once — that is how the agent gets its turn back
+        // (its own `resume_on` then says when).
         const movedSinceWake = lastActorAt !== undefined && lastActorAt !== null && lastActorAt > r.wakeAt;
         const ownWordThatIsNotAStep = ticket?.lastActor === consumerId && !stepTickets.has(r.ticketId);
         if (!movedSinceWake || ownWordThatIsNotAStep) {
             out.set(r.ticketId, cooldownSec);
         }
     }
-    // #2365 — a ticket whose last action is a step (then: continue) is sunk only
-    // briefly: a step says there is work to do now, and the wake that follows it
-    // used to hide that work for the whole cooldown. The short window
-    // (`tickets.backlog.after_step`, 0 = none) only turns the queue over.
-    const nowMs = Date.now();
-    for (const id of [...out.keys()].filter((id) => stepTickets.has(id))) {
-        const seconds = Number(getConfig("tickets.backlog.after_step", byTicket.get(id)?.project) ?? 300);
-        const windowSec = Math.min(cooldownSec, Math.max(0, Number.isFinite(seconds) ? seconds : 300));
-        const wakeAtMs = Date.parse(wakeAtByTicket.get(id) ?? "");
-        if (windowSec <= 0 || !Number.isFinite(wakeAtMs) || wakeAtMs + windowSec * 1000 <= nowMs) out.delete(id);
-        else out.set(id, windowSec);
-    }
+    // #4052 — no short window for a step any more. #2365 sank a step's ticket
+    // 5 min only, so the work it announced would not hide for the hour; that
+    // was before a step said when it resumes (`resume_on`, #2449/#2765). A step
+    // posted after the wake already lifts the sink (`movedSinceWake`), so the
+    // window only ever applied to a stale step the agent answered with
+    // silence — "nothing new" — and named it again every 5 minutes, forever
+    // (37 backlog wakes in 33 minutes on helios).
     // #2377 david — a blocked ticket keeps surfacing so it is not forgotten, but
     // nothing moves on it between two wakes: it stays sunk
     // `tickets.backlog.blocked_multiplier` times longer than the rest.

@@ -35,6 +35,12 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A ticket whose last action is a step, named by a backlog wake the agent
+  leaves unanswered, rests like any other (`tickets.backlog.rest`, an hour by
+  default) instead of 5 minutes. It came back every 5 minutes for as long as
+  the agent had nothing new to say. A step posted after the wake still lifts
+  the rest at once. The setting `tickets.backlog.after_step` (formerly
+  `tickets.sink_then_continue_minutes`) is gone.
 - A wake goes 10 s after Claude's turn ends, whatever brought it, or at once
   when the loop has been idle longer than that: an event, the end of a
   presence hold, a plan accept. The Stop hook no longer wakes Claude the moment

@@ -230,7 +230,6 @@ that still spells one the old way:
 | `tickets.wait_credit_commit_min_minutes` | `tickets.wait_credit.earn.commit_min` |
 | `tickets.claim_protect_minutes` | `tickets.backlog.claim_protect` |
 | `tickets.blocked_cooldown_multiplier` | `tickets.backlog.blocked_multiplier` |
-| `tickets.sink_then_continue_minutes` | `tickets.backlog.after_step` |
 | `autopoll.throttle_seconds` | `autopoll.throttle` |
 | `autopoll.include_recent_tickets` | `autopoll.recent_tickets` |
 
