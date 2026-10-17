@@ -53,6 +53,8 @@ export interface Sources {
     acts: Act[];
     /** What would have happened with Claude sessions alone, instead. */
     counterfactual: Act[];
+    /** Tickets agents filed: human traces when a human act is near (see supervisedOnly). */
+    agentTickets: Act[];
     /** What each project's Claude sessions spent, for `--weight tokens`. */
     spend: Spend[];
     /** Per day, which sources had something: b(oard), c(laude transcripts), l(oop logs). */
@@ -82,6 +84,7 @@ export async function collect(o: Options): Promise<Sources> {
     const acts: Act[] = [];
     const counterfactual: Act[] = [];
     const spend: Spend[] = [];
+    const agentTickets: Act[] = [];
     const coverage = new Map<string, Set<"b" | "c" | "l">>();
     const cover = (ms: number, src: "b" | "c" | "l") => {
         const d = o.dayOf(ms);
@@ -111,6 +114,8 @@ export async function collect(o: Options): Promise<Sources> {
             const kind = r.kind === "comment_added" ? "comment" : r.kind === "ticket_created" ? "ticket" : "close";
             both({ at, project: r.project, kind });
             cover(at, "b");
+        } else if (r.kind === "ticket_created") {
+            agentTickets.push({ at, project: r.project, kind: "ticket" });
         } else if (r.kind === "comment_added") {
             // Claude only: an agent's word on another project's ticket is carried by hand.
             const own = agentProject.get(r.by_agent);
@@ -172,7 +177,7 @@ export async function collect(o: Options): Promise<Sources> {
             }
         }
     }
-    return { acts, counterfactual, spend, coverage };
+    return { acts, counterfactual, spend, agentTickets, coverage };
 }
 
 /** Tokens one assistant message spent: new input and output; re-reading a cached context is not counted. */

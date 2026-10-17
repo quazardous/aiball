@@ -20,13 +20,19 @@ npx tsx scripts/attention-report.ts --project helios,mcu --json
 
 | source | how far back | what it gives |
 |---|---|---|
-| the board (`aiball.db`) | everything | what a human wrote (comments, tickets, closes) and decided (accept, reject) |
+| the board (`aiball.db`) | everything | what a human wrote (comments, tickets, closes) and decided (accept, reject); the tickets agents filed |
 | Claude transcripts (`~/.claude/projects/*/*.jsonl`) | what Claude Code keeps (30 days by default) | the prompts typed into a session, and the tokens each answer spent |
 | loop logs (`~/.claude-loop/*/loop.log`) | since each loop last started | bursts of keys at the terminal |
 
 A loop's wakes are typed into the same prompt as a human's, so a transcript
 cannot tell them apart by who typed them. They are told apart by their text:
 the forms a wake takes (`look #N`, `(#N / #hash)`, `was ACCEPTED`, …).
+
+A ticket an agent files is usually one the human asked for, while watching, so
+it counts as the human's trace too, but only when one of the human's acts is
+within 30 minutes: an agent working on its own also files tickets, at night.
+It lengthens a period the human was in; it never makes one up.
+`--no-agent-tickets` leaves them out.
 
 The `src` column says what a day rests on: `b` board, `c` transcripts, `l` loop
 logs. The fewer the letters, the less the day's estimate rests on.

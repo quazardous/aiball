@@ -1,7 +1,7 @@
 // #4088 — the snap model and the prompt classifier, on synthetic traces.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimate, hoursByDay, periods, sharedPeriods, type Act, type AttentionParams } from "./attention-model.js";
+import { estimate, hoursByDay, periods, sharedPeriods, supervisedOnly, type Act, type AttentionParams } from "./attention-model.js";
 import { classifyPrompt, projectFromDirName, spentTokens, transcriptDirName } from "./attention-sources.js";
 
 const P: AttentionParams = { snapSec: 600, leadSec: 60, tailSec: 120 };
@@ -78,4 +78,11 @@ test("transcript directories map to projects", () => {
     assert.equal(projectFromDirName("-home-david-Private-dev-projects-M2M-m2m-infra"), "M2M-m2m-infra");
     assert.equal(projectFromDirName("-home-david-work-math"), "work");
     assert.equal(projectFromDirName("-home-david--config-Claude-scratch-workspaces-b3a2-scratch-2026-10-16-c0e5"), "config");
+});
+
+test("a ticket an agent filed counts only next to a human act", () => {
+    const human = [act(0, "a"), act(120, "a")];
+    const filed = [act(20, "a"), act(-25, "b"), act(60, "c"), act(200, "d")];
+    assert.deepEqual(supervisedOnly(filed, human).map((x) => x.project), ["a", "b"], "20 min after, 25 min before: kept; 60 min from both, 80 min after the last: left out");
+    assert.deepEqual(supervisedOnly(filed, []), [], "no human act: nothing");
 });

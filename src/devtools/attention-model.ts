@@ -73,6 +73,23 @@ export interface Period {
     shares: Map<string, number>;
 }
 
+/**
+ * A ticket an agent files is usually one a human asked for, while watching: a
+ * trace of the human too. But an agent working on its own files tickets as
+ * well (sub-tickets in the night), so one counts only next to a human act:
+ * within `windowMs` of one, before or after. It then lengthens a period the
+ * human was in; it never makes one up.
+ */
+export function supervisedOnly(candidates: readonly Act[], human: readonly Act[], windowMs: number = 30 * 60_000): Act[] {
+    const times = human.map((a) => a.at).sort((a, b) => a - b);
+    const near = (t: number): boolean => {
+        let lo = 0, hi = times.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < t) lo = mid + 1; else hi = mid; }
+        return (lo < times.length && times[lo] - t <= windowMs) || (lo > 0 && t - times[lo - 1] <= windowMs);
+    };
+    return candidates.filter((c) => near(c.at));
+}
+
 /** Snap the acts into periods. */
 export function periods(acts: readonly Act[], p: AttentionParams): Array<{ start: number; end: number; acts: Act[] }> {
     const sorted = [...acts].sort((a, b) => a.at - b.at);

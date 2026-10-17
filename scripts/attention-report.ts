@@ -12,6 +12,8 @@
  * --weight          how a period is shared among its projects: acts (the
  *                   human's acts on each, default) or tokens (what each
  *                   project's Claude sessions spent in it)
+ * --no-agent-tickets  leave out the tickets agents filed (by default, one
+ *                   counts as the human's trace when a human act is within 30 min)
  * --range           each cell as low–median–high instead of the median
  * --counterfactual  also the same table for Claude sessions alone: each loop
  *                   wake typed by hand, each cross-project comment carried by hand
@@ -21,7 +23,7 @@
  * transcripts, l = loop logs (keys at the terminal; a few days at most). The
  * fewer the letters, the less the estimate rests on.
  */
-import { PARAM_SETS, estimate, dayOf, type Act, type Spend, type Weight } from "../src/devtools/attention-model.js";
+import { PARAM_SETS, estimate, dayOf, supervisedOnly, type Act, type Spend, type Weight } from "../src/devtools/attention-model.js";
 import { collect, defaultOptions } from "../src/devtools/attention-sources.js";
 
 type Table = Map<string, Map<string, number>>;
@@ -77,8 +79,11 @@ const since = sinceMs(arg("since") ?? "30d");
 const only = arg("project")?.split(",").map((s) => s.trim()).filter(Boolean);
 const keep = (a: Act) => !only || only.includes(a.project);
 const src = await collect(defaultOptions(since, (ms) => dayOf(ms)));
-const acts = src.acts.filter(keep);
-const cf = src.counterfactual.filter(keep);
+// A ticket an agent filed counts as the human's trace when one of the human's
+// acts is within 30 minutes (--no-agent-tickets: never).
+const filed = flag("no-agent-tickets") ? [] : supervisedOnly(src.agentTickets, src.acts);
+const acts = [...src.acts, ...filed].filter(keep);
+const cf = [...src.counterfactual, ...filed].filter(keep);
 const weight = (arg("weight") ?? "acts") as Weight;
 if (weight !== "acts" && weight !== "tokens") throw new Error(`--weight: acts or tokens, not ${weight}`);
 const spend = src.spend.filter((x) => !only || only.includes(x.project));

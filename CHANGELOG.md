@@ -30,8 +30,10 @@ dates are YYYY-MM-DD.
   transcripts and the loop logs. Acts close together snap into continuous
   periods of work, shared among projects by the human's acts or, with
   `--weight tokens`, by what each project's sessions spent; a low–median–high
-  range; and the same for Claude sessions alone, without aiball. It only
-  reads. See `docs/ATTENTION-REPORT.md`.
+  range; and the same for Claude sessions alone, without aiball. A ticket an
+  agent filed within 30 minutes of a human act counts as the human's trace
+  (`--no-agent-tickets` to leave them out). It only reads. See
+  `docs/ATTENTION-REPORT.md`.
 - A time zone setting, `display.timezone`: `auto` (the daemon machine's zone,
   the default), `UTC`, or a zone name such as `Europe/Paris`, for the board or
   a project. Agents read every time in it, with its offset
