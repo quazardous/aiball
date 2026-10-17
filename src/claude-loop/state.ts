@@ -2080,19 +2080,6 @@ export function acceptGraceHoldUntil(
     return until > nowMs ? until : null;
 }
 
-/**
- * #3791 — mark as seen what a delivered wake showed: its head and the rest of
- * its bundle (a closure run, a same-ticket digest). One helper for both paths
- * that deliver a wake, the kernel and the Stop hook: the hook acked the head
- * alone, and the next Stop delivered the rest again, one fewer each time.
- * Fire-and-forget, as each ack was.
- */
-export function ackDeliveredWake(client: Pick<AiballClient, "markMessageSeen">, wake: { headMessageId?: number | null; extraSeenIds?: number[] }): void {
-    for (const id of [wake.headMessageId, ...(wake.extraSeenIds ?? [])]) {
-        if (typeof id === "number") void client.markMessageSeen(id).catch(() => {});
-    }
-}
-
 export async function buildContextPhrase(
     client: AiballClient,
     project: string | null,
