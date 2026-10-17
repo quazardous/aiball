@@ -1,23 +1,26 @@
 /**
  * The human's attention, extrapolated from the traces it leaves (#4088).
  *
- * Typing is the only part anything records directly. Each recorded act — a
- * prompt, a comment, a decision, a burst of keys — is taken as the visible tip
- * of a longer stretch of attention:
+ * A snap model. Each recorded act — a prompt, a comment, a decision, a burst
+ * of keys — is a point in time. Acts close to one another snap together into
+ * one continuous period of work: the human was there between them, reading,
+ * watching, thinking, even where nothing was recorded. A period opens a little
+ * before its first act (getting into it) and closes a little after its last
+ * (reading what came back):
  *
- *   [switch][read what prompted it][type it] ● [watch what follows]
+ *   ─[lead]─●──●─●───────●──●─[tail]─        ●─[…]
+ *            gaps ≤ snap: one period          gap > snap: a new period
  *
- * - switch: a fixed cost when the act lands on another project than the one
- *   before, or after a long gap (finding the window, recalling the context);
- * - read: the text that came in since the human's previous act on that project,
- *   at a reading speed, capped (nobody reads hours of agent output);
- * - type: the act's own text, at a typing speed;
- * - watch: a while after it, until the next act at the latest.
+ * A period is then shared among the projects worked on in it, in proportion
+ * to a weight:
+ * - `acts` (the default): the human's acts on each project;
+ * - `tokens`: what each project's Claude sessions spent in that period, which
+ *   says where the work actually went (a period with no tokens falls back to
+ *   acts).
  *
- * The stretches are laid on one timeline. Where two overlap, the later one
- * takes over from its start: one human, one project at a time. Each parameter
- * is an assumption, so the model runs three times (low, median, high) and the
- * report gives a range rather than one falsely exact number.
+ * Each parameter is an assumption, so the model runs three times (low,
+ * median, high) and the report can show the range rather than one falsely
+ * exact number.
  *
  * Pure: no I/O. The sources live in attention-sources.ts.
  */
@@ -29,79 +32,90 @@ export interface Act {
     at: number;
     project: string;
     kind: ActKind;
-    /** Characters that came in and had to be read before the act. */
-    readChars: number;
-    /** Characters the human wrote. */
-    typeChars: number;
+}
+
+/** Tokens a project's Claude sessions spent at an instant (one assistant message). */
+export interface Spend {
+    at: number;
+    project: string;
+    tokens: number;
 }
 
 export interface AttentionParams {
-    /** Reading speed, characters per second. */
-    readCps: number;
-    /** Typing speed, characters per second. */
-    typeCps: number;
-    /** The cost of changing project, or of coming back after `gapSec`. */
-    switchSec: number;
-    /** A pause longer than this is a return, and costs a switch. */
-    gapSec: number;
-    /** Watching after an act, cut short by the next one. */
-    watchSec: number;
-    /** The most one act's reading can take. */
-    maxReadSec: number;
+    /** Two acts at most this far apart belong to the same period. */
+    snapSec: number;
+    /** A period opens this long before its first act. */
+    leadSec: number;
+    /** A period closes this long after its last act. */
+    tailSec: number;
 }
 
 /**
  * The three runs. Assumptions, written down so they can be argued with:
- * - reading: 250 wpm (~20 cps) for a skim, 180 wpm (~15 cps) for a read, 120 wpm
- *   (~10 cps) for a careful one (agent output is dense, often code);
- * - typing: 60 / 45 / 30 wpm (~6 / 4 / 3 cps), prompts in a second language included;
- * - a project switch: 20 s / 1 min / 2 min to find the window and the thread;
- * - watching after an act: 30 s / 2 min / 5 min.
+ * - snap: 5 / 10 / 20 min — a pause shorter than this is still the same work
+ *   (reading an answer, waiting on an agent, checking the board);
+ * - lead: 1 / 3 / 5 min — getting into it before the first act (reading what
+ *   prompted it, finding the window);
+ * - tail: 1 / 5 / 10 min — after the last act, reading what came back.
  */
 export const PARAM_SETS: Record<"low" | "median" | "high", AttentionParams> = {
-    low: { readCps: 20, typeCps: 6, switchSec: 20, gapSec: 900, watchSec: 30, maxReadSec: 300 },
-    median: { readCps: 15, typeCps: 4, switchSec: 60, gapSec: 900, watchSec: 120, maxReadSec: 600 },
-    high: { readCps: 10, typeCps: 3, switchSec: 120, gapSec: 900, watchSec: 300, maxReadSec: 900 },
+    low: { snapSec: 300, leadSec: 60, tailSec: 60 },
+    median: { snapSec: 600, leadSec: 180, tailSec: 300 },
+    high: { snapSec: 1200, leadSec: 300, tailSec: 600 },
 };
 
-export interface Stretch {
+export type Weight = "acts" | "tokens";
+
+export interface Period {
     start: number;
     end: number;
-    project: string;
+    /** Each project's share of the period, summing to 1. */
+    shares: Map<string, number>;
 }
 
-/** One stretch of attention per act, before the timeline resolves overlaps. */
-export function stretches(acts: readonly Act[], p: AttentionParams): Stretch[] {
+/** Snap the acts into periods. */
+export function periods(acts: readonly Act[], p: AttentionParams): Array<{ start: number; end: number; acts: Act[] }> {
     const sorted = [...acts].sort((a, b) => a.at - b.at);
-    const out: Stretch[] = [];
-    let prev: Act | undefined;
+    const out: Array<{ start: number; end: number; acts: Act[] }> = [];
     for (const a of sorted) {
-        const switched = !prev || prev.project !== a.project || a.at - prev.at > p.gapSec * 1000;
-        const read = Math.min(a.readChars / p.readCps, p.maxReadSec);
-        const type = a.typeChars / p.typeCps;
-        const before = (switched ? p.switchSec : 0) + read + type;
-        out.push({ start: a.at - before * 1000, end: a.at + p.watchSec * 1000, project: a.project });
-        prev = a;
+        const cur = out[out.length - 1];
+        if (cur && a.at - cur.acts[cur.acts.length - 1].at <= p.snapSec * 1000) {
+            cur.acts.push(a);
+            cur.end = a.at + p.tailSec * 1000;
+        } else {
+            out.push({ start: a.at - p.leadSec * 1000, end: a.at + p.tailSec * 1000, acts: [a] });
+        }
     }
+    // A lead may reach back into the previous period's tail: the time counts once.
+    for (let i = 1; i < out.length; i++) out[i].start = Math.max(out[i].start, out[i - 1].end);
     return out;
 }
 
-/**
- * Lay the stretches on one timeline: sorted by start, each runs until the next
- * one starts at the latest. A stretch that outlasts a shorter, later one does
- * not resume after it — a small undercount, accepted for a model this coarse.
- */
-export function timeline(all: readonly Stretch[]): Stretch[] {
-    const sorted = [...all].sort((a, b) => a.start - b.start);
-    const out: Stretch[] = [];
-    for (let i = 0; i < sorted.length; i++) {
-        const s = sorted[i];
-        const next = sorted[i + 1];
-        const start = out.length ? Math.max(s.start, out[out.length - 1].end) : s.start;
-        const end = next ? Math.min(s.end, Math.max(next.start, start)) : s.end;
-        if (end > start) out.push({ start, end, project: s.project });
-    }
-    return out;
+/** Normalise a weight map to shares summing to 1; empty when it weighs nothing. */
+function shares(w: Map<string, number>): Map<string, number> {
+    const total = [...w.values()].reduce((a, b) => a + b, 0);
+    return total > 0 ? new Map([...w].map(([k, v]) => [k, v / total])) : new Map();
+}
+
+/** The periods, each with its projects' shares. */
+export function sharedPeriods(acts: readonly Act[], p: AttentionParams, weight: Weight = "acts", spend: readonly Spend[] = []): Period[] {
+    const spends = [...spend].sort((a, b) => a.at - b.at);
+    return periods(acts, p).map((per) => {
+        const byActs = new Map<string, number>();
+        for (const a of per.acts) byActs.set(a.project, (byActs.get(a.project) ?? 0) + 1);
+        let s = shares(byActs);
+        if (weight === "tokens") {
+            const byTokens = new Map<string, number>();
+            for (const x of spends) {
+                if (x.at < per.start) continue;
+                if (x.at > per.end) break;
+                byTokens.set(x.project, (byTokens.get(x.project) ?? 0) + x.tokens);
+            }
+            const t = shares(byTokens);
+            if (t.size) s = t;
+        }
+        return { start: per.start, end: per.end, shares: s };
+    });
 }
 
 /** The local calendar day of an instant, as YYYY-MM-DD, in `timeZone`. */
@@ -109,31 +123,30 @@ export function dayOf(ms: number, timeZone?: string): string {
     return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
 }
 
-/** Hours per day per project, splitting stretches at local midnight. */
-export function hoursByDay(line: readonly Stretch[], timeZone?: string): Map<string, Map<string, number>> {
+/** The next instant after `t` that falls on another local day (to the second). */
+function nextDayStart(t: number, timeZone?: string): number {
+    const day = dayOf(t, timeZone);
+    let hi = t + 3_600_000;
+    while (dayOf(hi, timeZone) === day) hi += 3_600_000;
+    let lo = t;
+    while (hi - lo > 1000) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (dayOf(mid, timeZone) === day) lo = mid; else hi = mid;
+    }
+    return hi;
+}
+
+/** Hours per day per project: each period split at local midnight, then shared. */
+export function hoursByDay(list: readonly Period[], timeZone?: string): Map<string, Map<string, number>> {
     const out = new Map<string, Map<string, number>>();
-    const add = (day: string, project: string, ms: number) => {
-        const row = out.get(day) ?? new Map<string, number>();
-        row.set(project, (row.get(project) ?? 0) + ms / 3_600_000);
-        out.set(day, row);
-    };
-    for (const s of line) {
-        let t = s.start;
-        while (t < s.end) {
+    for (const per of list) {
+        let t = per.start;
+        while (t < per.end) {
+            const cut = Math.min(per.end, nextDayStart(t, timeZone));
             const day = dayOf(t, timeZone);
-            // The next local midnight: step an hour at a time until the day changes
-            // (DST-safe without a calendar library), then back to its first minute.
-            let cut = Math.min(s.end, t + 3_600_000);
-            while (cut < s.end && dayOf(cut, timeZone) === day) cut = Math.min(s.end, cut + 3_600_000);
-            if (dayOf(cut, timeZone) !== day) {
-                let lo = t, hi = cut;
-                while (hi - lo > 1000) {
-                    const mid = Math.floor((lo + hi) / 2);
-                    if (dayOf(mid, timeZone) === day) lo = mid; else hi = mid;
-                }
-                cut = hi;
-            }
-            add(day, s.project, cut - t);
+            const row = out.get(day) ?? new Map<string, number>();
+            for (const [project, share] of per.shares) row.set(project, (row.get(project) ?? 0) + share * (cut - t) / 3_600_000);
+            out.set(day, row);
             t = cut;
         }
     }
@@ -141,6 +154,6 @@ export function hoursByDay(line: readonly Stretch[], timeZone?: string): Map<str
 }
 
 /** The whole model for one parameter set. */
-export function estimate(acts: readonly Act[], p: AttentionParams, timeZone?: string): Map<string, Map<string, number>> {
-    return hoursByDay(timeline(stretches(acts, p)), timeZone);
+export function estimate(acts: readonly Act[], p: AttentionParams, opts: { weight?: Weight; spend?: readonly Spend[]; timeZone?: string } = {}): Map<string, Map<string, number>> {
+    return hoursByDay(sharedPeriods(acts, p, opts.weight, opts.spend), opts.timeZone);
 }

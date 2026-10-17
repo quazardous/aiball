@@ -27,9 +27,11 @@ dates are YYYY-MM-DD.
 
 - An attention report, `scripts/attention-report.ts`: the human's working hours
   per project and per day, estimated from the board, the Claude Code
-  transcripts and the loop logs (reading, typing, watching, switching between
-  projects), as a low–median–high range; and the same for Claude sessions
-  alone, without aiball. It only reads. See `docs/ATTENTION-REPORT.md`.
+  transcripts and the loop logs. Acts close together snap into continuous
+  periods of work, shared among projects by the human's acts or, with
+  `--weight tokens`, by what each project's sessions spent; a low–median–high
+  range; and the same for Claude sessions alone, without aiball. It only
+  reads. See `docs/ATTENTION-REPORT.md`.
 - A time zone setting, `display.timezone`: `auto` (the daemon machine's zone,
   the default), `UTC`, or a zone name such as `Europe/Paris`, for the board or
   a project. Agents read every time in it, with its offset

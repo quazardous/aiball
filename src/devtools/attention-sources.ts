@@ -4,10 +4,10 @@
  * read-only, transcripts and loop logs are only read.
  *
  * - board: what humans wrote (comments, tickets, closes) and decided
- *   (accept / reject), each with the text it answered;
+ *   (accept / reject);
  * - transcripts (`~/.claude/projects/<cwd>/*.jsonl`): the prompts typed into a
- *   Claude session and the agent output read before them. A loop's wakes are
- *   typed into the same prompt, so they are told apart by their text;
+ *   Claude session, and the tokens each assistant message spent. A loop's
+ *   wakes are typed into the same prompt, so they are told apart by their text;
  * - loop logs (`~/.claude-loop/<loop>/loop.log`): bursts of keys at the
  *   terminal. A log restarts with its loop, so this covers a few days at most.
  *
@@ -20,7 +20,7 @@ import { createReadStream, existsSync, readdirSync, readFileSync, statSync } fro
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { Act } from "./attention-model.js";
+import type { Act, Spend } from "./attention-model.js";
 
 /** The text of an aiball wake, as rendered by the loop (claude-loop-pings.yaml). */
 export const WAKE_RE = /look #\d+|\(#\d+ \/ #[a-z0-9]{6}\)|\(#[a-z0-9]{6}\) by |was ACCEPTED|was REJECTED|Not triaged until|another agent wrote this|tickets? closed|Signal from \S+ \(external|new ticket (\[\S+\] )?#\d+|— \d+ updates:/;
@@ -41,8 +41,11 @@ export function transcriptDirName(cwd: string): string {
 
 /** A readable project name for a transcript directory no aiball agent claims. */
 export function projectFromDirName(dir: string): string {
-    const after = dir.split("-projects-").pop() ?? dir;
-    return after.replace(/^quazardous-/, "").replace(/^-+/, "") || dir;
+    if (dir.includes("-projects-")) return dir.split("-projects-").pop()!.replace(/^quazardous-/, "").replace(/^-+/, "") || dir;
+    // Outside a projects tree (a home folder, a scratch workspace): its first
+    // folder under home, which is name enough for a column.
+    const underHome = /^-home-[^-]+-+(.*)$/.exec(dir)?.[1] ?? dir.replace(/^-+/, "");
+    return underHome.split("-").filter(Boolean)[0] ?? dir;
 }
 
 export interface Sources {
@@ -50,6 +53,8 @@ export interface Sources {
     acts: Act[];
     /** What would have happened with Claude sessions alone, instead. */
     counterfactual: Act[];
+    /** What each project's Claude sessions spent, for `--weight tokens`. */
+    spend: Spend[];
     /** Per day, which sources had something: b(oard), c(laude transcripts), l(oop logs). */
     coverage: Map<string, Set<"b" | "c" | "l">>;
 }
@@ -76,6 +81,7 @@ export function defaultOptions(sinceMs: number, dayOf: (ms: number) => string): 
 export async function collect(o: Options): Promise<Sources> {
     const acts: Act[] = [];
     const counterfactual: Act[] = [];
+    const spend: Spend[] = [];
     const coverage = new Map<string, Set<"b" | "c" | "l">>();
     const cover = (ms: number, src: "b" | "c" | "l") => {
         const d = o.dayOf(ms);
@@ -88,52 +94,43 @@ export async function collect(o: Options): Promise<Sources> {
     // --- board ------------------------------------------------------------
     const db = new Database(o.dbPath, { readonly: true, fileMustExist: true });
     const humans = new Set((db.prepare("SELECT consumer_id FROM consumers WHERE kind = 'human'").all() as { consumer_id: string }[]).map((r) => r.consumer_id));
-    const agents = db.prepare("SELECT consumer_id, project, cwd FROM consumers WHERE kind != 'human'").all() as { consumer_id: string; project: string | null; cwd: string | null }[];
+    // Oldest seen first, so where several agents share a directory the one seen
+    // last wins its transcripts (a test consumer once pointed at a real checkout).
+    const agents = db.prepare("SELECT consumer_id, project, cwd FROM consumers WHERE kind != 'human' ORDER BY COALESCE(last_seen_at, '')").all() as { consumer_id: string; project: string | null; cwd: string | null }[];
     const agentProject = new Map(agents.filter((a) => a.project).map((a) => [a.consumer_id, a.project!]));
     const sinceIso = new Date(o.sinceMs).toISOString();
-    type Row = { id: number; project: string; kind: string; ticket_id: number | null; by_agent: string; body: string | null; title: string | null; created_at: string; meta: string | null };
-    // Every message of the tickets a human touched in the window, oldest first:
-    // what came in on a ticket since the human's last word is what they read.
+    type Row = { project: string; kind: string; by_agent: string; created_at: string; meta: string | null };
+    // What humans wrote, and agents' comments on another project's tickets.
     const rows = db.prepare(`
-        SELECT m.id, t.project, m.kind, m.ticket_id, m.by_agent,
-               CASE WHEN m.kind = 'ticket_created' THEN COALESCE(t.body, m.body) ELSE m.body END AS body,
-               CASE WHEN m.kind = 'ticket_created' THEN t.title END AS title,
-               m.created_at, m.meta
+        SELECT t.project, m.kind, m.by_agent, m.created_at, m.meta
         FROM _messages m JOIN tickets t ON t.id = m.ticket_id
-        WHERE m.status = 'approved' AND m.ticket_id IN (
-            SELECT DISTINCT ticket_id FROM _messages WHERE created_at >= ? AND status = 'approved'
-        ) ORDER BY m.created_at`).all(sinceIso) as Row[];
-    const unread = new Map<number, number>();
+        WHERE m.status = 'approved' AND m.created_at >= ?`).all(sinceIso) as Row[];
     for (const r of rows) {
-        const ticket = r.ticket_id ?? r.id;
         const at = Date.parse(r.created_at);
-        const len = (r.body?.length ?? 0) + (r.title?.length ?? 0);
         if (humans.has(r.by_agent)) {
-            if (at >= o.sinceMs) {
-                const kind = r.kind === "comment_added" ? "comment" : r.kind === "ticket_created" ? "ticket" : "close";
-                both({ at, project: r.project, kind, readChars: unread.get(ticket) ?? 0, typeChars: kind === "close" ? 0 : len });
-                cover(at, "b");
-            }
-            unread.set(ticket, 0);
-        } else {
-            unread.set(ticket, (unread.get(ticket) ?? 0) + len);
+            const kind = r.kind === "comment_added" ? "comment" : r.kind === "ticket_created" ? "ticket" : "close";
+            both({ at, project: r.project, kind });
+            cover(at, "b");
+        } else if (r.kind === "comment_added") {
             // Claude only: an agent's word on another project's ticket is carried by hand.
             const own = agentProject.get(r.by_agent);
-            if (at >= o.sinceMs && r.kind === "comment_added" && own && own !== r.project) {
-                counterfactual.push({ at, project: r.project, kind: "relay", readChars: len, typeChars: 40 });
+            if (own && own !== r.project) counterfactual.push({ at, project: r.project, kind: "relay" });
+        }
+    }
+    // A decision is an act of its own, at the moment it was taken (the comment it
+    // decides may be older than the window).
+    const decided = db.prepare(`
+        SELECT t.project, m.meta FROM _messages m JOIN tickets t ON t.id = m.ticket_id
+        WHERE m.meta LIKE '%"decided_by"%' AND COALESCE(json_extract(m.meta, '$.decision.decided_at'), '') >= ?`).all(sinceIso) as { project: string; meta: string }[];
+    for (const r of decided) {
+        try {
+            const d = (JSON.parse(r.meta) as { decision?: { decided_by?: string; decided_at?: string } }).decision;
+            const at = d?.decided_at ? Date.parse(d.decided_at) : NaN;
+            if (d?.decided_by && humans.has(d.decided_by) && Number.isFinite(at) && at >= o.sinceMs) {
+                both({ at, project: r.project, kind: "decision" });
+                cover(at, "b");
             }
-        }
-        // A decision is an act of its own, at the moment it was taken.
-        if (r.meta && r.meta.includes('"decided_by"')) {
-            try {
-                const d = (JSON.parse(r.meta) as { decision?: { decided_by?: string; decided_at?: string } }).decision;
-                const dAt = d?.decided_at ? Date.parse(d.decided_at) : NaN;
-                if (d?.decided_by && humans.has(d.decided_by) && Number.isFinite(dAt) && dAt >= o.sinceMs) {
-                    both({ at: dAt, project: r.project, kind: "decision", readChars: len, typeChars: 0 });
-                    cover(dAt, "b");
-                }
-            } catch { /* a meta that does not parse carries no decision */ }
-        }
+        } catch { /* a meta that does not parse carries no decision */ }
     }
     db.close();
 
@@ -150,8 +147,8 @@ export async function collect(o: Options): Promise<Sources> {
                 if (statSync(path).mtimeMs < o.sinceMs) continue;
                 await readTranscript(path, project, o.sinceMs, (a, who) => {
                     if (who === "human") { both(a); cover(a.at, "c"); }
-                    else counterfactual.push({ ...a, typeChars: 80 });
-                });
+                    else counterfactual.push(a);
+                }, (x) => spend.push(x));
             }
         }
     }
@@ -170,39 +167,39 @@ export async function collect(o: Options): Promise<Sources> {
                 const ts = /"ts":"([^"]+)"/.exec(line)?.[1];
                 const at = ts ? Date.parse(ts) : NaN;
                 if (!Number.isFinite(at) || at < o.sinceMs) continue;
-                both({ at, project, kind: "keys", readChars: 0, typeChars: 0 });
+                both({ at, project, kind: "keys" });
                 cover(at, "l");
             }
         }
     }
-    return { acts, counterfactual, coverage };
+    return { acts, counterfactual, spend, coverage };
 }
 
-/** One transcript: each prompt, with the agent text that came before it. */
-async function readTranscript(path: string, project: string, sinceMs: number, emit: (a: Act, who: "human" | "wake") => void): Promise<void> {
-    let agentChars = 0;
+/** Tokens one assistant message spent: new input and output; re-reading a cached context is not counted. */
+export function spentTokens(usage: { input_tokens?: number; cache_creation_input_tokens?: number; output_tokens?: number } | undefined): number {
+    if (!usage) return 0;
+    return (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.output_tokens ?? 0);
+}
+
+/** One transcript: its prompts (human or wake) and what each assistant message spent. */
+async function readTranscript(path: string, project: string, sinceMs: number, emit: (a: Act, who: "human" | "wake") => void, spent: (s: Spend) => void): Promise<void> {
     const rl = createInterface({ input: createReadStream(path, "utf8"), crlfDelay: Infinity });
     for await (const line of rl) {
         const isUser = line.includes('"type":"user"');
         if (!isUser && !line.includes('"type":"assistant"')) continue;
-        let j: { type?: string; timestamp?: string; isMeta?: boolean; isSidechain?: boolean; origin?: { kind?: string } | null; message?: { content?: unknown } };
+        let j: { type?: string; timestamp?: string; isMeta?: boolean; isSidechain?: boolean; origin?: { kind?: string } | null; message?: { content?: unknown; usage?: Parameters<typeof spentTokens>[0] } };
         try { j = JSON.parse(line); } catch { continue; }
-        if (j.isSidechain) continue;
-        const content = j.message?.content;
+        const at = j.timestamp ? Date.parse(j.timestamp) : NaN;
+        if (!Number.isFinite(at) || at < sinceMs) continue;
         if (j.type === "assistant") {
-            if (Array.isArray(content)) {
-                for (const c of content as { type?: string; text?: string }[]) if (c?.type === "text" && c.text) agentChars += c.text.length;
-            }
+            // A subagent's tokens are the project's work too.
+            const tokens = spentTokens(j.message?.usage);
+            if (tokens > 0) spent({ at, project, tokens });
             continue;
         }
-        if (j.type !== "user" || typeof content !== "string") continue;
+        const content = j.message?.content;
+        if (j.type !== "user" || typeof content !== "string" || j.isSidechain) continue;
         const who = classifyPrompt(j, content);
-        if (!who) continue;
-        const at = j.timestamp ? Date.parse(j.timestamp) : NaN;
-        if (Number.isFinite(at) && at >= sinceMs) {
-            emit({ at, project, kind: "prompt", readChars: agentChars, typeChars: content.length }, who);
-        }
-        agentChars = 0;
+        if (who) emit({ at, project, kind: "prompt" }, who);
     }
 }
-

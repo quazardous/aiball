@@ -9,6 +9,9 @@
  *
  * --since           how far back: Nd (days) or a date (default 30d)
  * --project         only these projects (comma-separated)
+ * --weight          how a period is shared among its projects: acts (the
+ *                   human's acts on each, default) or tokens (what each
+ *                   project's Claude sessions spent in it)
  * --range           each cell as low–median–high instead of the median
  * --counterfactual  also the same table for Claude sessions alone: each loop
  *                   wake typed by hand, each cross-project comment carried by hand
@@ -18,7 +21,7 @@
  * transcripts, l = loop logs (keys at the terminal; a few days at most). The
  * fewer the letters, the less the estimate rests on.
  */
-import { PARAM_SETS, estimate, dayOf, type Act } from "../src/devtools/attention-model.js";
+import { PARAM_SETS, estimate, dayOf, type Act, type Spend, type Weight } from "../src/devtools/attention-model.js";
 import { collect, defaultOptions } from "../src/devtools/attention-sources.js";
 
 type Table = Map<string, Map<string, number>>;
@@ -41,11 +44,11 @@ function sinceMs(spec: string): number {
     return t;
 }
 
-function runs(acts: Act[]): Record<"low" | "median" | "high", Table> {
+function runs(acts: Act[], weight: Weight, spend: Spend[]): Record<"low" | "median" | "high", Table> {
     return {
-        low: estimate(acts, PARAM_SETS.low),
-        median: estimate(acts, PARAM_SETS.median),
-        high: estimate(acts, PARAM_SETS.high),
+        low: estimate(acts, PARAM_SETS.low, { weight, spend }),
+        median: estimate(acts, PARAM_SETS.median, { weight, spend }),
+        high: estimate(acts, PARAM_SETS.high, { weight, spend }),
     };
 }
 
@@ -76,8 +79,11 @@ const keep = (a: Act) => !only || only.includes(a.project);
 const src = await collect(defaultOptions(since, (ms) => dayOf(ms)));
 const acts = src.acts.filter(keep);
 const cf = src.counterfactual.filter(keep);
-const real = runs(acts);
-const counter = flag("counterfactual") || flag("json") ? runs(cf) : null;
+const weight = (arg("weight") ?? "acts") as Weight;
+if (weight !== "acts" && weight !== "tokens") throw new Error(`--weight: acts or tokens, not ${weight}`);
+const spend = src.spend.filter((x) => !only || only.includes(x.project));
+const real = runs(acts, weight, spend);
+const counter = flag("counterfactual") || flag("json") ? runs(cf, weight, spend) : null;
 
 const projectTotal = new Map<string, number>();
 for (const row of real.median.values()) for (const [p, v] of row) projectTotal.set(p, (projectTotal.get(p) ?? 0) + v);
@@ -89,6 +95,7 @@ if (flag("json")) {
     console.log(JSON.stringify({
         since: new Date(since).toISOString(),
         params: PARAM_SETS,
+        weight,
         acts: acts.length,
         coverage: Object.fromEntries([...src.coverage].map(([d, s]) => [d, [...s].sort().join("")])),
         hours: { low: obj(real.low), median: obj(real.median), high: obj(real.high) },
@@ -100,5 +107,5 @@ if (flag("json")) {
         console.log("");
         console.log(render("Claude sessions alone, same work", counter, projects, days, src.coverage, flag("range")));
     }
-    console.log(`\n${acts.length} human acts read since ${dayOf(since)}; src: b board, c Claude transcripts, l loop logs.`);
+    console.log(`\n${acts.length} human acts read since ${dayOf(since)}, periods shared by ${weight}; src: b board, c Claude transcripts, l loop logs.`);
 }
