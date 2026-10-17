@@ -37,7 +37,9 @@ dates are YYYY-MM-DD.
   `--weight tokens`, by what each project's sessions spent; a low–median–high
   range; and the same for Claude sessions alone, without aiball. A ticket an
   agent filed within 30 minutes of a human act counts as the human's trace
-  (`--no-agent-tickets` to leave them out). It only reads. See
+  (`--no-agent-tickets` to leave them out). Past Claude's transcripts the
+  days are extrapolated from the board and the UI log, with a factor per
+  project learned on the days every source covers (`~`). It only reads. See
   `docs/ATTENTION-REPORT.md`.
 - A time zone setting, `display.timezone`: `auto` (the daemon machine's zone,
   the default), `UTC`, or a zone name such as `Europe/Paris`, for the board or

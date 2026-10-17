@@ -100,3 +100,18 @@ test("UI lines: a human's gesture is an act on its project; a UI refreshing itse
         ["2026-10-17T09:17:00.000Z", "mcu"],
     ]);
 });
+
+test("#4091 the factor learned on the training days, per project, with the global one for thin projects", async () => {
+    const { calibrate, extrapolate } = await import("./attention-model.js");
+    const row = (o: Record<string, number>) => new Map(Object.entries(o));
+    const full = new Map([["d1", row({ a: 4, b: 0.3 })], ["d2", row({ a: 4 })]]);
+    const durable = new Map([["d1", row({ a: 1, b: 0.2 })], ["d2", row({ a: 3 })]]);
+    const cal = calibrate(full, durable, ["d1", "d2"]);
+    assert.equal(cal.perProject.get("a"), 2, "8 h full / 4 h durable");
+    assert.ok(Math.abs(cal.global - 8.3 / 4.2) < 1e-9);
+    assert.equal(cal.perProject.get("b"), cal.global, "0.2 h durable: too thin, the global factor");
+    const old = new Map([["d0", row({ a: 1.5, c: 1 })]]);
+    const out = extrapolate(old, cal, ["d0"]);
+    assert.equal(out.get("d0")?.get("a"), 3);
+    assert.ok(Math.abs(out.get("d0")!.get("c")! - cal.global) < 1e-9, "a project unseen in training: the global factor");
+});

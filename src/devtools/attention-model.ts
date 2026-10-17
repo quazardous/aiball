@@ -174,3 +174,50 @@ export function hoursByDay(list: readonly Period[], timeZone?: string): Map<stri
 export function estimate(acts: readonly Act[], p: AttentionParams, opts: { weight?: Weight; spend?: readonly Spend[]; timeZone?: string } = {}): Map<string, Map<string, number>> {
     return hoursByDay(sharedPeriods(acts, p, opts.weight, opts.spend), opts.timeZone);
 }
+
+/** Hours per day per project, as `estimate` returns them. */
+export type Hours = Map<string, Map<string, number>>;
+
+/** Acts whose source outlives Claude's transcripts: the board and the UI log. */
+export const DURABLE_KINDS: ReadonlySet<ActKind> = new Set(["comment", "decision", "ticket", "close", "relay", "ui"]);
+
+export interface Calibration {
+    /** Per project: full hours / durable hours over the training days. */
+    perProject: Map<string, number>;
+    /** The same over every project, for those too thin to have their own. */
+    global: number;
+    /** The training days. */
+    days: string[];
+}
+
+const sumOver = (t: Hours, days: readonly string[], project?: string): number =>
+    days.reduce((n, d) => n + (project ? t.get(d)?.get(project) ?? 0 : [...(t.get(d)?.values() ?? [])].reduce((a, b) => a + b, 0)), 0);
+
+/**
+ * #4091 — learn, on the days where every source exists, how much the durable
+ * sources alone underestimate: a factor per project. A project with less than
+ * `minHours` of durable time in the window takes the global factor.
+ */
+export function calibrate(full: Hours, durable: Hours, days: readonly string[], minHours = 1): Calibration {
+    const projects = new Set<string>();
+    for (const d of days) for (const p of durable.get(d)?.keys() ?? []) projects.add(p);
+    const g = sumOver(durable, days);
+    const global = g > 0 ? sumOver(full, days) / g : 1;
+    const perProject = new Map<string, number>();
+    for (const p of projects) {
+        const base = sumOver(durable, days, p);
+        perProject.set(p, base >= minHours ? sumOver(full, days, p) / base : global);
+    }
+    return { perProject, global, days: [...days] };
+}
+
+/** #4091 — the days before the window: the durable estimate, times each project's factor. */
+export function extrapolate(durable: Hours, cal: Calibration, days: readonly string[]): Hours {
+    const out: Hours = new Map();
+    for (const d of days) {
+        const row = new Map<string, number>();
+        for (const [p, h] of durable.get(d) ?? []) row.set(p, h * (cal.perProject.get(p) ?? cal.global));
+        if (row.size) out.set(d, row);
+    }
+    return out;
+}

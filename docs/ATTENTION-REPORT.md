@@ -76,6 +76,20 @@ show the range:
 They live in `src/devtools/attention-model.ts` (`PARAM_SETS`). Calibrate them
 by noting what you actually did over a stretch of time and comparing.
 
+## Past Claude's transcripts
+
+Claude Code keeps its transcripts for 30 days by default, the board and the UI
+log for much longer. Before the first day the transcripts cover, the estimate
+is degraded rather than blind:
+
+- on the days the transcripts cover (the training window), the model runs twice:
+  with every source, and with the durable ones alone (the board, the UI log);
+- per project, the ratio of the two is that project's factor. A project with
+  less than an hour of durable time in the window takes the overall factor;
+- each older day gets its durable estimate times the factor, and `~` in its
+  `src` column. The report says which window the factors come from, and lists
+  them (`--json` has them all, for each of the three runs).
+
 ## Claude sessions alone
 
 The counterfactual table keeps every human act, and adds the ones aiball made
