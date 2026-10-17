@@ -6,6 +6,7 @@ import { RPC_ERRORS, type RpcError, type RpcId, type RpcResponse } from "../bus-
 import { ERROR_CODES } from "../domain.js";
 import { accessRefusal, getMethod, Refusal, type Caller } from "./methods.js";
 import { beginCall, paramsShape, rowsOf } from "../request-stats.js";
+import { recordUiAction } from "../ui-actions-log.js";
 
 /** Past this many calls, a batch is refused whole. */
 export const MAX_BATCH = 100;
@@ -58,6 +59,8 @@ export async function runOne(caller: Caller, msg: unknown): Promise<RpcResponse 
             },
         }));
     }
+    // #4090 — a human's call, kept (identifiers only) for the attention report.
+    recordUiAction(caller, m.name, parsed.data);
     // #3243 — every method call counted and timed with the HTTP routes, named in a stall.
     // #3405 — with what it was asked for, and how much it answers: which client asks what.
     const end = beginCall(`BUS ${m.name}`, { consumer: caller.consumer_id ?? null, agent: caller.machine ?? caller.transport ?? null, query: paramsShape(req.params), shaped: true });

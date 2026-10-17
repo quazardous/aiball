@@ -25,7 +25,7 @@
  * Pure: no I/O. The sources live in attention-sources.ts.
  */
 
-export type ActKind = "prompt" | "comment" | "decision" | "ticket" | "close" | "keys" | "relay";
+export type ActKind = "prompt" | "comment" | "decision" | "ticket" | "close" | "keys" | "relay" | "ui";
 
 export interface Act {
     /** Epoch ms. */

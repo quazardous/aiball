@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { estimate, hoursByDay, periods, sharedPeriods, supervisedOnly, type Act, type AttentionParams } from "./attention-model.js";
-import { classifyPrompt, projectFromDirName, spentTokens, transcriptDirName } from "./attention-sources.js";
+import { classifyPrompt, projectFromDirName, spentTokens, transcriptDirName, uiActs } from "./attention-sources.js";
 
 const P: AttentionParams = { snapSec: 600, leadSec: 60, tailSec: 120 };
 const T0 = Date.parse("2026-10-14T10:00:00Z");
@@ -85,4 +85,18 @@ test("a ticket an agent filed counts only next to a human act", () => {
     const filed = [act(20, "a"), act(-25, "b"), act(60, "c"), act(200, "d")];
     assert.deepEqual(supervisedOnly(filed, human).map((x) => x.project), ["a", "b"], "20 min after, 25 min before: kept; 60 min from both, 80 min after the last: left out");
     assert.deepEqual(supervisedOnly(filed, []), [], "no human act: nothing");
+});
+
+test("UI lines: a human's gesture is an act on its project; a UI refreshing itself, or an agent, is not", () => {
+    const text = [
+        "09:14:25.655\tdavid\tweb\tticket.get\t\t4088",       // project from the ticket
+        "09:15:00.000\tdavid\tweb\tconsumer.counters\t\t",    // not a gesture
+        "09:16:00.000\thelios-claude\tuds\tticket.get\thelios\t1", // not a human
+        "09:17:00.000\tdavid\ttvty\tmessage.search\tmcu\t",
+    ].join("\n");
+    const acts = uiActs("2026-10-17", text, new Set(["david"]), new Map([["4088", "aiball"]]), 0);
+    assert.deepEqual(acts.map((a) => [new Date(a.at).toISOString(), a.project]), [
+        ["2026-10-17T09:14:25.655Z", "aiball"],
+        ["2026-10-17T09:17:00.000Z", "mcu"],
+    ]);
 });

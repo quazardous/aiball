@@ -20,7 +20,8 @@
  * --json            everything, as JSON
  *
  * A day's `src` column says what it rests on: b = board, c = Claude
- * transcripts, l = loop logs (keys at the terminal; a few days at most). The
+ * transcripts, l = loop logs (keys at the terminal; a few days at most),
+ * u = UI actions (reading in the web board, tvty, the CLI). The
  * fewer the letters, the less the estimate rests on.
  */
 import { PARAM_SETS, estimate, dayOf, supervisedOnly, type Act, type Spend, type Weight } from "../src/devtools/attention-model.js";
@@ -112,5 +113,5 @@ if (flag("json")) {
         console.log("");
         console.log(render("Claude sessions alone, same work", counter, projects, days, src.coverage, flag("range")));
     }
-    console.log(`\n${acts.length} human acts read since ${dayOf(since)}, periods shared by ${weight}; src: b board, c Claude transcripts, l loop logs.`);
+    console.log(`\n${acts.length} human acts read since ${dayOf(since)}, periods shared by ${weight}; src: b board, c Claude transcripts, l loop logs, u UI actions.`);
 }

@@ -23,6 +23,7 @@ npx tsx scripts/attention-report.ts --project helios,mcu --json
 | the board (`aiball.db`) | everything | what a human wrote (comments, tickets, closes) and decided (accept, reject); the tickets agents filed |
 | Claude transcripts (`~/.claude/projects/*/*.jsonl`) | what Claude Code keeps (30 days by default) | the prompts typed into a session, and the tokens each answer spent |
 | loop logs (`~/.claude-loop/*/loop.log`) | since each loop last started | bursts of keys at the terminal |
+| UI actions (`$AIBALL_HOME/ui-actions/`) | `logs.ui_actions.retention` (180 days by default) | the human's gestures in the web board, tvty or the CLI: reading a ticket, searching, typing into a session |
 
 A loop's wakes are typed into the same prompt as a human's, so a transcript
 cannot tell them apart by who typed them. They are told apart by their text:
@@ -34,8 +35,13 @@ within 30 minutes: an agent working on its own also files tickets, at night.
 It lengthens a period the human was in; it never makes one up.
 `--no-agent-tickets` leaves them out.
 
+The UI actions are one line per bus call a human makes — the method, the
+project, the ticket, never a text — in one file per day, gzipped once past. A UI
+left open calls on its own, so only the calls listed as gestures count
+(`UI_GESTURES` in `src/devtools/attention-sources.ts`).
+
 The `src` column says what a day rests on: `b` board, `c` transcripts, `l` loop
-logs. The fewer the letters, the less the day's estimate rests on.
+logs, `u` UI actions. The fewer the letters, the less the day's estimate rests on.
 
 ## How it estimates: snapping
 

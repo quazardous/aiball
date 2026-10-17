@@ -9,7 +9,10 @@
  *   Claude session, and the tokens each assistant message spent. A loop's
  *   wakes are typed into the same prompt, so they are told apart by their text;
  * - loop logs (`~/.claude-loop/<loop>/loop.log`): bursts of keys at the
- *   terminal. A log restarts with its loop, so this covers a few days at most.
+ *   terminal. A log restarts with its loop, so this covers a few days at most;
+ * - UI actions (`$AIBALL_HOME/ui-actions/`, #4090): the human's calls from the web
+ *   board, tvty or the CLI. Only gestures count (UI_GESTURES): a UI left open
+ *   calls on its own, and an open tab is not hours of work.
  *
  * The "Claude only" counterfactual is built from the same traces: each loop
  * wake would have been a prompt the human typed, and each comment an agent
@@ -20,7 +23,33 @@ import { createReadStream, existsSync, readdirSync, readFileSync, statSync } fro
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { gunzipSync } from "node:zlib";
 import type { Act, Spend } from "./attention-model.js";
+
+/**
+ * The UI calls that are a human's gesture rather than a UI refreshing itself:
+ * reading a ticket, marking it read, searching, typing into a session, waking a
+ * loop. A first list, to revise on a day of real lines (#4090): the log keeps
+ * every call, so the list can change without losing anything.
+ */
+export const UI_GESTURES: ReadonlySet<string> = new Set([
+    "ticket.get", "ticket.mark_read", "ticket.mark_unread", "unread.mark_read", "ping.mark_read",
+    "message.search", "message.get", "mention.suggestions", "message.vote",
+    "agent.pane_keys", "consumer.prompt", "loop.wake",
+]);
+
+/** A day's UI lines as acts: the gestures of humans, on a project the line or its ticket names. */
+export function uiActs(day: string, text: string, humans: ReadonlySet<string>, ticketProject: ReadonlyMap<string, string>, sinceMs: number): Act[] {
+    const out: Act[] = [];
+    for (const line of text.split("\n")) {
+        const [time, consumer, , method, project, ticket] = line.split("\t");
+        if (!time || !UI_GESTURES.has(method) || !humans.has(consumer)) continue;
+        const at = Date.parse(`${day}T${time}Z`);
+        const where = project || ticketProject.get(ticket) || "";
+        if (Number.isFinite(at) && at >= sinceMs && where) out.push({ at, project: where, kind: "ui" });
+    }
+    return out;
+}
 
 /** The text of an aiball wake, as rendered by the loop (claude-loop-pings.yaml). */
 export const WAKE_RE = /look #\d+|\(#\d+ \/ #[a-z0-9]{6}\)|\(#[a-z0-9]{6}\) by |was ACCEPTED|was REJECTED|Not triaged until|another agent wrote this|tickets? closed|Signal from \S+ \(external|new ticket (\[\S+\] )?#\d+|— \d+ updates:/;
@@ -57,8 +86,8 @@ export interface Sources {
     agentTickets: Act[];
     /** What each project's Claude sessions spent, for `--weight tokens`. */
     spend: Spend[];
-    /** Per day, which sources had something: b(oard), c(laude transcripts), l(oop logs). */
-    coverage: Map<string, Set<"b" | "c" | "l">>;
+    /** Per day, which sources had something: b(oard), c(laude transcripts), l(oop logs), u(i actions). */
+    coverage: Map<string, Set<"b" | "c" | "l" | "u">>;
 }
 
 interface Options {
@@ -66,6 +95,7 @@ interface Options {
     dbPath: string;
     transcriptsDir: string;
     loopsDir: string;
+    uiDir: string;
     dayOf: (ms: number) => string;
 }
 
@@ -76,6 +106,7 @@ export function defaultOptions(sinceMs: number, dayOf: (ms: number) => string): 
         dbPath: join(home, "aiball.db"),
         transcriptsDir: join(homedir(), ".claude", "projects"),
         loopsDir: join(homedir(), ".claude-loop"),
+        uiDir: join(home, "ui-actions"),
         dayOf,
     };
 }
@@ -85,8 +116,8 @@ export async function collect(o: Options): Promise<Sources> {
     const counterfactual: Act[] = [];
     const spend: Spend[] = [];
     const agentTickets: Act[] = [];
-    const coverage = new Map<string, Set<"b" | "c" | "l">>();
-    const cover = (ms: number, src: "b" | "c" | "l") => {
+    const coverage = new Map<string, Set<"b" | "c" | "l" | "u">>();
+    const cover = (ms: number, src: "b" | "c" | "l" | "u") => {
         const d = o.dayOf(ms);
         const s = coverage.get(d) ?? new Set();
         s.add(src);
@@ -130,7 +161,26 @@ export async function collect(o: Options): Promise<Sources> {
         if (humans.has(t.by_agent)) { both({ at, project: t.project, kind: "ticket" }); cover(at, "b"); }
         else agentTickets.push({ at, project: t.project, kind: "ticket" });
     }
+    const ticketProject = new Map((db.prepare("SELECT id, project FROM tickets").all() as { id: number; project: string }[]).map((t) => [String(t.id), t.project]));
     db.close();
+
+    // --- UI actions ---------------------------------------------------------
+    if (existsSync(o.uiDir)) {
+        const firstDay = new Date(o.sinceMs).toISOString().slice(0, 10);
+        for (const name of readdirSync(o.uiDir)) {
+            const m = /^(\d{4}-\d{2}-\d{2})\.tsv(\.gz)?$/.exec(name);
+            if (!m || m[1] < firstDay) continue;
+            let text = "";
+            try {
+                const raw = readFileSync(join(o.uiDir, name));
+                text = (m[2] ? gunzipSync(raw) : raw).toString("utf8");
+            } catch { continue; }
+            for (const a of uiActs(m[1], text, humans, ticketProject, o.sinceMs)) {
+                both(a);
+                cover(a.at, "u");
+            }
+        }
+    }
 
     // --- transcripts --------------------------------------------------------
     const dirProject = new Map(agents.filter((a) => a.cwd && a.project).map((a) => [transcriptDirName(a.cwd!), a.project!]));

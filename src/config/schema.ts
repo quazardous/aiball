@@ -89,6 +89,20 @@ export interface ConfigSchemaEntry {
  * the others are declared and consumed as each gets wired.
  */
 export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
+    // #4090 — how long the human's UI actions are kept for the attention report.
+    {
+        key: "logs.ui_actions.retention",
+        min: 0,
+        max: 63072000,
+        step: 86400,
+        scope: "global",
+        type: "duration",
+        default: 15552000,
+        sources: ["db", "file"],
+        label: "How long the human's UI actions are kept",
+        description:
+            "Each bus call a human makes (the web board, tvty, the CLI) is kept as one line — the method, the project, the ticket, never a text — in $AIBALL_HOME/ui-actions/, one file per day, gzipped once past. The attention report reads them to see reading, not only writing. Days older than this are deleted. 0 = do not keep them.",
+    },
     // #2586 — the daemon asks GitHub for the latest release when it starts.
     {
         key: "updates.check",

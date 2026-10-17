@@ -25,6 +25,11 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The human's UI actions (the web board, tvty, the CLI) are kept, one compact
+  line per call — the method, the project, the ticket, never a text — in
+  `$AIBALL_HOME/ui-actions/`, one file per day, gzipped once past, deleted
+  after `logs.ui_actions.retention` (180 days by default, 0 = off). The
+  attention report reads them, so reading a ticket counts, not only writing.
 - An attention report, `scripts/attention-report.ts`: the human's working hours
   per project and per day, estimated from the board, the Claude Code
   transcripts and the loop logs. Acts close together snap into continuous
