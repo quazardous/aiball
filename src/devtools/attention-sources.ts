@@ -102,40 +102,33 @@ export async function collect(o: Options): Promise<Sources> {
     const agents = db.prepare("SELECT consumer_id, project, cwd FROM consumers WHERE kind != 'human' ORDER BY COALESCE(last_seen_at, '')").all() as { consumer_id: string; project: string | null; cwd: string | null }[];
     const agentProject = new Map(agents.filter((a) => a.project).map((a) => [a.consumer_id, a.project!]));
     const sinceIso = new Date(o.sinceMs).toISOString();
-    type Row = { project: string; kind: string; by_agent: string; created_at: string; meta: string | null };
-    // What humans wrote, and agents' comments on another project's tickets.
+    type Row = { project: string; kind: string; by_agent: string; created_at: string };
+    // What humans did on the board — comments, decisions (each leaves its own
+    // row: plan_accepted, resolution_rejected, …), closes, relations — and
+    // agents' comments on another project's tickets.
     const rows = db.prepare(`
-        SELECT t.project, m.kind, m.by_agent, m.created_at, m.meta
+        SELECT t.project, m.kind, m.by_agent, m.created_at
         FROM _messages m JOIN tickets t ON t.id = m.ticket_id
         WHERE m.status = 'approved' AND m.created_at >= ?`).all(sinceIso) as Row[];
     for (const r of rows) {
         const at = Date.parse(r.created_at);
         if (humans.has(r.by_agent)) {
-            const kind = r.kind === "comment_added" ? "comment" : r.kind === "ticket_created" ? "ticket" : "close";
+            const kind = r.kind === "comment_added" ? "comment"
+                : /_(accepted|rejected)$/.test(r.kind) ? "decision"
+                : "close";
             both({ at, project: r.project, kind });
             cover(at, "b");
-        } else if (r.kind === "ticket_created") {
-            agentTickets.push({ at, project: r.project, kind: "ticket" });
         } else if (r.kind === "comment_added") {
             // Claude only: an agent's word on another project's ticket is carried by hand.
             const own = agentProject.get(r.by_agent);
             if (own && own !== r.project) counterfactual.push({ at, project: r.project, kind: "relay" });
         }
     }
-    // A decision is an act of its own, at the moment it was taken (the comment it
-    // decides may be older than the window).
-    const decided = db.prepare(`
-        SELECT t.project, m.meta FROM _messages m JOIN tickets t ON t.id = m.ticket_id
-        WHERE m.meta LIKE '%"decided_by"%' AND COALESCE(json_extract(m.meta, '$.decision.decided_at'), '') >= ?`).all(sinceIso) as { project: string; meta: string }[];
-    for (const r of decided) {
-        try {
-            const d = (JSON.parse(r.meta) as { decision?: { decided_by?: string; decided_at?: string } }).decision;
-            const at = d?.decided_at ? Date.parse(d.decided_at) : NaN;
-            if (d?.decided_by && humans.has(d.decided_by) && Number.isFinite(at) && at >= o.sinceMs) {
-                both({ at, project: r.project, kind: "decision" });
-                cover(at, "b");
-            }
-        } catch { /* a meta that does not parse carries no decision */ }
+    // A ticket's creation is its own row, not a message.
+    for (const t of db.prepare("SELECT project, by_agent, created_at FROM tickets WHERE created_at >= ?").all(sinceIso) as { project: string; by_agent: string; created_at: string }[]) {
+        const at = Date.parse(t.created_at);
+        if (humans.has(t.by_agent)) { both({ at, project: t.project, kind: "ticket" }); cover(at, "b"); }
+        else agentTickets.push({ at, project: t.project, kind: "ticket" });
     }
     db.close();
 
