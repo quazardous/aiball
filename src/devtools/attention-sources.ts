@@ -46,7 +46,7 @@ export function uiActs(day: string, text: string, humans: ReadonlySet<string>, t
         if (!time || !UI_GESTURES.has(method) || !humans.has(consumer)) continue;
         const at = Date.parse(`${day}T${time}Z`);
         const where = project || ticketProject.get(ticket) || "";
-        if (Number.isFinite(at) && at >= sinceMs && where) out.push({ at, project: where, kind: "ui" });
+        if (Number.isFinite(at) && at >= sinceMs && where) out.push({ at, project: where, kind: "ui", ...(ticket ? { ticket: Number(ticket) } : {}) });
     }
     return out;
 }
@@ -82,6 +82,8 @@ export interface Sources {
     acts: Act[];
     /** What would have happened with Claude sessions alone, instead. */
     counterfactual: Act[];
+    /** Every ticket's title and summary, for `--tickets`. */
+    tickets: Map<number, { title: string; summary: string | null }>;
     /** Tickets agents filed: human traces when a human act is near (see supervisedOnly). */
     agentTickets: Act[];
     /** What each project's Claude sessions spent, for `--weight tokens`. */
@@ -133,12 +135,12 @@ export async function collect(o: Options): Promise<Sources> {
     const agents = db.prepare("SELECT consumer_id, project, cwd FROM consumers WHERE kind != 'human' ORDER BY COALESCE(last_seen_at, '')").all() as { consumer_id: string; project: string | null; cwd: string | null }[];
     const agentProject = new Map(agents.filter((a) => a.project).map((a) => [a.consumer_id, a.project!]));
     const sinceIso = new Date(o.sinceMs).toISOString();
-    type Row = { project: string; kind: string; by_agent: string; created_at: string };
+    type Row = { project: string; ticket_id: number; kind: string; by_agent: string; created_at: string };
     // What humans did on the board — comments, decisions (each leaves its own
     // row: plan_accepted, resolution_rejected, …), closes, relations — and
     // agents' comments on another project's tickets.
     const rows = db.prepare(`
-        SELECT t.project, m.kind, m.by_agent, m.created_at
+        SELECT t.project, m.ticket_id, m.kind, m.by_agent, m.created_at
         FROM _messages m JOIN tickets t ON t.id = m.ticket_id
         WHERE m.status = 'approved' AND m.created_at >= ?`).all(sinceIso) as Row[];
     for (const r of rows) {
@@ -147,21 +149,23 @@ export async function collect(o: Options): Promise<Sources> {
             const kind = r.kind === "comment_added" ? "comment"
                 : /_(accepted|rejected)$/.test(r.kind) ? "decision"
                 : "close";
-            both({ at, project: r.project, kind });
+            both({ at, project: r.project, kind, ticket: r.ticket_id });
             cover(at, "b");
         } else if (r.kind === "comment_added") {
             // Claude only: an agent's word on another project's ticket is carried by hand.
             const own = agentProject.get(r.by_agent);
-            if (own && own !== r.project) counterfactual.push({ at, project: r.project, kind: "relay" });
+            if (own && own !== r.project) counterfactual.push({ at, project: r.project, kind: "relay", ticket: r.ticket_id });
         }
     }
     // A ticket's creation is its own row, not a message.
-    for (const t of db.prepare("SELECT project, by_agent, created_at FROM tickets WHERE created_at >= ?").all(sinceIso) as { project: string; by_agent: string; created_at: string }[]) {
+    for (const t of db.prepare("SELECT id, project, by_agent, created_at FROM tickets WHERE created_at >= ?").all(sinceIso) as { id: number; project: string; by_agent: string; created_at: string }[]) {
         const at = Date.parse(t.created_at);
-        if (humans.has(t.by_agent)) { both({ at, project: t.project, kind: "ticket" }); cover(at, "b"); }
-        else agentTickets.push({ at, project: t.project, kind: "ticket" });
+        if (humans.has(t.by_agent)) { both({ at, project: t.project, kind: "ticket", ticket: t.id }); cover(at, "b"); }
+        else agentTickets.push({ at, project: t.project, kind: "ticket", ticket: t.id });
     }
-    const ticketProject = new Map((db.prepare("SELECT id, project FROM tickets").all() as { id: number; project: string }[]).map((t) => [String(t.id), t.project]));
+    const ticketRows = db.prepare("SELECT id, project, title, summary FROM tickets").all() as { id: number; project: string; title: string; summary: string | null }[];
+    const ticketProject = new Map(ticketRows.map((t) => [String(t.id), t.project]));
+    const tickets = new Map(ticketRows.map((t) => [t.id, { title: t.title, summary: t.summary }]));
     db.close();
 
     // --- UI actions ---------------------------------------------------------
@@ -220,7 +224,7 @@ export async function collect(o: Options): Promise<Sources> {
             }
         }
     }
-    return { acts, counterfactual, spend, agentTickets, coverage };
+    return { acts, counterfactual, spend, agentTickets, tickets, coverage };
 }
 
 /** Tokens one assistant message spent: new input and output; re-reading a cached context is not counted. */

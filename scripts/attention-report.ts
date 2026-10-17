@@ -18,6 +18,8 @@
  * --counterfactual  also the same table for Claude sessions alone: each loop
  *                   wake typed by hand, each cross-project comment carried by hand
  * --json            everything, as JSON
+ * --tickets         with --json: per day and project, the tickets the human
+ *                   acted on, with their title, summary and number of acts
  *
  * Past Claude's transcripts (30 days by default) the estimate is degraded: on
  * the days the transcripts cover, a factor per project is learned between the
@@ -128,6 +130,30 @@ for (const row of real.median.values()) for (const [p, v] of row) projectTotal.s
 const projects = [...projectTotal].filter(([, v]) => v >= 0.05).sort((a, b) => b[1] - a[1]).map(([p]) => p);
 const days = [...new Set([...real.median.keys(), ...(counter?.median.keys() ?? [])])].filter((d) => d >= dayOf(since)).sort();
 
+/** Per day and project, the tickets the human acted on, most acts first. */
+function ticketsByDay(list: readonly Act[]): Record<string, Record<string, Array<{ id: number; title: string; summary: string | null; acts: number }>>> {
+    const count = new Map<string, Map<string, Map<number, number>>>();
+    for (const a of list) {
+        if (a.ticket === undefined) continue;
+        const day = dayOf(a.at);
+        const byProject = count.get(day) ?? new Map<string, Map<number, number>>();
+        const byTicket = byProject.get(a.project) ?? new Map<number, number>();
+        byTicket.set(a.ticket, (byTicket.get(a.ticket) ?? 0) + 1);
+        byProject.set(a.project, byTicket);
+        count.set(day, byProject);
+    }
+    const out: Record<string, Record<string, Array<{ id: number; title: string; summary: string | null; acts: number }>>> = {};
+    for (const day of [...count.keys()].sort()) {
+        out[day] = {};
+        for (const [project, byTicket] of count.get(day)!) {
+            out[day][project] = [...byTicket].sort((a, b) => b[1] - a[1]).map(([id, n]) => ({
+                id, title: src.tickets.get(id)?.title ?? "", summary: src.tickets.get(id)?.summary ?? null, acts: n,
+            }));
+        }
+    }
+    return out;
+}
+
 if (flag("json")) {
     const obj = (t: Table) => Object.fromEntries([...t].map(([d, row]) => [d, Object.fromEntries(row)]));
     console.log(JSON.stringify({
@@ -138,6 +164,7 @@ if (flag("json")) {
         coverage: Object.fromEntries([...src.coverage].map(([d, s]) => [d, [...s].sort().join("")])),
         hours: { low: obj(real.low), median: obj(real.median), high: obj(real.high) },
         claude_only: counter && { low: obj(counter.low), median: obj(counter.median), high: obj(counter.high) },
+        tickets: flag("tickets") ? ticketsByDay(acts) : undefined,
         extrapolated: degraded.length ? {
             days: degraded,
             training: train,

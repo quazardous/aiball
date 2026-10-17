@@ -115,3 +115,8 @@ test("#4091 the factor learned on the training days, per project, with the globa
     assert.equal(out.get("d0")?.get("a"), 3);
     assert.ok(Math.abs(out.get("d0")!.get("c")! - cal.global) < 1e-9, "a project unseen in training: the global factor");
 });
+
+test("a UI line keeps the ticket it names, for --tickets", () => {
+    const [a] = uiActs("2026-10-17", "09:14:25.655\tdavid\tweb\tticket.get\taiball\t4088", new Set(["david"]), new Map(), 0);
+    assert.equal(a.ticket, 4088);
+});

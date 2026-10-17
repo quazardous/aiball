@@ -40,7 +40,8 @@ dates are YYYY-MM-DD.
   (`--no-agent-tickets` to leave them out). Past Claude's transcripts the
   days are extrapolated from the board and the UI log, with a factor per
   project learned on the days every source covers (`~`). It only reads. See
-  `docs/ATTENTION-REPORT.md`.
+  `docs/ATTENTION-REPORT.md`. With `--json --tickets`, the tickets the human
+  acted on each day, per project, with their title and summary.
 - A time zone setting, `display.timezone`: `auto` (the daemon machine's zone,
   the default), `UTC`, or a zone name such as `Europe/Paris`, for the board or
   a project. Agents read every time in it, with its offset

@@ -32,6 +32,8 @@ export interface Act {
     at: number;
     project: string;
     kind: ActKind;
+    /** The ticket the act was on, when the source says (the board, the UI log). */
+    ticket?: number;
 }
 
 /** Tokens a project's Claude sessions spent at an instant (one assistant message). */

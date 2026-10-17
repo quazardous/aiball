@@ -14,7 +14,12 @@ npx tsx scripts/attention-report.ts --since 7d --range  # low–median–high pe
 npx tsx scripts/attention-report.ts --weight tokens     # share periods by tokens spent
 npx tsx scripts/attention-report.ts --counterfactual    # also: Claude sessions alone
 npx tsx scripts/attention-report.ts --project helios,mcu --json
+npx tsx scripts/attention-report.ts --since 1d --json --tickets  # + the tickets touched, per day and project
 ```
+
+With `--json --tickets` the JSON also lists, per day and project, the tickets
+the human acted on (a comment, a decision, a close, a creation, a gesture in a
+UI), with their title, summary and number of acts, most acts first.
 
 ## What it reads
 
