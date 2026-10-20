@@ -225,6 +225,22 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 getHookWatcher().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
+            // #4051 — a compaction starting, and Claude's idle_prompt notification.
+            if (hookKind === "PreCompact") {
+                const hookEvent: HookWatcherEvent = {
+                    type: "hook:pre_compact",
+                    atMs,
+                    ...(typeof event.trigger === "string" && event.trigger ? { trigger: event.trigger } : {}),
+                };
+                getHookWatcher().emit(hookEvent);
+                return { kind: "hook-event", hookEvent };
+            }
+            if (hookKind === "Notification") {
+                if (event.notification_type !== "idle_prompt") return { kind: "unknown", raw: `hook:Notification (${String(event.notification_type)})` };
+                const hookEvent: HookWatcherEvent = { type: "hook:idle_prompt", atMs };
+                getHookWatcher().emit(hookEvent);
+                return { kind: "hook-event", hookEvent };
+            }
             if (hookKind === "PreToolUse") {
                 const toolName = typeof event.tool_name === "string" ? event.tool_name : null;
                 if (!toolName) return { kind: "unknown", raw: `hook:PreToolUse (missing tool_name)` };

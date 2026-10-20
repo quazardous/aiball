@@ -35,6 +35,7 @@ import { createLogger } from "../log.js";
 import { CL_ENV } from "./env-vars.js";
 import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
 import { sendEventOnce } from "./ipc-events.js";
+import { emitHookEventToTimer } from "./hook-emit.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -104,6 +105,11 @@ try {
     const keys = parsed ? Object.keys(parsed).sort().join(",") : "-";
     logger.info(`notification type=${type} keys=[${keys}] raw=${JSON.stringify(raw)}`);
     await flushToTimer();
+    // #4051 — idle_prompt (~61 s at the prompt, nothing typed) proves Claude idle:
+    // the kernel lifts the hold a blind turn-end put on wakes.
+    if (type === "idle_prompt") {
+        try { await emitHookEventToTimer(sd!, { event: "hook", kind: "Notification", notification_type: type, at_ms: Date.now() }); } catch { /* best effort */ }
+    }
 } catch (e) {
     logger.info(`notification READ FAILED: ${e instanceof Error ? e.message : String(e)}`);
     await flushToTimer();

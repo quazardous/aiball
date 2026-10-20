@@ -1060,6 +1060,19 @@ let busyProofs: BusyProofs = new Map();
 // submit, not the end of the turn (see paneReadsIdle).
 let turnStartedAtMs = 0;
 let turnShowedWork = false;
+// #4051 — a compaction Claude Code announced (PreCompact hook): Claude works,
+// whatever the screen shows, until its SessionStart(compact) or a Stop. Bounded,
+// so a lost end never pins the loop busy.
+let hookCompactingSinceMs: number | null = null;
+const HOOK_COMPACTING_MAX_MS = 15 * 60_000;
+// #4051 — a turn the pane closed with nothing shown and no Stop hook is
+// unverified: Claude may be busy where the screen cannot tell (a compaction it
+// did not draw). No wake goes until something proves it idle — a Stop, work seen
+// on the screen, Claude's idle_prompt notification (~61 s of real idleness), a
+// human's prompt — or the bound passes. Seen on helios: four wakes queued, one
+// every 15 s, into a compaction.
+let blindEndAtMs: number | null = null;
+const BLIND_HOLD_MAX_MS = 120_000;
 function crossResumePicker(): void {
     if ((process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort") return;
     lastPickerCrossAtMs = Date.now();
@@ -1116,6 +1129,12 @@ async function probePaneMarkers(): Promise<void> {
     const escVisible = busyW.snapshot().visible;
     const inTurn = getTurnService().getActor().getSnapshot().matches("in_turn");
     const nowBusy = Date.now();
+    if (hookCompactingSinceMs !== null && nowBusy - hookCompactingSinceMs > HOOK_COMPACTING_MAX_MS) {
+        log(`compaction announced by PreCompact ${Math.round((nowBusy - hookCompactingSinceMs) / 1000)}s ago never ended — no longer counted`);
+        hookCompactingSinceMs = null;
+    }
+    const hookCompacting = hookCompactingSinceMs !== null;
+    if (hookCompacting) busyProofs = seenProof(busyProofs, PROOF_COMPACTING, nowBusy);
     if (inTurn) busyProofs = seenProof(busyProofs, PROOF_TURN, nowBusy);
     if (escVisible) busyProofs = seenProof(busyProofs, PROOF_ESC, nowBusy);
     if (getCompactingDetector().snapshot().active) busyProofs = seenProof(busyProofs, PROOF_COMPACTING, nowBusy);
@@ -1123,7 +1142,13 @@ async function probePaneMarkers(): Promise<void> {
     // travaille, quand le hint `esc` ne l'est qu'un tick sur six.
     if (activityW.snapshot().visible) busyProofs = seenProof(busyProofs, PROOF_ACTIVITY, nowBusy);
     // #4014 — this turn has shown Claude at work at least once.
-    if (inTurn && (escVisible || getCompactingDetector().snapshot().active || activityW.snapshot().visible)) turnShowedWork = true;
+    const workOnScreen = escVisible || getCompactingDetector().snapshot().active || activityW.snapshot().visible;
+    if (inTurn && (workOnScreen || hookCompacting)) turnShowedWork = true;
+    // #4051 — work seen after a blind turn-end: Claude was busy, and is shown now.
+    if (blindEndAtMs !== null && (workOnScreen || hookCompacting)) {
+        log("blind turn-end: work now seen on the screen — wakes resume their usual course");
+        blindEndAtMs = null;
+    }
     // pane-idle (cursor back at origin, no mechanical proof left) = authoritative
     // release : drop every proof at once, no waiting for remanence.
     //
@@ -1158,7 +1183,8 @@ async function probePaneMarkers(): Promise<void> {
     // Same predicate as the release above, and for the same reason: closing a
     // turn on a blinked-out hint would end it mid-work (#1580).
     if (paneIdle && inTurn) {
-        log(`turn-end via pane-idle (Stop hook absent/late) → turnEnded (${turnShowedWork ? "work shown, then idle" : `nothing shown in ${Math.round((nowBusy - turnStartedAtMs) / 1000)}s`})`);
+        log(`turn-end via pane-idle (Stop hook absent/late) → turnEnded (${turnShowedWork ? "work shown, then idle" : `nothing shown in ${Math.round((nowBusy - turnStartedAtMs) / 1000)}s — wakes held until a Stop, work on screen or idle_prompt`})`);
+        if (!turnShowedWork) blindEndAtMs = nowBusy;
         getTurnService().turnEnded(Date.now());
     }
     // Picker markers are AUTHORITATIVELY the current pane scan, not just
@@ -1697,6 +1723,17 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     if (existsSync(zenPath(sd!))) {
         log(`skip wake (${reason}) — zen mode (touch ${zenPath(sd!)} to mute, remove to unmute)`);
         return false;
+    }
+    // #4051 — after a blind turn-end, one wake already went into a Claude that
+    // may be busy; another would only queue behind it.
+    if (blindEndAtMs !== null && !manualWake) {
+        if (Date.now() - blindEndAtMs > BLIND_HOLD_MAX_MS) {
+            log(`blind turn-end ${Math.round((Date.now() - blindEndAtMs) / 1000)}s ago, nothing since — wakes go again`);
+            blindEndAtMs = null;
+        } else {
+            log(`skip wake (${reason}) — the last turn ended blind (nothing on screen, no Stop): held until a Stop, work on screen or idle_prompt`);
+            return false;
+        }
     }
     // #848 david `<chat>` : la fenêtre [boot:sealed → loop:start] (= 10s)
     // est gérée par le WakeController lui-même via l'état initial `gated`.
@@ -2324,6 +2361,11 @@ async function mainSse(): Promise<void> {
         // idleSince still propagate ici so the wake gate sees fresh
         // per-hook input. #881 — `setIpcIdleSince` délégué au TurnController.
         getTurnService().sessionStart(ev.atMs);
+        // #4051 — a compaction ends with its SessionStart(compact); any session start
+        // is a fresh prompt, so a blind turn-end is settled too.
+        if (ev.source === "compact" && hookCompactingSinceMs !== null) log(`compaction ended (SessionStart compact) after ${Math.round((ev.atMs - hookCompactingSinceMs) / 1000)}s`);
+        hookCompactingSinceMs = null;
+        blindEndAtMs = null;
         if (typeof ev.pickerSession === "boolean") {
             setIpcResumeSessionPicker(ev.pickerSession);
             if (sd) setResumeSessionPicker(sd, ev.pickerSession);
@@ -2339,6 +2381,9 @@ async function mainSse(): Promise<void> {
         // le gate, soit null explicite = clear defer. Stop event = idle
         // confirmed. #881 — `setIpcIdleSince` délégué à TurnController.
         getTurnService().turnEnded(ev.atMs);
+        // #4051 — a Stop proves the turn over: no compaction, no blind end left.
+        hookCompactingSinceMs = null;
+        blindEndAtMs = null;
         // #3283 — the model of the turn that ended, for the bar.
         if (ev.model) setIpcModel(ev.model);
         // #1072 — a Stop hook proves claude is running (= logged in). Clear the
@@ -2371,6 +2416,16 @@ async function mainSse(): Promise<void> {
             }
         }
     });
+    // #4051 — Claude Code says a compaction starts (manual or auto): busy, whatever the screen draws.
+    hookWatcher.on("hook:pre_compact", (ev) => {
+        log(`compaction starts (PreCompact${ev.trigger ? ` ${ev.trigger}` : ""}) — Claude counts as busy until it ends`);
+        hookCompactingSinceMs = ev.atMs;
+    });
+    // #4051 — Claude Code's idle_prompt: ~61 s at the prompt with nothing typed. Proof of idleness.
+    hookWatcher.on("hook:idle_prompt", () => {
+        if (blindEndAtMs !== null) log("blind turn-end: Claude's idle_prompt proves it idle — wakes resume");
+        blindEndAtMs = null;
+    });
     hookWatcher.on("hook:user_prompt_submit", (ev) => {
         // #898 — signal d'activité pour SanityController (reset stale clock).
         getSanityService().ticketActivity(ev.atMs);
@@ -2385,6 +2440,8 @@ async function mainSse(): Promise<void> {
             if (getIpcState().loopStart && !turn.matches("in_turn")) getTurnService().turnStarted(ev.atMs);
             return;
         }
+        // #4051 — a human's prompt: whatever the screen showed, they see Claude.
+        blindEndAtMs = null;
         // A real human submission flips claude back to busy ; an
         // auto-wake submission is the loop talking to itself.
         // #881 — délégué à TurnController via TURN_STARTED. Si TurnController

@@ -436,3 +436,20 @@ test("#2311 a typed hold lasts claude_loop.presence_hold_seconds, like F9 and --
         rmSync(project, { recursive: true, force: true });
     }
 });
+
+test("#4051 dispatch PreCompact and Notification idle_prompt → HookWatcher.emit; other notifications do not", () => {
+    const sd = tmp();
+    try {
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:pre_compact", (e) => { seen.push(e); });
+        getHookWatcher().on("hook:idle_prompt", (e) => { seen.push(e); });
+        assert.equal(dispatchProxyEvent(sd, { event: "hook", kind: "PreCompact", trigger: "auto", at_ms: 1_000 }).kind, "hook-event");
+        assert.equal(dispatchProxyEvent(sd, { event: "hook", kind: "Notification", notification_type: "idle_prompt", at_ms: 2_000 }).kind, "hook-event");
+        assert.equal(dispatchProxyEvent(sd, { event: "hook", kind: "Notification", notification_type: "permission_prompt", at_ms: 3_000 }).kind, "unknown");
+        assert.deepEqual(seen, [
+            { type: "hook:pre_compact", atMs: 1_000, trigger: "auto" },
+            { type: "hook:idle_prompt", atMs: 2_000 },
+        ]);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});

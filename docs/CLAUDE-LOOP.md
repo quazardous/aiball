@@ -370,6 +370,12 @@ flowchart TD
   override (boot, presence hold, typing, busy-defer), but still stops at not
   logged in, the trust dialog and an unreachable API. A panic wake only ignores
   busy-defer, `esc to interrupt` and `/compact`.
+- **A blind turn-end holds the wakes.** When the screen closes a turn with
+  nothing shown and no Stop hook came (Claude may be busy where the screen
+  cannot tell, such as a compaction it did not draw), no wake goes until a Stop,
+  work seen on the screen, Claude's `idle_prompt` notification or a human's
+  prompt proves it idle, or 2 minutes pass. A compaction announced by the
+  `PreCompact` hook counts as work until its `SessionStart (compact)`.
 - **busy-defer** is armed for 10 s after each delivered wake, for 5 s by the
   Stop hook when the screen still shows Claude busy, and by the API-error
   backoff (5 s, doubling, capped at 10 min).

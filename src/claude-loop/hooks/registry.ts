@@ -61,6 +61,8 @@ export const HOOKS: HookSpec[] = [
     // #3500 — a tool call the permission system denied (the auto mode
     // classifier, a deny rule): counted with time for the bar. Observes only.
     { event: "PermissionDenied", module: "../permission-denied-hook.js" },
+    // #4051 — a compaction starts: Claude is busy whatever the screen draws.
+    { event: "PreCompact", module: "../precompact-hook.js" },
 ];
 
 /** One `{matcher?, hooks}` entry in a Claude Code `settings.hooks[event]` array. */

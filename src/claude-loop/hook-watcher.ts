@@ -49,7 +49,11 @@ export type HookWatcherEvent =
     | { type: "hook:session_start"; source: SessionStartSource; atMs: number; pickerSession?: boolean; pickerMode?: boolean }
     | { type: "hook:user_prompt_submit"; fromAutoWake: boolean; atMs: number }
     | { type: "hook:stop"; atMs: number; busyDeferUntilMs?: number | null; model?: string }
-    | { type: "hook:pretooluse"; toolName: string; atMs: number };
+    | { type: "hook:pretooluse"; toolName: string; atMs: number }
+    /** #4051 — a compaction starts (`trigger`: manual | auto). */
+    | { type: "hook:pre_compact"; atMs: number; trigger?: string }
+    /** #4051 — Claude Code's idle_prompt notification: idle at the prompt for ~61 s. */
+    | { type: "hook:idle_prompt"; atMs: number };
 
 export type HookWatcherEventName = HookWatcherEvent["type"];
 export type HookWatcherListener<E extends HookWatcherEventName = HookWatcherEventName> =

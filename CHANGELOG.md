@@ -69,6 +69,12 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A compaction the screen does not show no longer gets wakes queued behind it.
+  The `PreCompact` hook makes Claude count as busy until the compaction ends;
+  and a turn the screen closes with nothing shown and no Stop holds the next
+  wake until something proves Claude idle (a Stop, work on screen, Claude's
+  `idle_prompt` notification, a human's prompt) or 2 minutes pass. Loops pick
+  up the new hook at their next start.
 - The loop no longer takes the moment right after a submit (the prompt box
   back and empty, Claude not drawing yet) for the end of the turn: it waits to
   have seen Claude at work in that turn, or 5 s without any. A wake the Stop

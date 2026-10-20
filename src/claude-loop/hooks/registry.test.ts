@@ -91,3 +91,7 @@ test("hook-entry dispatches by event and is fail-open", () => {
     assert.equal(run(["NopeNotAnEvent"]), "{}", "unknown event → fail-open {}");
     assert.equal(run([]), "{}", "no event arg → fail-open {}");
 });
+
+test("#4051 PreCompact is installed: a compaction the screen may not draw still counts as work", () => {
+    assert.ok(HOOKS.some((h) => h.event === "PreCompact" && h.module === "../precompact-hook.js"));
+});
