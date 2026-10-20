@@ -28,14 +28,26 @@ import type { Act, Spend } from "./attention-model.js";
 
 /**
  * The UI calls that are a human's gesture rather than a UI refreshing itself:
- * reading a ticket, marking it read, searching, typing into a session, waking a
- * loop. A first list, to revise on a day of real lines (#4090): the log keeps
- * every call, so the list can change without losing anything.
+ * reading a ticket or a message, marking it read, searching, deciding, steering
+ * a loop or a session. Measured on three days of real lines (#4090): the calls
+ * left out come at a steady pace whatever the human does — project.list and
+ * inbox.list every 2 s, a local client's project.list every ~19 s, and
+ * mention.suggestions / consumer.list / tag.list / project.milestones together
+ * every 60–90 s (a view's refresh, not typing) — or open a connection
+ * (bus.subscribe). The log keeps every call, so the list can change without
+ * losing anything.
  */
 export const UI_GESTURES: ReadonlySet<string> = new Set([
-    "ticket.get", "ticket.mark_read", "ticket.mark_unread", "unread.mark_read", "ping.mark_read",
-    "message.search", "message.get", "mention.suggestions", "message.vote",
-    "agent.pane_keys", "consumer.prompt", "loop.wake",
+    // reading
+    "ticket.get", "message.get", "message.search", "session.conversations",
+    "ticket.mark_read", "ticket.mark_unread", "unread.mark_read", "ping.mark_read",
+    // deciding and writing (also on the board: the same moment, counted as one period)
+    "message.decide", "message.approve", "message.reject", "message.post", "message.edit", "message.vote",
+    "ticket.postpone", "ticket.move", "ticket.assign", "ticket.relate",
+    // steering agents and sessions
+    "loop.restart", "loop.reload", "loop.wake", "consumer.stop_loop", "consumer.restart_claude",
+    "consumer.afk", "consumer.set_afk_hold", "consumer.prompt", "agent.pane_keys",
+    "session.start", "session.stop", "session.list",
 ]);
 
 /** A day's UI lines as acts: the gestures of humans, on a project the line or its ticket names. */

@@ -91,6 +91,7 @@ test("UI lines: a human's gesture is an act on its project; a UI refreshing itse
     const text = [
         "09:14:25.655\tdavid\tweb\tticket.get\t\t4088",       // project from the ticket
         "09:15:00.000\tdavid\tweb\tconsumer.counters\t\t",    // not a gesture
+        "09:15:30.000\tdavid\tweb\tmention.suggestions\t\t",  // a view refreshing every 60-90 s, not typing
         "09:16:00.000\thelios-claude\tuds\tticket.get\thelios\t1", // not a human
         "09:17:00.000\tdavid\ttvty\tmessage.search\tmcu\t",
     ].join("\n");
