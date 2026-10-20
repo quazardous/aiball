@@ -99,7 +99,7 @@ import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { loopName } from "./loop-name.js";
-import { conversationHolder, foreignAgentRefusal, startFolder, takeLaunchCwd } from "./start-guards.js";
+import { conversationHolder, foreignAgentRefusal, startFolder, takeLaunchCwd, configDirRefusal } from "./start-guards.js";
 import { afterTmuxAttach, type LoopWhereabouts } from "./attach-end.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
@@ -593,6 +593,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // crew of it: another agent here would take its conversation.
     const foreign = foreignAgentRefusal({ agent: opts.consumer, folderAgent: mainAgent, agentSource: ctx.agent_source, role: opts.role, cwd: ctx.cwd });
     if (foreign) die(foreign);
+    // #4120 — a config dir that never finished Claude's first run would stall the loop on its screens.
+    const freshDir = configDirRefusal(claudeConfigDir(ctx.cwd), (f) => { try { return readFileSync(f, "utf8"); } catch { return null; } });
+    if (freshDir) die(freshDir);
     if (opts.consumer) ctx.agent = opts.consumer;
     if (opts.project) ctx.project = opts.project;
     // #1435 slice 1 — `--role lead|crew` overrides the resolved role. A crew

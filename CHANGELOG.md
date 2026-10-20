@@ -32,7 +32,9 @@ dates are YYYY-MM-DD.
   it (`restart_needed` / `restart_loops` name the running loops on another
   dir); each usage reading names its `config_dir`. `aiball claude-config [dir]`
   shows or sets it for the current folder (`--cwd`, `--unset`), and
-  `--move-sessions` moves the folder's Claude sessions to the new dir.
+  `--move-sessions` moves the folder's Claude sessions to the new dir. A loop
+  refuses to start on a dir that has not been through Claude's first run, whose
+  screens (theme, login) it cannot answer.
 - The human's UI actions (the web board, tvty, the CLI) are kept, one compact
   line per call — the method, the project, the ticket, never a text — in
   `$AIBALL_HOME/ui-actions/`, one file per day, gzipped once past, deleted

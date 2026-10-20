@@ -263,7 +263,9 @@ claude:
   # projects may share one. Unset: the environment's, else ~/.claude. A change
   # applies at each loop's next restart, on a new conversation: the sessions of
   # another dir are not resumed. `aiball claude-config <dir> --move-sessions`
-  # sets it and moves the folder's sessions along.
+  # sets it and moves the folder's sessions along. A new dir must have been
+  # through Claude's first run once (`CLAUDE_CONFIG_DIR=<dir> claude`: theme,
+  # login): a loop refuses to start on one that has not.
   # config_dir: ~/.claude-work
 
 # --- project type -------------------------------------------------------------

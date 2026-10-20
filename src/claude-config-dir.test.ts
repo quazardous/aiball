@@ -49,3 +49,14 @@ test("a loop starts Claude with the project's dir: its env file exports it", asy
     const cli = readFileSync(new URL("./claude-loop/cli.ts", import.meta.url), "utf8");
     assert.match(cli, /ctx\.claude\.config_dir \? \[`export CLAUDE_CONFIG_DIR=\$\{shQuote\(expandConfigDir\(ctx\.claude\.config_dir, cwd\)\)\}`\]/);
 });
+
+test("a project's config dir that never finished Claude's first run refuses the start; a done one, or the env's, starts", async () => {
+    const { configDirRefusal } = await import("./claude-loop/start-guards.js");
+    const dir = { dir: "/d", json: "/d/.claude.json", from: "file" };
+    assert.match(configDirRefusal(dir, () => null) ?? "", /has not been through Claude's first run.*CLAUDE_CONFIG_DIR=\/d claude/);
+    assert.match(configDirRefusal(dir, () => "{}") ?? "", /first run/);
+    assert.match(configDirRefusal(dir, () => "not json") ?? "", /first run/);
+    assert.equal(configDirRefusal(dir, () => JSON.stringify({ hasCompletedOnboarding: true })), null);
+    assert.equal(configDirRefusal({ ...dir, from: "env" }, () => null), null, "the environment's dir is the user's own");
+    assert.equal(configDirRefusal({ ...dir, from: "default" }, () => null), null);
+});
