@@ -12,7 +12,7 @@
  * The caller owns the checks — the message exists, is still pending, and the
  * caller may moderate. This only applies the status and ripples it.
  */
-import { deletePingsForMessage, updateMessageStatus, type Message, type MessageStatus } from "../../db.js";
+import { deletePingsForMessage, insertPing, updateMessageStatus, type Message, type MessageStatus } from "../../db.js";
 import { postRejectRelationEvents } from "../../messages.js";
 import { emitLifecycle } from "../../event-bus.js";
 import { fanOutMentions, fanOutPings, notifyDecision } from "../../notifications.js";
@@ -29,6 +29,8 @@ export function applyModeration(existing: Message, status: MessageStatus, decide
         fanOutPings(updated);
         // #3396 — the ones it mentions hear it now, not before its moderation.
         fanOutMentions(updated);
+        // #4127 — and its assignee, whom filing it left unpinged while it waited.
+        if (updated.kind === "ticket_created" && updated.assignee) insertPing(updated.assignee, updated, updated.by_agent ?? decider);
     } else if (status === "rejected") {
         // At-insertion fan-out had already delivered pings to subscribers.
         // The message will never be approved, so wipe those pings so it

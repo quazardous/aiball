@@ -61,17 +61,18 @@ function targetInArray(ids: number[]) {
  * unreadCount / listPings / unreadPingCount) délèguent au moteur — chacun
  * en passant le `Target` qui matche sa surface logique.
  */
-function ticketRowToRuleItem(t: { id: number; byAgent: string | null; assignee: string | null; project?: string | null }): RuleItem {
+function ticketRowToRuleItem(t: { id: number; byAgent: string | null; assignee: string | null; project?: string | null; status?: string | null }): RuleItem {
     return {
         ticketId: t.id,
         ticketByAgent: t.byAgent,
         assignee: t.assignee,
         project: t.project ?? null,
+        pending: t.status === "pending",
     };
 }
 function messageRowToRuleItem(
     m: { byAgent: string | null; kind: string },
-    parent: { id: number; byAgent: string | null; assignee: string | null; project?: string | null },
+    parent: { id: number; byAgent: string | null; assignee: string | null; project?: string | null; status?: string | null },
 ): RuleItem {
     return {
         ticketId: parent.id,
@@ -80,6 +81,7 @@ function messageRowToRuleItem(
         commentKind: m.kind,
         assignee: parent.assignee,
         project: parent.project ?? null,
+        pending: parent.status === "pending",
     };
 }
 
@@ -601,7 +603,15 @@ export function unreadCount(consumer_id: string, project: string | null | undefi
  */
 function unreadNotWaking(consumer_id: string, project: string | null | undefined): Message[] {
     const waking = new Set(fetchUnread(consumer_id, project, "fifo-wake").messages.map((m) => m.id));
-    return fetchUnread(consumer_id, project, "unread-list").messages.filter((m) => !waking.has(m.id));
+    const rest = fetchUnread(consumer_id, project, "unread-list").messages.filter((m) => !waking.has(m.id));
+    // #4127 — an event on a ticket awaiting moderation waits for the approval
+    // to wake: carried here, it would be marked read before.
+    const tid = (m: Message): number | null => m.ticket_id ?? (m.kind === "ticket_created" ? m.id : null);
+    const ids = [...new Set(rest.map(tid).filter((v): v is number => v !== null))];
+    if (ids.length === 0) return rest;
+    const pending = new Set(getDb().select({ id: schema.tickets.id }).from(schema.tickets)
+        .where(and(inArray(schema.tickets.id, ids), eq(schema.tickets.status, "pending"))).all().map((r) => r.id));
+    return rest.filter((m) => { const t = tid(m); return t === null || !pending.has(t); });
 }
 
 function fetchUnread(
@@ -829,7 +839,7 @@ function pingWakes(recipient: string, msg: { id: number; kind: MessageKind; tick
     const isTicket = msg.kind === "ticket_created";
     const ticketId = isTicket ? msg.id : msg.ticket_id;
     if (!ticketId) return true;
-    const t = getDb().select({ id: schema.tickets.id, byAgent: schema.tickets.byAgent, assignee: schema.tickets.assignee, project: schema.tickets.project })
+    const t = getDb().select({ id: schema.tickets.id, byAgent: schema.tickets.byAgent, assignee: schema.tickets.assignee, project: schema.tickets.project, status: schema.tickets.status })
         .from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
     if (!t) return true;
     const item = isTicket ? ticketRowToRuleItem(t) : messageRowToRuleItem({ byAgent: actor, kind: msg.kind }, t);

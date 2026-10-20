@@ -85,6 +85,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A ticket awaiting moderation no longer wakes agents: a comment on it, or a
+  key-filed ticket's assignee, waits for the approval to wake them. The events
+  stay unread meanwhile; a human's comment on it (a moderator's question) still
+  wakes.
 - A session aiball starts in a project folder (a plain shell, a loop, its host)
   gets the folder's `claude.config_dir` as `CLAUDE_CONFIG_DIR`: a `claude`
   typed in a shell there landed on `~/.claude`, the wrong account.

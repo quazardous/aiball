@@ -151,9 +151,6 @@ function applyExtras(msg: Message, extras: TicketExtras, caller: string): Messag
     if (extras.assignee) {
         setTicketAssignment(id, extras.assignee, caller);
         upsertTicketSubscription(extras.assignee, id);
-        // The creation fan-out reaches the owners; a follower or crew assignee
-        // is not among them. Idempotent: an owner is not pinged twice.
-        insertPing(extras.assignee, { id, kind: msg.kind, intent: msg.intent }, caller);
     }
     return getMessage(id) ?? msg;
 }
@@ -164,10 +161,18 @@ function applyExtras(msg: Message, extras: TicketExtras, caller: string): Messag
  * `ticket_created`, `caller` who files it.
  */
 export function fileTicket(v: NewMessage, extras: TicketExtras, caller: string, opts: SubmitOpts = {}): Message {
-    return getDb().transaction(() => submitMessage(v, {
-        ...opts,
-        beforeAnnounce: (msg) => applyExtras(msg, extras, caller),
-    }));
+    return getDb().transaction(() => {
+        const out = submitMessage(v, {
+            ...opts,
+            beforeAnnounce: (msg) => applyExtras(msg, extras, caller),
+        });
+        // The creation fan-out reaches the owners; a follower or crew assignee
+        // is not among them. Idempotent: an owner is not pinged twice. #4127 —
+        // once approved, like the rest of the fan-out: a ticket awaiting
+        // moderation pings its assignee when the moderator approves it.
+        if (extras.assignee && out.status === "approved") insertPing(extras.assignee, { id: out.id, kind: out.kind, intent: out.intent }, caller);
+        return out;
+    });
 }
 
 /**

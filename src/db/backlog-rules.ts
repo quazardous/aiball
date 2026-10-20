@@ -26,7 +26,7 @@ import { and, eq, gt, isNotNull, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { mentions } from "../mentions.js";
 import { getDb, nowIso } from "./connection.js";
-import { getConsumer } from "./consumers.js";
+import { getConsumer, isHuman } from "./consumers.js";
 import { activeFocus, focusHides, type WakeFocus } from "../wake-focus.js";
 import { focusRelatives } from "./focus-relatives.js";
 import { onTicketChanged } from "./ticket-change.js";
@@ -89,6 +89,8 @@ export interface RuleItem {
     assignee?: string | null;
     /** #2525 — the ticket's project, for the wake focus. */
     project?: string | null;
+    /** #4127 — the ticket still awaits moderation (`status: pending`). */
+    pending?: boolean;
 }
 
 /** #3449 — a ticket that names me, or that I follow (filed it, wrote on it):
@@ -230,6 +232,19 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
             && item.assignee !== ctx.consumerId
             && !(ctx.mentionsMeIds?.has(item.ticketId) ?? false)
             && !isMine(ctx, item),
+        excludesFrom: new Set<Target>(["fifo-wake"]),
+    },
+    {
+        // #4127 — a ticket awaiting moderation wakes no one: it is not yet
+        // work, and an agent woken on it answers before the human has said it
+        // is. Its events stay unread (#643: pending counts as unread) and
+        // nothing is acked, so they wake once it is approved — the approval
+        // fans out again and refreshes the counters. A human's comment still
+        // wakes: a moderator asking a question before approving must reach
+        // someone.
+        name: "pending-moderation",
+        when: (_ctx, item) =>
+            item.pending === true && !(item.commentByAgent != null && isHuman(item.commentByAgent)),
         excludesFrom: new Set<Target>(["fifo-wake"]),
     },
     {
