@@ -3,7 +3,8 @@
  * loops start Claude with (`claude.config_dir` in its `.aiball.yaml`): shown,
  * set, or unset; with `--move-sessions`, the folder's Claude sessions follow;
  * with `--fork` (#4125), the new dir starts with the old one's instructions,
- * skills, settings and MCP servers, never its account nor its sessions.
+ * skills, settings and MCP servers, never its account nor its sessions —
+ * linked to the old dir's (#4126), or copied with `--copy`.
  */
 import type { Command } from "commander";
 import { existsSync } from "node:fs";
@@ -30,11 +31,12 @@ export function registerClaudeConfigCommands(program: Command): void {
         .option("--cwd <folder>", "The project folder (default: the current one)")
         .option("--unset", "Remove the setting: the environment's dir applies again, else ~/.claude")
         .option("--move-sessions", "Move the folder's Claude sessions (transcripts and its .claude.json entry) to the new dir, so they can be resumed there")
-        .option("--fork", "Start the new dir with the old one's mind: CLAUDE.md and its imports, settings.json, skills, agents, commands, plugins, the user MCP servers. Never its credentials, account or sessions")
+        .option("--fork", "Start the new dir with the old one's mind: CLAUDE.md and its imports, skills, agents, commands, plugins, settings.json, the user MCP servers. Never its credentials, account or sessions. Linked to the old dir's entries, so their updates reach both; settings.json, which Claude writes, is copied")
+        .option("--copy", "With --fork: copy everything instead of linking; the new dir then lives its own life")
         .option("--fork-from <dir>", "Fork from this dir rather than the old one; without a dir argument, fork into the folder's current dir")
-        .option("--force", "With --fork: overwrite what the new dir already has")
+        .option("--force", "With --fork: replace what the new dir already has; its own entries are moved aside into .replaced-by-fork-<date>/, never deleted")
         .option("--json", "Machine-readable JSON output")
-        .action((dir: string | undefined, opts: { cwd?: string; unset?: boolean; moveSessions?: boolean; fork?: boolean; forkFrom?: string; force?: boolean; json?: boolean }, cmd: Command) => {
+        .action((dir: string | undefined, opts: { cwd?: string; unset?: boolean; moveSessions?: boolean; fork?: boolean; forkFrom?: string; force?: boolean; copy?: boolean; json?: boolean }, cmd: Command) => {
             const json = opts.json || gOpts(cmd).json;
             const folder = startFolder(opts.cwd, takeLaunchCwd());
             try {
@@ -43,7 +45,7 @@ export function registerClaudeConfigCommands(program: Command): void {
                     const to = claudeConfigDir(folder);
                     const fromDir = expandConfigDir(opts.forkFrom, folder);
                     if (fromDir === to.dir) die(`${fromDir} is already the folder's dir`);
-                    const fork = forkClaudeConfig(sourceDir(fromDir), to, { force: opts.force });
+                    const fork = forkClaudeConfig(sourceDir(fromDir), to, { force: opts.force, copy: opts.copy });
                     if (json) jsonline({ folder, config_dir: to.dir, fork: { from: fromDir, ...fork } });
                     else process.stdout.write([`${folder}: ${fromDir} → ${to.dir} (fork)`, ...forkLines(fork)].join("\n") + "\n");
                     return;
@@ -69,7 +71,7 @@ export function registerClaudeConfigCommands(program: Command): void {
                 const forkFrom = opts.forkFrom !== undefined
                     ? sourceDir(expandConfigDir(opts.forkFrom, folder))
                     : before;
-                const fork = (opts.fork || opts.forkFrom !== undefined) && after.dir !== forkFrom.dir ? forkClaudeConfig(forkFrom, after, { force: opts.force }) : null;
+                const fork = (opts.fork || opts.forkFrom !== undefined) && after.dir !== forkFrom.dir ? forkClaudeConfig(forkFrom, after, { force: opts.force, copy: opts.copy }) : null;
                 if (json) {
                     jsonline({ folder, config_dir: s.config_dir.value, from: s.config_dir.from, previous: before.dir, sessions: move, fork: fork && { from: forkFrom.dir, ...fork } });
                     return;
@@ -99,10 +101,14 @@ function sourceDir(dir: string): { dir: string; json: string } {
 }
 
 function forkLines(f: ForkResult): string[] {
-    const out = [`  copied: ${f.copied.length ? f.copied.join(", ") : "nothing"}`];
+    const out: string[] = [];
+    if (f.linked.length) out.push(`  linked: ${f.linked.join(", ")}`);
+    if (f.copied.length) out.push(`  copied: ${f.copied.join(", ")}`);
+    if (!f.linked.length && !f.copied.length) out.push("  nothing linked or copied");
+    if (f.movedAside) out.push(`  replaced, the new dir's own moved into ${f.movedAside}`);
     if (f.mcpServers) out.push(`  MCP servers: ${f.mcpServers}`);
     if (f.kept.length) out.push(`  already there, kept (--force overwrites): ${f.kept.join(", ")}`);
     if (f.unknown.length) out.push(`  not copied, not known: ${f.unknown.join(", ")}`);
-    out.push(`  never copied: the credentials, the account, the sessions and history`);
+    out.push(`  never carried: the credentials, the account, the sessions and history`);
     return out;
 }

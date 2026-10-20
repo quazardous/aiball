@@ -36,11 +36,14 @@ dates are YYYY-MM-DD.
   refuses to start on a dir that has not been through Claude's first run, whose
   screens (theme, login) it cannot answer.
 - `aiball claude-config <dir> --fork` starts the new Claude config dir with the
-  old one's instructions (CLAUDE.md and the files it imports), settings,
-  key bindings, skills, agents, commands, output styles, plugins and user MCP
-  servers — never its credentials, account or sessions. `--fork-from <dir>`
-  names another source; what the new dir already has is kept unless `--force`;
-  an entry it does not know is named, not copied.
+  old one's instructions (CLAUDE.md and the files it imports), key bindings,
+  skills, agents, commands, output styles, plugins, settings and user MCP
+  servers — never its credentials, account or sessions. They are symbolic
+  links to the old dir's, so an update of a skill or of CLAUDE.md reaches both;
+  `settings.json`, which Claude writes, is copied; `--copy` copies everything.
+  `--fork-from <dir>` names another source; what the new dir already has is
+  kept, or with `--force` moved aside into `.replaced-by-fork-<date>/`; an
+  entry it does not know is named, not carried.
 - The human's UI actions (the web board, tvty, the CLI) are kept, one compact
   line per call — the method, the project, the ticket, never a text — in
   `$AIBALL_HOME/ui-actions/`, one file per day, gzipped once past, deleted

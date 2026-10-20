@@ -6,11 +6,16 @@
  * keep working the way the others do.
  *
  * Every entry of a Claude config dir is ranged here, with why: what is not in
- * FORKED is not copied, and the command says so, so an entry a later Claude Code
- * adds is seen and ranged rather than silently carried over.
+ * FORKED is not carried, and the command says so, so an entry a later Claude
+ * Code adds is seen and ranged rather than silently carried over.
+ *
+ * #4126 — carried by symbolic link by default, so the next update of a skill or
+ * of CLAUDE.md reaches every dir; `copy` makes the new dir its own. What Claude
+ * itself writes (WRITTEN_BY_CLAUDE) is copied either way. An entry replaced
+ * (`force`) is moved aside into `.replaced-by-fork-<date>/`, never deleted.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 /** Copied: how Claude works. */
 export const FORKED: Record<string, string> = {
@@ -25,7 +30,12 @@ export const FORKED: Record<string, string> = {
     "hooks": "hook scripts settings.json may name",
 };
 
-/** Never copied: the identity and the past. */
+/** Copied even when the rest is linked: Claude writes them, and through a link one dir would rewrite every other's. */
+export const WRITTEN_BY_CLAUDE: Record<string, string> = {
+    "settings.json": "/config, the theme, the permissions granted with \"always allow\"",
+};
+
+/** Never carried: the identity and the past. */
 export const NEVER: Record<string, string> = {
     ".credentials.json": "the account's credentials: the new dir logs in on its own",
     ".claude.json": "the account and first-run state; only its mcpServers are carried",
@@ -57,9 +67,13 @@ export const NEVER: Record<string, string> = {
 };
 
 export interface ForkResult {
+    /** Linked to the old dir's entry (or already were). */
+    linked: string[];
     copied: string[];
     /** Already in the new dir, left as it was (no `force`). */
     kept: string[];
+    /** Replaced (`force`): the new dir's own, moved into this folder. */
+    movedAside: string | null;
     /** Neither forked nor never: an entry this table does not know. */
     unknown: string[];
     /** `mcpServers` of `.claude.json` carried. */
@@ -80,11 +94,16 @@ function importedMarkdown(fromDir: string): string[] {
     return [...out];
 }
 
-export function forkClaudeConfig(from: { dir: string; json: string }, to: { dir: string; json: string }, opts: { force?: boolean } = {}): ForkResult {
-    const out: ForkResult = { copied: [], kept: [], unknown: [], mcpServers: 0 };
+export function forkClaudeConfig(
+    from: { dir: string; json: string },
+    to: { dir: string; json: string },
+    opts: { force?: boolean; copy?: boolean; now?: Date } = {},
+): ForkResult {
+    const out: ForkResult = { linked: [], copied: [], kept: [], movedAside: null, unknown: [], mcpServers: 0 };
     if (!existsSync(from.dir)) return out;
     mkdirSync(to.dir, { recursive: true });
     const imports = importedMarkdown(from.dir);
+    const aside = join(to.dir, `.replaced-by-fork-${(opts.now ?? new Date()).toISOString().slice(0, 10)}`);
     for (const name of readdirSync(from.dir).sort()) {
         const forked = name in FORKED || imports.includes(name);
         if (!forked) {
@@ -92,9 +111,27 @@ export function forkClaudeConfig(from: { dir: string; json: string }, to: { dir:
             if (!(name in NEVER) && !/\.(bak|old)\b|\.bak-/.test(name) && !name.startsWith(".")) out.unknown.push(name);
             continue;
         }
+        const source = resolve(from.dir, name);
         const target = join(to.dir, name);
-        if (existsSync(target) && !opts.force) { out.kept.push(name); continue; }
-        cpSync(join(from.dir, name), target, { recursive: statSync(join(from.dir, name)).isDirectory(), force: true });
+        const link = !opts.copy && !(name in WRITTEN_BY_CLAUDE);
+        const present = lstatOrNull(target);
+        if (present) {
+            if (link && present.isSymbolicLink() && resolve(to.dir, readlinkSync(target)) === source) { out.linked.push(name); continue; }
+            if (!opts.force) { out.kept.push(name); continue; }
+            mkdirSync(aside, { recursive: true });
+            renameSync(target, join(aside, name));
+            out.movedAside = aside;
+        }
+        const dir = statSync(source).isDirectory();
+        if (link) {
+            try {
+                // A junction on Windows, where a plain symlink needs a privilege; ignored elsewhere.
+                symlinkSync(source, target, dir ? "junction" : "file");
+                out.linked.push(name);
+                continue;
+            } catch { /* no symlink here: copied instead */ }
+        }
+        cpSync(source, target, { recursive: dir, force: true });
         out.copied.push(name);
     }
     // The user-scope MCP servers live in .claude.json, beside the account: only they go.
@@ -117,4 +154,8 @@ export function forkClaudeConfig(from: { dir: string; json: string }, to: { dir:
         }
     } catch { /* no .claude.json in the old dir: no user MCP server */ }
     return out;
+}
+
+function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {
+    try { return lstatSync(p); } catch { return null; }
 }
