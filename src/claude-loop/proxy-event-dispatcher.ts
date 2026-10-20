@@ -17,6 +17,7 @@
  * Unknown event kinds are logged + ignored (forward-compatible : a future
  * proxy emitting a new kind doesn't crash an old timer).
  */
+import { claudeConfigDir } from "../claude-config-dir.js";
 import {
     toggleAfk,
     touchHumanTyping,
@@ -270,7 +271,8 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             }
             // #3686 — the loop's status line ran: the subscription's usage, as Claude Code gave it.
             if (hookKind === "StatusLine") {
-                const usage = usageOf(event.rate_limits, atMs);
+                // #4120 — the loop's own Claude config dir (its env file exports the project's).
+                const usage = usageOf(event.rate_limits, atMs, claudeConfigDir(null).dir);
                 const changed = !sameUsage(getIpcState().usage, usage);
                 setIpcUsage(usage);
                 return { kind: "usage-read", usage, changed };

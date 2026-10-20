@@ -257,6 +257,15 @@ claude:
   # choice. Default false.
   # remote_control: true
 
+  # The Claude Code config dir (CLAUDE_CONFIG_DIR) this project's loops start
+  # Claude with: its own account or subscription, settings, MCP servers and
+  # sessions. `~` and paths relative to this folder are accepted; several
+  # projects may share one. Unset: the environment's, else ~/.claude. A change
+  # applies at each loop's next restart, on a new conversation: the sessions of
+  # another dir are not resumed. `aiball claude-config <dir> --move-sessions`
+  # sets it and moves the folder's sessions along.
+  # config_dir: ~/.claude-work
+
 # --- project type -------------------------------------------------------------
 # Picked up by the MCP `welcome` tool to choose the onboarding kit. Out of
 # the box: `public` (strict scrubbing) and `private`. Validated at call

@@ -9,8 +9,8 @@
  * Pure parts here: the reading as the bar carries it, and the status line
  * setting the loop spawns Claude with.
  */
+import { claudeConfigDir } from "../claude-config-dir.js";
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BarUsage, BarUsageWindow } from "../agent-bar.js";
 
@@ -27,12 +27,14 @@ function windowOf(w: unknown): BarUsageWindow | null {
 }
 
 /** The usage the bar carries from a status line's `rate_limits`; null when Claude Code gave none. */
-export function usageOf(rateLimits: unknown, readAtMs: number): BarUsage | null {
+export function usageOf(rateLimits: unknown, readAtMs: number, configDir?: string): BarUsage | null {
     if (!isObj(rateLimits)) return null;
     return {
         five_hour: windowOf(rateLimits.five_hour),
         seven_day: windowOf(rateLimits.seven_day),
         read_at: new Date(readAtMs).toISOString(),
+        // #4120 — whose quota it is: the loop's Claude config dir.
+        ...(configDir ? { config_dir: configDir } : {}),
     };
 }
 
@@ -64,7 +66,7 @@ function statusLineIn(file: string): StatusLineSetting | null {
  * user's). The loop's own setting takes its place in the session, so the
  * loop's status line runs this one.
  */
-export function userStatusLine(cwd: string, claudeDir: string = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")): StatusLineSetting | null {
+export function userStatusLine(cwd: string, claudeDir: string = claudeConfigDir(cwd).dir): StatusLineSetting | null {
     for (const file of [join(cwd, ".claude", "settings.local.json"), join(cwd, ".claude", "settings.json"), join(claudeDir, "settings.json")]) {
         const s = statusLineIn(file);
         if (s) return s;

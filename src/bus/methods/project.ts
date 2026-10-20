@@ -35,6 +35,7 @@ import { isAbsolute, join } from "node:path";
 import { ERROR_CODES } from "../../domain.js";
 import { initFolder, InitRefusal } from "../../project-init.js";
 import { patchForKey, readSettings, writeSettings } from "../../project-settings.js";
+import { loopsOnAnotherConfigDir } from "./loop.js";
 
 /** #2525 — the standing prompt, and the wake focus beside it. */
 export function standingPromptView(project: string) {
@@ -359,8 +360,16 @@ defineMethod({
         key: z.string().optional(),
         value: z.unknown().optional(),
     }),
-    run: (caller, p) => inFolder(caller, p.cwd, () => writeSettings(p.cwd, {
-        remote_control: p.remote_control, session: p.session,
-        ...(p.key !== undefined ? patchForKey(p.key, p.value === undefined ? null : p.value) : {}),
-    })),
+    run: (caller, p) => inFolder(caller, p.cwd, () => {
+        const patch = {
+            remote_control: p.remote_control, session: p.session,
+            ...(p.key !== undefined ? patchForKey(p.key, p.value === undefined ? null : p.value) : {}),
+        };
+        const settings = writeSettings(p.cwd, patch);
+        // #4120 — a new Claude config dir reaches a running loop only at its
+        // restart: say which loops run on another one, for the client to offer it.
+        if (patch.config_dir === undefined) return settings;
+        const restart = loopsOnAnotherConfigDir(p.cwd, settings.config_dir.value);
+        return { ...settings, restart_needed: restart.length > 0, restart_loops: restart };
+    }),
 });

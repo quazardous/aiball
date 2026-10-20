@@ -358,6 +358,10 @@ export interface AiballConfig {
         /** #3254 — start Claude with Remote Control: `true` names the session
          *  after the agent, a string names it. Default false. */
         remote_control: RemoteControl;
+        /** #4120 — the Claude Code config dir the project's loops start Claude
+         *  with (`CLAUDE_CONFIG_DIR`), as written (`~` and relative paths are
+         *  resolved by `claudeConfigDir`). Null: the environment's, else ~/.claude. */
+        config_dir: string | null;
     };
     /**
      * #160 Phase 1 (david `f9agk3` + `#552 b4y2yx`) — upstream provider
@@ -523,6 +527,8 @@ const DEFAULTS: AiballConfig = {
         deny_tools: [],
         // #3254 — Remote Control only where a tree asks for it.
         remote_control: false,
+        // #4120 — the environment's Claude config dir unless a tree names one.
+        config_dir: null,
     },
     // #160 Phase 1: no upstream bindings by default — opt-in per-project via
     // `.aiball.yaml upstream: { <project>: [...] }`. Without a binding,
@@ -1004,6 +1010,8 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #3254 — false, true or a session name; anything else is dropped.
             const rc = parseRemoteControl(cb.remote_control);
             if (rc !== null) cfg.claude.remote_control = rc;
+            // #4120 — a path; anything else is dropped.
+            if (typeof cb.config_dir === "string" && cb.config_dir.trim()) cfg.claude.config_dir = cb.config_dir.trim();
             // #565 david : per-project `project_type:` — picked up by the
             // MCP `welcome` tool. Free-string ; absent = null (welcome
             // applies its own `public` default + validates against the

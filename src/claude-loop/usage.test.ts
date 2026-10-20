@@ -4,6 +4,7 @@
  * null when absent), relayed by the loop's own status line, which runs the
  * user's with the same stdin and passes its output and exit code through.
  */
+import { claudeConfigDir } from "../claude-config-dir.js";
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -76,7 +77,9 @@ test("a reading reaches the agent bar; null replaces it when Claude Code gives n
     const v = dispatchProxyEvent(sd, { event: "hook", kind: "StatusLine", rate_limits: RL, at_ms: AT });
     assert.equal(v.kind, "usage-read");
     assert.equal(formatVerdictLogLine(v), "proxy-event: usage 5h=23.5% 7d=41%");
-    assert.deepEqual(computeAgentBar(sd).usage, usageOf(RL, AT));
+    // #4120 — the reading names the loop's Claude config dir: whose quota it is.
+    assert.deepEqual(computeAgentBar(sd).usage, usageOf(RL, AT, claudeConfigDir(null).dir));
+    assert.ok(computeAgentBar(sd).usage?.config_dir);
     const again = dispatchProxyEvent(sd, { event: "hook", kind: "StatusLine", rate_limits: RL, at_ms: AT + 1000 });
     assert.deepEqual([again.kind, (again as { changed: boolean }).changed], ["usage-read", false]);
     assert.equal(getIpcState().usage!.read_at, new Date(AT + 1000).toISOString(), "the freshest reading is kept");

@@ -16,6 +16,7 @@ import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 import { defaultLoopSession, findConfigUpwards, globalConfigPath, loadConfig, parseLoopQuestions, parseLoopSession, readGlobalLoopQuestions, readGlobalLoopSession, type ConsumerRole, type ConsumerSource, type LoopQuestions, type LoopSession } from "./autopoll/config.js";
 import { parseRemoteControl, type RemoteControl } from "./claude-loop/remote-control.js";
 import { InitRefusal } from "./project-init.js";
+import { claudeConfigDir, type ConfigDirFrom } from "./claude-config-dir.js";
 
 /** What a folder's loops start with, and whether its file says so or it is the default. */
 export interface ProjectSettings {
@@ -34,6 +35,8 @@ export interface ProjectSettings {
     remote_control: { value: RemoteControl; from: "file" | "default" };
     /** #3393 — where the folder's agent may ask its questions: the file's, the machine's, or the default. */
     questions: { value: LoopQuestions; from: "file" | "global" | "default" };
+    /** #4120 — the Claude Code config dir the folder's loops start Claude with, resolved. */
+    config_dir: { value: string; from: ConfigDirFrom };
     /** #3308 — the settings a client may change here, described (as `config.managed` does its keys). */
     settings: FolderSetting[];
 }
@@ -41,11 +44,12 @@ export interface ProjectSettings {
 /**
  * #3308 — a folder setting as a client shows it without knowing it: `key` is
  * its path in `.aiball.yaml`; `type` `enum` takes one of `options`,
- * `boolean_or_name` takes true, false or a name.
+ * `boolean_or_name` takes true, false or a name, `path` a directory (`~` and
+ * paths relative to the folder accepted).
  */
 export interface FolderSetting {
     key: string;
-    type: "enum" | "boolean_or_name";
+    type: "enum" | "boolean_or_name" | "path";
     options?: string[];
     default: unknown;
     value: unknown;
@@ -71,6 +75,11 @@ const FOLDER_SETTINGS: { key: string; field: keyof SettingsPatch; type: FolderSe
         label: "Agent questions",
         description: "present: the agent may open its choice dialog while a human is present, and is sent to the ticket otherwise; ticket_only: the dialog is always refused, every question goes to the ticket. Applies at the agent's next question, no restart.",
     },
+    {
+        key: "claude.config_dir", field: "config_dir", type: "path", default: () => claudeConfigDir(null).dir,
+        label: "Claude config dir",
+        description: "The Claude Code config dir (CLAUDE_CONFIG_DIR) the folder's loops start Claude with: its own account or subscription, settings, MCP servers and sessions. Unset: the environment's, else ~/.claude. Several projects may share one. Applies at the loop's next restart, on a new conversation: the sessions of another dir are not resumed.",
+    },
 ];
 
 /** #3308 — a `{ key, value }` change as the named patch; refused for a key this table does not know or a value its type does not take. */
@@ -83,6 +92,10 @@ export function patchForKey(key: string, value: unknown): SettingsPatch {
     }
     if (spec.type === "boolean_or_name" && parseRemoteControl(value) === null) {
         throw new InitRefusal(400, "BAD_REQUEST", `${key} takes true, false or a name, or null`);
+    }
+    if (spec.type === "path") {
+        if (typeof value !== "string" || !value.trim() || /[\r\n\0]/.test(value)) throw new InitRefusal(400, "BAD_REQUEST", `${key} takes a directory path, or null`);
+        return { [spec.field]: value.trim() };
     }
     return { [spec.field]: spec.type === "boolean_or_name" ? parseRemoteControl(value) : value };
 }
@@ -99,6 +112,8 @@ export interface SettingsPatch {
     session?: LoopSession | null;
     /** #3393 — `claude_loop.questions`. */
     questions?: LoopQuestions | null;
+    /** #4120 — `claude.config_dir`. */
+    config_dir?: string | null;
 }
 
 type Doc = ReturnType<typeof parseDocument>;
@@ -160,6 +175,7 @@ function readResolved(cwd: string): ProjectSettings {
             value: cfg.claude_loop.questions,
             from: questionsInFile !== undefined ? "file" : readGlobalLoopQuestions(globalConfigPath()) !== undefined ? "global" : "default",
         },
+        config_dir: (() => { const c = claudeConfigDir(cwd); return { value: c.dir, from: c.from }; })(),
         settings: [],
     };
 }
@@ -230,6 +246,7 @@ export function writeSettings(cwd: string, patch: SettingsPatch): ProjectSetting
     if (patch.remote_control !== undefined) patchKey(doc, file, "claude", "remote_control", patch.remote_control);
     if (patch.session !== undefined) patchKey(doc, file, "claude_loop", "session", patch.session);
     if (patch.questions !== undefined) patchKey(doc, file, "claude_loop", "questions", patch.questions);
+    if (patch.config_dir !== undefined) patchKey(doc, file, "claude", "config_dir", patch.config_dir);
     try {
         writeFileSync(file, textOf(doc));
     } catch (e) {

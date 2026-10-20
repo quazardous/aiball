@@ -25,6 +25,14 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A Claude Code config dir per project: `claude.config_dir` in its
+  `.aiball.yaml` (its own account, settings, MCP servers, sessions). The loops
+  start Claude with it; the status line, the sessions offered for resume and a
+  relocation read it; `project.settings` / `project.settings_set` show and set
+  it (`restart_needed` / `restart_loops` name the running loops on another
+  dir); each usage reading names its `config_dir`. `aiball claude-config [dir]`
+  shows or sets it for the current folder (`--cwd`, `--unset`), and
+  `--move-sessions` moves the folder's Claude sessions to the new dir.
 - The human's UI actions (the web board, tvty, the CLI) are kept, one compact
   line per call — the method, the project, the ticket, never a text — in
   `$AIBALL_HOME/ui-actions/`, one file per day, gzipped once past, deleted
@@ -69,6 +77,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The sessions offered for resume are read in Claude's config dir: they were
+  always looked for under `~/.claude`, whatever `CLAUDE_CONFIG_DIR` said.
 - A compaction the screen does not show no longer gets wakes queued behind it.
   The `PreCompact` hook makes Claude count as busy until the compaction ends;
   and a turn the screen closes with nothing shown and no Stop holds the next

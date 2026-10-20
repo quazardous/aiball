@@ -8,8 +8,8 @@
  * Not documented by Anthropic: a line whose shape this does not know is
  * skipped, never guessed at.
  */
+import { claudeConfigDir } from "../claude-config-dir.js";
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { isValidUuid } from "./session-id.js";
 
@@ -20,9 +20,14 @@ import { isValidUuid } from "./session-id.js";
  * Unix the leading `/` maps to `-` by the same rule, so output is identical
  * cross-platform.
  */
-export function claudeProjectDir(cwd: string, home: string = homedir()): string {
+export function claudeProjectDir(cwd: string, home?: string): string {
     const encoded = resolve(cwd).replace(/[^a-zA-Z0-9]/g, "-");
-    return join(home, ".claude", "projects", encoded);
+    // #4120 — the project's Claude config dir (`claude.config_dir`, else the
+    // environment's, else ~/.claude): ~/.claude was hard-coded, so a loop with
+    // its own CLAUDE_CONFIG_DIR was offered no session to resume. An explicit
+    // `home` (tests) keeps the old layout under it.
+    const base = home !== undefined ? join(home, ".claude") : claudeConfigDir(cwd).dir;
+    return join(base, "projects", encoded);
 }
 
 /** Whether claude has any session for `cwd`. True on an IO error (#616: the caller then lets claude decide). */

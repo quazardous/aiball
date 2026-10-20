@@ -3,6 +3,7 @@
  * state under the home, the loops, and the processes and their cwd from /proc.
  * #3765 — out of the CLI, so the daemon plans a rename the same way.
  */
+import { claudeConfigDir } from "./claude-config-dir.js";
 import { existsSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -45,12 +46,14 @@ function pidAlive(pid: number): boolean {
 }
 
 /** The real machine: home, Claude's state, the loops, /proc. */
-export function relocateEnv(scan: string[]): RelocateEnv {
+export function relocateEnv(scan: string[], cwd?: string): RelocateEnv {
     const home = homedir();
+    // CLAUDE_CONFIG_DIR moves both: the state dir and the .claude.json inside it.
+    // #4120 — the project's own one when it names one (`claude.config_dir`).
+    const claude = claudeConfigDir(cwd ?? null);
     return {
-        // CLAUDE_CONFIG_DIR moves both: the state dir and the .claude.json inside it.
-        claudeDir: process.env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"),
-        claudeJson: process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json"),
+        claudeDir: claude.dir,
+        claudeJson: claude.json,
         loopRoot: process.env.CLAUDE_LOOP_STATE_ROOT ?? join(home, ".claude-loop"),
         scanRoots: [join(home, ".local", "bin"), join(home, "bin"), ...scan],
         processCwds: procCwds,

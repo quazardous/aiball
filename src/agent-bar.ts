@@ -64,12 +64,15 @@ export interface BarUsageWindow {
 /**
  * #3686 — the subscription's usage (claude.ai Pro/Max), as Claude Code gives it
  * to its status line: each window null when absent, `read_at` when the loop read
- * it. The quota is the account's, so any agent's reading is the machine's.
+ * it. The quota is the account's: the same for every loop on one Claude config
+ * dir, another one for a project with its own (#4120).
  */
 export interface BarUsage {
     five_hour: BarUsageWindow | null;
     seven_day: BarUsageWindow | null;
     read_at: string;
+    /** #4120 — the Claude config dir of the loop that read it: which account the quota is. */
+    config_dir?: string;
 }
 
 export interface AgentBar {
@@ -142,7 +145,10 @@ const isCountOrNull = (v: unknown): v is number | null => v === null || (typeof 
 /** A checked `usage`, with its unknown fields dropped. */
 function usageCopy(u: Record<string, unknown>): BarUsage {
     const win = (w: unknown): BarUsageWindow | null => isObj(w) ? { used_percentage: w.used_percentage as number, resets_at: w.resets_at as string } : null;
-    return { five_hour: win(u.five_hour), seven_day: win(u.seven_day), read_at: u.read_at as string };
+    return {
+        five_hour: win(u.five_hour), seven_day: win(u.seven_day), read_at: u.read_at as string,
+        ...(typeof u.config_dir === "string" && u.config_dir ? { config_dir: u.config_dir } : {}),
+    };
 }
 
 /** The bar a loop pushed, or why it is refused. Unknown fields are dropped. */
@@ -202,7 +208,8 @@ export function parseAgentBar(input: unknown): AgentBar | { error: string } {
     const isWindow = (w: unknown) => w === null || (isObj(w) && typeof w.used_percentage === "number" && Number.isFinite(w.used_percentage)
         && w.used_percentage >= 0 && typeof w.resets_at === "string" && isDateOrNull(w.resets_at));
     if (!(us === undefined || us === null || (isObj(us) && isWindow(us.five_hour) && isWindow(us.seven_day)
-        && typeof us.read_at === "string" && isDateOrNull(us.read_at)))) {
+        && typeof us.read_at === "string" && isDateOrNull(us.read_at)
+        && (us.config_dir === undefined || typeof us.config_dir === "string")))) {
         return { error: "usage must be null or { five_hour, seven_day: null | { used_percentage: number, resets_at: ISO date }, read_at: ISO date }" };
     }
     if (!isBool(b.proxy_alive) || !isBool(b.zen)) return { error: "proxy_alive and zen must be booleans" };

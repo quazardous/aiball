@@ -5,6 +5,7 @@
 import type { Command } from "commander";
 import { die, gOpts, jsonline } from "./_helpers.js";
 import { blockerTexts, type ApplyResult, type RelocatePlan } from "../relocate.js";
+import { resolve } from "node:path";
 import { relocateEnv } from "../relocate-env.js";
 
 export function fmtPlan(p: RelocatePlan): string {
@@ -51,7 +52,8 @@ export function registerRelocateCommands(program: Command): void {
         .option("--json", "Machine-readable JSON output")
         .action(async (oldArg: string, newArg: string, opts: { apply?: boolean; stateOnly?: boolean; scan: string[]; fixLinks?: boolean; json?: boolean }, cmd: Command) => {
             const { applyRelocate, planRelocate } = await import("../relocate.js");
-            const env = relocateEnv(opts.scan);
+            // #4120 — the folder's own Claude config dir: read where its .aiball.yaml is now.
+            const env = relocateEnv(opts.scan, resolve(opts.stateOnly ? newArg : oldArg));
             const json = opts.json || gOpts(cmd).json;
             const plan = planRelocate(oldArg, newArg, env, { stateOnly: opts.stateOnly === true });
             if (!opts.apply || plan.blockers.length > 0) {

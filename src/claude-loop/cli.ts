@@ -10,6 +10,7 @@
  * | wake | reload | check | status | trace | prune`. Anything after `--`
  * is passed verbatim to the spawned `claude`.
  */
+import { claudeConfigDir, expandConfigDir } from "../claude-config-dir.js";
 import { spawnSync } from "node:child_process";
 import { commandExists } from "../sysdeps.js";
 import {
@@ -901,6 +902,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // drag-select is the mux's too. Same override rule as above: set before
         // env.local, so it can be unset there.
         `export CLAUDE_CODE_DISABLE_MOUSE=1`,
+        // #4120 — the project's own Claude config dir (its account, settings,
+        // MCP servers, sessions). Unset: Claude keeps the inherited one.
+        ...(ctx.claude.config_dir ? [`export CLAUDE_CONFIG_DIR=${shQuote(expandConfigDir(ctx.claude.config_dir, cwd))}`] : []),
         // #3460 — a Claude Code session's markers are not this Claude's: under
         // them it takes itself for that session's child and keeps no
         // transcript. Cleared here, right before Claude, because a tmux server
@@ -1073,7 +1077,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // the yaml → settings chain is testable without spawning.
     // #3686 — plus the loop's status line, which relays the subscription's usage
     // and runs the user's own (read now, from the folder's and the user's settings).
-    const statusLine = loopStatusLine(buildHookCommand("src/claude-loop/status-line.ts"), userStatusLine(cwd));
+    const statusLine = loopStatusLine(buildHookCommand("src/claude-loop/status-line.ts"), userStatusLine(cwd, claudeConfigDir(cwd).dir));
     const settings = buildSpawnSettings(buildHookSettings(HOOKS, buildHookCommand), ctx.claude.deny_tools, statusLine);
     const settingsJson = JSON.stringify(settings);
 

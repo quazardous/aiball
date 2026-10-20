@@ -26,6 +26,7 @@ import { getConsumer, setAfkHold } from "../../db/consumers.js";
 import { getAgentBar } from "../../agent-bar-store.js";
 import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 import { pickConversation } from "../../claude-loop/claude-conversations.js";
+import { claudeConfigDir } from "../../claude-config-dir.js";
 
 const HUMAN_HERE = {
     who: ["human"] as const,
@@ -152,6 +153,25 @@ function loopViews(live: LiveTmux = null): LoopView[] {
 /** #3461 — every loop's view, its tmux sessions read once without holding the daemon. */
 async function loopViewsNow(): Promise<LoopView[]> {
     return loopViews(await tmuxSessions());
+}
+
+/**
+ * #4120 — the running loops of a folder that run Claude with another config dir
+ * than `dir`: they keep the one they started with until a restart. A loop's
+ * dir is the `CLAUDE_CONFIG_DIR` its env file exports, else what it inherited
+ * (the environment's, else ~/.claude).
+ */
+export function loopsOnAnotherConfigDir(cwd: string, dir: string): string[] {
+    const folder = resolve(cwd);
+    const inherited = claudeConfigDir(null).dir;
+    return loopViews().filter((l) => l.running && l.cwd && resolve(l.cwd) === folder).filter((l) => {
+        let exported: string | null = null;
+        try {
+            const m = readFileSync(join(loopStateRoot(), l.name, "env"), "utf8").match(/^export CLAUDE_CONFIG_DIR='((?:[^']|'\\'')*)'$/m);
+            if (m) exported = m[1].replace(/'\\''/g, "'");
+        } catch { /* no env file: what it inherited */ }
+        return resolve(exported ?? inherited) !== resolve(dir);
+    }).map((l) => l.name);
 }
 
 /** #3417 — the agents whose loop runs on this machine: what an all-loops control reaches with `scope: "machine"` on a node. */

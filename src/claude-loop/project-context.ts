@@ -88,6 +88,8 @@ export interface ProjectContext {
         deny_tools: string[];
         /** #3254 — Remote Control (see config). */
         remote_control: boolean | string;
+        /** #4120 — the Claude config dir, as written (see config). */
+        config_dir: string | null;
     };
     /** #385: tmux bar colour profile (layered defaults → global → project). */
     colors: {

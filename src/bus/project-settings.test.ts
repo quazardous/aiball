@@ -164,7 +164,7 @@ test("a file emptied by set is not written {}: its leading comments stay, else i
 test("the settings are described, each with its type, choices, default, value and where it comes from", () => {
     const d = folder("claude_loop:\n  session: tmux\n");
     const r = settings.run(human, { cwd: d }) as Settings & { settings: { key: string; type: string; options?: string[]; default: unknown; value: unknown; from: string; label: string }[] };
-    assert.deepEqual(r.settings.map((s) => s.key), ["claude_loop.session", "claude.remote_control", "claude_loop.questions"]);
+    assert.deepEqual(r.settings.map((s) => s.key), ["claude_loop.session", "claude.remote_control", "claude_loop.questions", "claude.config_dir"]);
     const session = r.settings[0]!;
     assert.deepEqual([session.type, session.options, session.value, session.from], ["enum", ["host", "tmux"], "tmux", "file"]);
     assert.equal(typeof session.label, "string");
@@ -202,4 +202,21 @@ test("a file emptied keeps its header glued to the removed block; a key's own co
     const keyed = folder("claude:\n  # the phone\n  remote_control: phone\n  deny_tools: [Bash]\n");
     set({ cwd: keyed, remote_control: null });
     assert.match(readFileSync(join(keyed, ".aiball.yaml"), "utf8"), /# the phone\n {2}deny_tools/);
+});
+
+test("#4120 claude.config_dir: written to the yaml, resolved with ~, null hands it back; a non-path is refused; restart named", () => {
+    const b = folder(YAML);
+    const r = settingsSet.run(human, { cwd: b, key: "claude.config_dir", value: "~/.claude-work" }) as Settings & { config_dir: { value: string; from: string }; restart_needed: boolean; restart_loops: string[] };
+    assert.equal(r.config_dir.from, "file");
+    assert.ok(r.config_dir.value.endsWith("/.claude-work") && !r.config_dir.value.startsWith("~"), r.config_dir.value);
+    assert.match(readFileSync(join(b, ".aiball.yaml"), "utf8"), /claude:\n {2}config_dir: ~\/\.claude-work/);
+    assert.equal(loadConfig(b).claude.config_dir, "~/.claude-work");
+    // No loop runs in this folder: nothing to restart.
+    assert.deepEqual([r.restart_needed, r.restart_loops], [false, []]);
+    const back = settingsSet.run(human, { cwd: b, key: "claude.config_dir", value: null }) as { config_dir: { from: string } };
+    assert.notEqual(back.config_dir.from, "file");
+    assert.throws(() => set({ cwd: b, key: "claude.config_dir", value: 42 }), (e: { code: string }) => e.code === "BAD_REQUEST");
+    assert.throws(() => set({ cwd: b, key: "claude.config_dir", value: "a\nb" }), (e: { code: string }) => e.code === "BAD_REQUEST");
+    const listed = (read(b) as unknown as { settings: Array<{ key: string; type: string }> }).settings.find((x) => x.key === "claude.config_dir");
+    assert.equal(listed?.type, "path");
 });
