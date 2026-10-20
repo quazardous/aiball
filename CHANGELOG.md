@@ -35,6 +35,12 @@ dates are YYYY-MM-DD.
   `--move-sessions` moves the folder's Claude sessions to the new dir. A loop
   refuses to start on a dir that has not been through Claude's first run, whose
   screens (theme, login) it cannot answer.
+- `aiball claude-config <dir> --fork` starts the new Claude config dir with the
+  old one's instructions (CLAUDE.md and the files it imports), settings,
+  key bindings, skills, agents, commands, output styles, plugins and user MCP
+  servers — never its credentials, account or sessions. `--fork-from <dir>`
+  names another source; what the new dir already has is kept unless `--force`;
+  an entry it does not know is named, not copied.
 - The human's UI actions (the web board, tvty, the CLI) are kept, one compact
   line per call — the method, the project, the ticket, never a text — in
   `$AIBALL_HOME/ui-actions/`, one file per day, gzipped once past, deleted
