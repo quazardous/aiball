@@ -116,7 +116,7 @@ defineMethod({
                 const changed = setAfkHold(named, p.afk);
                 if (changed) broadcast({ type: "consumer_changed", data: changed });
             }
-            const env = sessionEnv(p.env, isMachineLocal(caller));
+            const env = sessionEnv(p.env, isMachineLocal(caller), p.cwd);
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
             const args = loopStartArgs({ ...p, resume, size: p.size });
@@ -159,7 +159,7 @@ defineMethod({
         }
         if (!p.argv) throw new Refusal(400, "argv: the command a session without an agent runs");
         // A local caller's variables, allow-listed, over the login environment.
-        const env = sessionEnv(p.env, isMachineLocal(caller));
+        const env = sessionEnv(p.env, isMachineLocal(caller), p.cwd);
         try {
             const link = await startSession({ name: p.name, argv: p.argv, cwd: p.cwd, size: p.size, env });
             return viewOf(link);
@@ -217,7 +217,7 @@ defineMethod({
             throw new Refusal(409, `${p.agent} runs on this daemon's host already`, ERROR_CODES.HOST_BUSY, { host: "daemon" });
         }
         const control = join(hostDirFor({ agent: p.agent }), "control.sock");
-        const env = { ...sessionEnv(p.env, true), CL_HOST_CONTROL: control };
+        const env = { ...sessionEnv(p.env, true, p.cwd), CL_HOST_CONTROL: control };
         try {
             const link = await startSession({ agent: p.agent, argv: p.argv, cwd: p.cwd, size: p.size, env });
             return { ...viewOf(link), control };

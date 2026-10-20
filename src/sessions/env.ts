@@ -7,6 +7,7 @@
  * code on this one.
  */
 import { spawnSync } from "node:child_process";
+import { claudeConfigDir } from "../claude-config-dir.js";
 
 let login: Record<string, string> | null = null;
 
@@ -58,9 +59,19 @@ export function allowedEnv(given: Record<string, unknown> | undefined): Record<s
  * colours. The daemon runs without a terminal, so `TERM` would be missing and
  * everything in the session black and white; the host's clients (tvty, a
  * terminal attached to it) render 256 colours and true colour.
+ *
+ * #4122 — and the folder's Claude config dir, when the folder chose one
+ * (`claude.config_dir`): a `claude` typed in a shell there must land on that
+ * account, as the folder's loops do. Resolved here, not passed by the client —
+ * `CLAUDE_CONFIG_DIR` stays out of the allow-list. A folder that chose none
+ * keeps the login environment's.
  */
-export function sessionEnv(given: Record<string, unknown> | undefined, local: boolean): Record<string, string> {
+export function sessionEnv(given: Record<string, unknown> | undefined, local: boolean, cwd?: string): Record<string, string> {
     const env: Record<string, string> = { ...loginEnv(), ...(local ? allowedEnv(given) : {}) };
+    if (cwd) {
+        const claude = claudeConfigDir(cwd);
+        if (claude.from === "file") env.CLAUDE_CONFIG_DIR = claude.dir;
+    }
     if (!env.TERM || env.TERM === "dumb") env.TERM = "xterm-256color";
     if (!env.COLORTERM) env.COLORTERM = "truecolor";
     return env;

@@ -79,6 +79,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A session aiball starts in a project folder (a plain shell, a loop, its host)
+  gets the folder's `claude.config_dir` as `CLAUDE_CONFIG_DIR`: a `claude`
+  typed in a shell there landed on `~/.claude`, the wrong account.
 - The sessions offered for resume are read in Claude's config dir: they were
   always looked for under `~/.claude`, whatever `CLAUDE_CONFIG_DIR` said.
 - A compaction the screen does not show no longer gets wakes queued behind it.
