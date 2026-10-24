@@ -17,6 +17,9 @@
  * --range           each cell as low–median–high instead of the median
  * --counterfactual  also the same table for Claude sessions alone: each loop
  *                   wake typed by hand, each cross-project comment carried by hand
+ * --transcripts-dir a Claude `projects/` dir to read besides ~/.claude's and the
+ *                   config dirs the known folders use (repeatable): one no
+ *                   folder names any more
  * --json            everything, as JSON
  * --tickets         with --json: per day and project, the tickets the human
  *                   acted on, with their title, summary and number of acts
@@ -105,7 +108,9 @@ function render(title: string, r: Record<"low" | "median" | "high", Table>, proj
 const since = sinceMs(arg("since") ?? "30d");
 const only = arg("project")?.split(",").map((s) => s.trim()).filter(Boolean);
 const keep = (a: Act) => !only || only.includes(a.project);
-const src = await collect(defaultOptions(since, (ms) => dayOf(ms)));
+const options = defaultOptions(since, (ms) => dayOf(ms));
+process.argv.forEach((a, i) => { if (a === "--transcripts-dir" && process.argv[i + 1]) options.transcriptsDirs.push(process.argv[i + 1]); });
+const src = await collect(options);
 // A ticket an agent filed counts as the human's trace when one of the human's
 // acts is within 30 minutes (--no-agent-tickets: never).
 const filed = flag("no-agent-tickets") ? [] : supervisedOnly(src.agentTickets, src.acts);

@@ -90,6 +90,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The attention report reads the Claude transcripts of every config dir the
+  known folders use (`claude.config_dir`), not only `~/.claude`'s: a project
+  moved to its own dir no longer drops to zero. `--transcripts-dir` adds one
+  no folder names any more.
 - `session.start` says why `claude-loop start` refused: a start guard answers
   422 with its sentence and a code of its own (`CONFIG_DIR_NOT_READY` with the
   dir, `FOLDER_OF_ANOTHER_AGENT`, `CONVERSATION_HELD`) instead of "exited 1";

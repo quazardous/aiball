@@ -26,7 +26,7 @@ UI), with their title, summary and number of acts, most acts first.
 | source | how far back | what it gives |
 |---|---|---|
 | the board (`aiball.db`) | everything | what a human wrote (comments, tickets, closes) and decided (accept, reject); the tickets agents filed |
-| Claude transcripts (`~/.claude/projects/*/*.jsonl`) | what Claude Code keeps (30 days by default) | the prompts typed into a session, and the tokens each answer spent |
+| Claude transcripts (`projects/*/*.jsonl` of `~/.claude` and of each Claude config dir a known folder uses, its `claude.config_dir`; `--transcripts-dir <dir>` adds one no folder names any more) | what Claude Code keeps (30 days by default) | the prompts typed into a session, and the tokens each answer spent |
 | loop logs (`~/.claude-loop/*/loop.log`) | since each loop last started | bursts of keys at the terminal |
 | UI actions (`$AIBALL_HOME/ui-actions/`) | `logs.ui_actions.retention` (180 days by default) | the human's gestures in the web board, tvty or the CLI: reading a ticket, searching, typing into a session |
 

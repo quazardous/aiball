@@ -7,7 +7,9 @@
  *   (accept / reject);
  * - transcripts (`~/.claude/projects/<cwd>/*.jsonl`): the prompts typed into a
  *   Claude session, and the tokens each assistant message spent. A loop's
- *   wakes are typed into the same prompt, so they are told apart by their text;
+ *   wakes are typed into the same prompt, so they are told apart by their text.
+ *   #4201 — read in every Claude config dir the known folders use
+ *   (`claude.config_dir`), not only ~/.claude;
  * - loop logs (`~/.claude-loop/<loop>/loop.log`): bursts of keys at the
  *   terminal. A log restarts with its loop, so this covers a few days at most;
  * - UI actions (`$AIBALL_HOME/ui-actions/`, #4090): the human's calls from the web
@@ -19,12 +21,13 @@
  * posted on another project's ticket a message the human carried by hand.
  */
 import Database from "better-sqlite3";
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { gunzipSync } from "node:zlib";
 import type { Act, Spend } from "./attention-model.js";
+import { claudeConfigDir } from "../claude-config-dir.js";
 
 /**
  * The UI calls that are a human's gesture rather than a UI refreshing itself:
@@ -76,6 +79,41 @@ export function classifyPrompt(line: { isMeta?: boolean; isSidechain?: boolean; 
 }
 
 /** Claude Code's project directory name for a working directory. */
+/**
+ * #4201 — the `projects/` dirs holding Claude's transcripts: the ones given, then
+ * the config dir of each known folder (its `claude.config_dir`, else the
+ * environment's, else ~/.claude — as its loops start Claude). Existing ones
+ * only, each once, by real path. No `~/.claude-*` glob: only the dirs folders
+ * name, not whatever else lives there.
+ */
+export function transcriptRoots(
+    given: string[],
+    cwds: (string | null)[],
+    configDirOf: (cwd: string) => string = (cwd) => claudeConfigDir(cwd).dir,
+): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const add = (dir: string) => {
+        if (!existsSync(dir)) return;
+        const real = realpathOr(dir);
+        if (seen.has(real)) return;
+        seen.add(real);
+        out.push(dir);
+    };
+    for (const d of given) add(d);
+    for (const cwd of new Set(cwds)) {
+        if (!cwd || !existsSync(cwd)) continue;
+        let dir: string;
+        try { dir = configDirOf(cwd); } catch { continue; }
+        add(join(dir, "projects"));
+    }
+    return out;
+}
+
+function realpathOr(p: string): string {
+    try { return realpathSync(p); } catch { return p; }
+}
+
 export function transcriptDirName(cwd: string): string {
     return cwd.replace(/[/.]/g, "-");
 }
@@ -107,7 +145,8 @@ export interface Sources {
 interface Options {
     sinceMs: number;
     dbPath: string;
-    transcriptsDir: string;
+    /** Read before the config dirs of the known folders (#4201): ~/.claude's, and any `--transcripts-dir`. */
+    transcriptsDirs: string[];
     loopsDir: string;
     uiDir: string;
     dayOf: (ms: number) => string;
@@ -118,7 +157,7 @@ export function defaultOptions(sinceMs: number, dayOf: (ms: number) => string): 
     return {
         sinceMs,
         dbPath: join(home, "aiball.db"),
-        transcriptsDir: join(homedir(), ".claude", "projects"),
+        transcriptsDirs: [join(homedir(), ".claude", "projects")],
         loopsDir: join(homedir(), ".claude-loop"),
         uiDir: join(home, "ui-actions"),
         dayOf,
@@ -200,14 +239,19 @@ export async function collect(o: Options): Promise<Sources> {
 
     // --- transcripts --------------------------------------------------------
     const dirProject = new Map(agents.filter((a) => a.cwd && a.project).map((a) => [transcriptDirName(a.cwd!), a.project!]));
-    if (existsSync(o.transcriptsDir)) {
-        for (const dir of readdirSync(o.transcriptsDir)) {
-            const full = join(o.transcriptsDir, dir);
+    // #4201 — a transcript reached twice (a dir linked into another) counts once.
+    const readFiles = new Set<string>();
+    for (const root of transcriptRoots(o.transcriptsDirs, agents.map((a) => a.cwd))) {
+        for (const dir of readdirSync(root)) {
+            const full = join(root, dir);
             const project = dirProject.get(dir) ?? projectFromDirName(dir);
             let files: string[] = [];
             try { files = readdirSync(full).filter((f) => f.endsWith(".jsonl")); } catch { continue; }
             for (const f of files) {
                 const path = join(full, f);
+                const real = realpathOr(path);
+                if (readFiles.has(real)) continue;
+                readFiles.add(real);
                 if (statSync(path).mtimeMs < o.sinceMs) continue;
                 await readTranscript(path, project, o.sinceMs, (a, who) => {
                     if (who === "human") { both(a); cover(a.at, "c"); }
