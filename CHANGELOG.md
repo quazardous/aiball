@@ -29,7 +29,8 @@ dates are YYYY-MM-DD.
   --fork` does (`fork: { from?, copy?, force? }`), and `project.settings` says
   the dir's state (`config_dir_state`: it exists, it has been through Claude's
   first run, it holds an account), so a client can prepare the dir and warn
-  before a start the loop would refuse.
+  before a start the loop would refuse; given a `config_dir`, it says the same
+  of a dir the client is about to choose (`candidate`), writing nothing.
 - `repos:` in a project's `.aiball.yaml` names its other git repositories (a
   library developed beside it, a fork): a commit cited from one of them earns
   wait credit as one from the checkout does. `project.settings` answers them.

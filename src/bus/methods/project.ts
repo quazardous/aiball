@@ -335,8 +335,21 @@ defineMethod({
     name: "project.settings",
     who: ["human"],
     machine: true,
-    params: z.object({ cwd: z.string() }),
-    run: (caller, p) => inFolder(caller, p.cwd, () => readSettings(p.cwd)),
+    params: z.object({
+        cwd: z.string(),
+        /** #4222 — a config dir the client is about to choose: its state comes back as `candidate`, nothing written. */
+        config_dir: z.string().optional(),
+    }),
+    run: (caller, p) => inFolder(caller, p.cwd, () => {
+        const settings = readSettings(p.cwd);
+        if (p.config_dir === undefined) return settings;
+        if (!p.config_dir.trim() || /[\r\n\0]/.test(p.config_dir)) {
+            throw new Refusal(400, "config_dir takes a directory path", ERROR_CODES.BAD_REQUEST);
+        }
+        // Expanded as claude.config_dir is; ~/.claude keeps its .claude.json in the home.
+        const dir = sourceDir(expandConfigDir(p.config_dir, p.cwd));
+        return { ...settings, candidate: { dir: dir.dir, state: configDirState(dir) } };
+    }),
 });
 
 /**

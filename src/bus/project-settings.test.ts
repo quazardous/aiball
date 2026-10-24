@@ -261,3 +261,45 @@ test("#4209 a dir that does not exist yet: its state says so", () => {
     const f = folder(`consumer:\n  agent: a-4209c\nclaude:\n  config_dir: ${join(home, "nowhere")}\n`);
     assert.deepEqual((read(f) as Forked).config_dir_state, { exists: false, first_run_done: false, has_account: false });
 });
+
+// #4222 — the state of a dir the client is about to choose, before anything is written.
+type WithCandidate = Settings & { config_dir_state: unknown; candidate?: { dir: string; state: { exists: boolean; first_run_done: boolean; has_account: boolean } } };
+
+test("#4222 candidate: a missing dir, a new one, one with an account; config_dir_state untouched; nothing written", () => {
+    const f = folder("consumer:\n  agent: a-4222\n");
+    const was = readFileSync(join(f, ".aiball.yaml"), "utf8");
+    const current = (read(f) as WithCandidate).config_dir_state;
+    const ask = (config_dir: string) => settings.run(human, { cwd: f, config_dir }) as WithCandidate;
+
+    const missing = ask(join(home, "cand-none"));
+    assert.deepEqual(missing.candidate, { dir: join(home, "cand-none"), state: { exists: false, first_run_done: false, has_account: false } });
+    assert.deepEqual(missing.config_dir_state, current, "the folder's own state keeps its meaning");
+
+    mkdirSync(join(f, "cand-new"));
+    assert.deepEqual(ask("cand-new").candidate, { dir: join(f, "cand-new"), state: { exists: true, first_run_done: false, has_account: false } }, "relative to cwd");
+
+    const used = join(home, "cand-used");
+    mkdirSync(used);
+    writeFileSync(join(used, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true, oauthAccount: { email: "x" } }));
+    assert.deepEqual(ask(used).candidate?.state, { exists: true, first_run_done: true, has_account: true });
+
+    assert.equal(readFileSync(join(f, ".aiball.yaml"), "utf8"), was);
+    assert.equal(existsSync(join(home, "cand-none")), false, "nothing created");
+    assert.equal((read(f) as WithCandidate).candidate, undefined, "no candidate asked, none answered");
+});
+
+test("#4222 candidate ~/.claude: expanded, and its .claude.json read in the home", () => {
+    const f = folder("consumer:\n  agent: a-4222b\n");
+    const fakeHome = join(home, "fake-home");
+    mkdirSync(join(fakeHome, ".claude"), { recursive: true });
+    writeFileSync(join(fakeHome, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true }));
+    const was = process.env.HOME;
+    process.env.HOME = fakeHome;
+    try {
+        const r = settings.run(human, { cwd: f, config_dir: "~/.claude" }) as WithCandidate;
+        assert.deepEqual(r.candidate, { dir: join(fakeHome, ".claude"), state: { exists: true, first_run_done: true, has_account: false } });
+    } finally {
+        process.env.HOME = was;
+    }
+    assert.throws(() => settings.run(human, { cwd: f, config_dir: "a\nb" }), (e: { code: string }) => e.code === "BAD_REQUEST");
+});

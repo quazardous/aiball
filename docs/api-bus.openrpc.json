@@ -3516,6 +3516,13 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "config_dir",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {
