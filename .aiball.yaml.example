@@ -265,7 +265,8 @@ claude:
   # another dir are not resumed. `aiball claude-config <dir> --move-sessions`
   # sets it and moves the folder's sessions along; `--fork` gives the new dir
   # the old one's CLAUDE.md, skills, plugins, settings and MCP servers, linked
-  # so their updates reach both (`--copy` copies), never its account or
+  # so their updates reach both (`--copy` copies; settings.json and plugins/,
+  # which Claude writes per dir, are always copied), never its account or
   # sessions. A new dir must have been
   # through Claude's first run once (`CLAUDE_CONFIG_DIR=<dir> claude`: theme,
   # login): a loop refuses to start on one that has not.

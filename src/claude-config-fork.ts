@@ -14,8 +14,8 @@
  * itself writes (WRITTEN_BY_CLAUDE) is copied either way. An entry replaced
  * (`force`) is moved aside into `.replaced-by-fork-<date>/`, never deleted.
  */
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 
 /** Copied: how Claude works. */
 export const FORKED: Record<string, string> = {
@@ -33,6 +33,21 @@ export const FORKED: Record<string, string> = {
 /** Copied even when the rest is linked: Claude writes them, and through a link one dir would rewrite every other's. */
 export const WRITTEN_BY_CLAUDE: Record<string, string> = {
     "settings.json": "/config, the theme, the permissions granted with \"always allow\"",
+    // #4216 — per account: the marketplaces each dir clones, the folders it syncs with its account.
+    "plugins": "the marketplaces, their clones and the account's sync, under the dir's own absolute paths",
+};
+
+/**
+ * #4216 — in `plugins/`, what Claude rebuilds and what belongs to one account:
+ * left out of the copy. The rest (`known_marketplaces.json`,
+ * `installed_plugins.json`, the `marketplaces/` clones, `data/`) is the user's
+ * choice and goes, its absolute paths into the old dir rewritten to the new one.
+ */
+export const PLUGINS_LEFT_OUT: Record<string, string> = {
+    "synced": "the folders Claude syncs with this dir's account",
+    "plugin-directory-cache-v2.json": "cache",
+    "plugin-catalog-cache.json": "cache",
+    "blocklist.json": "cache",
 };
 
 /** Never carried: the identity and the past. */
@@ -131,7 +146,8 @@ export function forkClaudeConfig(
                 continue;
             } catch { /* no symlink here: copied instead */ }
         }
-        cpSync(source, target, { recursive: dir, force: true });
+        if (name === "plugins" && dir) copyPlugins(source, target, from.dir, to.dir);
+        else cpSync(source, target, { recursive: dir, force: true });
         out.copied.push(name);
     }
     // The user-scope MCP servers live in .claude.json, beside the account: only they go.
@@ -154,6 +170,33 @@ export function forkClaudeConfig(
         }
     } catch { /* no .claude.json in the old dir: no user MCP server */ }
     return out;
+}
+
+/** #4216 — `plugins/` copied without what Claude rebuilds, the old dir's paths rewritten to the new one. */
+function copyPlugins(source: string, target: string, fromDir: string, toDir: string): void {
+    cpSync(source, target, {
+        recursive: true,
+        force: true,
+        filter: (src) => {
+            const top = relative(source, src).split(sep)[0];
+            return !(top in PLUGINS_LEFT_OUT);
+        },
+    });
+    // The registries record where each marketplace and plugin lives, as absolute paths.
+    const olds = [...new Set([resolve(fromDir), realpathOrSelf(fromDir)])];
+    const quote = (p: string) => JSON.stringify(p).slice(1, -1);
+    for (const name of readdirSync(target)) {
+        if (!name.endsWith(".json")) continue;
+        const file = join(target, name);
+        const text = readFileSync(file, "utf8");
+        let next = text;
+        for (const old of olds) next = next.split(quote(old + sep)).join(quote(resolve(toDir) + sep));
+        if (next !== text) writeFileSync(file, next);
+    }
+}
+
+function realpathOrSelf(p: string): string {
+    try { return realpathSync(p); } catch { return resolve(p); }
 }
 
 function lstatOrNull(p: string): ReturnType<typeof lstatSync> | null {

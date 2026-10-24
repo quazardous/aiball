@@ -104,6 +104,7 @@ function forkLines(f: ForkResult): string[] {
     const out: string[] = [];
     if (f.linked.length) out.push(`  linked: ${f.linked.join(", ")}`);
     if (f.copied.length) out.push(`  copied: ${f.copied.join(", ")}`);
+    if (f.copied.includes("plugins")) out.push(`  plugins/: copied (Claude writes it, per account); synced/ and caches left for Claude to rebuild`);
     if (!f.linked.length && !f.copied.length) out.push("  nothing linked or copied");
     if (f.movedAside) out.push(`  replaced, the new dir's own moved into ${f.movedAside}`);
     if (f.mcpServers) out.push(`  MCP servers: ${f.mcpServers}`);

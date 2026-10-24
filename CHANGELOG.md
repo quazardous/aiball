@@ -40,7 +40,9 @@ dates are YYYY-MM-DD.
   skills, agents, commands, output styles, plugins, settings and user MCP
   servers — never its credentials, account or sessions. They are symbolic
   links to the old dir's, so an update of a skill or of CLAUDE.md reaches both;
-  `settings.json`, which Claude writes, is copied; `--copy` copies everything.
+  `settings.json` and `plugins/`, which Claude writes, are copied — `plugins/`
+  without the account's sync and the caches Claude rebuilds, its paths into
+  the old dir rewritten to the new one; `--copy` copies everything.
   `--fork-from <dir>` names another source; what the new dir already has is
   kept, or with `--force` moved aside into `.replaced-by-fork-<date>/`; an
   entry it does not know is named, not carried.

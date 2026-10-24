@@ -89,3 +89,28 @@ test("no source dir: nothing done", () => {
     const r = forkClaudeConfig({ dir: join(root, "none"), json: join(root, "none.json") }, { dir: join(root, "x"), json: join(root, "x", ".claude.json") });
     assert.deepEqual(r, { linked: [], copied: [], kept: [], movedAside: null, unknown: [], mcpServers: 0 });
 });
+
+// #4216 — plugins/ is per account and records the dir's own absolute paths: copied, never linked.
+test("plugins/ is copied, its paths rewritten to the new dir; the account's sync and the caches stay", () => {
+    const from = source("p");
+    const pl = join(from.dir, "plugins");
+    mkdirSync(join(pl, "marketplaces", "official", ".claude-plugin"), { recursive: true });
+    mkdirSync(join(pl, "synced", "acct_1"), { recursive: true });
+    mkdirSync(join(pl, "data", "plug"), { recursive: true });
+    writeFileSync(join(pl, "marketplaces", "official", ".claude-plugin", "marketplace.json"), "{}");
+    writeFileSync(join(pl, "data", "plug", "state"), "s");
+    writeFileSync(join(pl, "synced", "acct_1", ".last-complete-round"), "x");
+    writeFileSync(join(pl, "plugin-catalog-cache.json"), "{}");
+    writeFileSync(join(pl, "known_marketplaces.json"), JSON.stringify({ official: { installLocation: join(pl, "marketplaces", "official") } }));
+    const to = { dir: join(root, "p-new"), json: join(root, "p-new", ".claude.json") };
+    const r = forkClaudeConfig(from, to);
+    assert.ok(r.copied.includes("plugins") && !r.linked.includes("plugins"), "copied, not linked");
+    assert.equal(lstatSync(join(to.dir, "plugins")).isSymbolicLink(), false);
+    const known = JSON.parse(readFileSync(join(to.dir, "plugins", "known_marketplaces.json"), "utf8"));
+    assert.equal(known.official.installLocation, join(to.dir, "plugins", "marketplaces", "official"), "points into the new dir");
+    assert.ok(existsSync(join(to.dir, "plugins", "marketplaces", "official", ".claude-plugin", "marketplace.json")));
+    assert.equal(readFileSync(join(to.dir, "plugins", "data", "plug", "state"), "utf8"), "s");
+    assert.equal(existsSync(join(to.dir, "plugins", "synced")), false, "the old account's sync stays behind");
+    assert.equal(existsSync(join(to.dir, "plugins", "plugin-catalog-cache.json")), false, "Claude rebuilds its caches");
+    assert.equal(JSON.parse(readFileSync(join(pl, "known_marketplaces.json"), "utf8")).official.installLocation, join(pl, "marketplaces", "official"), "the old dir untouched");
+});
