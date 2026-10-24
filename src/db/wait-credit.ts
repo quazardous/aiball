@@ -19,6 +19,7 @@
  * What would take it over is not credited, and a balance already over (the cap
  * lowered, or credit earned before it existed) is cut back by a `cap` move.
  */
+import { projectRepos } from "../project-repos.js";
 import { ticketChanged } from "./ticket-change.js";
 import { and, eq, sql } from "drizzle-orm";
 import { spawnSync } from "node:child_process";
@@ -237,7 +238,8 @@ export function earnForCommits(
         if (!cwd || !existsSync(cwd)) return { commit, minutes: 0, reason: "the agent's folder is not readable from the daemon" };
         // #2661 — the agent's folder may hold several repositories (a workspace
         // like BookShepherd/{bms,bms-core,…}) rather than be one: look in each.
-        repos ??= gitRepositoriesAt(cwd);
+        // #4141 — and the project's other repositories its .aiball.yaml names (`repos:`).
+        repos ??= [...new Set([...gitRepositoriesAt(cwd), ...projectRepos(cwd).flatMap((r) => existsSync(r) ? gitRepositoriesAt(r) : [])])];
         if (repos.length === 0) return { commit, minutes: 0, reason: `no git repository in or under ${cwd}` };
         let repo: string | null = null;
         let sha = "";
@@ -246,7 +248,7 @@ export function earnForCommits(
             if (full.status === 0) { repo = r; sha = full.stdout.trim(); break; }
         }
         if (!repo) {
-            return { commit, minutes: 0, reason: `not a commit in ${repos.length === 1 ? repos[0] : `any of the ${repos.length} repositories under ${cwd}`}` };
+            return { commit, minutes: 0, reason: `not a commit in ${repos.length === 1 ? repos[0] : `any of the ${repos.length} repositories under ${cwd}${projectRepos(cwd).length ? " or named in its repos:" : ""}`}` };
         }
         const git = (args: string[]) => spawnSync("git", ["-C", repo!, ...args], { encoding: "utf8", timeout: 10_000 });
         const when = Number(git(["show", "-s", "--format=%ct", sha]).stdout.trim()) * 1000;

@@ -61,6 +61,13 @@ Keys: `enabled`, `volatile`, `throttle` (a duration, see below; `0` = at every
 Stop), `recent_tickets` (at most 20), `backlog`, `tone`
 (`hint`|`directive`|`imperative`).
 
+### Other repositories — `repos:` — *per-project only*
+
+The git repositories the project's work spans beyond its checkout, as a list
+of paths (`~` and paths relative to the folder). Wait credit looks for a cited
+commit in each of them as well as in the checkout's own repositories, and
+`project.settings` answers them resolved (`repos`).
+
 ### claude-loop timeouts — `claude_loop:` — *defaults → yaml → CLI/env*
 Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
 `--check-cmd`, `--wait`/`--no-wait`) and `CL_*` env (which the loop's

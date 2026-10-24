@@ -294,6 +294,16 @@ claude:
 
 project_type: public
 
+# ─── Other repositories (`repos:`) ──────────────────────────────────────
+# The git repositories this project's work spans beyond its own checkout:
+# a library developed beside it, a fork. The checkout's own repository (or
+# the ones under it) is always read; these are its siblings. `~` and paths
+# relative to this folder are accepted. Wait credit looks for a cited commit
+# in each of them too, so work done there earns as it does here.
+# repos:
+#   - ../egui-pop
+#   - ../darktable
+
 # --- tmux bar colours ---------------------------------------------------------
 # Each value is a raw tmux colour token (`colour16`, named like `red`, or
 # `#0087ff`). Layered: shipped defaults → ~/.config/aiball/config.yaml

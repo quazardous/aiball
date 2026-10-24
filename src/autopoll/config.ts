@@ -411,6 +411,13 @@ export interface AiballConfig {
      * `welcome` then applies its own fail-safe default (`public`).
      */
     project_type: string | null;
+    /**
+     * #4141 — the project's other git repositories (`.aiball.yaml repos:`), as
+     * written: `~` and paths relative to the folder, resolved by `projectRepos`.
+     * The checkout's own repository (or those under it) is always read; these
+     * are the siblings, e.g. a library the project develops beside it.
+     */
+    repos: string[];
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
     /**
@@ -549,6 +556,7 @@ const DEFAULTS: AiballConfig = {
         link_down_bg: "colour160", // red — IPC link lost (#1039)
     },
     project_type: null,
+    repos: [],
     configPath: null,
     prompts: {},
 };
@@ -814,6 +822,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         retired_keys: [],
         renamed_keys: [],
         project_type: DEFAULTS.project_type,
+        repos: [],
         configPath,
         prompts: {},
     };
@@ -1017,6 +1026,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // applies its own `public` default + validates against the
             // install's `welcome/<type>` folders, so an unknown name
             // surfaces a clear error rather than silently mis-applying).
+            // #4141 — a list of paths; anything else is dropped.
+            if (Array.isArray(raw.repos)) {
+                cfg.repos = raw.repos.filter((r): r is string => typeof r === "string" && r.trim() !== "").map((r) => r.trim());
+            }
             if (typeof raw.project_type === "string" && raw.project_type.trim()) {
                 cfg.project_type = raw.project_type.trim();
             }

@@ -25,6 +25,9 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `repos:` in a project's `.aiball.yaml` names its other git repositories (a
+  library developed beside it, a fork): a commit cited from one of them earns
+  wait credit as one from the checkout does. `project.settings` answers them.
 - A Claude Code config dir per project: `claude.config_dir` in its
   `.aiball.yaml` (its own account, settings, MCP servers, sessions). The loops
   start Claude with it; the status line, the sessions offered for resume and a
