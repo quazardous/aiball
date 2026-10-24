@@ -17,7 +17,7 @@ import { defaultLoopSession, findConfigUpwards, globalConfigPath, loadConfig, pa
 import { parseRemoteControl, type RemoteControl } from "./claude-loop/remote-control.js";
 import { InitRefusal } from "./project-init.js";
 import { projectRepos } from "./project-repos.js";
-import { claudeConfigDir, type ConfigDirFrom } from "./claude-config-dir.js";
+import { claudeConfigDir, configDirState, type ConfigDirFrom } from "./claude-config-dir.js";
 
 /** What a folder's loops start with, and whether its file says so or it is the default. */
 export interface ProjectSettings {
@@ -38,6 +38,8 @@ export interface ProjectSettings {
     questions: { value: LoopQuestions; from: "file" | "global" | "default" };
     /** #4120 — the Claude Code config dir the folder's loops start Claude with, resolved. */
     config_dir: { value: string; from: ConfigDirFrom };
+    /** #4209 — the state of that dir: a loop refuses one not through Claude's first run. */
+    config_dir_state: { exists: boolean; first_run_done: boolean; has_account: boolean };
     /** #4141 — the project's other repositories (`repos:`), resolved; wait credit reads commits there too. */
     repos: { value: string[]; from: "file" | "default" };
     /** #3308 — the settings a client may change here, described (as `config.managed` does its keys). */
@@ -179,6 +181,7 @@ function readResolved(cwd: string): ProjectSettings {
             from: questionsInFile !== undefined ? "file" : readGlobalLoopQuestions(globalConfigPath()) !== undefined ? "global" : "default",
         },
         config_dir: (() => { const c = claudeConfigDir(cwd); return { value: c.dir, from: c.from }; })(),
+        config_dir_state: configDirState(claudeConfigDir(cwd)),
         repos: (() => { const r = projectRepos(cwd); return { value: r, from: r.length ? "file" as const : "default" as const }; })(),
         settings: [],
     };

@@ -3540,6 +3540,24 @@
           }
         },
         {
+          "name": "fork",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "copy": {
+                "type": "boolean"
+              },
+              "force": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
           "name": "key",
           "required": false,
           "schema": {

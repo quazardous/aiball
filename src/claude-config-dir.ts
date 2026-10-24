@@ -12,6 +12,7 @@
  * Several projects may share one dir (a "profile"): nothing in the dir belongs
  * to a single project.
  */
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { loadConfig } from "./autopoll/config.js";
@@ -47,4 +48,35 @@ export function claudeConfigDir(cwd?: string | null, env: NodeJS.ProcessEnv = pr
     const fromEnv = env.CLAUDE_CONFIG_DIR;
     if (fromEnv) return { dir: fromEnv, json: join(fromEnv, ".claude.json"), from: "env" };
     return { dir: join(home, ".claude"), json: join(home, ".claude.json"), from: "default" };
+}
+
+/**
+ * #4209 — a dir named by hand (a fork's source): ~/.claude keeps its
+ * .claude.json beside it, in the home, as Claude does without CLAUDE_CONFIG_DIR.
+ */
+export function sourceDir(dir: string, home: string = homedir()): { dir: string; json: string } {
+    const inside = join(dir, ".claude.json");
+    if (resolve(dir) === join(home, ".claude") && !existsSync(inside)) return { dir, json: join(home, ".claude.json") };
+    return { dir, json: inside };
+}
+
+/** #4120 — a `.claude.json` that has been through Claude's first run (theme, login, …). */
+export function onboardingDone(jsonText: string | null): boolean {
+    if (jsonText === null) return false;
+    try { return (JSON.parse(jsonText) as { hasCompletedOnboarding?: unknown }).hasCompletedOnboarding === true; } catch { return false; }
+}
+
+/**
+ * #4209 — what a client needs before starting a loop on a dir: whether it
+ * exists, has been through Claude's first run (a loop refuses one that has not),
+ * and holds an account. Yes or no only: never what the account is.
+ */
+export function configDirState(c: { dir: string; json: string }): { exists: boolean; first_run_done: boolean; has_account: boolean } {
+    let text: string | null = null;
+    try { text = readFileSync(c.json, "utf8"); } catch { /* none yet */ }
+    let account = existsSync(join(c.dir, ".credentials.json"));
+    if (!account && text !== null) {
+        try { account = Boolean((JSON.parse(text) as { oauthAccount?: unknown }).oauthAccount); } catch { /* unreadable */ }
+    }
+    return { exists: existsSync(c.dir), first_run_done: onboardingDone(text), has_account: account };
 }

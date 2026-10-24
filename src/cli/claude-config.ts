@@ -7,11 +7,8 @@
  * linked to the old dir's (#4126), or copied with `--copy`.
  */
 import type { Command } from "commander";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
 import { die, gOpts, jsonline } from "./_helpers.js";
-import { claudeConfigDir, expandConfigDir } from "../claude-config-dir.js";
+import { claudeConfigDir, expandConfigDir, sourceDir } from "../claude-config-dir.js";
 import { moveClaudeSessions } from "../claude-config-move.js";
 import { forkClaudeConfig, type ForkResult } from "../claude-config-fork.js";
 import { readSettings, writeSettings } from "../project-settings.js";
@@ -91,13 +88,6 @@ export function registerClaudeConfigCommands(program: Command): void {
                 throw e;
             }
         });
-}
-
-/** A dir named by hand: ~/.claude keeps its .claude.json beside it, in the home, as Claude does without CLAUDE_CONFIG_DIR. */
-function sourceDir(dir: string): { dir: string; json: string } {
-    const inside = join(dir, ".claude.json");
-    if (resolve(dir) === join(homedir(), ".claude") && !existsSync(inside)) return { dir, json: join(homedir(), ".claude.json") };
-    return { dir, json: inside };
 }
 
 function forkLines(f: ForkResult): string[] {

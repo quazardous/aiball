@@ -6,6 +6,7 @@
  */
 import { existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { onboardingDone } from "../claude-config-dir.js";
 import { readPlate, stateDirFor, STATE_ROOT, type Plate } from "./state.js";
 
 /**
@@ -60,12 +61,7 @@ export function conversationHolder(
  */
 export function configDirRefusal(c: { dir: string; json: string; from: string }, readJson: (file: string) => string | null): string | null {
     if (c.from !== "file") return null;
-    let done = false;
-    const text = readJson(c.json);
-    if (text !== null) {
-        try { done = (JSON.parse(text) as { hasCompletedOnboarding?: unknown }).hasCompletedOnboarding === true; } catch { /* unreadable: not done */ }
-    }
-    if (done) return null;
+    if (onboardingDone(readJson(c.json))) return null;
     return `the Claude config dir ${c.dir} (claude.config_dir) has not been through Claude's first run yet (theme, login): `
         + `a loop cannot answer those screens. Run it once by hand — CLAUDE_CONFIG_DIR=${c.dir} claude — then start again.`;
 }

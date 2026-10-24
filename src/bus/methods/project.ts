@@ -36,6 +36,8 @@ import { ERROR_CODES } from "../../domain.js";
 import { initFolder, InitRefusal } from "../../project-init.js";
 import { patchForKey, readSettings, writeSettings } from "../../project-settings.js";
 import { loopsOnAnotherConfigDir } from "./loop.js";
+import { claudeConfigDir, configDirState, expandConfigDir, sourceDir } from "../../claude-config-dir.js";
+import { forkClaudeConfig } from "../../claude-config-fork.js";
 
 /** #2525 — the standing prompt, and the wake focus beside it. */
 export function standingPromptView(project: string) {
@@ -359,17 +361,42 @@ defineMethod({
         /** #3308 — any setting `project.settings` describes, by its key; `value` null for the layer below. */
         key: z.string().optional(),
         value: z.unknown().optional(),
+        /** #4209 — with a new `claude.config_dir`: start it as `aiball claude-config --fork` does. */
+        fork: z.object({
+            /** The dir to fork from; default the folder's dir before the change. */
+            from: z.string().optional(),
+            /** Copy everything instead of linking. */
+            copy: z.boolean().optional(),
+            /** Replace what the new dir has; its own entries are moved aside, never deleted. */
+            force: z.boolean().optional(),
+        }).optional(),
     }),
     run: (caller, p) => inFolder(caller, p.cwd, () => {
         const patch = {
             remote_control: p.remote_control, session: p.session,
             ...(p.key !== undefined ? patchForKey(p.key, p.value === undefined ? null : p.value) : {}),
         };
+        // #4209 — a fork starts a new dir: only with one.
+        if (p.fork && typeof patch.config_dir !== "string") {
+            throw new Refusal(400, "fork comes with a new claude.config_dir (key claude.config_dir, a path)", ERROR_CODES.BAD_REQUEST);
+        }
+        const before = claudeConfigDir(p.cwd);
         const settings = writeSettings(p.cwd, patch);
         // #4120 — a new Claude config dir reaches a running loop only at its
         // restart: say which loops run on another one, for the client to offer it.
         if (patch.config_dir === undefined) return settings;
         const restart = loopsOnAnotherConfigDir(p.cwd, settings.config_dir.value);
-        return { ...settings, restart_needed: restart.length > 0, restart_loops: restart };
+        const out = { ...settings, restart_needed: restart.length > 0, restart_loops: restart };
+        if (!p.fork) return out;
+        const to = claudeConfigDir(p.cwd);
+        const from = p.fork.from !== undefined ? sourceDir(expandConfigDir(p.fork.from, p.cwd)) : before;
+        if (from.dir === to.dir) return { ...out, fork: null };
+        const f = forkClaudeConfig(from, to, { copy: p.fork.copy, force: p.fork.force });
+        return {
+            ...out,
+            // The new dir has changed: its state again.
+            config_dir_state: configDirState(to),
+            fork: { from: from.dir, linked: f.linked, copied: f.copied, kept: f.kept, moved_aside: f.movedAside, unknown: f.unknown, mcp_servers: f.mcpServers },
+        };
     }),
 });

@@ -2,7 +2,7 @@
 import { test, after } from "node:test";
 import { refused, testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../autopoll/config.js";
@@ -219,4 +219,45 @@ test("#4120 claude.config_dir: written to the yaml, resolved with ~, null hands 
     assert.throws(() => set({ cwd: b, key: "claude.config_dir", value: "a\nb" }), (e: { code: string }) => e.code === "BAD_REQUEST");
     const listed = (read(b) as unknown as { settings: Array<{ key: string; type: string }> }).settings.find((x) => x.key === "claude.config_dir");
     assert.equal(listed?.type, "path");
+});
+
+// #4209 — settings_set forks the new claude.config_dir as `aiball claude-config --fork` does; settings says the dir's state.
+type Forked = Settings & {
+    config_dir_state: { exists: boolean; first_run_done: boolean; has_account: boolean };
+    fork: { from: string; linked: string[]; copied: string[]; kept: string[]; moved_aside: string | null; unknown: string[]; mcp_servers: number } | null;
+};
+
+test("#4209 fork: the new dir starts from the folder's old one, linked; its state says it has no account and no first run", () => {
+    const old = join(home, "cfg-old");
+    mkdirSync(join(old, "skills", "s"), { recursive: true });
+    writeFileSync(join(old, "CLAUDE.md"), "rules\n");
+    writeFileSync(join(old, "settings.json"), "{}");
+    writeFileSync(join(old, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true, oauthAccount: { email: "x" }, mcpServers: { aiball: { command: "x" } } }));
+    writeFileSync(join(old, ".credentials.json"), "{}");
+    const f = folder(`consumer:\n  agent: a-4209\nclaude:\n  config_dir: ${old}\n`);
+    const before = read(f) as Forked;
+    assert.deepEqual(before.config_dir_state, { exists: true, first_run_done: true, has_account: true });
+
+    const fresh = join(home, "cfg-new");
+    const r = set({ cwd: f, key: "claude.config_dir", value: fresh, fork: {} }) as Forked;
+    assert.equal(r.fork?.from, old);
+    assert.deepEqual(r.fork?.linked, ["CLAUDE.md", "skills"]);
+    assert.deepEqual(r.fork?.copied, ["settings.json"]);
+    assert.equal(r.fork?.mcp_servers, 1);
+    assert.deepEqual(r.config_dir_state, { exists: true, first_run_done: false, has_account: false }, "never the account, nor the first run");
+    assert.equal(existsSync(join(fresh, ".credentials.json")), false);
+    assert.deepEqual((read(f) as Forked).config_dir_state, r.config_dir_state);
+});
+
+test("#4209 fork without a new dir is refused, and nothing is written", () => {
+    const f = folder("consumer:\n  agent: a-4209b\n");
+    const was = readFileSync(join(f, ".aiball.yaml"), "utf8");
+    assert.throws(() => set({ cwd: f, session: "tmux", fork: {} }), (e: { code: string }) => e.code === "BAD_REQUEST");
+    assert.throws(() => set({ cwd: f, key: "claude.config_dir", value: null, fork: {} }), (e: { code: string }) => e.code === "BAD_REQUEST");
+    assert.equal(readFileSync(join(f, ".aiball.yaml"), "utf8"), was);
+});
+
+test("#4209 a dir that does not exist yet: its state says so", () => {
+    const f = folder(`consumer:\n  agent: a-4209c\nclaude:\n  config_dir: ${join(home, "nowhere")}\n`);
+    assert.deepEqual((read(f) as Forked).config_dir_state, { exists: false, first_run_done: false, has_account: false });
 });
