@@ -90,6 +90,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `session.start` says why `claude-loop start` refused: a start guard answers
+  422 with its sentence and a code of its own (`CONFIG_DIR_NOT_READY` with the
+  dir, `FOLDER_OF_ANOTHER_AGENT`, `CONVERSATION_HELD`) instead of "exited 1";
+  any other failed start carries what the loop wrote.
 - A ticket awaiting moderation no longer wakes agents: a comment on it, or a
   key-filed ticket's assignee, waits for the approval to wake them. The events
   stay unread meanwhile; a human's comment on it (a moderator's question) still

@@ -69,3 +69,36 @@ export function configDirRefusal(c: { dir: string; json: string; from: string },
     return `the Claude config dir ${c.dir} (claude.config_dir) has not been through Claude's first run yet (theme, login): `
         + `a loop cannot answer those screens. Run it once by hand — CLAUDE_CONFIG_DIR=${c.dir} claude — then start again.`;
 }
+
+/**
+ * #4210 — how `claude-loop start` tells a caller which guard refused: it exits
+ * REFUSAL_EXIT and ends stderr with one `aiball-refusal: {json}` line, after the
+ * sentence a person reads. `session.start` turns it into a refusal of its own,
+ * so a client can say what to fix instead of "exited 1".
+ */
+export const REFUSAL_EXIT = 3;
+const REFUSAL_PREFIX = "aiball-refusal: ";
+
+export interface GuardRefusal {
+    /** One of the `ERROR_CODES` a start guard answers. */
+    code: "CONFIG_DIR_NOT_READY" | "FOLDER_OF_ANOTHER_AGENT" | "CONVERSATION_HELD";
+    details: Record<string, unknown>;
+}
+
+export function refusalLine(r: GuardRefusal): string {
+    return REFUSAL_PREFIX + JSON.stringify(r);
+}
+
+/** The guard refusal a stderr ends with, if any; and the text before it, for a person. */
+export function parseRefusal(stderr: string): { refusal: GuardRefusal | null; text: string } {
+    const lines = stderr.split(/\r?\n/).filter((l) => l.trim() !== "");
+    let refusal: GuardRefusal | null = null;
+    const last = lines.at(-1);
+    if (last?.startsWith(REFUSAL_PREFIX)) {
+        try {
+            const v = JSON.parse(last.slice(REFUSAL_PREFIX.length)) as GuardRefusal;
+            if (typeof v?.code === "string") { refusal = { code: v.code, details: v.details ?? {} }; lines.pop(); }
+        } catch { /* not ours: left in the text */ }
+    }
+    return { refusal, text: lines.map((l) => l.replace(/^claude-loop: /, "")).join("\n") };
+}

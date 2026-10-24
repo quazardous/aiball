@@ -190,6 +190,12 @@ export const ERROR_CODES = {
     ALREADY_IMPORTED: "ALREADY_IMPORTED",
     /** #3066 — the agent's (or the name's) session runs elsewhere: claude-loop, or another host. */
     HOST_BUSY: "HOST_BUSY",
+    /** #4210 — `session.start`: the folder's Claude config dir has not been through Claude's first run (`config_dir`). */
+    CONFIG_DIR_NOT_READY: "CONFIG_DIR_NOT_READY",
+    /** #4210 — `session.start`: the folder's .aiball.yaml is another agent's (`folder_agent`). */
+    FOLDER_OF_ANOTHER_AGENT: "FOLDER_OF_ANOTHER_AGENT",
+    /** #4210 — `session.start`: the conversation to resume is another agent's running loop's (`conversation`, `agent`). */
+    CONVERSATION_HELD: "CONVERSATION_HELD",
     /** #3066 — a handover waited for Claude to be idle, and it did not become so. */
     NOT_IDLE: "NOT_IDLE",
     /** #3036 — a body names an author other than the authenticated caller. */

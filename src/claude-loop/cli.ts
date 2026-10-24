@@ -99,7 +99,7 @@ import { BUILD_CMD, resolveProxyLaunch } from "./proxy-launch.js";
 import { resolveInitSize, newSessionSizeArgs } from "./init-size.js";
 import { daemonHostedAgents, hostAttachSocket, liveHostAgent, loopAlive as isLoopAlive } from "./host-alive.js";
 import { loopName } from "./loop-name.js";
-import { conversationHolder, foreignAgentRefusal, startFolder, takeLaunchCwd, configDirRefusal } from "./start-guards.js";
+import { conversationHolder, foreignAgentRefusal, startFolder, takeLaunchCwd, configDirRefusal, refusalLine, REFUSAL_EXIT, type GuardRefusal } from "./start-guards.js";
 import { afterTmuxAttach, type LoopWhereabouts } from "./attach-end.js";
 import { attachHost } from "./host-attach.js";
 import { joinLiveLoop, type LivePlace } from "./join-live.js";
@@ -110,6 +110,12 @@ import { parseRemoteControl, remoteControlPlan, type RemoteControl } from "./rem
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
     process.exit(1);
+}
+
+/** #4210 — a start guard's refusal: the sentence, then the line `session.start` reads. */
+function refuse(msg: string, r: GuardRefusal): never {
+    process.stderr.write(`claude-loop: ${msg}\n${refusalLine(r)}\n`);
+    process.exit(REFUSAL_EXIT);
 }
 
 function need(cmd: string): void {
@@ -592,10 +598,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #3360 — a folder whose .aiball.yaml names its agent runs that agent, or a
     // crew of it: another agent here would take its conversation.
     const foreign = foreignAgentRefusal({ agent: opts.consumer, folderAgent: mainAgent, agentSource: ctx.agent_source, role: opts.role, cwd: ctx.cwd });
-    if (foreign) die(foreign);
+    if (foreign) refuse(foreign, { code: "FOLDER_OF_ANOTHER_AGENT", details: { cwd: ctx.cwd, folder_agent: mainAgent } });
     // #4120 — a config dir that never finished Claude's first run would stall the loop on its screens.
-    const freshDir = configDirRefusal(claudeConfigDir(ctx.cwd), (f) => { try { return readFileSync(f, "utf8"); } catch { return null; } });
-    if (freshDir) die(freshDir);
+    const configDir = claudeConfigDir(ctx.cwd);
+    const freshDir = configDirRefusal(configDir, (f) => { try { return readFileSync(f, "utf8"); } catch { return null; } });
+    if (freshDir) refuse(freshDir, { code: "CONFIG_DIR_NOT_READY", details: { config_dir: configDir.dir } });
     if (opts.consumer) ctx.agent = opts.consumer;
     if (opts.project) ctx.project = opts.project;
     // #1435 slice 1 — `--role lead|crew` overrides the resolved role. A crew
@@ -719,7 +726,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // runs on is not resumed here.
     if (sessionPlan.sessionId) {
         const holder = conversationHolder(sessionPlan.sessionId, ctx.agent, loopAlive);
-        if (holder) die(`the conversation ${sessionPlan.sessionId} is ${holder.agent}'s: its loop ${holder.name} runs on it. Start ${ctx.agent} in its own folder, or with --no-resume for a fresh conversation.`);
+        if (holder) {
+            refuse(`the conversation ${sessionPlan.sessionId} is ${holder.agent}'s: its loop ${holder.name} runs on it. Start ${ctx.agent} in its own folder, or with --no-resume for a fresh conversation.`,
+                { code: "CONVERSATION_HELD", details: { conversation: sessionPlan.sessionId, agent: holder.agent } });
+        }
     }
     // #3489 — recorded now, not by the SessionStart hook alone: the next
     // starts resume it, even if this one never gets that far.

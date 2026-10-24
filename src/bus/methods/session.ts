@@ -21,7 +21,9 @@ import { tmuxSessionView } from "../../sessions/registry.js";
 import { remoteControlFlags } from "../../claude-loop/remote-control.js";
 import { listConversations, pickConversation, sessionExists } from "../../claude-loop/claude-conversations.js";
 import { parseSessionFile, sessionEntry, sessionKeyFor, SESSION_ID_FILE } from "../../claude-loop/session-id.js";
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { parseRefusal, REFUSAL_EXIT } from "../../claude-loop/start-guards.js";
 import { runningConversations } from "./loop.js";
 
 const HUMAN_HERE = {
@@ -120,14 +122,20 @@ defineMethod({
             const before = new Set(listSessionViews().map((v) => v.agent).filter(Boolean));
             const present = new Set(listConsumers().filter((c) => isPresent(c.consumer_id)).map((c) => c.consumer_id));
             const args = loopStartArgs({ ...p, resume, size: p.size });
-            const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, ...args], { cwd: p.cwd, env, detached: true, stdio: "ignore" });
+            // #4210 — the loop's stderr goes to a file, not a pipe: the loop is
+            // detached and outlives this call, and a pipe closed under it would
+            // break its next write. Read when it exits non-zero, removed either way.
+            const errFile = join(tmpdir(), `aiball-loop-start-${process.pid}-${Date.now()}.err`);
+            const errFd = openSync(errFile, "w");
+            const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, ...args], { cwd: p.cwd, env, detached: true, stdio: ["ignore", "ignore", errFd] });
+            closeSync(errFd);
             // Without a listener a failed spawn is an uncaught 'error' event:
             // it took the whole daemon down, as project.launch once did (#3103).
             let spawnError: string | null = null;
             child.on("error", (e) => { spawnError = e.message; });
             child.unref();
             const deadline = Date.now() + 30_000;
-            for (;;) {
+            try { for (;;) {
                 // #3298 — without a mode, the loop decides where it runs (its
                 // configured mode, tmux for a folder on a remote daemon): the
                 // answer is where it came up, the host or tmux.
@@ -148,10 +156,15 @@ defineMethod({
                 }
                 if (spawnError) throw new Refusal(500, `claude-loop start could not be launched: ${spawnError}`, ERROR_CODES.INTERNAL);
                 if (child.exitCode !== null && child.exitCode !== 0) {
-                    throw new Refusal(500, `claude-loop ${args.slice(0, 2).join(" ")} exited ${child.exitCode}`, ERROR_CODES.INTERNAL);
+                    let stderr = "";
+                    try { stderr = readFileSync(errFile, "utf8"); } catch { /* nothing written */ }
+                    throw loopExitRefusal(child.exitCode, stderr, args);
                 }
                 if (Date.now() > deadline) throw new Refusal(504, "the agent's session did not come up in 30 s", ERROR_CODES.INTERNAL);
                 await new Promise((r) => setTimeout(r, 200));
+            } } finally {
+                // The loop may still hold it: on Windows the removal waits for it to end.
+                try { rmSync(errFile, { force: true }); } catch { /* still open */ }
             }
         }
         if (sessionFor({ name: p.name! })) {
@@ -191,6 +204,22 @@ export function loopStartArgs(p: { cwd: string; mode?: "host" | "tmux"; agent?: 
 /** The loop's launcher, next to the daemon's source. A `#!/usr/bin/env node`
  *  script with no extension: Windows cannot execute it, so it is always run
  *  as `node <launcher>` (process.execPath), on every platform. */
+/**
+ * #4210 — why `claude-loop start` exited: a start guard's refusal (its exit
+ * code and last line, `parseRefusal`) is the caller's to fix, so a 422 with the
+ * guard's code and its sentence; anything else stays internal, with what the
+ * loop wrote.
+ */
+export function loopExitRefusal(exitCode: number, stderr: string, args: string[]): Refusal {
+    const { refusal, text } = parseRefusal(stderr);
+    if (exitCode === REFUSAL_EXIT && refusal && refusal.code in ERROR_CODES) {
+        // The guard's sentence is the line before its refusal; earlier lines are the start's warnings.
+        return new Refusal(422, text.split("\n").at(-1) || refusal.code, ERROR_CODES[refusal.code], refusal.details);
+    }
+    const tail = text.split("\n").slice(-5).join("\n");
+    return new Refusal(500, `claude-loop ${args.slice(0, 2).join(" ")} exited ${exitCode}${tail ? `: ${tail}` : ""}`, ERROR_CODES.INTERNAL);
+}
+
 const CLAUDE_LOOP_BIN = resolve(import.meta.dirname, "..", "..", "..", "bin", "claude-loop");
 
 /**
