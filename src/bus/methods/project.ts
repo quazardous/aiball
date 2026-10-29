@@ -38,6 +38,7 @@ import { patchForKey, readSettings, writeSettings } from "../../project-settings
 import { loopsOnAnotherConfigDir } from "./loop.js";
 import { claudeConfigDir, configDirState, expandConfigDir, sourceDir } from "../../claude-config-dir.js";
 import { forkClaudeConfig } from "../../claude-config-fork.js";
+import { claudeRunningIn, moveClaudeSessions, sessionsWire } from "../../claude-config-move.js";
 
 /** #2525 — the standing prompt, and the wake focus beside it. */
 export function standingPromptView(project: string) {
@@ -383,6 +384,12 @@ defineMethod({
             /** Replace what the new dir has; its own entries are moved aside, never deleted. */
             force: z.boolean().optional(),
         }).optional(),
+        /**
+         * #4419 — with a change of `claude.config_dir` (a path, or null for the
+         * layer below): the folder's Claude sessions follow, as
+         * `aiball claude-config --move-sessions` does. Refused while a Claude runs there.
+         */
+        move_sessions: z.boolean().optional(),
     }),
     run: (caller, p) => inFolder(caller, p.cwd, () => {
         const patch = {
@@ -393,15 +400,27 @@ defineMethod({
         if (p.fork && typeof patch.config_dir !== "string") {
             throw new Refusal(400, "fork comes with a new claude.config_dir (key claude.config_dir, a path)", ERROR_CODES.BAD_REQUEST);
         }
+        // #4419 — moving the sessions comes with a change of dir, and never under a running Claude.
+        if (p.move_sessions && patch.config_dir === undefined) {
+            throw new Refusal(400, "move_sessions comes with a change of claude.config_dir (key claude.config_dir)", ERROR_CODES.BAD_REQUEST);
+        }
+        const busy = p.move_sessions ? claudeRunningIn(p.cwd) : null;
+        if (busy && busy.length > 0) {
+            throw new Refusal(409, `Claude runs in ${p.cwd} (${busy.map((b) => b.pid).join(", ")}): stop its loops before moving its sessions`, ERROR_CODES.CLAUDE_RUNS_IN_FOLDER, { folder: p.cwd, pids: busy });
+        }
         const before = claudeConfigDir(p.cwd);
         const settings = writeSettings(p.cwd, patch);
         // #4120 — a new Claude config dir reaches a running loop only at its
         // restart: say which loops run on another one, for the client to offer it.
         if (patch.config_dir === undefined) return settings;
         const restart = loopsOnAnotherConfigDir(p.cwd, settings.config_dir.value);
-        const out = { ...settings, restart_needed: restart.length > 0, restart_loops: restart };
-        if (!p.fork) return out;
         const to = claudeConfigDir(p.cwd);
+        const move = p.move_sessions && to.dir !== before.dir ? moveClaudeSessions(p.cwd, before, to) : null;
+        const out = {
+            ...settings, restart_needed: restart.length > 0, restart_loops: restart,
+            ...(p.move_sessions ? { sessions: move && { ...sessionsWire(move), checked: busy !== null } } : {}),
+        };
+        if (!p.fork) return out;
         const from = p.fork.from !== undefined ? sourceDir(expandConfigDir(p.fork.from, p.cwd)) : before;
         if (from.dir === to.dir) return { ...out, fork: null };
         const f = forkClaudeConfig(from, to, { copy: p.fork.copy, force: p.fork.force });

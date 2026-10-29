@@ -3572,6 +3572,13 @@
           }
         },
         {
+          "name": "move_sessions",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "remote_control",
           "required": false,
           "schema": {
@@ -5750,6 +5757,7 @@
             "AUTH_REQUIRED",
             "BAD_GATEWAY",
             "BAD_REQUEST",
+            "CLAUDE_RUNS_IN_FOLDER",
             "COMMITS_REQUIRED",
             "CONFIG_DIR_NOT_READY",
             "CONFIG_OUT_OF_RANGE",

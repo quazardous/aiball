@@ -2,7 +2,7 @@
 import { test, after } from "node:test";
 import { refused, testCaller } from "../tests/lib.js";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../autopoll/config.js";
@@ -302,4 +302,70 @@ test("#4222 candidate ~/.claude: expanded, and its .claude.json read in the home
         process.env.HOME = was;
     }
     assert.throws(() => settings.run(human, { cwd: f, config_dir: "a\nb" }), (e: { code: string }) => e.code === "BAD_REQUEST");
+});
+
+// #4419 — settings_set carries the folder's Claude sessions to its new config dir, there and back.
+type Moved = Settings & { sessions?: { moved: number; replaced: { path: string; aside: string }[]; project_entry: string; checked: boolean } | null };
+
+test("#4419 move_sessions: the sessions follow to a new dir, and back to the old one merged", async () => {
+    const { claudeProjectKey } = await import("../relocate.js");
+    const a = join(home, "cfg-a-4419"), b = join(home, "cfg-b-4419");
+    const f = folder(`consumer:\n  agent: a-4419\nclaude:\n  config_dir: ${a}\n`);
+    const key = claudeProjectKey(f);
+    mkdirSync(join(a, "projects", key, "memory"), { recursive: true });
+    writeFileSync(join(a, "projects", key, "s1.jsonl"), "one\n");
+    writeFileSync(join(a, "projects", key, "memory", "MEMORY.md"), "a\n");
+    writeFileSync(join(a, ".claude.json"), JSON.stringify({ projects: { [f]: { allowedTools: ["Read"] } } }));
+
+    const there = set({ cwd: f, key: "claude.config_dir", value: b, move_sessions: true }) as Moved;
+    assert.equal(there.sessions?.moved, 2);
+    assert.equal(there.sessions?.project_entry, "copied");
+    assert.equal(there.sessions?.checked, process.platform === "linux");
+    assert.equal(readFileSync(join(b, "projects", key, "s1.jsonl"), "utf8"), "one\n");
+
+    // In b the conversation goes on; meanwhile a Claude run on a left a trace there.
+    writeFileSync(join(b, "projects", key, "s1.jsonl"), "one\ntwo\n");
+    writeFileSync(join(b, "projects", key, "memory", "MEMORY.md"), "b\n");
+    mkdirSync(join(a, "projects", key, "memory"), { recursive: true });
+    writeFileSync(join(a, "projects", key, "memory", "other.md"), "x\n");
+    const past = new Date(Date.now() - 86_400_000);
+    for (const [file, text] of [["s1.jsonl", "stale\n"], ["memory/MEMORY.md", "stale a\n"]] as const) {
+        writeFileSync(join(a, "projects", key, file), text);
+        utimesSync(join(a, "projects", key, file), past, past);
+    }
+    writeFileSync(join(a, ".claude.json"), JSON.stringify({ projects: { [f]: { allowedTools: ["Edit"] } } }));
+
+    const back = set({ cwd: f, key: "claude.config_dir", value: a, move_sessions: true }) as Moved;
+    assert.equal(back.sessions?.project_entry, "merged");
+    assert.equal(back.sessions?.replaced.length, 2, "s1.jsonl and MEMORY.md were on both sides");
+    assert.equal(readFileSync(back.sessions!.replaced.find((r) => r.path.endsWith("s1.jsonl"))!.aside, "utf8"), "stale\n", "the older set aside, not lost");
+    assert.equal(readFileSync(join(a, "projects", key, "s1.jsonl"), "utf8"), "one\ntwo\n", "the conversation as it went on in b");
+    assert.equal(readFileSync(join(a, "projects", key, "memory", "MEMORY.md"), "utf8"), "b\n");
+    assert.ok(existsSync(join(a, "projects", key, "memory", "other.md")), "a's own memory file stays");
+    assert.equal(existsSync(join(b, "projects", key)), false, "nothing left in b");
+    assert.deepEqual(JSON.parse(readFileSync(join(a, ".claude.json"), "utf8")).projects[f].allowedTools, ["Edit", "Read"]);
+
+    const same = set({ cwd: f, key: "claude.config_dir", value: a, move_sessions: true }) as Moved;
+    assert.equal(same.sessions, null, "no change of dir, nothing moved");
+});
+
+test("#4419 move_sessions refused: without a change of dir, and while a Claude runs in the folder — nothing written", { skip: process.platform !== "linux" ? "processes are listed on Linux" : false }, async () => {
+    const { spawn } = await import("node:child_process");
+    const a = join(home, "cfg-c-4419");
+    const f = folder(`consumer:\n  agent: b-4419\nclaude:\n  config_dir: ${a}\n`);
+    const was = readFileSync(join(f, ".aiball.yaml"), "utf8");
+    assert.equal((await refused(() => set({ cwd: f, session: "tmux", move_sessions: true }))).code, "BAD_REQUEST");
+
+    const claude = spawn("bash", ["-c", "exec -a claude sleep 30"], { cwd: f, stdio: "ignore" });
+    try {
+        await new Promise((r) => setTimeout(r, 200));
+        const e = await refused(() => set({ cwd: f, key: "claude.config_dir", value: join(home, "cfg-d-4419"), move_sessions: true }));
+        assert.equal(e.code, "CLAUDE_RUNS_IN_FOLDER");
+        assert.deepEqual((e.details as { pids: { pid: number }[] }).pids.map((p) => p.pid), [claude.pid]);
+        assert.equal(readFileSync(join(f, ".aiball.yaml"), "utf8"), was, "nothing written");
+        // Without move_sessions the dir changes as before: the running Claude keeps its own.
+        set({ cwd: f, key: "claude.config_dir", value: join(home, "cfg-d-4419") });
+    } finally {
+        claude.kill();
+    }
 });

@@ -31,6 +31,10 @@ dates are YYYY-MM-DD.
   first run, it holds an account), so a client can prepare the dir and warn
   before a start the loop would refuse; given a `config_dir`, it says the same
   of a dir the client is about to choose (`candidate`), writing nothing.
+- `project.settings_set` moves the folder's Claude sessions with a change of
+  `claude.config_dir` (`move_sessions: true`), as `aiball claude-config
+  --move-sessions` does, and answers what moved (`sessions`); refused while a
+  Claude runs in the folder (`CLAUDE_RUNS_IN_FOLDER`), nothing written.
 - `repos:` in a project's `.aiball.yaml` names its other git repositories (a
   library developed beside it, a fork): a commit cited from one of them earns
   wait credit as one from the checkout does. `project.settings` answers them.
@@ -41,7 +45,9 @@ dates are YYYY-MM-DD.
   it (`restart_needed` / `restart_loops` name the running loops on another
   dir); each usage reading names its `config_dir`. `aiball claude-config [dir]`
   shows or sets it for the current folder (`--cwd`, `--unset`), and
-  `--move-sessions` moves the folder's Claude sessions to the new dir. A loop
+  `--move-sessions` moves the folder's Claude sessions to the new dir — into a
+  dir the folder used before, merged: a file on both sides keeps the newer and
+  moves the older aside into `.replaced-by-move-<date>/`. A loop
   refuses to start on a dir that has not been through Claude's first run, whose
   screens (theme, login) it cannot answer.
 - `aiball claude-config <dir> --fork` starts the new Claude config dir with the

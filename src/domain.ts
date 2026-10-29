@@ -196,6 +196,8 @@ export const ERROR_CODES = {
     FOLDER_OF_ANOTHER_AGENT: "FOLDER_OF_ANOTHER_AGENT",
     /** #4210 — `session.start`: the conversation to resume is another agent's running loop's (`conversation`, `agent`). */
     CONVERSATION_HELD: "CONVERSATION_HELD",
+    /** #4419 — `project.settings_set` `move_sessions`: a Claude runs in the folder (`folder`, `pids`). */
+    CLAUDE_RUNS_IN_FOLDER: "CLAUDE_RUNS_IN_FOLDER",
     /** #3066 — a handover waited for Claude to be idle, and it did not become so. */
     NOT_IDLE: "NOT_IDLE",
     /** #3036 — a body names an author other than the authenticated caller. */

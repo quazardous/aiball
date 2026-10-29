@@ -112,6 +112,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `CONFIG_DIR_NOT_READY` | 422 | `session.start`: the folder's Claude config dir has not been through Claude's first run (theme, login), which a loop cannot answer; `details.config_dir` names it. Run `CLAUDE_CONFIG_DIR=<dir> claude` once. |
 | `FOLDER_OF_ANOTHER_AGENT` | 422 | `session.start`: the folder's `.aiball.yaml` is another agent's; `details.folder_agent` names it. |
 | `CONVERSATION_HELD` | 422 | `session.start`: the conversation to resume is another agent's running loop's; `details.conversation` and `details.agent`. |
+| `CLAUDE_RUNS_IN_FOLDER` | 409 | `project.settings_set` with `move_sessions`: a Claude runs in the folder and writes its sessions; `details.folder` and `details.pids` (`{ pid, cmd }`). Stop its loops, then move. Nothing was written. |
 | `NOT_IDLE` | 409 | `consumer.restart_claude`: Claude works; the restart waits until it is idle (or pass `when_idle`). `loop.restart` and `loop.wake`: Claude works (or pass `force`). |
 | `NO_ROOT` | 409 | `project.rename_all` without `cwd`: aiball knows no folder for the project; `details.roots` is empty. |
 | `AMBIGUOUS_ROOT` | 409 | `project.rename_all` without `cwd`: the project is known in several folders; `details.roots` lists them. |
