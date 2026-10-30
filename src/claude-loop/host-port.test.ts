@@ -53,6 +53,22 @@ test("the host port reads the screen and types, beside the daemon's own connecti
     assert.deepEqual(logs, [], "nothing went wrong on the way");
 });
 
+test("#4437 the OSC 7501 the command writes are counted by the host and said in the kernel's log", { skip }, async () => {
+    const script = "sleep 1; printf 'a\\033]7501;busy\\007b\\033]0;title\\007c'; exec cat";
+    const link = await startHost({ name: "osc", argv: ["sh", "-c", script], cwd: home, size: { rows: 12, cols: 60 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+    cleanups.push(async () => { await link.call("host.shutdown").catch(() => {}); link.close(); });
+    const screen = async () => await link.call("host.screen") as { text: string; osc7501: { count: number; last: string } };
+    await until("the line on the screen", async () => (await screen()).text.includes("abc"));
+    assert.deepEqual((await screen()).osc7501, { count: 1, last: "busy" }, "one 7501, the title OSC not counted");
+    const logs: string[] = [];
+    const port = hostPort({ controlSocket: join(link.info.dir, "control.sock"), log: (m) => logs.push(m) });
+    cleanups.push(() => port.close());
+    await port.ready;
+    assert.deepEqual(logs, ['host: OSC 7501 seen 1 time(s) since the host started, last "busy"']);
+    port.end();
+    await until("the command gone", () => !port.alive());
+});
+
 test("host.keys stands for the proxy events the tmux proxy emits for the same verdict", async () => {
     const { proxyEventsOfKeys } = await import("./terminal-port.js");
     assert.deepEqual(proxyEventsOfKeys({ typing: true, now_ms: 5 }), [

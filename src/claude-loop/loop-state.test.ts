@@ -20,6 +20,7 @@ import {
     isBootPhase,
     isInputHot,
     isReallyBusy,
+    kernelReloadVerdict,
     LoopStateBus,
     shouldArmAfk10mOnSettleBoot,
     shouldPollFast,
@@ -416,17 +417,28 @@ test("busy-defer active → wake skipped", () => {
     assert.match(v.wakeSkipReason ?? "", /busy-defer/);
 });
 
-test("pane busy (esc to interrupt) → wake skipped", () => {
+test("pane busy → wake skipped, the reason naming the proofs that hold it (#4437)", () => {
     const start = T0;
     const now = start + 5 * MIN;
     const v = computeLoopView(baseInput({
         nowMs: now,
         loopStartMs: start,
         paneBusy: true,
+        paneBusyProofs: ["activity", "turn"],
         idleSinceMs: now,
     }));
     assert.equal(v.wakeAllowed, false);
-    assert.match(v.wakeSkipReason ?? "", /esc to interrupt/);
+    assert.equal(v.wakeSkipReason, "Claude is working (busy proofs: activity, turn)");
+    assert.doesNotMatch(v.wakeSkipReason ?? "", /esc to interrupt/, "esc is not quoted when it does not hold busy");
+    const unknown = computeLoopView(baseInput({ nowMs: now, loopStartMs: start, paneBusy: true, idleSinceMs: now }));
+    assert.equal(unknown.wakeSkipReason, "Claude is working (busy proofs: unknown)", "a reader without the proofs (a hook, the CLI) says so");
+});
+
+test("#4437 the kernel reloads on moved source only in a lull", () => {
+    assert.equal(kernelReloadVerdict({ stale: false, idle: false, paneBusy: true }), "none");
+    assert.equal(kernelReloadVerdict({ stale: true, idle: true, paneBusy: false }), "reload");
+    assert.equal(kernelReloadVerdict({ stale: true, idle: false, paneBusy: false }), "hold", "a turn runs");
+    assert.equal(kernelReloadVerdict({ stale: true, idle: true, paneBusy: true }), "hold", "idle marker set, but the screen shows work (a turn no hook announced)");
 });
 
 test("#1072 not logged in → wake skipped", () => {
@@ -904,7 +916,7 @@ test("pane busy + paneCompacting both true → busy reason wins (first checked)"
         paneCompacting: true,
     }));
     assert.equal(v.wakeAllowed, false);
-    assert.match(v.wakeSkipReason ?? "", /esc to interrupt/);
+    assert.match(v.wakeSkipReason ?? "", /Claude is working/);
 });
 
 test("pane busy=false, compacting=false → wake allowed when nothing else gates", () => {

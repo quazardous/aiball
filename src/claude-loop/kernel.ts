@@ -183,13 +183,16 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
     recordIpcDeniedPromptSent,
+    setIpcPaneBusyProofs,
 } from "./ipc-state.js";
 import { DENIAL_WINDOW_MS, denialsInLastHour } from "./denials.js";
 import { DENIED_KEY_PREFIX, deniedContext, deniedPromptBlocker, deniedPromptConfigured, resolveDeniedPrompt, resolveOnRepetitiveDenied, type BoardValues, type OnRepetitiveDenied } from "./denied-prompt.js";
 import { readFileValue } from "../config/file-reader.js";
-import { bootReminderFor, POST_RESTART_REMINDER, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
+import { bootReminderFor, POST_RESTART_REMINDER, isHumanPresentHold, isInputHot, kernelReloadVerdict, shouldInjectBootstrapSkill, wakeCountdownArmable, LoopStateBus, wakeViewVerdict, type AfkMode } from "./loop-state.js";
 import {
     seenProof,
+    liveProofs,
+    proofChanges,
     isBusy as busyStackActive,
     releaseAll as releaseBusyProofs,
     paneReadsIdle,
@@ -611,6 +614,8 @@ function shQuote(s: string): string {
 // kernel`. `stale=true` with NO `respawning kernel` ⇒ respawn path broken ; NO
 // flip at all after a confirmed commit ⇒ the watchdog tick isn't running.
 let lastStaleEval: boolean | null = null;
+// #4437 — the hold is said once per stretch of busy, not every 2 s.
+let reloadHeldSaid = false;
 function selfReloadIfStale(): void {
     let plate: Plate;
     try { plate = readPlate(sd!); } catch { return; }
@@ -620,7 +625,13 @@ function selfReloadIfStale(): void {
         lastStaleEval = stale;
         log(`selfReloadIfStale: source stale=${stale} (boot=${(plate.started_at_sha ?? "?").slice(0, 7)} now=${(sha ?? "?").slice(0, 7)})`);
     }
-    if (!stale) return;
+    const verdict = kernelReloadVerdict({ stale, idle: readIdleSinceMs(sd!) !== null, paneBusy: getIpcState().paneBusy === true });
+    if (verdict === "none") { reloadHeldSaid = false; return; }
+    if (verdict === "hold") {
+        if (!reloadHeldSaid) log("source moved, but Claude is working — the kernel reloads at the end of the turn");
+        reloadHeldSaid = true;
+        return;
+    }
     log(
         `source moved since boot (${(plate.started_at_sha ?? "?").slice(0, 7)} → ${(sha ?? "?").slice(0, 7)}) ` +
         `and loop is idle — self-reloading kernel`,
@@ -910,6 +921,9 @@ if (sd) {
     // visible → seenProof(esc), pane-idle → releaseAll. busyW.on just feeds the
     // SanityController stale-busy detector.
     busyW.on("change", (s) => {
+        // #4437 — logged: the stale-busy detector is armed by `esc` alone, which
+        // Claude Code no longer draws since 2.1.304.
+        log(`sanity: ${s.visible ? "armed (BUSY_LATCHED, esc to interrupt shown)" : "disarmed (esc to interrupt gone)"}`);
         if (s.visible) getSanityService().busyLatched();
         else getSanityService().busyCleared();
     });
@@ -1055,6 +1069,8 @@ const PICKER_CROSS_RETRY_MS = 3000;
 // holds. Module state because it accumulates across ticks. Released wholesale
 // by pane-idle + the explicit clears (Stop hook, sanity, turn:settled).
 let busyProofs: BusyProofs = new Map();
+// #4437 — the live proofs at the last tick, to log what changed.
+let lastLiveProofs: string[] = [];
 // #4014 — when the current turn started, and whether the pane has shown Claude
 // at work since: until it has, an empty prompt box is the moment right after a
 // submit, not the end of the turn (see paneReadsIdle).
@@ -1172,6 +1188,15 @@ async function probePaneMarkers(): Promise<void> {
         sinceTurnStartMs: nowBusy - turnStartedAtMs,
     });
     if (paneIdle) busyProofs = releaseBusyProofs();
+    // #4437 — say which proof comes on or goes off: the only way to read back,
+    // from loop.log, what held busy (or nothing) at a given moment.
+    const liveNow = liveProofs(busyProofs, nowBusy).sort();
+    const changed = proofChanges(lastLiveProofs, liveNow);
+    if (changed) {
+        log(`busy proofs:${changed.on.map((p) => ` +${p}`).join("")}${changed.off.map((p) => ` -${p}`).join("")} → ${liveNow.length ? liveNow.join(", ") : "none"}${paneIdle && changed.off.length ? " (pane idle: all released)" : ""}`);
+        lastLiveProofs = liveNow;
+        setIpcPaneBusyProofs(liveNow);
+    }
     const composite = busyStackActive(busyProofs, nowBusy);
     if (composite !== getIpcState().paneBusy) setPaneBusy(sd, composite);
     // #1012 — pane-idle = 2nd source of turn-end (the Stop hook can be missed).
@@ -1710,8 +1735,8 @@ async function tryWake(reason: string, manualWake = false, hint?: WakeHint, pani
         }
     }
 }
-// A panic wake bypasses ONLY the busy gates (busy-defer, pane shows
-// "esc to interrupt", pane shows /compact) — `PANIC_BYPASSABLE_REASONS` in
+// A panic wake bypasses ONLY the busy gates (busy-defer, Claude is working
+// on a busy proof, pane shows /compact) — `PANIC_BYPASSABLE_REASONS` in
 // loop-state.ts. AFK / zen / idle-marker still apply — if the loop is told to
 // shut up, panic respects that; if claude was never seen idle the wake would
 // be lost anyway.
@@ -2100,10 +2125,11 @@ async function mainSse(): Promise<void> {
     //   - SHA mismatch: tsx-watch may hold cached modules even after a
     //     code change (today's tryPanic-still-firing repro). The
     //     existing `selfReloadIfStale()` runs only post-heartbeat and
-    //     only when claude is idle; if a stale wake keeps claude busy
-    //     it's never reached. Running the SHA check on the watchdog
-    //     cadence forces a full process respawn within 2s of any
-    //     install-root SHA change, regardless of claude state.
+    //     only when no wake fired; running the SHA check on the watchdog
+    //     cadence respawns within 2s of the first idle moment after any
+    //     install-root SHA change. #4437 — idle only: it used to respawn
+    //     regardless of claude state, and the drain on reattach typed a
+    //     wake into the turn still running.
     // #3340 — who is attached to a tmux loop, told to the daemon when it
     // changes, so a client (tvty) knows another holds the loop. On the host,
     // the host says it itself (`host.clients`).

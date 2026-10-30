@@ -152,6 +152,8 @@ export interface IpcState {
      *  out-of-process readers (cli inspect, hook tests) until a follow-up
      *  drops it. */
     paneBusy: boolean | null;
+    /** #4437 — the busy proofs that hold `paneBusy` (turn, esc, activity, compacting). */
+    paneBusyProofs: string[] | null;
     paneReady: boolean | null;
     paneCompacting: boolean | null;
     paneInterrupted: boolean | null;
@@ -298,6 +300,7 @@ const state: IpcState = {
     promptHasInput: false,
     bootActiveModules: [],
     paneBusy: null,
+    paneBusyProofs: null,
     paneReady: null,
     paneCompacting: null,
     paneInterrupted: null,
@@ -743,6 +746,10 @@ export function setIpcPaneBusy(value: boolean | null): void {
     state.paneBusy = value;
     notifyIpcChanged();
 }
+export function setIpcPaneBusyProofs(value: string[] | null): void {
+    state.paneBusyProofs = value;
+    notifyIpcChanged();
+}
 export function setIpcPaneReady(value: boolean | null): void {
     state.paneReady = value;
     notifyIpcChanged();
@@ -783,6 +790,7 @@ export function resetIpcStateForTests(): void {
     state.dispAfkCommitAtMs = null;
     state.humanTypingAtMs = null;
     state.paneBusy = null;
+    state.paneBusyProofs = null;
     state.paneReady = null;
     state.paneCompacting = null;
     state.paneInterrupted = null;

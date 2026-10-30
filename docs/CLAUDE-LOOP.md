@@ -288,8 +288,11 @@ stateDiagram-v2
 
 Entering **live** unlocks the wake machine (`BOOT_READY`, diagram 3) and tries a
 first wake. The bar's *busy* colour is not a state of its own: it stays on while
-any sign of activity was seen in the last 4 s — an open turn, the
-`esc to interrupt` footer, `/compact`, the spinner line.
+any sign of activity was seen in the last 4 s — an open turn, the spinner line
+(spinner, timer and tokens, which Claude shows the whole time it works),
+`/compact`, and on Claude Code before 2.1.304 the `esc to interrupt` footer.
+Each sign coming on or going off is logged in `loop.log` as
+`busy proofs: +activity -turn → …`.
 
 ### 2. Human presence — F9 and typing
 
@@ -356,7 +359,7 @@ flowchart TD
     C -- no --> D{"idle marker set?"}
     D -- no --> S2["skip: claude busy or still booting"]
     D -- yes --> E{"loop view allows it?"}
-    E -- no --> S3["skip, first reason that applies:<br/>not logged in · usage limit · trust dialog · API unreachable ·<br/>boot grace · human typing in the last 5 s · presence hold ·<br/>busy-defer · esc to interrupt · /compact"]
+    E -- no --> S3["skip, first reason that applies:<br/>not logged in · usage limit · trust dialog · API unreachable ·<br/>boot grace · human typing in the last 5 s · presence hold ·<br/>busy-defer · Claude is working · /compact"]
     E -- yes --> F{"work waiting?<br/>pings · actionable tickets · signals"}
     F -- no --> S4["skip: drained"]
     F -- yes --> G["pick the phrase:<br/>1. external signal<br/>2. unread event, or the live notification<br/>3. backlog ticket"]
@@ -369,7 +372,12 @@ flowchart TD
 - A manual `claude-loop wake` skips the work check and what a human asks to
   override (boot, presence hold, typing, busy-defer), but still stops at not
   logged in, the trust dialog and an unreachable API. A panic wake only ignores
-  busy-defer, `esc to interrupt` and `/compact`.
+  busy-defer, Claude working (the reason names the signs that hold it:
+  `Claude is working (busy proofs: activity, turn)`) and `/compact`.
+- **Moved source reloads the kernel only between turns.** After a deploy the
+  kernel reloads itself in place at the first moment Claude is idle; while a
+  turn runs, `loop.log` says `source moved, but Claude is working — the kernel
+  reloads at the end of the turn`.
 - **A blind turn-end holds the wakes.** When the screen closes a turn with
   nothing shown and no Stop hook came (Claude may be busy where the screen
   cannot tell, such as a compaction it did not draw), no wake goes until a Stop,

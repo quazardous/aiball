@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+    proofChanges,
     seenProof,
     liveProofs,
     mechanicalProofsLive,
@@ -133,4 +134,12 @@ test("#4014 out of a turn, and with work on screen, nothing changes", () => {
     assert.equal(paneReadsIdle({ ...idleBox, inTurn: false, turnShowedWork: false, sinceTurnStartMs: 0 }), true);
     assert.equal(paneReadsIdle({ idlePromptVisible: true, mechanicalLive: true, inTurn: true, turnShowedWork: true, sinceTurnStartMs: 60_000 }), false);
     assert.equal(paneReadsIdle({ idlePromptVisible: false, mechanicalLive: false, inTurn: true, turnShowedWork: true, sinceTurnStartMs: 60_000 }), false);
+});
+
+test("#4437 proofChanges: what came on and went off, null when nothing moved", () => {
+    assert.equal(proofChanges([], []), null);
+    assert.equal(proofChanges(["activity", "turn"], ["activity", "turn"]), null);
+    assert.deepEqual(proofChanges([], ["turn"]), { on: ["turn"], off: [] });
+    assert.deepEqual(proofChanges(["activity", "turn"], ["turn"]), { on: [], off: ["activity"] });
+    assert.deepEqual(proofChanges(["esc", "turn"], []), { on: [], off: ["esc", "turn"] });
 });

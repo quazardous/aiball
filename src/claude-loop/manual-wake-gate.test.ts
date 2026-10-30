@@ -89,6 +89,11 @@ test("a panic wake passes the busy reasons and nothing else", () => {
     const busy = wakeViewVerdict(input({ busyDeferUntilMs: T0 + 5 * SEC }), true);
     assert.equal(busy.proceed, true);
     assert.equal(busy.panicBypass, true);
+    // #4437 — the pane-busy reason changed wording; a panic wake still passes it.
+    const working = wakeViewVerdict(input({ paneBusy: true, paneBusyProofs: ["activity"] }), true);
+    assert.equal(working.proceed, true);
+    assert.equal(working.panicBypass, true);
+    assert.equal(wakeViewVerdict(input({ paneBusy: true }), false).proceed, false, "an ordinary wake still waits");
     for (const [name, over] of [...BLOCK_EVERY_WAKE, ["presence hold", { afkMode: "wait_inf" }] as [string, Partial<LoopStateInput>]]) {
         const v = wakeViewVerdict(input(over), true);
         assert.equal(v.proceed, false, name);

@@ -73,3 +73,37 @@ test("the activity is searched on the WHOLE pane, not in the footer window", () 
     assert.equal(paneShowsActivity(pane), true);
     assert.equal(paneFooterShowsBusy(pane), false, "control: the footer window misses it");
 });
+
+// #4437 — Claude Code 2.1.312, recorded on Linux through the session host
+// (`host.screen`), 2026-10-30: no `esc to interrupt` anywhere while it works,
+// and at rest a "done" line that keeps a spinner glyph. Bottom of the screen
+// only. Note the no-break space in "⎿ Running…".
+const BUSY_2_1_312 = [
+    "  ⎿ \u00a0Running…",
+    "",
+    "✢ Caramelizing… (39s · ↓ 2.9k tokens)",
+    "",
+    "──────────────────────────────────────── agent ─",
+    "❯",
+    "────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                                                                                                 /rc",
+].join("\n");
+const IDLE_2_1_312 = [
+    "✻ Sautéed for 30s · done 7:06",
+    "",
+    "────────────────────────────────────────────────",
+    "❯",
+    "────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                                                                                                 /rc",
+].join("\n");
+
+test("#4437 2.1.312: the activity line carries busy, esc never shows", () => {
+    assert.equal(paneShowsActivity(BUSY_2_1_312), true);
+    assert.equal(paneFooterShowsBusy(BUSY_2_1_312), false, "the hint is gone since 2.1.304");
+});
+
+test("#4437 2.1.312: the \"done\" line at rest is not an activity, glyph and chrono notwithstanding", () => {
+    assert.equal(paneShowsActivity(IDLE_2_1_312), false);
+    assert.equal(paneShowsActivity("✻ Churned for 9s · done jeudi 09:57"), false);
+    assert.equal(paneFooterShowsBusy(IDLE_2_1_312), false);
+});

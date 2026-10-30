@@ -673,7 +673,8 @@ export function logPaneCapture(sd: string | undefined, text: string, cursor?: { 
 //
 // Persistence across a timer reload is out of scope here (see #771 —
 // micro-db option study).
-/** Pane probe: claude pane shows `esc to interrupt` in its footer. */
+/** The composite busy (busy-stack.ts): a turn, the activity line, `/compact`,
+ *  or `esc to interrupt` (Claude Code before 2.1.304). */
 export function setPaneBusy(_sd: string, busy: boolean): void {
     setIpcPaneBusy(busy);
 }
@@ -1398,6 +1399,7 @@ export function readLoopStateInput(
         // false from outside the timer process). #771 covers the future
         // persistence-across-reload option.
         paneBusy: ipc.paneBusy ?? false,
+        paneBusyProofs: ipc.paneBusyProofs ?? undefined,
         paneReady: ipc.paneReady ?? false,
         paneCompacting: ipc.paneCompacting ?? false,
         paneInterrupted: ipc.paneInterrupted ?? false,
@@ -1819,7 +1821,8 @@ export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean 
  * prompt rendu. À confirmer/affiner via #360 (le logger proxy) ou une
  * capture d'interruption réelle. C'est de la DÉCORATION pure : un faux
  * négatif retombe sur `[idle]`, un faux positif sur `[idle:interrupted]`
- * — aucun impact sur le gating des wakes (qui, lui, lit `esc to interrupt`).
+ * — aucun impact sur le gating des wakes (qui, lui, lit le busy composite de
+ * busy-stack.ts ; #4437 — plus `esc to interrupt`, absent depuis 2.1.304).
  */
 export function paneShowsInterrupted(paneText: string, footerLines = 12): boolean {
     const footer = paneText

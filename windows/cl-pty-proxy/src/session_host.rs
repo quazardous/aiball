@@ -18,6 +18,8 @@ mod core;
 mod frames;
 #[path = "host/os.rs"]
 mod os;
+#[path = "host/osc_probe.rs"]
+mod osc_probe;
 #[path = "host/session.rs"]
 mod session;
 #[path = "host/attach.rs"]

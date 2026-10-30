@@ -25,6 +25,10 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `loop.log` says each sign of work the loop reads as it comes on or goes off
+  (`busy proofs: +activity -turn → …`), and when the stale-busy guard is armed.
+  The session host counts the `OSC 7501` sequences Claude writes, which the
+  screen drops (`host.screen`: `osc7501`); the kernel logs them. A measure only.
 - `project.settings_set` forks a new `claude.config_dir` as `aiball claude-config
   --fork` does (`fork: { from?, copy?, force? }`), and `project.settings` says
   the dir's state (`config_dir_state`: it exists, it has been through Claude's
@@ -88,6 +92,9 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- A wake held because Claude works says which signs hold it
+  (`Claude is working (busy proofs: activity, turn)`) instead of always quoting
+  `esc to interrupt`, which Claude Code no longer shows since 2.1.304.
 - A ticket whose last action is a step, named by a backlog wake the agent
   leaves unanswered, rests like any other (`tickets.backlog.rest`, an hour by
   default) instead of 5 minutes. It came back every 5 minutes for as long as
@@ -105,6 +112,10 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A deploy no longer lands a wake in the middle of a turn: the kernel reloads
+  itself on moved source only once Claude is idle, where it used to respawn
+  within 2 s whatever Claude was doing, and the wake its reattach sent arrived
+  as a message typed while Claude worked.
 - The attention report reads the Claude transcripts of every config dir the
   known folders use (`claude.config_dir`), not only `~/.claude`'s: a project
   moved to its own dir no longer drops to zero. `--transcripts-dir` adds one

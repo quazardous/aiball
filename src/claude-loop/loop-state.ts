@@ -99,11 +99,14 @@ export interface LoopStateInput {
      *  inputs like every other signal. Setters live in `state.ts`
      *  (`setPaneBusy`, `setPaneReady`, `setCompacting`, `setInterrupted`).
      *
-     *  - `paneBusy`     : `esc to interrupt` visible in the footer
+     *  - `paneBusy`     : the composite busy (busy-stack.ts): a turn, the
+     *                     activity line, `esc to interrupt`, a compaction
      *  - `paneReady`    : prompt signature (`Claude Code v`, `❯ `, …)
      *  - `paneCompacting`: `/compact` or auto-compact running
      *  - `paneInterrupted`: `interrupted by user` notice in pane */
     paneBusy: boolean;
+    /** #4437 — which proofs hold `paneBusy`, for the skip reason to name them. */
+    paneBusyProofs?: string[];
     paneReady: boolean;
     paneCompacting: boolean;
     paneInterrupted: boolean;
@@ -404,7 +407,10 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
         return { allowed: false, reason: `busy-defer ${remMs}ms remaining` };
     }
     if (input.paneBusy) {
-        return { allowed: false, reason: "pane footer shows `esc to interrupt`" };
+        // #4437 — name the proofs: since Claude Code 2.1.304 `esc to interrupt`
+        // no longer shows, and the reason quoted it whatever held busy.
+        const proofs = input.paneBusyProofs?.length ? input.paneBusyProofs.join(", ") : "unknown";
+        return { allowed: false, reason: `Claude is working (busy proofs: ${proofs})` };
     }
     if (input.paneCompacting) {
         // #624 david `62ys4g` : `/compact` (manual or auto) is internally
@@ -468,8 +474,20 @@ export function shouldArmAfk10mOnSettleBoot(input: Pick<LoopStateInput, "noWait"
     return !input.noWait;
 }
 
+/**
+ * #4437 — may the kernel reload itself on moved source now? Only in a lull:
+ * Claude idle (the idle marker is set) and nothing on the screen says it works.
+ * The 2 s watchdog used to reload whatever Claude did, so a deploy respawned the
+ * kernel mid-turn, and the drain on reattach typed a wake into the working
+ * Claude. Moved source now waits for the end of the turn.
+ */
+export function kernelReloadVerdict(i: { stale: boolean; idle: boolean; paneBusy: boolean }): "reload" | "hold" | "none" {
+    if (!i.stale) return "none";
+    return i.idle && !i.paneBusy ? "reload" : "hold";
+}
+
 /** The skip reasons a panic wake may pass: the pane is working, not refusing. */
-export const PANIC_BYPASSABLE_REASONS = /busy-defer|esc to interrupt|\/compact/;
+export const PANIC_BYPASSABLE_REASONS = /busy-defer|Claude is working|\/compact/;
 
 /**
  * #2311 — what `tryWake` does with the loop view, for EVERY wake. A manual wake

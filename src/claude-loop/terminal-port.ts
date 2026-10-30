@@ -176,6 +176,9 @@ export async function typeAndSubmit(
     return true;
 }
 
+/** #4437 — the OSC 7501 count is said at most this often. */
+const OSC_LOG_EVERY_MS = 10_000;
+
 export function hostPort(opts: {
     controlSocket: string;
     log: (msg: string) => void;
@@ -199,8 +202,28 @@ export function hostPort(opts: {
         waiting.set(id, (r) => (r.error ? reject(new Error(r.error.message)) : resolve(r.result)));
         sock.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
+    // #4437 — the host counts the OSC 7501 Claude writes (vt100 drops them):
+    // said in the log as they come, at most once per OSC_LOG_EVERY_MS, so it
+    // can be decided from real sessions whether they tell busy from idle.
+    let oscLogged: number | null = null;
+    let oscLoggedAtMs = 0;
+    const noteOsc = (o: { count?: unknown; last?: unknown } | undefined): void => {
+        const count = typeof o?.count === "number" ? o.count : null;
+        if (count === null) return;
+        const last = typeof o?.last === "string" ? o.last : "";
+        if (oscLogged === null) {
+            oscLogged = count;
+            if (count > 0) opts.log(`host: OSC 7501 seen ${count} time(s) since the host started, last ${JSON.stringify(last)}`);
+            return;
+        }
+        if (count <= oscLogged || Date.now() - oscLoggedAtMs < OSC_LOG_EVERY_MS) return;
+        opts.log(`host: OSC 7501 seen ${count - oscLogged} more time(s) (${count} in all), last ${JSON.stringify(last)}`);
+        oscLogged = count;
+        oscLoggedAtMs = Date.now();
+    };
     const screenOf = (v: unknown): ScreenSnapshot => {
-        const s = v as { text?: unknown; cursor?: { x?: unknown; y?: unknown } } | null;
+        const s = v as { text?: unknown; cursor?: { x?: unknown; y?: unknown }; osc7501?: { count?: unknown; last?: unknown } } | null;
+        noteOsc(s?.osc7501);
         const c = s?.cursor;
         return {
             text: typeof s?.text === "string" ? s.text : "",

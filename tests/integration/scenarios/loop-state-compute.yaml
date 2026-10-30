@@ -261,15 +261,16 @@ unit:
         "wakeAllowed": false
         "wakeSkipReason": "/busy-defer/"
 
-    - name: "pane busy (esc to interrupt) → wake skipped"
+    - name: "pane busy → wake skipped, the reason naming the busy proofs"
       call: { module: "./loop-state.js", fn: "computeLoopView" }
       args_overrides:
         nowMs: 1780245900000
         paneBusy: true
+        paneBusyProofs: ["activity"]
         idleSinceMs: 1780245900000
       expect:
         "wakeAllowed": false
-        "wakeSkipReason": "/esc to interrupt/"
+        "wakeSkipReason": "/Claude is working \\(busy proofs: activity\\)/"
 
     - name: "manual wake with idle marker bypasses AFK + defer + wake-in-flight"
       call: { module: "./loop-state.js", fn: "computeLoopView" }

@@ -114,6 +114,18 @@ export function liveProofs(proofs: BusyProofs, nowMs: number): string[] {
     return out;
 }
 
+/**
+ * #4437 — the proofs that came on and went off between two reads of the live
+ * set, for the loop's log: which proof holds busy is otherwise invisible, so
+ * "esc no longer shows" or "a turn ran with no proof on screen" can't be read
+ * back from `loop.log`. Null when nothing changed.
+ */
+export function proofChanges(before: readonly string[], after: readonly string[]): { on: string[]; off: string[] } | null {
+    const on = after.filter((p) => !before.includes(p));
+    const off = before.filter((p) => !after.includes(p));
+    return on.length || off.length ? { on, off } : null;
+}
+
 /** busy ⟺ au moins une preuve tient encore à `nowMs`. */
 export function isBusy(proofs: BusyProofs, nowMs: number): boolean {
     for (const p of proofs.values()) {

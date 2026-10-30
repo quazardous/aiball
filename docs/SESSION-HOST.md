@@ -180,7 +180,7 @@ Unix host, is accepted and does nothing.
 | `host.auth` | `{ token }` | `{}` — Windows, the first line (above) |
 | `host.hello` | — | `{ version, agent, pid, cwd, claude: { pid, running, started_at, exit_code }, size: {rows, cols}, clients }` |
 | `host.inject` | `{ text }` | `{}` — writes `text` to Claude's input, as the kernel's wakes do today |
-| `host.screen` | — | `{ text, cursor: {x, y}, rows, cols, seq }` — the visible screen, as `getScreen` today |
+| `host.screen` | — | `{ text, cursor: {x, y}, rows, cols, seq, osc7501 }` — the visible screen, as `getScreen` today; `osc7501: { count, last }` counts the `OSC 7501` sequences the command wrote, which the screen model drops (a measure, logged by the kernel, not yet read as a sign of work) |
 | `host.start` | `{ argv, env?, cwd? }` | `{ pid }` — starts Claude in the PTY; refused while one runs |
 | `host.stop` | `{ signal?: "TERM" \| "INT", timeout_ms?, restart? }` | `{ exit_code }` — ends Claude: a hangup first (a terminal closing, which a shell obeys), the signal a second later if it still runs, SIGKILL past the timeout, to its whole process group; the host itself stays. With `restart`, attached clients get `exited { restarting: true }` and stay for the next `host.start` |
 | `host.shutdown` | — | `{}` — Claude stopped first, then the host exits and removes its files |
@@ -190,7 +190,7 @@ Unix host, is accepted and does nothing.
 
 | Notification | Params | When |
 |---|---|---|
-| `host.screen_changed` | `{ text, cursor, rows, cols, seq }` | the screen changed; at most 4 per second, the latest state |
+| `host.screen_changed` | `{ text, cursor, rows, cols, seq, osc7501 }` | the screen changed; at most 4 per second, the latest state |
 | `host.keys` | `{ typing, lone_esc, afk_key, reload, afk_active, now_ms }` | a client's keys meant something for the loop — the PTY proxy's keystroke verdict, what its `proxyEvent`s carry today |
 | `host.clients` | `{ count, interactive }` | a client attached or left |
 | `host.exited` | `{ code, restarting }` | Claude ended; the host waits for `host.start` or `host.shutdown`, or exits with it (`--exit-with-command`) |

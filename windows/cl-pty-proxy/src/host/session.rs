@@ -16,6 +16,7 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde_json::{json, Value};
 
 use crate::frames;
+use crate::osc_probe::OscProbe;
 use crate::core::{Decider, Unit, Verdict};
 use crate::os::Stream;
 
@@ -150,6 +151,8 @@ struct Inner {
     restarting: bool,
     /// #3333 — the command exited and no restart was asked: the session is over.
     over: bool,
+    /// #4437 — OSC 7501 sequences the command wrote, counted before vt100 drops them.
+    osc7501: OscProbe,
     /// #3425 — the command's processes (Windows): what its process group is on Unix.
     #[cfg(windows)]
     job: Option<crate::os::Job>,
@@ -206,6 +209,7 @@ impl Session {
                 claude: ClaudeState { running: false, pid: None, started_at: None, exit_code: None },
                 restarting: false,
                 over: false,
+                osc7501: OscProbe::new("7501"),
                 #[cfg(windows)]
                 job: None,
                 #[cfg(windows)]
@@ -323,6 +327,7 @@ impl Session {
             let answered = answer_cursor_query(&mut inner, bytes);
             #[cfg(windows)]
             let bytes: &[u8] = answered.as_deref().unwrap_or(bytes);
+            inner.osc7501.feed(bytes);
             inner.parser.process(bytes);
             inner.seq += bytes.len() as u64;
             inner.screen_rev += 1;
@@ -843,7 +848,10 @@ fn screen_text(inner: &Inner) -> Value {
     let (rows, cols) = s.size();
     let text = s.rows(0, cols).collect::<Vec<_>>().join("\n");
     let (cy, cx) = s.cursor_position();
-    json!({ "text": text, "cursor": { "x": cx, "y": cy }, "rows": rows, "cols": cols, "seq": inner.screen_rev })
+    json!({
+        "text": text, "cursor": { "x": cx, "y": cy }, "rows": rows, "cols": cols, "seq": inner.screen_rev,
+        "osc7501": { "count": inner.osc7501.count, "last": inner.osc7501.last },
+    })
 }
 
 /// A preview: the screen's rows, cut to the client's window, plain or with colours.
