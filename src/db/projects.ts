@@ -26,7 +26,7 @@ import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./l
 import { isAssignmentLive, isHeldByOther } from "./assignment-gate.js";
 import { assignWindowSec, findConfigUpwards, globalConfigPath } from "../autopoll/config.js";
 import { statSync } from "node:fs";
-import { levelsVisibleTo, listHumans } from "./consumers.js";
+import { isHuman, levelsVisibleTo, listHumans } from "./consumers.js";
 import { listSubscriptions } from "./subscriptions.js";
 import { computeDecisionGate, computeDecisionGateProposers } from "./decision-gate.js";
 import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
@@ -37,6 +37,7 @@ import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate
 import { isStepMeta, keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
 import { forgetConfigOverrides, getConfig } from "./config-overrides.js";
 import { parseMeta } from "../questions.js";
+import { ticketsHeldByHuman } from "./human-hand.js";
 import { gateEdges } from "../critical-ticket.js";
 
 /**
@@ -2089,6 +2090,8 @@ function computeActionableTicketIdsUncached(
     // #370). Only computed when a consumer is in scope (anonymous / token-
     // less callers keep the global, pre-#265 behaviour — zero regression).
     const awaitingOtherSet = consumerId ? lastActorExclusions(consumerId, scopeIds) : null;
+    // #4452 — a human keeps the hand: no agent's turn, until the next action.
+    const heldByHuman = consumerId && !isHuman(consumerId) ? ticketsHeldByHuman() : null;
 
     // #2241 — an agent's actionable pool holds only the levels it works on:
     // `task` for a coder, `roadmap` + `milestone` for a cto. The rest stays open
@@ -2107,6 +2110,7 @@ function computeActionableTicketIdsUncached(
         if (gatedByBlocker.has(id)) continue;
         if (assignedAwaySet.has(id)) continue;
         if (awaitingOtherSet && awaitingOtherSet.has(id)) continue;
+        if (heldByHuman && heldByHuman.has(id)) continue;
         actionableIds.add(id);
     }
 

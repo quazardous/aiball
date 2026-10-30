@@ -137,6 +137,11 @@ actionable-for-C (whose-court) =
 - **…unless C's last action is a step** (`then: continue`) or a comment with
   `handback: false` → C is carrying on, not waiting → stays actionable, even
   right after C's own question.
+- **The last action is a human's comment with `handback: false`** → the human
+  keeps the hand: said something, not done, nobody acts on it yet. The ticket is
+  out of every agent's actionable pool and backlog, the holder's included, and
+  the comment pings no one, except an `@mention` in it. The next action on the
+  ticket, a comment or a decision, ends it.
 - **A ticket C filed with `handback`** (C does not lead the project) → gated even
   before anyone else acts: C filed it for someone else.
 

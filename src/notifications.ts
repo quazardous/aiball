@@ -28,6 +28,7 @@ import {
     type Message,
 } from "./db.js";
 import { effectiveNotifyProjectBroadcasts, getConsumer, seesLevel } from "./db/consumers.js";
+import { isStepMeta, readHandback } from "./ticket-transitions.js";
 import { isDecisionEventKind } from "./domain.js";
 import { getMessage } from "./db/messages.js";
 // #1573 — moved to a leaf module so the backlog rules can ask the same
@@ -62,6 +63,10 @@ export function fanOutPings(msg: Message, opts?: { except?: string | null }): vo
     // the pending queue if it's not auto-approved; they just don't
     // get a personal ping for it.
     if (msg.scope === "internal") return;
+    // #4452 — a human's comment that keeps the hand pings no one either: they
+    // read it when they open the thread. @mentions still reach, as above.
+    if (msg.kind === "comment_added" && msg.by_agent && isHuman(msg.by_agent)
+        && readHandback(msg.meta) === false && !isStepMeta(msg.meta)) return;
 
     const recipients = new Set<string>();
 

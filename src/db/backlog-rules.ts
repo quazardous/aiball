@@ -27,6 +27,7 @@ import * as schema from "../schema.js";
 import { mentions } from "../mentions.js";
 import { getDb, nowIso } from "./connection.js";
 import { getConsumer, isHuman } from "./consumers.js";
+import { ticketsHeldByHuman } from "./human-hand.js";
 import { activeFocus, focusHides, type WakeFocus } from "../wake-focus.js";
 import { focusRelatives } from "./focus-relatives.js";
 import { onTicketChanged } from "./ticket-change.js";
@@ -56,6 +57,8 @@ export interface BacklogRulesCtx {
      *  `--role crew` worker or a project declaring `no_claim: true`. Such a
      *  consumer consumes ONLY what is pushed to it. */
     canClaim: boolean;
+    /** #4452 — tickets a human keeps the hand on; absent for a human reader. */
+    heldByHumanIds?: ReadonlySet<number>;
     /** #1573 — tickets whose body, or any comment in the thread, addresses
      *  this consumer by `@name`. Populated ONLY when `canClaim === false`
      *  (the rule that reads it is inert otherwise), so a normal consumer
@@ -235,6 +238,14 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         excludesFrom: new Set<Target>(["fifo-wake"]),
     },
     {
+        // #4452 — a human said something and keeps the hand: nobody acts on it
+        // yet. Not `fifo-wake`: the comment pings no one, and an @mention in it
+        // is an explicit call that still reaches its agent.
+        name: "human-keeps-the-hand",
+        when: (ctx, item) => ctx.heldByHumanIds?.has(item.ticketId) ?? false,
+        excludesFrom: new Set<Target>(["backlog-tier", "actionable-pool", "hot-tier"]),
+    },
+    {
         // #4127 — a ticket awaiting moderation wakes no one: it is not yet
         // work, and an agent woken on it answers before the human has said it
         // is. Its events stay unread (#643: pending counts as unread) and
@@ -321,6 +332,7 @@ export function buildBacklogRulesCtx(
     const mentionsMeIds = canClaim ? new Set<number>() : ticketsMentioning(consumerId);
     const focusByProject = wakeFocusFor(consumerId, nowMs);
     const namesMe = namesMeOf(consumerId, canClaim ? null : mentionsMeIds);
+    const heldByHumanIds = isHuman(consumerId) ? undefined : ticketsHeldByHuman();
     const followsTicket = (ticketId: number): boolean => !!getDb().select({ c: schema.ticketSubscriptions.consumerId })
         .from(schema.ticketSubscriptions)
         .where(and(eq(schema.ticketSubscriptions.ticketId, ticketId), eq(schema.ticketSubscriptions.consumerId, consumerId)))
@@ -328,7 +340,7 @@ export function buildBacklogRulesCtx(
     if (opts.closedIds && opts.snoozedIds) {
         return {
             consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds,
-            claimedByOtherIds, canClaim, mentionsMeIds, namesMe, followsTicket, focusByProject,
+            claimedByOtherIds, canClaim, mentionsMeIds, heldByHumanIds, namesMe, followsTicket, focusByProject,
         };
     }
     const db = getDb();
@@ -350,7 +362,7 @@ export function buildBacklogRulesCtx(
             .all();
         snoozedIds = new Set(rows.map((r) => r.id));
     }
-    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds, namesMe, followsTicket, focusByProject };
+    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds, canClaim, mentionsMeIds, heldByHumanIds, namesMe, followsTicket, focusByProject };
 }
 
 /**

@@ -28,6 +28,10 @@ const { updateMessageStatus } = await import("../db/messages.js");
 const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
 const { BANDS } = await import("./inbox-pilot.js");
+const schema = await import("../schema.js");
+const { eq } = await import("drizzle-orm");
+const { computeActionableTicketIds } = await import("../db/projects.js");
+const { buildBacklogRulesCtx, defaultBacklogRules } = await import("../db/backlog-rules.js");
 
 const P = "p-3005";
 getDb();
@@ -141,6 +145,56 @@ test("a comment handing the ticket back shows as a question; one keeping the han
     submitMessage({ project: P, kind: "comment_added", ticket_id: legacy, body: "older", by_agent: "worker", summary_until: "s" });
     r = await row(legacy);
     assert.deepEqual([r.turn, r.state_glyph], ["you", null], "no handback on the last word: the turn and glyph read as before");
+});
+
+test("a human's comment keeping the hand: not the agents' turn, not actionable, no ping, until the next action", async () => {
+    const pingsOf = (id: number) => getDb().select().from(schema.pings).where(eq(schema.pings.commentId, id)).all().map((p) => p.recipient);
+    const actionable = (id: number) => computeActionableTicketIds("worker", [id]).actionableIds.has(id);
+
+    const t = ticket("human keeps");
+    await comment(WORKER, t, { handback: true });
+    assert.equal(actionable(t), false, "the worker spoke last");
+    const kept = await comment(HUMAN, t, { handback: false });
+    const r = await row(t);
+    assert.deepEqual([r.turn, r.state_glyph], ["you", null], "the ball is the human's");
+    assert.equal((await row(t, WORKER)).turn, "them");
+    assert.equal(actionable(t), false, "not the agent's turn");
+    assert.deepEqual(pingsOf(kept), [], "the comment pings no one");
+    const ctx = buildBacklogRulesCtx("worker");
+    assert.equal(defaultBacklogRules.excludes(ctx, { ticketId: t, ticketByAgent: "boss", assignee: null, project: P }, "backlog-tier"), true, "no backlog wake brings it up");
+
+    // A held ticket is held from its holder too.
+    assert.ok((await call(WORKER, "ticket.claim", { id: t })).status < 500);
+    assert.equal(actionable(t), false, "the holder waits too");
+
+    // The human's next comment hands over, as usual.
+    await comment(HUMAN, t, { handback: undefined });
+    assert.equal(actionable(t), true, "a plain comment moves the hand");
+
+    // A decision ends it too.
+    const u = ticket("kept then decided");
+    const plan = await comment(WORKER, u, { decision_kind: "plan", handback: undefined });
+    await comment(HUMAN, u, { handback: false });
+    assert.equal(actionable(u), false);
+    await decide(plan, "accepted");
+    assert.equal(actionable(u), true, "the decision hands over");
+
+    // An @mention in it is an explicit call: it still reaches, the ticket stays out of the pool.
+    const v = ticket("mention");
+    const called = await comment(HUMAN, v, { handback: false, body: "@worker a look" });
+    assert.deepEqual(pingsOf(called), ["worker"], "the mention still pings");
+    assert.equal(actionable(v), false);
+
+    // An agent's own handback: false is not this rule.
+    const w = ticket("agent keeps");
+    await comment(WORKER, w, { handback: false });
+    assert.equal(actionable(w), true, "the agent carries on");
+
+    // A human's comment with no handback hands over and pings.
+    const x = ticket("plain");
+    const plain = await comment(HUMAN, x, { handback: undefined });
+    assert.ok(pingsOf(plain).includes("worker"), "a plain comment pings the owner");
+    assert.equal(actionable(x), true);
 });
 
 test("the decision band is the viewer's to decide, not the proposer's", async () => {

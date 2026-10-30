@@ -118,6 +118,11 @@ the band its work is in, and the row says it is unread (`unread`).
 | `rejected` | The live plan or resolution was rejected. |
 | null | None of the above. |
 
+A human's comment with `handback: false` keeps the hand: `turn` stays `you` for
+that human and is `them` for everyone else, and the band does not move. No agent
+is woken by it, and the ticket leaves the agents' pools until the next action
+(see `TICKET_LIFECYCLE.md`).
+
 ## Changes
 
 - **Version 4.** A question waiting on the caller's answer (`question` glyph,
