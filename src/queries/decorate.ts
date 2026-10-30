@@ -4,7 +4,7 @@
  * the bus methods that answer messages; moved from src/api/_helpers.ts.
  */
 import { listMessageTags, tagsForMessages, type Tag } from "../db.js";
-import { parseMeta } from "../questions.js";
+import { parseMeta } from "../message-meta.js";
 
 /**
  * Decorate one or many messages with their tags so callers can render

@@ -2080,47 +2080,6 @@
       ]
     },
     {
-      "name": "message.answer_question",
-      "description": "Mark a question of a message answered (#B.104): its checkbox ticked, the audit in `meta.questions`. Idempotent. who answers is the caller.",
-      "paramStructure": "by-name",
-      "params": [
-        {
-          "name": "id",
-          "required": true,
-          "schema": {
-            "type": "integer",
-            "exclusiveMinimum": 0,
-            "maximum": 9007199254740991
-          }
-        },
-        {
-          "name": "qid",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "answered_by",
-          "required": false,
-          "schema": {}
-        },
-        {
-          "name": "answered_in",
-          "required": false,
-          "schema": {}
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {}
-      },
-      "x-callers": [
-        "human",
-        "agent"
-      ]
-    },
-    {
       "name": "message.approve",
       "description": "Moderate a pending message: approve or reject it (the ripple, the same one the pending-children sweep applies, lives in ./moderation.ts).",
       "paramStructure": "by-name",

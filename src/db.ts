@@ -98,7 +98,6 @@ export {
     moveTicket,
     deleteComment,
     noteMessage,
-    markQuestionAnswered,
     applyMessageDecision,
     promoteMessageToDecision,
     setDecisionOptions,

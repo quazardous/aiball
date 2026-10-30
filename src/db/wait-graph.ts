@@ -13,7 +13,7 @@ import * as schema from "../schema.js";
 import { listTypedRelationsForTicket } from "./messages.js";
 import { closedTicketIds } from "./ticket-closed.js";
 import { isStepMeta } from "../ticket-transitions.js";
-import { parseMeta } from "../questions.js";
+import { parseMeta } from "../message-meta.js";
 import { lastMoveAt } from "./last-move.js";
 
 export type WaitKind = "depends_on" | "resume_on";

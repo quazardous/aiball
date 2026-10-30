@@ -26,7 +26,6 @@ import {
     updateMessageStatus,
     type Intent,
     type Priority,
-    markQuestionAnswered,
     noteMessage,
     promoteMessageToDecision,
     setDecisionOptions,
@@ -38,7 +37,7 @@ import {
 } from "../../db.js";
 import { clearSeenForMessage, insertPing } from "../../db/pings.js";
 import { isDecisionKind, optionChoiceRefusal, optionsRefusal, type DecisionOption } from "../../decisions.js";
-import { parseMeta } from "../../questions.js";
+import { parseMeta } from "../../message-meta.js";
 import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, validateNewMessage, withoutDecisionRefusal } from "../../messages.js";
 import { NO_EXTRAS, fileTicket, isExtrasRefusal, ticketExtras, SUBMIT_REFUSAL_STATUS } from "../../file-ticket.js";
 import { applyPlatformTag } from "./message-filing.js";
@@ -114,25 +113,6 @@ defineMethod({
         }
         if (!updated) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         deletePingsForMessage(p.id);
-        return edited(updated);
-    },
-});
-
-/**
- * Mark a question of a message answered (#B.104): its checkbox ticked, the
- * audit in `meta.questions`. Idempotent. #3036 — who answers is the caller.
- */
-defineMethod({
-    name: "message.answer_question",
-    who: ["human", "agent"],
-    params: z.object({ id, qid: z.string(), answered_by: z.unknown().optional(), answered_in: z.unknown().optional() }),
-    run: (caller, p) => {
-        if (!/^[a-zA-Z0-9_-]+$/.test(p.qid)) throw new Refusal(400, "invalid question id");
-        const answeredBy = authorOf(caller, p.answered_by, "answered_by");
-        const answeredIn = p.answered_in;
-        if (typeof answeredIn !== "number" || !Number.isFinite(answeredIn)) throw new Refusal(400, "answered_in (number) required");
-        const updated = markQuestionAnswered(p.id, p.qid, { answered_by: answeredBy, answered_at: new Date().toISOString(), answered_in: answeredIn });
-        if (!updated) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         return edited(updated);
     },
 });

@@ -1,23 +1,8 @@
-/**
- * The sidecar a message carries (`messages.meta`, `tickets.meta`).
- *
- * #4459 — and what is left of the GFM task-list questions (#B.104): they are
- * no longer marked or shown. `message.answer_question` stays until tvty stops
- * calling it, on the question ids already in old bodies.
- */
-export type QuestionStatus = "open" | "answered";
-
-export interface QuestionAnswer {
-    answered_by: string;
-    answered_at: string;
-    answered_in: number;
-}
-
+/** The sidecar a message carries (`messages.meta`, `tickets.meta`). */
 import type { CommentDecision } from "./decisions.js";
 import type { TypedRelationMeta } from "./relations.js";
 
 export interface MessageMeta {
-    questions?: Record<string, QuestionAnswer>;
     /** Decision-on-comment sidecar (#B.129). Set by the author at post
      *  time (composer dropdown) and updated when the reporter accepts
      *  or rejects via the bus's message.decide. */
@@ -67,54 +52,6 @@ export interface MessageMeta {
     step_tagged?: { by: string; at: string; handback: boolean | null };
 }
 
-// `- [ ]` or `- [x]` line, optionally preceded by indent, optionally
-// followed by the marker. Captures: 1=indent, 2=char, 3=marker-id or
-// undefined, 4=trailing text after the marker.
-//
-// We also accept asterisks (`* [ ]`) and plus (`+ [ ]`) as GFM does.
-//
-// `\s*` between `]` and the marker so both the legacy no-space format
-// (`- [ ]<!-- q:xxx -->`) and the GFM-friendly one (`- [ ] <!-- q:xxx -->`)
-// parse. marked needs the space to recognize the line as a task-list
-// item — the read path tolerates either to avoid breaking existing bodies.
-const TASK_LINE = /^([ \t]*)(?:[-*+])\s\[( |x|X)\](?:\s*<!--\s*q:([a-zA-Z0-9_-]+)\s*-->)?(.*)$/;
-
-/**
- * Toggle the `[ ]` ↔ `[x]` state on the task-list line carrying the
- * given question id. No-op when the id isn't found (defensive: a
- * stale frontend click on a deleted question shouldn't error).
- * Returns the new body and whether a change was made.
- *
- * `to` defaults to "answered" (the answer-on-reply flow); pass
- * "open" to explicitly reopen.
- */
-export function setQuestionStatus(
-    body: string | null | undefined,
-    questionId: string,
-    to: QuestionStatus = "answered",
-): { body: string; changed: boolean } {
-    if (!body) return { body: body ?? "", changed: false };
-    const lines = body.split("\n");
-    const targetChar = to === "answered" ? "x" : " ";
-    for (let i = 0; i < lines.length; i++) {
-        const m = TASK_LINE.exec(lines[i]);
-        if (!m) continue;
-        if (m[3] !== questionId) continue;
-        const indent = m[1];
-        const currentChar = m[2].toLowerCase();
-        if (currentChar === targetChar.toLowerCase()) {
-            return { body, changed: false }; // already in target state
-        }
-        const trailing = m[4] ?? "";
-        const trailingWithLeadingSpace = trailing.startsWith(" ") ? trailing : trailing ? " " + trailing : "";
-        // Spaced form between `]` and `<!--` so marked's GFM task-list
-        // tokenizer renders the line as a checkbox.
-        lines[i] = `${indent}- [${targetChar}] <!-- q:${questionId} -->${trailingWithLeadingSpace}`;
-        return { body: lines.join("\n"), changed: true };
-    }
-    return { body, changed: false };
-}
-
 /**
  * Parse a possibly-null `meta` JSON string from the DB into a
  * `MessageMeta` object. Tolerates malformed JSON by returning `{}`
@@ -133,15 +70,14 @@ export function parseMeta(raw: string | null | undefined): MessageMeta {
 
 /**
  * Serialize a `MessageMeta` back to a string for DB storage. Returns
- * `null` when there's nothing worth persisting (no questions
- * answered, no other keys) so the column stays NULL on empty rows.
+ * `null` when there's nothing worth persisting, so the column stays
+ * NULL on empty rows.
  */
 export function serializeMeta(meta: MessageMeta): string | null {
-    const hasQuestions = !!meta.questions && Object.keys(meta.questions).length > 0;
     const hasDecision = !!meta.decision;
     const hasSummary = typeof meta.summary_until === "string" && meta.summary_until.length > 0;
     const hasRelation = !!meta.relation;
     const hasDeleted = !!meta.deleted;
-    if (!hasQuestions && !hasDecision && !hasSummary && !hasRelation && !hasDeleted) return null;
+    if (!hasDecision && !hasSummary && !hasRelation && !hasDeleted) return null;
     return JSON.stringify(meta);
 }

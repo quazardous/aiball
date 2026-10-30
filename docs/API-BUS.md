@@ -284,7 +284,6 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `message.step` | human | `POST /api/messages/:id/step` |
 | `message.unstep` | human | `POST /api/messages/:id/unstep` |
 | `message.delete` | human | `POST /api/messages/:id/delete` |
-| `message.answer_question` | human, agent | `POST /api/messages/:id/questions/:qid/answer` |
 | `message.resurface` | human | `POST /api/messages/:id/resurface` |
 | `message.summarize` | human, agent | `POST /api/messages/:id/summarize` |
 | `message.vote` | human, agent | `POST /api/messages/:id/vote` |

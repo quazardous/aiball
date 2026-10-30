@@ -177,11 +177,8 @@ export interface Message {
      */
     ticket_summary_until?: string | null;
     /**
-     * Sidecar JSON metadata (#B.104). String-encoded JSON shaped like
-     * `{"questions": {"q-abc": {answered_by, answered_at, answered_in}}}`.
-     * NULL when no metadata is attached. Today only used for the
-     * question-answer audit; future fields (signatures, polls, ...)
-     * colocate without schema changes.
+     * Sidecar JSON metadata (`MessageMeta`), string-encoded: the decision, the
+     * step, the summary. NULL when no metadata is attached.
      */
     meta?: string | null;
     /**

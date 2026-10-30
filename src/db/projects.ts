@@ -36,7 +36,7 @@ import { tagsForMessages } from "./tags.js";
 import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
 import { isStepMeta, keepsAuthorInPool, readHandback } from "../ticket-transitions.js";
 import { forgetConfigOverrides, getConfig } from "./config-overrides.js";
-import { parseMeta } from "../questions.js";
+import { parseMeta } from "../message-meta.js";
 import { ticketsHeldByHuman } from "./human-hand.js";
 import { gateEdges } from "../critical-ticket.js";
 

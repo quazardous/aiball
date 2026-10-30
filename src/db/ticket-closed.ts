@@ -14,7 +14,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb } from "./connection.js";
 import { onTicketChanged } from "./ticket-change.js";
-import { parseMeta } from "../questions.js";
+import { parseMeta } from "../message-meta.js";
 import { resolvesTicket } from "../ticket-transitions.js";
 
 /**

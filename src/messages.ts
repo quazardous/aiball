@@ -1,4 +1,4 @@
-import { parseMeta } from "./questions.js";
+import { parseMeta } from "./message-meta.js";
 import { moderationRefusal } from "./moderation-gate.js";
 import {
     getMessage,

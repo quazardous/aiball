@@ -19,7 +19,7 @@ import { presenceConnect, presenceDisconnect, presenceElsewhere } from "../../li
 import { onCounters, refreshCounters } from "../../agent-counters.js";
 import { wakeFocusHidesTicket } from "../../db/backlog-rules.js";
 import { listProjectTicketIds } from "../../db/tickets.js";
-import { parseMeta } from "../../questions.js";
+import { parseMeta } from "../../message-meta.js";
 import { buildInboxRow, buildInboxRowContext, inboxRowDeadline, type InboxRowContext } from "../../queries/inbox-row.js";
 import { buildPilotFacts, pilotFields } from "../../queries/inbox-pilot.js";
 

@@ -5,7 +5,7 @@
  * - a body naming someone else is refused whole (403 AUTHOR_MISMATCH), and
  *   nothing is written;
  * - a body naming the caller is accepted; a body naming nobody gets the caller;
- * - the same for the other author fields: set_by, answered_by, decided_by.
+ * - the same for the other author fields: set_by, decided_by.
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -79,9 +79,6 @@ test("the other author fields: set_by, answered_by, decided_by", async () => {
     const tags = await call(WORKER, "message.set_tags", { id: t, tag_ids: ["t-3036"], set_by: "boss" });
     assert.deepEqual([tags.status, tags.json.code], [403, "AUTHOR_MISMATCH"], "set_by");
     assert.equal((await call(WORKER, "message.set_tags", { id: t, tag_ids: ["t-3036"] })).status, 200, "set_by left out");
-
-    const answer = await call(WORKER, "message.answer_question", { id: t, qid: "q1", answered_by: "boss", answered_in: 1 });
-    assert.deepEqual([answer.status, answer.json.code], [403, "AUTHOR_MISMATCH"], "answered_by");
 
     const plan = submitMessage({ project: P, kind: "comment_added", ticket_id: t, body: "plan", by_agent: "worker", decision_kind: "plan", summary_until: "p" }).id;
     const decide = await call(HUMAN, "message.decide", { id: plan, status: "accepted", decided_by: "worker" });

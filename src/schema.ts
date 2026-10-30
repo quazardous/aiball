@@ -167,10 +167,9 @@ export const tickets = sqliteTable("tickets", {
      */
     parentTicketId: integer("parent_ticket_id").references((): any => tickets.id, { onDelete: "set null" }),
     /**
-     * Sidecar JSON metadata (#B.104). Today: question-answer audit
-     * (`{"questions": {"q-abc": {"answered_by", "answered_at",
-     * "answered_in"}}}`). Future fields colocate here — sidecar
-     * pattern, no new table for every new metadata kind.
+     * Sidecar JSON metadata (`MessageMeta`): the decision, the step, the
+     * summary. Fields colocate here — sidecar pattern, no new table for every
+     * new metadata kind.
      */
     meta: text("meta"),
     /**

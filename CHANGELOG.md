@@ -96,7 +96,7 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
-- The web no longer treats a `- [ ]` line in a ticket or comment as a question to tick: it is an ordinary checkbox in the text.
+- A `- [ ]` line in a ticket or comment is no longer a question to tick, in the web or in tvty: it is an ordinary checkbox in the text. `message.answer_question` is gone.
 - An agent's step (`then: continue`) withdraws its own pending decision: the proposal shows as withdrawn and nothing is left to accept. Someone else's stays.
 - A wake held because Claude works says which signs hold it
   (`Claude is working (busy proofs: activity, turn)`) instead of always quoting

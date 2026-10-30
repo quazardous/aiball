@@ -63,7 +63,7 @@ const milestone = ticketOf("v1");
 getDb().update(schema.tickets).set({ level: "milestone" }).where(eq(schema.tickets.id, milestone)).run();
 const main = ticketOf("the thread tvty opens");
 const other = ticketOf("another");
-const plan = submitMessage({ project: P, kind: "comment_added", ticket_id: main, body: `a plan ![](/uploads/${sha}.png)\n- [ ] <!-- q:qq1 --> which db?`, by_agent: "worker", decision_kind: "plan", summary_until: "s" }).id;
+const plan = submitMessage({ project: P, kind: "comment_added", ticket_id: main, body: `a plan ![](/uploads/${sha}.png)`, by_agent: "worker", decision_kind: "plan", summary_until: "s" }).id;
 
 // ── the transport: the local socket, the human by header, like the daemon ─
 // tvty's bus connection opens on the local socket with `x-aiball-consumer`
@@ -264,7 +264,6 @@ test("writes: every body tvty sends is accepted", async () => {
     const writes: [string, Record<string, unknown>, number][] = [
         ["ticket.mark_read", { id: main }, 200],
         ["consumer.afk", { name: "worker", action: "toggle" }, 404], // no loop on this test board: LOOP_NOT_FOUND
-        ["message.answer_question", { id: plan, qid: "qq1", answered_in: mine }, 200],
         ["ticket.postpone", { id: other, until: new Date(Date.now() + 86_400_000).toISOString() }, 200],
         ["ticket.unsnooze", { id: other }, 200],
         ["message.edit", { id: other, priority: "high" }, 200],
@@ -396,7 +395,7 @@ function tvtyCertainRoutes(): { routes: string[]; source: string } {
 const COVERED_METHODS: Record<string, true | string> = {
     "consumer.list": true, "inbox.list": true, "ticket.get": true, "message.get": true, "consumer.backlog": true,
     "tag.list": true, "project.milestones": true, "mention.suggestions": true, "message.post": true,
-    "ticket.mark_read": true, "consumer.afk": true, "message.answer_question": true, "ticket.postpone": true,
+    "ticket.mark_read": true, "consumer.afk": true, "ticket.postpone": true,
     "ticket.unsnooze": true, "message.edit": true, "message.add_tag": true, "message.remove_tag": true,
     "ticket.set_milestone": true, "ticket.assign": true, "ticket.release": true, "ticket.set_owner": true,
     "ticket.relate": true, "message.step": true, "message.unstep": true, "message.promote": true,

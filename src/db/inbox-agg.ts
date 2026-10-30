@@ -34,7 +34,7 @@ import { listMessages } from "./messages.js";
 import { onTicketChanged } from "./ticket-change.js";
 import { replayLifecycle } from "./ticket-closed.js";
 import type { Message } from "./connection.js";
-import { parseMeta } from "../questions.js";
+import { parseMeta } from "../message-meta.js";
 import { DECISION_KINDS, decisionGesture, isStepMeta, readHandback, type DecisionKind } from "../ticket-transitions.js";
 
 /** The latest decision of one kind on a thread. */

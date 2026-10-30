@@ -14,7 +14,7 @@ import { holding, ticketClaimHeldUntil } from "../../db/claim-hold.js";
 import { isLineageRelationKind } from "../../relations.js";
 import { listSubscriptions } from "../../db/subscriptions.js";
 import { milestoneProgress, milestonesOf } from "../../db/milestones.js";
-import { parseMeta } from "../../questions.js";
+import { parseMeta } from "../../message-meta.js";
 import { projectCriticalTicket } from "../../db/critical-ticket.js";
 import { ticketHasPayload } from "../../db/payloads.js";
 import { withTags, withVotes } from "../../queries/decorate.js";
@@ -221,9 +221,7 @@ defineMethod({
             return c && c.id === t.id ? { holds: c.holds, quiet: c.quiet, quiet_since: c.quiet_since } : null;
         })(),
         tags: listMessageTags(t.id),
-        // #B.104: sidecar metadata (question-answer audit, etc.).
-        // Frontend reads this to render the "X/Y open" chip beside
-        // questions without round-tripping to the server.
+        // Sidecar metadata: the decision, the step, the summary.
         meta: t.meta ?? null,
         // #406 (david 7mybeg "dans le détail ticket on a pas l'info du cumul
         // d'effort"): expose the per-ticket token tally on the GET header too,

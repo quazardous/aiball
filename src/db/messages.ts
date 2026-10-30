@@ -30,10 +30,8 @@ import {
 import {
     parseMeta,
     serializeMeta,
-    setQuestionStatus,
     type MessageMeta,
-    type QuestionAnswer,
-} from "../questions.js";
+} from "../message-meta.js";
 import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionOption, type DecisionStatus } from "../decisions.js";
 import { getConfig } from "./config-overrides.js"; // #449: config-driven default priority
 // #2070 — inferring a cross-project deposit. The rule is pure and lives apart;
@@ -1251,79 +1249,6 @@ export function noteMessage(id: number, note: string | null): Message | null {
 // Question / metadata side-channel (#B.104)
 // =====================================================================
 
-/**
- * Mark a question (identified by its `q-xxx` id) as answered: flips
- * `[ ]` → `[x]` in the parent's body AND records the audit in
- * `meta.questions[qid]`. Idempotent — already-answered questions
- * return the existing message untouched.
- *
- * Walks ticket-first, then comments. Returns the updated Message,
- * or null when the parent doesn't exist / the question id isn't
- * found in the body.
- */
-export function markQuestionAnswered(
-    messageId: number,
-    questionId: string,
-    answer: QuestionAnswer,
-): Message | null {
-    const db = getDb();
-    return db.transaction((tx) => {
-        // Try the tickets table first.
-        const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, messageId)).get();
-        if (t) {
-            const r = setQuestionStatus(t.body, questionId, "answered");
-            if (!r.changed) {
-                // No body change means either the question was already
-                // answered or the id isn't in the body. In the first
-                // case we still want to record the audit if missing.
-                const meta = parseMeta(t.meta ?? null);
-                const already = meta.questions?.[questionId];
-                if (already) return ticketRowToMessage(t);
-            }
-            const meta = mergeMeta(t.meta ?? null, questionId, answer);
-            tx.update(schema.tickets)
-                .set({ body: r.body, meta: serializeMeta(meta) })
-                .where(eq(schema.tickets.id, messageId))
-                .run();
-            const fresh = tx.select().from(schema.tickets).where(eq(schema.tickets.id, messageId)).get();
-            return fresh ? ticketRowToMessage(fresh) : null;
-        }
-        // Fall through to comments.
-        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
-        if (!m) return null;
-        const r = setQuestionStatus(m.body, questionId, "answered");
-        const meta = mergeMeta(m.meta ?? null, questionId, answer);
-        tx.update(schema.messages)
-            .set({ body: r.body, meta: serializeMeta(meta) })
-            .where(eq(schema.messages.id, messageId))
-            .run();
-        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
-        if (!fresh) return null;
-        const parent = tx.select({ project: schema.tickets.project })
-            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
-        return messageRowToMessage(fresh, parent?.project ?? "");
-    });
-}
-
-function mergeMeta(
-    raw: string | null,
-    questionId: string,
-    answer: QuestionAnswer,
-): MessageMeta {
-    const meta = parseMeta(raw);
-    meta.questions = { ...(meta.questions ?? {}), [questionId]: answer };
-    return meta;
-}
-
-/**
- * Apply an accept/reject to the `meta.decision` sidecar of a comment
- * (#B.129). Comments only — tickets carry their own lifecycle via
- * ticket_resolved / ticket_blocked. Returns the updated message or null
- * when the message id doesn't exist OR has no decision to update.
- *
- * Throws for invalid transitions (re-deciding a terminal decision).
- * The HTTP layer maps the throw to 409 Conflict.
- */
 /**
  * Set or clear the `meta.summary_until` one-liner on a comment
  * (#B.130). Empty string → drop the field. Returns the updated

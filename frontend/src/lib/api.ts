@@ -84,8 +84,8 @@ export interface Message {
     source_ticket_stage?: TicketStage;
     /** #2432 — the other ticket's title, for the row's tooltip. */
     source_ticket_title?: string | null;
-    /** Sidecar JSON (raw string from the DB). Carries question audit
-     *  (#B.104) and decision-on-comment (#B.129). Parsed lazily by
+    /** Sidecar JSON (raw string from the DB). Carries the
+     *  decision-on-comment (#B.129) among others. Parsed lazily by
      *  components that need it. */
     meta?: string | null;
     /** #B.245 event scope tristate. `internal` = owners+@mentions

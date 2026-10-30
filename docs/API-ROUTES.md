@@ -63,7 +63,6 @@ when tvty's checkout is not next to this one.
 - `loop.restart`
 - `mention.suggestions`
 - `message.add_tag`
-- `message.answer_question`
 - `message.approve`
 - `message.decide`
 - `message.delete`
