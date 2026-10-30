@@ -117,6 +117,8 @@ export function decisionGesture(kind: string | null | undefined): DecisionGestur
 /** The gate a decision imposes at a status; null when the kind or the status is unknown — it is then inert. */
 export function gateEffect(kind: string | null | undefined, status: string | null | undefined): GateEffect | null {
     const row = decisionGesture(kind);
+    // #4458 — withdrawn by its author: it holds nothing, whatever the kind.
+    if (row && status === "withdrawn") return "open";
     if (!row || (status !== "pending" && status !== "accepted" && status !== "rejected")) return null;
     return row.gate[status];
 }

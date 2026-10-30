@@ -45,7 +45,8 @@ import { DECISION_KINDS, kindsInFamily, type DecisionKind } from "./ticket-trans
 // existing importer.
 export { DECISION_KINDS, type DecisionKind };
 
-export const DECISION_STATUSES = ["pending", "accepted", "rejected"] as const;
+// #4458 — `withdrawn`: its author posted a step instead, so nothing is left to decide.
+export const DECISION_STATUSES = ["pending", "accepted", "rejected", "withdrawn"] as const;
 export type DecisionStatus = typeof DECISION_STATUSES[number];
 
 // The two gate families, read from the table's `family` column (consumed by

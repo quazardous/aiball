@@ -137,13 +137,15 @@ const decisionChipLabel = computed(() => {
         // #2308 — the pending label is the transition table's `pendingLabel`.
         return DECISION_GESTURES[d.kind]?.pendingLabel ?? `pending ${d.kind}`;
     }
+    // #4458 — its author carried on with a step: nobody decided anything.
+    if (d.status === "withdrawn") return `withdrawn ${d.kind}`;
     const prefix = d.status === "accepted" ? "✓ accepted" : "✗ rejected";
     const by = d.decided_by ? ` by ${d.decided_by}` : "";
     return `${prefix} ${d.kind}${by}`;
 });
 const decisionChipSeverity = computed(() => {
     const d = decision.value;
-    if (!d || props.supersededBy) return "secondary";
+    if (!d || props.supersededBy || d.status === "withdrawn") return "secondary";
     if (d.status === "accepted") return "success";
     if (d.status === "rejected") return "danger";
     // #737 — pending escalation = visually arresting red ("I need a human

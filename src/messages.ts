@@ -1,3 +1,4 @@
+import { parseMeta } from "./questions.js";
 import { moderationRefusal } from "./moderation-gate.js";
 import {
     getMessage,
@@ -1038,6 +1039,12 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // moderation will resolve it. #980 N2 — except a silent auto-close
     // (skipBroadcast) whose decision event already announced the action.
     if (!opts.skipBroadcast) broadcast({ type: "message_created", data: msg });
+    // #4458 — a step withdrew a pending decision: an open thread must lose its buttons.
+    const withdrew = parseMeta(msg.meta ?? null).step_withdrew;
+    if (withdrew) {
+        const edited = getMessage(withdrew);
+        if (edited) broadcast({ type: "message_edited", data: edited });
+    }
 
     // Cross-reference pseudo-comments (`ticket_sub_added` + `ticket_referenced`)
     // — auto-emitted on the target threads. Side-effect only; the

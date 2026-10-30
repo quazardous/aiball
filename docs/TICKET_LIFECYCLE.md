@@ -78,6 +78,10 @@ meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status
 - **wontfix** — close without doing it. **escalation** — a blocker only a human
   can lift. Both are in the matrix below.
 - accept/reject goes through `POST /messages/:id/decide`.
+- **A step withdraws its author's own pending decision** (`then: continue`): the
+  work goes on, so the proposal no longer holds. Its status becomes `withdrawn`,
+  nothing is left to accept, and the thread keeps it. Someone else's pending
+  decision stays. To change a proposal rather than drop it, post a fresher `then:`.
 - A reply can also carry **no decision** (the second table below). Every
   message says whether it hands the ticket back: a decision does (its author
   waits), `then: continue` does not (the author carries on), and a comment with

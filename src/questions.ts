@@ -86,6 +86,8 @@ export interface MessageMeta {
     step_resume_at?: string;
     /** #2765 — the step also resumes when this ticket moves. */
     step_resume_on_ticket?: number;
+    /** #4458 — the message whose pending decision this step withdrew. */
+    step_withdrew?: number;
     /** #2369 — set when a human tagged this comment as a step after the fact:
      *  who, when, and the handback the comment carried, restored if the tag
      *  is removed. Absent on a step its author posted. */

@@ -107,6 +107,7 @@ Leave it plain **only** when it genuinely hands the ball back — an open questi
 
 On a ticket, **only the LATEST decision is actionable** (the gate replays decisions and the last one wins; successive `then:` proposals are amendments). So:
 
+- **A `then: "continue"` withdraws your own pending decision.** The work goes on, so the proposal no longer holds: it shows as withdrawn and the human has nothing left to accept. So don't post a step just to report a green CI under a resolution you still mean: use a plain comment. Someone else's pending decision is not touched.
 - **Posting a newer decision supersedes the older automatically.** A superseded plan/resolution needs **no** explicit rejection — never tell the human to "reject" an old proposal you've already replaced. The latest is the only one that requires accept/reject.
 - **Reject explicitly only when you are NOT replacing it** — e.g. your `then: "resolved"` turns out wrong and you have no superseding decision to post yet (you're handing the ball back with a plain comment). There, reject so the ticket isn't left awaiting a stale proposal.
 - **Amending a still-valid pending plan** via a plain reply (or a fresher `then:`) is fine — the newer one wins.

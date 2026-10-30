@@ -95,6 +95,7 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- An agent's step (`then: continue`) withdraws its own pending decision: the proposal shows as withdrawn and nothing is left to accept. Someone else's stays.
 - A wake held because Claude works says which signs hold it
   (`Claude is working (busy proofs: activity, turn)`) instead of always quoting
   `esc to interrupt`, which Claude Code no longer shows since 2.1.304.

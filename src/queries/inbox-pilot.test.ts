@@ -103,7 +103,7 @@ test("a viewer alone on a thread, commenting several times, keeps the ball", asy
     assert.equal((await row(t)).turn, "you");
 });
 
-test("a step keeps the ball with its author, and a pending decision outranks it", async () => {
+test("a step keeps the ball with its author, withdraws its own pending decision, and yields to another's", async () => {
     const t = ticket("step");
     await comment(WORKER, t, { step: true, step_after_minutes: 0, handback: undefined });
     let r = await row(t);
@@ -117,7 +117,14 @@ test("a step keeps the ball with its author, and a pending decision outranks it"
     await comment(WORKER, u, { decision_kind: "plan", handback: undefined });
     await comment(WORKER, u, { step: true, step_after_minutes: 0, handback: undefined });
     r = await row(u);
-    assert.deepEqual([r.band, r.state_glyph], [band("decision"), "plan"]);
+    assert.deepEqual([r.band, r.state_glyph], [band("working"), "step"], "the author's step withdrew its own plan");
+
+    // Someone else's pending decision stays: only its author withdraws it.
+    const v = ticket("human's plan, agent's step");
+    await comment(HUMAN, v, { decision_kind: "plan", handback: undefined });
+    await comment(WORKER, v, { step: true, step_after_minutes: 0, handback: undefined });
+    r = await row(v, WORKER);
+    assert.deepEqual([r.band, r.state_glyph], [band("decision"), "plan"], "a pending decision outranks another's step");
 });
 
 test("a comment handing the ticket back shows as a question; one keeping the hand is not the others' turn", async () => {
@@ -195,6 +202,28 @@ test("a human's comment keeping the hand: not the agents' turn, not actionable, 
     const plain = await comment(HUMAN, x, { handback: undefined });
     assert.ok(pingsOf(plain).includes("worker"), "a plain comment pings the owner");
     assert.equal(actionable(x), true);
+});
+
+test("a step withdraws its author's pending decision: nothing left to accept, the thread keeps the trace", async () => {
+    const decisionOf = (id: number) => (JSON.parse(getDb().select({ meta: schema.messages.meta }).from(schema.messages).where(eq(schema.messages.id, id)).get()!.meta!) as { decision: { status: string; kind: string } }).decision;
+    const t = ticket("resolved, then more work");
+    const res = await comment(WORKER, t, { decision_kind: "resolution", handback: undefined });
+    assert.equal((await row(t)).state_glyph, "resolution");
+    const step = await comment(WORKER, t, { step: true, step_after_minutes: 0, handback: undefined });
+    assert.deepEqual([decisionOf(res).status, decisionOf(res).kind], ["withdrawn", "resolution"]);
+    assert.equal((JSON.parse(getDb().select({ meta: schema.messages.meta }).from(schema.messages).where(eq(schema.messages.id, step)).get()!.meta!) as { step_withdrew: number }).step_withdrew, res, "the step names what it withdrew");
+    const r = await row(t);
+    assert.deepEqual([r.turn, r.band, r.state_glyph], ["them", band("working"), "step"], "no more Accept");
+    assert.equal(computeActionableTicketIds("worker", [t]).actionableIds.has(t), true, "the agent carries on");
+    const late = await call(HUMAN, "message.decide", { id: res, status: "accepted" });
+    assert.ok(late.status >= 400, `a withdrawn decision cannot be accepted: ${JSON.stringify(late.json)}`);
+
+    // A plan filed with the ticket, by its reporter who leads the project, goes the same way.
+    const filed = submitMessage({ project: P, kind: "ticket_created", title: "filed with a plan", body: "x", by_agent: "worker", decision_kind: "plan" }).id;
+    updateMessageStatus(filed, "approved", "human", null, "ticket_created");
+    assert.equal((await row(filed)).state_glyph, "plan");
+    await comment(WORKER, filed, { step: true, step_after_minutes: 0, handback: undefined });
+    assert.equal((await row(filed)).state_glyph, "step");
 });
 
 test("the decision band is the viewer's to decide, not the proposer's", async () => {

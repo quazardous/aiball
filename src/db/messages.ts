@@ -234,6 +234,9 @@ export function insertMessage(m: NewMessage): Message {
                 }
                 // #2765 — or when this other ticket moves, whichever comes first.
                 if (m.step_resume_on_ticket) meta.step_resume_on_ticket = m.step_resume_on_ticket;
+                // #4458 — the work goes on: its author's own pending decision no longer holds.
+                const withdrew = m.by_agent ? withdrawOwnPendingDecision(tx, m.ticket_id, m.by_agent) : null;
+                if (withdrew !== null) meta.step_withdrew = withdrew;
             }
             // #2331 — an explicit handback (a comment with no `then`).
             if (typeof m.handback === "boolean") {
@@ -1870,6 +1873,36 @@ export function listPendingResolutionDecisionsForTicket(
     const parent = db.select({ project: schema.tickets.project })
         .from(schema.tickets).where(eq(schema.tickets.id, latest.row.ticketId)).get();
     return [messageRowToMessage(latest.row, parent?.project ?? "")];
+}
+
+/**
+ * #4458 — a step says the work goes on, which contradicts its author's own
+ * proposal still waiting on the thread: the thread's latest decision, if it is
+ * pending and the author's, becomes `withdrawn`. Someone else's stays. Returns
+ * the id of the message that carried it. Not a decision by anyone: the step
+ * that does it is the action, and it moves `last_actor` itself.
+ */
+function withdrawOwnPendingDecision(tx: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0], ticketId: number, author: string): number | null {
+    const withdrawn = (d: NonNullable<ReturnType<typeof parseMeta>["decision"]>) =>
+        ({ ...d, status: "withdrawn" as const, decided_by: author, decided_at: new Date().toISOString() });
+    for (const c of tx.select({ id: schema.messages.id, byAgent: schema.messages.byAgent, meta: schema.messages.meta })
+        .from(schema.messages)
+        .where(and(eq(schema.messages.ticketId, ticketId), eq(schema.messages.kind, "comment_added"), eq(schema.messages.status, "approved")))
+        .orderBy(desc(schema.messages.id)).all()) {
+        const meta = parseMeta(c.meta ?? null);
+        if (!meta.decision) continue;
+        if (meta.decision.status !== "pending" || c.byAgent !== author) return null;
+        meta.decision = withdrawn(meta.decision);
+        tx.update(schema.messages).set({ meta: serializeMeta(meta) }).where(eq(schema.messages.id, c.id)).run();
+        return c.id;
+    }
+    // No comment carries one: the ticket was filed with it.
+    const t = tx.select({ byAgent: schema.tickets.byAgent, meta: schema.tickets.meta }).from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
+    const meta = parseMeta(t?.meta ?? null);
+    if (!t || meta.decision?.status !== "pending" || t.byAgent !== author) return null;
+    meta.decision = withdrawn(meta.decision);
+    tx.update(schema.tickets).set({ meta: serializeMeta(meta) }).where(eq(schema.tickets.id, ticketId)).run();
+    return ticketId;
 }
 
 export function applyMessageDecision(
