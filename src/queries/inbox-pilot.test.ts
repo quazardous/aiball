@@ -115,6 +115,26 @@ test("a step keeps the ball with its author, and a pending decision outranks it"
     assert.deepEqual([r.band, r.state_glyph], [band("decision"), "plan"]);
 });
 
+test("a comment handing the ticket back shows as a question; one keeping the hand is not the others' turn", async () => {
+    const asked = ticket("asked");
+    await comment(WORKER, asked, { handback: true });
+    let r = await row(asked);
+    assert.deepEqual([r.turn, r.band, r.state_glyph], ["you", band("open"), "question"], "the question waits on the human");
+    assert.equal((await row(asked, WORKER)).state_glyph, "question", "the glyph is the ticket's state, the same for its author");
+
+    const kept = ticket("kept");
+    await comment(WORKER, kept, { handback: false });
+    r = await row(kept);
+    assert.deepEqual([r.turn, r.state_glyph], ["them", null], "the agent said it carries on");
+    assert.equal((await row(kept, WORKER)).turn, "you", "for its author it is still its turn");
+
+    // A comment that says no handback (one written before it existed) reads as before.
+    const legacy = ticket("legacy");
+    submitMessage({ project: P, kind: "comment_added", ticket_id: legacy, body: "older", by_agent: "worker", summary_until: "s" });
+    r = await row(legacy);
+    assert.deepEqual([r.turn, r.state_glyph], ["you", null], "no handback on the last word: the turn and glyph read as before");
+});
+
 test("the decision band is the viewer's to decide, not the proposer's", async () => {
     const t = ticket("worker's own plan");
     await comment(WORKER, t, { decision_kind: "plan", handback: undefined });

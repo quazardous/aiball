@@ -4,7 +4,7 @@
 computed **for the caller** (unread, turn and band depend on who asks). This page
 is the row's contract.
 
-**Row schema: version 2.** A field added keeps the version; a field removed or
+**Row schema: version 3.** A field added keeps the version; a field removed or
 whose meaning changes bumps it, and is listed under [Changes](#changes).
 
 ## Query
@@ -89,7 +89,7 @@ computed by the same rule, next to `is_claim` and `claim_until`.
 
 | Field | Values | Meaning |
 |---|---|---|
-| `turn` | `you` \| `them` \| `none` | Whose move it is. `them`: the caller acted last and someone else is involved, or the last word is someone else's step. `none`: closed. It follows the actionable rule (see `TICKET_LIFECYCLE.md`), not only the last comment: a decision taken or a close without a word hands the ball over. |
+| `turn` | `you` \| `them` \| `none` | Whose move it is. `them`: the caller acted last and someone else is involved, or the last word is someone else's step or a comment where they kept the hand (`handback: false`). `none`: closed. It follows the actionable rule (see `TICKET_LIFECYCLE.md`), not only the last comment: a decision taken or a close without a word hands the ball over. |
 | `band` | number | Index into the bands below; `sort=band` orders by it. |
 | `band_name` | string | The band's name, one of the bands below. Read this one: a band added or removed shifts the indexes, not the names. |
 | `state_glyph` | see below \| null | The one state mark the row shows. |
@@ -114,11 +114,15 @@ the band its work is in, and the row says it is unread (`unread`).
 | `closed_resolved`, `closed` | Closed, as done or not. |
 | `plan`, `resolution`, `wontfix`, `escalation` | A proposal of that kind awaits a decision. It outranks a later step. |
 | `step_stalled`, `step` | The last word is a step, stalled or not. |
+| `question` | The last word is a comment that hands the ticket back (`handback: true`): a question waiting on an answer. |
 | `rejected` | The live plan or resolution was rejected. |
 | null | None of the above. |
 
 ## Changes
 
+- **Version 3.** `turn` is `them` when the last word is someone else's comment
+  that kept the hand (`handback: false`), as for a step; it was `you`. Adds the
+  `question` glyph, for a last word that hands the ticket back.
 - **Version 2.** The `unread` band is gone: an unread ticket keeps its
   workflow band, and `working`, `open` and `closed` move up one index. Adds
   `band_name`, the band's name next to its index.

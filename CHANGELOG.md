@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The inbox's turn view marks a ticket whose agent asked an open question and waits on the answer (a `question` glyph), and an agent that says it carries on keeps the turn instead of handing it to you (row schema version 3).
 - `loop.log` says each sign of work the loop reads as it comes on or goes off
   (`busy proofs: +activity -turn → …`), and when the stale-busy guard is armed.
   The session host counts the `OSC 7501` sequences Claude writes, which the

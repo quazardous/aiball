@@ -24,7 +24,7 @@ export const BANDS = ["moderate", "decision", "working", "open", "closed"] as co
 
 export type StateGlyph =
     | "plan" | "resolution" | "wontfix" | "escalation"
-    | "step" | "step_stalled" | "rejected"
+    | "step" | "step_stalled" | "question" | "rejected"
     | "closed_resolved" | "closed";
 
 export interface PilotFields {
@@ -42,6 +42,8 @@ export interface PilotFacts {
     viewerActedLast: boolean;
     /** Who proposed the ticket's live pending decision, when there is one. */
     proposer: string | null;
+    /** #4443 — the `handback` of the thread's last word when it is a comment that said one, else null. */
+    lastHandback: boolean | null;
 }
 
 const PENDING_FLAG: Record<DecisionKind, keyof InboxRow> = {
@@ -62,8 +64,9 @@ export function pilotFields(row: InboxRow, facts: PilotFacts, viewer: string, vi
     let turn: Turn;
     if (row.closed) turn = "none";
     else if (facts.viewerActedLast) turn = "them";
-    // A step says "not done, I carry on": the ball stays with its author.
-    else if (row.latest_is_step && row.last_speaker !== viewer) turn = "them";
+    // A step says "not done, I carry on", and so does a comment that kept the
+    // hand (`handback: false`): the ball stays with its author.
+    else if ((row.latest_is_step || facts.lastHandback === false) && row.last_speaker !== viewer) turn = "them";
     else turn = "you";
 
     let glyph: StateGlyph | null;
@@ -71,6 +74,8 @@ export function pilotFields(row: InboxRow, facts: PilotFacts, viewer: string, vi
     // A pending decision outranks a step posted after it: the decision is what gates the ticket.
     else if (pending) glyph = pending;
     else if (row.latest_is_step) glyph = row.stalled_step ? "step_stalled" : "step";
+    // #4443 — the last word is a comment handing the ticket back: a question waiting on an answer.
+    else if (facts.lastHandback === true) glyph = "question";
     else if (row.latest_resolution_rejected || row.latest_plan_rejected) glyph = "rejected";
     else glyph = null;
 
@@ -117,7 +122,7 @@ export function buildPilotFacts(rows: readonly InboxRow[], viewer: string, proje
         // No comment carries it: the ticket was filed with it, by its reporter.
         const proposer = commentId ? authorOf.get(commentId) ?? null
             : pendingKind(r) ? r.by_agent : null;
-        out.set(r.id, { viewerActedLast: excluded.has(r.id), proposer });
+        out.set(r.id, { viewerActedLast: excluded.has(r.id), proposer, lastHandback: aggs.get(r.id)?.lastSpeakerHandback ?? null });
     }
     return out;
 }

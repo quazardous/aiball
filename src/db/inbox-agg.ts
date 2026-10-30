@@ -35,7 +35,7 @@ import { onTicketChanged } from "./ticket-change.js";
 import { replayLifecycle } from "./ticket-closed.js";
 import type { Message } from "./connection.js";
 import { parseMeta } from "../questions.js";
-import { DECISION_KINDS, decisionGesture, isStepMeta, type DecisionKind } from "../ticket-transitions.js";
+import { DECISION_KINDS, decisionGesture, isStepMeta, readHandback, type DecisionKind } from "../ticket-transitions.js";
 
 /** The latest decision of one kind on a thread. */
 export interface DecisionTrack {
@@ -63,6 +63,8 @@ export interface InboxAgg {
     latestDecisionId: number;
     lastSpeaker: string | null;
     lastSpeakerId: number;
+    /** #4443 — the `handback` the last speaker's plain comment said; null when it said none, or the last word is not a plain comment. */
+    lastSpeakerHandback: boolean | null;
     /** #2308 — the latest step (`then: continue`) on the thread; 0 and "" when none. */
     lastStepId: number;
     lastStepAt: string;
@@ -86,6 +88,7 @@ export function emptyAgg(): InboxAgg {
         latestDecisionId: 0,
         lastSpeaker: null,
         lastSpeakerId: 0,
+        lastSpeakerHandback: null,
         lastStepId: 0,
         lastStepAt: "",
         lastStepResumeAt: "",
@@ -130,6 +133,9 @@ export function buildInboxAgg(project: string | undefined, ticketId?: number): M
         ) {
             cur.lastSpeaker = m.by_agent;
             cur.lastSpeakerId = m.id;
+            // A decision or a step says its own handback: only a plain comment's counts.
+            const said = m.kind === "comment_added" ? parseMeta(m.meta ?? null) : null;
+            cur.lastSpeakerHandback = said && !said.decision && !said.step ? readHandback(m.meta ?? null) : null;
         }
         if (m.kind === "ticket_resolved" && m.status === "pending") {
             cur.decisions.resolution.pending = true;
