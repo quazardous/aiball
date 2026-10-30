@@ -28,7 +28,6 @@ import {
     type TicketLevel,
 } from "./connection.js";
 import {
-    injectMarkers,
     parseMeta,
     serializeMeta,
     setQuestionStatus,
@@ -125,11 +124,7 @@ export function insertMessage(m: NewMessage): Message {
     const db = getDb();
     const result = db.transaction((tx) => {
         const createdAt = nowIso();
-        // #B.104: stamp stable `<!-- q:xxx -->` markers on every
-        // `- [ ]` line so future toggles can address the question by
-        // id regardless of edits / reorders. Idempotent — lines that
-        // already carry a marker are left alone.
-        const bodyWithMarkers = injectMarkers(m.body ?? null);
+        const bodyText = m.body ?? "";
         if (m.kind === "ticket_created") {
             const id = nextTicketId(tx);
             const seq = (tx.select({
@@ -157,7 +152,7 @@ export function insertMessage(m: NewMessage): Message {
                 project: m.project,
                 displaySeq: seq,
                 title: m.title ?? "",
-                body: bodyWithMarkers || null,
+                body: bodyText || null,
                 summary: m.summary ?? null,
                 byAgent: m.by_agent ?? null,
                 intent: m.intent ?? null,
@@ -253,7 +248,7 @@ export function insertMessage(m: NewMessage): Message {
             displaySeq: seq,
             kind: m.kind,
             parentMessageId,
-            body: bodyWithMarkers || null,
+            body: bodyText || null,
             byAgent: m.by_agent ?? null,
             createdAt,
             hashid,
@@ -617,12 +612,7 @@ export function editMessage(
 }
 function applyMessageEdit(id: number, fields: EditMessageFields): Message | null {
     const db = getDb();
-    // #B.104: re-inject `<!-- q:xxx -->` markers on any new task-list
-    // lines the editor added. Existing markers are preserved.
-    const nextBody =
-        fields.body !== undefined && fields.body !== null
-            ? injectMarkers(fields.body)
-            : fields.body;
+    const nextBody = fields.body;
     // Try tickets first — only tickets have a title and intent.
     //
     // #1565: `title`/`body` ARE the current text — the edit overwrites them in

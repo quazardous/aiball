@@ -17,7 +17,6 @@ import { bus } from "../lib/bus";
 import { scopeIcon, scopeTitle } from "../lib/scope";
 import { ticketHref } from "../lib/base";
 import { attachPasteImage } from "../lib/pasteImage";
-import { questionStats as computeQuestionStats } from "../lib/questions";
 import { readDecision, type DecisionRef } from "../lib/decisions";
 import { formatTicketRef } from "../lib/formatting";
 
@@ -110,9 +109,6 @@ const scopeHint = computed(() => {
         + " Agents can still read this comment when they open the thread.";
 });
 
-const questionStats = computed(() =>
-    computeQuestionStats(props.msg.body ?? ""),
-);
 
 // #B.129 phase 4: decision-on-comment audit chip. Read-only — the
 // accept/reject pair lives under the composer, per david's layout
@@ -473,15 +469,6 @@ async function doDelete() {
                 :class="['pi', scopePicto, 'scope-picto']"
                 :title="scopeHint"
             />
-            <Tag
-                v-if="questionStats.total > 0"
-                :value="`${questionStats.answered}/${questionStats.total} answered`"
-                :severity="questionStats.open === 0 ? 'success' : 'warn'"
-                :title="questionStats.open === 0
-                    ? 'All questions in this comment have been answered.'
-                    : `${questionStats.open} question${questionStats.open === 1 ? '' : 's'} still open — click a checkbox to quote it in your reply.`"
-                style="font-size: var(--fs-2xs); margin-left: 0.4rem"
-            />
             <!-- #2308 — a step (then: continue): work done and going on, nothing to decide.
                  #2326 david: after the author's name, with the other markers. -->
             <Tag
@@ -621,8 +608,6 @@ async function doDelete() {
         <MarkdownView
             v-if="!editing && msg.body"
             :source="msg.body"
-            :message-id="msg.id"
-            :questions-clickable="true"
             :self-ticket-id="msg.ticket_id ?? undefined"
             :project="msg.project"
         />

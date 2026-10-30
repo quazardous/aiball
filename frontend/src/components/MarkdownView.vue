@@ -2,7 +2,6 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
-import { extractQuestions } from "../lib/questions";
 import { markedInstance } from "../lib/formatting";
 import { stripBase, pushRoute } from "../lib/base";
 import { api } from "../lib/api";
@@ -10,17 +9,8 @@ import { BUILT_IN_BODY_DECORATORS, renderBody } from "../lib/body-decorators";
 import { wireAttachmentCards } from "../lib/attachment-card";
 import { ticketTitle, ticketTooltip } from "../lib/ticketTitles";
 
-/**
- * `messageId` + `questionsClickable` opt the body into the #B.104
- * Q&A flow: each GFM `- [ ]` becomes a clickable handle that emits
- * `composer.add-answer` on the bus. The composer subscribes, appends
- * a quote of the question text, and tracks the (messageId, questionId)
- * pair so the eventual submit toggles the checkbox via the API.
- */
 const props = defineProps<{
     source: string | null | undefined;
-    messageId?: number;
-    questionsClickable?: boolean;
     /**
      * #B.123 follow-up: id of the ticket this body lives under, when
      * known. Used to suppress the "promote to typed relation" right-
@@ -183,59 +173,10 @@ function onMouseOut(ev: MouseEvent) {
     }
 }
 
-// #B.104: after every re-render, scan rendered checkboxes and wire
-// the click → "ask the composer to quote this question" flow. We
-// pair the Nth DOM checkbox with the Nth task-list line in the
-// source body to recover the question id from its `<!-- q:xxx -->`
-// marker. DOMPurify strips the HTML comment, so the rendered DOM
-// has no way to carry the id directly — the source string is the
-// source of truth.
 const rootRef = ref<HTMLDivElement | null>(null);
 
-async function wireQuestionClicks() {
-    await nextTick();
-    const root = rootRef.value;
-    if (!root) return;
-    const inputs = Array.from(root.querySelectorAll('input[type="checkbox"]'));
-    if (inputs.length === 0) return;
-    const questions = extractQuestions(props.source ?? "");
-    const clickable = props.questionsClickable === true && props.messageId !== undefined;
-    inputs.forEach((el, i) => {
-        const input = el as HTMLInputElement;
-        const q = questions[i];
-        if (!q) return;
-        input.dataset.aiballQid = q.id;
-        // Enable interaction only when explicitly opted in. Toggles
-        // are NEVER persisted from a raw click — the composer flow
-        // owns the write-back. We prevent the default checkbox toggle
-        // so the visual state stays in sync with the source body.
-        if (clickable && q.status === "open") {
-            input.removeAttribute("disabled");
-            input.addEventListener("click", onQuestionClick, { once: true });
-            input.classList.add("aiball-q-clickable");
-        }
-    });
-}
-
-function onQuestionClick(ev: Event) {
-    const input = ev.target as HTMLInputElement;
-    ev.preventDefault();
-    // Don't actually flip the checkbox — let the round-trip handle it.
-    input.checked = false;
-    const qid = input.dataset.aiballQid;
-    if (!qid || props.messageId === undefined) return;
-    const questions = extractQuestions(props.source ?? "");
-    const q = questions.find((x) => x.id === qid);
-    if (!q) return;
-    bus.emit("composer.add-answer", {
-        messageId: props.messageId,
-        questionId: q.id,
-        questionText: q.text,
-    });
-}
-
 // #556: copy-button overlay on every rendered `<pre>` (fenced code block).
-// Comme `wireQuestionClicks`, on agit en post-render DOM (plutôt qu'en
+// On agit en post-render DOM (plutôt qu'en
 // modifiant le renderer marked) parce que le bouton vit en dehors du flow
 // markdown : il est purement chrome UI, n'a pas à survivre à un copy/paste
 // du body lui-même (textContent du `<code>` reste propre).
@@ -289,12 +230,9 @@ function wireAttachments() {
     });
 }
 
-// `immediate: true` so the very first render also wires clicks —
-// `watch` without it only fires on subsequent changes, which means a
-// freshly mounted MarkdownView would leave its checkboxes inert until
-// the source changes again.
+// `immediate: true` so the very first render is wired too: `watch` without
+// it only fires on subsequent changes.
 watch(html, () => {
-    void wireQuestionClicks();
     void wireCopyButtons();
     wireAttachments();
 }, { flush: "post", immediate: true });

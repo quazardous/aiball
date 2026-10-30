@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, toRef } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
@@ -10,7 +10,7 @@ import { useToast } from "primevue/usetoast";
 import MarkdownView from "./MarkdownView.vue";
 import TagPicker from "./TagPicker.vue";
 import { api, INTENTS, PRIORITIES, type Intent, type Priority } from "../lib/api";
-import { bus, useBus } from "../lib/bus";
+import { bus } from "../lib/bus";
 import { useComposerDraft } from "../lib/composer-draft";
 import { useMentionAutocomplete } from "../lib/mention-autocomplete";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -98,53 +98,6 @@ const priorityOptions = PRIORITIES.map((p) => ({
     label: p,
     value: p,
 }));
-
-// #B.104 pending answers — populated when the user clicks a `- [ ]`
-// in a comment body (the MarkdownView emits `composer.add-answer`).
-// Each entry pairs the source message id with the question id; at
-// submit time, after the reply lands, we POST to
-// /api/messages/<msgId>/questions/<qid>/answer to toggle the
-// checkbox in the parent body.
-interface PendingAnswer {
-    messageId: number;
-    questionId: string;
-    questionText: string;
-}
-const pendingAnswers = ref<PendingAnswer[]>([]);
-
-useBus("composer.add-answer", (payload) => {
-    // Only react when we're a comment composer on this thread — the
-    // new-ticket composer shouldn't be hijacked. Drop dupes.
-    if (props.mode !== "comment") return;
-    if (props.ticketId !== undefined && payload.messageId !== props.ticketId) {
-        // Comment-on-comment case: the questionId lives on a comment
-        // (not the ticket root). Allow when ticketId is unset (rare)
-        // or always: the messageId itself drives the API call.
-    }
-    const dupe = pendingAnswers.value.find(
-        (p) => p.messageId === payload.messageId && p.questionId === payload.questionId,
-    );
-    if (dupe) return;
-    pendingAnswers.value.push(payload);
-    // Append a quote of the question to the body so the answer lands
-    // right under the question it addresses.
-    const quote = "> " + (payload.questionText || "(empty question)") + "\n\n";
-    const cur = body.value;
-    body.value = (cur ? cur.replace(/\s*$/, "\n\n") : "") + quote;
-    // Scroll the composer into view and focus the textarea so the user
-    // lands ready to type (#B.104). Without this the click felt like a
-    // no-op when the composer was below the fold.
-    void nextTick(() => {
-        const el = bodyTextareaRef.value?.$el as HTMLTextAreaElement | undefined;
-        if (!el) return;
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        el.focus();
-        // Drop the caret at the end so the user starts typing right
-        // after the freshly inserted quote.
-        const end = el.value.length;
-        try { el.setSelectionRange(end, end); } catch { /* ignore */ }
-    });
-});
 
 const isTicket = computed(() => props.mode === "ticket");
 const canSubmit = computed(() =>
@@ -252,39 +205,12 @@ async function submit(scopeOverride?: Scope, keepTheHand = false) {
                 }
             }
         }
-        // #B.104: after the reply lands, mark every question that was
-        // queued via the click-to-quote flow as answered. Done after
-        // the post so the answer message id is known (used in the
-        // audit `answered_in` field). Each call is independent —
-        // a failure on one doesn't block the others, and the body
-        // toggle on the parent is server-side idempotent.
-        if (
-            createdId !== null &&
-            pendingAnswers.value.length > 0 &&
-            !isTicket.value
-        ) {
-            for (const pa of pendingAnswers.value) {
-                try {
-                    await api.markQuestionAnswered(pa.messageId, pa.questionId, {
-                        answered_in: createdId,
-                    });
-                } catch (e) {
-                    // Surface a discreet toast but don't fail the
-                    // whole submit — the comment is already posted.
-                    console.warn(
-                        `[composer] failed to mark question ${pa.questionId} answered:`,
-                        e,
-                    );
-                }
-            }
-        }
         // Successful post → drop the persisted draft, reset local state.
         sessionStorage.removeItem(draftKey.value);
         title.value = "";
         body.value = "";
         ticketTagIds.value = [];
         preview.value = false;
-        pendingAnswers.value = [];
         // #606 david : quand l'utilisateur poste lui-même un commentaire
         // sur un thread, il l'a, par définition, lu — mark-read jusqu'à
         // ce nouvel id IMMÉDIATEMENT, sans attendre le dwell autoMarkRead.
