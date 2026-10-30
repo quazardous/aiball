@@ -34,7 +34,7 @@ import {
     type MessageMeta,
     type QuestionAnswer,
 } from "../questions.js";
-import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionStatus } from "../decisions.js";
+import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionOption, type DecisionStatus } from "../decisions.js";
 import { getConfig } from "./config-overrides.js"; // #449: config-driven default priority
 // #2070 — inferring a cross-project deposit. The rule is pure and lives apart;
 // only the lookup of who-belongs-where happens here.
@@ -1404,6 +1404,29 @@ export function setMessageVote(
             .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
         return messageRowToMessage(fresh, parent?.project ?? "");
     });
+}
+
+/**
+ * #4459 — replace the options of a pending decision, on a comment or on the
+ * ticket that was filed with it. An empty list makes it a plain plan.
+ */
+export function setDecisionOptions(id: number, options: DecisionOption[]): Message | null {
+    const withOptions = (meta: ReturnType<typeof parseMeta>) => {
+        const { options: _old, ...decision } = meta.decision!;
+        meta.decision = options.length > 0 ? { ...decision, options: options.map((o) => ({ key: o.key, label: o.label.trim(), ...(o.recommended === true ? { recommended: true } : {}) })) } : decision;
+        return serializeMeta(meta);
+    };
+    const db = getDb();
+    const m = db.select({ meta: schema.messages.meta }).from(schema.messages).where(eq(schema.messages.id, id)).get();
+    if (m) db.update(schema.messages).set({ meta: withOptions(parseMeta(m.meta ?? null)) }).where(eq(schema.messages.id, id)).run();
+    else {
+        const t = db.select({ meta: schema.tickets.meta }).from(schema.tickets).where(eq(schema.tickets.id, id)).get();
+        if (!t) return null;
+        db.update(schema.tickets).set({ meta: withOptions(parseMeta(t.meta ?? null)) }).where(eq(schema.tickets.id, id)).run();
+    }
+    const out = getMessage(id);
+    threadChanged(out);
+    return out;
 }
 
 /**

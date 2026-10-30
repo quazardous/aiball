@@ -101,6 +101,7 @@ export {
     markQuestionAnswered,
     applyMessageDecision,
     promoteMessageToDecision,
+    setDecisionOptions,
     reclassifyMessageDecision,
     removeMessageDecision,
     setMessageSummary,

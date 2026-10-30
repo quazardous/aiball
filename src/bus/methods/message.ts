@@ -29,6 +29,7 @@ import {
     markQuestionAnswered,
     noteMessage,
     promoteMessageToDecision,
+    setDecisionOptions,
     reclassifyMessageDecision,
     removeMessageDecision,
     setMessageSummary,
@@ -36,7 +37,7 @@ import {
     type Message,
 } from "../../db.js";
 import { clearSeenForMessage, insertPing } from "../../db/pings.js";
-import { isDecisionKind, optionChoiceRefusal } from "../../decisions.js";
+import { isDecisionKind, optionChoiceRefusal, optionsRefusal, type DecisionOption } from "../../decisions.js";
 import { parseMeta } from "../../questions.js";
 import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, validateNewMessage, withoutDecisionRefusal } from "../../messages.js";
 import { NO_EXTRAS, fileTicket, isExtrasRefusal, ticketExtras, SUBMIT_REFUSAL_STATUS } from "../../file-ticket.js";
@@ -196,6 +197,31 @@ defineMethod({
         const kind = p.new_kind;
         if (typeof kind !== "string" || !isDecisionKind(kind)) throw new Refusal(400, "new_kind must be a valid decision kind");
         const updated = conflictOf(() => reclassifyMessageDecision(p.id, kind));
+        if (!updated) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
+        return edited(updated);
+    },
+});
+
+/**
+ * #4459 — change the options of a pending plan: add one, remove one, or none to
+ * make it a plain plan. The whole list is sent. Its author's gesture, or a
+ * human's: an agent does not rewrite another's proposal.
+ */
+defineMethod({
+    name: "message.set_options",
+    who: ["human", "agent"],
+    params: z.object({ id, options: z.unknown() }),
+    run: (caller, p) => {
+        const options = p.options;
+        const target = messageOf(p.id);
+        const decision = parseMeta(target.meta ?? null).decision;
+        if (decision?.status !== "pending") throw new Refusal(409, "no pending decision here: options change only while it waits", ERROR_CODES.DECISION_OPTION_INVALID);
+        const me = consumerIdOf(caller);
+        if (target.by_agent !== me && !isHuman(me)) throw new Refusal(403, "only the plan's author or a human can change its options");
+        const empty = Array.isArray(options) && options.length === 0;
+        const refusal = empty ? null : optionsRefusal(options, decision.kind);
+        if (refusal) throw new Refusal(400, refusal, ERROR_CODES.FIELD_INVALID);
+        const updated = setDecisionOptions(p.id, empty ? [] : options as DecisionOption[]);
         if (!updated) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         return edited(updated);
     },

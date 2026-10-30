@@ -25,7 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
-- A plan can offer named options (`options` on `then: plan`): the web shows one button per option, the choice is recorded on the decision, and the agent's wake names it. A plan with options has to be accepted on one of them.
+- A plan can offer named options (`options` on `then: plan`): the web shows one button per option, the choice is recorded on the decision, and the agent's wake names it. A plan with options has to be accepted on one of them. Its author or a human can add or remove options while it waits, and an agent posting a plan without options is reminded of them.
 - A human can reply on a ticket while keeping the hand (`handback: false`, "post, keep the hand" in the web composer's menu): no agent is woken, and the ticket leaves their pools until the next comment or decision. An `@mention` in it still calls its agent.
 - The web list marks a ticket that ends on a question waiting on your answer, and the thread says when a comment's author keeps the hand.
 - The inbox's turn view marks a ticket whose agent asked an open question and waits on the answer (a `question` glyph) and lists it with the decisions waiting on you, and an agent that says it carries on keeps the turn instead of handing it to you (row schema version 4).

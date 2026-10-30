@@ -331,8 +331,24 @@ export function registerTicketWriteTools(server: McpServer): void {
             }
             // #2640 — what the post did to the wait credit, in words, first.
             const note = waitCreditNote((res as { wait_credit?: WaitCreditAnswer } | null)?.wait_credit);
-            return asText({ ...(note ? { wait_credit_note: note } : {}), ...(res as object), your_decision: yourDecision });
+            // #4459 — a plan with no options is fine when there is one way to go; if the human has a choice, it wants them.
+            const optionsNote = then === "plan" && !options
+                ? "Plan posted without options. If the human has a choice to make, give it options: plan_options, or `options` on a fresher then: plan."
+                : null;
+            return asText({ ...(note ? { wait_credit_note: note } : {}), ...(optionsNote ? { options_note: optionsNote } : {}), ...(res as object), your_decision: yourDecision });
         },
+    );
+
+    server.registerTool(
+        "plan_options",
+        {
+            description: "#4459 — change the options of a plan still waiting on a decision: send the whole new list to add or remove some, or an empty list to make it a plain plan. The plan's author or a human only. `message_id` is the id of the comment that carries the plan (`ticket_reply` returned it), or the ticket's id for a plan filed with the ticket.",
+            inputSchema: {
+                message_id: z.number().int(),
+                options: z.array(z.object({ key: z.string(), label: z.string(), recommended: z.boolean().optional() })),
+            },
+        },
+        async ({ message_id, options }) => asText(await client.setPlanOptions(message_id, options)),
     );
 
     server.registerTool(

@@ -259,6 +259,28 @@ test("a plan with options is accepted on one of them, recorded on the decision a
     assert.equal(await bad({ decision_kind: "resolution", options: OPTIONS }), 400, "only a plan");
 });
 
+test("a pending plan's options can be changed by its author or a human, and removed", async () => {
+    const A = { key: "A", label: "first" }, B = { key: "B", label: "second" }, C = { key: "C", label: "third" };
+    const optionsOf = (id: number) => (JSON.parse(getDb().select({ meta: schema.messages.meta }).from(schema.messages).where(eq(schema.messages.id, id)).get()!.meta!) as { decision: { options?: Array<{ key: string }> } }).decision.options?.map((o) => o.key);
+    const set = (token: string, id: number, options: unknown[]) => call(token, "message.set_options", { id, options });
+    const t = ticket("options move");
+    const plan = await comment(WORKER, t, { decision_kind: "plan", handback: undefined });
+    assert.ok((await set(WORKER, plan, [A, B])).status < 300, "added to a plain plan");
+    assert.deepEqual(optionsOf(plan), ["A", "B"]);
+    assert.ok((await set(HUMAN, plan, [A, B, C])).status < 300, "a human too");
+    assert.deepEqual(optionsOf(plan), ["A", "B", "C"]);
+    assert.equal((await set(WORKER, plan, [A])).status, 400, "one option is not a choice");
+    assert.ok((await set(WORKER, plan, [])).status < 300, "an empty list makes it a plain plan");
+    assert.equal(optionsOf(plan), undefined);
+    assert.ok((await call(HUMAN, "message.decide", { id: plan, status: "accepted" })).status < 300, "and it takes a plain accept");
+    assert.equal((await set(WORKER, plan, [A, B])).status, 409, "not once decided");
+
+    // Someone else's plan is not an agent's to change.
+    const u = ticket("human's plan");
+    const theirs = await comment(HUMAN, u, { decision_kind: "plan", handback: undefined });
+    assert.equal((await set(WORKER, theirs, [A, B])).status, 403);
+});
+
 test("the decision band is the viewer's to decide, not the proposer's", async () => {
     const t = ticket("worker's own plan");
     await comment(WORKER, t, { decision_kind: "plan", handback: undefined });

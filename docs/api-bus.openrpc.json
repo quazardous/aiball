@@ -2616,6 +2616,35 @@
       ]
     },
     {
+      "name": "message.set_options",
+      "description": "Change the options of a pending plan: add one, remove one, or none to make it a plain plan. The whole list is sent. Its author's gesture, or a human's: an agent does not rewrite another's proposal.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "options",
+          "required": true,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "message.set_tags",
       "description": "Replace a message's tags (`tag_ids`: tag ids or names). each tag new on a ticket fires its own `tagged` trigger, as `match_tag_added` works per tag. `set_by` is the caller.",
       "paramStructure": "by-name",

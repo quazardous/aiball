@@ -356,6 +356,11 @@ export class AiballClient {
     //  #2109 — the ticket's payload zone
     // =================================================================
 
+    /** #4459 — replace the options of a pending plan; an empty list removes them. */
+    async setPlanOptions(messageId: number, options: Array<{ key: string; label: string; recommended?: boolean }>): Promise<unknown> {
+        return this.call("message.set_options", { id: messageId, options });
+    }
+
     /** The FILTERED view: keys always, values only where the schema says. */
     ticketPayload(ticketId: number) {
         return this.call("ticket.payload", { id: ticketId });

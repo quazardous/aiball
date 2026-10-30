@@ -110,3 +110,17 @@ test("a reply and a close send neither the project nor the author", async () => 
     await handlers.ticket_close({ ticket_id: 7 });
     assert.deepEqual(sent, [{ kind: "ticket_closed", ticket_id: 7, parent_id: 7 }]);
 });
+
+// #4459 — the options reach the wire, and a plan without them is reminded.
+test("then: plan carries its options; without them, the answer reminds of them", async () => {
+    const options = [{ key: "A", label: "one" }, { key: "B", label: "two" }];
+    sent.length = 0;
+    const withOptions = JSON.stringify(await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "plan", commits: null, options }));
+    assert.deepEqual(sent[0]?.options, options);
+    assert.doesNotMatch(withOptions, /options_note/);
+    const without = JSON.stringify(await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "plan", commits: null }));
+    assert.match(without, /options_note/);
+    assert.match(without, /Plan posted without options/);
+    const resolved = JSON.stringify(await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "resolved", commits: null }));
+    assert.doesNotMatch(resolved, /options_note/);
+});

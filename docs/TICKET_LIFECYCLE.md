@@ -81,7 +81,8 @@ meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status
 - **A plan can offer options** (`options` on `then: plan`, 2 to 6, at most one
   recommended). It is then accepted on one of them (`option` on the decide), or
   rejected. The choice stays on the decision, and the `plan_accepted` event's
-  body names it, which the wake repeats.
+  body names it, which the wake repeats. While it waits, its author or a human
+  can change the list (`message.set_options`, the `plan_options` tool).
 - **A step withdraws its author's own pending decision** (`then: continue`): the
   work goes on, so the proposal no longer holds. Its status becomes `withdrawn`,
   nothing is left to accept, and the thread keeps it. Someone else's pending
