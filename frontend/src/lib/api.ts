@@ -601,6 +601,10 @@ export interface InboxRow {
     latest_plan_rejected?: boolean;
     /** #B.245 tristate scope. */
     scope?: "internal" | "default" | "broadcast";
+    /** #4454 — the turn view (docs/API-INBOX.md): whose move it is, for the reader. */
+    turn?: "you" | "them" | "none";
+    /** #4454 — the turn view's state mark. Only `question` is read here. */
+    state_glyph?: string | null;
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;
     /** #2112 — the ticket carries a payload zone. Drives a discreet mark in
@@ -956,6 +960,8 @@ export const api = {
             limit: params.limit || undefined,
             offset: params.offset || undefined,
             ids: params.ids?.length ? params.ids : undefined,
+            // #4454 — for `state_glyph` and `turn`: a question waiting on the reader.
+            view: "turn",
         });
         return { rows: out.rows, total: Number.isFinite(out.total) ? out.total : out.rows.length };
     },

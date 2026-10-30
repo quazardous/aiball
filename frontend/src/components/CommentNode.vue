@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { fmtDateTime } from "../lib/time-zone";
-import { DECISION_GESTURES, STEP_LABEL, isStepMeta } from "@shared/ticket-transitions";
+import { DECISION_GESTURES, STEP_LABEL, isStepMeta, readHandback } from "@shared/ticket-transitions";
 import { shortResume } from "../lib/labels";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import Button from "primevue/button";
@@ -122,6 +122,8 @@ const decision = computed(() => readDecision(props.msg));
 const isStepComment = computed(() => isStepMeta(props.msg.meta));
 // #2470 — shown as a step only while no later step supersedes it.
 const isStep = computed(() => isStepComment.value && !props.supersededStep);
+// #4454 — a plain comment whose author said it keeps the hand (`handback: false`).
+const keepsTheHand = computed(() => !isStepComment.value && readHandback(props.msg.meta) === false);
 const decisionChipLabel = computed(() => {
     const d = decision.value;
     if (!d) return "";
@@ -489,6 +491,14 @@ async function doDelete() {
                     : stepMeta.resumeAt || stepMeta.resumeOnTicket
                         ? 'a step: the agent waits on something before it resumes — nothing to accept or reject'
                         : 'a step: the agent marked this part done and carries on — nothing to accept or reject'"
+                style="font-size: var(--fs-2xs); margin-left: 0.4rem"
+            />
+            <!-- #4454 — says why nobody moves after this comment. -->
+            <Tag
+                v-if="keepsTheHand"
+                value="keeps the hand"
+                severity="secondary"
+                title="the author keeps the hand: not done yet, nobody has to act on this comment"
                 style="font-size: var(--fs-2xs); margin-left: 0.4rem"
             />
             <!-- #2456 david — the resume reads right after the step chip, in the chip's own colour. -->

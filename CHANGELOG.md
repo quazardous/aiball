@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The web list marks a ticket that ends on a question waiting on your answer, and the thread says when a comment's author keeps the hand.
 - The inbox's turn view marks a ticket whose agent asked an open question and waits on the answer (a `question` glyph) and lists it with the decisions waiting on you, and an agent that says it carries on keeps the turn instead of handing it to you (row schema version 4).
 - `loop.log` says each sign of work the loop reads as it comes on or goes off
   (`busy proofs: +activity -turn → …`), and when the stale-busy guard is armed.

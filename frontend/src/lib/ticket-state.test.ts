@@ -19,3 +19,14 @@ test("what asks for someone, or a stalled step, wins over the step icon", () => 
 test("no step as the last word, the ordinary open icon", () => {
     assert.equal(lifecycleStage(row({})), "open");
 });
+
+// #4454 — a question shows when the answer is the reader's, not for the one who asked.
+test("a question waiting on the reader shows the question icon", () => {
+    assert.equal(lifecycleStage(row({ state_glyph: "question", turn: "you" })), "question");
+    assert.equal(lifecycleStage(row({ state_glyph: "question", turn: "them" })), "open");
+});
+
+test("a pending decision wins over a question, and a question over a rejection", () => {
+    assert.equal(lifecycleStage(row({ state_glyph: "question", turn: "you", pending_plan: true })), "pending-plan");
+    assert.equal(lifecycleStage(row({ state_glyph: "question", turn: "you", latest_plan_rejected: true })), "question");
+});

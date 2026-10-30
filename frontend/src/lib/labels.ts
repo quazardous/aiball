@@ -98,6 +98,12 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         color: "--p-red-500",
         title: "you rejected the latest resolution — thread still open",
     },
+    question: {
+        // #4454 — an agent's question waiting on the reader's answer.
+        icon: "pi pi-question-circle",
+        color: "--p-amber-500",
+        title: "a question waits on your answer",
+    },
     "rejected-plan": {
         // #B.173: latest plan decision was rejected. Visually
         // distinct from rejected-resolved (which is "work was

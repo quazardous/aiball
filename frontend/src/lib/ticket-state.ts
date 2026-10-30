@@ -68,6 +68,7 @@ export type LifecycleStage =
     | "pending-escalation"
     | "pending-resolved"
     | "pending-plan"
+    | "question"
     | "rejected-resolved"
     | "rejected-plan"
     | "blocked"
@@ -95,6 +96,10 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     // in the pipeline" — agent says done, awaiting accept) ; a pending
     // plan is "earlier" — agent proposes a direction, awaiting validate.
     if (r.pending_plan) return "pending-plan";
+    // #4454 — the last word is a question and the answer is the reader's. It
+    // ranks as the turn view's glyph does: after a pending decision, and over
+    // a rejection, which the question came after.
+    if (r.state_glyph === "question" && r.turn === "you") return "question";
     // #B.168 follow-up: latest resolution was rejected and the thread
     // is still open — distinct red X badge so the reporter sees their
     // earlier rejection still leaves work on the table.
