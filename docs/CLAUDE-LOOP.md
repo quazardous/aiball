@@ -289,8 +289,10 @@ stateDiagram-v2
 Entering **live** unlocks the wake machine (`BOOT_READY`, diagram 3) and tries a
 first wake. The bar's *busy* colour is not a state of its own: it stays on while
 any sign of activity was seen in the last 4 s — an open turn, the spinner line
-(spinner, timer and tokens, which Claude shows the whole time it works),
-`/compact`, and on Claude Code before 2.1.304 the `esc to interrupt` footer.
+(spinner, timer and tokens, which Claude shows the whole time it works), a
+prompt waiting in Claude's queue (the input box says `Press up to edit queued
+messages`), `/compact`, and on Claude Code before 2.1.304 the `esc to
+interrupt` footer.
 Each sign coming on or going off is logged in `loop.log` as
 `busy proofs: +activity -turn → …`.
 

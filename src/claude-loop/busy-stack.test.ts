@@ -143,3 +143,13 @@ test("#4437 proofChanges: what came on and went off, null when nothing moved", (
     assert.deepEqual(proofChanges(["activity", "turn"], ["turn"]), { on: [], off: ["activity"] });
     assert.deepEqual(proofChanges(["esc", "turn"], []), { on: [], off: ["esc", "turn"] });
 });
+
+test("#4121 a queued prompt is a mechanical proof: it holds busy and keeps the pane from reading idle", async () => {
+    const { PROOF_QUEUED, MECHANICAL_PROOFS, paneReadsIdle } = await import("./busy-stack.js");
+    assert.ok(MECHANICAL_PROOFS.includes(PROOF_QUEUED));
+    const proofs = seenProof(new Map(), PROOF_QUEUED, 1_000);
+    assert.equal(isBusy(proofs, 2_000), true);
+    assert.equal(mechanicalProofsLive(proofs, 2_000), true);
+    assert.equal(paneReadsIdle({ idlePromptVisible: true, mechanicalLive: mechanicalProofsLive(proofs, 2_000), inTurn: true, turnShowedWork: true, sinceTurnStartMs: 60_000 }), false,
+        "an empty-looking box with a queued prompt does not end the turn");
+});

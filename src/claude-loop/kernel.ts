@@ -123,7 +123,7 @@ import {
     CompactConfirmWatcher,
     TrustDialogWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, ActivityWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, LimitReachedWatcher, limitResetsOf, RemoteControlWatcher, UpdateInstalledWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, ActivityWatcher, QueuedWatcher, InterruptedWatcher, IdlePromptWatcher, NotLoggedInWatcher, LimitReachedWatcher, limitResetsOf, RemoteControlWatcher, UpdateInstalledWatcher, ApiUnreachableWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
@@ -200,6 +200,7 @@ import {
     PROOF_TURN,
     PROOF_ESC,
     PROOF_ACTIVITY,
+    PROOF_QUEUED,
     PROOF_COMPACTING,
     type BusyProofs,
 } from "./busy-stack.js";
@@ -809,6 +810,8 @@ const compactConfirmW = new CompactConfirmWatcher();
 const promptW = new PromptWatcher();
 const busyW = new BusyWatcher();
 const activityW = new ActivityWatcher();
+// #4121 — a prompt waiting in Claude Code's queue.
+const queuedW = new QueuedWatcher();
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
@@ -828,7 +831,7 @@ const trustDialogW = new TrustDialogWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, activityW, interruptedW, idlePromptW, notLoggedInW, limitReachedW, remoteControlW, updateInstalledW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
+    promptW, busyW, activityW, queuedW, interruptedW, idlePromptW, notLoggedInW, limitReachedW, remoteControlW, updateInstalledW, apiUnreachableW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW, trustDialogW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -1157,8 +1160,10 @@ async function probePaneMarkers(): Promise<void> {
     // #1580 — la preuve CONTINUE : la ligne d'activité est là tant que claude
     // travaille, quand le hint `esc` ne l'est qu'un tick sur six.
     if (activityW.snapshot().visible) busyProofs = seenProof(busyProofs, PROOF_ACTIVITY, nowBusy);
+    // #4121 — a queued prompt: the queue empties only into a turn.
+    if (queuedW.snapshot().visible) busyProofs = seenProof(busyProofs, PROOF_QUEUED, nowBusy);
     // #4014 — this turn has shown Claude at work at least once.
-    const workOnScreen = escVisible || getCompactingDetector().snapshot().active || activityW.snapshot().visible;
+    const workOnScreen = escVisible || getCompactingDetector().snapshot().active || activityW.snapshot().visible || queuedW.snapshot().visible;
     if (inTurn && (workOnScreen || hookCompacting)) turnShowedWork = true;
     // #4051 — work seen after a blind turn-end: Claude was busy, and is shown now.
     if (blindEndAtMs !== null && (workOnScreen || hookCompacting)) {

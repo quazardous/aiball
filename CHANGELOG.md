@@ -112,6 +112,9 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A prompt waiting in Claude Code's queue counts as Claude working: no wake is
+  typed behind it, and the turn does not end on an input box that only looks
+  empty. Seen during a compaction, where wakes piled up greyed in the queue.
 - A deploy no longer lands a wake in the middle of a turn: the kernel reloads
   itself on moved source only once Claude is idle, where it used to respawn
   within 2 s whatever Claude was doing, and the wake its reattach sent arrived

@@ -66,6 +66,22 @@ export function findPromptZone(paneText: string): PromptZone | null {
     return null;
 }
 
+/**
+ * #4121 — a prompt waits in Claude Code's queue: the input box shows the hint
+ * `Press up to edit queued messages` on its `❯` line (recorded on 2.1.312, with
+ * a no-break space after the chevron). Claude has not finished, whatever else
+ * the screen shows: the queue empties only into a turn. Anchored on the box
+ * found by `findPromptZone`, so the same words in the transcript above (a
+ * quoted capture, code on screen) do not count; the `ctrl+x ctrl+s to send now`
+ * line under the queued prompt sits in the transcript and is not read.
+ */
+export function promptShowsQueued(paneText: string): boolean {
+    const zone = findPromptZone(paneText);
+    if (!zone) return false;
+    const lines = paneText.split("\n");
+    return /^\s*❯[\s\u00a0]*Press up to edit queued messages/.test(lines[zone.chevron]);
+}
+
 export class PromptZoneWatcher extends BoolWatcher {
     readonly name = "prompt_zone";
     private lastZone: PromptZone | null = null;

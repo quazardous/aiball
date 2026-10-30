@@ -8,6 +8,7 @@ import { BoolWatcher } from "./bool-watcher.js";
 import { paneFooterShowsBusy, paneShowsActivity, paneShowsInterrupted } from "../state.js";
 import { footerOf } from "../error-backoff.js";
 import { belowPromptBox } from "../pane-decor.js";
+import { promptShowsQueued } from "./prompt-zone-watcher.js";
 import type { PaneScanCtx } from "./types.js";
 
 /** Claude prompt visible (= `Claude Code v`, `❯ `, `> ` at line start).
@@ -38,6 +39,16 @@ export class ActivityWatcher extends BoolWatcher {
     readonly name = "activity";
     protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
         return paneShowsActivity(paneText);
+    }
+}
+
+/** #4121 — a prompt waits in Claude Code's queue (the input box says so):
+ *  Claude is still busy, even where nothing else on the screen shows it (a
+ *  compaction, a turn between two tools). */
+export class QueuedWatcher extends BoolWatcher {
+    readonly name = "queued";
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        return promptShowsQueued(paneText);
     }
 }
 

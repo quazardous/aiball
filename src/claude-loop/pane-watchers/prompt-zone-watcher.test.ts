@@ -115,3 +115,47 @@ test("zone() snapshot returns the last detected geometry", () => {
     assert.ok(zone !== null);
     assert.ok(typeof zone!.chevron === "number");
 });
+
+// #4121 — a prompt waiting in Claude Code's queue. Recorded on 2.1.312 through
+// the session host (tvty's loop, 2026-10-30 07:02, a message typed while Claude
+// worked); bottom of the screen only, rules shortened. Note the no-break space
+// after the chevron in the input box.
+const QUEUED_2_1_312 = [
+    "❯ decrit ce composant de panneau stacké",
+    "  ctrl+x ctrl+s to send now",
+    "",
+    "✢ Brewing… (38s · ↓ 660 tokens)",
+    "",
+    "────────────────────────────────────────────────",
+    "❯ Press up to edit queued messages",
+    "────────────────────────────────────────────────",
+    "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent",
+].join("\n");
+
+test("#4121 the queued hint in the input box is a queued prompt", async () => {
+    const { promptShowsQueued } = await import("./prompt-zone-watcher.js");
+    assert.equal(promptShowsQueued(QUEUED_2_1_312), true);
+    // Without the activity line (a compaction draws none): still queued.
+    assert.equal(promptShowsQueued(QUEUED_2_1_312.replace("✢ Brewing… (38s · ↓ 660 tokens)", "")), true);
+    // A plain space instead of the no-break one.
+    assert.equal(promptShowsQueued(QUEUED_2_1_312.replace("❯ Press", "❯ Press")), true);
+});
+
+test("#4121 the same words outside the input box are not a queue", async () => {
+    const { promptShowsQueued } = await import("./prompt-zone-watcher.js");
+    // Delivered: the box is empty again, the "send now" line scrolled into the transcript.
+    assert.equal(promptShowsQueued(QUEUED_2_1_312.replace("❯ Press up to edit queued messages", "❯")), false);
+    // Quoted on screen above an empty box (a capture, code being read).
+    const quoted = [
+        "  // ❯ Press up to edit queued messages",
+        "  ctrl+x ctrl+s to send now",
+        "────────────────────────────────────────────────",
+        "❯",
+        "────────────────────────────────────────────────",
+    ].join("\n");
+    assert.equal(promptShowsQueued(quoted), false);
+    // Typed by the human in the box: it does not start the box line.
+    assert.equal(promptShowsQueued(QUEUED_2_1_312.replace("❯ Press up", "❯ why does it say Press up")), false);
+    // No box at all.
+    assert.equal(promptShowsQueued("❯ Press up to edit queued messages"), false);
+});
