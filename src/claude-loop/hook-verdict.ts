@@ -163,7 +163,7 @@ const ASK_USER_QUESTION_REDIRECT =
 /** #3393 — `claude_loop.questions: ticket_only`: the dialog is refused even with a human in front. */
 const ASK_USER_QUESTION_TICKET_ONLY =
     "AskUserQuestion (multi-choice dialog) is off for this project: its questions go to the ticket (claude_loop.questions: ticket_only). " +
-    "Post your question as an aiball ticket comment (ticket_reply on the relevant ticket, with handback: true, or then: \"plan\" when you propose a choice).";
+    "Post your question as an aiball ticket comment (ticket_reply on the relevant ticket: a choice between options is then: \"plan\" with your recommendation; an open question is a plain comment with handback: true).";
 
 /**
  * Pure mapping `(state, context) → verdict`. Encapsulates the deny logic

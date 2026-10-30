@@ -67,9 +67,19 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 - **`then: "resolved"`** — propose to close. Use when work shipped (commit landed, fix live) and scope is satisfied. Do this **immediately** — don't write "awaiting test" and wait.
 - **`then: "plan"`** — propose **how** you'll tackle. Reporter's accept = greenlight to execute.
 - **`then: "continue"`** — a step is done and you carry on, nothing to validate. On a ticket you hold; on a project you lead, it claims a ticket nobody else holds. The ticket stays in your queue even though you spoke last; the human sees a "step" mark and has nothing to click.
-- **Plain comment** — say whether you hand the ticket back. `handback: true` for a clarifying question or anything you wait an answer on: the ticket leaves your actionable pool, and your backlog still reminds you of it (`You spoke last`) until someone moves. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
+- **Plain comment** — say whether you hand the ticket back. `handback: true` for an open question nobody can answer with a yes or a no ("which file did you mean?"), or a move that belongs to another agent: the ticket leaves your actionable pool, and your backlog still reminds you of it (`You spoke last`) until someone moves. `handback: false` to keep working on a ticket you hold without marking a step. A progress note is a `then: "continue"`. A reply with neither a `then:` nor `handback` is refused and nothing is posted.
 - **Waiting on another ticket** — `ticket_relate` your ticket `depends_on` that one, and say so with `handback: false`. The ticket is blocked while the other is open and you get a `dependency_closed` event when it closes. Don't post `then: "continue"` cycle after cycle to keep it alive.
 - **Work that moves to another ticket** — when you carry the work on a recap or follow-up ticket, say it on the OLDER one: close it, or state there what now carries it. Nothing else can tell; left alone it keeps coming back as a triage wake, and a `relates_to` relation does not change that.
+
+### A ticket that waits on the human's answer is a `then: "plan"`
+
+When the next move is the human's choice — option A or B, go or no go, which
+of two ways — post it as `then: "plan"`: the options, your recommendation
+first, and what each one implies. A plain comment with `handback: true` and a
+question gives them nothing to click: it sits among the open tickets with no
+mark, and the ticket comes back to you unanswered. Keep `handback: true` for a
+question no option can answer ("which file did you mean?") and for a move that
+belongs to another agent.
 
 ### The default is decision-bearing
 
@@ -91,7 +101,7 @@ Skipping `then:` pushes cleanup overhead onto the human.
 - *this shouldn't be done* → `then: "wontfix"`
 - *this step is done, I carry on* → `then: "continue"`
 
-Leave it plain **only** when it genuinely hands the ball back — a clarifying question, missing context, a refinement to a still-valid plan. Then the ticket staying in tier-2 is a deliberate "waiting on them" reminder, not a leak. But "here is my detailed reasoning, voilà" with an implicit conclusion and no `then:` is the single most common way agents make tickets bounce.
+Leave it plain **only** when it genuinely hands the ball back — an open question, missing context, a refinement to a still-valid plan. Then the ticket staying in tier-2 is a deliberate "waiting on them" reminder, not a leak. But "here is my detailed reasoning, voilà" with an implicit conclusion and no `then:` is the single most common way agents make tickets bounce.
 
 ### Decisions are last-wins — amend freely, don't ask to "reject" superseded ones
 
@@ -109,7 +119,7 @@ A reopen (Reopen button OR rejected `then: "resolved"`) = **technical rejection 
 
 Right move : fresh discussion comment that either
 - proposes a new direction with `then: "plan"`,
-- asks a sharp clarifying question,
+- asks a sharp question (a choice between options is a `then: "plan"`, see below),
 - offers `then: "wontfix"` if you genuinely believe the work was correct.
 
 Don't re-post the same `then: "resolved"`.
@@ -313,7 +323,8 @@ belongs to someone else — hand the ticket back.
 
 | Who makes the next move? | Gesture |
 |---|---|
-| **someone else** — answer a question, review, decide | `handback: true` — the ticket leaves your actionable pool; the backlog still reminds you until they speak |
+| **the human** — choose between options, approve a direction, say yes or no | `then: "plan"` with the options and your recommendation: they get accept / reject, and the ticket shows in their decisions |
+| **someone else** — another agent to answer or review, or an open question with no options to offer | `handback: true` — the ticket leaves your actionable pool; the backlog still reminds you until they speak |
 | **you, later** — a build, a job, a measurement, a deploy to finish | `then: "continue"` with `resume_on: { timer: N }` — it stays yours and comes back in N minutes; `resume_on: { ticket: M }` to come back when ticket M moves (both: whichever comes first) |
 
 `handback` is not a way to wait. Handing a ticket back to nobody takes it out of

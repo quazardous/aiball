@@ -160,7 +160,8 @@ export function verbsAllowedOn(host: DecisionHost): string[] {
  * A reply nobody accepts or rejects. #2331 — every message says whether it hands
  * the ticket back: a decision does (its author waits), `then: continue` does not
  * (the author carries on, and the step is marked), and a comment with no `then`
- * says it with `handback: true` (a question, an answer awaited) or
+ * says it with `handback: true` (an open question or another agent's move, an
+ * answer awaited; a choice for the human is a `then: plan`) or
  * `handback: false` (keeping the hand without marking a step).
  */
 export interface ReplyGesture {
@@ -263,8 +264,8 @@ export function handbackRefusal(h: {
     }
     if (h.handback !== undefined || !h.required) return null;
     return "a comment without then: needs one, or handback. A step you finished on a ticket you hold: then: continue. "
-        + "A step to have validated: then: plan. Work done, or a ticket to drop or unblock: then: resolved / wontfix / escalate. "
-        + "Otherwise say whether you hand the ticket back: handback: true (a question, you wait for an answer; the ticket leaves your actionable pool, the backlog still reminds you) "
+        + "A step to have validated, or a choice for the human (options and your recommendation): then: plan. Work done, or a ticket to drop or unblock: then: resolved / wontfix / escalate. "
+        + "Otherwise say whether you hand the ticket back: handback: true (an open question or another agent's move, you wait for an answer; the ticket leaves your actionable pool, the backlog still reminds you) "
         + "or handback: false (you keep working on it; only on a ticket you hold). Nothing was posted.";
 }
 

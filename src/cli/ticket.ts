@@ -101,7 +101,7 @@ export function registerTicketCommands(program: Command): void {
         .option("--project <project>", "Ignored: the daemon files it in the ticket's project")
         .option("--parent <id>", "Parent message id (default: ticket id)")
         .option("--by <agent>", "Post as this consumer (the identity sent)")
-        .option("--handback", "Hand the ticket back: a question, you wait for an answer (an agent's comment needs --handback or --keep)")
+        .option("--handback", "Hand the ticket back: an open question or another agent's move, you wait for an answer; a choice for the human is a plan instead (the MCP ticket_reply with then: plan) (an agent's comment needs --handback or --keep)")
         .option("--keep", "Keep the ticket and carry on (only on a ticket you hold)")
         .option("--commits <shas>", "Commits this comment delivers, comma-separated, or \"none\" (an agent's comment needs it)")
         .option("--summary <text>", "The ticket's state after this comment, one line (summary_until; an agent's comment needs it)")
