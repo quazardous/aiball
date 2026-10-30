@@ -180,7 +180,7 @@ rests until then.
 of the backlog: the open ticket of your project that holds back the most open
 tickets, down its `depends_on` / `blocks` chains (`· quiet 3 d` when it has not
 moved for days). Moving it frees the most work: do the next step if it is
-yours, or chase whoever it waits on. It then sinks like any backlog head.
+yours, or chase whoever it waits on. It then sinks like any backlog head. It only wakes you this way while the next move is yours: once you have spoken last, or a blocker holds it, it keeps the ordinary ending of that case.
 
 **Triage = ONE of three gestures, in order of preference :**
 

@@ -6,7 +6,7 @@ import { parseQuery, wholeWordScore } from "./search.js";
 
 test("parseQuery: long (≥3-char) tokens become quoted MATCH literals", () => {
     const r = parseQuery("hello world");
-    assert.equal(r.match, '"hello" "world"');
+    assert.equal(r.match, '"hello" AND "world"');
     assert.deepEqual(r.likeTokens, []);
     assert.equal(r.empty, false);
 });
@@ -35,7 +35,7 @@ test("parseQuery: empty / whitespace-only → empty", () => {
 test("parseQuery: strips FTS5 quoting / prefix chars", () => {
     // "foo"→foo, (bar)→bar, baz*→baz — all ≥3 chars
     const r = parseQuery('"foo" (bar) baz*');
-    assert.equal(r.match, '"foo" "bar" "baz"');
+    assert.equal(r.match, '"foo" AND "bar" AND "baz"');
 });
 
 test("parseQuery: char-stripping can shrink a token below 3 → LIKE", () => {
@@ -101,7 +101,7 @@ test("parseQuery: an expanded token becomes an OR group, groups stay AND-ed", ()
     // Expansion must widen INSIDE a token, never turn the query into "either".
     const r = parseQuery("réveil verrou");
     assert.match(r.match!, /\(.*"wake".*\)/, "the group is OR-ed inside");
-    assert.match(r.match!, /\).*\(/, "and the two groups sit side by side (AND)");
+    assert.match(r.match!, /\) AND \(/, "and the two groups are AND-ed");
     assert.equal(r.expanded.length, 2, "both tokens grew");
     // The re-rank must still reward what the caller typed, not the synonyms.
     assert.deepEqual(r.wordTokens, ["réveil", "verrou"]);

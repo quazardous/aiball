@@ -98,6 +98,19 @@ test("the critical ticket is a tier of its own, ahead of the rest, with the back
     const after = (await backlog()).find((r) => r.id === root);
     assert.equal(after?.backlog_tier, -1, "still critical");
     assert.ok(after?.backlog_cooled_until, "but sunk until the cooldown ends");
+
+    // #4135 — handed back with nothing new: not "Unstick it" at every cooldown.
+    const said = await call("message.post", { project: Q, kind: "comment_added", ticket_id: root, body: "waits on the owner", summary_until: "s", handback: true, commits: null }, LEAD);
+    assert.ok(said.status < 300, JSON.stringify(said.json));
+    let row = (await backlog()).find((r) => r.id === root);
+    assert.equal(row?.backlog_tier, 3, "the agent spoke last: the waiting tier and its ending");
+    assert.equal(row?.critical?.holds, 2, "still flagged as the critical ticket");
+
+    // Someone else moves: it is the agent's to move again.
+    const moved = await call("message.post", { project: Q, kind: "comment_added", ticket_id: root, body: "go", summary_until: "s" }, HUMAN);
+    assert.ok(moved.status < 300, JSON.stringify(moved.json));
+    row = (await backlog()).find((r) => r.id === root);
+    assert.equal(row?.backlog_tier, -1, "the critical tier again");
 });
 
 // #2770 david — "in the lists / ticket detail can we flag the

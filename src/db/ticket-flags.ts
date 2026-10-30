@@ -255,10 +255,13 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         // (or the step ignored it), and a blocked ticket keeps its own tier and
         // wording. Someone else's heat still lifts it — that is news.
         const freshOwnStep = (ctx.freshOwnStepIds?.has(t.id) ?? false) && !blocked;
-        if (critical && inPool) {
+        if (critical && inPool && (actionable || hotForTier || freshOwnStep)) {
             // #2770 david — "un wake à part après les events et avant le
             // backlog, avec un sink : c'est un nouveau tier". The sink is the
             // backlog cooldown, like any head.
+            // #4135 — only while the next move is this agent's: one who spoke
+            // last, or is blocked, keeps the natural tier and its ending, or
+            // "Unstick it" comes back every cooldown with nothing new.
             backlog_tier = -1;
         } else if ((hotForTier || freshOwnStep) && inPool) {
             backlog_tier = 0;

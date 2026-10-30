@@ -73,6 +73,8 @@ test("search and the decisions lenses: a bus connection and a direct call agree"
     const c = await worker();
     assert.deepEqual(await c.call("message.search", { q: "zebra", project: "p-look" }), (await direct("message.search", { q: "zebra", project: "p-look" })).json);
     assert.deepEqual(await c.call("message.search", { q: "  " }), [], "an empty query finds nothing");
+    // #4135 — several words, one with a synonym: a real FTS5 query, which refused the implicit AND next to the group.
+    assert.ok(Array.isArray(await c.call("message.search", { q: "critical wake handback" })), "answered, not a 500");
     assert.deepEqual(await c.call("decision.mine"), (await direct("decision.mine")).json);
     assert.deepEqual(await c.call("decision.plans_to_execute"), (await direct("decision.plans_to_execute")).json);
 });

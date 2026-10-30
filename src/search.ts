@@ -115,13 +115,14 @@ export function parseQuery(raw: string): ParsedQuery {
     // #2193 — each token becomes a GROUP: OR inside, AND between. That keeps
     // the existing meaning of a multi-word query ("both words", never
     // "either") while letting `réveil` also reach the threads that say `wake`.
+    // #4135 — AND in full: FTS5 refuses the implicit AND next to a group.
     const groups = long.map((t) => expandToken(t));
     const expanded = groups.filter((g) => g.length > 1);
     return {
         match: long.length > 0
             ? groups.map((g) => g.length > 1
                 ? `(${g.map((t) => `"${t}"`).join(" OR ")})`
-                : `"${g[0]}"`).join(" ")
+                : `"${g[0]}"`).join(" AND ")
             : null,
         expanded,
         likeTokens: short,

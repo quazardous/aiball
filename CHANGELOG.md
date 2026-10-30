@@ -115,6 +115,8 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The project's critical ticket no longer wakes its agent at every cooldown after the agent has spoken last, or while a blocker holds it: it keeps the ordinary ending of that case, until someone else moves.
+- Search no longer answers 500 on a query of several words when one of them has a synonym.
 - The daemon's service waits for an install that lives under a folder mounted after login, instead of failing every 2 seconds until the mount.
 - A prompt waiting in Claude Code's queue counts as Claude working: no wake is
   typed behind it, and the turn does not end on an input box that only looks
