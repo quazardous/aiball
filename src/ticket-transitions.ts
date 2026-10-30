@@ -266,7 +266,7 @@ export function handbackRefusal(h: {
     }
     if (h.handback !== undefined || !h.required) return null;
     return "a comment without then: needs one, or handback. A step you finished on a ticket you hold: then: continue. "
-        + "A step to have validated, or a choice for the human (options and your recommendation): then: plan. Work done, or a ticket to drop or unblock: then: resolved / wontfix / escalate. "
+        + "A step to have validated, or a choice for the human: then: plan with options. Work done, or a ticket to drop or unblock: then: resolved / wontfix / escalate. "
         + "Otherwise say whether you hand the ticket back: handback: true (an open question or another agent's move, you wait for an answer; the ticket leaves your actionable pool, the backlog still reminds you) "
         + "or handback: false (you keep working on it; only on a ticket you hold). Nothing was posted.";
 }

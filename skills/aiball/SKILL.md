@@ -73,13 +73,20 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 
 ### A ticket that waits on the human's answer is a `then: "plan"`
 
-When the next move is the human's choice — option A or B, go or no go, which
-of two ways — post it as `then: "plan"`: the options, your recommendation
-first, and what each one implies. A plain comment with `handback: true` and a
-question gives them nothing to click: it sits among the open tickets with no
-mark, and the ticket comes back to you unanswered. Keep `handback: true` for a
-question no option can answer ("which file did you mean?") and for a move that
-belongs to another agent.
+When the next move is the human's choice — option A or B, which of two ways —
+post it as `then: "plan"` with `options`: `[{ key: "A", label: "…", recommended:
+true }, { key: "B", label: "…" }]`, 2 to 6 of them, at most one recommended. The
+body says what each one implies. The human gets one button per option, and your
+wake names the one chosen: read it there, not in a comment. To add or remove
+options while the plan waits, use `plan_options`, or post a fresher plan.
+
+A go or no go has no options: a plain `then: "plan"`, and the answer says it
+was posted without options, in case there is a choice after all.
+
+A plain comment with `handback: true` and a question gives them nothing to
+click, and the ticket comes back to you unanswered. Keep it for a question no
+option can answer ("which file did you mean?") and for a move that belongs to
+another agent.
 
 ### The default is decision-bearing
 
@@ -88,7 +95,7 @@ For these three cases, use `then:`, NOT a plain comment :
 | You're about to say | Use |
 |---|---|
 | "Shipped commit XYZ, awaiting test" | `then: "resolved"` |
-| "Tu préfères A ou B ?" | `then: "plan"` with A vs B |
+| "Tu préfères A ou B ?" | `then: "plan"` with `options` A and B |
 | "Claim = je code ?" | `then: "plan"` with the next concrete step |
 | "J'ai fini l'étape 2, je passe à la 3" | `then: "continue"` |
 
@@ -324,7 +331,7 @@ belongs to someone else — hand the ticket back.
 
 | Who makes the next move? | Gesture |
 |---|---|
-| **the human** — choose between options, approve a direction, say yes or no | `then: "plan"` with the options and your recommendation: they get accept / reject, and the ticket shows in their decisions |
+| **the human** — choose between options, approve a direction, say yes or no | `then: "plan"`, with `options` when there is a choice: they get a button per option or accept / reject, and the ticket shows in their decisions |
 | **someone else** — another agent to answer or review, or an open question with no options to offer | `handback: true` — the ticket leaves your actionable pool; the backlog still reminds you until they speak |
 | **you, later** — a build, a job, a measurement, a deploy to finish | `then: "continue"` with `resume_on: { timer: N }` — it stays yours and comes back in N minutes; `resume_on: { ticket: M }` to come back when ticket M moves (both: whichever comes first) |
 
