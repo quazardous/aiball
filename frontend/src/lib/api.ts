@@ -659,6 +659,8 @@ export interface ThreadView {
 export interface PostMessageInput {
     project: string;
     kind: MessageKind;
+    /** #4454 — false: the human keeps the hand. Left out on a plain post. */
+    handback?: boolean;
     title?: string;
     body?: string;
     ticket_id?: number;

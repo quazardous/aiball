@@ -180,9 +180,16 @@ const postMenu = computed(() => [{
     label: "post without notifying",
     icon: `pi ${scopeIcon("internal")}`,
     command: () => { void submit("internal"); },
+}, {
+    // #4454 — one-shot too: a plain post never says `handback`, so an ordinary
+    // answer hands over and does not read as a question.
+    label: "post, keep the hand",
+    icon: "pi pi-pause",
+    title: "you are not done: no agent is woken and none acts on the ticket until your next comment or decision",
+    command: () => { void submit(undefined, true); },
 }]);
 
-async function submit(scopeOverride?: Scope) {
+async function submit(scopeOverride?: Scope, keepTheHand = false) {
     if (!canSubmit.value) return;
     sending.value = true;
     error.value = null;
@@ -230,6 +237,7 @@ async function submit(scopeOverride?: Scope) {
                 ...((scopeOverride ?? scope.value) !== "default"
                     ? { scope: scopeOverride ?? scope.value }
                     : {}),
+                ...(keepTheHand ? { handback: false } : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
             // #553 david : assignee picker dispo en comment mode aussi.
@@ -649,8 +657,8 @@ async function onAttachPicked(ev: Event) {
                 :loading="sending"
                 :disabled="!canSubmit"
                 :model="postMenu"
-                menu-button-aria-label="Post without notifying the agent"
-                title="Post normally — subscribers and project owners get a ping. Use the dropdown to post without notifying anyone."
+                menu-button-aria-label="More ways to post: without notifying, or keeping the hand"
+                title="Post normally — subscribers and project owners get a ping. Use the dropdown to post without notifying anyone, or to keep the hand."
                 @click="submit()"
             />
             <Button
