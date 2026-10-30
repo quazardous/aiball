@@ -113,6 +113,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The daemon's service waits for an install that lives under a folder mounted after login, instead of failing every 2 seconds until the mount.
 - A prompt waiting in Claude Code's queue counts as Claude working: no wake is
   typed behind it, and the turn does not end on an input box that only looks
   empty. Seen during a compaction, where wakes piled up greyed in the queue.

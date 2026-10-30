@@ -89,6 +89,9 @@ It writes a systemd **user** unit (`~/.config/systemd/user/aiball.service`)
 pointing at the daemon entrypoint of the aiball you ran it from, then
 enables it. Nothing else on your system is touched, and `--remove`
 reverses it completely.
+The unit also starts when the install sits under a folder mounted after login
+(an encrypted home mounted by hand): it waits for the daemon to appear, then
+starts it, instead of failing every 2 s until the mount.
 
 `install.sh` already does this as part of its own flow — you only need
 this command when you started from the portable path, or when you want to

@@ -32,6 +32,15 @@ test("host and port default, and are overridable", () => {
     assert.match(custom, /^Environment=AIBALL_PORT=7878$/m);
 });
 
+test("an install under a folder mounted later waits for it instead of failing on CHDIR", () => {
+    const unit = renderUnit({ root: "/home/u/Private/aiball" });
+    // `-`: a missing directory does not fail the unit; ExecStartPre waits for the daemon.
+    assert.match(unit, /^WorkingDirectory=-\/home\/u\/Private\/aiball$/m);
+    assert.match(unit, /^ExecStartPre=\/bin\/sh -c '.*until \[ -e "\$\$d" \]; do sleep 5; done'$/m);
+    assert.match(unit, /d="\/home\/u\/Private\/aiball\/bin\/aiball-daemon"/);
+    assert.match(unit, /^TimeoutStartSec=infinity$/m);
+});
+
 test("the unit announces itself as generated, so a refresh can tell it apart", () => {
     // The install path only overwrites silently when it recognises its own
     // header; a hand-written unit gets a warning first.

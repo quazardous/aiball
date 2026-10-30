@@ -4,7 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/.local/lib/aiball
+# The checkout may live under a folder mounted after login (an encrypted
+# ~/Private mounted by hand): `-` lets the unit start while it is missing, and
+# ExecStartPre waits for the daemon to appear instead of failing on CHDIR every
+# 2 s until then.
+WorkingDirectory=-%h/.local/lib/aiball
+ExecStartPre=/bin/sh -c 'd="%h/.local/lib/aiball/bin/aiball-daemon"; [ -e "$$d" ] || echo "waiting for $$d"; until [ -e "$$d" ]; do sleep 5; done'
+TimeoutStartSec=infinity
 # The daemon has its own entrypoint (#1567): `npx --no-install tsx …/src/daemon.ts`
 # only resolved inside a checkout with dev dependencies installed, and npx had to
 # find tsx by walking up from the working directory.
