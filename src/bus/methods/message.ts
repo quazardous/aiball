@@ -190,7 +190,7 @@ defineMethod({
 defineMethod({
     name: "message.set_options",
     who: ["human", "agent"],
-    params: z.object({ id, options: z.unknown() }),
+    params: z.object({ id, options: z.unknown(), multiple: z.unknown().optional() }),
     run: (caller, p) => {
         const options = p.options;
         const target = messageOf(p.id);
@@ -199,9 +199,9 @@ defineMethod({
         const me = consumerIdOf(caller);
         if (target.by_agent !== me && !isHuman(me)) throw new Refusal(403, "only the plan's author or a human can change its options");
         const empty = Array.isArray(options) && options.length === 0;
-        const refusal = empty ? null : optionsRefusal(options, decision.kind);
+        const refusal = empty ? null : optionsRefusal(options, decision.kind, p.multiple);
         if (refusal) throw new Refusal(400, refusal, ERROR_CODES.FIELD_INVALID);
-        const updated = setDecisionOptions(p.id, empty ? [] : options as DecisionOption[]);
+        const updated = setDecisionOptions(p.id, empty ? [] : options as DecisionOption[], p.multiple === true);
         if (!updated) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         return edited(updated);
     },
@@ -577,6 +577,8 @@ defineMethod({
         new_kind?: unknown;
         // #4459 — the option accepted, on a plan that offers some.
         option?: unknown;
+        // #4474 — the options accepted, on a `multiple` plan.
+        options?: unknown;
         // #980 `7cnyjb` — optional closing note carried on the auto-close
         // event when accepting a resolution / wontfix (front sends it here
         // instead of a separate postBodyAs("ticket_closed")).
@@ -601,7 +603,7 @@ defineMethod({
     // #4459 — a plan that offers options is accepted on one of them.
     {
         const target = getMessage(id);
-        const refusal = optionChoiceRefusal(parseMeta(target?.meta ?? null).decision, body.status, body.option);
+        const refusal = optionChoiceRefusal(parseMeta(target?.meta ?? null).decision, body.status, body.option, body.options);
         if (refusal) throw new Refusal(400, refusal, ERROR_CODES.DECISION_OPTION_INVALID);
     }
     // #2376 david `dvqfvt` (case 4) — only the LATEST decision of a thread can
@@ -642,7 +644,7 @@ defineMethod({
         }
     }
     try {
-        const updated = applyMessageDecision(id, body.status, by, newKind, typeof body.option === "string" ? body.option : undefined);
+        const updated = applyMessageDecision(id, body.status, by, newKind, typeof body.option === "string" ? body.option : undefined, Array.isArray(body.options) ? [...new Set(body.options as string[])] : undefined);
         if (!updated) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         // #260/#261: notify the proposal's author that their plan/resolution
         // was accepted (go-signal to execute) or rejected (ball back in
@@ -674,10 +676,12 @@ defineMethod({
         const eventTicketId = updated.kind === "ticket_created" ? updated.id : updated.ticket_id;
         if (updated.meta && eventTicketId != null) {
             try {
-                const m = JSON.parse(updated.meta) as { decision?: { kind?: string; option?: string; options?: Array<{ key: string; label: string }> } };
+                const m = JSON.parse(updated.meta) as { decision?: { kind?: string; option?: string; chosen?: string[]; options?: Array<{ key: string; label: string }> } };
                 const decisionKind = m.decision?.kind;
                 // #4459 — the event says which option: the agent's wake reads it.
-                const chosen = m.decision?.options?.find((o) => o.key === m.decision?.option);
+                const picked = m.decision?.options?.filter((o) => m.decision?.chosen?.includes(o.key) || o.key === m.decision?.option) ?? [];
+                const chosen = picked.length === 0 ? null
+                    : `${picked.length > 1 ? "options" : "option"} ${picked.map((o) => o.key).join(", ")}: ${picked.map((o) => o.label).join("; ")}`;
                 const eventKindStr = decisionKind && (body.status === "accepted" || body.status === "rejected")
                     ? `${decisionKind}_${body.status}`
                     : "";
@@ -694,7 +698,7 @@ defineMethod({
                         kind: eventKindStr as MessageKind,
                         ticket_id: eventTicketId,
                         parent_id: updated.id,
-                        body: chosen ? `option ${chosen.key}: ${chosen.label}` : null,
+                        body: chosen,
                         by_agent: by,
                     });
                 }

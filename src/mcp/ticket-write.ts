@@ -85,6 +85,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`, at most one `recommended`. The human then accepts ONE of them, or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.",
                     ),
+                multiple: z
+                    .boolean()
+                    .optional()
+                    .describe("#4474 — REQUIRED with `options`: `false` = the human picks exactly one, `true` = they may pick several together. Refused without it."),
                 then: z
                     .enum(THEN_ON_TICKET)
                     .optional()
@@ -101,7 +105,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, scope, parent_id, tags, from_project, then, options, milestone }) => {
+        async ({ project, title, summary, body, intent, priority, scope, parent_id, tags, from_project, then, options, multiple, milestone }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,
@@ -118,7 +122,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // pipeline (validator extends to allow it on ticket_created ;
                 // db/messages stamps meta.decision={kind,status:"pending"}).
                 decision_kind: kindForVerb(then) ?? undefined,
-                ...(options ? { options } : {}),
+                ...(options ? { options, multiple } : {}),
                 // #3037 — filed with its tags and milestone in the same call: an
                 // unknown tag or a milestone this agent may not set refuses the
                 // whole ticket, nothing is half-created.
@@ -203,6 +207,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`, at most one `recommended`. The human then accepts ONE of them, or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.",
                     ),
+                multiple: z
+                    .boolean()
+                    .optional()
+                    .describe("#4474 — REQUIRED with `options`: `false` = the human picks exactly one, `true` = they may pick several together. Refused without it."),
                 then: z
                     .enum(THEN_ON_REPLY)
                     .optional()
@@ -238,7 +246,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ target_id, body, summary_until, then, options, handback, resume_on, commits, scope }) => {
+        async ({ target_id, body, summary_until, then, options, multiple, handback, resume_on, commits, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -290,7 +298,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 parent_id: parentId,
                 body,
                 decision_kind,
-                ...(options ? { options } : {}),
+                ...(options ? { options, multiple } : {}),
                 // Only forward summary_until for comment_added kinds —
                 // close/reopen are lifecycle rows where the field has no
                 // meaning and the validator would reject it.
@@ -333,7 +341,7 @@ export function registerTicketWriteTools(server: McpServer): void {
             const note = waitCreditNote((res as { wait_credit?: WaitCreditAnswer } | null)?.wait_credit);
             // #4459 — a plan with no options is fine when there is one way to go; if the human has a choice, it wants them.
             const optionsNote = then === "plan" && !options
-                ? "Plan posted without options. If the human has a choice to make, give it options: plan_options, or `options` on a fresher then: plan."
+                ? "Plan posted without options. If the human has a choice to make, give it options: plan_options, or `options` and `multiple` on a fresher then: plan."
                 : null;
             return asText({ ...(note ? { wait_credit_note: note } : {}), ...(optionsNote ? { options_note: optionsNote } : {}), ...(res as object), your_decision: yourDecision });
         },
@@ -346,9 +354,10 @@ export function registerTicketWriteTools(server: McpServer): void {
             inputSchema: {
                 message_id: z.number().int(),
                 options: z.array(z.object({ key: z.string(), label: z.string(), recommended: z.boolean().optional() })),
+                multiple: z.boolean().optional().describe("REQUIRED unless the list is empty: `false` = exactly one, `true` = several together."),
             },
         },
-        async ({ message_id, options }) => asText(await client.setPlanOptions(message_id, options)),
+        async ({ message_id, options, multiple }) => asText(await client.setPlanOptions(message_id, options, multiple)),
     );
 
     server.registerTool(

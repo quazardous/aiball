@@ -76,16 +76,22 @@ export interface CommentDecision {
     decided_at?: string;
     /** #4459 — the choices the plan offers, when it offers some. */
     options?: DecisionOption[];
-    /** #4459 — the key of the option accepted. */
+    /** #4474 — whether several may be accepted together; said whenever there are options. */
+    multiple?: boolean;
+    /** #4459 — the key of the option accepted, on a plan that takes one. */
     option?: string;
+    /** #4474 — the keys accepted on a `multiple` plan. */
+    chosen?: string[];
 }
 
 /**
  * #4459 — the refusal for a plan's `options`, or null. Two to six, each with a
  * short key and a label, one recommended at most; only a plan offers them.
  */
-export function optionsRefusal(options: unknown, kind: string | null): string | null {
+export function optionsRefusal(options: unknown, kind: string | null, multiple?: unknown): string | null {
     if (kind !== "plan") return "options only go on a then: plan";
+    // #4474 david — mandatory: exclusive or not is the author's to say, never a default.
+    if (typeof multiple !== "boolean") return "options need multiple: true (the human may pick several) or false (exactly one)";
     if (!Array.isArray(options) || options.length < 2 || options.length > 6) return "options must be 2 to 6 choices";
     const keys = new Set<string>();
     let recommended = 0;
@@ -104,12 +110,20 @@ export function optionsRefusal(options: unknown, kind: string | null): string | 
  * with options is accepted on one of them: an accept with none is what left the
  * choice to be read from a comment.
  */
-export function optionChoiceRefusal(decision: CommentDecision | undefined, status: string, option: unknown): string | null {
+export function optionChoiceRefusal(decision: CommentDecision | undefined, status: string, option: unknown, options?: unknown): string | null {
     const offered = decision?.options;
-    if (status !== "accepted") return option === undefined ? null : "option only goes with an accept";
-    if (!offered?.length) return option === undefined ? null : "this decision offers no options";
-    if (option === undefined) return `this plan offers options: accept one of ${offered.map((o) => o.key).join(", ")}`;
-    return offered.some((o) => o.key === option) ? null : `no option ${String(option)} here: accept one of ${offered.map((o) => o.key).join(", ")}`;
+    if (status !== "accepted") return option === undefined && options === undefined ? null : "option only goes with an accept";
+    if (!offered?.length) return option === undefined && options === undefined ? null : "this decision offers no options";
+    const keys = offered.map((o) => o.key).join(", ");
+    if (decision?.multiple === true) {
+        if (option !== undefined) return "this plan takes several: send options, a list";
+        if (!Array.isArray(options) || options.length === 0) return `this plan offers options: accept at least one of ${keys}`;
+        const bad = options.find((k) => !offered.some((o) => o.key === k));
+        return bad === undefined ? null : `no option ${String(bad)} here: accept among ${keys}`;
+    }
+    if (options !== undefined) return "this plan takes exactly one: send option";
+    if (option === undefined) return `this plan offers options: accept one of ${keys}`;
+    return offered.some((o) => o.key === option) ? null : `no option ${String(option)} here: accept one of ${keys}`;
 }
 
 export function isDecisionKind(s: string): s is DecisionKind {
@@ -222,6 +236,8 @@ export function applyDecision(
     newKind?: DecisionKind,
     /** #4459 — the option accepted. */
     option?: string,
+    /** #4474 — the options accepted, on a `multiple` plan. */
+    chosen?: string[],
 ): { decision: CommentDecision; changed: boolean } {
     if (!current) {
         throw new Error("no decision on this message — author must tag it first");
@@ -245,7 +261,9 @@ export function applyDecision(
             decided_by: by,
             decided_at: at,
             ...(current.options ? { options: current.options } : {}),
+            ...(current.multiple !== undefined ? { multiple: current.multiple } : {}),
             ...(option !== undefined ? { option } : {}),
+            ...(chosen !== undefined ? { chosen } : {}),
         },
         changed: true,
     };

@@ -229,7 +229,7 @@ test("a step withdraws its author's pending decision: nothing left to accept, th
 test("a plan with options is accepted on one of them, recorded on the decision and named by its event", async () => {
     const OPTIONS = [{ key: "A", label: "the gesture", recommended: true }, { key: "B", label: "the step" }];
     const t = ticket("a choice");
-    const plan = await comment(WORKER, t, { decision_kind: "plan", handback: undefined, options: OPTIONS });
+    const plan = await comment(WORKER, t, { decision_kind: "plan", handback: undefined, options: OPTIONS, multiple: false });
     const decide = (extra: Record<string, unknown>) => call(HUMAN, "message.decide", { id: plan, status: "accepted", ...extra });
     assert.equal((await decide({})).status, 400, "an accept with no option is refused");
     assert.equal((await decide({ option: "Z" })).status, 400, "and one the plan does not offer");
@@ -244,7 +244,7 @@ test("a plan with options is accepted on one of them, recorded on the decision a
 
     // A rejection needs no option; a plan without options takes none.
     const u = ticket("rejected");
-    const other = await comment(WORKER, u, { decision_kind: "plan", handback: undefined, options: OPTIONS });
+    const other = await comment(WORKER, u, { decision_kind: "plan", handback: undefined, options: OPTIONS, multiple: false });
     assert.ok((await call(HUMAN, "message.decide", { id: other, status: "rejected" })).status < 300);
     const v = ticket("plain plan");
     const plain = await comment(WORKER, v, { decision_kind: "plan", handback: undefined });
@@ -253,16 +253,35 @@ test("a plan with options is accepted on one of them, recorded on the decision a
 
     // Bad shapes are refused, and only a plan offers options.
     const bad = async (extra: Record<string, unknown>) => (await call(WORKER, "message.post", { project: P, kind: "comment_added", ticket_id: ticket("bad"), body: "c", summary_until: "s", decision_kind: "plan", ...extra })).status;
-    assert.equal(await bad({ options: [{ key: "A", label: "alone" }] }), 400, "at least two");
-    assert.equal(await bad({ options: [{ key: "A", label: "x" }, { key: "A", label: "y" }] }), 400, "unique keys");
-    assert.equal(await bad({ options: [{ key: "A", label: "x", recommended: true }, { key: "B", label: "y", recommended: true }] }), 400, "one recommended");
-    assert.equal(await bad({ decision_kind: "resolution", options: OPTIONS }), 400, "only a plan");
+    assert.equal(await bad({ multiple: false, options: [{ key: "A", label: "alone" }] }), 400, "at least two");
+    assert.equal(await bad({ multiple: false, options: [{ key: "A", label: "x" }, { key: "A", label: "y" }] }), 400, "unique keys");
+    assert.equal(await bad({ multiple: false, options: [{ key: "A", label: "x", recommended: true }, { key: "B", label: "y", recommended: true }] }), 400, "one recommended");
+    assert.equal(await bad({ decision_kind: "resolution", multiple: false, options: OPTIONS }), 400, "only a plan");
+    assert.equal(await bad({ options: OPTIONS }), 400, "multiple is mandatory");
+
+    // #4474 — a plan that takes several.
+    const many = ticket("several");
+    const several = await comment(WORKER, many, { decision_kind: "plan", handback: undefined, options: [...OPTIONS, { key: "C", label: "third" }], multiple: true });
+    const pick = (extra: Record<string, unknown>) => call(HUMAN, "message.decide", { id: several, status: "accepted", ...extra });
+    assert.equal((await pick({})).status, 400, "at least one");
+    assert.equal((await pick({ options: [] })).status, 400);
+    assert.equal((await pick({ option: "A" })).status, 400, "a list, not one");
+    assert.equal((await pick({ options: ["A", "Z"] })).status, 400, "only what it offers");
+    const both = await pick({ options: ["A", "C"] });
+    assert.ok(both.status < 300, JSON.stringify(both.json));
+    assert.deepEqual(meta(several).decision.chosen, ["A", "C"]);
+    const manyEvent = getDb().select({ body: schema.messages.body }).from(schema.messages).where(and(eq(schema.messages.ticketId, many), eq(schema.messages.kind, "plan_accepted"))).get();
+    assert.equal(manyEvent?.body, "options A, C: the gesture; third");
+    // A plan that takes one refuses a list.
+    const w = ticket("exactly one");
+    const one = await comment(WORKER, w, { decision_kind: "plan", handback: undefined, options: OPTIONS, multiple: false });
+    assert.equal((await call(HUMAN, "message.decide", { id: one, status: "accepted", options: ["A"] })).status, 400);
 });
 
 test("a pending plan's options can be changed by its author or a human, and removed", async () => {
     const A = { key: "A", label: "first" }, B = { key: "B", label: "second" }, C = { key: "C", label: "third" };
     const optionsOf = (id: number) => (JSON.parse(getDb().select({ meta: schema.messages.meta }).from(schema.messages).where(eq(schema.messages.id, id)).get()!.meta!) as { decision: { options?: Array<{ key: string }> } }).decision.options?.map((o) => o.key);
-    const set = (token: string, id: number, options: unknown[]) => call(token, "message.set_options", { id, options });
+    const set = (token: string, id: number, options: unknown[]) => call(token, "message.set_options", { id, options, ...(options.length ? { multiple: false } : {}) });
     const t = ticket("options move");
     const plan = await comment(WORKER, t, { decision_kind: "plan", handback: undefined });
     assert.ok((await set(WORKER, plan, [A, B])).status < 300, "added to a plain plan");

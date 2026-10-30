@@ -1142,13 +1142,14 @@ export const api = {
         // for resolution/wontfix accepts (one call does decide + close).
         closeBody?: string,
         // #4459 — the option accepted, on a plan that offers some.
-        option?: string,
+        option?: string | string[],
     ) =>
         call<Message>("message.decide", {
             id,
             status,
             new_kind,
-            ...(option !== undefined ? { option } : {}),
+            // #4474 — a list on a plan that takes several.
+            ...(Array.isArray(option) ? { options: option } : option !== undefined ? { option } : {}),
             ...(closeBody ? { body: closeBody } : {}),
         }),
     /** Reclassify a pending decision's kind without changing its

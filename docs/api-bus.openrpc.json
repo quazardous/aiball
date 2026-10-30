@@ -2592,6 +2592,11 @@
           "name": "options",
           "required": true,
           "schema": {}
+        },
+        {
+          "name": "multiple",
+          "required": false,
+          "schema": {}
         }
       ],
       "result": {

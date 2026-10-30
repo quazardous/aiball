@@ -357,8 +357,8 @@ export class AiballClient {
     // =================================================================
 
     /** #4459 — replace the options of a pending plan; an empty list removes them. */
-    async setPlanOptions(messageId: number, options: Array<{ key: string; label: string; recommended?: boolean }>): Promise<unknown> {
-        return this.call("message.set_options", { id: messageId, options });
+    async setPlanOptions(messageId: number, options: Array<{ key: string; label: string; recommended?: boolean }>, multiple?: boolean): Promise<unknown> {
+        return this.call("message.set_options", { id: messageId, options, multiple });
     }
 
     /** The FILTERED view: keys always, values only where the schema says. */

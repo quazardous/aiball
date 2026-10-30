@@ -18,6 +18,7 @@
  * just forwards the MouseEvent via `open-snooze`.
  */
 import Button from "primevue/button";
+import { ref, watch } from "vue";
 import SplitButton from "primevue/splitbutton";
 import type { Message, TicketSummary } from "../lib/api";
 import type { CommentDecision } from "../lib/decisions";
@@ -58,7 +59,7 @@ interface MenuItem {
     command: () => void;
 }
 
-defineProps<{
+const props = defineProps<{
     ticket: TicketSummary;
     hasBody: boolean;
     activeDecision: { message: Message; decision: CommentDecision } | null;
@@ -73,11 +74,19 @@ defineProps<{
     decisionMenu: MenuItem[];
 }>();
 
+// #4474 — what is ticked on a plan that takes several, the recommended one to start with.
+const ticked = ref<string[]>([]);
+watch(
+    () => props.activeDecision?.message.id,
+    () => { ticked.value = (props.activeDecision?.decision.options ?? []).filter((o) => o.recommended).map((o) => o.key); },
+    { immediate: true },
+);
+
 const emit = defineEmits<{
     (e: "open-snooze", event: MouseEvent): void;
     (e: "reject-active"): void;
     (e: "accept-active"): void;
-    (e: "accept-option", key: string): void;
+    (e: "accept-option", key: string | string[]): void;
     (e: "reject-resolution"): void;
     (e: "accept-resolution"): void;
     (e: "comment-undo-reject"): void;
@@ -141,7 +150,27 @@ const emit = defineEmits<{
             @click="emit('reject-active')"
         />
         <!-- #4459 — a plan that offers options is accepted on one of them, the recommended first. -->
-        <template v-if="activeDecision.decision.options?.length">
+        <!-- #4474 — a plan that takes several: tick, then accept them together. -->
+        <template v-if="activeDecision.decision.options?.length && activeDecision.decision.multiple">
+            <label
+                v-for="o in orderedOptions(activeDecision.decision.options)"
+                :key="o.key"
+                style="display: inline-flex; align-items: center; gap: 0.3rem; font-size: var(--fs-xs)"
+            >
+                <input v-model="ticked" type="checkbox" :value="o.key" />
+                {{ o.key }}: {{ o.label }}
+            </label>
+            <Button
+                label="accept selection"
+                icon="pi pi-verified"
+                severity="success"
+                size="small"
+                :loading="resolutionBusy"
+                :disabled="ticked.length === 0"
+                @click="emit('accept-option', ticked)"
+            />
+        </template>
+        <template v-else-if="activeDecision.decision.options?.length">
             <Button
                 v-for="o in orderedOptions(activeDecision.decision.options)"
                 :key="o.key"

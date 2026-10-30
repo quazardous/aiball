@@ -49,7 +49,7 @@ test("then: plan goes out as the plan decision", async () => {
 
 test("#4459 — a plan's options go on the wire", async () => {
     const options = [{ key: "A", label: "one", recommended: true }, { key: "B", label: "two" }];
-    const { msg } = await create({ then: "plan", options });
+    const { msg } = await create({ then: "plan", options, multiple: false });
     assert.deepEqual(msg.options, options);
 });
 

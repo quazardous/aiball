@@ -115,7 +115,7 @@ test("a reply and a close send neither the project nor the author", async () => 
 test("then: plan carries its options; without them, the answer reminds of them", async () => {
     const options = [{ key: "A", label: "one" }, { key: "B", label: "two" }];
     sent.length = 0;
-    const withOptions = JSON.stringify(await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "plan", commits: null, options }));
+    const withOptions = JSON.stringify(await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "plan", commits: null, options, multiple: false }));
     assert.deepEqual(sent[0]?.options, options);
     assert.doesNotMatch(withOptions, /options_note/);
     const without = JSON.stringify(await handlers.ticket_reply({ target_id: 7, body: "b", summary_until: "s", then: "plan", commits: null }));

@@ -260,7 +260,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
     }
     // #4459 — the choices a plan offers: the human picks one.
     if (o.options !== undefined && o.options !== null) {
-        const refusal = optionsRefusal(o.options, decisionKind);
+        const refusal = optionsRefusal(o.options, decisionKind, o.multiple);
         if (refusal) return { error: refusal, code: ERROR_CODES.FIELD_INVALID };
     }
     // #B.130: `summary_until` on comments — author's one-line TLDR of
@@ -424,7 +424,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
         intent: kind === "ticket_created" ? intent : null,
         priority: kind === "ticket_created" ? priority : null,
         decision_kind: decisionKind,
-        ...(Array.isArray(o.options) ? { options: (o.options as DecisionOption[]).map((x) => ({ key: x.key, label: x.label.trim(), ...(x.recommended === true ? { recommended: true } : {}) })) } : {}),
+        ...(Array.isArray(o.options) ? { options: (o.options as DecisionOption[]).map((x) => ({ key: x.key, label: x.label.trim(), ...(x.recommended === true ? { recommended: true } : {}) })), multiple: o.multiple === true } : {}),
         summary_until: summaryUntil,
         ...(step ? { step: true } : {}),
         ...(stepAfterMinutes !== undefined ? { step_after_minutes: stepAfterMinutes } : {}),

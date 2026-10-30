@@ -142,7 +142,7 @@ export function insertMessage(m: NewMessage): Message {
             // it like a comment_added with a pending plan.
             // #2331 — and the handback deduced from who filed it.
             const ticketMetaFields: Record<string, unknown> = {};
-            if (m.decision_kind) ticketMetaFields.decision = { kind: m.decision_kind, status: "pending", ...(m.options ? { options: m.options } : {}) };
+            if (m.decision_kind) ticketMetaFields.decision = { kind: m.decision_kind, status: "pending", ...(m.options ? { options: m.options, multiple: m.multiple === true } : {}) };
             if (typeof m.handback === "boolean") ticketMetaFields.handback = m.handback;
             const ticketMeta = Object.keys(ticketMetaFields).length > 0 ? JSON.stringify(ticketMetaFields) : null;
             const inserted = tx.insert(schema.tickets).values({
@@ -216,7 +216,7 @@ export function insertMessage(m: NewMessage): Message {
         if (m.kind === "comment_added" && (m.decision_kind || m.summary_until || m.step || typeof m.handback === "boolean")) {
             const meta: Record<string, unknown> = {};
             if (m.decision_kind) {
-                meta.decision = { kind: m.decision_kind, status: "pending", ...(m.options ? { options: m.options } : {}) };
+                meta.decision = { kind: m.decision_kind, status: "pending", ...(m.options ? { options: m.options, multiple: m.multiple === true } : {}) };
             }
             // #2308 — `then: continue`: a step, which proposes nothing.
             if (m.step) {
@@ -1335,10 +1335,10 @@ export function setMessageVote(
  * #4459 — replace the options of a pending decision, on a comment or on the
  * ticket that was filed with it. An empty list makes it a plain plan.
  */
-export function setDecisionOptions(id: number, options: DecisionOption[]): Message | null {
+export function setDecisionOptions(id: number, options: DecisionOption[], multiple: boolean): Message | null {
     const withOptions = (meta: ReturnType<typeof parseMeta>) => {
-        const { options: _old, ...decision } = meta.decision!;
-        meta.decision = options.length > 0 ? { ...decision, options: options.map((o) => ({ key: o.key, label: o.label.trim(), ...(o.recommended === true ? { recommended: true } : {}) })) } : decision;
+        const { options: _old, multiple: _was, ...decision } = meta.decision!;
+        meta.decision = options.length > 0 ? { ...decision, multiple, options: options.map((o) => ({ key: o.key, label: o.label.trim(), ...(o.recommended === true ? { recommended: true } : {}) })) } : decision;
         return serializeMeta(meta);
     };
     const db = getDb();
@@ -1854,6 +1854,8 @@ export function applyMessageDecision(
     newKind?: import("../decisions.js").DecisionKind,
     /** #4459 — the option accepted, on a plan that offers some. */
     option?: string,
+    /** #4474 — the options accepted, on a `multiple` plan. */
+    chosen?: string[],
 ): Message | null {
     const db = getDb();
     const out = db.transaction((tx) => {
@@ -1861,7 +1863,7 @@ export function applyMessageDecision(
         if (m) {
             const meta = parseMeta(m.meta ?? null);
             const decidedAt = new Date().toISOString();
-            const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind, option);
+            const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind, option, chosen);
             if (!r.changed) {
                 // idempotent re-decide — return current row unchanged
                 const parent = tx.select({ project: schema.tickets.project })
@@ -1896,7 +1898,7 @@ export function applyMessageDecision(
         if (!t) return null;
         const meta = parseMeta(t.meta ?? null);
         const decidedAt = new Date().toISOString();
-        const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind, option);
+        const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind, option, chosen);
         if (!r.changed) {
             return ticketRowToMessage(t);
         }

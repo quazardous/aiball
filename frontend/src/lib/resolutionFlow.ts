@@ -256,7 +256,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
     // but it's really just a plan, accept it as a plan". When `asKind`
     // is passed AND differs from the original kind, the close side-
     // effect of resolution-accept is suppressed (we want plan ergonomics).
-    async function acceptActiveDecision(asKind?: DecisionKind, option?: string) {
+    async function acceptActiveDecision(asKind?: DecisionKind, option?: string | string[]) {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;
