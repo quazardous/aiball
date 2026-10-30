@@ -76,9 +76,10 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 When the next move is the human's choice — option A or B, which of two ways —
 post it as `then: "plan"` with `options`: `[{ key: "A", label: "…", recommended:
 true }, { key: "B", label: "…" }]`, 2 to 6 of them, at most one recommended, and
-`multiple`, which is mandatory: `false` when they pick exactly one. The body says
-what each one implies. The human gets one button per option, and your
-wake names the one chosen: read it there, not in a comment. To add or remove
+`multiple`, which is mandatory: `false` when they pick exactly one, `true` when
+the choices are independent and they may tick several. The body says what each
+one implies. The human gets one button per option, and your
+wake names what was chosen: read it there, not in a comment. To add or remove
 options while the plan waits, use `plan_options`, or post a fresher plan.
 
 A go or no go has no options: a plain `then: "plan"`, and the answer says it
