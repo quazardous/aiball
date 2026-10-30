@@ -43,6 +43,11 @@ const ACCEPT_LABELS: Record<CommentDecision["kind"], string> = {
     plan: "accept plan → keep open",
 };
 
+/** #4459 — the recommended option first, the others in the author's order. */
+function orderedOptions(options: NonNullable<CommentDecision["options"]>) {
+    return [...options].sort((a, b) => Number(b.recommended === true) - Number(a.recommended === true));
+}
+
 function acceptLabel(kind: CommentDecision["kind"]): string {
     return ACCEPT_LABELS[kind];
 }
@@ -72,6 +77,7 @@ const emit = defineEmits<{
     (e: "open-snooze", event: MouseEvent): void;
     (e: "reject-active"): void;
     (e: "accept-active"): void;
+    (e: "accept-option", key: string): void;
     (e: "reject-resolution"): void;
     (e: "accept-resolution"): void;
     (e: "comment-undo-reject"): void;
@@ -134,7 +140,22 @@ const emit = defineEmits<{
                 : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
             @click="emit('reject-active')"
         />
+        <!-- #4459 — a plan that offers options is accepted on one of them, the recommended first. -->
+        <template v-if="activeDecision.decision.options?.length">
+            <Button
+                v-for="o in orderedOptions(activeDecision.decision.options)"
+                :key="o.key"
+                :label="`${o.key}: ${o.label}`"
+                icon="pi pi-verified"
+                :severity="o.recommended ? 'success' : 'secondary'"
+                size="small"
+                :loading="resolutionBusy"
+                :title="o.recommended ? 'Accept this option (the author recommends it). Any text typed in the composer is posted with it.' : 'Accept this option. Any text typed in the composer is posted with it.'"
+                @click="emit('accept-option', o.key)"
+            />
+        </template>
         <SplitButton
+            v-else
             :label="acceptLabel(activeDecision.decision.kind)"
             icon="pi pi-verified"
             severity="success"

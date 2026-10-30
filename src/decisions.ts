@@ -60,12 +60,56 @@ export type DecisionStatus = typeof DECISION_STATUSES[number];
 export const CLOSING_DECISION_KINDS: readonly DecisionKind[] = kindsInFamily("closing");
 export const WAITING_DECISION_KINDS: readonly DecisionKind[] = kindsInFamily("waiting");
 
+/** #4459 — one of the choices a plan offers: the human picks one. */
+export interface DecisionOption {
+    key: string;
+    label: string;
+    /** The author's recommendation; at most one. */
+    recommended?: boolean;
+}
+
 export interface CommentDecision {
     kind: DecisionKind;
     status: DecisionStatus;
     /** Filled when status transitions to accepted/rejected. */
     decided_by?: string;
     decided_at?: string;
+    /** #4459 — the choices the plan offers, when it offers some. */
+    options?: DecisionOption[];
+    /** #4459 — the key of the option accepted. */
+    option?: string;
+}
+
+/**
+ * #4459 — the refusal for a plan's `options`, or null. Two to six, each with a
+ * short key and a label, one recommended at most; only a plan offers them.
+ */
+export function optionsRefusal(options: unknown, kind: string | null): string | null {
+    if (kind !== "plan") return "options only go on a then: plan";
+    if (!Array.isArray(options) || options.length < 2 || options.length > 6) return "options must be 2 to 6 choices";
+    const keys = new Set<string>();
+    let recommended = 0;
+    for (const o of options as Array<Partial<DecisionOption> | null>) {
+        if (!o || typeof o.key !== "string" || !/^[A-Za-z0-9_-]{1,20}$/.test(o.key)) return "each option needs a short key (letters, digits, - or _, 20 at most)";
+        if (typeof o.label !== "string" || !o.label.trim() || o.label.length > 200) return `option ${o.key} needs a label of 200 characters at most`;
+        if (keys.has(o.key)) return `option key ${o.key} is used twice`;
+        keys.add(o.key);
+        if (o.recommended === true) recommended++;
+    }
+    return recommended > 1 ? "only one option can be the recommended one" : null;
+}
+
+/**
+ * #4459 — the refusal for accepting or rejecting with `option`, or null. A plan
+ * with options is accepted on one of them: an accept with none is what left the
+ * choice to be read from a comment.
+ */
+export function optionChoiceRefusal(decision: CommentDecision | undefined, status: string, option: unknown): string | null {
+    const offered = decision?.options;
+    if (status !== "accepted") return option === undefined ? null : "option only goes with an accept";
+    if (!offered?.length) return option === undefined ? null : "this decision offers no options";
+    if (option === undefined) return `this plan offers options: accept one of ${offered.map((o) => o.key).join(", ")}`;
+    return offered.some((o) => o.key === option) ? null : `no option ${String(option)} here: accept one of ${offered.map((o) => o.key).join(", ")}`;
 }
 
 export function isDecisionKind(s: string): s is DecisionKind {
@@ -176,6 +220,8 @@ export function applyDecision(
      *  a plan, accept it as a plan". Without this, the kind stays
      *  whatever the author originally chose. */
     newKind?: DecisionKind,
+    /** #4459 — the option accepted. */
+    option?: string,
 ): { decision: CommentDecision; changed: boolean } {
     if (!current) {
         throw new Error("no decision on this message — author must tag it first");
@@ -198,6 +244,8 @@ export function applyDecision(
             status: next,
             decided_by: by,
             decided_at: at,
+            ...(current.options ? { options: current.options } : {}),
+            ...(option !== undefined ? { option } : {}),
         },
         changed: true,
     };

@@ -144,7 +144,7 @@ export function insertMessage(m: NewMessage): Message {
             // it like a comment_added with a pending plan.
             // #2331 — and the handback deduced from who filed it.
             const ticketMetaFields: Record<string, unknown> = {};
-            if (m.decision_kind) ticketMetaFields.decision = { kind: m.decision_kind, status: "pending" };
+            if (m.decision_kind) ticketMetaFields.decision = { kind: m.decision_kind, status: "pending", ...(m.options ? { options: m.options } : {}) };
             if (typeof m.handback === "boolean") ticketMetaFields.handback = m.handback;
             const ticketMeta = Object.keys(ticketMetaFields).length > 0 ? JSON.stringify(ticketMetaFields) : null;
             const inserted = tx.insert(schema.tickets).values({
@@ -218,7 +218,7 @@ export function insertMessage(m: NewMessage): Message {
         if (m.kind === "comment_added" && (m.decision_kind || m.summary_until || m.step || typeof m.handback === "boolean")) {
             const meta: Record<string, unknown> = {};
             if (m.decision_kind) {
-                meta.decision = { kind: m.decision_kind, status: "pending" };
+                meta.decision = { kind: m.decision_kind, status: "pending", ...(m.options ? { options: m.options } : {}) };
             }
             // #2308 — `then: continue`: a step, which proposes nothing.
             if (m.step) {
@@ -1904,6 +1904,8 @@ export function applyMessageDecision(
      *  reporter wants to accept a comment tagged as a resolution as a
      *  plan instead (or vice versa). */
     newKind?: import("../decisions.js").DecisionKind,
+    /** #4459 — the option accepted, on a plan that offers some. */
+    option?: string,
 ): Message | null {
     const db = getDb();
     const out = db.transaction((tx) => {
@@ -1911,7 +1913,7 @@ export function applyMessageDecision(
         if (m) {
             const meta = parseMeta(m.meta ?? null);
             const decidedAt = new Date().toISOString();
-            const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind);
+            const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind, option);
             if (!r.changed) {
                 // idempotent re-decide — return current row unchanged
                 const parent = tx.select({ project: schema.tickets.project })
@@ -1946,7 +1948,7 @@ export function applyMessageDecision(
         if (!t) return null;
         const meta = parseMeta(t.meta ?? null);
         const decidedAt = new Date().toISOString();
-        const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind);
+        const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind, option);
         if (!r.changed) {
             return ticketRowToMessage(t);
         }

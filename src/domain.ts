@@ -165,6 +165,8 @@ export const ERROR_CODES = {
     TICKET_HELD: "TICKET_HELD",
     /** #3039 — deciding a proposal a newer decision on the ticket replaced. */
     DECISION_SUPERSEDED: "DECISION_SUPERSEDED",
+    /** #4459 — an accept without one of the options a plan offers, or with an unknown one. */
+    DECISION_OPTION_INVALID: "DECISION_OPTION_INVALID",
     /** #3039 — approving or rejecting a message already moderated. */
     ALREADY_MODERATED: "ALREADY_MODERATED",
     /** #3039 — putting a ticket in a milestone that is already released. */

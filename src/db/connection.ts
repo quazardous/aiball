@@ -240,6 +240,8 @@ export interface NewMessage {
      *  `meta.decision = {kind, status:"pending"}` so the reporter can
      *  later accept/reject via the bus's message.decide. */
     decision_kind?: string | null;
+    /** #4459 — the choices a plan offers. */
+    options?: Array<{ key: string; label: string; recommended?: boolean }>;
     /** #B.130 phase 1: author-supplied one-line TLDR. comment_added
      *  only — used by brief-mode reads to skip the full body. */
     summary_until?: string | null;

@@ -750,6 +750,7 @@ async function copyTicketRef() {
                         @open-snooze="openSnoozePopover"
                         @reject-active="rejectActiveDecision"
                         @accept-active="acceptActiveDecision()"
+                        @accept-option="(key: string) => acceptActiveDecision(undefined, key)"
                         @reject-resolution="rejectResolution"
                         @accept-resolution="acceptResolution()"
                         @comment-undo-reject="commentAndUndoReject"

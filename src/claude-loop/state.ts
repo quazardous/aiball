@@ -2475,7 +2475,7 @@ export async function buildContextPhrase(
             const base = m?.kind === "comment_added" && body.trim()
                 ? wakeExcerpt(body, ticketId)
                 // #3397 — the compact form of an accepted plan names who executes it too.
-                : m?.kind === "plan_accepted" ? planAcceptedLabel(headHolder, client.agentId)
+                : m?.kind === "plan_accepted" ? planAcceptedLabel(headHolder, client.agentId) + (body ? `: ${body}` : "")
                 : (m?.kind && BUNDLE_LABELS[m.kind]) || m?.kind || "update";
             const ref = typeof m?.hashid === "string" && m.hashid ? ` (#${m.hashid})` : "";
             const by = m?.by_agent ? ` by ${m.by_agent}` : "";
@@ -2553,6 +2553,8 @@ export async function buildContextPhrase(
                     // the ticket, and to whoever reads it when nobody does.
                     if (headDecisionEvent && unreadKind === "plan_accepted") {
                         headDecisionEvent = planAcceptedPhrase(headHolder, headHeldAs, client.agentId);
+                        // #4459 — the option chosen, which the event's body carries.
+                        if (typeof unreadHead?.body === "string" && unreadHead.body) headDecisionEvent += `: ${unreadHead.body}`;
                     }
                     // #1350 — piggyback the actionable + claimable flags (same
                     // fetch, no extra round-trip) for the fyi marker on this

@@ -36,7 +36,8 @@ import {
     type Message,
 } from "../../db.js";
 import { clearSeenForMessage, insertPing } from "../../db/pings.js";
-import { isDecisionKind } from "../../decisions.js";
+import { isDecisionKind, optionChoiceRefusal } from "../../decisions.js";
+import { parseMeta } from "../../questions.js";
 import { commitsRequirement, creationHandbackFor, isDecisionEventKind, submitMessage, validateNewMessage, withoutDecisionRefusal } from "../../messages.js";
 import { NO_EXTRAS, fileTicket, isExtrasRefusal, ticketExtras, SUBMIT_REFUSAL_STATUS } from "../../file-ticket.js";
 import { applyPlatformTag } from "./message-filing.js";
@@ -568,6 +569,8 @@ defineMethod({
         status?: unknown;
         decided_by?: unknown;
         new_kind?: unknown;
+        // #4459 — the option accepted, on a plan that offers some.
+        option?: unknown;
         // #980 `7cnyjb` — optional closing note carried on the auto-close
         // event when accepting a resolution / wontfix (front sends it here
         // instead of a separate postBodyAs("ticket_closed")).
@@ -589,6 +592,12 @@ defineMethod({
         newKind = body.new_kind;
     }
     refuseWhileTicketAwaitsModeration(id);
+    // #4459 — a plan that offers options is accepted on one of them.
+    {
+        const target = getMessage(id);
+        const refusal = optionChoiceRefusal(parseMeta(target?.meta ?? null).decision, body.status, body.option);
+        if (refusal) throw new Refusal(400, refusal, ERROR_CODES.DECISION_OPTION_INVALID);
+    }
     // #2376 david `dvqfvt` (case 4) — only the LATEST decision of a thread can
     // be accepted or rejected. A replaced one is moot: deciding it sent the
     // agent a `plan_accepted` for a plan nobody works on any more, while the
@@ -627,7 +636,7 @@ defineMethod({
         }
     }
     try {
-        const updated = applyMessageDecision(id, body.status, by, newKind);
+        const updated = applyMessageDecision(id, body.status, by, newKind, typeof body.option === "string" ? body.option : undefined);
         if (!updated) throw new Refusal(404, "message not found", ERROR_CODES.MESSAGE_NOT_FOUND);
         // #260/#261: notify the proposal's author that their plan/resolution
         // was accepted (go-signal to execute) or rejected (ball back in
@@ -659,8 +668,10 @@ defineMethod({
         const eventTicketId = updated.kind === "ticket_created" ? updated.id : updated.ticket_id;
         if (updated.meta && eventTicketId != null) {
             try {
-                const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
+                const m = JSON.parse(updated.meta) as { decision?: { kind?: string; option?: string; options?: Array<{ key: string; label: string }> } };
                 const decisionKind = m.decision?.kind;
+                // #4459 — the event says which option: the agent's wake reads it.
+                const chosen = m.decision?.options?.find((o) => o.key === m.decision?.option);
                 const eventKindStr = decisionKind && (body.status === "accepted" || body.status === "rejected")
                     ? `${decisionKind}_${body.status}`
                     : "";
@@ -677,7 +688,7 @@ defineMethod({
                         kind: eventKindStr as MessageKind,
                         ticket_id: eventTicketId,
                         parent_id: updated.id,
-                        body: null,
+                        body: chosen ? `option ${chosen.key}: ${chosen.label}` : null,
                         by_agent: by,
                     });
                 }

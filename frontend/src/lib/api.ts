@@ -1141,11 +1141,14 @@ export const api = {
         // #980 — closing note carried on the server-side auto-close event
         // for resolution/wontfix accepts (one call does decide + close).
         closeBody?: string,
+        // #4459 — the option accepted, on a plan that offers some.
+        option?: string,
     ) =>
         call<Message>("message.decide", {
             id,
             status,
             new_kind,
+            ...(option !== undefined ? { option } : {}),
             ...(closeBody ? { body: closeBody } : {}),
         }),
     /** Reclassify a pending decision's kind without changing its

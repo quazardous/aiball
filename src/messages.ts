@@ -31,7 +31,7 @@ import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } 
 import { purgeSeenPingsForTicket } from "./db.js";
 import { isTicketClosed } from "./db/messages.js";
 import { describeWaits, resumeWouldCycle } from "./db/wait-graph.js";
-import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
+import { DECISION_KINDS, isDecisionKind, optionsRefusal, type DecisionOption } from "./decisions.js";
 import { DECISION_GESTURES, isDecisionAllowedOn, kindsAllowedOn, type DecisionHost, type DecisionKind, isStepMeta, stepRefusal, handbackRefusal, creationHandback, readHandback } from "./ticket-transitions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
@@ -258,6 +258,11 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
         }
         decisionKind = o.decision_kind;
     }
+    // #4459 — the choices a plan offers: the human picks one.
+    if (o.options !== undefined && o.options !== null) {
+        const refusal = optionsRefusal(o.options, decisionKind);
+        if (refusal) return { error: refusal, code: ERROR_CODES.FIELD_INVALID };
+    }
     // #B.130: `summary_until` on comments — author's one-line TLDR of
     // the thread state *up to this comment*. Powers brief-mode reads
     // and densifies the thread context. Mandatory on comment_added
@@ -419,6 +424,7 @@ export function validateNewMessage(input: unknown, author?: string): ValidationE
         intent: kind === "ticket_created" ? intent : null,
         priority: kind === "ticket_created" ? priority : null,
         decision_kind: decisionKind,
+        ...(Array.isArray(o.options) ? { options: (o.options as DecisionOption[]).map((x) => ({ key: x.key, label: x.label.trim(), ...(x.recommended === true ? { recommended: true } : {}) })) } : {}),
         summary_until: summaryUntil,
         ...(step ? { step: true } : {}),
         ...(stepAfterMinutes !== undefined ? { step_after_minutes: stepAfterMinutes } : {}),

@@ -109,6 +109,7 @@ const emit = defineEmits<{
                     @click="emit('reject-active')"
                 />
                 <Button
+                    v-if="!activeDecision.decision.options?.length"
                     icon="pi pi-verified"
                     severity="success"
                     size="small"

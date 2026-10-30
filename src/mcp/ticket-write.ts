@@ -79,6 +79,12 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "#697 F4 — origin project for cross-project tickets. Set when this agent (living in `from_project`) files a ticket in `project` on behalf of `project`'s agents (e.g. `kodi_sauvagge-claude` opening a ticket in `pisynth` to ask how pisynth handles deploy/probe). Surfaced on `ticket_get` and renderable as a 'from X' badge so the recipient distinguishes a cross-project ask from an in-project ticket. Omit for intra-project tickets — the common case.",
                     ),
+                options: z
+                    .array(z.object({ key: z.string(), label: z.string(), recommended: z.boolean().optional() }))
+                    .optional()
+                    .describe(
+                        "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`, at most one `recommended`. The human then accepts ONE of them, or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.",
+                    ),
                 then: z
                     .enum(THEN_ON_TICKET)
                     .optional()
@@ -95,7 +101,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, scope, parent_id, tags, from_project, then, milestone }) => {
+        async ({ project, title, summary, body, intent, priority, scope, parent_id, tags, from_project, then, options, milestone }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,
@@ -112,6 +118,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // pipeline (validator extends to allow it on ticket_created ;
                 // db/messages stamps meta.decision={kind,status:"pending"}).
                 decision_kind: kindForVerb(then) ?? undefined,
+                ...(options ? { options } : {}),
                 // #3037 — filed with its tags and milestone in the same call: an
                 // unknown tag or a milestone this agent may not set refuses the
                 // whole ticket, nothing is half-created.
@@ -190,6 +197,12 @@ export function registerTicketWriteTools(server: McpServer): void {
                             "Light markdown is OK and rendered in the web-UI tldr banner (`**bold**`, `` `code` ``, lists, links). Keep it light — it's a compact one-liner, not a document.",
                         ].join("\n"),
                     ),
+                options: z
+                    .array(z.object({ key: z.string(), label: z.string(), recommended: z.boolean().optional() }))
+                    .optional()
+                    .describe(
+                        "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`, at most one `recommended`. The human then accepts ONE of them, or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.",
+                    ),
                 then: z
                     .enum(THEN_ON_REPLY)
                     .optional()
@@ -225,7 +238,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ target_id, body, summary_until, then, handback, resume_on, commits, scope }) => {
+        async ({ target_id, body, summary_until, then, options, handback, resume_on, commits, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -277,6 +290,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 parent_id: parentId,
                 body,
                 decision_kind,
+                ...(options ? { options } : {}),
                 // Only forward summary_until for comment_added kinds —
                 // close/reopen are lifecycle rows where the field has no
                 // meaning and the validator would reject it.

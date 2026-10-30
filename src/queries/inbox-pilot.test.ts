@@ -29,7 +29,7 @@ const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
 const { BANDS } = await import("./inbox-pilot.js");
 const schema = await import("../schema.js");
-const { eq } = await import("drizzle-orm");
+const { and, eq } = await import("drizzle-orm");
 const { computeActionableTicketIds } = await import("../db/projects.js");
 const { buildBacklogRulesCtx, defaultBacklogRules } = await import("../db/backlog-rules.js");
 
@@ -224,6 +224,39 @@ test("a step withdraws its author's pending decision: nothing left to accept, th
     assert.equal((await row(filed)).state_glyph, "plan");
     await comment(WORKER, filed, { step: true, step_after_minutes: 0, handback: undefined });
     assert.equal((await row(filed)).state_glyph, "step");
+});
+
+test("a plan with options is accepted on one of them, recorded on the decision and named by its event", async () => {
+    const OPTIONS = [{ key: "A", label: "the gesture", recommended: true }, { key: "B", label: "the step" }];
+    const t = ticket("a choice");
+    const plan = await comment(WORKER, t, { decision_kind: "plan", handback: undefined, options: OPTIONS });
+    const decide = (extra: Record<string, unknown>) => call(HUMAN, "message.decide", { id: plan, status: "accepted", ...extra });
+    assert.equal((await decide({})).status, 400, "an accept with no option is refused");
+    assert.equal((await decide({ option: "Z" })).status, 400, "and one the plan does not offer");
+    assert.equal((await row(t)).state_glyph, "plan", "still waiting");
+    const done = await decide({ option: "B" });
+    assert.ok(done.status < 300, JSON.stringify(done.json));
+    const meta = (id: number) => JSON.parse(getDb().select({ meta: schema.messages.meta }).from(schema.messages).where(eq(schema.messages.id, id)).get()!.meta!);
+    assert.equal(meta(plan).decision.option, "B");
+    assert.equal(meta(plan).decision.options.length, 2, "the choices stay on the decision");
+    const event = getDb().select({ body: schema.messages.body }).from(schema.messages).where(and(eq(schema.messages.ticketId, t), eq(schema.messages.kind, "plan_accepted"))).get();
+    assert.equal(event?.body, "option B: the step", "the wake reads it from the event");
+
+    // A rejection needs no option; a plan without options takes none.
+    const u = ticket("rejected");
+    const other = await comment(WORKER, u, { decision_kind: "plan", handback: undefined, options: OPTIONS });
+    assert.ok((await call(HUMAN, "message.decide", { id: other, status: "rejected" })).status < 300);
+    const v = ticket("plain plan");
+    const plain = await comment(WORKER, v, { decision_kind: "plan", handback: undefined });
+    assert.equal((await call(HUMAN, "message.decide", { id: plain, status: "accepted", option: "A" })).status, 400);
+    assert.ok((await call(HUMAN, "message.decide", { id: plain, status: "accepted" })).status < 300);
+
+    // Bad shapes are refused, and only a plan offers options.
+    const bad = async (extra: Record<string, unknown>) => (await call(WORKER, "message.post", { project: P, kind: "comment_added", ticket_id: ticket("bad"), body: "c", summary_until: "s", decision_kind: "plan", ...extra })).status;
+    assert.equal(await bad({ options: [{ key: "A", label: "alone" }] }), 400, "at least two");
+    assert.equal(await bad({ options: [{ key: "A", label: "x" }, { key: "A", label: "y" }] }), 400, "unique keys");
+    assert.equal(await bad({ options: [{ key: "A", label: "x", recommended: true }, { key: "B", label: "y", recommended: true }] }), 400, "one recommended");
+    assert.equal(await bad({ decision_kind: "resolution", options: OPTIONS }), 400, "only a plan");
 });
 
 test("the decision band is the viewer's to decide, not the proposer's", async () => {

@@ -5764,6 +5764,7 @@
             "CONFLICT",
             "CONSUMER_NOT_FOUND",
             "CONVERSATION_HELD",
+            "DECISION_OPTION_INVALID",
             "DECISION_SUPERSEDED",
             "FIELD_INVALID",
             "FIELD_NOT_ALLOWED",

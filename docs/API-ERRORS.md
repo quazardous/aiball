@@ -92,6 +92,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | Code | Status | When |
 |---|---|---|
 | `DECISION_SUPERSEDED` | 409 | A newer decision on the ticket replaced this one; decide that one. |
+| `DECISION_OPTION_INVALID` | 400 | A plan that offers options was accepted without one, or with one it does not offer; or an `option` was sent where none applies. |
 | `ALREADY_MODERATED` | 400 | The message was already approved or rejected (`…/approve`, `…/reject`, `…/accept-and-close`). |
 | `MILESTONE_HAS_OPEN` | 409 | Releasing (closing) a milestone that still holds open tickets. Also on `POST /api/messages`. |
 

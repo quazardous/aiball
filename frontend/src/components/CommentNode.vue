@@ -137,7 +137,9 @@ const decisionChipLabel = computed(() => {
     if (d.status === "withdrawn") return `withdrawn ${d.kind}`;
     const prefix = d.status === "accepted" ? "✓ accepted" : "✗ rejected";
     const by = d.decided_by ? ` by ${d.decided_by}` : "";
-    return `${prefix} ${d.kind}${by}`;
+    // #4459 — which of the options the plan offered.
+    const chosen = d.option ? `: ${d.option}` : "";
+    return `${prefix} ${d.kind}${chosen}${by}`;
 });
 const decisionChipSeverity = computed(() => {
     const d = decision.value;

@@ -256,7 +256,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
     // but it's really just a plan, accept it as a plan". When `asKind`
     // is passed AND differs from the original kind, the close side-
     // effect of resolution-accept is suppressed (we want plan ergonomics).
-    async function acceptActiveDecision(asKind?: DecisionKind) {
+    async function acceptActiveDecision(asKind?: DecisionKind, option?: string) {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;
@@ -285,7 +285,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
             if (composerBody.value.trim() && !closes) {
                 await postBodyAs("comment_added");
             }
-            await api.decide(active.message.id, "accepted", asKind, closeNote);
+            await api.decide(active.message.id, "accepted", asKind, closeNote, option);
             composerBody.value = "";
             // #902 — apply le composer assignee si présent. Couvre les 4
             // kinds accept (plan / resolution / wontfix / escalation).
