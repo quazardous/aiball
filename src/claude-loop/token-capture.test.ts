@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, utimesSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     projectTranscriptDir,
     latestSessionFile,
     latestTurnUsage,
+    folderModel,
     latestModel,
     captureTokenUsage,
     activeTicketMarkerPath,
@@ -213,4 +214,25 @@ test("#3283 latestModel: the last assistant turn's model, from the file's tail",
         assert.equal(latestModel(f), null);
         assert.equal(latestModel(join(d, "absent.jsonl")), null);
     } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
+// #4473 — a kernel starting reads it, so a reload does not blank the bar.
+test("folderModel: no transcript, no model; a folder never seen answers null", () => {
+    assert.equal(folderModel(join(tmpdir(), `no-such-folder-${Date.now()}`)), null);
+});
+
+test("folderModel: the model of the folder's latest session, under Claude's own key", () => {
+    const home = mkdtempSync(join(tmpdir(), "aiball-4473-"));
+    const was = process.env.HOME;
+    process.env.HOME = home;
+    try {
+        const folder = "/x/my.project";
+        const dir = projectTranscriptDir(folder);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "s.jsonl"), JSON.stringify({ message: { role: "assistant", model: "claude-opus-5-5" } }) + "\n");
+        assert.equal(folderModel(folder), "claude-opus-5-5");
+    } finally {
+        process.env.HOME = was;
+        rmSync(home, { recursive: true, force: true });
+    }
 });

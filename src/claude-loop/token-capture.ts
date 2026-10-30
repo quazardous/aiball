@@ -109,6 +109,18 @@ export function latestModel(file: string, tailBytes = 256 * 1024): string | null
     return null;
 }
 
+/**
+ * #4473 — the model of the folder's latest session, or null with no transcript
+ * or no model in it. For a kernel starting: its state starts empty, and the Stop
+ * hook only speaks when a turn ends, so a reload would blank the bar until then.
+ */
+export function folderModel(cwd: string): string | null {
+    try {
+        const file = latestSessionFile(projectTranscriptDir(cwd));
+        return file ? latestModel(file) : null;
+    } catch { return null; }
+}
+
 /** Marker the MCP server writes (the ticket the agent is focused on). */
 export function activeTicketMarkerPath(stateDir: string): string {
     return join(stateDir, "active-ticket");

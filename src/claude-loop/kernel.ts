@@ -42,6 +42,7 @@
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
 import { surviveDiskFull } from "../disk-full.js";
+import { folderModel } from "./token-capture.js";
 import { PhaseReport } from "./phase-report.js";
 import { appendFileSync, existsSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -1927,6 +1928,12 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     return true;
 }
 
+/** #4473 — the bar's model from the transcript, as a kernel starts: a reload must not blank it until the turn ends. */
+function seedBarModel(): void {
+    const model = loopCwd ? folderModel(loopCwd) : null;
+    if (model) setIpcModel(model);
+}
+
 /**
  * SSE-driven main loop (#B.148 phase C). Subscribes once, lets the
  * daemon push `ping` events, and reacts via `tryWake`. Parallel slow
@@ -1945,6 +1952,7 @@ async function mainSse(): Promise<void> {
     // this against the live HEAD to flag a ghost daemon.
     const bootSha = installRootSha();
     if (bootSha) log(`kernel source: install-root SHA ${bootSha.slice(0, 7)}`);
+    seedBarModel();
     // #1032 S2 — the timer just (re)started : replay anything the hooks/proxy
     // offloaded while the IPC was down (with original ts) into the central log.
     drainOffloadIntoLog();
@@ -3319,6 +3327,7 @@ async function mainPoll(): Promise<void> {
     // #B.225: same boot SHA log as mainSse — see comment there.
     const bootSha = installRootSha();
     if (bootSha) log(`kernel source: install-root SHA ${bootSha.slice(0, 7)}`);
+    seedBarModel();
     // Same startup safety net as SSE mode (#B.148): drain any
     // pre-existing work right away instead of waiting `interval`s.
     await tryWake("startup");
