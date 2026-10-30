@@ -4,7 +4,7 @@
 computed **for the caller** (unread, turn and band depend on who asks). This page
 is the row's contract.
 
-**Row schema: version 3.** A field added keeps the version; a field removed or
+**Row schema: version 4.** A field added keeps the version; a field removed or
 whose meaning changes bumps it, and is listed under [Changes](#changes).
 
 ## Query
@@ -99,7 +99,7 @@ computed by the same rule, next to `is_claim` and `claim_until`.
 | Index | Band | A row is here when |
 |---|---|---|
 | 0 | `moderate` | The caller is a moderator and the ticket, or a comment on it, awaits moderation. |
-| 1 | `decision` | A proposal awaits a decision, and the caller did not make it. |
+| 1 | `decision` | A proposal awaits a decision, and the caller did not make it; or a question (`question` glyph) waits on the caller's answer. |
 | 2 | `working` | The last word is a step, or the ticket is claimed and hot. |
 | 3 | `open` | Any other open ticket. |
 | 4 | `closed` | Closed. |
@@ -120,6 +120,9 @@ the band its work is in, and the row says it is unread (`unread`).
 
 ## Changes
 
+- **Version 4.** A question waiting on the caller's answer (`question` glyph,
+  `turn` `you`) is in the `decision` band; it was in `open`. For the one who
+  asked, it stays in `open`.
 - **Version 3.** `turn` is `them` when the last word is someone else's comment
   that kept the hand (`handback: false`), as for a step; it was `you`. Adds the
   `question` glyph, for a last word that hands the ticket back.

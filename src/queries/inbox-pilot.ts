@@ -83,6 +83,8 @@ export function pilotFields(row: InboxRow, facts: PilotFacts, viewer: string, vi
     if (row.closed) band = "closed";
     else if (viewerIsHuman && (row.status === "pending" || row.pending_comment_count > 0)) band = "moderate";
     else if (pending && facts.proposer !== viewer) band = "decision";
+    // #4446 — a question waiting on the viewer's answer waits on them like a decision.
+    else if (glyph === "question" && turn === "you") band = "decision";
     else if (row.latest_is_step || (row.claimant && row.hot)) band = "working";
     else band = "open";
 

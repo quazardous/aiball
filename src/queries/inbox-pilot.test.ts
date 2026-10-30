@@ -24,6 +24,7 @@ const { issueToken } = await import("../db/tokens.js");
 const { upsertConsumer } = await import("../db.js");
 const { getDb } = await import("../db/connection.js");
 const { submitMessage } = await import("../messages.js");
+const { updateMessageStatus } = await import("../db/messages.js");
 const { createProject } = await import("../db/projects.js");
 const { upsertSubscription } = await import("../db/subscriptions.js");
 const { BANDS } = await import("./inbox-pilot.js");
@@ -119,8 +120,15 @@ test("a comment handing the ticket back shows as a question; one keeping the han
     const asked = ticket("asked");
     await comment(WORKER, asked, { handback: true });
     let r = await row(asked);
-    assert.deepEqual([r.turn, r.band, r.state_glyph], ["you", band("open"), "question"], "the question waits on the human");
-    assert.equal((await row(asked, WORKER)).state_glyph, "question", "the glyph is the ticket's state, the same for its author");
+    assert.deepEqual([r.turn, r.band, r.state_glyph], ["you", band("decision"), "question"], "the question waits on the human, like a decision");
+    r = await row(asked, WORKER);
+    assert.deepEqual([r.turn, r.band, r.state_glyph], ["them", band("open"), "question"], "the glyph is the ticket's state, the band follows who has to move");
+
+    // Moderation still comes first: a question on a ticket awaiting moderation stays there.
+    const held = ticket("held");
+    await comment(WORKER, held, { handback: true });
+    updateMessageStatus(held, "pending", "human");
+    assert.equal((await row(held)).band, band("moderate"));
 
     const kept = ticket("kept");
     await comment(WORKER, kept, { handback: false });
