@@ -339,7 +339,7 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
         if (onlyOpen) {
             cand = cand.filter((m) => {
                 const pu = m.postponed_until ?? null;
-                return !closedSet.has(m.id) && (includePostponed || !(!!pu && pu > nowStr));
+                return !closedSet.has(m.id) && m.status !== "rejected" && (includePostponed || !(!!pu && pu > nowStr));
             });
         }
         if (onlyActionable) cand = cand.filter((m) => actionableIds.has(m.id));
@@ -535,7 +535,8 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
             // #2759 — spelled out: `status: "pending"` is easy to misread.
             awaiting_moderation: m.status === "pending",
             created_at: m.created_at,
-            closed: closedSet.has(m.id),
+            // #4546 — a rejected ticket reads closed, as in ticket.get and the inbox row.
+            closed: closedSet.has(m.id) || m.status === "rejected",
             scope: m.scope,
             postponed,
             postponed_until: postponedUntil,
