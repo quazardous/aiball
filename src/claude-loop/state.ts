@@ -9,6 +9,7 @@
  * - `loop.pid`   — pid of the detached loop process
  * - `loop.log`   — stdout/stderr of the loop
  */
+import { findPromptZone } from "./pane-watchers/prompt-zone-watcher.js";
 import { renderFyiLine, type FyiEvent } from "./fyi-line.js";
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
@@ -1795,8 +1796,43 @@ export function paneShowsActivity(paneText: string): boolean {
     // NEGATIVE, which only falls back on the `esc` and `turn` proofs. That is
     // the survivable direction; a false positive sticks busy forever.
     const HEAD = /^\s*(?:\S\s+)?(?:⎿\s+)?[^\s(]*…\s*\(/u;
-    return paneText.split("\n").some((l) =>
-        HEAD.test(l) && (ELAPSED.test(l) || TOKENS.test(l) || RUNNING.test(l)));
+    const lines = paneText.split("\n");
+    return lines.some((l) =>
+        (HEAD.test(l) && (ELAPSED.test(l) || TOKENS.test(l) || RUNNING.test(l)))
+        || SPINNER_WITH_PARENS.test(l)
+        || RETRY_ROW.test(l))
+        || spinnerRowAboveBox(lines);
+}
+
+/**
+ * #4616 david `8cgcr5` — the status row's grammar, read in Claude Code 2.1.316:
+ * `<glyph> <message>…`, then, only if there is something to say and room for it,
+ * a parenthesis of parts joined by ` · `: a hook's status (`running Stop hook… 1/2`,
+ * or the hook's own message), the time, the tokens, `thinking` and its variants.
+ * Every part is optional: the width drops them, and for the first 16 s of a turn
+ * with no token and no thinking there is no parenthesis at all. So the glyph plus
+ * the ellipsis carry a parenthesis of any content, whatever Claude puts in it next.
+ */
+const SPINNER_GLYPH = "[·✢✳✶✻✽*]";
+const SPINNER_WITH_PARENS = new RegExp(`^\\s*${SPINNER_GLYPH}\\s+[^()]*…\\s*\\(`, "u");
+const SPINNER_BARE = new RegExp(`^\\s*${SPINNER_GLYPH}\\s+[^()]*…\\s*$`, "u");
+/** Waiting on the API, the row replaces the spinner: Claude is still in its turn. */
+const RETRY_ROW = /^\s*(?:\S\s+)?(?:Waiting for API response\b.*\bwill retry in\b|.*·\s*next try in\b.*·\s*attempt\b)/u;
+
+/**
+ * The bare `✶ Word…` proves nothing anywhere else: a word and an ellipsis are
+ * ordinary text. It counts only where the row sits, the first thing above the
+ * input box, past blank lines and the indented task list under it.
+ */
+function spinnerRowAboveBox(lines: readonly string[]): boolean {
+    const zone = findPromptZone(lines.join("\n"));
+    if (!zone) return false;
+    for (let i = zone.top - 1; i >= Math.max(0, zone.top - 40); i--) {
+        const l = lines[i];
+        if (l.trim() === "" || /^\s+/.test(l)) continue;
+        return SPINNER_BARE.test(l);
+    }
+    return false;
 }
 
 export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean {

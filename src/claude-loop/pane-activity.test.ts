@@ -121,12 +121,45 @@ test("the activity line while a hook runs, and any other form with a time", () =
     ]) assert.equal(paneShowsActivity(l), true, l);
 });
 
-test("a parenthesis after an ellipsis is not activity by itself, and quoted forms still do not count", () => {
+// The row's grammar in Claude Code 2.1.316: every part of the parenthesis is
+// optional, and the width drops them.
+test("every form the status row can take is read", () => {
     for (const l of [
-        "✶ Sock-hopping… (nothing here)",
+        "* Sprouting… (49s · ↓ 2.1k tokens · thinking)",
+        "✢ Baking… (running Stop hooks… 1/2 · 12s · ↓ 1.2k tokens)",
+        "· Baking… (12s · ↓ 1.2k tokens · thought for 5s)",
+        "✢ Baking… (9s · thinking)",
+        "✳ Baking… (thinking)",
+        "✳ Baking… (still thinking)",
+        "✶ Baking… (deep in thought)",
+        "✢ Baking… (2m 3s · thought for 12s)",
+        "✻ Baking… (running tool for 1m 2s)",
+        "· Baking… (running Stop hooks… 1/2 · 5s)",
+        "✽ Baking… (checking the build…)",
+        "✶ Compacting conversation… (12s)",
+        "✻ Waiting for API response · will retry in 12s · check your network",
+        "✻ Slow lane · next try in 30s · attempt 2 · esc to interrupt",
+    ]) assert.equal(paneShowsActivity(l), true, l);
+});
+
+test("what only looks like it does not count", () => {
+    for (const l of [
         "Loading… (see docs)",
         "Saved… (build 42s3)",
         "  ⎿  rang -8 | ✶ Sock-hopping… (running UserPromptSubmit hook · 6s)",
         "the line says `✶ Sock-hopping… (running UserPromptSubmit hook · 6s)`",
+        "We should wait for the API response, then retry in a while",
+        "✻ Churned for 9s",
     ]) assert.equal(paneShowsActivity(l), false, l);
+});
+
+const box = (above: string[]) => [...above, "", "─".repeat(60), "❯ ", "─".repeat(60), "  ⏵⏵ auto mode on"].join("\n");
+
+test("the bare row of a turn's first seconds counts only right above the input box", () => {
+    assert.equal(paneShowsActivity(box(["some output", "✶ Sock-hopping…"])), true);
+    assert.equal(paneShowsActivity(box(["✶ Sock-hopping…", "  ⎿  ◻ a task", "  ⎿  ◻ another"])), true, "its task list under it");
+    assert.equal(paneShowsActivity(box(["✶ Sock-hopping…", "the reply goes on here"])), false, "text under it: an old line");
+    assert.equal(paneShowsActivity(box(["Honking…"])), false, "no glyph, no row");
+    assert.equal(paneShowsActivity(box(["* note the ellipsis…", "more"])), false);
+    assert.equal(paneShowsActivity("✶ Sock-hopping…"), false, "no box on screen: nothing anchors it");
 });
