@@ -32,7 +32,7 @@ import { isAssignmentLive } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { assignWindowSec } from "../autopoll/config.js";
 
-import { buildInboxRow, buildInboxRowContext, hotWindowSec } from "./inbox-row.js";
+import { buildInboxRow, buildInboxRowContext, hotWindowSec, ticketDecision } from "./inbox-row.js";
 import { getInboxAgg, isLiveDecision, liveStep, type LiveStep } from "../db/inbox-agg.js";
 import { DECISION_KINDS } from "../decisions.js";
 
@@ -479,6 +479,9 @@ export function listTicketsFor(agentId: string, query: Request["query"], opts: {
                 aggByProject.set(m.project, byTicket);
             }
             const agg = byTicket.get(m.id);
+            // #4609 — a decision the ticket was filed with lives on the ticket,
+            // not in the aggregate: it stands until the thread carries a decision.
+            if (ticketDecision(m, null) && !agg?.latestDecisionId) pendingDecisionIds.add(m.id);
             if (!agg) continue;
             const step = liveStep(agg, m.status !== "rejected");
             if (step) stepByTicket.set(m.id, step);

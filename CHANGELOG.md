@@ -1402,6 +1402,7 @@ dates are YYYY-MM-DD.
   wake would be. `sim up --from-live --as <agents>` seats real agents on a
   sanitized copy of the live board.
 - **A rejected ticket tells the tickets that were waiting on it**: a rejection is
+- `ticket_list`: a plan attached at ticket creation reads `pending_decision: true`, as `ticket_get` and the inbox say.
   not a close, so the gate used to lift with nobody told and the relation stayed
   a dead letter. Each ticket that depended on it now hears it once, with the cue
   to cut the relation or file the work again.
