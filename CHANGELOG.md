@@ -1406,6 +1406,7 @@ dates are YYYY-MM-DD.
 - `poll`: `my_pending_tickets` lists your pending tickets of every project, as the `my_pending` count has always counted them.
 - Loop: a turn open in the session's transcript counts as busy, so a wake is no longer typed into a turn Claude started by itself before its hook arrives.
 - Loop: the activity line is read in its other forms too, such as `(running UserPromptSubmit hook · 6s)`, and a wake waits 3 s more once the last sign of work goes off.
+- Moving a folder's sessions: only Claude itself refuses the move, no longer any process whose command line holds the word `claude`.
 - Loop: Claude's status row counts in all its forms: no parenthesis in a turn's first seconds (right above the input box), any content in the parenthesis, and the API waiting rows.
 - Loop: a prompt waiting in Claude's queue counts as busy from the transcript too, as the screen's hint goes away while the input box holds text.
   not a close, so the gate used to lift with nobody told and the relation stayed

@@ -349,6 +349,31 @@ test("#4419 move_sessions: the sessions follow to a new dir, and back to the old
     assert.equal(same.sessions, null, "no change of dir, nothing moved");
 });
 
+test("#4634 only Claude itself holds a folder, not what merely names it", async () => {
+    const { isClaudeCommand } = await import("../claude-config-move.js");
+    for (const cmd of [
+        "claude --settings /x/claude-settings.json",
+        "claude 6",
+        "/home/u/.local/bin/claude",
+        "C:\\Users\\u\\.local\\bin\\claude.exe --resume",
+        "\"C:\\Program\\claude.exe\" --resume",
+        "node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+        "/usr/bin/node-22 /x/@anthropic-ai/claude-code/cli.js --resume",
+    ]) assert.equal(isClaudeCommand(cmd), true, cmd);
+    for (const cmd of [
+        "/usr/bin/bash -lc source '/home/u/.claude-loop/cl-a-1/env'; claude",
+        "/bin/bash -c source /home/u/.claude/shell-snapshots/snapshot.sh",
+        "/x/windows/cl-pty-proxy/target/release/cl-session-host --dir /home/u/.claude",
+        "node /x/node_modules/.bin/tsx /x/src/claude-loop/kernel.ts",
+        "/usr/bin/node-22 --require /x/preflight.cjs /x/src/claude-loop/kernel.ts",
+        "socat UNIX-LISTEN:/tmp/claude-http-1.sock,fork TCP:localhost:1",
+        "vim .claude/settings.json",
+        "uv run --quiet --script /x/bin/fake-claude",
+        "grep claude notes.txt",
+        "",
+    ]) assert.equal(isClaudeCommand(cmd), false, cmd);
+});
+
 test("#4419 move_sessions refused: without a change of dir, and while a Claude runs in the folder — nothing written", { skip: process.platform !== "linux" ? "processes are listed on Linux" : false }, async () => {
     const { spawn } = await import("node:child_process");
     const a = join(home, "cfg-c-4419");
@@ -357,6 +382,8 @@ test("#4419 move_sessions refused: without a change of dir, and while a Claude r
     assert.equal((await refused(() => set({ cwd: f, session: "tmux", move_sessions: true }))).code, "BAD_REQUEST");
 
     const claude = spawn("bash", ["-c", "exec -a claude sleep 30"], { cwd: f, stdio: "ignore" });
+    // Naming the word is not being Claude: it does not count, and does not hide the real one.
+    const editor = spawn("bash", ["-c", "sleep 30; : .claude/settings.json"], { cwd: f, stdio: "ignore" });
     try {
         await new Promise((r) => setTimeout(r, 200));
         const e = await refused(() => set({ cwd: f, key: "claude.config_dir", value: join(home, "cfg-d-4419"), move_sessions: true }));
@@ -367,5 +394,6 @@ test("#4419 move_sessions refused: without a change of dir, and while a Claude r
         set({ cwd: f, key: "claude.config_dir", value: join(home, "cfg-d-4419") });
     } finally {
         claude.kill();
+        editor.kill();
     }
 });

@@ -35,11 +35,25 @@ export interface SessionsMove {
     projectEntry: "copied" | "merged" | "none";
 }
 
+/**
+ * #4634 — is this command line Claude Code itself? Read from the executable: the
+ * word alone also matched what merely names a path, and on a live machine 31 of
+ * the 37 processes so matched were not Claude (a session host, a loop's kernel, a
+ * shell sourcing `.claude-loop/…/env`). An npm install runs under node, with the
+ * package's script as first argument.
+ */
+export function isClaudeCommand(cmd: string): boolean {
+    const [exe = "", script = ""] = cmd.trim().split(/\s+/);
+    const unquoted = exe.replace(/^["']|["']$/g, "");
+    if (/(?:^|[\\/])claude(?:\.exe)?$/i.test(unquoted)) return true;
+    return /(?:^|[\\/])node(?:\.exe|-\d+)?$/i.test(unquoted) && /@anthropic-ai[\\/]claude-code[\\/]/.test(script);
+}
+
 /** The Claude processes running in the folder, or null when they cannot be listed here. */
 export function claudeRunningIn(folder: string): Array<{ pid: number; cmd: string }> | null {
     const procs = relocateEnv([], folder).processCwds();
     if (procs === null) return null;
-    return procs.filter((p) => under(p.cwd, folder) && /\bclaude\b/.test(p.cmd)).map((p) => ({ pid: p.pid, cmd: p.cmd }));
+    return procs.filter((p) => under(p.cwd, folder) && isClaudeCommand(p.cmd)).map((p) => ({ pid: p.pid, cmd: p.cmd }));
 }
 
 function moveFile(from: string, to: string): void {
