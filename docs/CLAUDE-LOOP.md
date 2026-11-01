@@ -292,7 +292,12 @@ any sign of activity was seen in the last 4 s — an open turn, the spinner line
 (spinner, timer and tokens, which Claude shows the whole time it works), a
 prompt waiting in Claude's queue (the input box says `Press up to edit queued
 messages`), `/compact`, and on Claude Code before 2.1.304 the `esc to
-interrupt` footer.
+interrupt` footer. One more needs no screen: a prompt in the session's transcript
+with no end of turn behind it, or one still in its queue (the input box hides the
+hint while it holds text), held for 1.5 s rather than 4. Claude writes it as it
+takes the prompt, and the hook that says so can come seconds later, so this is
+what stops a wake being typed into a turn the loop did not start (a task
+notification, say). It lets go after 60 s without the file growing.
 Each sign coming on or going off is logged in `loop.log` as
 `busy proofs: +activity -turn → …`.
 

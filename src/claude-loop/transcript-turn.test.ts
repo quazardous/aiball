@@ -1,0 +1,121 @@
+/**
+ * #4616 — a turn open in the transcript, before the UserPromptSubmit hook says so.
+ * The lines are the shapes of a real session's transcript.
+ */
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { appendFileSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { TranscriptTurn, TRANSCRIPT_OPEN_MAX_MS, transcriptLineSignal } from "./transcript-turn.js";
+import { isBusy, mechanicalProofsLive, PROOF_TRANSCRIPT, seenProof } from "./busy-stack.js";
+
+const dir = mkdtempSync(join(tmpdir(), "aiball-4616-"));
+after(() => rmSync(dir, { recursive: true, force: true }));
+let n = 0;
+const fresh = () => { const f = join(dir, `${n++}.jsonl`); writeFileSync(f, ""); return f; };
+
+const ts = "2026-11-01T07:04:54.014Z";
+const prompt = (content: unknown, extra: object = {}) => JSON.stringify({ type: "user", timestamp: ts, message: { role: "user", content }, ...extra }) + "\n";
+const toolResult = prompt([{ type: "tool_result", tool_use_id: "x", content: "ok" }]);
+const end = (subtype: string) => JSON.stringify({ type: "system", subtype, timestamp: ts }) + "\n";
+const queueOp = (operation: string) => JSON.stringify({ type: "queue-operation", operation, timestamp: ts }) + "\n";
+const noise = JSON.stringify({ type: "attachment", timestamp: ts }) + "\n";
+
+/** A poller pinned to the file's real clock: `poll` compares with its mtime. */
+const turnOn = (file: string) => new TranscriptTurn(() => file);
+
+test("what opens a turn, what ends one, and what says nothing", () => {
+    const kind = (l: string) => transcriptLineSignal(l.trim())?.kind ?? null;
+    assert.equal(kind(prompt("Wake up, Neo. look #1")), "prompt");
+    assert.equal(kind(prompt("<task-notification> <task-id>a</task-id>")), "prompt", "the prompt the loop never typed");
+    assert.equal(kind(prompt([{ type: "text", text: "from a list" }])), "prompt");
+    assert.equal(kind(toolResult), null, "a tool result is within a turn");
+    assert.equal(kind(prompt("x", { isMeta: true })), null);
+    assert.equal(kind(prompt("a subagent's", { isSidechain: true })), null);
+    assert.equal(kind(prompt("<command-name>/mcp</command-name>")), null, "no turn follows it");
+    assert.equal(kind(prompt("[Request interrupted by user]")), "end", "no Stop follows an interrupt");
+    assert.equal(kind(end("stop_hook_summary")), "end");
+    assert.equal(kind(end("turn_duration")), "end");
+    assert.equal(kind(end("compact_boundary")), null);
+    assert.equal(kind(noise), null);
+    assert.equal(kind("not json {"), null);
+});
+
+test("the 08:04 sequence: the prompt taken by itself holds the loop before its hook, until the turn ends", () => {
+    const f = fresh();
+    appendFileSync(f, prompt("the turn before") + end("stop_hook_summary") + end("turn_duration"));
+    const t = turnOn(f);
+    assert.equal(t.poll(Date.now()), false, "the last turn ended: nothing to hold");
+    appendFileSync(f, noise + prompt("<task-notification> done"));
+    assert.equal(t.poll(Date.now()), true, "no hook has come, the transcript knows");
+    appendFileSync(f, toolResult);
+    assert.equal(t.poll(Date.now()), true, "still in it");
+    appendFileSync(f, end("stop_hook_summary"));
+    assert.equal(t.poll(Date.now()), false, "ended");
+    assert.equal(t.lastEndMs, Date.parse(ts));
+});
+
+test("#4617 a prompt waiting in the queue holds, after the turn's end too, until it is taken", () => {
+    const f = fresh();
+    appendFileSync(f, end("turn_duration"));
+    const t = turnOn(f);
+    assert.equal(t.poll(Date.now()), false);
+    appendFileSync(f, queueOp("enqueue") + queueOp("enqueue"));
+    assert.equal(t.poll(Date.now()), true, "greyed on the screen, the hint or not");
+    appendFileSync(f, queueOp("remove"));
+    assert.equal(t.poll(Date.now()), true, "one left");
+    appendFileSync(f, queueOp("dequeue"));
+    assert.equal(t.poll(Date.now()), false, "none left");
+    appendFileSync(f, queueOp("remove") + queueOp("enqueue") + queueOp("remove"));
+    assert.equal(t.poll(Date.now()), false, "a removal seen without its enqueue never goes below empty");
+    const stuck = fresh();
+    appendFileSync(stuck, queueOp("enqueue"));
+    const q = turnOn(stuck);
+    const now = Date.now();
+    assert.equal(q.poll(now + TRANSCRIPT_OPEN_MAX_MS + 1_000), false, "a queue that never empties lets go like a turn");
+});
+
+test("attaching mid-turn sees it open; a line cut in two is read once whole", () => {
+    const f = fresh();
+    appendFileSync(f, end("turn_duration") + prompt("in progress"));
+    const t = turnOn(f);
+    assert.equal(t.poll(Date.now()), true, "a kernel reloaded mid-turn");
+    const line = end("stop_hook_summary");
+    appendFileSync(f, line.slice(0, 10));
+    assert.equal(t.poll(Date.now()), true, "half a line says nothing");
+    appendFileSync(f, line.slice(10));
+    assert.equal(t.poll(Date.now()), false);
+});
+
+test("a turn that never ends lets go once the file stops moving", () => {
+    const f = fresh();
+    appendFileSync(f, prompt("then Claude was killed"));
+    const t = turnOn(f);
+    const now = Date.now();
+    assert.equal(t.poll(now), true);
+    assert.equal(t.poll(now + TRANSCRIPT_OPEN_MAX_MS - 1_000), true, "a long silence within the bound");
+    assert.equal(t.poll(now + TRANSCRIPT_OPEN_MAX_MS + 1_000), false, "past it, no longer held");
+    const old = new Date(now - 2 * TRANSCRIPT_OPEN_MAX_MS);
+    utimesSync(f, old, old);
+    assert.equal(turnOn(f).poll(now), false, "attached to an old open turn: a stuck busy would never end");
+});
+
+test("no file, or a file gone: the proof says nothing and nothing throws", () => {
+    assert.equal(new TranscriptTurn(() => null).poll(Date.now()), false);
+    const f = fresh();
+    appendFileSync(f, prompt("x"));
+    const t = turnOn(f);
+    assert.equal(t.poll(Date.now()), true);
+    rmSync(f);
+    assert.equal(t.poll(Date.now()), false);
+    assert.equal(turnOn(join(dir, "missing.jsonl")).poll(Date.now()), false);
+});
+
+test("it holds busy and blocks the pane-idle release, like any proof the screen shows", () => {
+    const now = 1_000_000;
+    const proofs = seenProof(new Map(), PROOF_TRANSCRIPT, now, 1_500);
+    assert.equal(isBusy(proofs, now + 1_000), true);
+    assert.equal(mechanicalProofsLive(proofs, now + 1_000), true, "the empty box must not release it");
+    assert.equal(isBusy(proofs, now + 2_000), false, "it lets go without the usual 4 s");
+});

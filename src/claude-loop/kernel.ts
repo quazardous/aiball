@@ -203,8 +203,10 @@ import {
     PROOF_ACTIVITY,
     PROOF_QUEUED,
     PROOF_COMPACTING,
+    PROOF_TRANSCRIPT,
     type BusyProofs,
 } from "./busy-stack.js";
+import { TranscriptTurn, TRANSCRIPT_REMANENCE_MS, sessionTranscriptFile } from "./transcript-turn.js";
 import { BarRenderer, queuedSpawn } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus, type ControlEvent } from "./wake-bus.js";
@@ -813,6 +815,8 @@ const busyW = new BusyWatcher();
 const activityW = new ActivityWatcher();
 // #4121 — a prompt waiting in Claude Code's queue.
 const queuedW = new QueuedWatcher();
+const transcriptTurn = new TranscriptTurn(() =>
+    loopCwd ? sessionTranscriptFile(loopCwd, process.env.AIBALL_SESSION_KEY || "default") : null);
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const notLoggedInW = new NotLoggedInWatcher();
@@ -1163,6 +1167,8 @@ async function probePaneMarkers(): Promise<void> {
     if (activityW.snapshot().visible) busyProofs = seenProof(busyProofs, PROOF_ACTIVITY, nowBusy);
     // #4121 — a queued prompt: the queue empties only into a turn.
     if (queuedW.snapshot().visible) busyProofs = seenProof(busyProofs, PROOF_QUEUED, nowBusy);
+    // #4616 — a turn already open in the transcript, whose hook has not come yet.
+    if (transcriptTurn.poll(nowBusy)) busyProofs = seenProof(busyProofs, PROOF_TRANSCRIPT, nowBusy, TRANSCRIPT_REMANENCE_MS);
     // #4014 — this turn has shown Claude at work at least once.
     const workOnScreen = escVisible || getCompactingDetector().snapshot().active || activityW.snapshot().visible || queuedW.snapshot().visible;
     if (inTurn && (workOnScreen || hookCompacting)) turnShowedWork = true;
@@ -1335,7 +1341,7 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         // the divergence happens before we pick a rule for it.
         const glued = hintTicketId != null && wakeTicketId != null && hintTicketId !== wakeTicketId;
         const hintPart = hintTicketId != null ? ` hintTicket=#${hintTicketId}${glued ? " GLUED" : ""}` : "";
-        log(`wake:diag kind=${wkind} ticket=${wticket} bundled=${bundled} distinctTickets=${distinct}${hintPart} series=#${wakeSeq} sinceLastWakeMs=${sinceMs < 0 ? "-" : sinceMs}`);
+        log(`wake:diag kind=${wkind} ticket=${wticket} bundled=${bundled} distinctTickets=${distinct}${hintPart} series=#${wakeSeq} sinceLastWakeMs=${sinceMs < 0 ? "-" : sinceMs}${transcriptTurn.lastEndMs === null ? "" : ` sinceTurnEndMs=${Date.now() - transcriptTurn.lastEndMs}`}`);
         // #879 — armBusyDefer redondant avec le cooldown state du
         // WakeMachine ; gardé pendant la transition pour que les
         // consumers externes (stop-hook etc.) qui lisent ipc.busyDeferUntilMs

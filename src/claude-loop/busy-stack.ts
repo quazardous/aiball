@@ -53,6 +53,12 @@ export const PROOF_ACTIVITY = "activity";
  * rien d'autre ne se voit (une compaction).
  */
 export const PROOF_QUEUED = "queued";
+/**
+ * #4616 — preuve « un tour est ouvert dans le transcript » : un prompt écrit sans
+ * fin de tour derrière. Claude Code l'écrit quand il le prend, le hook arrive
+ * plus tard, et entre les deux l'écran ne montre rien (`transcript-turn.ts`).
+ */
+export const PROOF_TRANSCRIPT = "transcript";
 
 /** Rémanence par défaut d'une preuve : assez pour ponter un flicker pane
  *  entre deux re-signalements (~1s) sans coller le busy une fois claude
@@ -89,7 +95,7 @@ export function seenProof(
  * hook perdu collerait le busy indéfiniment, exactement ce que le release existe
  * pour éviter.
  */
-export const MECHANICAL_PROOFS: readonly string[] = [PROOF_ESC, PROOF_COMPACTING, PROOF_ACTIVITY, PROOF_QUEUED];
+export const MECHANICAL_PROOFS: readonly string[] = [PROOF_ESC, PROOF_COMPACTING, PROOF_ACTIVITY, PROOF_QUEUED, PROOF_TRANSCRIPT];
 
 /**
  * Reste-t-il une preuve mécanique VIVANTE (dans sa rémanence) à `nowMs` ?
