@@ -60,6 +60,19 @@ export const PROOF_QUEUED = "queued";
  */
 export const PROOF_TRANSCRIPT = "transcript";
 
+/**
+ * #4616 david `8cgcr5` — "ajouter des timeout là où ça peut éviter d'aller trop
+ * vite". After the last sign of work goes off, a wake waits this long more: Claude
+ * may be between two signs (a prompt just taken, a hook starting). The retry is
+ * armed at the end of it, so it never costs a whole tempo.
+ */
+export const WAKE_QUIET_MS = 3_000;
+
+/** How long a wake must still wait, given when the last proof went off. */
+export function wakeQuietLeftMs(busyEndedAtMs: number | null, nowMs: number, quietMs: number = WAKE_QUIET_MS): number {
+    return busyEndedAtMs === null ? 0 : Math.max(0, busyEndedAtMs + quietMs - nowMs);
+}
+
 /** Rémanence par défaut d'une preuve : assez pour ponter un flicker pane
  *  entre deux re-signalements (~1s) sans coller le busy une fois claude
  *  réellement idle (le pane-idle release est de toute façon immédiat). */

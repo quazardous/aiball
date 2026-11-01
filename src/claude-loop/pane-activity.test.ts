@@ -107,3 +107,26 @@ test("#4437 2.1.312: the \"done\" line at rest is not an activity, glyph and chr
     assert.equal(paneShowsActivity("✻ Churned for 9s · done jeudi 09:57"), false);
     assert.equal(paneFooterShowsBusy(IDLE_2_1_312), false);
 });
+
+// #4616 david `8cgcr5` — forms seen live: the hook ones were not read, and they
+// show exactly while the loop has no hook of its own to say a turn started.
+test("the activity line while a hook runs, and any other form with a time", () => {
+    for (const l of [
+        "✶ Sock-hopping… (running UserPromptSubmit hook · 6s)",
+        "✽ Smooshing… (3m 52s · ↓ 14.4k tokens)",
+        "✢ Gitifying… (42s · ↓ 1.8k tokens)",
+        "✶ Whirring… (1h 2m 3s · ↓ 4.5k tokens)",
+        "· Pondering… (running stop hooks)",
+        "✻ Thinking… (12s)",
+    ]) assert.equal(paneShowsActivity(l), true, l);
+});
+
+test("a parenthesis after an ellipsis is not activity by itself, and quoted forms still do not count", () => {
+    for (const l of [
+        "✶ Sock-hopping… (nothing here)",
+        "Loading… (see docs)",
+        "Saved… (build 42s3)",
+        "  ⎿  rang -8 | ✶ Sock-hopping… (running UserPromptSubmit hook · 6s)",
+        "the line says `✶ Sock-hopping… (running UserPromptSubmit hook · 6s)`",
+    ]) assert.equal(paneShowsActivity(l), false, l);
+});

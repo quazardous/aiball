@@ -1761,7 +1761,11 @@ export function afkGlyphChunk(sd: string | undefined): string {
  * it. It is specific enough not to need the scope.
  */
 export function paneShowsActivity(paneText: string): boolean {
-    const ELAPSED = /\((?:\d+m\s*)?\d+s\s*·/;
+    // #4616 — a time anywhere in the parenthesis: while a hook runs Claude shows
+    // `✶ Sock-hopping… (running UserPromptSubmit hook · 6s)`, the very moments the
+    // loop has no hook of its own to tell it a turn started.
+    const ELAPSED = /\((?:[^)]*\D)?(?:\d+h\s*)?(?:\d+m\s*)?\d+s\b/;
+    const RUNNING = /\(running\b/i;
     const TOKENS = /[↓↑]\s*[\d.]+k?\s*tokens/i;
     // The activity line OPENS its row: an optional spinner glyph or tool-result
     // marker, a word, then the parenthesised timer. Anything further in is
@@ -1792,7 +1796,7 @@ export function paneShowsActivity(paneText: string): boolean {
     // the survivable direction; a false positive sticks busy forever.
     const HEAD = /^\s*(?:\S\s+)?(?:⎿\s+)?[^\s(]*…\s*\(/u;
     return paneText.split("\n").some((l) =>
-        HEAD.test(l) && (ELAPSED.test(l) || TOKENS.test(l)));
+        HEAD.test(l) && (ELAPSED.test(l) || TOKENS.test(l) || RUNNING.test(l)));
 }
 
 export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean {

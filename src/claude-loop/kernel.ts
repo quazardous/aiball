@@ -204,6 +204,7 @@ import {
     PROOF_QUEUED,
     PROOF_COMPACTING,
     PROOF_TRANSCRIPT,
+    wakeQuietLeftMs,
     type BusyProofs,
 } from "./busy-stack.js";
 import { TranscriptTurn, TRANSCRIPT_REMANENCE_MS, sessionTranscriptFile } from "./transcript-turn.js";
@@ -1207,6 +1208,7 @@ async function probePaneMarkers(): Promise<void> {
     if (changed) {
         log(`busy proofs:${changed.on.map((p) => ` +${p}`).join("")}${changed.off.map((p) => ` -${p}`).join("")} → ${liveNow.length ? liveNow.join(", ") : "none"}${paneIdle && changed.off.length ? " (pane idle: all released)" : ""}`);
         lastLiveProofs = liveNow;
+        if (liveNow.length === 0) busyEndedAtMs = nowBusy;
         setIpcPaneBusyProofs(liveNow);
     }
     const composite = busyStackActive(busyProofs, nowBusy);
@@ -1568,14 +1570,16 @@ function drainNow(source: string): void {
 /** #4034 — a plan accept held in its grace (#3898) is retried at the grace's
  *  own end, not at the next tempo boundary after it. */
 let graceUntilMs: number | null = null;
+/** #4616 — when the last busy proof went off. */
+let busyEndedAtMs: number | null = null;
 let graceTimer: ReturnType<typeof setTimeout> | null = null;
-function armGraceRetry(untilMs: number): void {
+function armGraceRetry(untilMs: number, source = "accept-grace-ended"): void {
     graceUntilMs = untilMs;
     if (graceTimer) clearTimeout(graceTimer);
     graceTimer = setTimeout(() => {
         graceTimer = null;
         graceUntilMs = null;
-        if (loopSettled()) drainNow("accept-grace-ended");
+        if (loopSettled()) drainNow(source);
         else recomputeNextWake();
     }, Math.max(0, untilMs - Date.now()) + 50);
 }
@@ -1871,6 +1875,13 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
                 return false;
             }
         }
+    }
+    // #4616 — the last sign of work just went off: Claude may be between two.
+    const quietLeft = manualWake || panicMode ? 0 : wakeQuietLeftMs(busyEndedAtMs, Date.now());
+    if (quietLeft > 0) {
+        log(`hold wake (${reason}) — quiet ${Math.ceil(quietLeft / 1000)}s more after the last sign of work`);
+        armGraceRetry(Date.now() + quietLeft, "quiet-ended");
+        return false;
     }
     const { phrase, headMessageId, hasContent, backlogTicketId, extraSeenIds, wakeTicketId, bundleTicketCount, signalId, holdUntilMs } = await pickPhrase(hint, manualWake || panicMode);
     // #3898 — a plan accept younger than its grace: the next tempo re-entry

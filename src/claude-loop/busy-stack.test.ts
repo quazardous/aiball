@@ -153,3 +153,12 @@ test("#4121 a queued prompt is a mechanical proof: it holds busy and keeps the p
     assert.equal(paneReadsIdle({ idlePromptVisible: true, mechanicalLive: mechanicalProofsLive(proofs, 2_000), inTurn: true, turnShowedWork: true, sinceTurnStartMs: 60_000 }), false,
         "an empty-looking box with a queued prompt does not end the turn");
 });
+
+test("#4616 a wake waits a little more after the last proof, and nothing before any", async () => {
+    const { wakeQuietLeftMs, WAKE_QUIET_MS } = await import("./busy-stack.js");
+    assert.equal(wakeQuietLeftMs(null, 1_000), 0, "no work seen yet");
+    assert.equal(wakeQuietLeftMs(1_000, 1_000), WAKE_QUIET_MS);
+    assert.equal(wakeQuietLeftMs(1_000, 1_000 + WAKE_QUIET_MS - 1), 1);
+    assert.equal(wakeQuietLeftMs(1_000, 1_000 + WAKE_QUIET_MS), 0);
+    assert.equal(wakeQuietLeftMs(1_000, 1_000 + 60_000), 0, "never negative");
+});

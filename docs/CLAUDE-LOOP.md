@@ -298,6 +298,7 @@ hint while it holds text), held for 1.5 s rather than 4. Claude writes it as it
 takes the prompt, and the hook that says so can come seconds later, so this is
 what stops a wake being typed into a turn the loop did not start (a task
 notification, say). It lets go after 60 s without the file growing.
+When the last sign goes off, a wake waits 3 s more in case Claude is between two.
 Each sign coming on or going off is logged in `loop.log` as
 `busy proofs: +activity -turn → …`.
 
