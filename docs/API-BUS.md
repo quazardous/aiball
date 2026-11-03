@@ -233,14 +233,19 @@ stops comes back `interrupted`, with what it had done, and is not taken up again
 
 **`claude.config_dir`'s wizard.** `value` is a path, or `null` to go back to
 the dir the folder falls back to without its own (the key leaves its
-`.aiball.yaml`; `target` in the facts names that dir). Questions: `confirm` (naming the loops),
-`fork` when the new dir has not been through Claude's first run (never for `null`) (link the
-account and settings of the current dir, or leave it empty), `move_sessions`
-(the folder's conversations follow, or not). Steps: `idle`, wait until the
-folder's loops are idle (up to 5 min), so no turn is cut; `stop`; `free`, wait
-until no Claude runs in the folder (up to 30 s); `write`, the point of no
-return (`project.settings_set` with `move_sessions` and `fork`); `start`, the
-loops again, on their conversation. Without a running loop, `idle`, `stop` and
+`.aiball.yaml`; `target` in the facts names that dir). A dir that has not been
+through Claude's first run (theme, login) is refused at once,
+`CONFIG_DIR_NOT_READY` (422, `details.config_dir`), as a loop's start would
+refuse it: a fork never carries the account nor the first-run state, so none
+makes it ready. Questions: `confirm` (naming the loops), `fork` toward a path
+(carry how Claude works in the current dir, linked: CLAUDE.md, settings,
+skills, agents, commands, plugins; what the new dir has stays; or keep it as it
+is), `move_sessions` (the folder's conversations follow, or not). Steps:
+`idle`, wait until the folder's loops are idle (up to 5 min), so no turn is
+cut; `stop`; `free`, wait until no Claude runs in the folder (up to 30 s);
+`ready`, the new dir checked again; `write`, the point of no return
+(`project.settings_set` with `move_sessions` and `fork`); `start`, the loops
+again, on their conversation. Without a running loop, `idle`, `stop` and
 `start` are left out. Before the write, a failure or a cancel starts the
 stopped loops again on the current dir; a `start` that fails names the loops
 not back.
@@ -249,13 +254,14 @@ Its codes: `idle` says `waiting_busy` (`busy`), then `loops_idle`, or fails
 `still_busy`; `stop` says `stopping` (`loop`), `waiting_stop` (`running`),
 then `stopped` (`stopped`), or fails `still_running`; `free` says
 `claude_in_folder` (`pids`), then `folder_free` or `not_checked`, or fails
-`claude_still_in_folder`; `write` says `written` (`dir`, and what
+`claude_still_in_folder`; `ready` says `target_ready` (`dir`), or fails
+`target_not_ready`; `write` says `written` (`dir`, and what
 `project.settings_set` answered); `start` says `starting` (`loop`), then
 `started` (`started`), or fails `not_started` (`failed`). The fallback says
 `restarted_on_current` or `not_restarted` (`dir`, `restarted`, `failed`); a
 cancelled step says `cancelled`, an unexpected failure `error`. The questions'
-facts: `confirm` `{ current, target, loops }`, `fork` `{ current, target,
-target_first_run }`, `move_sessions` `{ from, to }`.
+facts: `confirm` `{ current, target, loops }`, `fork` `{ current, target }`,
+`move_sessions` `{ from, to }`.
 
 ## Who may call a method
 

@@ -23,7 +23,7 @@ import { readSettings } from "../../project-settings.js";
 import { claudeConfigDir, configDirState, expandConfigDir, sourceDir } from "../../claude-config-dir.js";
 import { claudeRunningIn } from "../../claude-config-move.js";
 import { getAgentBar } from "../../agent-bar-store.js";
-import { answersRefusal, cancellable, newRun, runWizard, type WizardPlan, type WizardRun } from "../../setting-wizard.js";
+import { answersRefusal, cancellable, newRun, PlanRefused, runWizard, type WizardPlan, type WizardRun } from "../../setting-wizard.js";
 import { configDirPlan, type ConfigDirOps } from "../../setting-wizard-config-dir.js";
 import { folderLoops, loopRunning, stopLoop } from "./loop.js";
 
@@ -118,6 +118,7 @@ function planFor(caller: Caller, cwd: string, key: string, value: unknown): Wiza
         return make(cwd, value, caller);
     } catch (e) {
         if (e instanceof Refusal) throw e;
+        if (e instanceof PlanRefused) throw new Refusal(e.status, e.message, ERROR_CODES[e.code as keyof typeof ERROR_CODES] ?? ERROR_CODES.BAD_REQUEST, e.details);
         throw new Refusal(400, (e as Error).message, ERROR_CODES.BAD_REQUEST);
     }
 }

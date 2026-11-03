@@ -110,7 +110,7 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | Code | Status | When |
 |---|---|---|
 | `HOST_BUSY` | 409 | `session.start`: the agent's session already runs elsewhere (claude-loop, or a host), or a session of that name already runs; `details.host` says where. |
-| `CONFIG_DIR_NOT_READY` | 422 | `session.start`: the folder's Claude config dir has not been through Claude's first run (theme, login), which a loop cannot answer; `details.config_dir` names it. Run `CLAUDE_CONFIG_DIR=<dir> claude` once. |
+| `CONFIG_DIR_NOT_READY` | 422 | `session.start`: the folder's Claude config dir has not been through Claude's first run (theme, login), which a loop cannot answer; `details.config_dir` names it. `project.setting_wizard_preview` / `_start` for `claude.config_dir`: the dir switched to is not, so its loops could not start on it. Run `CLAUDE_CONFIG_DIR=<dir> claude` once. |
 | `FOLDER_OF_ANOTHER_AGENT` | 422 | `session.start`: the folder's `.aiball.yaml` is another agent's; `details.folder_agent` names it. |
 | `CONVERSATION_HELD` | 422 | `session.start`: the conversation to resume is another agent's running loop's; `details.conversation` and `details.agent`. |
 | `CLAUDE_RUNS_IN_FOLDER` | 409 | `project.settings_set` with `move_sessions`: a Claude runs in the folder and writes its sessions; `details.folder` and `details.pids` (`{ pid, cmd }`). Stop its loops, then move. Nothing was written. |

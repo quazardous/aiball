@@ -23,7 +23,13 @@ const call = <T>(name: string, p: Record<string, unknown>, caller = human) => ge
 
 const cfgA = join(home, "cfg-a");
 const cfgB = join(home, "cfg-b");
-mkdirSync(cfgA);
+const cfgNew = join(home, "cfg-new");
+/** A dir that has been through Claude's first run, as a loop's start asks. */
+const ready = (dir: string) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, ".claude.json"), JSON.stringify({ hasCompletedOnboarding: true })); };
+ready(cfgA);
+ready(cfgB);
+ready(join(home, "cfg-default"));
+mkdirSync(cfgNew);
 const cwd = join(home, "proj");
 mkdirSync(cwd);
 writeFileSync(join(cwd, ".aiball.yaml"), `consumer:\n  agent: w-4682\nclaude:\n  config_dir: ${cfgA}\n`);
@@ -39,7 +45,7 @@ test("the setting says it has a wizard", () => {
 test("the preview asks and lists, and runs nothing", () => {
     const p = call<{ questions: Array<{ id: string }>; steps: Array<{ id: string }>; loops: unknown[] }>("project.setting_wizard_preview", { cwd, key: "claude.config_dir", value: cfgB });
     assert.deepEqual(p.questions.map((q) => q.id), ["confirm", "fork", "move_sessions"]);
-    assert.deepEqual(p.steps.map((s) => s.id), ["free", "write"], "no loop in this folder");
+    assert.deepEqual(p.steps.map((s) => s.id), ["free", "ready", "write"], "no loop in this folder");
     assert.deepEqual(p.loops, []);
     assert.match(readFileSync(join(cwd, ".aiball.yaml"), "utf8"), /config_dir: .*cfg-a/, "nothing written");
 });
@@ -49,15 +55,18 @@ test("refused: a setting without a wizard, the same dir, answers that do not ans
     assert.equal((await refused(() => call("project.setting_wizard_preview", { cwd, key: "claude.config_dir", value: cfgA }))).code, "BAD_REQUEST");
     assert.equal((await refused(() => call("project.setting_wizard_start", { cwd, key: "claude.config_dir", value: cfgB, answers: { confirm: true } }))).code, "BAD_REQUEST");
     assert.equal((await refused(() => call("project.setting_wizard_cancel", { run: "w-none" }))).code, "NOT_FOUND");
+    // #4696 — a dir never run: refused as a loop's start would refuse it.
+    const notReady = await refused(() => call("project.setting_wizard_preview", { cwd, key: "claude.config_dir", value: cfgNew }));
+    assert.deepEqual([notReady.code, (notReady.details as { config_dir: string }).config_dir], ["CONFIG_DIR_NOT_READY", cfgNew]);
 });
 
 test("a run goes to its end, writes the dir, and is kept on disk", async () => {
-    const run = call<Run>("project.setting_wizard_start", { cwd, key: "claude.config_dir", value: cfgB, answers: { confirm: true, fork: "empty", move_sessions: "yes" } });
+    const run = call<Run>("project.setting_wizard_start", { cwd, key: "claude.config_dir", value: cfgB, answers: { confirm: true, fork: "keep", move_sessions: "yes" } });
     assert.equal(run.status, "running");
     const deadline = Date.now() + 10_000;
     while (run.status === "running" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
     assert.equal(run.status, "done", JSON.stringify(run.steps));
-    assert.deepEqual(run.steps.map((s) => `${s.id}:${s.status}`), ["free:done", "write:done"]);
+    assert.deepEqual(run.steps.map((s) => `${s.id}:${s.status}`), ["free:done", "ready:done", "write:done"]);
     assert.equal(run.settings?.config_dir.value, cfgB);
     assert.match(readFileSync(join(cwd, ".aiball.yaml"), "utf8"), /config_dir: .*cfg-b/);
     assert.ok(existsSync(join(home, "wizards", `${run.run}.json`)), "kept, for a daemon that restarts");

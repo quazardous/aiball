@@ -100,6 +100,13 @@ export class StepFailed extends Error {
     }
 }
 
+/** #4696 — a plan that cannot be made, with the bus code its refusal carries. */
+export class PlanRefused extends Error {
+    constructor(message: string, readonly code: string, readonly status = 400, readonly details?: Record<string, unknown>) {
+        super(message);
+    }
+}
+
 /** Thrown by `StepCtx.waitUntil` when the run was cancelled meanwhile. */
 export class StepCancelled extends Error {
     constructor() {

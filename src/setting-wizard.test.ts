@@ -6,11 +6,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { answersRefusal, cancellable, newRun, runWizard, type WizardRun } from "./setting-wizard.js";
 import { configDirPlan, FREE_WAIT_MS, IDLE_WAIT_MS, type ConfigDirOps, type FolderLoop } from "./setting-wizard-config-dir.js";
+import { PlanRefused } from "./setting-wizard.js";
 
 const CWD = "/p/mosquito";
 
 /** A machine: loops that run, busy or not, Claude processes, and what was done to it, in order. */
-function machine(o: { loops?: string[]; busyFor?: number; claudeFor?: number; firstRunDone?: boolean; startFails?: string[] } = {}) {
+function machine(o: { loops?: string[]; busyFor?: number; claudeFor?: number; firstRunDone?: boolean | (() => boolean); startFails?: string[] } = {}) {
     const clock = { now: 1_000_000 };
     const running = new Set(o.loops ?? []);
     const did: string[] = [];
@@ -27,7 +28,7 @@ function machine(o: { loops?: string[]; busyFor?: number; claudeFor?: number; fi
         },
         claudeRunning: () => (clock.now - t0 < (o.claudeFor ?? 0) ? [{ pid: 42, cmd: "claude" }] : []),
         currentDir: () => "/home/u/.claude",
-        target: (_cwd, value) => ({ dir: value === null ? "/home/u/.claude-default" : value.replace("~", "/home/u"), firstRunDone: o.firstRunDone ?? true }),
+        target: (_cwd, value) => ({ dir: value === null ? "/home/u/.claude-default" : value.replace("~", "/home/u"), firstRunDone: typeof o.firstRunDone === "function" ? o.firstRunDone() : o.firstRunDone ?? true }),
         write: (_cwd, value, opts) => { did.push(`write ${value} move=${opts.moveSessions} fork=${opts.fork}`); return { moved: 3 }; },
         settings: () => ({ config_dir: "after" }),
     };
@@ -51,34 +52,54 @@ async function run(m: ReturnType<typeof machine>, answers: Record<string, unknow
 const OK = { confirm: true, move_sessions: "yes" };
 const steps = (r: WizardRun) => r.steps.map((s) => `${s.id}:${s.status}`).join(" ");
 
-test("the preview names the loops, asks the fork only for a dir never run, and leaves out the loop steps without loops", () => {
-    const m = machine({ loops: ["cl-a"], firstRunDone: false });
+test("the preview names the loops, offers the fork toward a dir of the folder's own, and leaves out the loop steps without loops", () => {
+    const m = machine({ loops: ["cl-a"] });
     const p = configDirPlan(CWD, "~/.claude-b", m.ops).preview;
     assert.deepEqual(p.loops, [{ name: "cl-a", agent: "cl-a-claude", busy: false }]);
     assert.deepEqual(p.questions.map((q) => q.id), ["confirm", "fork", "move_sessions"]);
     assert.match(p.questions[0].label, /1 loop \(cl-a-claude\)/);
     assert.deepEqual(p.questions.map((q) => q.facts), [
         { current: "/home/u/.claude", target: "/home/u/.claude-b", loops: ["cl-a"] },
-        { current: "/home/u/.claude", target: "/home/u/.claude-b", target_first_run: false },
+        { current: "/home/u/.claude", target: "/home/u/.claude-b" },
         { from: "/home/u/.claude", to: "/home/u/.claude-b" },
     ], "the facts each label names, for a client in another language");
     assert.deepEqual([p.fallback_code, p.fallback_facts], ["restart_on_current", { current: "/home/u/.claude", loops: ["cl-a"] }]);
-    assert.deepEqual(p.steps.map((s) => s.id), ["idle", "stop", "free", "write", "start"]);
+    assert.deepEqual(p.steps.map((s) => s.id), ["idle", "stop", "free", "ready", "write", "start"]);
     assert.deepEqual(p.steps.filter((s) => s.point_of_no_return).map((s) => s.id), ["write"]);
 
-    const bare = configDirPlan(CWD, "~/.claude-b", machine({ firstRunDone: true }).ops).preview;
-    assert.deepEqual(bare.questions.map((q) => q.id), ["confirm", "move_sessions"], "a dir already run: nothing to fork");
-    assert.deepEqual(bare.steps.map((s) => s.id), ["free", "write"]);
+    const bare = configDirPlan(CWD, "~/.claude-b", machine().ops).preview;
+    assert.deepEqual(bare.steps.map((s) => s.id), ["free", "ready", "write"]);
     assert.equal(m.did.length, 0, "a preview runs nothing");
 });
 
 test("#4690 null goes back to the dir the folder falls back to, with the same steps and no fork", () => {
-    const m = machine({ loops: ["cl-a"], firstRunDone: false });
+    const m = machine({ loops: ["cl-a"] });
     const p = configDirPlan(CWD, null, m.ops).preview;
     assert.equal(p.value, null);
     assert.deepEqual(p.questions.map((q) => q.id), ["confirm", "move_sessions"], "no fork: the folder falls back to a dir, it does not start one");
     assert.deepEqual(p.questions[0].facts, { current: "/home/u/.claude", target: "/home/u/.claude-default", loops: ["cl-a"] });
-    assert.deepEqual(p.steps.map((s) => s.id), ["idle", "stop", "free", "write", "start"]);
+    assert.deepEqual(p.steps.map((s) => s.id), ["idle", "stop", "free", "ready", "write", "start"]);
+});
+
+test("#4696 a dir never run is refused before anything runs: no fork makes it ready", () => {
+    const m = machine({ loops: ["cl-a"], firstRunDone: false });
+    assert.throws(() => configDirPlan(CWD, "~/.claude-b", m.ops), (e: unknown) =>
+        e instanceof PlanRefused && e.code === "CONFIG_DIR_NOT_READY" && e.status === 422 && (e.details as { config_dir: string }).config_dir === "/home/u/.claude-b");
+    assert.throws(() => configDirPlan(CWD, null, m.ops), /first run/, "the default dir too");
+    assert.deepEqual(m.did, []);
+});
+
+test("#4696 the dir checked again before the write: no longer ready, nothing written, the loops back on the current dir", async () => {
+    let ready = true;
+    const m = machine({ loops: ["cl-a"], firstRunDone: () => ready, busyFor: 2_000 });
+    const plan = configDirPlan(CWD, "~/.claude-b", m.ops);
+    ready = false;
+    const r = newRun("w-3", CWD, plan.preview, "t");
+    await runWizard(r, plan, { answers: OK, changed: () => {}, cancelRequested: () => false, sleep: async (ms) => { m.clock.now += ms; }, now: () => m.clock.now });
+    assert.equal(r.status, "failed");
+    assert.deepEqual([r.steps.find((s) => s.id === "ready")!.code, r.steps.find((s) => s.id === "write")!.status], ["target_not_ready", "skipped"]);
+    assert.deepEqual(m.did, ["stop cl-a", "start cl-a"]);
+    assert.equal(r.fallback?.code, "restarted_on_current");
 });
 
 test("refused: the same dir, a value that is not a path", () => {
@@ -89,20 +110,20 @@ test("refused: the same dir, a value that is not a path", () => {
 });
 
 test("the answers must answer every question, with an option it offers", () => {
-    const p = configDirPlan(CWD, "~/.claude-b", machine({ firstRunDone: false }).ops).preview;
+    const p = configDirPlan(CWD, "~/.claude-b", machine().ops).preview;
     assert.match(answersRefusal(p, {}) ?? "", /confirm/);
-    assert.match(answersRefusal(p, { confirm: true, fork: "maybe", move_sessions: "yes" }) ?? "", /fork: one of fork, empty/);
+    assert.match(answersRefusal(p, { confirm: true, fork: "maybe", move_sessions: "yes" }) ?? "", /fork: one of fork, keep/);
     assert.equal(answersRefusal(p, { confirm: true, fork: "fork", move_sessions: "no" }), null);
 });
 
 test("a switch goes through: waits for the busy loop, stops, waits for Claude to end, writes, starts again", async () => {
-    const m = machine({ loops: ["cl-a", "cl-b"], busyFor: 4_000, claudeFor: 7_000, firstRunDone: false });
+    const m = machine({ loops: ["cl-a", "cl-b"], busyFor: 4_000, claudeFor: 7_000 });
     const r = await run(m, { ...OK, fork: "fork" });
     assert.equal(r.status, "done", steps(r));
     assert.deepEqual(m.did, ["stop cl-a", "stop cl-b", "write ~/.claude-b move=true fork=true", "start cl-a", "start cl-b"]);
-    assert.equal(steps(r), "idle:done stop:done free:done write:done start:done");
+    assert.equal(steps(r), "idle:done stop:done free:done ready:done write:done start:done");
     assert.deepEqual(r.steps.find((s) => s.id === "write")!.details, { dir: "/home/u/.claude-b", moved: 3 });
-    assert.deepEqual(r.steps.map((s) => s.code), ["loops_idle", "stopped", "folder_free", "written", "started"], "a code beside each sentence");
+    assert.deepEqual(r.steps.map((s) => s.code), ["loops_idle", "stopped", "folder_free", "target_ready", "written", "started"], "a code beside each sentence");
     assert.deepEqual([r.fallback, r.settings], [null, { config_dir: "after" }]);
     assert.ok(r.ended_at);
 });
@@ -111,7 +132,7 @@ test("a loop still busy at the bound: nothing changed, nothing to fall back on",
     const m = machine({ loops: ["cl-a"], busyFor: IDLE_WAIT_MS + 60_000 });
     const r = await run(m, OK);
     assert.equal(r.status, "failed");
-    assert.equal(steps(r), "idle:failed stop:skipped free:skipped write:skipped start:skipped");
+    assert.equal(steps(r), "idle:failed stop:skipped free:skipped ready:skipped write:skipped start:skipped");
     assert.match(r.steps[0].said!, /Still busy after 5 min: cl-a-claude; nothing changed/);
     assert.deepEqual([r.steps[0].code, r.steps[0].details], ["still_busy", { busy: ["cl-a"], waited_s: 300 }]);
     assert.deepEqual([m.did, r.fallback], [[], null]);
@@ -131,7 +152,7 @@ test("a cancel while waiting stops the run there; the fallback restores what it 
     const m = machine({ loops: ["cl-a"], busyFor: 60_000 });
     const r = await run(m, OK, 1_000_000 + 10_000);
     assert.equal(r.status, "cancelled");
-    assert.equal(steps(r), "idle:skipped stop:skipped free:skipped write:skipped start:skipped");
+    assert.equal(steps(r), "idle:skipped stop:skipped free:skipped ready:skipped write:skipped start:skipped");
     assert.deepEqual(m.did, []);
 });
 

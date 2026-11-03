@@ -4,12 +4,17 @@
  * sessions under the move, and with the loops back on their conversation.
  *
  * Steps: wait until the folder's loops are idle, stop them, wait until no
- * Claude runs in the folder, write the dir (moving the conversations, forking
- * the dir: the point of no return), start the loops again. Before the write,
- * a stop or a failure starts again the loops already stopped, on the current
- * dir. The machine is reached through `ConfigDirOps`, so the tests drive it.
+ * Claude runs in the folder, check the new dir is ready, write the dir (moving
+ * the conversations, forking the dir: the point of no return), start the loops
+ * again. Before the write, a stop or a failure starts again the loops already
+ * stopped, on the current dir. The machine is reached through `ConfigDirOps`,
+ * so the tests drive it.
+ *
+ * #4696 — a dir that has not been through Claude's first run (theme, login) is
+ * refused before anything runs, as a loop's start would refuse it: no fork can
+ * make it ready, a fork never carries the account nor the first-run state.
  */
-import { StepFailed, type WizardPlan, type WizardQuestion, type WizardStepView } from "./setting-wizard.js";
+import { PlanRefused, StepFailed, type WizardPlan, type WizardQuestion, type WizardStepView } from "./setting-wizard.js";
 
 export const IDLE_WAIT_MS = 5 * 60_000;
 export const STOP_WAIT_MS = 60_000;
@@ -58,6 +63,12 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
     const current = ops.currentDir(cwd);
     const target = ops.target(cwd, value);
     if (target.dir === current) throw new Error(`the folder's loops already start Claude with ${current}`);
+    if (!target.firstRunDone) {
+        throw new PlanRefused(
+            `${target.dir} has not been through Claude's first run (theme, login), which a loop cannot answer: run Claude there once, then switch`,
+            "CONFIG_DIR_NOT_READY", 422, { config_dir: target.dir },
+        );
+    }
     const loops = ops.loops(cwd);
     const n = loops.length;
 
@@ -69,15 +80,16 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
             ? `Start this folder's loops on ${target.dir} from now on; none runs now`
             : `Stop and restart ${n} loop${n > 1 ? "s" : ""} (${names(loops)}) on ${target.dir}; ${n > 1 ? "their conversations follow" : "its conversation follows"}`,
     }];
-    // A fork starts a dir of the folder's own: not one it falls back to.
-    if (!target.firstRunDone && value !== null) {
+    // A fork carries how Claude works (instructions, skills, settings), never the
+    // account: offered toward a dir of the folder's own, not one it falls back to.
+    if (value !== null) {
         questions.push({
-            id: "fork", kind: "choose", default: "fork",
-            facts: { current, target: target.dir, target_first_run: false },
-            label: `${target.dir} has not been through Claude's first run: start it from ${current}?`,
+            id: "fork", kind: "choose", default: "keep",
+            facts: { current, target: target.dir },
+            label: `Carry how Claude works in ${current} (CLAUDE.md, settings, skills, agents, commands, plugins) into ${target.dir}?`,
             options: [
-                { key: "fork", label: `Link the account and settings of ${current}` },
-                { key: "empty", label: "Leave it empty: Claude's first run is yours to do there" },
+                { key: "fork", label: `Carry them, linked; what ${target.dir} already has stays` },
+                { key: "keep", label: `Keep ${target.dir} as it is` },
             ],
         });
     }
@@ -97,6 +109,7 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
             { id: "stop", label: "Stop the folder's loops" },
         ] : []),
         { id: "free", label: "Wait until no Claude runs in the folder" },
+        { id: "ready", label: "Check the new dir is ready for Claude" },
         { id: "write", label: "Write the dir, move the conversations", point_of_no_return: true },
         ...(n > 0 ? [{ id: "start", label: "Start the loops again" }] : []),
     ];
@@ -149,6 +162,17 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
                     },
                 );
                 return { said: "No Claude runs in the folder", code: "folder_free" };
+            },
+            ready: async () => {
+                // Checked again here, just before the point of no return: it was when previewed.
+                const now = ops.target(cwd, value);
+                if (!now.firstRunDone) {
+                    throw new StepFailed({
+                        said: `${now.dir} has not been through Claude's first run: a loop would refuse it; nothing changed`,
+                        code: "target_not_ready", details: { dir: now.dir },
+                    });
+                }
+                return { said: `${now.dir} is ready for Claude`, code: "target_ready", details: { dir: now.dir } };
             },
             write: async (ctx) => {
                 const moveSessions = ctx.answers.move_sessions !== "no";

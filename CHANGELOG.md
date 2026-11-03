@@ -120,6 +120,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `claude.config_dir`'s wizard refuses a dir that has not been through Claude's first run before anything runs, and checks it again before its write, instead of stopping the loops for a dir they cannot start on.
 - `claude.config_dir`'s wizard takes `null`, to take a folder back to the default dir.
 - Loop: task notifications passing through an idle Claude's queue no longer hold the loop busy; only a queued prompt does.
 - `ticket_list`: a rejected ticket reads `closed: true`, as `ticket_get` says, and `open` leaves it out.
