@@ -93,7 +93,7 @@ computed by the same rule, next to `is_claim` and `claim_until`.
 | `band` | number | Index into the bands below; `sort=band` orders by it. |
 | `band_name` | string | The band's name, one of the bands below. Read this one: a band added or removed shifts the indexes, not the names. |
 | `state_glyph` | see below \| null | The one state mark the row shows. |
-| `waits_on` | object \| null | When the last word is a step waiting on another ticket (`resume_on: { ticket }`) that has not moved since: that ticket as the caller sees it, `{ id, title, band_name, state_glyph, closed }`. The row keeps its band; this says what the agent waits on. The row is sent again when that ticket changes. `null` otherwise. |
+| `waits_on` | object \| null | When the last word is a step and the ticket waits on another: that ticket as the caller sees it, `{ id, kind, title, band_name, state_glyph, closed }`. `kind` is `resume_on` (the step named it, and it has not moved since) or `depends_on` (a dependency still open, which holds the ticket until it closes); the step's own wait comes first. The row keeps its band; this says what the agent waits on. The row is sent again when that ticket changes. `null` otherwise. |
 
 **Bands**, in order:
 
@@ -126,8 +126,9 @@ is woken by it, and the ticket leaves the agents' pools until the next action
 
 ## Changes
 
-- **Added to version 4:** `waits_on`, what a step waiting on another ticket
-  waits on, with that ticket's band and glyph. The bands do not change.
+- **Added to version 4:** `waits_on`, what a ticket whose last word is a step
+  waits on (its step's `resume_on`, or an open `depends_on`), with that
+  ticket's band and glyph. The bands do not change.
 - **Version 4.** A question waiting on the caller's answer (`question` glyph,
   `turn` `you`) is in the `decision` band; it was in `open`. For the one who
   asked, it stays in `open`.

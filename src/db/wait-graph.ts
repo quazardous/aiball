@@ -49,10 +49,18 @@ export function liveResumeOn(ticketId: number): { on: number; at: string } | nul
 }
 
 /**
- * #4689 — the tickets whose step named `ticketId` to resume on: when it changes,
- * their rows say so again. A candidate list; `liveResumeOn` says which still wait.
+ * #4689 — the tickets that may wait on `ticketId`: a step that named it to
+ * resume on, or a `depends_on` it. When it changes, their rows say so again. A
+ * candidate list; `waitsOf` says which still wait.
  */
-export function resumeWaitersOf(ticketId: number): number[] {
+export function waitersOf(ticketId: number): number[] {
+    const dependents = listTypedRelationsForTicket(ticketId)
+        .filter((r) => r.kind === "blocks")
+        .map((r) => r.target_ticket_id);
+    return [...new Set([...resumeWaitersOf(ticketId), ...dependents])].filter((id) => id !== ticketId);
+}
+
+function resumeWaitersOf(ticketId: number): number[] {
     const rows = getDb().select({ ticketId: schema.messages.ticketId }).from(schema.messages).where(and(
         eq(schema.messages.kind, "comment_added"),
         eq(schema.messages.status, "approved"),
