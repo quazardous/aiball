@@ -40,8 +40,12 @@
  */
 import { setup, emit } from "xstate";
 
-/** Default 5 min — bien plus long que n'importe quel turn busy claude
- *  normal. Tunable via env CL_STALE_BUSY_MS si besoin. */
+/** Default 5 min. Not longer than every real turn: measured over 96 h of
+ *  `busy proofs:` logs (#4441), 39 busy spans of 2170 ran past 5 min and all
+ *  ended on their own, the longest at 25.5 min. Only `BUSY_LATCHED` (the `esc`
+ *  hint) arms this machine, which Claude Code no longer shows since 2.1.304, so
+ *  it is not armed today; arming it on `activity` as is would release those
+ *  long turns. Tunable via env CL_STALE_BUSY_MS. */
 export const STALE_BUSY_MS = 5 * 60 * 1000;
 
 export interface SanityMachineInput {
