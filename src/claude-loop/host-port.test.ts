@@ -50,7 +50,24 @@ test("the host port reads the screen and types, beside the daemon's own connecti
 
     port.end();
     await until("Claude gone", () => !port.alive());
-    assert.deepEqual(logs, [], "nothing went wrong on the way");
+    await until("its end said", () => logs.some((l) => l.startsWith("host: Claude ended")));
+    assert.deepEqual(logs.filter((l) => !l.startsWith("host: Claude ended")), [], "nothing went wrong on the way");
+});
+
+test("#4698 a Claude that ends says its code and the screen it left, in the kernel's log", { skip }, async () => {
+    const link = await startHost({ name: "dies", argv: ["sh", "-c", "sleep 1; echo the last words; sleep 1; exit 3"], cwd: home, size: { rows: 12, cols: 60 }, env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+    cleanups.push(async () => { await link.call("host.shutdown").catch(() => {}); link.close(); });
+    const logs: string[] = [];
+    const port = hostPort({ controlSocket: join(link.info.dir, "control.sock"), log: (m) => logs.push(m) });
+    cleanups.push(() => port.close());
+    await port.ready;
+    await until("its end said", () => logs.some((l) => l.startsWith("host: Claude ended")), 10_000);
+    const line = logs.find((l) => l.startsWith("host: Claude ended"))!;
+    assert.match(line, /^host: Claude ended \(code 3\); its last screen:\n/);
+    assert.match(line, /the last words/);
+    port.close();
+    await link.call("host.shutdown").catch(() => {});
+    link.close();
 });
 
 test("#4437 the OSC 7501 the command writes are counted by the host and said in the kernel's log", { skip }, async () => {

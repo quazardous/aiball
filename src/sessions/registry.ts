@@ -5,6 +5,7 @@
  * `session.<name>.state`.
  */
 import { rememberSize, rememberedSize } from "./session-sizes.js";
+import { screenTail } from "../claude-loop/exit-trace.js";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { discoverHosts, startHost, type HostLink, type StartHost } from "./hosts.js";
@@ -141,7 +142,15 @@ function track(link: HostLink): void {
     if (!link.info.agent) labels.set(link, readLabel(link));
     byKey.set(key, link);
     link.on("host.clients", () => { announce(link); noteSize(link); });
-    link.on("host.exited", () => announce(link));
+    link.on("host.exited", (p: { code?: number | null; restarting?: boolean } = {}) => {
+        announce(link);
+        // #4698 — a Claude that ends, in the daemon's journal: who, its code, the screen it left.
+        const who = link.info.agent ?? link.info.name ?? "?";
+        void link.call<{ text?: string }>("host.screen").then(
+            (v) => console.log(`[session] ${who}: Claude ended (code ${p.code ?? "?"}${p.restarting ? ", restarting" : ""}); its last screen:\n${screenTail(v?.text ?? "")}`),
+            () => console.log(`[session] ${who}: Claude ended (code ${p.code ?? "?"}${p.restarting ? ", restarting" : ""})`),
+        );
+    });
     link.on("gone", () => {
         if (byKey.get(key) === link) byKey.delete(key);
         announce(link, true);

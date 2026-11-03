@@ -6,6 +6,7 @@
  * these: it holds a `TerminalPort`.
  */
 import { spawnSync } from "node:child_process";
+import { screenTail } from "./exit-trace.js";
 import { type Socket } from "node:net";
 import { connectHost, controlAuthLine } from "../host-socket.js";
 import { captureCursor, captureCursorSync } from "../pane.js";
@@ -262,7 +263,10 @@ export function hostPort(opts: {
                 } else if (m.method === "host.keys") {
                     opts.onKeys?.((m.params ?? {}) as HostKeys);
                 } else if (m.method === "host.exited") {
-                    exited = !(m.params as { restarting?: boolean } | undefined)?.restarting;
+                    const p = (m.params ?? {}) as { code?: number | null; restarting?: boolean };
+                    exited = !p.restarting;
+                    // #4698 — the death, said where it can be read after the restart.
+                    opts.log(`host: Claude ended (code ${p.code ?? "?"}${p.restarting ? ", restarting" : ""}); its last screen:\n${screenTail(latest.text)}`);
                 }
             }
         });

@@ -302,6 +302,9 @@ notification, say). It lets go after 60 s without the file growing.
 When the last sign goes off, a wake waits 3 s more in case Claude is between two.
 Each sign coming on or going off is logged in `loop.log` as
 `busy proofs: +activity -turn → …`.
+When Claude ends, the kernel logs `host: Claude ended (code N)` with the last
+lines of its screen, and the daemon logs the same in its journal. A start that
+finds a dead loop's state dir clears it, keeping its log as `loop.log.prev`.
 
 ### 2. Human presence — F9 and typing
 

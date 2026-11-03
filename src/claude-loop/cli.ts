@@ -11,6 +11,7 @@
  * is passed verbatim to the spawned `claude`.
  */
 import { claudeConfigDir, expandConfigDir } from "../claude-config-dir.js";
+import { keepPreviousLog, takePreviousLog } from "./exit-trace.js";
 import { spawnSync } from "node:child_process";
 import { commandExists } from "../sysdeps.js";
 import {
@@ -642,6 +643,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     await readHostedByDaemon(ctx.agent);
     // #3594 — the hold to start in: `--afk`, else the agent's own, kept by aiball.
     const startAfk = opts.afk ?? await agentAfkHold(ctx.agent);
+    let previousLog: string | null = null;
     if (existsSync(sd)) {
         // #602 — with the deterministic naming (#594), restarting from the
         // same (cwd, agent) always hits the SAME state-dir. If the previous
@@ -657,6 +659,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // its processes swept (they run inside the host).
         if (tmuxAlive(name)) return joinLive(name, "tmux", opts);
         if (liveHostAgent(sd) || daemonHosts(sd)) return joinLive(name, "host", opts);
+        // #4698 — the dead loop's log says how it ended: kept as `loop.log.prev`.
+        previousLog = takePreviousLog(sd);
         rmSync(sd, { recursive: true, force: true });
         process.stdout.write(`claude-loop: removed stale state-dir for dead loop '${name}' (cleared so restart can reuse the same deterministic name)\n`);
     }
@@ -808,6 +812,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     }
 
     ensureDir(sd);
+    keepPreviousLog(sd, previousLog);
     // #622 — write the loop session start once at launch so short-lived
     // hooks (session-start, user-prompt-submit, stop) all derive boot-grace
     // from the SAME instant. Without it each hook read its own module-load

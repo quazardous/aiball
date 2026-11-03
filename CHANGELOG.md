@@ -95,6 +95,7 @@ dates are YYYY-MM-DD.
   time an agent passes back (`since`) may carry any offset.
 - Setting wizards: a folder setting that breaks things when written bare carries a wizard (`project.setting_wizard_preview` / `_start` / `_cancel`, followed on `wizard.<run>.state`); the first is `claude.config_dir`, which waits for the loops to be idle, stops them, moves the conversations and starts them again.
 - The inbox's turn view says what a ticket held by a step waits on (`waits_on`: the step's `resume_on` or an open `depends_on`, with that ticket's band and glyph), so a client can show a ticket the agent holds while it waits on someone else.
+- A Claude that ends leaves a trace: its code and last screen in `loop.log` and in the daemon's journal, and a restart keeps the dead loop's log as `loop.log.prev`.
 
 ### Changed
 
