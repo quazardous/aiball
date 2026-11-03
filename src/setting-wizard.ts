@@ -19,6 +19,8 @@ export interface WizardQuestion {
     id: string;
     kind: "confirm" | "choose";
     label: string;
+    /** The facts the label names, for a client that says the question in its own words. */
+    facts?: Record<string, unknown>;
     options?: Array<{ key: string; label: string }>;
     default?: string;
 }
@@ -45,12 +47,17 @@ export interface WizardPreview {
     questions: WizardQuestion[];
     steps: WizardStepView[];
     fallback: string;
+    /** What `fallback` says, as a code with its facts. */
+    fallback_code: string;
+    fallback_facts?: Record<string, unknown>;
 }
 
 export interface StepState extends WizardStepView {
     status: StepStatus;
-    /** A sentence for the human: what the step does or did. */
+    /** A sentence for the human, in English: what the step does or did. */
     said: string | null;
+    /** What `said` says, as a stable code; its facts are in `details`. */
+    code: string | null;
     /** What it saw or did: pids, conversations moved, loops started. */
     details?: Record<string, unknown>;
 }
@@ -66,15 +73,30 @@ export interface WizardRun {
     ended_at: string | null;
     steps: StepState[];
     /** Set at the end when the fallback had to run, or could have. */
-    fallback: { ran: boolean; said: string } | null;
+    fallback: FallbackResult | null;
     /** At the end, the folder's settings as `project.settings` gives them. */
     settings: unknown;
 }
 
+/** What the fallback did: `said` in English, `code` and `details` for a client that says it its own way. */
+export interface FallbackResult {
+    ran: boolean;
+    said: string;
+    code: string;
+    details?: Record<string, unknown>;
+}
+
+/** What a step says: an English sentence, its code, and the facts it names. */
+export interface Said {
+    said: string;
+    code: string;
+    details?: Record<string, unknown>;
+}
+
 /** A step that cannot go on: the run fails here, `said` says why. */
 export class StepFailed extends Error {
-    constructor(readonly said: string, readonly details?: Record<string, unknown>) {
-        super(said);
+    constructor(readonly what: Said) {
+        super(what.said);
     }
 }
 
@@ -88,20 +110,20 @@ export class StepCancelled extends Error {
 export interface StepCtx {
     answers: Record<string, unknown>;
     /** Say what the step does now; the run is published again. */
-    say(said: string, details?: Record<string, unknown>): void;
+    say(what: Said): void;
     /**
      * Poll `ready` until it holds, saying `waiting()` meanwhile; fails with
      * `timeout()` past `ms`, and stops at once on a cancellation.
      */
-    waitUntil(ready: () => boolean, ms: number, waiting: () => [string, Record<string, unknown>?], timeout: () => string): Promise<void>;
+    waitUntil(ready: () => boolean, ms: number, waiting: () => Said, timeout: () => Said): Promise<void>;
 }
 
 export interface WizardPlan {
     preview: WizardPreview;
     /** One function per step of the preview, by id: it returns what it did, or throws `StepFailed`. */
-    steps: Record<string, (ctx: StepCtx) => Promise<{ said: string; details?: Record<string, unknown> } | void>>;
+    steps: Record<string, (ctx: StepCtx) => Promise<Said | void>>;
     /** Run when the run stops before its point of no return: `done` lists the steps that went through. */
-    fallback(done: string[]): Promise<{ ran: boolean; said: string } | null>;
+    fallback(done: string[]): Promise<FallbackResult | null>;
     /** The folder's settings at the end. */
     settings(): unknown;
 }
@@ -121,7 +143,7 @@ export function answersRefusal(preview: WizardPreview, answers: Record<string, u
 export function newRun(id: string, cwd: string, preview: WizardPreview, nowIso: string): WizardRun {
     return {
         run: id, cwd, key: preview.key, value: preview.value, status: "running", started_at: nowIso, ended_at: null,
-        steps: preview.steps.map((s) => ({ ...s, status: "pending", said: null })),
+        steps: preview.steps.map((s) => ({ ...s, status: "pending", said: null, code: null })),
         fallback: null, settings: null,
     };
 }
@@ -158,9 +180,10 @@ export async function runWizard(run: WizardRun, plan: WizardPlan, hooks: RunHook
         hooks.changed();
         const ctx: StepCtx = {
             answers: hooks.answers,
-            say: (said, details) => {
-                step.said = said;
-                if (details) step.details = details;
+            say: (what) => {
+                step.said = what.said;
+                step.code = what.code;
+                if (what.details) step.details = what.details;
                 hooks.changed();
             },
             waitUntil: async (ready, ms, waiting, timeout) => {
@@ -170,20 +193,21 @@ export async function runWizard(run: WizardRun, plan: WizardPlan, hooks: RunHook
                     if (ready()) return;
                     if (!pastReturn && hooks.cancelRequested()) throw new StepCancelled();
                     if (hooks.now() >= until) throw new StepFailed(timeout());
-                    const [said, details] = waiting();
-                    const key = JSON.stringify([said, details]);
+                    const what = waiting();
+                    const key = JSON.stringify(what);
                     if (key !== last) {
                         last = key;
-                        ctx.say(said, details);
+                        ctx.say(what);
                     }
                     await hooks.sleep(poll);
                 }
             },
         };
         try {
-            const out = await (plan.steps[step.id] ?? (async () => { throw new StepFailed(`no step ${step.id}`); }))(ctx);
+            const out = await (plan.steps[step.id] ?? (async () => { throw new StepFailed({ said: `no step ${step.id}`, code: "error" }); }))(ctx);
             if (out) {
                 step.said = out.said;
+                step.code = out.code;
                 if (out.details) step.details = out.details;
             }
             step.status = "done";
@@ -193,11 +217,14 @@ export async function runWizard(run: WizardRun, plan: WizardPlan, hooks: RunHook
             if (e instanceof StepCancelled) {
                 step.status = "skipped";
                 step.said = "Cancelled";
+                step.code = "cancelled";
                 end = "cancelled";
             } else {
                 step.status = "failed";
-                step.said = e instanceof StepFailed ? e.said : `failed: ${(e as Error).message ?? e}`;
-                if (e instanceof StepFailed && e.details) step.details = e.details;
+                const what: Said = e instanceof StepFailed ? e.what : { said: `failed: ${(e as Error).message ?? e}`, code: "error" };
+                step.said = what.said;
+                step.code = what.code;
+                if (what.details) step.details = what.details;
                 end = "failed";
             }
             break;
@@ -208,7 +235,7 @@ export async function runWizard(run: WizardRun, plan: WizardPlan, hooks: RunHook
         try {
             run.fallback = await plan.fallback(done);
         } catch (e) {
-            run.fallback = { ran: false, said: `the fallback failed: ${(e as Error).message ?? e}` };
+            run.fallback = { ran: false, said: `the fallback failed: ${(e as Error).message ?? e}`, code: "error" };
         }
     }
     try {

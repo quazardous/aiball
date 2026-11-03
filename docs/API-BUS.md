@@ -209,7 +209,14 @@ nothing and answers `{ key, value, title, loops, questions, steps, fallback }`:
   the one to offer first). A question that does not apply is left out;
 - `steps`: `{ id, label }`, the one marked `point_of_no_return` after which
   the run can no longer be cancelled nor undone by its fallback;
-- `fallback`: what happens when the run stops before that point.
+- `fallback`: what happens when the run stops before that point, with
+  `fallback_code` and `fallback_facts`.
+
+**Codes beside the sentences.** Every `label`, `said` and `fallback` is an
+English sentence, shown as is by a client that does not know it. Beside each,
+the facts it names are data, for a client that says it in its own language:
+a question's `facts`, a step's `code` (with its facts in `details`), and the
+fallback's `code` and `details`. Step and question `id`s are stable codes too.
 
 **The run** (`project.setting_wizard_start {cwd, key, value, answers}`) is
 planned again from the folder as it is then, and answered at once, still
@@ -217,8 +224,9 @@ planned again from the folder as it is then, and answered at once, still
 status, started_at, ended_at, steps, fallback, settings }`, sent whole at each
 change. `status` is `running`, then `done`, `failed`, `cancelled` or
 `interrupted`; each step has a `status` (`pending`, `running`, `done`,
-`failed`, `skipped`), `said`, a sentence for the human, and `details`, what it
-saw or did. At the end `fallback` is `{ ran, said }` when it applied, and
+`failed`, `skipped`), `said`, a sentence for the human, its `code`, and
+`details`, what it saw or did. At the end `fallback` is `{ ran, said, code,
+details }` when it applied, and
 `settings` what `project.settings` gives for the folder. One run at a time per
 folder. A run is kept on disk at each change: one under way when the daemon
 stops comes back `interrupted`, with what it had done, and is not taken up again.
@@ -234,6 +242,18 @@ loops again, on their conversation. Without a running loop, `idle`, `stop` and
 `start` are left out. Before the write, a failure or a cancel starts the
 stopped loops again on the current dir; a `start` that fails names the loops
 not back.
+
+Its codes: `idle` says `waiting_busy` (`busy`), then `loops_idle`, or fails
+`still_busy`; `stop` says `stopping` (`loop`), `waiting_stop` (`running`),
+then `stopped` (`stopped`), or fails `still_running`; `free` says
+`claude_in_folder` (`pids`), then `folder_free` or `not_checked`, or fails
+`claude_still_in_folder`; `write` says `written` (`dir`, and what
+`project.settings_set` answered); `start` says `starting` (`loop`), then
+`started` (`started`), or fails `not_started` (`failed`). The fallback says
+`restarted_on_current` or `not_restarted` (`dir`, `restarted`, `failed`); a
+cancelled step says `cancelled`, an unexpected failure `error`. The questions'
+facts: `confirm` `{ current, target, loops }`, `fork` `{ current, target,
+target_first_run }`, `move_sessions` `{ from, to }`.
 
 ## Who may call a method
 

@@ -57,6 +57,12 @@ test("the preview names the loops, asks the fork only for a dir never run, and l
     assert.deepEqual(p.loops, [{ name: "cl-a", agent: "cl-a-claude", busy: false }]);
     assert.deepEqual(p.questions.map((q) => q.id), ["confirm", "fork", "move_sessions"]);
     assert.match(p.questions[0].label, /1 loop \(cl-a-claude\)/);
+    assert.deepEqual(p.questions.map((q) => q.facts), [
+        { current: "/home/u/.claude", target: "/home/u/.claude-b", loops: ["cl-a"] },
+        { current: "/home/u/.claude", target: "/home/u/.claude-b", target_first_run: false },
+        { from: "/home/u/.claude", to: "/home/u/.claude-b" },
+    ], "the facts each label names, for a client in another language");
+    assert.deepEqual([p.fallback_code, p.fallback_facts], ["restart_on_current", { current: "/home/u/.claude", loops: ["cl-a"] }]);
     assert.deepEqual(p.steps.map((s) => s.id), ["idle", "stop", "free", "write", "start"]);
     assert.deepEqual(p.steps.filter((s) => s.point_of_no_return).map((s) => s.id), ["write"]);
 
@@ -86,7 +92,8 @@ test("a switch goes through: waits for the busy loop, stops, waits for Claude to
     assert.equal(r.status, "done", steps(r));
     assert.deepEqual(m.did, ["stop cl-a", "stop cl-b", "write ~/.claude-b move=true fork=true", "start cl-a", "start cl-b"]);
     assert.equal(steps(r), "idle:done stop:done free:done write:done start:done");
-    assert.deepEqual(r.steps.find((s) => s.id === "write")!.details, { moved: 3 });
+    assert.deepEqual(r.steps.find((s) => s.id === "write")!.details, { dir: "/home/u/.claude-b", moved: 3 });
+    assert.deepEqual(r.steps.map((s) => s.code), ["loops_idle", "stopped", "folder_free", "written", "started"], "a code beside each sentence");
     assert.deepEqual([r.fallback, r.settings], [null, { config_dir: "after" }]);
     assert.ok(r.ended_at);
 });
@@ -97,6 +104,7 @@ test("a loop still busy at the bound: nothing changed, nothing to fall back on",
     assert.equal(r.status, "failed");
     assert.equal(steps(r), "idle:failed stop:skipped free:skipped write:skipped start:skipped");
     assert.match(r.steps[0].said!, /Still busy after 5 min: cl-a-claude; nothing changed/);
+    assert.deepEqual([r.steps[0].code, r.steps[0].details], ["still_busy", { busy: ["cl-a"], waited_s: 300 }]);
     assert.deepEqual([m.did, r.fallback], [[], null]);
 });
 
@@ -106,7 +114,8 @@ test("a Claude that does not end before the write: the stopped loops start again
     assert.equal(r.status, "failed");
     assert.match(r.steps.find((s) => s.id === "free")!.said!, /still runs in the folder after 30 s \(42\)/);
     assert.deepEqual(m.did, ["stop cl-a", "start cl-a"], "no write; the fallback started it again");
-    assert.deepEqual(r.fallback, { ran: true, said: "Started cl-a-claude again on /home/u/.claude" });
+    assert.deepEqual(r.fallback, { ran: true, said: "Started cl-a-claude again on /home/u/.claude", code: "restarted_on_current", details: { dir: "/home/u/.claude", restarted: ["cl-a"], failed: [] } });
+    assert.equal(r.steps.find((s) => s.id === "free")!.code, "claude_still_in_folder");
 });
 
 test("a cancel while waiting stops the run there; the fallback restores what it had stopped", async () => {
@@ -131,5 +140,6 @@ test("past the point of no return there is no cancel, and a loop that does not c
     const failed = await run(m2, OK);
     assert.equal(failed.status, "failed");
     assert.match(failed.steps.find((s) => s.id === "start")!.said!, /Not started again: cl-b; the dir is written/);
+    assert.equal(failed.steps.find((s) => s.id === "start")!.code, "not_started");
     assert.equal(failed.fallback, null, "past the write, the fallback does not run");
 });

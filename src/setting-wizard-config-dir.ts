@@ -55,8 +55,10 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
     const loops = ops.loops(cwd);
     const n = loops.length;
 
+    const loopNames = loops.map((l) => l.name);
     const questions: WizardQuestion[] = [{
         id: "confirm", kind: "confirm",
+        facts: { current, target: target.dir, loops: loopNames },
         label: n === 0
             ? `Start this folder's loops on ${target.dir} from now on; none runs now`
             : `Stop and restart ${n} loop${n > 1 ? "s" : ""} (${names(loops)}) on ${target.dir}; ${n > 1 ? "their conversations follow" : "its conversation follows"}`,
@@ -64,6 +66,7 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
     if (!target.firstRunDone) {
         questions.push({
             id: "fork", kind: "choose", default: "fork",
+            facts: { current, target: target.dir, target_first_run: false },
             label: `${target.dir} has not been through Claude's first run: start it from ${current}?`,
             options: [
                 { key: "fork", label: `Link the account and settings of ${current}` },
@@ -73,6 +76,7 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
     }
     questions.push({
         id: "move_sessions", kind: "choose", default: "yes",
+        facts: { from: current, to: target.dir },
         label: `Move this folder's conversations from ${current} to ${target.dir}?`,
         options: [
             { key: "yes", label: "Move them: the loops resume where they were" },
@@ -97,59 +101,64 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
             loops: loops.map((l) => ({ name: l.name, agent: l.agent, busy: ops.busy(l) })),
             questions, steps,
             fallback: n > 0 ? `Before the write, the loops start again on ${current}` : `Before the write, nothing has changed`,
+            fallback_code: n > 0 ? "restart_on_current" : "nothing_changed",
+            fallback_facts: { current, loops: loopNames },
         },
         steps: {
             idle: async (ctx) => {
                 const busy = () => loops.filter((l) => ops.running(l) && ops.busy(l));
                 await ctx.waitUntil(
                     () => busy().length === 0, IDLE_WAIT_MS,
-                    () => [`Waiting for ${names(busy())} (busy)`, { busy: busy().map((l) => l.name) }],
-                    () => `Still busy after ${IDLE_WAIT_MS / 60_000} min: ${names(busy())}; nothing changed`,
+                    () => ({ said: `Waiting for ${names(busy())} (busy)`, code: "waiting_busy", details: { busy: busy().map((l) => l.name) } }),
+                    () => ({ said: `Still busy after ${IDLE_WAIT_MS / 60_000} min: ${names(busy())}; nothing changed`, code: "still_busy", details: { busy: busy().map((l) => l.name), waited_s: IDLE_WAIT_MS / 1000 } }),
                 );
-                return { said: "The folder's loops are idle" };
+                return { said: "The folder's loops are idle", code: "loops_idle" };
             },
             stop: async (ctx) => {
                 for (const l of loops) {
                     if (!ops.running(l)) continue;
-                    ctx.say(`Stopping ${l.agent ?? l.name}`);
+                    ctx.say({ said: `Stopping ${l.agent ?? l.name}`, code: "stopping", details: { loop: l.name } });
                     await ops.stop(l);
                     stopped.push(l);
                 }
                 await ctx.waitUntil(
                     () => loops.every((l) => !ops.running(l)), STOP_WAIT_MS,
-                    () => [`Waiting for ${names(loops.filter((l) => ops.running(l)))} to stop`],
-                    () => `Still running after ${STOP_WAIT_MS / 1000} s: ${names(loops.filter((l) => ops.running(l)))}`,
+                    () => ({ said: `Waiting for ${names(loops.filter((l) => ops.running(l)))} to stop`, code: "waiting_stop", details: { running: loops.filter((l) => ops.running(l)).map((l) => l.name) } }),
+                    () => ({ said: `Still running after ${STOP_WAIT_MS / 1000} s: ${names(loops.filter((l) => ops.running(l)))}`, code: "still_running", details: { running: loops.filter((l) => ops.running(l)).map((l) => l.name), waited_s: STOP_WAIT_MS / 1000 } }),
                 );
-                return { said: `Stopped ${names(stopped) || "nothing"}`, details: { stopped: stopped.map((l) => l.name) } };
+                return { said: `Stopped ${names(stopped) || "nothing"}`, code: "stopped", details: { stopped: stopped.map((l) => l.name) } };
             },
             free: async (ctx) => {
-                if (ops.claudeRunning(cwd) === null) return { said: "Claude's processes cannot be listed here: not checked" };
+                if (ops.claudeRunning(cwd) === null) return { said: "Claude's processes cannot be listed here: not checked", code: "not_checked" };
                 await ctx.waitUntil(
                     () => (ops.claudeRunning(cwd) ?? []).length === 0, FREE_WAIT_MS,
                     () => {
                         const pids = ops.claudeRunning(cwd) ?? [];
-                        return [`Waiting for ${pids.length} Claude process${pids.length > 1 ? "es" : ""} to end`, { pids }];
+                        return { said: `Waiting for ${pids.length} Claude process${pids.length > 1 ? "es" : ""} to end`, code: "claude_in_folder", details: { pids } };
                     },
-                    () => `A Claude still runs in the folder after ${FREE_WAIT_MS / 1000} s (${(ops.claudeRunning(cwd) ?? []).map((p) => p.pid).join(", ")}); nothing changed`,
+                    () => {
+                        const pids = ops.claudeRunning(cwd) ?? [];
+                        return { said: `A Claude still runs in the folder after ${FREE_WAIT_MS / 1000} s (${pids.map((p) => p.pid).join(", ")}); nothing changed`, code: "claude_still_in_folder", details: { pids, waited_s: FREE_WAIT_MS / 1000 } };
+                    },
                 );
-                return { said: "No Claude runs in the folder" };
+                return { said: "No Claude runs in the folder", code: "folder_free" };
             },
             write: async (ctx) => {
                 const moveSessions = ctx.answers.move_sessions !== "no";
                 const fork = ctx.answers.fork === "fork";
                 const details = ops.write(cwd, value, { moveSessions, fork });
-                return { said: `The folder's loops now start Claude with ${target.dir}`, details };
+                return { said: `The folder's loops now start Claude with ${target.dir}`, code: "written", details: { dir: target.dir, ...details } };
             },
             start: async (ctx) => {
                 const failed: Array<{ name: string; error: string }> = [];
                 for (const l of loops) {
-                    ctx.say(`Starting ${l.agent ?? l.name}`);
+                    ctx.say({ said: `Starting ${l.agent ?? l.name}`, code: "starting", details: { loop: l.name } });
                     try { await ops.start(l); } catch (e) { failed.push({ name: l.name, error: (e as Error).message ?? String(e) }); }
                 }
                 if (failed.length > 0) {
-                    throw new StepFailed(`Not started again: ${failed.map((f) => f.name).join(", ")}; the dir is written`, { failed });
+                    throw new StepFailed({ said: `Not started again: ${failed.map((f) => f.name).join(", ")}; the dir is written`, code: "not_started", details: { failed } });
                 }
-                return { said: `Started ${names(loops)} again`, details: { started: loops.map((l) => l.name) } };
+                return { said: `Started ${names(loops)} again`, code: "started", details: { started: loopNames } };
             },
         },
         fallback: async () => {
@@ -165,6 +174,8 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
                 said: failed.length === 0
                     ? `Started ${names(back)} again on ${current}`
                     : `Started ${names(back) || "none"} again on ${current}; not started: ${failed.join(", ")}`,
+                code: failed.length === 0 ? "restarted_on_current" : "not_restarted",
+                details: { dir: current, restarted: back.map((l) => l.name), failed },
             };
         },
         settings: () => ops.settings(cwd),
