@@ -17,7 +17,7 @@ whose meaning changes bumps it, and is listed under [Changes](#changes).
 | `open=1`, `unread=1` | Only open tickets; only tickets with something unread for the caller. |
 | `intent`, `priority` | Only tickets with this intent, this priority. |
 | `include_postponed=1` | Also snoozed tickets, hidden otherwise. |
-| `view=turn` | Adds `turn`, `band`, `band_name` and `state_glyph` to each row ([below](#the-turn-view)). |
+| `view=turn` | Adds `turn`, `band`, `band_name`, `state_glyph` and `waits_on` to each row ([below](#the-turn-view)). |
 | `sort` | `activity` (default, latest first), `created_desc`, `created_asc`, `priority`, or `band` (by band, then latest activity). |
 | `limit`, `offset` | A page; the total is in the `X-Total-Count` header. |
 
@@ -85,7 +85,7 @@ computed by the same rule, next to `is_claim` and `claim_until`.
 
 ## The turn view
 
-`view=turn` adds three fields, computed by the server for the caller:
+`view=turn` adds these fields, computed by the server for the caller:
 
 | Field | Values | Meaning |
 |---|---|---|
@@ -93,6 +93,7 @@ computed by the same rule, next to `is_claim` and `claim_until`.
 | `band` | number | Index into the bands below; `sort=band` orders by it. |
 | `band_name` | string | The band's name, one of the bands below. Read this one: a band added or removed shifts the indexes, not the names. |
 | `state_glyph` | see below \| null | The one state mark the row shows. |
+| `waits_on` | object \| null | When the last word is a step waiting on another ticket (`resume_on: { ticket }`) that has not moved since: that ticket as the caller sees it, `{ id, title, band_name, state_glyph, closed }`. The row keeps its band; this says what the agent waits on. The row is sent again when that ticket changes. `null` otherwise. |
 
 **Bands**, in order:
 
@@ -125,6 +126,8 @@ is woken by it, and the ticket leaves the agents' pools until the next action
 
 ## Changes
 
+- **Added to version 4:** `waits_on`, what a step waiting on another ticket
+  waits on, with that ticket's band and glyph. The bands do not change.
 - **Version 4.** A question waiting on the caller's answer (`question` glyph,
   `turn` `you`) is in the `decision` band; it was in `open`. For the one who
   asked, it stays in `open`.

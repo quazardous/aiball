@@ -94,6 +94,7 @@ dates are YYYY-MM-DD.
   web UI follows it unless it is `auto`. Times are still stored in UTC, and a
   time an agent passes back (`since`) may carry any offset.
 - Setting wizards: a folder setting that breaks things when written bare carries a wizard (`project.setting_wizard_preview` / `_start` / `_cancel`, followed on `wizard.<run>.state`); the first is `claude.config_dir`, which waits for the loops to be idle, stops them, moves the conversations and starts them again.
+- The inbox's turn view says what a step waits on (`waits_on`: the awaited ticket, its band and glyph), so a client can show a ticket the agent holds while it waits on someone else.
 
 ### Changed
 

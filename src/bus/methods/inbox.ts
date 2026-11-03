@@ -1,5 +1,6 @@
 /** #3063 — the inbox: the board's ticket rows, filtered, sorted and paged. */
 import { z } from "zod";
+import { waitsOnFor } from "../../queries/inbox-waits-on.js";
 import { consumerIdOf, defineMethod } from "../methods.js";
 import { flag } from "../params.js";
 import { isHuman, listMessages, ticketUnreadFlags, type MessageStatus } from "../../db.js";
@@ -189,6 +190,8 @@ defineMethod({
     const total = earlyTotal ?? rows.length;
     if (paged && !pageEarly) rows = rows.slice(offset, offset + limit);
 
-    return { total, rows: withPilot && pilot ? rows.map((r) => ({ ...r, ...pilot.get(r.id)! })) : rows };
+    // #4689 — what a step waits on, for the rows returned.
+    const waits = withPilot ? waitsOnFor(rows, consumerId, isHuman(consumerId)) : null;
+    return { total, rows: withPilot && pilot ? rows.map((r) => ({ ...r, ...pilot.get(r.id)!, waits_on: waits?.get(r.id) ?? null })) : rows };
     },
 });

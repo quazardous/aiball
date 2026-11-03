@@ -7,7 +7,7 @@
  * `ticket_reply` refuses the step that would close such a cycle, and
  * `graph_audit` reports the ones already on the board.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./connection.js";
 import * as schema from "../schema.js";
 import { listTypedRelationsForTicket } from "./messages.js";
@@ -46,6 +46,19 @@ export function liveResumeOn(ticketId: number): { on: number; at: string } | nul
     const moved = lastMoveAt(on);
     if (moved && moved > t.lastActorAt) return null;
     return { on, at: t.lastActorAt };
+}
+
+/**
+ * #4689 — the tickets whose step named `ticketId` to resume on: when it changes,
+ * their rows say so again. A candidate list; `liveResumeOn` says which still wait.
+ */
+export function resumeWaitersOf(ticketId: number): number[] {
+    const rows = getDb().select({ ticketId: schema.messages.ticketId }).from(schema.messages).where(and(
+        eq(schema.messages.kind, "comment_added"),
+        eq(schema.messages.status, "approved"),
+        sql`json_extract(${schema.messages.meta}, '$.step_resume_on_ticket') = ${ticketId}`,
+    )).all();
+    return [...new Set(rows.map((r) => r.ticketId).filter((id): id is number => id != null && id !== ticketId))];
 }
 
 /** What an open ticket waits on now; a closed ticket waits on nothing. */

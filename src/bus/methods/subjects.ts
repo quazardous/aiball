@@ -22,6 +22,8 @@ import { listProjectTicketIds } from "../../db/tickets.js";
 import { parseMeta } from "../../message-meta.js";
 import { buildInboxRow, buildInboxRowContext, inboxRowDeadline, type InboxRowContext } from "../../queries/inbox-row.js";
 import { buildPilotFacts, pilotFields } from "../../queries/inbox-pilot.js";
+import { waitsOnFor } from "../../queries/inbox-waits-on.js";
+import { resumeWaitersOf } from "../../db/wait-graph.js";
 
 /** An agent's own data: a human, or the agent itself. */
 function ownOrHuman(caller: Caller, id: string, what: string): Refusal | null {
@@ -124,9 +126,10 @@ function turnRows(sub: Subscription, tickets: Message[], shared?: InboxRowContex
     for (const r of rows) byProject.set(r.t.project, [...(byProject.get(r.t.project) ?? []), r]);
     for (const [project, list] of byProject) {
         const facts = buildPilotFacts(list.map((r) => r.row), me, project);
+        const waits = waitsOnFor(list.map((r) => r.row), me, sub.caller.kind === "human");
         for (const { t, row } of list) {
             out.push({
-                row: { ...row, ...pilotFields(row, facts.get(row.id)!, me, sub.caller.kind === "human") } as TurnRow,
+                row: { ...row, ...pilotFields(row, facts.get(row.id)!, me, sub.caller.kind === "human"), waits_on: waits.get(row.id) ?? null } as TurnRow,
                 deadline: inboxRowDeadline(t, own),
             });
         }
@@ -442,6 +445,11 @@ onBroadcast((ev) => {
 export function ticketMoved(t: Pick<Message, "id" | "project">, type: string, message: unknown): void {
     publish(`ticket.${t.id}`, { type, message });
     publish("tickets", { ticket_id: t.id, project: t.project } satisfies TicketMoved);
+    // #4689 — a step waiting on this ticket says what it waits on: its row again.
+    for (const id of resumeWaitersOf(t.id)) {
+        const w = getMessage(id);
+        if (w) publish("tickets", { ticket_id: w.id, project: w.project } satisfies TicketMoved);
+    }
 }
 
 /**
