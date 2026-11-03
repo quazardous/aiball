@@ -93,6 +93,7 @@ dates are YYYY-MM-DD.
   `welcome` and the skill tell agents to write times to the human in it; the
   web UI follows it unless it is `auto`. Times are still stored in UTC, and a
   time an agent passes back (`since`) may carry any offset.
+- Setting wizards: a folder setting that breaks things when written bare carries a wizard (`project.setting_wizard_preview` / `_start` / `_cancel`, followed on `wizard.<run>.state`); the first is `claude.config_dir`, which waits for the loops to be idle, stops them, moves the conversations and starts them again.
 
 ### Changed
 
@@ -118,6 +119,14 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `ticket_list`: a rejected ticket reads `closed: true`, as `ticket_get` says, and `open` leaves it out.
+- `ticket_list`: a plan attached at ticket creation reads `pending_decision: true`, as `ticket_get` and the inbox say.
+- `poll`: `my_pending_tickets` lists your pending tickets of every project, as the `my_pending` count has always counted them.
+- Loop: a turn open in the session's transcript counts as busy, so a wake is no longer typed into a turn Claude started by itself before its hook arrives.
+- Loop: the activity line is read in its other forms too, such as `(running UserPromptSubmit hook · 6s)`, and a wake waits 3 s more once the last sign of work goes off.
+- Moving a folder's sessions: only Claude itself refuses the move, no longer any process whose command line holds the word `claude`.
+- Loop: Claude's status row counts in all its forms: no parenthesis in a turn's first seconds (right above the input box), any content in the parenthesis, and the API waiting rows.
+- Loop: a prompt waiting in Claude's queue counts as busy from the transcript too, as the screen's hint goes away while the input box holds text.
 - The session's model stays in the bar across a kernel reload, instead of disappearing until the turn ends.
 - The project's critical ticket no longer wakes its agent at every cooldown after the agent has spoken last, or while a blocker holds it: it keeps the ordinary ending of that case, until someone else moves.
 - Search no longer answers 500 on a query of several words when one of them has a synonym.
@@ -1402,13 +1411,6 @@ dates are YYYY-MM-DD.
   wake would be. `sim up --from-live --as <agents>` seats real agents on a
   sanitized copy of the live board.
 - **A rejected ticket tells the tickets that were waiting on it**: a rejection is
-- `ticket_list`: a plan attached at ticket creation reads `pending_decision: true`, as `ticket_get` and the inbox say.
-- `poll`: `my_pending_tickets` lists your pending tickets of every project, as the `my_pending` count has always counted them.
-- Loop: a turn open in the session's transcript counts as busy, so a wake is no longer typed into a turn Claude started by itself before its hook arrives.
-- Loop: the activity line is read in its other forms too, such as `(running UserPromptSubmit hook · 6s)`, and a wake waits 3 s more once the last sign of work goes off.
-- Moving a folder's sessions: only Claude itself refuses the move, no longer any process whose command line holds the word `claude`.
-- Loop: Claude's status row counts in all its forms: no parenthesis in a turn's first seconds (right above the input box), any content in the parenthesis, and the API waiting rows.
-- Loop: a prompt waiting in Claude's queue counts as busy from the transcript too, as the screen's hint goes away while the input box holds text.
   not a close, so the gate used to lift with nobody told and the relation stayed
   a dead letter. Each ticket that depended on it now hears it once, with the cue
   to cut the relation or file the work again.

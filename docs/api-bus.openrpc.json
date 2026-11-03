@@ -3499,6 +3499,108 @@
       ]
     },
     {
+      "name": "project.setting_wizard_cancel",
+      "description": "Cancel a run before its point of no return: the fallback runs, the run ends `cancelled`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "run",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
+      "name": "project.setting_wizard_preview",
+      "description": "What the wizard of `key` would ask and do for `value` in the folder; nothing runs.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "value",
+          "required": true,
+          "schema": {}
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
+      "name": "project.setting_wizard_start",
+      "description": "Start the wizard of `key` with the answers to its questions; answers the run as `wizard.<run>.state` carries it.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "key",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "value",
+          "required": true,
+          "schema": {}
+        },
+        {
+          "name": "answers",
+          "required": false,
+          "schema": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ],
+      "x-machine": true
+    },
+    {
       "name": "project.settings",
       "description": "The settings a client may show for a folder's project, as a loop started there would get them: each one's value and where it comes from (`from`), and `file`, the `.aiball.yaml` that loop reads (the nearest one up the tree; null without one, `configured` false). the identity (`consumer`: project, agent, role), where it runs (`session`) and `remote_control`, Claude's Remote Control: what a client setting the folder up starts from. A human's gesture, on this machine only.",
       "paramStructure": "by-name",
@@ -5799,7 +5901,9 @@
             "TOKEN_INVALID",
             "TOO_MANY_REQUESTS",
             "UNAUTHORIZED",
-            "UNAVAILABLE"
+            "UNAVAILABLE",
+            "WIZARD_PAST_RETURN",
+            "WIZARD_RUNNING"
           ]
         }
       }

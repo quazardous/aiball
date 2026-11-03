@@ -200,6 +200,10 @@ export const ERROR_CODES = {
     CONVERSATION_HELD: "CONVERSATION_HELD",
     /** #4419 — `project.settings_set` `move_sessions`: a Claude runs in the folder (`folder`, `pids`). */
     CLAUDE_RUNS_IN_FOLDER: "CLAUDE_RUNS_IN_FOLDER",
+    /** #4682 — `project.setting_wizard_start`: another wizard runs in the folder (`run`). */
+    WIZARD_RUNNING: "WIZARD_RUNNING",
+    /** #4682 — `project.setting_wizard_cancel`: the run has started its point of no return. */
+    WIZARD_PAST_RETURN: "WIZARD_PAST_RETURN",
     /** #3066 — a handover waited for Claude to be idle, and it did not become so. */
     NOT_IDLE: "NOT_IDLE",
     /** #3036 — a body names an author other than the authenticated caller. */

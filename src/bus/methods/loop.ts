@@ -174,6 +174,26 @@ export function loopsOnAnotherConfigDir(cwd: string, dir: string): string[] {
     }).map((l) => l.name);
 }
 
+/** #4682 — the running loops of a folder, for the config dir wizard. */
+export function folderLoops(cwd: string): Array<{ name: string; agent: string | null; mode: "host" | "tmux" }> {
+    const folder = resolve(cwd);
+    return loopViews().filter((l) => l.running && l.cwd && resolve(l.cwd) === folder).map((l) => ({ name: l.name, agent: l.agent, mode: l.mode }));
+}
+
+/** #4682 — whether a loop runs, by its name. */
+export function loopRunning(name: string): boolean {
+    return loopViews().some((l) => l.name === name && l.running);
+}
+
+/** #4682 — stop a loop as `claude-loop stop` does; back once the command ends. */
+export function stopLoop(name: string): Promise<void> {
+    return new Promise((done, fail) => {
+        const child = spawn(process.execPath, [CLAUDE_LOOP_BIN, "stop", name], { stdio: "ignore", timeout: 60_000 });
+        child.on("error", fail);
+        child.on("exit", (code) => code === 0 ? done() : fail(new Error(`claude-loop stop ${name} exited ${code}`)));
+    });
+}
+
 /** #3417 — the agents whose loop runs on this machine: what an all-loops control reaches with `scope: "machine"` on a node. */
 export function runningLoopAgents(): string[] {
     return [...new Set(loopViews().filter((l) => l.running && l.agent).map((l) => l.agent!))].sort();

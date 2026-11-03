@@ -226,6 +226,25 @@
           "summary": "a ping, and message: what it points at (kind, status, author, project, ticket title, decision)"
         }
       }
+    },
+    "wizard.*.state": {
+      "address": "wizard.{id}.state",
+      "parameters": {
+        "id": {
+          "description": "an id, or * for all (those added later too)"
+        }
+      },
+      "messages": {
+        "value": {
+          "name": "value",
+          "summary": "the run, whole, as project.setting_wizard_start answers it, or null; with *, the runs under way and those ended in the last hour, keyed by run"
+        },
+        "event": {
+          "name": "event",
+          "summary": "the whole run again at each change"
+        }
+      },
+      "x-machine": true
     }
   }
 }

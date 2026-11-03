@@ -18,6 +18,7 @@ import { parseRemoteControl, type RemoteControl } from "./claude-loop/remote-con
 import { InitRefusal } from "./project-init.js";
 import { projectRepos } from "./project-repos.js";
 import { claudeConfigDir, configDirState, type ConfigDirFrom } from "./claude-config-dir.js";
+import { CONFIG_DIR_TITLE } from "./setting-wizard-config-dir.js";
 
 /** What a folder's loops start with, and whether its file says so or it is the default. */
 export interface ProjectSettings {
@@ -61,10 +62,15 @@ export interface FolderSetting {
     from: string;
     label: string;
     description: string;
+    /**
+     * #4682 — this setting is changed through a wizard: a client asks
+     * `project.setting_wizard_preview`, then `_start`, rather than writing it bare.
+     */
+    wizard?: { title: string };
 }
 
 /** #3308 — the folder settings, one row each: a key added here shows in a client with no code of its own. */
-const FOLDER_SETTINGS: { key: string; field: keyof SettingsPatch; type: FolderSetting["type"]; options?: string[]; default: () => unknown; label: string; description: string }[] = [
+const FOLDER_SETTINGS: { key: string; field: keyof SettingsPatch; type: FolderSetting["type"]; options?: string[]; default: () => unknown; label: string; description: string; wizard?: { title: string } }[] = [
     {
         key: "claude_loop.session", field: "session", type: "enum", options: ["host", "tmux"], default: () => defaultLoopSession(),
         label: "Where loops run",
@@ -82,6 +88,7 @@ const FOLDER_SETTINGS: { key: string; field: keyof SettingsPatch; type: FolderSe
     },
     {
         key: "claude.config_dir", field: "config_dir", type: "path", default: () => claudeConfigDir(null).dir,
+        wizard: { title: CONFIG_DIR_TITLE },
         label: "Claude config dir",
         description: "The Claude Code config dir (CLAUDE_CONFIG_DIR) the folder's loops start Claude with: its own account or subscription, settings, MCP servers and sessions. Unset: the environment's, else ~/.claude. Several projects may share one. Applies at the loop's next restart, on a new conversation: the sessions of another dir are not resumed.",
     },
@@ -149,6 +156,7 @@ export function readSettings(cwd: string): ProjectSettings {
         return {
             key: spec.key, type: spec.type, ...(spec.options ? { options: spec.options } : {}),
             default: spec.default(), value: current.value, from: current.from, label: spec.label, description: spec.description,
+            ...(spec.wizard ? { wizard: spec.wizard } : {}),
         };
     });
     return r;

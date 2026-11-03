@@ -172,6 +172,7 @@ events, and the same epoch), the answer is `replayed: true` with the missed
 | `board.events` | `null` | every event the board broadcasts, `{ type, data }`, the feed the web UI patches its views from; `project_standing_changed` carries a project's `project.standing_prompt` answer after each change of its standing prompt or wake focus (a focus that runs out on its own date sends nothing) | humans and agents |
 | `config.changed` | `null` (`config.managed` is the whole read) | `{ op: "set" \| "clear", key, project, value, by }` on each `config.set` / `config.clear`; `{ op: "reload" }` after a config file was reloaded: read `config.managed` again | humans and agents |
 | `agent.<id>.screen` | `{ source }`: `host`, `tmux` or `node`; `null` when it cannot be followed | from the session host, `snapshot` (bytes that repaint the screen, base64, after a reset, with the `size`) then `output` (Claude's output as it comes, base64) and `size`; from tmux or a node, `frame` (the whole visible pane as text, with `cursor` and `geometry`) when it changed; `error` (passing), `unavailable` (why nothing more comes). Options `typing` (on the host, an interactive client: it may type, and takes the size once it does) and `size` (the size it would like). Never replayed: a new subscription gets a fresh snapshot | humans |
+| `wizard.<run>.state` | a setting wizard's run, whole, as `project.setting_wizard_start` answers it, or `null`; with `*`, the runs under way and those ended in the last hour, keyed by run | the whole run again at each change | a human, on this machine |
 
 `*` stands for one level: `agent.*.bar`, `agent.*.state` and
 `project.*.tickets` give every agent's or project's, including the ones
@@ -189,6 +190,50 @@ renamed moves every one of its tickets: each row comes again under the new
 name, and leaves the old project's view as a `remove`; each of its agents' entries comes again on `agent.<id>.state` (and on the board's `consumer_changed`), as does an agent's whose folder `project.rename_all` moved. The view is
 always sent whole again on `since`: the rows it held could have left it while
 the client was away.
+
+## Setting wizards
+
+Some folder settings break things when written bare: `claude.config_dir`
+moves the folder's loops to another Claude Code config dir. Such a setting's
+row in `project.settings` carries `wizard: { title }`, and a client changes it
+through the wizard: aiball knows the steps, runs them, and says each one's
+state; the client shows the questions, then follows the run, knowing nothing of
+the setting. `project.settings_set` still writes it bare, for scripts and the CLI.
+
+**The preview** (`project.setting_wizard_preview {cwd, key, value}`) runs
+nothing and answers `{ key, value, title, loops, questions, steps, fallback }`:
+
+- `loops`: the folder's running loops, `{ name, agent, busy }`;
+- `questions`, all asked before the start: `confirm` (answered `true`) and
+  `choose` (answered with the `key` of one of its `options`; `default` names
+  the one to offer first). A question that does not apply is left out;
+- `steps`: `{ id, label }`, the one marked `point_of_no_return` after which
+  the run can no longer be cancelled nor undone by its fallback;
+- `fallback`: what happens when the run stops before that point.
+
+**The run** (`project.setting_wizard_start {cwd, key, value, answers}`) is
+planned again from the folder as it is then, and answered at once, still
+`running`. It is followed on `wizard.<run>.state`: `{ run, cwd, key, value,
+status, started_at, ended_at, steps, fallback, settings }`, sent whole at each
+change. `status` is `running`, then `done`, `failed`, `cancelled` or
+`interrupted`; each step has a `status` (`pending`, `running`, `done`,
+`failed`, `skipped`), `said`, a sentence for the human, and `details`, what it
+saw or did. At the end `fallback` is `{ ran, said }` when it applied, and
+`settings` what `project.settings` gives for the folder. One run at a time per
+folder. A run is kept on disk at each change: one under way when the daemon
+stops comes back `interrupted`, with what it had done, and is not taken up again.
+
+**`claude.config_dir`'s wizard.** Questions: `confirm` (naming the loops),
+`fork` when the new dir has not been through Claude's first run (link the
+account and settings of the current dir, or leave it empty), `move_sessions`
+(the folder's conversations follow, or not). Steps: `idle`, wait until the
+folder's loops are idle (up to 5 min), so no turn is cut; `stop`; `free`, wait
+until no Claude runs in the folder (up to 30 s); `write`, the point of no
+return (`project.settings_set` with `move_sessions` and `fork`); `start`, the
+loops again, on their conversation. Without a running loop, `idle`, `stop` and
+`start` are left out. Before the write, a failure or a cancel starts the
+stopped loops again on the current dir; a `start` that fails names the loops
+not back.
 
 ## Who may call a method
 
@@ -336,6 +381,9 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `project.rename_all` | human, local only, this machine's | — renames a project everywhere at once, as `aiball project rename-all` does: its name (as `project.rename`, with the same `project_renamed` and rows moved in the views), `consumer.project` in its `.aiball.yaml` (the agent keeps its name) and its folder, moved with the state keyed by its path. `name`, `new_name`; `cwd`, the folder, when aiball does not know exactly one on this machine for the project (else its loops' root; a root a loop on another machine pushed does not count); `dir`, where it goes (default: next to it, under the new name, when it is named after the project); `no_move`; `apply` (default: a dry run). Answers `{ applied, plan: { db, yaml, folder: { from, to, mode } \| null }, blockers, result? }`; nothing is applied while a blocker stands, and a step already done is skipped. Each blocker is `{ kind, text }`, `text` the CLI's sentence: `loop` (with `loop`, a running claude-loop to stop), `process` or `claude` (with `pid`, `cmd`, `cwd`), `name`, `folder`, `yaml`, `daemon`, `state` (Claude's own files). Once applied, the roots the loops pushed follow the folder. Refusals: no folder known (`NO_ROOT`) or several (`AMBIGUOUS_ROOT`), both with `details.roots`; a relative `cwd` or `dir` (`BAD_REQUEST`) |
 | `project.settings` | human, local only, this machine's | — the settings a client may show for a folder's project (`cwd`), as a loop started there would get them, each value with where it comes from: `{ file, configured, consumer: { project, agent, role }, session, remote_control, questions, config_dir, repos }`, each field `{ value, from }` (`repos`: the project's other repositories, resolved), and `config_dir_state: { exists, first_run_done, has_account }` (a loop refuses a dir not through Claude's first run; never what the account is). With `config_dir` (a dir the client is about to choose, expanded as `claude.config_dir` is), the answer adds `candidate: { dir, state }`, the same state for that dir; nothing is written (`from`: `file`, `global` for `session` and `questions`, `mcp` or `env` for the identity, else `default`); and `settings`, the settings a client may change here described as `config.managed` describes its keys (`{ key, type: enum\|boolean_or_name, options?, default, value, from, label, description }`), so a key added later shows with no client code; `file` is the `.aiball.yaml` that loop reads (the nearest one up the tree), null without one (`configured` false) |
 | `project.settings_set` | human, local only, this machine's | — changes them in that `.aiball.yaml`, patched in place (its other keys and comments stay): `remote_control` true, false or a name, `session` `host` or `tmux`, `null` to remove either (the layer below applies again), or any described setting as `{ key, value }` (`BAD_REQUEST` for an unknown key or a value its type does not take); a file left with no key keeps its leading comments only, never `{}`; answers as `project.settings`. The next start reads it. With a new `claude.config_dir`, `fork` (`{ from?, copy?, force? }`) starts that dir as `aiball claude-config --fork` does — from the folder's dir before the change unless `from` names one; linked, `copy` copies; `force` moves the new dir's own entries aside — and the answer adds `fork: { from, linked, copied, kept, moved_aside, unknown, mcp_servers }`; `fork` without a new dir is `BAD_REQUEST`. With a change of `claude.config_dir` (a path, or `null`), `move_sessions: true` moves the folder's Claude sessions (transcripts, memory, its `.claude.json` entry) to the new dir as `aiball claude-config --move-sessions` does — into a dir the folder used before, merged: a file on both sides keeps the newer and moves the older aside into `.replaced-by-move-<date>/` — and answers `sessions: { moved, replaced: [{ path, aside }], project_entry, checked }` (`null` when the dir does not change; `checked` false where running processes cannot be listed); refused first while a Claude runs in the folder (`CLAUDE_RUNS_IN_FOLDER`, nothing written), `BAD_REQUEST` without a change of dir. The loops stay as they are: stop them before, start them on their conversation after (`restart_loops`). Refusals: a folder absent (`NOT_FOUND`), no `.aiball.yaml` to patch (`CONFLICT`: `project.init` first), a file that cannot be parsed (`CONFLICT`), not writable (`FORBIDDEN`) |
+| `project.setting_wizard_preview` | human, local only, this machine's | — what the wizard of a setting (`key`, one whose `project.settings` row carries `wizard`) would ask and do for `value` in the folder (`cwd`): `{ key, value, title, loops, questions, steps, fallback }`, nothing run; see *Setting wizards*. A setting without one, or a value it refuses: `BAD_REQUEST` |
+| `project.setting_wizard_start` | human, local only, this machine's | — run it with `answers` (by question id): the run, as `wizard.<run>.state` carries it; `WIZARD_RUNNING` while another runs in the folder, `BAD_REQUEST` for answers that do not answer |
+| `project.setting_wizard_cancel` | human, local only, this machine's | — stop a run (`run`) before its point of no return: its fallback runs, it ends `cancelled`; `WIZARD_PAST_RETURN` past it, `CONFLICT` once ended, `NOT_FOUND` |
 | `consumer.presence` | human, agent | `GET /api/presence` |
 | `consumer.get` | human, agent | `GET /api/consumers/:consumer_id` |
 | `consumer.push_state` | agent, its own | `PUT /api/consumers/:consumer_id/state` |

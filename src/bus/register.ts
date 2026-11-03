@@ -17,6 +17,7 @@ import "./methods/loop.js";
 import "./methods/read-state.js";
 import "./methods/lookup.js";
 import "./methods/project.js";
+import "./methods/wizard.js";
 import "./methods/loop-io.js";
 import "./methods/misc.js";
 import "./methods/automation.js";
