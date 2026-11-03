@@ -294,7 +294,8 @@ prompt waiting in Claude's queue (the input box says `Press up to edit queued
 messages`), `/compact`, and on Claude Code before 2.1.304 the `esc to
 interrupt` footer. One more needs no screen: a prompt in the session's transcript
 with no end of turn behind it, or one still in its queue (the input box hides the
-hint while it holds text), held for 1.5 s rather than 4. Claude writes it as it
+hint while it holds text; task notifications in the queue do not count, an idle
+Claude lets them go without a turn), held for 1.5 s rather than 4. Claude writes it as it
 takes the prompt, and the hook that says so can come seconds later, so this is
 what stops a wake being typed into a turn the loop did not start (a task
 notification, say). It lets go after 60 s without the file growing.

@@ -19,7 +19,7 @@ const ts = "2026-11-01T07:04:54.014Z";
 const prompt = (content: unknown, extra: object = {}) => JSON.stringify({ type: "user", timestamp: ts, message: { role: "user", content }, ...extra }) + "\n";
 const toolResult = prompt([{ type: "tool_result", tool_use_id: "x", content: "ok" }]);
 const end = (subtype: string) => JSON.stringify({ type: "system", subtype, timestamp: ts }) + "\n";
-const queueOp = (operation: string) => JSON.stringify({ type: "queue-operation", operation, timestamp: ts }) + "\n";
+const queueOp = (operation: string, content?: string) => JSON.stringify({ type: "queue-operation", operation, timestamp: ts, ...(content !== undefined ? { content } : {}) }) + "\n";
 const noise = JSON.stringify({ type: "attachment", timestamp: ts }) + "\n";
 
 /** A poller pinned to the file's real clock: `poll` compares with its mtime. */
@@ -74,6 +74,24 @@ test("#4617 a prompt waiting in the queue holds, after the turn's end too, until
     const q = turnOn(stuck);
     const now = Date.now();
     assert.equal(q.poll(now + TRANSCRIPT_OPEN_MAX_MS + 1_000), false, "a queue that never empties lets go like a turn");
+});
+
+test("#4684 task notifications that pass through an idle Claude's queue do not hold it; a prompt among them does", () => {
+    const f = fresh();
+    // helios, 3 November: the turn ended, four notifications queued, then removed without a turn.
+    appendFileSync(f, end("stop_hook_summary") + end("turn_duration"));
+    const t = turnOn(f);
+    const note = (id: string) => `<task-notification> <task-id>${id}</task-id> done`;
+    appendFileSync(f, queueOp("enqueue", note("a")) + queueOp("enqueue", note("b")) + queueOp("enqueue", "<agent-message from=\"x\"> hi"));
+    assert.equal(t.poll(Date.now()), false, "notifications alone: Claude is idle");
+    appendFileSync(f, queueOp("enqueue", "and also this, typed by david"));
+    assert.equal(t.poll(Date.now()), true, "a greyed prompt among them holds");
+    appendFileSync(f, queueOp("remove", note("b")) + queueOp("remove", note("a")));
+    assert.equal(t.poll(Date.now()), true, "the removals took the notifications, by their text");
+    appendFileSync(f, queueOp("remove", "<agent-message from=\"x\"> hi") + queueOp("dequeue"));
+    assert.equal(t.poll(Date.now()), false, "the prompt was taken from the head");
+    appendFileSync(f, queueOp("enqueue"));
+    assert.equal(t.poll(Date.now()), true, "a queued entry that is not text (an image) is a prompt");
 });
 
 test("attaching mid-turn sees it open; a line cut in two is read once whole", () => {

@@ -10,7 +10,10 @@
  *
  * #4617 — it also holds the queue: prompts waiting to be taken, greyed on the
  * screen. The hint the pane shows for them goes away while the input box holds
- * text; the file's enqueue / dequeue / remove lines do not.
+ * text; the file's enqueue / dequeue / remove lines do not. #4684 — only a
+ * prompt holds: task notifications and agent messages also pass through the
+ * queue of an idle Claude, and leave it (`remove`) without a turn; one that
+ * does open a turn is held by that turn's prompt.
  *
  * Open = the last prompt has no end of turn behind it. A turn may never get one
  * (a crash, a kill), so the answer also needs the file to have grown lately:
@@ -32,19 +35,31 @@ const ATTACH_TAIL_BYTES = 256 * 1024;
 const RESOLVE_EVERY_MS = 15_000;
 
 /** What one transcript line says of the turn, or null when it says nothing. */
-export function transcriptLineSignal(line: string): { kind: "prompt" | "end" | "queued" | "taken"; atMs: number } | null {
+export type TranscriptSignal =
+    | { kind: "prompt" | "end"; atMs: number }
+    /** `content`: the queued text, `""` when it is not text (an image, say). */
+    | { kind: "queued"; atMs: number; content: string }
+    | { kind: "taken"; atMs: number; op: "dequeue" | "remove"; content: string | null };
+
+/** #4684 — what Claude Code queues on its own, which an idle Claude may drop without a turn. */
+export function isNotification(content: string): boolean {
+    return content.startsWith("<task-notification") || content.startsWith("<agent-message");
+}
+
+export function transcriptLineSignal(line: string): TranscriptSignal | null {
     // Cheap filter: the file is mostly tool output, parsed only when it can matter.
     if (!line.includes('"type":"user"') && !line.includes('"type":"system"') && !line.includes('"type":"queue-operation"')) return null;
     let e: {
         type?: string; subtype?: string; isSidechain?: boolean; isMeta?: boolean; timestamp?: string;
-        operation?: string; message?: { content?: unknown };
+        operation?: string; content?: unknown; message?: { content?: unknown };
     };
     try { e = JSON.parse(line) as typeof e; } catch { return null; }
     if (e.isSidechain) return null;
     const atMs = e.timestamp ? Date.parse(e.timestamp) : 0;
     if (e.type === "queue-operation") {
-        if (e.operation === "enqueue") return { kind: "queued", atMs };
-        return e.operation === "dequeue" || e.operation === "remove" ? { kind: "taken", atMs } : null;
+        const content = typeof e.content === "string" ? e.content : null;
+        if (e.operation === "enqueue") return { kind: "queued", atMs, content: content ?? "" };
+        return e.operation === "dequeue" || e.operation === "remove" ? { kind: "taken", atMs, op: e.operation, content } : null;
     }
     if (e.type === "system") {
         return e.subtype === "stop_hook_summary" || e.subtype === "turn_duration" ? { kind: "end", atMs } : null;
@@ -66,7 +81,8 @@ export class TranscriptTurn {
     private offset = 0;
     private partial = "";
     private open = false;
-    private queue = 0;
+    /** The queue in order: each entry's text. */
+    private queue: string[] = [];
     private grewAtMs = 0;
     private resolvedAtMs = -Infinity;
     /** When the last turn ended, by the transcript's clock; null before one is read. */
@@ -93,10 +109,11 @@ export class TranscriptTurn {
             // A file gone, or unreadable: this proof says nothing, the others hold.
             this.file = null;
             this.open = false;
-            this.queue = 0;
+            this.queue = [];
             return false;
         }
-        return (this.open || this.queue > 0) && nowMs - this.grewAtMs <= TRANSCRIPT_OPEN_MAX_MS;
+        const promptQueued = this.queue.some((c) => !isNotification(c));
+        return (this.open || promptQueued) && nowMs - this.grewAtMs <= TRANSCRIPT_OPEN_MAX_MS;
     }
 
     private attach(file: string | null): void {
@@ -104,7 +121,7 @@ export class TranscriptTurn {
         this.offset = 0;
         this.partial = "";
         this.open = false;
-        this.queue = 0;
+        this.queue = [];
         this.lastEndMs = null;
         if (!file) return;
         const st = statSync(file);
@@ -123,9 +140,13 @@ export class TranscriptTurn {
         for (const line of skipFirstLine ? lines.slice(1) : lines) {
             const s = transcriptLineSignal(line);
             if (!s) continue;
-            // An attach may start past an enqueue: never below empty.
-            if (s.kind === "queued") this.queue++;
-            else if (s.kind === "taken") this.queue = Math.max(0, this.queue - 1);
+            if (s.kind === "queued") this.queue.push(s.content);
+            else if (s.kind === "taken") {
+                // `dequeue` takes the head; `remove` names what it takes. An attach
+                // may start past an enqueue: a removal of nothing known does nothing.
+                const at = s.op === "remove" && s.content !== null ? this.queue.indexOf(s.content) : 0;
+                if (at >= 0 && this.queue.length > 0) this.queue.splice(at, 1);
+            }
             else {
                 this.open = s.kind === "prompt";
                 if (s.kind === "end") this.lastEndMs = s.atMs;
