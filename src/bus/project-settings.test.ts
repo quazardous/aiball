@@ -169,6 +169,13 @@ test("the settings are described, each with its type, choices, default, value an
     assert.deepEqual([session.type, session.options, session.value, session.from], ["enum", ["host", "tmux"], "tmux", "file"]);
     assert.equal(typeof session.label, "string");
     assert.deepEqual([r.settings[1]!.type, r.settings[1]!.value, r.settings[1]!.from], ["boolean_or_name", false, "default"]);
+    // #4701 — the shape, in the vocabulary config.managed shares.
+    assert.deepEqual((r.settings as unknown as { shape: unknown }[]).map((s) => s.shape), [
+        { type: "enum", options: ["host", "tmux"] },
+        { type: "boolean_or_name" },
+        { type: "enum", options: ["present", "ticket_only"] },
+        { type: "path", kind: "dir", must_exist: false },
+    ]);
 });
 
 test("set by key writes what the named field writes; an unknown key or a value out of its type is refused", () => {

@@ -12,6 +12,7 @@
  * comes from (`from`), so what is not the default can be shown as such.
  */
 import { readFileSync, statSync, writeFileSync } from "node:fs";
+import type { ValueShape } from "./value-shape.js";
 import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 import { defaultLoopSession, findConfigUpwards, globalConfigPath, loadConfig, parseLoopQuestions, parseLoopSession, readGlobalLoopQuestions, readGlobalLoopSession, type ConsumerRole, type ConsumerSource, type LoopQuestions, type LoopSession } from "./autopoll/config.js";
 import { parseRemoteControl, type RemoteControl } from "./claude-loop/remote-control.js";
@@ -67,27 +68,34 @@ export interface FolderSetting {
      * `project.setting_wizard_preview`, then `_start`, rather than writing it bare.
      */
     wizard?: { title: string };
+    /** #4701 — what kind of value it takes, in the vocabulary `config.managed` shares. */
+    shape: ValueShape;
 }
 
 /** #3308 — the folder settings, one row each: a key added here shows in a client with no code of its own. */
-const FOLDER_SETTINGS: { key: string; field: keyof SettingsPatch; type: FolderSetting["type"]; options?: string[]; default: () => unknown; label: string; description: string; wizard?: { title: string } }[] = [
+const FOLDER_SETTINGS: { key: string; field: keyof SettingsPatch; type: FolderSetting["type"]; options?: string[]; default: () => unknown; label: string; description: string; wizard?: { title: string }; shape: ValueShape }[] = [
     {
         key: "claude_loop.session", field: "session", type: "enum", options: ["host", "tmux"], default: () => defaultLoopSession(),
+        shape: { type: "enum", options: ["host", "tmux"] },
         label: "Where loops run",
         description: "host: this daemon's session host; tmux: a tmux session, with the loop's bar in its status line.",
     },
     {
         key: "claude.remote_control", field: "remote_control", type: "boolean_or_name", default: () => false,
+        shape: { type: "boolean_or_name" },
         label: "Remote Control",
         description: "Claude starts with Remote Control: true names the session after the agent, a name names it so, false leaves it off.",
     },
     {
         key: "claude_loop.questions", field: "questions", type: "enum", options: ["present", "ticket_only"], default: () => "present",
+        shape: { type: "enum", options: ["present", "ticket_only"] },
         label: "Agent questions",
         description: "present: the agent may open its choice dialog while a human is present, and is sent to the ticket otherwise; ticket_only: the dialog is always refused, every question goes to the ticket. Applies at the agent's next question, no restart.",
     },
     {
         key: "claude.config_dir", field: "config_dir", type: "path", default: () => claudeConfigDir(null).dir,
+        // A dir not there yet is taken: `fork` makes it (the wizard refuses one not ready to start on).
+        shape: { type: "path", kind: "dir", must_exist: false },
         wizard: { title: CONFIG_DIR_TITLE },
         label: "Claude config dir",
         description: "The Claude Code config dir (CLAUDE_CONFIG_DIR) the folder's loops start Claude with: its own account or subscription, settings, MCP servers and sessions. Unset: the environment's, else ~/.claude. Several projects may share one. Applies at the loop's next restart, on a new conversation: the sessions of another dir are not resumed.",
@@ -157,6 +165,7 @@ export function readSettings(cwd: string): ProjectSettings {
             key: spec.key, type: spec.type, ...(spec.options ? { options: spec.options } : {}),
             default: spec.default(), value: current.value, from: current.from, label: spec.label, description: spec.description,
             ...(spec.wizard ? { wizard: spec.wizard } : {}),
+            shape: spec.shape,
         };
     });
     return r;

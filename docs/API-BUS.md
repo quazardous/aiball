@@ -191,6 +191,24 @@ name, and leaves the old project's view as a `remove`; each of its agents' entri
 always sent whole again on `since`: the rows it held could have left it while
 the client was away.
 
+## Value shapes
+
+A setting described to a client — a `config.managed` key, a `project.settings`
+row — says what kind of value it takes in `shape`, one vocabulary for both, so a
+client picks its input without knowing the key. The fields each had before
+(`type`, `options`, `min`, `max`, `step`, `unit`) stay beside it.
+
+| `shape.type` | Its fields | The input |
+|---|---|---|
+| `number` | `integer`, `min?`, `max?`, `step?`, `unit?` | whole or decimal; the bounds inclusive |
+| `duration` | `min?`, `max?`, `step?` | seconds on the wire |
+| `enum` | `options` | one of them |
+| `boolean` | — | true or false |
+| `boolean_or_name` | — | true, false or a name |
+| `string` | `multiline`, `hint?` | one line or several; `hint`, what a refused value should have been |
+| `path` | `kind` (`dir`, `file`), `must_exist` | a folder or file picker; one not there is refused when `must_exist` |
+| `url` | `schemes` | an address in one of them (no setting takes one yet) |
+
 ## Setting wizards
 
 Some folder settings break things when written bare: `claude.config_dir`

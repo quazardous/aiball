@@ -75,6 +75,8 @@ export interface ConfigSchemaEntry {
     validate?: (v: string) => boolean;
     /** What a refused value should have been, for the refusal. */
     validateHint?: string;
+    /** #4701 — string only: the value may hold several lines (a prompt). */
+    multiline?: boolean;
     /** #590 — explicit precedence when `sources.length === 2`. Default `"db"`
      *  (UI override wins over the committed yaml). Set `"file"` for the rare
      *  case where the per-tree value MUST win (e.g. a checked-in policy). */
@@ -465,6 +467,7 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         key: "claude_loop.on_repetitive_denied.prompt",
         scope: "global+project",
         type: "string",
+        multiline: true,
         default: "",
         protected: true,
         sources: ["db", "file"],

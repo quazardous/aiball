@@ -6,6 +6,7 @@
  * schema default. The resolver core is pure (no DB) so it unit-tests on its own.
  */
 import { and, eq, inArray } from "drizzle-orm";
+import { shapeOfConfigEntry, type ValueShape } from "../value-shape.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import {
@@ -142,6 +143,8 @@ export interface ResolvedConfig {
     max: number | null;
     step: number | null;
     unit: string | null;
+    /** #4701 — what kind of value it takes, in the vocabulary `project.settings` shares. */
+    shape: ValueShape;
     default: ConfigValue;
     /** The global-layer override, or null when unset / not applicable. */
     global: ConfigValue | null;
@@ -185,6 +188,7 @@ export function getResolvedConfig(project?: string | null): ResolvedConfig[] {
             max: entry.max ?? null,
             step: entry.step ?? null,
             unit: entry.unit ?? null,
+            shape: shapeOfConfigEntry(entry),
             default: entry.default,
             global: g ?? null,
             project: p ?? null,
