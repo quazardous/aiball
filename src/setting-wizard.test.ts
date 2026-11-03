@@ -27,7 +27,7 @@ function machine(o: { loops?: string[]; busyFor?: number; claudeFor?: number; fi
         },
         claudeRunning: () => (clock.now - t0 < (o.claudeFor ?? 0) ? [{ pid: 42, cmd: "claude" }] : []),
         currentDir: () => "/home/u/.claude",
-        target: (_cwd, value) => ({ dir: value.replace("~", "/home/u"), firstRunDone: o.firstRunDone ?? true }),
+        target: (_cwd, value) => ({ dir: value === null ? "/home/u/.claude-default" : value.replace("~", "/home/u"), firstRunDone: o.firstRunDone ?? true }),
         write: (_cwd, value, opts) => { did.push(`write ${value} move=${opts.moveSessions} fork=${opts.fork}`); return { moved: 3 }; },
         settings: () => ({ config_dir: "after" }),
     };
@@ -70,6 +70,15 @@ test("the preview names the loops, asks the fork only for a dir never run, and l
     assert.deepEqual(bare.questions.map((q) => q.id), ["confirm", "move_sessions"], "a dir already run: nothing to fork");
     assert.deepEqual(bare.steps.map((s) => s.id), ["free", "write"]);
     assert.equal(m.did.length, 0, "a preview runs nothing");
+});
+
+test("#4690 null goes back to the dir the folder falls back to, with the same steps and no fork", () => {
+    const m = machine({ loops: ["cl-a"], firstRunDone: false });
+    const p = configDirPlan(CWD, null, m.ops).preview;
+    assert.equal(p.value, null);
+    assert.deepEqual(p.questions.map((q) => q.id), ["confirm", "move_sessions"], "no fork: the folder falls back to a dir, it does not start one");
+    assert.deepEqual(p.questions[0].facts, { current: "/home/u/.claude", target: "/home/u/.claude-default", loops: ["cl-a"] });
+    assert.deepEqual(p.steps.map((s) => s.id), ["idle", "stop", "free", "write", "start"]);
 });
 
 test("refused: the same dir, a value that is not a path", () => {

@@ -89,7 +89,8 @@ function configDirOps(caller: Caller): ConfigDirOps {
         claudeRunning: (cwd) => claudeRunningIn(cwd),
         currentDir: (cwd) => claudeConfigDir(cwd).dir,
         target: (cwd, value) => {
-            const dir = sourceDir(expandConfigDir(value, cwd));
+            // #4690 — null: what the folder falls back to, the dir its key's default names.
+            const dir = value === null ? claudeConfigDir(null) : sourceDir(expandConfigDir(value, cwd));
             return { dir: dir.dir, firstRunDone: configDirState(dir).first_run_done };
         },
         write: (cwd, value, o) => getMethod("project.settings_set")!.run(caller, {

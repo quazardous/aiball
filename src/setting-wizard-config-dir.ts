@@ -33,10 +33,13 @@ export interface ConfigDirOps {
     claudeRunning(cwd: string): Array<{ pid: number; cmd: string }> | null;
     /** The dir the folder's loops start Claude with now. */
     currentDir(cwd: string): string;
-    /** Where `value` points, and whether that dir has been through Claude's first run. */
-    target(cwd: string, value: string): { dir: string; firstRunDone: boolean };
-    /** Write the setting: `project.settings_set` with the answers; what it did. */
-    write(cwd: string, value: string, opts: { moveSessions: boolean; fork: boolean }): Record<string, unknown>;
+    /**
+     * Where `value` points, and whether that dir has been through Claude's first
+     * run; `null`: the dir the folder falls back to once its own is removed.
+     */
+    target(cwd: string, value: string | null): { dir: string; firstRunDone: boolean };
+    /** Write the setting: `project.settings_set` with the answers (`null` removes the key); what it did. */
+    write(cwd: string, value: string | null, opts: { moveSessions: boolean; fork: boolean }): Record<string, unknown>;
     settings(cwd: string): unknown;
 }
 
@@ -48,7 +51,10 @@ function names(loops: FolderLoop[]): string {
 
 /** The plan for `value`; refuses (`Error` with a message for the client) what cannot be switched to. */
 export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): WizardPlan {
-    if (typeof value !== "string" || !value.trim() || /[\r\n\0]/.test(value)) throw new Error("claude.config_dir takes a directory path");
+    // #4690 — null: back to the layer below, as `project.settings_set` takes it.
+    if (value !== null && (typeof value !== "string" || !value.trim() || /[\r\n\0]/.test(value))) {
+        throw new Error("claude.config_dir takes a directory path, or null for the default");
+    }
     const current = ops.currentDir(cwd);
     const target = ops.target(cwd, value);
     if (target.dir === current) throw new Error(`the folder's loops already start Claude with ${current}`);
@@ -63,7 +69,8 @@ export function configDirPlan(cwd: string, value: unknown, ops: ConfigDirOps): W
             ? `Start this folder's loops on ${target.dir} from now on; none runs now`
             : `Stop and restart ${n} loop${n > 1 ? "s" : ""} (${names(loops)}) on ${target.dir}; ${n > 1 ? "their conversations follow" : "its conversation follows"}`,
     }];
-    if (!target.firstRunDone) {
+    // A fork starts a dir of the folder's own: not one it falls back to.
+    if (!target.firstRunDone && value !== null) {
         questions.push({
             id: "fork", kind: "choose", default: "fork",
             facts: { current, target: target.dir, target_first_run: false },

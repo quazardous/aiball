@@ -120,6 +120,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- `claude.config_dir`'s wizard takes `null`, to take a folder back to the default dir.
 - Loop: task notifications passing through an idle Claude's queue no longer hold the loop busy; only a queued prompt does.
 - `ticket_list`: a rejected ticket reads `closed: true`, as `ticket_get` says, and `open` leaves it out.
 - `ticket_list`: a plan attached at ticket creation reads `pending_decision: true`, as `ticket_get` and the inbox say.

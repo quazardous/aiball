@@ -12,7 +12,8 @@ process.env.AIBALL_SOCK = "";
 process.env.XDG_CONFIG_HOME = join(home, "xdg");
 // No loop of this machine is the folder's.
 process.env.CLAUDE_LOOP_STATE_ROOT = join(home, "loops");
-delete process.env.CLAUDE_CONFIG_DIR;
+// The dir a folder falls back to without its own: one of the test's, never the user's.
+process.env.CLAUDE_CONFIG_DIR = join(home, "cfg-default");
 const { getMethod } = await import("./methods.js");
 await import("./register.js");
 after(() => rmSync(home, { recursive: true, force: true }));
@@ -61,4 +62,13 @@ test("a run goes to its end, writes the dir, and is kept on disk", async () => {
     assert.match(readFileSync(join(cwd, ".aiball.yaml"), "utf8"), /config_dir: .*cfg-b/);
     assert.ok(existsSync(join(home, "wizards", `${run.run}.json`)), "kept, for a daemon that restarts");
     assert.equal((await refused(() => call("project.setting_wizard_cancel", { run: run.run }))).code, "CONFLICT", "ended: nothing to cancel");
+});
+
+test("#4690 null takes the folder back to the default dir: the key leaves its .aiball.yaml", async () => {
+    const run = call<Run>("project.setting_wizard_start", { cwd, key: "claude.config_dir", value: null, answers: { confirm: true, move_sessions: "no" } });
+    const deadline = Date.now() + 10_000;
+    while (run.status === "running" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(run.status, "done", JSON.stringify(run.steps));
+    assert.equal(run.settings?.config_dir.value, join(home, "cfg-default"));
+    assert.doesNotMatch(readFileSync(join(cwd, ".aiball.yaml"), "utf8"), /config_dir/);
 });

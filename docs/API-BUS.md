@@ -231,8 +231,10 @@ details }` when it applied, and
 folder. A run is kept on disk at each change: one under way when the daemon
 stops comes back `interrupted`, with what it had done, and is not taken up again.
 
-**`claude.config_dir`'s wizard.** Questions: `confirm` (naming the loops),
-`fork` when the new dir has not been through Claude's first run (link the
+**`claude.config_dir`'s wizard.** `value` is a path, or `null` to go back to
+the dir the folder falls back to without its own (the key leaves its
+`.aiball.yaml`; `target` in the facts names that dir). Questions: `confirm` (naming the loops),
+`fork` when the new dir has not been through Claude's first run (never for `null`) (link the
 account and settings of the current dir, or leave it empty), `move_sessions`
 (the folder's conversations follow, or not). Steps: `idle`, wait until the
 folder's loops are idle (up to 5 min), so no turn is cut; `stop`; `free`, wait
