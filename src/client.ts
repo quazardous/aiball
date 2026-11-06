@@ -357,7 +357,7 @@ export class AiballClient {
     // =================================================================
 
     /** #4459 — replace the options of a pending plan; an empty list removes them. */
-    async setPlanOptions(messageId: number, options: Array<{ key: string; label: string; recommended?: boolean }>, multiple?: boolean): Promise<unknown> {
+    async setPlanOptions(messageId: number, options: Array<{ key: string; label: string; recommended?: boolean; confidence?: "high" | "medium" | "low" }>, multiple?: boolean): Promise<unknown> {
         return this.call("message.set_options", { id: messageId, options, multiple });
     }
 

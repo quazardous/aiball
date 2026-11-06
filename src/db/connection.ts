@@ -238,7 +238,7 @@ export interface NewMessage {
      *  later accept/reject via the bus's message.decide. */
     decision_kind?: string | null;
     /** #4459 — the choices a plan offers. */
-    options?: Array<{ key: string; label: string; recommended?: boolean }>;
+    options?: Array<{ key: string; label: string; recommended?: boolean; confidence?: "high" | "medium" | "low" }>;
     /** #4474 — whether the human may pick several of them. */
     multiple?: boolean;
     /** #B.130 phase 1: author-supplied one-line TLDR. comment_added

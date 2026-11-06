@@ -78,9 +78,12 @@ meta.decision = { kind: "plan" | "resolution" | "wontfix" | "escalation", status
 - **wontfix** — close without doing it. **escalation** — a blocker only a human
   can lift. Both are in the matrix below.
 - accept/reject goes through `POST /messages/:id/decide`.
-- **A plan can offer options** (`options` on `then: plan`, 2 to 6, at most one
-  recommended), and must say with `multiple` whether the human picks one or may
-  pick several. It is then accepted on one (`option` on the decide) or on several
+- **A plan can offer options** (`options` on `then: plan`, 2 to 6), and must say
+  with `multiple` whether the human picks one or may pick several. `recommended`
+  marks the author's suggestion: one option at most on a plan that takes one,
+  a set (never every option) on a plan that takes several. Any option may carry
+  `confidence` (`high` / `medium` / `low`), how sure its author is; clients show
+  it as green, yellow, red. It is then accepted on one (`option` on the decide) or on several
   (`options`), or rejected. The choice stays on the decision, and the `plan_accepted` event's
   body names it, which the wake repeats. While it waits, its author or a human
   can change the list (`message.set_options`, the `plan_options` tool).

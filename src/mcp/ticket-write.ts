@@ -11,13 +11,26 @@ import { type WaitCreditAnswer, waitCreditNote } from "./wait-credit-note.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MESSAGE_SCOPES } from "../domain.js";
-import { type DecisionKind } from "../decisions.js";
+import { OPTION_CONFIDENCES, type DecisionKind } from "../decisions.js";
 import { STEP_VERB, kindForVerb, verbsAllowedOn } from "../ticket-transitions.js";
 import { asText, client, markActiveTicket } from "./_helpers.js";
 
 // #2308 — each decision's `then` verb, where it may be posted and what posting
 // it does come from the transition table (src/ticket-transitions.ts). Only the
 // lifecycle verbs (close, reopen) are named here.
+/** #4459 / #4788 — one option of a plan, and how the options are told to the author. */
+const OPTION_SCHEMA = z.object({
+    key: z.string(),
+    label: z.string(),
+    recommended: z.boolean().optional(),
+    confidence: z.enum(OPTION_CONFIDENCES).optional(),
+});
+const OPTIONS_DESCRIPTION =
+    "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`. " +
+    "`recommended` marks your suggestion, what is ticked to start with: one at most when `multiple` is false; with `multiple: true`, the set you suggest (never every option). " +
+    "#4788 — `confidence` (`high` / `medium` / `low`, optional, on any option) says how sure you are of it; the human sees it as a colour, so a recommendation you hold loosely says `low` and draws their eye. " +
+    "The human accepts one option (or several when `multiple`), or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.";
+
 const THEN_ON_TICKET = verbsAllowedOn("ticket_created") as [string, ...string[]];
 const THEN_ON_REPLY: [string, ...string[]] = ["close", "reopen", ...verbsAllowedOn("comment_added"), STEP_VERB];
 
@@ -80,10 +93,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                         "#697 F4 — origin project for cross-project tickets. Set when this agent (living in `from_project`) files a ticket in `project` on behalf of `project`'s agents (e.g. `kodi_sauvagge-claude` opening a ticket in `pisynth` to ask how pisynth handles deploy/probe). Surfaced on `ticket_get` and renderable as a 'from X' badge so the recipient distinguishes a cross-project ask from an in-project ticket. Omit for intra-project tickets — the common case.",
                     ),
                 options: z
-                    .array(z.object({ key: z.string(), label: z.string(), recommended: z.boolean().optional() }))
+                    .array(OPTION_SCHEMA)
                     .optional()
                     .describe(
-                        "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`, at most one `recommended`. The human then accepts ONE of them, or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.",
+                        OPTIONS_DESCRIPTION,
                     ),
                 multiple: z
                     .boolean()
@@ -202,10 +215,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                         ].join("\n"),
                     ),
                 options: z
-                    .array(z.object({ key: z.string(), label: z.string(), recommended: z.boolean().optional() }))
+                    .array(OPTION_SCHEMA)
                     .optional()
                     .describe(
-                        "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`, at most one `recommended`. The human then accepts ONE of them, or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.",
+                        OPTIONS_DESCRIPTION,
                     ),
                 multiple: z
                     .boolean()
@@ -353,7 +366,7 @@ export function registerTicketWriteTools(server: McpServer): void {
             description: "#4459 — change the options of a plan still waiting on a decision: send the whole new list to add or remove some, or an empty list to make it a plain plan. The plan's author or a human only. `message_id` is the id of the comment that carries the plan (`ticket_reply` returned it), or the ticket's id for a plan filed with the ticket.",
             inputSchema: {
                 message_id: z.number().int(),
-                options: z.array(z.object({ key: z.string(), label: z.string(), recommended: z.boolean().optional() })),
+                options: z.array(OPTION_SCHEMA).describe("The whole new list, each option as in `ticket_reply`'s `options` (`recommended`, `confidence`)."),
                 multiple: z.boolean().optional().describe("REQUIRED unless the list is empty: `false` = exactly one, `true` = several together."),
             },
         },

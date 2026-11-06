@@ -60,12 +60,35 @@ export type DecisionStatus = typeof DECISION_STATUSES[number];
 export const CLOSING_DECISION_KINDS: readonly DecisionKind[] = kindsInFamily("closing");
 export const WAITING_DECISION_KINDS: readonly DecisionKind[] = kindsInFamily("waiting");
 
-/** #4459 — one of the choices a plan offers: the human picks one. */
+/**
+ * #4788 — how sure the author is of an option: a level, not a number, since a
+ * model cannot calibrate itself finely. Clients colour it (green, yellow, red).
+ */
+export const OPTION_CONFIDENCES = ["high", "medium", "low"] as const;
+export type OptionConfidence = (typeof OPTION_CONFIDENCES)[number];
+
+/** #4459 — one of the choices a plan offers. */
 export interface DecisionOption {
     key: string;
     label: string;
-    /** The author's recommendation; at most one. */
+    /**
+     * The author's suggestion: what is ticked to start with. One at most on a
+     * plan that takes one; #4788 — on a plan that takes several, the suggested
+     * set (never every option).
+     */
     recommended?: boolean;
+    /** #4788 — how sure the author is of this option; absent when not said. */
+    confidence?: OptionConfidence;
+}
+
+/** #4788 — an option as it is stored: the label trimmed, the flags only when set. */
+export function storedOption(o: DecisionOption): DecisionOption {
+    return {
+        key: o.key,
+        label: o.label.trim(),
+        ...(o.recommended === true ? { recommended: true } : {}),
+        ...(typeof o.confidence === "string" ? { confidence: o.confidence } : {}),
+    };
 }
 
 export interface CommentDecision {
@@ -86,7 +109,9 @@ export interface CommentDecision {
 
 /**
  * #4459 — the refusal for a plan's `options`, or null. Two to six, each with a
- * short key and a label, one recommended at most; only a plan offers them.
+ * short key and a label; only a plan offers them. #4788 — one recommended at
+ * most on a plan that takes one, never all of them on a plan that takes
+ * several; a confidence is one of `OPTION_CONFIDENCES`.
  */
 export function optionsRefusal(options: unknown, kind: string | null, multiple?: unknown): string | null {
     if (kind !== "plan") return "options only go on a then: plan";
@@ -101,8 +126,13 @@ export function optionsRefusal(options: unknown, kind: string | null, multiple?:
         if (keys.has(o.key)) return `option key ${o.key} is used twice`;
         keys.add(o.key);
         if (o.recommended === true) recommended++;
+        if (o.confidence !== undefined && !(OPTION_CONFIDENCES as readonly unknown[]).includes(o.confidence)) {
+            return `option ${o.key}: confidence is one of ${OPTION_CONFIDENCES.join(", ")}`;
+        }
     }
-    return recommended > 1 ? "only one option can be the recommended one" : null;
+    if (multiple === false && recommended > 1) return "a plan that takes one option recommends one at most";
+    if (multiple === true && recommended === options.length) return "recommending every option suggests nothing: recommend the set you suggest";
+    return null;
 }
 
 /**

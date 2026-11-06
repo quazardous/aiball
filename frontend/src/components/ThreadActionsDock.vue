@@ -49,6 +49,26 @@ function orderedOptions(options: NonNullable<CommentDecision["options"]>) {
     return [...options].sort((a, b) => Number(b.recommended === true) - Number(a.recommended === true));
 }
 
+type PlanOption = NonNullable<CommentDecision["options"]>[number];
+
+/**
+ * #4788 — an option's colour: its author's confidence when said (green, yellow,
+ * red), else green for the suggestion and grey for the rest.
+ */
+function optionSeverity(o: PlanOption): "success" | "warn" | "danger" | "secondary" {
+    if (o.confidence === "high") return "success";
+    if (o.confidence === "medium") return "warn";
+    if (o.confidence === "low") return "danger";
+    return o.recommended ? "success" : "secondary";
+}
+
+const CONFIDENCE_COLOR: Record<string, string> = { high: "var(--p-green-500)", medium: "var(--p-yellow-500)", low: "var(--p-red-500)" };
+
+function optionTitle(o: PlanOption): string {
+    const said = [o.recommended ? "the author suggests it" : "", o.confidence ? `confidence ${o.confidence}` : ""].filter(Boolean).join(", ");
+    return `Accept this option${said ? ` (${said})` : ""}. Any text typed in the composer is posted with it.`;
+}
+
 function acceptLabel(kind: CommentDecision["kind"]): string {
     return ACCEPT_LABELS[kind];
 }
@@ -74,7 +94,7 @@ const props = defineProps<{
     decisionMenu: MenuItem[];
 }>();
 
-// #4474 — what is ticked on a plan that takes several, the recommended one to start with.
+// #4474 — what is ticked on a plan that takes several: the recommended ones to start with (#4788: several).
 const ticked = ref<string[]>([]);
 watch(
     () => props.activeDecision?.message.id,
@@ -156,8 +176,14 @@ const emit = defineEmits<{
                 v-for="o in orderedOptions(activeDecision.decision.options)"
                 :key="o.key"
                 style="display: inline-flex; align-items: center; gap: 0.3rem; font-size: var(--fs-xs)"
+                :title="optionTitle(o)"
             >
                 <input v-model="ticked" type="checkbox" :value="o.key" />
+                <span
+                    v-if="o.confidence"
+                    :aria-label="`confidence ${o.confidence}`"
+                    :style="{ display: 'inline-block', width: '0.6rem', height: '0.6rem', borderRadius: '50%', background: CONFIDENCE_COLOR[o.confidence] }"
+                />
                 {{ o.key }}: {{ o.label }}
             </label>
             <Button
@@ -176,10 +202,10 @@ const emit = defineEmits<{
                 :key="o.key"
                 :label="`${o.key}: ${o.label}`"
                 icon="pi pi-verified"
-                :severity="o.recommended ? 'success' : 'secondary'"
+                :severity="optionSeverity(o)"
                 size="small"
                 :loading="resolutionBusy"
-                :title="o.recommended ? 'Accept this option (the author recommends it). Any text typed in the composer is posted with it.' : 'Accept this option. Any text typed in the composer is posted with it.'"
+                :title="optionTitle(o)"
                 @click="emit('accept-option', o.key)"
             />
         </template>

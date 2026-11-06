@@ -32,7 +32,7 @@ import {
     serializeMeta,
     type MessageMeta,
 } from "../message-meta.js";
-import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionOption, type DecisionStatus } from "../decisions.js";
+import { applyDecision, promoteToDecision, reclassifyDecision, storedOption, type DecisionOption, type DecisionStatus } from "../decisions.js";
 import { getConfig } from "./config-overrides.js"; // #449: config-driven default priority
 // #2070 — inferring a cross-project deposit. The rule is pure and lives apart;
 // only the lookup of who-belongs-where happens here.
@@ -1338,7 +1338,7 @@ export function setMessageVote(
 export function setDecisionOptions(id: number, options: DecisionOption[], multiple: boolean): Message | null {
     const withOptions = (meta: ReturnType<typeof parseMeta>) => {
         const { options: _old, multiple: _was, ...decision } = meta.decision!;
-        meta.decision = options.length > 0 ? { ...decision, multiple, options: options.map((o) => ({ key: o.key, label: o.label.trim(), ...(o.recommended === true ? { recommended: true } : {}) })) } : decision;
+        meta.decision = options.length > 0 ? { ...decision, multiple, options: options.map(storedOption) } : decision;
         return serializeMeta(meta);
     };
     const db = getDb();

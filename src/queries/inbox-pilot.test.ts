@@ -255,7 +255,7 @@ test("a plan with options is accepted on one of them, recorded on the decision a
     const bad = async (extra: Record<string, unknown>) => (await call(WORKER, "message.post", { project: P, kind: "comment_added", ticket_id: ticket("bad"), body: "c", summary_until: "s", decision_kind: "plan", ...extra })).status;
     assert.equal(await bad({ multiple: false, options: [{ key: "A", label: "alone" }] }), 400, "at least two");
     assert.equal(await bad({ multiple: false, options: [{ key: "A", label: "x" }, { key: "A", label: "y" }] }), 400, "unique keys");
-    assert.equal(await bad({ multiple: false, options: [{ key: "A", label: "x", recommended: true }, { key: "B", label: "y", recommended: true }] }), 400, "one recommended");
+    assert.equal(await bad({ multiple: false, options: [{ key: "A", label: "x", recommended: true }, { key: "B", label: "y", recommended: true }] }), 400, "one recommended on a plan that takes one");
     assert.equal(await bad({ decision_kind: "resolution", multiple: false, options: OPTIONS }), 400, "only a plan");
     assert.equal(await bad({ options: OPTIONS }), 400, "multiple is mandatory");
 
@@ -276,6 +276,21 @@ test("a plan with options is accepted on one of them, recorded on the decision a
     const w = ticket("exactly one");
     const one = await comment(WORKER, w, { decision_kind: "plan", handback: undefined, options: OPTIONS, multiple: false });
     assert.equal((await call(HUMAN, "message.decide", { id: one, status: "accepted", options: ["A"] })).status, 400);
+});
+
+test("a plan that takes several recommends a set, and any option may say how sure its author is", async () => {
+    const post = (extra: Record<string, unknown>) => call(WORKER, "message.post", { project: P, kind: "comment_added", ticket_id: ticket("suggested set"), body: "c", summary_until: "s", decision_kind: "plan", ...extra });
+    const A = { key: "A", label: "x", recommended: true, confidence: "high" };
+    const B = { key: "B", label: "y", recommended: true, confidence: "low" };
+    const C = { key: "C", label: "z", confidence: "medium" };
+    const set = await post({ multiple: true, options: [A, B, C] });
+    assert.ok(set.status < 300, JSON.stringify(set.json));
+    const stored = JSON.parse(getDb().select({ meta: schema.messages.meta }).from(schema.messages).where(eq(schema.messages.id, (set.json as { id: number }).id)).get()!.meta!).decision.options;
+    assert.deepEqual(stored, [A, B, C], "the set and each confidence are kept as said");
+    assert.equal((await post({ multiple: true, options: [A, B] })).status, 400, "every option recommended suggests nothing");
+    assert.equal((await post({ multiple: false, options: [A, B, C] })).status, 400, "a plan that takes one recommends one at most");
+    assert.equal((await post({ multiple: false, options: [{ ...A, confidence: "sure" }, C] })).status, 400, "a confidence off the scale");
+    assert.ok((await post({ multiple: false, options: [{ key: "A", label: "x" }, C] })).status < 300, "a confidence alone, on an option not recommended");
 });
 
 test("a pending plan's options can be changed by its author or a human, and removed", async () => {

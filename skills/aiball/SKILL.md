@@ -75,10 +75,13 @@ Replies carry an optional `then:` that turns the comment into a **proposal** the
 
 When the next move is the human's choice — option A or B, which of two ways —
 post it as `then: "plan"` with `options`: `[{ key: "A", label: "…", recommended:
-true }, { key: "B", label: "…" }]`, 2 to 6 of them, at most one recommended, and
-`multiple`, which is mandatory: `false` when they pick exactly one, `true` when
-the choices are independent and they may tick several. The body says what each
-one implies. The human gets one button per option, and your
+true }, { key: "B", label: "…" }]`, 2 to 6 of them, and `multiple`, which is
+mandatory: `false` when they pick exactly one, `true` when the choices are
+independent and they may tick several. `recommended` is your suggestion, ticked
+for them to start with: one option at most when they pick one, the set you
+suggest when they may pick several (never all of them). Any option may say
+`confidence`: `high`, `medium` or `low`, shown as a colour, so a suggestion you
+hold loosely draws their eye. The body says what each one implies. The human gets one button per option, and your
 wake names what was chosen: read it there, not in a comment. To add or remove
 options while the plan waits, use `plan_options`, or post a fresher plan.
 
