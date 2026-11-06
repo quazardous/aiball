@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.58.0] — 2026-11-06
+
 ### Added
 
 - A plan that takes several options can recommend several of them (the suggested set, ticked to start with), and any option can say how sure its author is (`confidence`: `high`, `medium`, `low`), which the web shows as green, yellow, red.
