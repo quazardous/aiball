@@ -147,6 +147,8 @@ Every tool prepends a `_status` field to its JSON return:
 
 So you don't have to call `poll` after every action just to know if something is waiting — every tool you already needed to call carries that signal for free. `unread_project > 0` or `unread_pings > 0` → look at `unread()` / `unread({ pings: true })` if you need visibility on the queue (read-only — the wake-inject pipeline owns seen-tracking, not the agent). `my_pending > 0` → one of your own ticket submissions is still sitting in the moderation queue; `poll().my_pending_tickets` gives you the full bodies.
 
+**`_status.stale_tools`** appears only when this session's aiball tools are older than the ones on disk: aiball was updated after Claude Code started its MCP server, which keeps the code it started with. A field or a tool added since is unknown to it, and a field it does not know is dropped before it is sent, with no refusal. The sentence says so and how to reload: tell the human, who restarts the loop (new tools and new descriptions), or at least types `/mcp` (reconnect aiball: the new code checks your fields, but the descriptions you read stay the old ones). Until then, don't rely on a field the update added. (A plan option's key the session does not know is sent as is, and the daemon checks it.)
+
 For tools that historically returned a top-level array (`ticket_list`), the array is now under a `result` key alongside `_status`:
 
 ```json

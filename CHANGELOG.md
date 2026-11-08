@@ -23,6 +23,10 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- An agent whose aiball tools are older than the ones on disk hears it: every tool answer carries `_status.stale_tools`, saying that a field added since would be dropped unsaid and that a loop restart (or at least `/mcp`) reloads them. A plan option's key the session does not know now goes through to the daemon.
+
 ### Fixed
 
 - A proxy node cut from its parent no longer loses the writes its loops made meanwhile: it replays its spool to the parent when the parent answers again, instead of into its own empty database, where every one was refused.

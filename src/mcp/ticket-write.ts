@@ -18,13 +18,19 @@ import { asText, client, markActiveTicket } from "./_helpers.js";
 // #2308 — each decision's `then` verb, where it may be posted and what posting
 // it does come from the transition table (src/ticket-transitions.ts). Only the
 // lifecycle verbs (close, reopen) are named here.
-/** #4459 / #4788 — one option of a plan, and how the options are told to the author. */
-const OPTION_SCHEMA = z.object({
-    key: z.string(),
-    label: z.string(),
-    recommended: z.boolean().optional(),
-    confidence: z.enum(OPTION_CONFIDENCES).optional(),
-});
+/**
+ * #4459 / #4788 — one option of a plan, and how the options are told to the
+ * author. #4794 — `passthrough`: a key this server does not know yet reaches the
+ * daemon, which knows it and checks it, instead of being dropped here unsaid.
+ */
+export const OPTION_SCHEMA = z
+    .object({
+        key: z.string(),
+        label: z.string(),
+        recommended: z.boolean().optional(),
+        confidence: z.enum(OPTION_CONFIDENCES).optional(),
+    })
+    .passthrough();
 const OPTIONS_DESCRIPTION =
     "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`. " +
     "They are shown in the order you give them, usually their key order (A, B, C): mark your suggestion with `recommended`, don't move it first; it keeps its colour where it sits. " +

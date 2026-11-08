@@ -18,6 +18,7 @@ import { AiballClient } from "../client.js";
 import { captureTokenUsage, projectTranscriptDir } from "../claude-loop/token-capture.js";
 import { CL_ENV } from "../claude-loop/env-vars.js";
 import { boardTimeZone, rewriteTimes } from "../timezone.js";
+import { staleTools } from "./stale-tools.js";
 
 // #2652 — this MCP server sends `commits` on every comment it posts.
 export const client = new AiballClient({ features: ["commits"] });
@@ -86,8 +87,10 @@ export async function microStatus(): Promise<{
     unread_pings: number;
     my_pending: number;
     project: string | null;
+    stale_tools?: string;
 }> {
     const proj = client.defaultProject;
+    const stale = staleTools.check();
     // #2164 — ONE round-trip. This was three, wrapped in a `Promise.all` that
     // parallelised nothing: the daemon is single-threaded, so it served them in
     // a row and each took a place in the queue every other caller waits in.
@@ -100,6 +103,8 @@ export async function microStatus(): Promise<{
         unread_pings: counts.unread_pings ?? 0,
         my_pending: counts.my_pending ?? 0,
         project: proj,
+        // #4794 — only when this server's tools are older than the ones on disk.
+        ...(stale ? { stale_tools: stale } : {}),
     };
 }
 
@@ -123,7 +128,7 @@ export async function asLines(meta: string[], lines: string[]) {
         content: [
             {
                 type: "text" as const,
-                text: [head, ...meta.map((m) => `# ${m}`), ...lines].join("\n"),
+                text: [head, ...(s.stale_tools ? [`# stale_tools: ${s.stale_tools}`] : []), ...meta.map((m) => `# ${m}`), ...lines].join("\n"),
             },
         ],
     };
