@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.59.0] — 2026-11-09
+
 ### Added
 
 - Switching the board's master from where the machine's state shows: the GNOME extension on a proxy node offers to take the board over (greyed out with why when it cannot), and the master's Nodes panel says which machine holds the board and whether each node can take it over. Each switch is recorded on the board (from which machine to which, when, by whom, at which revision) and listed in the Nodes panel.
