@@ -589,6 +589,13 @@
       "when": 1782700000050,
       "tag": "0083_sequences",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1782700000060,
+      "tag": "0084_doc_revs",
+      "breakpoints": true
     }
   ]
 }

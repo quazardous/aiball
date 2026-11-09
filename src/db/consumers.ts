@@ -11,6 +11,7 @@ import { LEVELS_BY_AGENT_TYPE, type TicketLevel } from "../domain.js";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { clearFlagsCache } from "./flags-cache.js";
+import { reviseConsumers } from "./doc-revs.js";
 import { isRemoteConsumer, type SeenVia } from "./remote-detect.js";
 
 export type ConsumerKind = "human" | "agent" | "sandbox" | "system";
@@ -154,6 +155,7 @@ export function setAfkHold(consumer_id: string, hold: AfkHold): Consumer | null 
         .set({ afkHold: hold, updatedAt: new Date().toISOString() })
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
+    reviseConsumers([consumer_id]);
     return getConsumer(consumer_id);
 }
 
@@ -171,6 +173,7 @@ export function setPasswordHash(consumer_id: string, hash: string): boolean {
         .set({ passwordHash: hash, updatedAt: nowIso() })
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
+    if (r.changes > 0) reviseConsumers([consumer_id]);
     return r.changes > 0;
 }
 
@@ -180,6 +183,7 @@ export function touchLastLogin(consumer_id: string): void {
         .set({ lastLoginAt: now, updatedAt: now })
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
+    reviseConsumers([consumer_id]);
 }
 
 /**
@@ -269,13 +273,14 @@ export function getConsumer(consumer_id: string): Consumer | null {
 export function ensureConsumer(consumer_id: string): void {
     if (!consumer_id) return;
     const now = nowIso();
-    getDb().insert(schema.consumers).values({
+    const r = getDb().insert(schema.consumers).values({
         consumerId: consumer_id,
         kind: "agent",
         enabled: 1,
         createdAt: now,
         updatedAt: now,
     }).onConflictDoNothing().run();
+    if (r.changes > 0) reviseConsumers([consumer_id]);
 }
 
 /**
@@ -384,6 +389,7 @@ export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch):
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
     if (r.changes === 0) return null;
+    reviseConsumers([consumer_id]);
     // #2682 — the actionable gate reads who is human (kind + enabled) and which
     // levels an agent works (agent_type); its cache lives up to a minute now.
     if (patch.kind !== undefined || patch.enabled !== undefined || patch.agent_type !== undefined) clearFlagsCache();
@@ -422,6 +428,7 @@ export function upsertConsumer(input: {
         updatedAt: now,
     }).run();
     if (input.kind === "human") clearFlagsCache(); // #2682 — a new human changes the gate
+    reviseConsumers([input.consumer_id]);
     return getConsumer(input.consumer_id)!;
 }
 
@@ -430,6 +437,7 @@ export function deleteConsumer(consumer_id: string): boolean {
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
     if (r.changes > 0) clearFlagsCache(); // #2682 — it may have been a human
+    if (r.changes > 0) reviseConsumers([consumer_id]);
     return r.changes > 0;
 }
 

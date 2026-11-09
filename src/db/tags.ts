@@ -9,6 +9,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { clearFlagsCache } from "./flags-cache.js";
+import { reviseTickets } from "./doc-revs.js";
 
 export interface Tag {
     id: number;
@@ -116,8 +117,11 @@ export function updateTag(
 }
 
 export function deleteTag(id: number): void {
+    // #4866 — the tickets that carried it lose it with the tag (cascade): they change.
+    const carried = getDb().select({ id: schema.ticketTags.ticketId }).from(schema.ticketTags).where(eq(schema.ticketTags.tagId, id)).all().map((r) => r.id);
     getDb().delete(schema.tags).where(eq(schema.tags.id, id)).run();
     clearFlagsCache();
+    if (carried.length > 0) reviseTickets(carried);
 }
 
 /**
@@ -162,6 +166,7 @@ export function addMessageTag(
         setBy,
     }).onConflictDoNothing().run();
     clearFlagsCache();
+    reviseTickets([messageId]);
 }
 
 export function removeMessageTag(messageId: number, tagId: number): void {
@@ -170,6 +175,7 @@ export function removeMessageTag(messageId: number, tagId: number): void {
         eq(schema.ticketTags.tagId, tagId),
     )).run();
     clearFlagsCache();
+    reviseTickets([messageId]);
 }
 
 export function setMessageTags(
@@ -191,4 +197,5 @@ export function setMessageTags(
         }
     });
     clearFlagsCache();
+    reviseTickets([messageId]);
 }

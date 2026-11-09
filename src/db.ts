@@ -246,3 +246,4 @@ export {
     type TokenKind,
 } from "./db/tokens.js";
 export { getPresenceFacts, type PresenceFacts } from "./db/presence.js";
+export { lastRev, revise, reviseConsumers, revisedAfter, revOf, reviseTickets, type DocKind } from "./db/doc-revs.js";

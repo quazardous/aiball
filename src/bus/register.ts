@@ -24,3 +24,4 @@ import "./methods/automation.js";
 import "./methods/board.js";
 import "./methods/nodes.js";
 import "./methods/screen.js";
+import "./methods/replica.js";

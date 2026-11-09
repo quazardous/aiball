@@ -11,6 +11,7 @@ import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import type { Subscription, SubscriptionRole } from "./connection.js";
 import { clearFlagsCache } from "./flags-cache.js";
+import { reviseConsumers, reviseTickets } from "./doc-revs.js";
 
 // =====================================================================
 //  Project subscriptions
@@ -46,6 +47,7 @@ export function upsertSubscription(
             // #2682 — an owner role puts the project's tickets in the agent's
             // actionable pool; that cache lives up to a minute now.
             clearFlagsCache();
+            reviseConsumers([consumer_id]);
         }
         return {
             consumer_id: existing.consumerId,
@@ -63,6 +65,7 @@ export function upsertSubscription(
         role: role ?? "follower",
     }).run();
     clearFlagsCache(); // #2682 — same, for a new subscription
+    reviseConsumers([consumer_id]);
     const fresh = db.select().from(schema.subscriptions)
         .where(and(
             eq(schema.subscriptions.consumerId, consumer_id),
@@ -83,6 +86,7 @@ export function deleteSubscription(consumer_id: string, project: string): void {
         eq(schema.subscriptions.project, project),
     )).run();
     clearFlagsCache(); // #2682 — same, for a dropped subscription
+    reviseConsumers([consumer_id]);
 }
 
 export function listSubscriptions(consumer_id?: string): Subscription[] {
@@ -186,6 +190,7 @@ export function upsertTicketSubscription(
         target: [schema.ticketSubscriptions.consumerId, schema.ticketSubscriptions.ticketId],
         set: { muted: muted ? 1 : 0 },
     }).run();
+    reviseTickets([ticket_id]);
 }
 
 /**
@@ -255,6 +260,7 @@ export function deleteTicketSubscription(
         eq(schema.ticketSubscriptions.consumerId, consumer_id),
         eq(schema.ticketSubscriptions.ticketId, ticket_id),
     )).run();
+    reviseTickets([ticket_id]);
 }
 
 export function listTicketSubscribers(ticket_id: number): string[] {

@@ -34,6 +34,7 @@ import {
     type Target,
 } from "./backlog-rules.js";
 import { closedTicketIds } from "./ticket-closed.js";
+import { reviseTickets } from "./doc-revs.js";
 
 // =====================================================================
 //  Helpers
@@ -112,6 +113,30 @@ function pingsChanged(recipient: string | null): void {
     }
 }
 
+/** #4866 — what a ping write hands back: the ping's ticket, or its comment. */
+const PING_TARGET = { ticketId: schema.pings.ticketId, commentId: schema.pings.commentId };
+
+/**
+ * #4866 — the pings written are in their tickets' documents: revise those
+ * tickets (a comment's ping, through its comment). Returns the count, as
+ * `.run()` did.
+ */
+function revisedPings(rows: ReadonlyArray<{ ticketId: number | null; commentId: number | null }>): { changes: number } {
+    const ids = new Set<number>();
+    const comments: number[] = [];
+    for (const r of rows) {
+        if (r.ticketId !== null) ids.add(r.ticketId);
+        else if (r.commentId !== null) comments.push(r.commentId);
+    }
+    if (comments.length > 0) {
+        for (const m of getDb().select({ t: schema.messages.ticketId }).from(schema.messages).where(inArray(schema.messages.id, [...new Set(comments)])).all()) {
+            if (m.t !== null) ids.add(m.t);
+        }
+    }
+    if (ids.size > 0) reviseTickets([...ids]);
+    return { changes: rows.length };
+}
+
 export function insertPing(
     recipient: string,
     msg: {
@@ -147,6 +172,9 @@ export function insertPing(
     // can swallow a duplicate). Subscribers (SSE) react in real-time —
     // no more polling-lag (#B.148 phase A).
     if (r.changes > 0) {
+        // #4866 — the ticket the ping is about holds it in its document.
+        const about = isTicket ? msg.id : (msg.ticket_id ?? null);
+        if (about !== null) reviseTickets([about]);
         // #B.214 david: a `ticket_closed` / `ticket_referenced` /
         // `ticket_sub_added` / `ticket_resolved` event on a panic
         // ticket used to inherit the parent's intent, so closing a
@@ -191,9 +219,9 @@ export function insertPing(
  * should not keep surfacing as unread in their inboxes.
  */
 export function deletePingsForMessage(messageId: number): { deleted: number } {
-    const r = getDb().delete(schema.pings)
+    const r = revisedPings(getDb().delete(schema.pings)
         .where(targetMatches(messageId))
-        .run();
+        .returning(PING_TARGET).all());
     pingsChanged(null);
     return { deleted: r.changes };
 }
@@ -202,13 +230,13 @@ export function markMessageSeen(
     consumer_id: string,
     message_id: number,
 ): { updated: number } {
-    const r = getDb().update(schema.pings)
+    const r = revisedPings(getDb().update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             targetMatches(message_id),
             isNull(schema.pings.seenAt),
-        )).run();
+        )).returning(PING_TARGET).all());
     pingsChanged(consumer_id);
     return { updated: r.changes };
 }
@@ -225,14 +253,14 @@ export function markMessageSeen(
  * MCP can't fabricate it).
  */
 export function clearSeenForMessage(message_id: number): { resurfaced: number } {
-    const r = getDb().update(schema.pings)
+    const r = revisedPings(getDb().update(schema.pings)
         .set({ seenAt: null })
         .where(and(
             targetMatches(message_id),
             // Only flip rows that were ack'd ; an already-unread ping
             // doesn't count as a re-surface (would inflate the metric).
             sql`${schema.pings.seenAt} IS NOT NULL`,
-        )).run();
+        )).returning(PING_TARGET).all());
     pingsChanged(null);
     return { resurfaced: r.changes };
 }
@@ -276,7 +304,7 @@ export function pingCountsByConsumer(): Map<string, { total: number; unseen: num
 }
 
 export function purgeSeenPingsForClosedTickets(): { deleted: number } {
-    const r = getDb().run(sql`
+    const r = revisedPings(getDb().all<{ ticketId: number | null; commentId: number | null }>(sql`
         WITH closed AS (
             SELECT ticket_id,
                    MAX(CASE WHEN kind='ticket_closed'   THEN id END) c,
@@ -291,9 +319,10 @@ export function purgeSeenPingsForClosedTickets(): { deleted: number } {
           AND (ticket_id IN (SELECT ticket_id FROM closed)
             OR comment_id IN (SELECT id FROM _messages
                               WHERE ticket_id IN (SELECT ticket_id FROM closed)))
-    `);
+        RETURNING ticket_id AS ticketId, comment_id AS commentId
+    `));
     pingsChanged(null);
-    return { deleted: (r as { changes?: number }).changes ?? 0 };
+    return { deleted: r.changes };
 }
 
 export function purgeSeenPingsForTicket(ticket_id: number): { deleted: number } {
@@ -302,9 +331,9 @@ export function purgeSeenPingsForTicket(ticket_id: number): { deleted: number } 
         .from(schema.messages).where(eq(schema.messages.ticketId, ticket_id))
         .all().map((r) => r.id);
     const ids = [ticket_id, ...messageIds];
-    const r = db.delete(schema.pings)
+    const r = revisedPings(db.delete(schema.pings)
         .where(and(targetInArray(ids), isNotNull(schema.pings.seenAt)))
-        .run();
+        .returning(PING_TARGET).all());
     pingsChanged(null);
     return { deleted: r.changes };
 }
@@ -330,16 +359,16 @@ export function prunePings(
     }
     if (opts.del) {
         // Hard-delete every ping row (seen or not) for the consumer in scope.
-        const r = db.delete(schema.pings)
+        const r = revisedPings(db.delete(schema.pings)
             .where(and(eq(schema.pings.recipient, consumer_id), scope))
-            .run();
+            .returning(PING_TARGET).all());
         return { affected: r.changes };
     }
     // Mark-seen only the still-unseen rows (seen ones are already drained).
-    const r = db.update(schema.pings)
+    const r = revisedPings(db.update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(eq(schema.pings.recipient, consumer_id), isNull(schema.pings.seenAt), scope))
-        .run();
+        .returning(PING_TARGET).all());
     pingsChanged(consumer_id);
     return { affected: r.changes };
 }
@@ -357,13 +386,13 @@ export function markAllSeenForProject(
         : [];
     const allIds = [...ticketIds, ...messageIds];
     if (!allIds.length) return { updated: 0 };
-    const r = db.update(schema.pings)
+    const r = revisedPings(db.update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             targetInArray(allIds),
-        )).run();
+        )).returning(PING_TARGET).all());
     pingsChanged(consumer_id);
     return { updated: r.changes };
 }
@@ -398,13 +427,13 @@ export function markTicketSeen(
     }
     if (commentIds.length) targetConds.push(inArray(schema.pings.commentId, commentIds));
     if (!targetConds.length) return { updated: 0 };
-    const r = db.update(schema.pings)
+    const r = revisedPings(db.update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             or(...targetConds),
-        )).run();
+        )).returning(PING_TARGET).all());
     pingsChanged(consumer_id);
     return { updated: r.changes };
 }
@@ -426,13 +455,13 @@ export function markTicketUnseen(
         .map((r) => r.id);
     const conds = [eq(schema.pings.ticketId, ticket_id)];
     if (commentIds.length) conds.push(inArray(schema.pings.commentId, commentIds));
-    const r = db.update(schema.pings)
+    const r = revisedPings(db.update(schema.pings)
         .set({ seenAt: null })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNotNull(schema.pings.seenAt),
             or(...conds),
-        )).run();
+        )).returning(PING_TARGET).all());
     pingsChanged(consumer_id);
     return { updated: r.changes };
 }
@@ -451,13 +480,13 @@ export function markSeenUpToForProject(
         : [];
     const allIds = [...ticketIds, ...messageIds].filter((id) => id <= upToId);
     if (!allIds.length) return { updated: 0 };
-    const r = db.update(schema.pings)
+    const r = revisedPings(db.update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             targetInArray(allIds),
-        )).run();
+        )).returning(PING_TARGET).all());
     pingsChanged(consumer_id);
     return { updated: r.changes };
 }
@@ -482,10 +511,10 @@ export function markPingsRead(opts: {
             )!,
         );
     }
-    const r = getDb().update(schema.pings)
+    const r = revisedPings(getDb().update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(...conds))
-        .run();
+        .returning(PING_TARGET).all());
     pingsChanged(opts.recipient);
     return { updated: r.changes };
 }

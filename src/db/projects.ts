@@ -5,6 +5,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
+import { reviseConsumers, reviseTickets } from "./doc-revs.js";
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { lastMoveAt } from "./last-move.js";
 import {
@@ -934,6 +935,9 @@ export function purgeOldClosedTickets(
         // #786 — satellite tables keyed on ticket_id must drop their rows too.
         tx.delete(schema.backlogWakeLog).where(inArray(schema.backlogWakeLog.ticketId, purgeIds)).run();
         tx.delete(schema.tickets).where(inArray(schema.tickets.id, purgeIds)).run();
+        // #4866 — the purged tickets are gone, and their pings and wakes with them.
+        reviseTickets(purgeIds);
+        reviseConsumers("all");
         return { purged_tickets: purgeIds.length, purged_messages: messageIds.length };
     });
     // #2165 — tickets removed wholesale; the ids are gone, not merely changed.
@@ -992,6 +996,7 @@ export function relocateConsumerRoots(oldPath: string, newPath: string): string[
         db.update(schema.consumers).set({ cwd: newPath + (r.cwd ?? "").slice(oldPath.length) })
             .where(eq(schema.consumers.consumerId, r.id)).run();
     }
+    if (rows.length > 0) reviseConsumers(rows.map((r) => r.id));
     if (rows.length > 0) invalidateProjectsDetailed();
     return rows.map((r) => r.id);
 }
@@ -1057,6 +1062,8 @@ export function renameProject(oldName: string, newName: string): ProjectRenameRe
             .set({ project: newTrim })
             .where(eq(schema.consumers.project, oldTrim))
             .run().changes;
+        // #4866 — consumers' rows and subscriptions name the project: they change.
+        reviseConsumers("all");
         const configOverrides = tx.update(schema.configOverrides)
             .set({ project: newTrim })
             .where(eq(schema.configOverrides.project, oldTrim))
@@ -1108,6 +1115,9 @@ export function deleteProject(name: string): { deleted_messages: number } {
             tx.delete(schema.pings).where(inArray(schema.pings.ticketId, ticketIds)).run();
             // #786 — satellite tables keyed on ticket_id (drop alongside pings).
             tx.delete(schema.backlogWakeLog).where(inArray(schema.backlogWakeLog.ticketId, ticketIds)).run();
+            // #4866 — the project's tickets go, and their pings and wakes with them.
+            reviseTickets(ticketIds);
+            reviseConsumers("all");
         }
         if (messageIds.length) {
             tx.delete(schema.pings).where(inArray(schema.pings.commentId, messageIds)).run();
@@ -1142,6 +1152,7 @@ export function recordBacklogWake(consumerId: string, ticketId: number): void {
         target: [schema.backlogWakeLog.consumerId, schema.backlogWakeLog.ticketId],
         set: { wakeAt: nowIso },
     }).run();
+    reviseTickets([ticketId]);
 }
 
 /**

@@ -19,6 +19,7 @@
  * What would take it over is not credited, and a balance already over (the cap
  * lowered, or credit earned before it existed) is cut back by a `cap` move.
  */
+import { reviseConsumers, reviseTickets } from "./doc-revs.js";
 import { projectRepos } from "../project-repos.js";
 import { ticketChanged } from "./ticket-change.js";
 import { and, eq, sql } from "drizzle-orm";
@@ -132,6 +133,11 @@ function record(move: Omit<schema.NewWaitCreditMove, "createdAt">): boolean {
         INSERT OR IGNORE INTO wait_credit_moves (consumer_id, project, kind, minutes, ticket_id, message_id, ref, requested, created_at)
         VALUES (${move.consumerId}, ${move.project}, ${move.kind}, ${move.minutes}, ${move.ticketId ?? null}, ${move.messageId ?? null}, ${move.ref ?? null}, ${move.requested ?? null}, ${new Date().toISOString()})
     `);
+    if (r.changes > 0) {
+        // #4866 — a move about a ticket is in that ticket's document; one about none, in its consumer's.
+        if (move.ticketId != null) reviseTickets([move.ticketId]);
+        else reviseConsumers([move.consumerId]);
+    }
     return r.changes > 0;
 }
 
@@ -392,6 +398,7 @@ export function trimStepWaits(maxMinutes: number, nowMs = Date.now()): TrimmedSt
     `);
     return rows.map((r) => {
         getDb().run(sql`UPDATE _messages SET meta = json_set(meta, '$.step_resume_at', ${limit}) WHERE id = ${r.id}`);
+        reviseTickets([r.ticket_id]); // #4866 — its step's comment changed
         let refunded = 0;
         const spend = getDb().all<{ spent: number }>(sql`
             SELECT -minutes AS spent FROM wait_credit_moves WHERE kind = 'spend' AND message_id = ${r.id}

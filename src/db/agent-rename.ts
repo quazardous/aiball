@@ -10,6 +10,7 @@
  * its claims stayed on the old one. The new consumer's own record is kept; a
  * row that would duplicate one it has (a subscription, a ping) is dropped.
  */
+import { reviseConsumers, reviseTickets } from "./doc-revs.js";
 import { sql } from "drizzle-orm";
 import { getDb } from "./connection.js";
 import { clearFlagsCache } from "./flags-cache.js";
@@ -121,5 +122,8 @@ export function renameAgent(oldId: string, newId: string): AgentRenameCounts {
     clearFlagsCache();
     invalidateFlagsCache();
     clearInboxAgg();
+    // #4866 — every document may name the agent: a replica takes them all again.
+    reviseConsumers("all");
+    reviseTickets("all");
     return out;
 }

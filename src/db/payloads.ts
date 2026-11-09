@@ -18,6 +18,7 @@
 import { eq } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
+import { reviseTickets } from "./doc-revs.js";
 import {
     type FilteredPayload,
     filterPayload,
@@ -186,6 +187,7 @@ export function writeTicketPayload(
             .values({ ticketId, createdAt: now, ...values })
             .run();
     }
+    reviseTickets([ticketId]);
     return readTicketPayload(ticketId) as TicketPayloadView;
 }
 
@@ -214,5 +216,6 @@ export function revokeTicketPayload(ticketId: number, by: string): TicketPayload
         })
         .where(eq(schema.ticketPayloads.ticketId, ticketId))
         .run();
+    reviseTickets([ticketId]);
     return readTicketPayload(ticketId);
 }

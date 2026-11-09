@@ -527,6 +527,17 @@ export const sequences = sqliteTable("sequences", {
     next: integer("next").notNull(),
 });
 
+/**
+ * #4866 — each document's revision: the `rev` sequence's number it took the
+ * last time it changed (`src/db/doc-revs.ts`). A document is a ticket or a
+ * consumer; a replica pulls the documents revised after its cursor.
+ */
+export const docRevs = sqliteTable("doc_revs", {
+    kind: text("kind").notNull(),
+    key: text("key").notNull(),
+    rev: integer("rev").notNull(),
+}, (t) => [primaryKey({ columns: [t.kind, t.key] }), uniqueIndex("idx_doc_revs_rev").on(t.rev)]);
+
 /** #4866 — a range of a sequence reserved to a node: the sequence's next number never falls in it. */
 export const sequenceRanges = sqliteTable("sequence_ranges", {
     sequence: text("sequence").notNull(),

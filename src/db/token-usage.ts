@@ -11,6 +11,7 @@
 import { inArray, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
+import { reviseTickets } from "./doc-revs.js";
 
 /** A turn's usage delta (any subset; missing = 0). */
 export interface TokenDelta {
@@ -47,6 +48,7 @@ export function addTicketTokenUsage(ticket_id: number, d: TokenDelta): void {
             updatedAt: now,
         },
     }).run();
+    reviseTickets([ticket_id]);
 }
 
 /** #404: read accumulated tallies for a set of tickets (absent = no usage yet). */

@@ -23,6 +23,8 @@ type Db = BetterSQLite3Database<typeof schema>;
 export const SEQUENCES = {
     ticket: { table: schema.tickets, id: schema.tickets.id, first: 1 },
     message: { table: schema.messages, id: schema.messages.id, first: 1_000_000 },
+    /** A document's revision (`doc_revs`): taken when a document already holds it. */
+    rev: { table: schema.docRevs, id: schema.docRevs.rev, first: 1 },
 } as const;
 
 export type SequenceName = keyof typeof SEQUENCES;
