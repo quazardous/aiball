@@ -36,7 +36,8 @@ export function daemonView(node, health) {
 export function replicaWords(replica) {
     if (!replica) return '';
     if (replica.complete) return 'copy of the board complete';
-    return replica.total ? `copy of the board: ${replica.kept}/${replica.total}` : `copy of the board: ${replica.kept} documents`;
+    const docs = replica.total ? `copy of the board: ${replica.kept}/${replica.total}` : `copy of the board: ${replica.kept} documents`;
+    return replica.files && replica.files.total > 0 ? `${docs}, files ${replica.files.kept}/${replica.files.total}` : docs;
 }
 
 function withSlash(url) {

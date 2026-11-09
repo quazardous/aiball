@@ -503,6 +503,12 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `replica.board` | the same | — `{ tables? }`: the rows of those board tables (all of them without it), with their signatures |
 | `replica.changes` | the same | — `{ after, limit? }` (5000 at most): what changed after `after`, as headers `{ kind, key, rev, project }`, oldest revision first, with `last` and `board` (the signatures); a node takes from them the documents it keeps |
 | `replica.docs` | the same | — `{ keys: [{ kind, key }] }` (100 at most): those documents, whole, at their current revision |
+| `replica.handover_begin` | a node (its token) | — a master switch begins ([`REPLICA.md`](./REPLICA.md)): the master stops taking writes (they answer 503 `SWITCHING`, their clients queue them) and answers `{ last, counts, board }` for the node to check; `SWITCH_NOT_READY` while another node is connected |
+| `replica.handover_abort` | a node | — the switch did not happen: the master takes writes again |
+| `replica.doc_revs` | a node, during a switch | — the master's revisions, whole |
+| `replica.tokens` | a node, during a switch | — the master's tokens, whole (the node asks only over https, a tailnet or this machine) |
+| `replica.handover_commit` | a node, during a switch | — `{ url, token, restart? }`: the master becomes the node's node (its `proxy:` block points at `url` with `token`, its database is a complete copy) and restarts |
+| `replica.take` | human or agent, this machine's | — on a proxy node: take the board over from its master (`aiball master take`); `{ url, restart? }`, `url` where the master reaches this machine; `SWITCH_NOT_READY` with `reasons` when a condition does not hold |
 | `signal_key.list` | human | `GET /api/signal-keys` |
 | `signal_key.create` | human | `POST /api/signal-keys` — the only answer that carries the token |
 | `signal_key.update` | human | `PATCH /api/signal-keys/:key_id` |

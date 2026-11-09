@@ -1,9 +1,10 @@
 # Replica: a proxy node that keeps working when cut from its parent, and can take its place
 
-> **Status: built up to the node's copy** (numbers from sequences, a revision
-> per document, the master's `replica.*` methods and signal, the node's lazy
-> copy, its background replication, its reads when cut); the planned switch and
-> the rest are a design. This page states what a proxy node does when it loses
+> **Status: built up to the planned switch** (numbers from sequences, a
+> revision per document, the master's `replica.*` methods and signal, the
+> node's lazy copy with the attachments' files, its background replication, its
+> reads when cut, `aiball master take`); local writes while cut, failover and
+> the cascade are a design. This page states what a proxy node does when it loses
 > its parent, how the board is copied, the choices made and the work left.
 
 A proxy node ([`REMOTE.md`](./REMOTE.md), type 1) is a relay: the daemon on
@@ -261,6 +262,31 @@ copy is beside, in its own database:
 The copy is written with its foreign keys unchecked: a ticket kept may name one
 that is not (its parent, a relation), as a partial copy must allow.
 
+## Switching the master: `aiball master take`
+
+Made on the node (B) that takes the board over from its master (A):
+
+```
+aiball master take --url http://B:7777     # where A reaches B from then on
+```
+
+1. **Conditions**, each said when it fails: B's copy is complete (every
+   document and every attachment's file); the link between them is https, a
+   tailnet address or the same machine (A's tokens will cross it); no other node
+   is connected to A (it would need the cascade).
+2. **A stops taking writes**: they answer 503 `SWITCHING` and their clients
+   queue them; reads still answer. A's own periodic board writes stop too.
+3. **B catches up** to A's last revision, takes A's revisions and tokens whole,
+   and checks it holds what A holds (counts, board signatures). A mismatch
+   aborts: A takes writes again, nothing has changed.
+4. **The point of no return**: B mints a node token for A; A writes its
+   `proxy:` block towards B and a complete `replica.json`; B drops its own
+   `proxy:` block. Both restart (`--no-restart` leaves it to you), and each
+   machine's loops with them.
+
+A's address keeps serving the board, relayed to B: tvty, a phone, A's tailnet
+URL need no change. Writes queued during the switch go up to B from A's spool.
+
 ## Order of work
 
 1. **The spool on a proxy node goes to its parent** (done). Writes made during
@@ -269,8 +295,8 @@ that is not (its parent, a relation), as a partial copy must allow.
    `replica.pull` and `replica.board`, the signal to nodes.
 3. **A copy on B** (done): lazy, ticket by ticket, then the rest in the
    background; reads served from it when cut, writes spooled.
-4. **Planned switch** (the copy covers the whole board): the human's gesture,
-   A drains, B takes over, A follows.
+4. **Planned switch** (done): `aiball master take`, A drains, B takes over,
+   A follows. The GNOME extension's and the Nodes panel's gestures are next.
 5. **Local writes while cut**, tickets numbered from the node's reserved range.
 6. **Failover as a human gesture**, with the replay of A's writes after the
    split.

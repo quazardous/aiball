@@ -226,7 +226,8 @@ function replicaShort(s: WsState): string | null {
     const r = s.replica;
     if (!r) return null;
     if (r.complete) return "copy complete";
-    return r.total ? `copy ${r.kept}/${r.total}` : `copy ${r.kept}`;
+    const docs = r.total ? `copy ${r.kept}/${r.total}` : `copy ${r.kept}`;
+    return r.files && r.files.total > 0 ? `${docs} · files ${r.files.kept}/${r.files.total}` : docs;
 }
 function replicaTitle(s: WsState): string {
     const r = s.replica;

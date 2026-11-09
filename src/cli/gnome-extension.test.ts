@@ -277,6 +277,8 @@ test("a proxy node with a copy of the board says how far along it is, and serves
     const replica = { kept: 120, total: 4936, complete: false, cursor: 4900, synced_at: "2026-11-09T09:30:00.000Z" };
     const up = node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777", replica }, { ok: true, version: "0.59.0" });
     assert.match(node.presentation(up, local).stateLine, /copy of the board: 120\/4936/);
+    const withFiles = node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777", replica: { ...replica, files: { kept: 30, total: 1357 } } }, { ok: true });
+    assert.match(node.presentation(withFiles, local).stateLine, /120\/4936, files 30\/1357/);
     const done = node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777", replica: { ...replica, complete: true } }, { ok: true });
     assert.match(node.presentation(done, local).stateLine, /copy of the board complete/);
     const cut = node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777", replica }, null);

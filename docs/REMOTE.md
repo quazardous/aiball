@@ -182,7 +182,13 @@ proxy:
     pause_ms: 2000     # rest between two batches
 ```
 
-B's cursor and progress are in `$AIBALL_HOME/replica.json`.
+B's cursor and progress are in `$AIBALL_HOME/replica.json`. Its copy includes
+the attachments' files (taken when a read names one, then in the background,
+each checked against its name).
+
+**Swapping roles**: once B's copy is complete, `aiball master take --url
+<where A reaches B>` on B makes B the master and A its node
+([`REPLICA.md`](./REPLICA.md)).
 
 **When A is out of reach**, B answers its clients' reads from its copy (the
 tickets it keeps; a node with no copy yet answers 502), and writes (replies,

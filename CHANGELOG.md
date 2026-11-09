@@ -25,6 +25,8 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `aiball master take`, on a proxy node whose copy is complete: the board is handed over without merging anything. The master stops taking writes (its clients queue them), the node catches up, takes its revisions and tokens (only over https, a tailnet or the same machine), checks it, and the two swap roles; both restart.
+- A proxy node's copy includes the attachments' files, taken when a read names one and then in the background, each checked against its name; its copy is complete only once every file is there.
 - A proxy node cut from its master answers its clients' reads from its copy instead of failing (a write is refused as unavailable and queued by the client), and says how far its copy is along: `/api/node`, its master's Nodes panel, the GNOME extension.
 - A proxy node replicates the rest of the board in the background, quietly (small batches, a rest between them, stepping aside while its clients are at work and on battery), until it has it all; then it follows every change. `proxy.replica` in the global config tunes it or turns it off.
 - A proxy node keeps a copy of the tickets it relays a read of, with the board's small tables, in its own database: when its master says its last revision moved, it asks what changed (`replica.changes`) and takes again the documents it keeps (`replica.docs`), and no other.

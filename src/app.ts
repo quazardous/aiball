@@ -3,12 +3,13 @@
 // through the business API. daemon.ts wraps this in the HTTP + UDS + WS servers;
 // tests call createApp() + listen on an ephemeral port (or use it directly).
 // No server bind, no side effects on import.
-import { replicaProgress } from "./replica-node.js";
+import { replicaNode, replicaProgress } from "./replica-node.js";
 import { requestStatsMiddleware, requestStatsReport } from "./request-stats.js";
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { UPLOADS_DIR } from "./paths.js";
 import { api } from "./api.js";
 import { serveUpload } from "./api/uploads.js";
 import { errorCodeDefaults } from "./api/error-codes.js";
@@ -87,6 +88,16 @@ export function createApp(opts: { basePath?: string } = {}): express.Express {
         mountVersionRoutes(app);
         const fwd = proxyMiddleware(proxy);
         app.use("/api", fwd);
+        // #4873 — an attachment this node holds is served from its copy (its
+        // name is its content: it cannot be stale); one it lacks is relayed,
+        // and taken from the master on the way.
+        app.get("/uploads/:file", (req, res, next) => {
+            const m = /^([0-9a-f]{64})\.([A-Za-z0-9]+)$/.exec(req.params.file);
+            if (!m) { next(); return; }
+            if (existsSync(join(UPLOADS_DIR, req.params.file))) { serveUpload(req, res); return; }
+            replicaNode()?.keepFile(m[1]!, m[2]!);
+            next();
+        });
         app.use("/uploads", fwd);
         // #394 (8c7xut): the browser UI is degraded in proxy mode (it mirrors A),
         // so instead of the SPA serve a tiny "I'm a proxy of <url>" landing page.

@@ -4001,6 +4001,20 @@
       ]
     },
     {
+      "name": "replica.doc_revs",
+      "description": "At a switch only: the master's revisions, whole.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "replica.docs",
       "description": "These documents, whole, at their current revision.",
       "paramStructure": "by-name",
@@ -4043,6 +4057,86 @@
       ]
     },
     {
+      "name": "replica.handover_abort",
+      "description": "The switch did not happen: the master takes writes again.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "replica.handover_begin",
+      "description": "The master stops taking writes (they wait, their clients queue them) and says its last revision, its counts and its board's signatures, for the node taking over to check. Refused while another node is connected: it would have to go through the new master's node (a cascade, not built).",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "replica.handover_commit",
+      "description": "The point of no return: the master becomes the node's node. Its `proxy:` block points at `url` with `token`, its database is a complete copy level with its last revision; it restarts (unless `restart: false`).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "token",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "url",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "by",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        {
+          "name": "restart",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "replica.pull",
       "description": "The documents (tickets, consumers) revised after `after`, oldest revision first, each whole; the master's last revision, and a signature per board table.",
       "paramStructure": "by-name",
@@ -4066,6 +4160,51 @@
           }
         }
       ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "replica.take",
+      "description": "On a proxy node, take the board over from its master: the human's gesture (`aiball master take`). `url` is where the master reaches this machine. Refused with the reasons when a condition does not hold.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "url",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "name": "restart",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ],
+      "x-machine": true
+    },
+    {
+      "name": "replica.tokens",
+      "description": "At a switch only: the master's tokens, whole, for the node taking over to recognise its clients. The node asks only over https, a tailnet or this machine (`secureLink`).",
+      "paramStructure": "by-name",
+      "params": [],
       "result": {
         "name": "result",
         "schema": {}
@@ -6027,6 +6166,8 @@
             "STEP_TIMER_TOO_LONG",
             "SUMMARY_REQUIRED",
             "SUMMARY_TOO_LONG",
+            "SWITCHING",
+            "SWITCH_NOT_READY",
             "TAG_UNKNOWN",
             "TICKET_ASSIGNED",
             "TICKET_HELD",

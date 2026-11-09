@@ -17,7 +17,9 @@ import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSyn
 import { join } from "node:path";
 import { BusClient } from "./bus-client.js";
 import { relayAuthorization, type ProxyConfig, type ProxyTokenStore } from "./proxy.js";
-import { AIBALL_HOME } from "./paths.js";
+import { AIBALL_HOME, UPLOADS_DIR } from "./paths.js";
+import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import type { Document } from "./db/documents.js";
 import type { DocKind } from "./db/doc-revs.js";
 import { applyBoardTables, applyDocuments, keeps } from "./db/replica-apply.js";
@@ -75,6 +77,8 @@ export interface ReplicaNode {
     signal(last: number): void;
     /** Keep this document from now on (a read the node relayed named it). */
     keep(kind: DocKind, key: string): void;
+    /** #4873 — take this attachment's file from the master (a read the node relayed named it). */
+    keepFile(sha: string, ext: string): void;
     /** Catch up now; resolves when level, or when the master is out of reach. */
     sync(): Promise<void>;
     /** The node's clients are at work: the background replication steps aside a while. */
@@ -88,6 +92,8 @@ export interface ReplicaNode {
 
 export interface ReplicaProgress {
     kept: number;
+    /** #4873 — the attachments' files present here, out of the uploads the copy lists. */
+    files: { kept: number; total: number };
     /** The master's documents, as last counted (null before a background pass). */
     total: number | null;
     complete: boolean;
@@ -145,6 +151,32 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
     return node;
 }
 
+/** #4873 — the uploads the copy lists whose file is not here. */
+export function missingFiles(): Array<{ sha: string; ext: string }> {
+    const rows = getRawSqlite().prepare(`SELECT sha, ext FROM uploads ORDER BY created_at DESC`).all() as Array<{ sha: string; ext: string }>;
+    return rows.filter((r) => !existsSync(join(UPLOADS_DIR, `${r.sha}.${r.ext}`)));
+}
+
+function filesProgress(): { kept: number; total: number } {
+    const total = (getRawSqlite().prepare(`SELECT count(*) AS n FROM uploads`).get() as { n: number }).n;
+    return { kept: total - missingFiles().length, total };
+}
+
+/**
+ * #4873 — write an attachment's file taken from the master, once its content is
+ * checked: its name is the sha256 of its content, so a file that does not match
+ * is refused and taken again later.
+ */
+export function storeFile(sha: string, ext: string, content: Buffer): boolean {
+    if (createHash("sha256").update(content).digest("hex") !== sha) return false;
+    mkdirSync(UPLOADS_DIR, { recursive: true });
+    const final = join(UPLOADS_DIR, `${sha}.${ext}`);
+    const tmp = `${final}.tmp`;
+    writeFileSync(tmp, content);
+    renameSync(tmp, final);
+    return true;
+}
+
 function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode {
     let client: BusClient | null = null;
     let syncing: Promise<void> | null = null;
@@ -190,6 +222,16 @@ function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode 
         }
     }
 
+    /** #4873 — one attachment's file, from the master, checked. */
+    async function fetchFile(sha: string, ext: string): Promise<void> {
+        if (existsSync(join(UPLOADS_DIR, `${sha}.${ext}`))) return;
+        const auth = relayAuthorization(cfg, store, undefined);
+        const headers: Record<string, string> = auth.ok && auth.authorization ? { authorization: auth.authorization } : {};
+        const res = await fetch(`${cfg.url.replace(/\/$/, "")}/uploads/${sha}.${ext}`, { headers });
+        if (!res.ok) throw new Error(`attachment ${sha.slice(0, 12)}: ${res.status}`);
+        if (!storeFile(sha, ext, Buffer.from(await res.arrayBuffer()))) console.warn(`[replica] attachment ${sha.slice(0, 12)} did not match its name: refused`);
+    }
+
     async function syncBoard(signatures: Record<string, string>): Promise<Record<string, string>> {
         const state = readReplicaState();
         const moved = Object.keys(signatures).filter((t) => state.board[t] !== signatures[t]);
@@ -211,6 +253,8 @@ function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode 
                 if (state.complete || keeps(h.kind, h.key)) kept.set(`${h.kind}:${h.key}`, { kind: h.kind, key: h.key });
             }
             await fetchDocs([...kept.values()]);
+            // Complete, the node takes new attachments' files as they come.
+            if (state.complete) for (const f of missingFiles()) await fetchFile(f.sha, f.ext).catch(() => { /* taken by a later sync */ });
             const cursor = got.changes.length > 0 ? got.changes[got.changes.length - 1].rev : got.last;
             state = { ...readReplicaState(), cursor, board, synced_at: new Date().toISOString() };
             writeReplicaState(state);
@@ -276,7 +320,18 @@ function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode 
                 i += background.batch;
                 await rest(background.pauseMs);
             }
-            if (!stopped) {
+            // #4873 — then the attachments' files, as quietly, the most recent first.
+            const files = missingFiles();
+            for (let i = 0; i < files.length && !stopped; ) {
+                if (Date.now() - busyAt < BUSY_QUIET_MS || onBattery()) { await rest(Math.max(background.pauseMs, 1_000)); continue; }
+                for (const f of files.slice(i, i + background.batch)) {
+                    await fetchFile(f.sha, f.ext).catch((e) => console.warn(`[replica] ${(e as Error).message}`));
+                }
+                i += background.batch;
+                await rest(background.pauseMs);
+            }
+            // Complete: every document, and every attachment's file.
+            if (!stopped && missingFiles().length === 0) {
                 writeReplicaState({ ...readReplicaState(), complete: true });
                 console.log(`[replica] complete: ${total} documents`);
                 await sync();
@@ -299,7 +354,7 @@ function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode 
         busy() { busyAt = Date.now(); },
         progress() {
             const st = readReplicaState();
-            return { kept: countKept(), total, complete: st.complete, cursor: st.cursor, synced_at: st.synced_at };
+            return { kept: countKept(), files: filesProgress(), total, complete: st.complete, cursor: st.cursor, synced_at: st.synced_at };
         },
         signal(last) {
             if (last > readReplicaState().cursor) void sync();
@@ -307,6 +362,9 @@ function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode 
             if (!readReplicaState().complete) void backfill();
         },
         keep,
+        keepFile(sha, ext) {
+            void fetchFile(sha, ext).catch((e) => console.warn(`[replica] keep file: ${(e as Error).message}`));
+        },
         sync,
         close() {
             stopped = true;
