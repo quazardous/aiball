@@ -4,6 +4,36 @@ import { SPOOL_DIR, SPOOL_FAILED_DIR, ensureDirs } from "./paths.js";
 import { callerOf, callMethod, Refusal } from "./bus/methods.js";
 import "./bus/register.js";
 
+/**
+ * #4864 — how a spooled write is replayed. It resolves once the write is made
+ * (or was already: its idempotency key answers), throws `SpoolRefused` when
+ * the board refuses it (the file goes to `failed/`), and throws anything else
+ * when the board cannot be reached: the file stays, and the drain stops there,
+ * so the writes keep their order for the next drain.
+ */
+export type SpoolPoster = (msg: Record<string, unknown>, author: string) => Promise<void>;
+
+export class SpoolRefused extends Error {}
+
+/** The board is this daemon: the write goes through its own method table. */
+const localPoster: SpoolPoster = async (msg, author) => {
+    try {
+        await callMethod(callerOf({ consumer_id: author, token_kind: "agent", transport: "uds", token: null }), "message.post", msg);
+    } catch (e) {
+        throw new SpoolRefused(e instanceof Refusal ? `refused (${e.status} ${e.code}): ${e.message}` : `submit failed: ${(e as Error).message}`);
+    }
+};
+
+let poster: SpoolPoster = localPoster;
+
+/**
+ * #4864 — a proxy node replays its spool to its parent, never into the empty
+ * database it opens at boot: set once, at boot, by the daemon in relay mode.
+ */
+export function setSpoolPoster(p: SpoolPoster | null): void {
+    poster = p ?? localPoster;
+}
+
 /** The file `aiball drain` touches to wake the watcher: not a spooled write, so
  *  never read as one, but a reason to drain now (#3299). */
 export const DRAIN_TRIGGER = ".drain-trigger";
@@ -19,33 +49,40 @@ function isSpoolFile(name: string): boolean {
  * tag), and its idempotency key makes a write that had in fact gone through
  * answer with the message it made instead of posting it twice.
  */
-async function processOne(filename: string): Promise<void> {
+async function processOne(filename: string): Promise<"done" | "unreachable"> {
     const full = join(SPOOL_DIR, filename);
     let raw: string;
     try {
         raw = readFileSync(full, "utf8");
     } catch {
-        return; // file disappeared (concurrent drain) — skip
+        return "done"; // file disappeared (concurrent drain) — skip
     }
     let parsed: unknown;
     try {
         parsed = JSON.parse(raw);
     } catch (e) {
         moveToFailed(full, filename, `invalid JSON: ${(e as Error).message}`);
-        return;
+        return "done";
     }
     const msg = parsed as Record<string, unknown> | null;
     const author = typeof msg?.by_agent === "string" && msg.by_agent ? msg.by_agent : null;
     if (!msg || typeof msg !== "object" || Array.isArray(msg) || !author) {
         moveToFailed(full, filename, "not a message with its author (by_agent)");
-        return;
+        return "done";
     }
     try {
-        await callMethod(callerOf({ consumer_id: author, token_kind: "agent", transport: "uds", token: null }), "message.post", msg);
+        await poster(msg, author);
         unlinkSync(full);
     } catch (e) {
-        moveToFailed(full, filename, e instanceof Refusal ? `refused (${e.status} ${e.code}): ${e.message}` : `submit failed: ${(e as Error).message}`);
+        if (e instanceof SpoolRefused) {
+            moveToFailed(full, filename, e.message);
+            return "done";
+        }
+        // #4864 — the board is out of reach: the file waits for the next drain.
+        console.warn(`[spool] kept ${filename}: ${(e as Error).message}`);
+        return "unreachable";
     }
+    return "done";
 }
 
 function moveToFailed(full: string, filename: string, reason: string): void {
@@ -88,7 +125,7 @@ async function drainOnce(): Promise<number> {
         } catch {
             continue;
         }
-        await processOne(f);
+        if (await processOne(f) === "unreachable") break;
         count++;
     }
     if (count > 0) {

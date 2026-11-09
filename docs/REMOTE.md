@@ -159,8 +159,20 @@ token-less over the UDS / `127.0.0.1`, as if A were local.
 The B daemon becomes a **transparent relay**: it forwards `/api/*` and
 `/uploads/*` to A (injecting the bearer), relays each local bus connection (`/bus`)
 to A's, and keeps no local DB. Local clients on B talk to the UDS /
-`127.0.0.1` token-less, exactly as if A were local. If A is unreachable the proxy
-answers 502 and the local client spools the write for replay.
+`127.0.0.1` token-less, exactly as if A were local.
+
+**When A is out of reach**, reads answer 502 and writes (replies, new tickets,
+decisions) are spooled on B (`$AIBALL_HOME/spool/`). B replays them to A as
+soon as A answers again (its link to A reconnects), each as its author, with
+its idempotency key, so a write that had gone through is not made twice. A
+write A refuses lands in `spool/failed/`, as a live call would be refused. In
+strict mode the node lends no token, so a spooled write stays in the spool:
+replay it from its author's side.
+
+Before this was fixed, a node replayed its spool into its own empty database
+and every write of a cut ended in `spool/failed/` refused with
+`PROJECT_NOT_FOUND` or `TICKET_NOT_FOUND`. Such files can be moved back to
+`spool/` by hand; the node replays them to A on its next drain (`aiball drain`).
 
 ### The node token — why the proxy needs a *special* token
 

@@ -11,7 +11,8 @@ import { initSessions, listSessionViews, onSessionsChanged } from "./sessions/re
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
 import { ensureMachineSecret } from "./machine-secret.js";
-import { drainSpool, watchSpool } from "./spool.js";
+import { drainSpool, setSpoolPoster, watchSpool } from "./spool.js";
+import { relaySpoolPoster } from "./spool-relay.js";
 import { backfillParentTicketRelations } from "./db.js";
 import { startScheduler, CRON_TASKS } from "./cron/index.js";
 import { registerAutomationRuntime } from "./automation/runtime.js";
@@ -142,6 +143,8 @@ function main(): void {
     const relay = loadProxy();
     const relayTokens = relay ? loadProxyTokens() : null;
     if (relay) attachBusRelay(server, relay, relayTokens!);
+    // #4864 — a proxy node's spool goes to its parent, never into its own empty database.
+    if (relay) setSpoolPoster(relaySpoolPoster(relay, relayTokens!));
     // #3066 — the session hosts still running from before this start. #3284 —
     // a proxy node too: it answers its own machine's sessions.
     // #3288 — the models there are, once per start: an open list, kept on disk.
@@ -189,7 +192,8 @@ function main(): void {
         const px = loadProxy();
         if (px) {
             // #3468 — with this node's own sessions, which its hub cannot see.
-            startProxyWsClient(px, { list: listSessionViews, onChange: onSessionsChanged });
+            // #4864 — back in touch with the parent: what was spooled meanwhile goes up.
+            startProxyWsClient(px, { list: listSessionViews, onChange: onSessionsChanged }, { onConnected: () => void drainSpool() });
             console.log(`proxy WS client → ${px.url}/ws/proxy-node (persistent, with reconnect)`);
         }
     });

@@ -16,9 +16,10 @@
  * `x-aiball-consumer` header is preserved; a streamed response pipes through.
  * The bus is relayed on its own (#3071). No local DB in this mode.
  *
- * Resilience comes for free: when the remote is unreachable the proxy answers
- * 502, and the local AiballClient spools the write for replay (#389: 5xx/
- * transport → spool, 4xx → surfaced).
+ * When the remote is unreachable the proxy answers 502, and the local
+ * AiballClient spools the write (#389: 5xx/transport → spool, 4xx → surfaced).
+ * #4864 — the node replays its spool to the remote (src/spool-relay.ts), when
+ * the remote answers again; never into its own database, which is empty.
  */
 import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { hostname } from "node:os";
@@ -340,7 +341,7 @@ export function buildSessionsPushFrame(sessions: Array<{ agent: string | null }>
     return { kind: "node_sessions_push", sessions: sessions.filter((s) => s.agent) };
 }
 
-export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessionsSource): ProxyWsClientHandle {
+export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessionsSource, hooks: { onConnected?: () => void } = {}): ProxyWsClientHandle {
     // Convertit l'URL http(s):// → ws(s):// pour le canal WS.
     let wsUrl: string;
     try {
@@ -386,6 +387,8 @@ export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessions
         }
         ws.on("open", () => {
             attempt = 0; // succès → reset le backoff
+            // #4864 — the parent answers again: the node's spool can go up.
+            try { hooks.onConnected?.(); } catch (e) { console.warn(`[proxy WS] onConnected: ${(e as Error).message}`); }
             // #524 : résout le display_host via la provider chain (tailscale →
             // hostname). Mémoïsé, donc ce 1er appel paie le `tailscale status`
             // ; les reconnects sont gratuits. Null si même hostname() fail.
