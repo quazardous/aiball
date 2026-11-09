@@ -538,6 +538,18 @@ export const docRevs = sqliteTable("doc_revs", {
     rev: integer("rev").notNull(),
 }, (t) => [primaryKey({ columns: [t.kind, t.key] }), uniqueIndex("idx_doc_revs_rev").on(t.rev)]);
 
+/** #4874 — each time the board changed master, written once by the new master at the commit. */
+export const masterSwitches = sqliteTable("master_switches", {
+    id: integer("id").primaryKey(),
+    fromMachine: text("from_machine").notNull(),
+    fromUrl: text("from_url").notNull(),
+    toMachine: text("to_machine").notNull(),
+    toUrl: text("to_url").notNull(),
+    rev: integer("rev").notNull(),
+    by: text("by"),
+    at: text("at").notNull(),
+});
+
 /** #4866 — a range of a sequence reserved to a node: the sequence's next number never falls in it. */
 export const sequenceRanges = sqliteTable("sequence_ranges", {
     sequence: text("sequence").notNull(),

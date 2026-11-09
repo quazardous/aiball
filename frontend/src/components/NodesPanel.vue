@@ -5,7 +5,8 @@ import { fmtDateTime } from "../lib/time-zone";
 // Read-only list; revoke + relayed consumers live on the detail page (#452).
 // The token value is never exposed — a node is keyed by a non-secret `node_id`.
 import { computed, ref, onMounted, watch } from "vue";
-import { api, type NodeEnrollment, type NodeView, type PairingWindow } from "../lib/api";
+import { api, type MasterState, type NodeEnrollment, type NodeView, type PairingWindow } from "../lib/api";
+import { nodeSwitchState, TAKE_COMMAND } from "../lib/nodeSwitch";
 import { formatActivityAge } from "../lib/format";
 import { useNowTicker } from "../lib/now-ticker";
 import { useBus } from "../lib/bus";
@@ -177,10 +178,28 @@ async function decide(verdict: "approve" | "reject"): Promise<void> {
     }
 }
 
+// #4874 — this machine holds the board; the trace of its switches.
+const master = ref<MasterState | null>(null);
+
+/** Whether this node may take the board over now, and why not. */
+function switchOf(n: NodeView): { ready: boolean; reasons: string[] } {
+    const connected = n.ws_state?.connected === true;
+    const all = nodes.value.filter((x) => !x.revoked_at && x.ws_state?.connected).length;
+    return nodeSwitchState(n.ws_state?.replica, connected, all - (connected ? 1 : 0));
+}
+function switchTitle(n: NodeView): string {
+    const s = switchOf(n);
+    return s.ready
+        ? `This node may take the board over. On it: the GNOME menu, or ${TAKE_COMMAND}. Both daemons restart, and their loops.`
+        : `Not now: ${s.reasons.join("; ")}.`;
+}
+
 const { loading, error, load } = useLoader(async () => {
     const [ns, es] = await Promise.all([api.listNodes(), api.listNodeEnrollments()]);
     nodes.value = ns;
     enrollments.value = es;
+    // #4874 — who holds the board, and its switches. Never fails the list.
+    master.value = await api.masterState().catch(() => null);
     // #2087 — the enrolment window rides the same refresh, so opening or
     // shutting it anywhere reaches this panel too. It swallows its own errors,
     // so it can never fail the list.
@@ -373,6 +392,22 @@ function sortValue(row: Row, key: string): string | number {
                 remote clients to this daemon. The token value is never shown — a node is addressed by its id.
             </p>
         </PanelHeader>
+        <!-- #4874 — who holds the board, and each time it changed hands. The
+             switch itself is made on the node that takes over. -->
+        <div v-if="master" class="master-state">
+            <p class="aiball-explainer">
+                This machine (<strong>{{ master.machine }}</strong>) is the master: it holds the board.
+                A node whose copy is complete can take it over, from that node:
+                its GNOME menu, or <code>{{ TAKE_COMMAND }}</code>.
+            </p>
+            <ul v-if="master.switches.length" class="master-switches">
+                <li v-for="sw in master.switches" :key="sw.id">
+                    {{ fmt(sw.at) }} — <strong>{{ sw.from_machine }}</strong> handed the board to
+                    <strong>{{ sw.to_machine }}</strong> at revision {{ sw.rev }}{{ sw.by ? `, by ${sw.by}` : "" }}
+                    <code class="nodes-id" :title="`${sw.from_url} → ${sw.to_url}`">{{ sw.to_url }}</code>
+                </li>
+            </ul>
+        </div>
 
         <DataList
             table-class="nodes-table"
@@ -473,6 +508,12 @@ function sortValue(row: Row, key: string): string | number {
                         class="nodes-version"
                         :title="replicaTitle(asNode(row).ws_state!)"
                     >{{ replicaShort(asNode(row).ws_state!) }}</code>
+                    <code
+                        v-if="asNode(row).ws_state?.replica"
+                        class="nodes-version"
+                        :class="{ 'nodes-switch--ready': switchOf(asNode(row)).ready }"
+                        :title="switchTitle(asNode(row))"
+                    >{{ switchOf(asNode(row)).ready ? "can take over" : "cannot take over" }}</code>
                 </template>
             </template>
             <template #cell-host="{ row }">
@@ -567,6 +608,21 @@ function sortValue(row: Row, key: string): string | number {
     opacity: 0.6;
     font-style: italic;
     color: var(--p-text-muted-color);
+}
+.nodes-switch--ready {
+    opacity: 1;
+    color: var(--p-green-600, #16a34a);
+}
+.master-state {
+    margin: 0 0 1rem;
+}
+.master-switches {
+    margin: 0.25rem 0 0;
+    padding-left: 1.2rem;
+    font-size: var(--fs-sm);
+}
+.master-switches .nodes-id {
+    margin-left: 0.4rem;
 }
 .nodes-host {
     font-family: var(--font-mono);

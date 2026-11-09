@@ -4,6 +4,7 @@
 // tests call createApp() + listen on an ephemeral port (or use it directly).
 // No server bind, no side effects on import.
 import { replicaNode, replicaProgress } from "./replica-node.js";
+import { switchReadiness } from "./master-switch.js";
 import { requestStatsMiddleware, requestStatsReport } from "./request-stats.js";
 import express from "express";
 import { fileURLToPath } from "node:url";
@@ -84,7 +85,8 @@ export function createApp(opts: { basePath?: string } = {}): express.Express {
         // remote (in proxy mode /api/health relays → reports the REMOTE, not us).
         // The tray reads it to show a `[proxy]` badge; details live on the page.
         // #4867 — with where this node's copy of the board stands.
-        app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: true, upstream: proxy.url, replica: replicaProgress() }));
+        // #4874 — and whether it may take the board over now, or why not.
+        app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: true, upstream: proxy.url, replica: replicaProgress(), switch: switchReadiness(proxy) }));
         mountVersionRoutes(app);
         const fwd = proxyMiddleware(proxy);
         app.use("/api", fwd);

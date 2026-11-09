@@ -15,7 +15,9 @@
  *
  * Until step 4 nothing is changed but A's pause; an error aborts it.
  */
+import { hostname } from "node:os";
 import { getRawSqlite } from "./db/connection.js";
+import { recordSwitch } from "./db/master-switches.js";
 import { boardSignatures } from "./db/board-tables.js";
 import { applyTableWhole } from "./db/replica-apply.js";
 import { issueToken } from "./db/tokens.js";
@@ -26,6 +28,8 @@ import { restartViaSupervisor } from "./supervisor-restart.js";
 
 export interface HandoverBegun {
     last: number;
+    /** #4874 — the master's machine name, for the board's trace of the switch. */
+    machine?: string;
     counts: Record<string, number>;
     board: Record<string, string>;
 }
@@ -50,6 +54,26 @@ export function secureLink(url: string): boolean {
     return m !== null && Number(m[1]) >= 64 && Number(m[1]) <= 127;
 }
 
+export interface SwitchReadiness {
+    ready: boolean;
+    /** Why not, in words a human acts on; empty when ready. */
+    reasons: string[];
+}
+
+/**
+ * #4874 — whether this daemon may take the board over now, and if not why: what
+ * `takeOver` checks before it asks anything of the master, short of the URL it
+ * is given. Shown where the gesture is (the GNOME extension, through
+ * `/api/node`) and where the master sees its nodes (the Nodes panel).
+ */
+export function switchReadiness(cfg = loadProxy(), node: ReplicaNode | null = replicaNode()): SwitchReadiness {
+    const reasons: string[] = [];
+    if (!cfg || !node) reasons.push("this daemon is not a proxy node: it has no master to take over from");
+    if (cfg && !secureLink(cfg.url)) reasons.push(`the link to the master (${cfg.url}) is not https, a tailnet address or this machine`);
+    if (node && !readReplicaState().complete) reasons.push("this node's copy is not complete yet (its background replication is still going)");
+    return { ready: reasons.length === 0, reasons };
+}
+
 export class SwitchNotReady extends Error {
     constructor(readonly reasons: string[]) {
         super(`the switch cannot start: ${reasons.join("; ")}`);
@@ -71,11 +95,8 @@ export interface TakeResult {
  */
 export async function takeOver(selfUrl: string, opts: { restart?: boolean; by?: string } = {}, node: ReplicaNode | null = replicaNode()): Promise<TakeResult> {
     const cfg = loadProxy();
-    const reasons: string[] = [];
-    if (!cfg || !node) reasons.push("this daemon is not a proxy node: it has no master to take over from");
+    const reasons = [...switchReadiness(cfg, node).reasons];
     if (!secureLink(selfUrl)) reasons.push(`${selfUrl} is not https, a tailnet address or this machine: the master's tokens would cross it in clear`);
-    if (cfg && !secureLink(cfg.url)) reasons.push(`the link to the master (${cfg.url}) is not https, a tailnet address or this machine`);
-    if (node && !readReplicaState().complete) reasons.push("this node's copy is not complete yet (its background replication is still going)");
     if (reasons.length > 0 || !cfg || !node) throw new SwitchNotReady(reasons);
 
     const begun = await node.call<HandoverBegun>("replica.handover_begin", {});
@@ -101,6 +122,8 @@ export async function takeOver(selfUrl: string, opts: { restart?: boolean; by?: 
     await node.call("replica.handover_commit", { url: selfUrl, token: forA, restart: opts.restart !== false, by: opts.by ?? null });
     removeProxyConfig();
     forgetReplicaState();
+    // #4874 — the board's trace: written here, on the board's new master, once.
+    recordSwitch({ from_machine: begun.machine ?? new URL(cfg.url).hostname, from_url: cfg.url, to_machine: hostname(), to_url: selfUrl, rev: begun.last, by: opts.by ?? null });
     console.log(`[switch] this machine is the master now (from ${cfg.url}, at revision ${begun.last})`);
     const restarting = opts.restart !== false;
     if (restarting) setTimeout(() => restartViaSupervisor({ selfIsDaemon: true }), 1_000).unref();

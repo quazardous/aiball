@@ -24,6 +24,7 @@ export const BOARD_TABLES: ReadonlyArray<{ table: string; mode: "full" | "append
     { table: "token_usage_snapshot", mode: "append" },
     { table: "signal_deliveries", mode: "append" },
     { table: "idempotency_keys", mode: "append" },
+    { table: "master_switches", mode: "append" },
 ];
 
 /** Left out of the copy, each with why. */

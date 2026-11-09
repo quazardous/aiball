@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- Switching the board's master from where the machine's state shows: the GNOME extension on a proxy node offers to take the board over (greyed out with why when it cannot), and the master's Nodes panel says which machine holds the board and whether each node can take it over. Each switch is recorded on the board (from which machine to which, when, by whom, at which revision) and listed in the Nodes panel.
 - `aiball master take`, on a proxy node whose copy is complete: the board is handed over without merging anything. The master stops taking writes (its clients queue them), the node catches up, takes its revisions and tokens (only over https, a tailnet or the same machine), checks it, and the two swap roles; both restart.
 - A proxy node's copy includes the attachments' files, taken when a read names one and then in the background, each checked against its name; its copy is complete only once every file is there.
 - A proxy node cut from its master answers its clients' reads from its copy instead of failing (a write is refused as unavailable and queued by the client), and says how far its copy is along: `/api/node`, its master's Nodes panel, the GNOME extension.

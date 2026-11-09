@@ -4,6 +4,7 @@
  * oldest revision first, and the master's last revision. Answered to a proxy node, and to a human on this
  * machine's socket (to look).
  */
+import { hostname } from "node:os";
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { ERROR_CODES } from "../../domain.js";
@@ -127,7 +128,7 @@ defineMethod({
         }
         const last = lastRev();
         beginSwitching({ to: caller.machine ?? "a node", since: new Date().toISOString(), last });
-        return { last, counts: boardCounts(), board: boardSignatures() };
+        return { last, machine: hostname(), counts: boardCounts(), board: boardSignatures() };
     },
 });
 

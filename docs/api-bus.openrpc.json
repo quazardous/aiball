@@ -2003,6 +2003,19 @@
       "x-node-local": true
     },
     {
+      "name": "master.state",
+      "description": "Who holds the board: this machine (a master answers the panel), and the trace of each switch it went through, the most recent first.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human"
+      ]
+    },
+    {
       "name": "mention.suggestions",
       "description": "What the composer offers after `@`: projects and known agents.",
       "paramStructure": "by-name",

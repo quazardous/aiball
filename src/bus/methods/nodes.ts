@@ -6,7 +6,9 @@
  * mints it. The pairing requests themselves stay on HTTP: a node asking to be
  * enrolled holds no credential yet.
  */
+import { hostname } from "node:os";
 import { z } from "zod";
+import { listSwitches } from "../../db/master-switches.js";
 import { consumerIdOf, defineMethod, Refusal } from "../methods.js";
 import { listNodesWithRevoked, revokeNode } from "../../db/nodes.js";
 import { approveEnrollment, listEnrollments, rejectEnrollment } from "../../db/node-enrollments.js";
@@ -147,4 +149,15 @@ defineMethod({
     ...humanOnly(SIGNALS_ONLY),
     params: z.object({ name: z.string() }),
     run: (_caller, p) => ({ project: p.name, signals: listProjectSignals(p.name) }),
+});
+
+/**
+ * #4874 — who holds the board: this machine (a master answers the panel), and
+ * the trace of each switch it went through, the most recent first.
+ */
+defineMethod({
+    name: "master.state",
+    ...humanOnly("the board's master is moderator-only"),
+    params: z.object({}),
+    run: () => ({ machine: hostname(), switches: listSwitches(20) }),
 });

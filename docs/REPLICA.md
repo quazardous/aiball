@@ -3,7 +3,8 @@
 > **Status: built up to the planned switch** (numbers from sequences, a
 > revision per document, the master's `replica.*` methods and signal, the
 > node's lazy copy with the attachments' files, its background replication, its
-> reads when cut, `aiball master take`); local writes while cut, failover and
+> reads when cut, `aiball master take`, from the CLI, the GNOME extension, or
+> as the Nodes panel says, with a trace on the board); local writes while cut, failover and
 > the cascade are a design. This page states what a proxy node does when it loses
 > its parent, how the board is copied, the choices made and the work left.
 
@@ -183,15 +184,13 @@ down", and an automatic promotion on a network cut is two masters by design.
 machine's state is already shown:
 
 - **the GNOME extension's menu**: on a proxy node it already shows the relay's
-  state, and an orange icon when the parent does not answer. That menu offers
-  *Take over as master* (failover) next to the state that calls for it, and
-  *Hand over to …* (planned switch) on either machine. The extension talks to
-  its own daemon over the Unix socket, with no token, which is enough: a
-  machine promotes or demotes itself.
+  state, and an orange icon when the parent does not answer. The planned switch
+  is there (built, see below); *Take over as master* (failover) would sit next
+  to the state that calls for it. The extension runs its own machine's CLI, with
+  no token, which is enough: a machine promotes or demotes itself.
 - **the web UI**: the Nodes panel shows which machine is master, each
-  replica's lag (its cursor against the master's last entry) and the same two
-  gestures, with a dialog that says what the switch does and which loops it
-  restarts.
+  node's copy and whether it can take over (built); the failover gesture would
+  join it.
 - the CLI, for a machine without either.
 
 Each gesture is confirmed, names the machine that becomes master, and is
@@ -287,6 +286,25 @@ aiball master take --url http://B:7777     # where A reaches B from then on
 A's address keeps serving the board, relayed to B: tvty, a phone, A's tailnet
 URL need no change. Writes queued during the switch go up to B from A's spool.
 
+**Where the gesture is.** The same gesture, wherever the machine's state shows:
+
+- **the GNOME extension** on the node: *Take the board over (become the
+  master)*. Greyed out while the node is not ready, with the first reason (the
+  copy is not complete, the link is not https or a tailnet, the master is out of
+  reach, no URL where the master would reach this machine). The URL is the one
+  Tailscale serves this board on. A confirmation says what restarts, then it
+  runs `aiball master take`, and its answer is a notification.
+- **the Nodes panel** on the master: which machine is the master, and for each
+  node whether it can take over, or why not (what the node says through its
+  `/api/node` and its pushed progress, plus the other nodes connected to the
+  master). The gesture stays on the node: the panel says where to make it.
+- **the CLI**, for a machine without either.
+
+**The trace.** Each switch is written once, by the new master, at the point of
+no return: from which machine to which (and their URLs), when, by whom, at which
+revision. It is a board table, so every node keeps it too; the Nodes panel
+lists the latest. A switch that is refused or aborted leaves none.
+
 ## Order of work
 
 1. **The spool on a proxy node goes to its parent** (done). Writes made during
@@ -296,7 +314,8 @@ URL need no change. Writes queued during the switch go up to B from A's spool.
 3. **A copy on B** (done): lazy, ticket by ticket, then the rest in the
    background; reads served from it when cut, writes spooled.
 4. **Planned switch** (done): `aiball master take`, A drains, B takes over,
-   A follows. The GNOME extension's and the Nodes panel's gestures are next.
+   A follows; the same gesture in the GNOME extension, each node's readiness
+   in the Nodes panel, and each switch traced on the board.
 5. **Local writes while cut**, tickets numbered from the node's reserved range.
 6. **Failover as a human gesture**, with the replay of A's writes after the
    split.

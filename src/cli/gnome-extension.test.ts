@@ -116,6 +116,11 @@ const node = await import(pathToFileURL(NODE_FILE).href) as {
     replicaWords: (replica: unknown) => string;
     presentation: (view: View, localBoardUrl: string) => Look;
     actionLabel: (label: string, proxy: boolean) => string;
+    TAKE_LABEL: string;
+    takeArgv: (url: string) => string[];
+    takeEntry: (view: unknown, selfUrl: string | null) => { visible: boolean; sensitive: boolean; label: string; reasons: string[]; url: string | null };
+    takeConfirmation: (upstream: string | null, url: string) => { title: string; body: string; button: string };
+    takeResult: (text: string | null) => string;
 };
 
 test("the actions module stays loadable outside the shell (no gi:// or resource:// import)", () => {
@@ -437,4 +442,29 @@ test("the tick reads without a subscription, and with one only after a quiet spe
     assert.equal(counters.tickReads(1000, null, true), true);
     assert.equal(counters.tickReads(1000 + counters.QUIET_REFRESH_MS - 1, 1000, true), false);
     assert.equal(counters.tickReads(1000 + counters.QUIET_REFRESH_MS, 1000, true), true);
+});
+
+test("#4874 — taking the board over: only on a proxy node, greyed out with why, clickable when ready", () => {
+    const ts = "https://b.tail1.ts.net/aiball";
+    assert.equal(node.takeEntry({ state: "up" }, ts).visible, false, "a master or a plain daemon has nothing to take");
+    assert.equal(node.takeEntry(undefined, ts).visible, false);
+    const ready = node.takeEntry(node.daemonView({ ok: true, proxy: true, upstream: "https://a", replica: { complete: true }, switch: { ready: true, reasons: [] } }, { ok: true }), ts);
+    assert.deepEqual([ready.visible, ready.sensitive, ready.label, ready.url], [true, true, node.TAKE_LABEL, ts]);
+    const copying = node.takeEntry({ state: "proxy-up", switch: { ready: false, reasons: ["copy not complete"] } }, ts);
+    assert.equal(copying.sensitive, false);
+    assert.match(copying.label, /not now: copy not complete/);
+    const noUrl = node.takeEntry({ state: "proxy-up", switch: { ready: true, reasons: [] } }, null);
+    assert.equal(noUrl.sensitive, false);
+    assert.match(noUrl.reasons[0]!, /expose it on the tailnet/);
+    assert.match(node.takeEntry({ state: "proxy-remote-down", switch: { ready: true, reasons: [] } }, ts).reasons[0]!, /out of reach/);
+    assert.match(node.takeEntry({ state: "proxy-up" }, ts).reasons[0]!, /update it/, "a daemon too old to say is not offered the gesture");
+});
+
+test("#4874 — the switch runs the CLI's gesture, confirmed first, and its answer reads in one line", () => {
+    assert.deepEqual(node.takeArgv("https://b"), ["aiball", "--json", "master", "take", "--url", "https://b", "--yes"]);
+    const c = node.takeConfirmation("https://a", "https://b");
+    assert.match(c.body, /https:\/\/a its node, reaching it at https:\/\/b/);
+    assert.match(c.body, /every agent loop of both machines/);
+    assert.match(node.takeResult(JSON.stringify({ from: "https://a", to: "https://b", last: 9, restarting: true })), /master now .* revision 9.*restart/);
+    assert.equal(node.takeResult("aiball: the switch did not happen: copy not complete\n"), "the switch did not happen: copy not complete");
 });

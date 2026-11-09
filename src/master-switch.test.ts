@@ -15,7 +15,8 @@ process.env.AIBALL_SOCK = "";
 process.env.XDG_CONFIG_HOME = join(home, "cfg");
 after(() => rmSync(home, { recursive: true, force: true }));
 
-const { secureLink } = await import("./master-switch.js");
+const { secureLink, switchReadiness, takeOver } = await import("./master-switch.js");
+const { listSwitches, recordSwitch } = await import("./db/master-switches.js");
 const { beginSwitching, endSwitching, waitsForSwitch, boardWritesHere } = await import("./switch-state.js");
 const { callMethod } = await import("./bus/methods.js");
 await import("./bus/register.js");
@@ -47,4 +48,39 @@ test("while the board is handed over, writes wait and reads, replica calls and m
 
 test("a switch is a node's gesture: a master refuses it from anyone else", async () => {
     await assert.rejects(callMethod(testCaller("boss", { kind: "human" }), "replica.handover_begin", {}), /node token/);
+});
+
+test("#4874 — a daemon that is no proxy node is not ready, and says why", () => {
+    const r = switchReadiness(null, null);
+    assert.equal(r.ready, false);
+    assert.match(r.reasons.join(" "), /not a proxy node/);
+});
+
+test("#4874 — a node with a clear link but an incomplete copy is not ready, and says why", () => {
+    const fakeNode = {} as never;
+    const r = switchReadiness({ url: "https://master.example" } as never, fakeNode);
+    assert.equal(r.ready, false);
+    assert.deepEqual(r.reasons, ["this node's copy is not complete yet (its background replication is still going)"]);
+    const clear = switchReadiness({ url: "http://192.168.1.10:7777" } as never, fakeNode);
+    assert.match(clear.reasons[0]!, /not https, a tailnet address or this machine/);
+});
+
+test("#4874 — a refused switch leaves no trace on the board; a switch leaves one", async () => {
+    await assert.rejects(takeOver("https://b.example", { restart: false }, null), /not a proxy node/);
+    assert.equal(listSwitches().length, 0);
+    recordSwitch({ from_machine: "a", from_url: "https://a.example", to_machine: "b", to_url: "https://b.example", rev: 42, by: "boss" });
+    const [sw, ...rest] = listSwitches();
+    assert.equal(rest.length, 0);
+    assert.equal(sw!.from_machine, "a");
+    assert.equal(sw!.to_machine, "b");
+    assert.equal(sw!.rev, 42);
+    assert.equal(sw!.by, "boss");
+});
+
+test("#4874 — the board's master and its switches, for the moderator's panel only", async () => {
+    const st = await callMethod(testCaller("boss", { kind: "human" }), "master.state", {}) as { machine: string; switches: unknown[] };
+    assert.equal(typeof st.machine, "string");
+    assert.equal(st.switches.length, 1);
+    upsertConsumer({ consumer_id: "bot", kind: "agent" });
+    await assert.rejects(callMethod(testCaller("bot", { kind: "agent" }), "master.state", {}));
 });

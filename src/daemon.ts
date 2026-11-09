@@ -22,6 +22,7 @@ import { attachProxyWs } from "./proxy-ws.js";
 import { checkForUpdatesAtBoot } from "./api/version-routes.js";
 import { dropClaudeSessionEnv } from "./claude-loop/inherited-env.js";
 import { surviveDiskFull } from "./disk-full.js";
+import { switchReadiness } from "./master-switch.js";
 
 // #3774 — a full disk loses a write, not the daemon (a SQLITE_FULL from a timer killed it).
 surviveDiskFull("daemon");
@@ -201,7 +202,8 @@ function main(): void {
             startProxyWsClient(px, { list: listSessionViews, onChange: onSessionsChanged }, {
                 onConnected: () => void drainSpool(),
                 onReplicaRev: (last) => replica?.signal(last),
-                replicaProgress: replica ? () => replica.progress() : undefined,
+                // #4874 — with whether it may take the board over, for the master's Nodes panel.
+                replicaProgress: replica ? () => ({ ...replica.progress(), switch: switchReadiness(px, replica) }) : undefined,
             });
             console.log(`proxy WS client → ${px.url}/ws/proxy-node (persistent, with reconnect)`);
         }

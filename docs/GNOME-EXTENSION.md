@@ -102,6 +102,12 @@ A node that keeps a copy of the board says how far along it is in its state
 line ("copy of the board: 120/4936", "copy of the board complete"), and, when
 the remote does not answer, that it serves reads from its copy and as of when.
 
+On such a node the menu also offers *Take the board over (become the master)*:
+greyed out with the reason while the node cannot (its copy is not complete, the
+master is out of reach, no tailnet URL where the master would reach it), and
+otherwise a confirmation that says both machines restart, with their loops, then
+`aiball master take`. See [`REPLICA.md`](./REPLICA.md).
+
 The menu names the upstream, *Open the board* opens the remote board (the relay
 only serves a landing page), and start / stop / restart say they act on the
 relay. Every read has a deadline of a few seconds, so a remote that hangs

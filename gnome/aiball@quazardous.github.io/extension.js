@@ -28,7 +28,7 @@ import {AiballBus} from './aiballBus.js';
 import {movesCounters, refreshDelay, sumCounts, tickReads} from './countersState.js';
 import {ACTIONS, AUTOSTART, autostartFromIsEnabled, isActionSensitive} from './daemonActions.js';
 import {TAILNET, aiballTailnetUrl, tailnetMenu, tailscaleConnection, tailscaleProvider} from './tailscaleState.js';
-import {HEALTH_PATH, ICON_LOCAL, NODE_PATH, actionLabel, daemonView, presentation} from './nodeState.js';
+import {HEALTH_PATH, ICON_LOCAL, NODE_PATH, actionLabel, daemonView, presentation, takeArgv, takeConfirmation, takeEntry, takeResult} from './nodeState.js';
 import {VERSION, installConfirmation, parseVersion, updateResult, versionMenu} from './versionState.js';
 
 /*
@@ -105,6 +105,11 @@ class AiballIndicator extends PanelMenu.Button {
             action,
             item: this._addAction(action.label, () => this._runThen(action.argv, () => this._refreshHealth())),
         }));
+
+        // #4874 — on a proxy node: take the board over, greyed out with why when it cannot.
+        this._takeItem = this._addAction('', () => this._confirmTake());
+        this._takeItem.visible = false;
+        this._take = null;
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         this._autostartItem = new PopupMenu.PopupSwitchMenuItem(AUTOSTART.label, false);
@@ -319,11 +324,60 @@ class AiballIndicator extends PanelMenu.Button {
             this._tailnetCopy, this._tailnetExpose])
             item.visible = state.visible;
         this._tailnetUrl = state.url;
+        this._showTake();
         if (!state.visible) return;
         this._tailnetItem.label.text = state.line;
         this._tailnetOpen.setSensitive(!!state.url);
         this._tailnetCopy.setSensitive(!!state.url);
         this._tailnetExpose.setSensitive(state.canExpose);
+    }
+
+    _showTake() {
+        if (!this._takeItem) return;
+        const e = takeEntry(this._view, this._tailnetUrl);
+        this._take = e;
+        this._takeItem.visible = e.visible;
+        this._takeItem.label.text = e.label;
+        this._takeItem.setSensitive(e.sensitive);
+    }
+
+    _confirmTake() {
+        const e = this._take;
+        if (!e?.sensitive) return;
+        const c = takeConfirmation(this._view?.upstream, e.url);
+        const dialog = new ModalDialog.ModalDialog();
+        dialog.contentLayout.add_child(new Dialog.MessageDialogContent({title: c.title, description: c.body}));
+        dialog.setButtons([
+            {label: 'Cancel', action: () => dialog.close()},
+            {
+                label: c.button,
+                action: () => {
+                    dialog.close();
+                    this._runTake(e.url);
+                },
+            },
+        ]);
+        dialog.open();
+    }
+
+    /** Run the switch; its answer (or its refusal, on the error output) becomes a notification. */
+    _runTake(url) {
+        try {
+            const proc = Gio.Subprocess.new(takeArgv(url),
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE);
+            proc.communicate_utf8_async(null, this._cancellable, (p, res) => {
+                let text = null;
+                try {
+                    text = p.communicate_utf8_finish(res)[1];
+                } catch {
+                    return;
+                }
+                Main.notify('aiball', takeResult(text));
+                this._refreshHealth();
+            });
+        } catch (err) {
+            Main.notify('aiball', `could not run aiball master take: ${err.message}`);
+        }
     }
 
     /** GET `path` on the socket, or null when it fails or outlasts `timeoutMs`. */
@@ -456,6 +510,8 @@ class AiballIndicator extends PanelMenu.Button {
             item.setSensitive(isActionSensitive(action, p.localUp));
         }
         this._stateItem.label.text = p.stateLine;
+        this._view = view;
+        this._showTake();
         // The logo either way — with the uplink arrow on a proxy node — and a
         // colour for trouble: red when the local daemon is down, orange when
         // only a proxy node's remote is.

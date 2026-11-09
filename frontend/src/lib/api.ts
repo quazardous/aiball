@@ -1364,6 +1364,8 @@ export const api = {
         call<{ ok: boolean; id: string; label: string; pid: number }>("launcher.run", { id }),
     /** #424: proxy-node tokens + the consumers each relays (moderator-only). */
     listNodes: () => call<NodeView[]>("node.list"),
+    /** #4874 — this machine (the master) and the trace of the board's switches, the most recent first. */
+    masterState: () => call<MasterState>("master.state"),
     /** #2074 — the enrolment switch: the public pairing route only answers
      *  while this window is open. Shut by default, and shut again on restart. */
     getPairingWindow: () => call<PairingWindow>("node.pairing"),
@@ -1458,13 +1460,35 @@ export interface NodeView {
         node_version?: string | null;
         node_commit?: string | null;
         /** #4867 — where the node's copy of the board stands, as it last said; null before. */
-        replica?: { kept: number; total: number | null; complete: boolean; cursor: number; synced_at: string | null; files?: { kept: number; total: number } } | null;
+        replica?: {
+            kept: number; total: number | null; complete: boolean; cursor: number; synced_at: string | null;
+            files?: { kept: number; total: number };
+            /** #4874 — whether the node may take the board over, as it says. */
+            switch?: { ready: boolean; reasons: string[] };
+        } | null;
     };
     /** #2085 — set on a node that no longer exists: the credential is gone and
      *  this row is the receipt for the click that destroyed it. Shown greyed
      *  for an hour, then forgotten. Absent/null on a live node. */
     revoked_at?: string | null;
     revoked_by?: string | null;
+}
+
+/** #4874 — one switch of the board's master. */
+export interface MasterSwitch {
+    id: number;
+    from_machine: string;
+    from_url: string;
+    to_machine: string;
+    to_url: string;
+    rev: number;
+    by: string | null;
+    at: string;
+}
+
+export interface MasterState {
+    machine: string;
+    switches: MasterSwitch[];
 }
 
 /** #2333 — one loop's outcome in a message-all / release-all. */

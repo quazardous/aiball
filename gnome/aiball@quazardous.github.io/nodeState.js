@@ -24,6 +24,8 @@ export function daemonView(node, health) {
     if (node?.proxy === true) {
         // The node's copy of the board, when it keeps one.
         const replica = node.replica ? {replica: node.replica} : {};
+        // #4874 — whether it may take the board over now, and why not.
+        if (node.switch) replica.switch = node.switch;
         return health?.ok
             ? {state: 'proxy-up', upstream: node.upstream ?? null, version: health.version ?? null, ...replica}
             : {state: 'proxy-remote-down', upstream: node.upstream ?? null, version: null, ...replica};
@@ -88,4 +90,63 @@ export function presentation(view, localBoardUrl) {
 /** On a proxy node, start / stop / restart act on the local relay, and say so. */
 export function actionLabel(label, proxy) {
     return proxy ? String(label).replace('the daemon', 'the relay') : String(label);
+}
+
+/*
+ * Taking the board over (become the master): on a proxy node only. The daemon
+ * says through /api/node whether it may, and why not; the extension adds what
+ * only it knows here: the URL where the master will reach this machine, read
+ * from Tailscale. The gesture is `aiball master take`, run like the other
+ * actions, after a confirmation that says what restarts.
+ */
+export const TAKE_LABEL = 'Take the board over (become the master)';
+
+export function takeArgv(url) {
+    return ['aiball', '--json', 'master', 'take', '--url', String(url), '--yes'];
+}
+
+/**
+ * The menu entry. `view` is daemonView's result (with the node's `switch`),
+ * `selfUrl` the tailnet URL this board is served on, or null.
+ */
+export function takeEntry(view, selfUrl) {
+    if (!String(view?.state ?? '').startsWith('proxy'))
+        return {visible: false, sensitive: false, label: TAKE_LABEL, reasons: [], url: null};
+    const reasons = [];
+    if (view.state === 'proxy-remote-down') reasons.push('the master is out of reach: it hands the board over itself');
+    if (!view.switch) reasons.push('this daemon does not say whether it can take over (update it)');
+    else reasons.push(...(view.switch.reasons ?? []));
+    if (!selfUrl) reasons.push('no URL where the master reaches this machine: expose it on the tailnet');
+    const sensitive = reasons.length === 0;
+    return {
+        visible: true,
+        sensitive,
+        label: sensitive ? TAKE_LABEL : `${TAKE_LABEL} — not now: ${reasons[0]}`,
+        reasons,
+        url: selfUrl ?? null,
+    };
+}
+
+/** The confirmation, as the CLI asks it. */
+export function takeConfirmation(upstream, url) {
+    return {
+        title: 'Take the board over?',
+        body: `This machine becomes the master, and ${upstream ?? 'the current master'} its node, reaching it at ${url}.\n\n` +
+            'The master stops taking writes while this machine catches up and checks its copy. ' +
+            'Then both daemons restart, and every agent loop of both machines with them.',
+        button: 'Take over and restart',
+    };
+}
+
+/** What `aiball --json master take` answered, in one line for a notification. */
+export function takeResult(text) {
+    let r = null;
+    try {
+        r = JSON.parse(String(text ?? ''));
+    } catch {
+        // Not JSON: the CLI refused, and said why on its error output.
+    }
+    if (r && r.to) return `this machine is the master now (from ${r.from}, at revision ${r.last})${r.restarting ? '; both daemons restart' : ''}`;
+    const said = String(text ?? '').trim().replace(/^aiball: /, '').replace(/^the switch did not happen: /, '');
+    return `the switch did not happen${said ? `: ${said}` : ''}`;
 }
