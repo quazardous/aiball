@@ -22,6 +22,11 @@ function replicaOnly(caller: Caller): void {
 /** At most this many documents per pull: a replica catching up pulls again. */
 export const PULL_MAX = 500;
 
+/**
+ * #4866 — the documents (tickets, consumers) revised after `after`, oldest
+ * revision first, each whole; the master's last revision, and a signature per
+ * board table.
+ */
 defineMethod({
     name: "replica.pull",
     who: ["human", "agent"],

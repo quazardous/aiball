@@ -3969,7 +3969,7 @@
     },
     {
       "name": "replica.pull",
-      "description": "",
+      "description": "The documents (tickets, consumers) revised after `after`, oldest revision first, each whole; the master's last revision, and a signature per board table.",
       "paramStructure": "by-name",
       "params": [
         {

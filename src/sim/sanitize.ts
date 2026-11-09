@@ -45,6 +45,7 @@ export const NOT_SECRET_COLUMNS: Readonly<Record<string, string>> = {
     "settings.key": "the name of an internal counter or setting; its value is not a credential",
     "config_overrides.key": "the name of a configuration setting (tickets.*, autopoll.*), not a credential",
     "idempotency_keys.key": "a random id a client gives a post so a retry is not posted twice, not a credential",
+    "doc_revs.key": "a document's name for a replica (a ticket id, a consumer id), not a credential",
 };
 
 /** Does this column name look like it could hold a secret? */
