@@ -15,9 +15,8 @@ the board. A replica keeps a copy of the board on B, so that:
    when A goes away for good, when B is where the work now happens, or only
    for a while.
 
-Ticket numbering is a separate question: a node cut from the master cannot
-draw a number from the master's counter, so a ticket it creates while cut
-needs a provisional id, whatever format the numbering takes.
+A node cut from the master cannot draw a number from the master's counter: a
+ticket it creates while cut takes one from a range reserved for it (below).
 
 ## Today: what a cut does (measured)
 
@@ -67,11 +66,11 @@ write for replay") does not hold today; fixing it comes first (step 1).
 |---|---|---|---|
 | B holds | the projects it serves, kept up to date from A | the same | the whole board |
 | Cut: reads | from the copy | from the copy | from the copy |
-| Cut: writes | queued, replayed to A on return (step 1's spool) | applied on B at once, with provisional ids, and replayed to A | applied on B |
+| Cut: writes | queued, replayed to A on return (step 1's spool) | applied on B at once, with ids from a reserved range, and replayed to A | applied on B |
 | Cut: wakes | from the copy | from the copy, own writes included | from the copy |
-| Return | replay the queue | replay B's writes, map provisional ids to A's | replay both ways |
+| Return | replay the queue | replay B's writes, ids kept | replay both ways |
 | Role switch | no | no | **yes** |
-| Depends on numbering | no | yes (provisional id) | yes |
+| Needs ids made while cut | no | yes (see below) | yes |
 
 (a) covers the common case, reading and answering through a short cut, without
 touching ids. (b) lets B's agents see their own writes and create tickets that
@@ -117,6 +116,26 @@ Two cases, of very different risk:
 automatic. A machine cannot tell "A is down" from "the network between us is
 down", and an automatic promotion on a network cut is two masters by design.
 
+## Tickets created while cut: ids from a reserved range
+
+A ticket made on a node cut from the master takes its id from a range above
+the master's: the highest ticket id the node's copy knows, plus an offset
+(1000 for the first node, 2000 for the second…). The id is final: on return
+the master inserts the ticket under it, and its own counter goes on from the
+highest id it holds. Nothing is renumbered, so a `#N` quoted during the cut
+stays right; the price is a gap in the numbering.
+
+- It needs a copy that is up to date when the cut starts, so it comes with
+  level (a): a node that does not know the master's last id could collide.
+- Each node has its own offset, so two nodes cut at the same time do not draw
+  the same ids.
+- The master can still run into the range during a long cut (more tickets made
+  on it than the offset). The return checks it: an id already taken is
+  refused, never overwritten, and that ticket alone gets a new number, said
+  to its author.
+- Comments are not concerned: their ids are a separate range, and nothing
+  quotes them by number.
+
 ## Conflicts on return
 
 | Case | Resolution |
@@ -126,7 +145,7 @@ down", and an automatic promotion on a network cut is two masters by design.
 | A decision decided on one side while superseded on the other | the replay is refused; the refusal is reported to its author |
 | Closed on one side, answered on the other | the answer is kept and the ticket stays closed; whether the answer should reopen it is a choice to make |
 | Claimed on both sides | the first in the master's order keeps it; the other gets the usual refusal |
-| Ticket created on both sides | both kept; the provisional ids map to the master's |
+| Ticket created on both sides | both kept; the node's ids come from its reserved range |
 | Moderation decided on both sides | the master's stands; the other is reported |
 
 All but one (a reply landing on a ticket closed meanwhile) follow the rule a
@@ -150,6 +169,7 @@ everything, the upstream sync only what may leave the machine.
    cut or not; writes still go to A, or to the spool when cut.
 4. **Planned switch** (needs (c): the copy covers the whole board): the human's
    gesture, A drains, B takes over, A follows.
-5. **(b) Local writes while cut**, once ticket numbering has a provisional id.
+5. **(b) Local writes while cut**, tickets numbered from the node's reserved
+   range.
 6. **Failover as a human gesture**, with the replay of A's writes after the
    split.
