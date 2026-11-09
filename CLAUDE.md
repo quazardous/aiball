@@ -69,6 +69,7 @@ Root:
 - [`SM-NETWORK.md`](./docs/SM-NETWORK.md) — XState v5 state-machine network: per-controller slices, composition root, bridge pattern, add-a-controller checklist.
 - [`LOOP-HOST.md`](./docs/LOOP-HOST.md) — attaching to a loop without tmux: the protocol clients (tvty, `claude-loop attach`, the web) will speak to the proxy that holds the session. A design, not yet implemented.
 - [`SESSION-HOST.md`](./docs/SESSION-HOST.md) — the Rust session host that replaces tmux + claude-loop: one per session, detached from the daemon, its control channel, the client methods (`session.start` / `stop`), Claude's environment. A design, not yet implemented.
+- [`REPLICA.md`](./docs/REPLICA.md) — a proxy node that keeps a copy of the board: working through a cut from its parent, resyncing on return, switching which machine is master. A design, not yet implemented.
 - [`TVTY-BIND.md`](./docs/TVTY-BIND.md) — tvty and claude-loop over one agent's Claude: one place at a time, watching vs holding, two modes (tmux, host) × two clients: a start where Claude runs attaches as a copy, `--force` takes the controls, changing mode is `restart --resume`.
 - [`PTY-PROXY.md`](./docs/PTY-PROXY.md) — the Unix PTY proxy (live human-typing detection).
 - [`PTY-PROXY-WINDOWS.md`](./docs/PTY-PROXY-WINDOWS.md) — the Windows ConPTY port.
