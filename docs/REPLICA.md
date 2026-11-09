@@ -38,9 +38,8 @@ when its daemon answers 5xx, and the daemon replays its spool by calling its
 own method table. On a proxy node that table writes to a local database that
 is empty (B creates one at boot, migrations only): the replay is refused
 (`PROJECT_NOT_FOUND`, `TICKET_NOT_FOUND`) and the file moves to
-`spool/failed/` within a second. When A comes back nothing is replayed. So
-the resilience the proxy's design counted on ("the local client spools the
-write for replay") does not hold today; fixing it comes first (step 1).
+`spool/failed/` within a second. When A comes back nothing is replayed.
+Fixed since (step 1): the node replays its spool to A when A answers again.
 
 ## What is already there to build on
 
@@ -95,6 +94,55 @@ Two ways, not exclusive:
 **Recommended: the operation log.** It is the only one that handles writes on
 both sides, and it is the bus's own unit (a method call), so it adds no second
 model. The ids it carries are the master's.
+
+## Transport: the master signals, the replica pulls
+
+A replica must keep up without loading either machine, idle or catching up.
+
+- **The master pushes a signal**, never the data: "my last entry is N", on the
+  link a node already keeps open to its parent (the WebSocket that carries its
+  heartbeat, its sessions and its state). No new connection, and nothing sent
+  while nothing is written.
+- **The replica pulls** the entries after its cursor, in bounded batches (say
+  500), at its own pace. The master keeps no queue per replica: only the
+  cursor each replica reports, for retention.
+- **A lost signal costs nothing**: the next one, or a slow check on the
+  heartbeat (once a minute), catches up.
+- **Catching up after a cut** is the same path, from an older cursor: batches
+  until the replica is level. The link compresses (WebSocket deflate).
+- **The first copy** is a snapshot of the database (SQLite's backup), sent
+  once, then the log from the snapshot's entry.
+- **Retention**: the master keeps its log while a known replica has not read
+  it, up to a limit (say 30 days); a replica further behind starts again from
+  a snapshot.
+
+Pushing everything would make the master queue for each cut replica, without
+bound during a long cut, and track acknowledgements. Pulling alone means
+choosing between latency and idle calls (one a second is 86,400 a day for
+nothing). The volume is not the issue: an entry is a method call in JSON, and
+a board makes at most tens of writes a minute.
+
+## Cascade: a replica of a replica
+
+A replica can serve replicas of its own, so nodes chain (A ← B ← C):
+
+- **Down the chain, the log is relayed as it is.** B pulls from A and serves
+  the same entries, under A's sequence numbers, to C; B's signal to C follows
+  its own pull. C never talks to A, and nothing is renumbered on the way.
+- **Up the chain, a write goes hop by hop.** C's write goes to B, which relays
+  it to A, as a proxy node does today; cut at any hop, it waits in the spool of
+  the machine below the cut, and goes up when that hop answers again.
+- **A cut in the middle** leaves the machines below it on their copies: C
+  reads from its copy, B from its own, each as far as its cursor goes.
+- **Each machine knows only its parent and its children**: its upstream to
+  pull from and write to, its downstream to signal. Retention on B counts C's
+  cursor, as A's counts B's.
+- **Switching the master in a chain** re-points one link at a time: when B
+  becomes master, A becomes B's replica, and C keeps B as its parent. Taking
+  over from a machine in the middle of a chain is the same human gesture,
+  made on that machine.
+- **A node's id range** (above) is taken per machine, wherever it sits in the
+  chain.
 
 ## Switching the master
 
@@ -179,8 +227,8 @@ everything, the upstream sync only what may leave the machine.
 
 ## Order of work
 
-1. **The spool on a proxy node goes to its parent** (a bug, today). Writes made
-   during a cut reach A on return, once.
+1. **The spool on a proxy node goes to its parent** (done). Writes made during
+   a cut reach A on return, once.
 2. **The operation log on the master**: every write recorded with its sequence
    number; a replica pulls it. Nothing else changes for clients.
 3. **(a) A read copy on B** fed by the log: B serves reads and wakes from it,
