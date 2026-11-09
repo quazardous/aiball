@@ -22,6 +22,12 @@ import type { Document } from "./db/documents.js";
 import type { DocKind } from "./db/doc-revs.js";
 import { applyBoardTables, applyDocuments, keeps } from "./db/replica-apply.js";
 import { getRawSqlite } from "./db/connection.js";
+import type { IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
+import { WebSocketServer } from "ws";
+import { authenticateUpgrade, openGated, type BusGate } from "./bus/server.js";
+import { callerOf, getMethod } from "./bus/methods.js";
+import { ERROR_CODES } from "./domain.js";
 
 interface ReplicaState {
     /** The master's last revision this node has looked at. */
@@ -76,6 +82,9 @@ export interface ReplicaProgress {
     synced_at: string | null;
 }
 
+/** A sync that failed is tried again after this long, if no signal came first. */
+const SYNC_RETRY_MS = 15_000;
+
 /** The background pass steps aside this long after the node's clients were last at work. */
 const BUSY_QUIET_MS = 5_000;
 
@@ -105,7 +114,20 @@ const DOCS_BATCH = 100;
 /** Headers asked for at once. */
 const CHANGES_BATCH = 5000;
 
+let current: ReplicaNode | null = null;
+
+/** #4867 — where this node's copy stands, or null when this daemon keeps none (not a proxy node). */
+export function replicaProgress(): ReplicaProgress | null {
+    return current ? current.progress() : null;
+}
+
 export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode {
+    const node = makeReplicaNode(cfg, store);
+    current = node;
+    return node;
+}
+
+function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode {
     let client: BusClient | null = null;
     let syncing: Promise<void> | null = null;
     let again = false;
@@ -115,6 +137,7 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
     let total: number | null = null;
     let stopped = false;
     let backfilling = false;
+    let retryTimer: NodeJS.Timeout | null = null;
     const background = cfg.replica ?? { background: true, batch: 20, pauseMs: 2000 };
 
     async function bus(): Promise<BusClient> {
@@ -129,12 +152,16 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
     }
 
     async function call<T>(method: string, params: unknown): Promise<T> {
-        try {
-            return await (await bus()).call<T>(method, params);
-        } catch (e) {
-            client?.close();
-            client = null;
-            throw e;
+        // A connection left from before a cut is dead: one more try, on a fresh one.
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await (await bus()).call<T>(method, params);
+            } catch (e) {
+                client?.close();
+                client = null;
+                const status = (e as { status?: number }).status;
+                if (attempt > 0 || (typeof status === "number" && status < 500)) throw e;
+            }
         }
     }
 
@@ -180,6 +207,11 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
                 do { again = false; await syncOnce(); } while (again);
             } catch (e) {
                 console.warn(`[replica] sync stopped: ${(e as Error).message}`);
+                // The master's next signal starts it again; this, in case none comes.
+                if (!stopped && !retryTimer) {
+                    retryTimer = setTimeout(() => { retryTimer = null; void sync(); }, SYNC_RETRY_MS);
+                    retryTimer.unref?.();
+                }
             } finally {
                 syncing = null;
             }
@@ -259,6 +291,7 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
         sync,
         close() {
             stopped = true;
+            if (retryTimer) clearTimeout(retryTimer);
             client?.close();
             client = null;
             if (keepTimer) clearTimeout(keepTimer);
@@ -283,5 +316,44 @@ export function keepWhatIsRead(replica: ReplicaNode): (msg: unknown) => void {
             const m = c as { method?: unknown; params?: { id?: unknown } };
             if (m?.method === "ticket.get" && typeof m.params?.id === "number") replica.keep("ticket", String(m.params.id));
         }
+    };
+}
+
+/**
+ * #4867 — the reads a node answers from its copy while its master is out of
+ * reach. Each reads the board and writes nothing; a write is refused (503),
+ * and the client queues it for the master, as during any cut.
+ */
+export const CUT_READS: ReadonlySet<string> = new Set([
+    "bus.whoami", "rpc.discover", "bus.subjects", "bus.subscribe", "bus.unsubscribe",
+    "ticket.get", "ticket.list", "ticket.bookends", "ticket.subscribers",
+    "message.get", "message.list", "message.search",
+    "inbox.list", "unread.list", "unread.count", "ping.list", "ping.count",
+    "consumer.micro_status", "consumer.get", "consumer.list", "consumer.me", "consumer.backlog",
+    "project.list", "project.milestones", "tag.list", "decision.mine", "decision.plans_to_execute",
+]);
+
+/**
+ * #4867 — the node's bus while cut: a connection its client opens is served
+ * here, on the node's copy, through a gate that lets the reads above and the
+ * node's own machine methods through, and refuses the rest as unavailable.
+ * Only once the node holds a copy: before, the client gets the 502 it got.
+ */
+export function serveWhenCut(replica: ReplicaNode): (req: IncomingMessage, socket: Duplex, head: Buffer, trusted: boolean) => boolean {
+    const wss = new WebSocketServer({ noServer: true });
+    return (req, socket, head, trusted) => {
+        const p = replica.progress();
+        if (p.kept === 0) return false;
+        const out = authenticateUpgrade(req, trusted);
+        if (!out.ok) return false;
+        const gate: BusGate = {
+            refuse(method) {
+                if (CUT_READS.has(method) || getMethod(method)?.machine === true) return null;
+                return { message: "the master is out of reach: this node answers reads from its copy, and the write waits for the master", code: ERROR_CODES.UNAVAILABLE, status: 503 };
+            },
+            hello: { replica: { cut: true, complete: p.complete, as_of: p.synced_at } },
+        };
+        wss.handleUpgrade(req, socket, head, (ws) => openGated(ws, callerOf(out.ctx), gate));
+        return true;
     };
 }

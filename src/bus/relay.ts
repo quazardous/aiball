@@ -145,7 +145,12 @@ function refuse(socket: Duplex, status: number, body: string): void {
     socket.destroy();
 }
 
-export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTokenStore, opts: { trusted?: boolean; onRelayed?: (msg: unknown) => void } = {}): WebSocketServer {
+export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTokenStore, opts: {
+    trusted?: boolean;
+    onRelayed?: (msg: unknown) => void;
+    /** #4867 — the upstream is out of reach: serve the connection here instead (true), or not (false: 502). */
+    whenCut?: (req: IncomingMessage, socket: Duplex, head: Buffer, trusted: boolean) => boolean;
+} = {}): WebSocketServer {
     const trusted = opts.trusted === true;
     const wss = new WebSocketServer({ noServer: true });
     const upstreamUrl = `${cfg.url.replace(/\/$/, "").replace(/^http/, "ws")}${BUS_PATH}`;
@@ -182,7 +187,10 @@ export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTok
             res.on("end", () => refuse(socket, res.statusCode ?? 502, body || JSON.stringify({ error: "the upstream refused" })));
         });
         up.once("error", (e) => {
-            if (up.readyState !== WebSocket.OPEN) refuse(socket, 502, JSON.stringify({ error: `proxy upstream unreachable: ${e.message}`, code: "BAD_GATEWAY" }));
+            if (up.readyState === WebSocket.OPEN) return;
+            // #4867 — cut from the upstream, the node may answer from its own copy.
+            if (opts.whenCut?.(req, socket, head, trusted)) return;
+            refuse(socket, 502, JSON.stringify({ error: `proxy upstream unreachable: ${e.message}`, code: "BAD_GATEWAY" }));
         });
         up.once("open", () => {
             // Accepted in this same tick (no verifyClient: handleUpgrade calls

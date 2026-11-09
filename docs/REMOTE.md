@@ -184,8 +184,9 @@ proxy:
 
 B's cursor and progress are in `$AIBALL_HOME/replica.json`.
 
-**When A is out of reach**, reads answer 502 and writes (replies, new tickets,
-decisions) are spooled on B (`$AIBALL_HOME/spool/`). B replays them to A as
+**When A is out of reach**, B answers its clients' reads from its copy (the
+tickets it keeps; a node with no copy yet answers 502), and writes (replies,
+new tickets, decisions) are spooled on B (`$AIBALL_HOME/spool/`). B replays them to A as
 soon as A answers again (its link to A reconnects), each as its author, with
 its idempotency key, so a write that had gone through is not made twice. A
 write A refuses lands in `spool/failed/`, as a live call would be refused. In

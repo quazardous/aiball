@@ -10,7 +10,7 @@ import type { Duplex } from "node:stream";
 import { authenticate, bearerFrom, type AuthOutcome } from "../auth.js";
 import { getToken, getTokenAndTouch, onTokenRevoked } from "../db/tokens.js";
 import { touchLastSeen } from "../db/consumers.js";
-import { BUS_PATH, BUS_VERSION } from "../bus-protocol.js";
+import { BUS_PATH, BUS_VERSION, RPC_ERRORS } from "../bus-protocol.js";
 import { callerOf, type Caller } from "./methods.js";
 import { handleFrame } from "./rpc.js";
 import { resolveBasePath, stripBasePath } from "../base-path.js";
@@ -136,7 +136,39 @@ export function sweepConnections(wss: WebSocketServer): void {
     }
 }
 
-function open(ws: WebSocket, connCaller: Caller, seen: boolean): void {
+/**
+ * #4867 — a connection the node serves itself while its master is out of reach:
+ * `refuse` says which methods it does not answer (with what), `hello` what its
+ * hello adds (where its answers come from).
+ */
+export interface BusGate {
+    refuse(method: string): { message: string; code: string; status: number } | null;
+    hello?: Record<string, unknown>;
+}
+
+/** The answer to a frame the gate refuses a call of, or null to let it through. */
+function gated(text: string, gate: BusGate): string | null {
+    let msg: unknown;
+    try { msg = JSON.parse(text); } catch { return null; }
+    const calls = (Array.isArray(msg) ? msg : [msg]) as Array<{ id?: unknown; method?: unknown }>;
+    const refusals = calls.map((c) => (c && typeof c.method === "string" ? gate.refuse(c.method) : null));
+    const first = refusals.find((r) => r !== null);
+    if (!first) return null;
+    // A frame with one refused call is refused whole: each call answered with why.
+    const answers = calls.filter((c) => c && "id" in c).map((c, i) => {
+        const r = refusals[i] ?? first;
+        return { jsonrpc: "2.0", id: c.id ?? null, error: { code: RPC_ERRORS.INTERNAL_ERROR, message: r.message, data: { code: r.code, status: r.status } } };
+    });
+    if (answers.length === 0) return "";
+    return JSON.stringify(Array.isArray(msg) ? answers : answers[0]);
+}
+
+/** #4867 — serve a connection here, through `gate`: what a node does while cut from its master. */
+export function openGated(ws: WebSocket, caller: Caller, gate: BusGate): void {
+    open(ws, caller, true, gate);
+}
+
+function open(ws: WebSocket, connCaller: Caller, seen: boolean, gate?: BusGate): void {
     const session: BusSession = {
         subscriptions: new Map(),
         notify(method, params) {
@@ -165,7 +197,8 @@ function open(ws: WebSocket, connCaller: Caller, seen: boolean): void {
         c.active = true;
         const text = data.toString();
         c.queue = c.queue.then(async () => {
-            const out = await handleFrame(caller, text);
+            const refused = gate ? gated(text, gate) : null;
+            const out = refused !== null ? (refused === "" ? null : refused) : await handleFrame(caller, text);
             if (out === null || ws.readyState !== WebSocket.OPEN) return;
             if (ws.bufferedAmount > BUS_MAX_BUFFERED) {
                 ws.close(BUS_CLOSE.TOO_SLOW, "too slow");
@@ -177,7 +210,7 @@ function open(ws: WebSocket, connCaller: Caller, seen: boolean): void {
     ws.send(JSON.stringify({
         jsonrpc: "2.0",
         method: "bus.hello",
-        params: { version: BUS_VERSION, epoch: BUS_EPOCH, consumer: caller.consumer_id ?? null, kind: caller.kind, relayed: caller.relayed },
+        params: { version: BUS_VERSION, epoch: BUS_EPOCH, consumer: caller.consumer_id ?? null, kind: caller.kind, relayed: caller.relayed, ...(gate?.hello ?? {}) },
     }));
 }
 

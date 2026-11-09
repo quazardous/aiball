@@ -22,12 +22,21 @@ export const ICON_PROXY = 'aiball-proxy-symbolic.svg';
  */
 export function daemonView(node, health) {
     if (node?.proxy === true) {
+        // The node's copy of the board, when it keeps one.
+        const replica = node.replica ? {replica: node.replica} : {};
         return health?.ok
-            ? {state: 'proxy-up', upstream: node.upstream ?? null, version: health.version ?? null}
-            : {state: 'proxy-remote-down', upstream: node.upstream ?? null, version: null};
+            ? {state: 'proxy-up', upstream: node.upstream ?? null, version: health.version ?? null, ...replica}
+            : {state: 'proxy-remote-down', upstream: node.upstream ?? null, version: null, ...replica};
     }
     if (node?.ok || health?.ok) return {state: 'up', upstream: null, version: health?.version ?? null};
     return {state: 'down', upstream: null, version: null};
+}
+
+/** The node's copy, in a few words: complete, or how far along; '' without one. */
+export function replicaWords(replica) {
+    if (!replica) return '';
+    if (replica.complete) return 'copy of the board complete';
+    return replica.total ? `copy of the board: ${replica.kept}/${replica.total}` : `copy of the board: ${replica.kept} documents`;
 }
 
 function withSlash(url) {
@@ -48,7 +57,7 @@ export function presentation(view, localBoardUrl) {
         return {
             icon: ICON_PROXY, styleClass: null, localUp: true, showCounts: true,
             countsPrefix: 'remote board: ',
-            stateLine: `proxy node → ${upstream} — remote reachable${view.version ? ` (${view.version})` : ''}`,
+            stateLine: `proxy node → ${upstream} — remote reachable${view.version ? ` (${view.version})` : ''}${view.replica ? ` — ${replicaWords(view.replica)}` : ''}`,
             // The relay only serves a landing page: the board worth opening is the remote one.
             boardUrl: withSlash(view.upstream) ?? localBoardUrl,
         };
@@ -56,7 +65,8 @@ export function presentation(view, localBoardUrl) {
         return {
             icon: ICON_PROXY, styleClass: 'aiball-upstream-down', localUp: true, showCounts: false,
             countsPrefix: '',
-            stateLine: `proxy node → ${upstream} — remote unreachable`,
+            // Cut, a node with a copy answers reads from it: say so, and how fresh.
+            stateLine: `proxy node → ${upstream} — remote unreachable${view.replica?.kept ? ` — reads served from its copy${view.replica.synced_at ? ` (as of ${view.replica.synced_at.slice(11, 16)} UTC)` : ''}` : ''}`,
             boardUrl: withSlash(view.upstream) ?? localBoardUrl,
         };
     case 'up':

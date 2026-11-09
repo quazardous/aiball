@@ -98,6 +98,10 @@ Windows tray does:
 - **the relay is up but the remote does not answer** → the same icon in orange,
   and no counters.
 
+A node that keeps a copy of the board says how far along it is in its state
+line ("copy of the board: 120/4936", "copy of the board complete"), and, when
+the remote does not answer, that it serves reads from its copy and as of when.
+
 The menu names the upstream, *Open the board* opens the remote board (the relay
 only serves a landing page), and start / stop / restart say they act on the
 relay. Every read has a deadline of a few seconds, so a remote that hangs

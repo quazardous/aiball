@@ -1457,6 +1457,8 @@ export interface NodeView {
          *  NULL avant connexion ou pre-build qui n'envoie pas ces champs. */
         node_version?: string | null;
         node_commit?: string | null;
+        /** #4867 — where the node's copy of the board stands, as it last said; null before. */
+        replica?: { kept: number; total: number | null; complete: boolean; cursor: number; synced_at: string | null } | null;
     };
     /** #2085 — set on a node that no longer exists: the credential is gone and
      *  this row is the receipt for the click that destroyed it. Shown greyed

@@ -113,6 +113,7 @@ const node = await import(pathToFileURL(NODE_FILE).href) as {
     ICON_LOCAL: string;
     ICON_PROXY: string;
     daemonView: (node: unknown, health: unknown) => View;
+    replicaWords: (replica: unknown) => string;
     presentation: (view: View, localBoardUrl: string) => Look;
     actionLabel: (label: string, proxy: boolean) => string;
 };
@@ -269,6 +270,17 @@ test("each state has its icon, colour, board link and counters", () => {
     const remoteDown = node.presentation({ state: "proxy-remote-down", upstream: "https://a:7777" }, local);
     assert.deepEqual(pick(remoteDown), [node.ICON_PROXY, "aiball-upstream-down", true, false, "https://a:7777/"]);
     assert.match(remoteDown.stateLine, /unreachable/);
+});
+
+test("a proxy node with a copy of the board says how far along it is, and serves it when cut", () => {
+    const local = "http://127.0.0.1:7777/";
+    const replica = { kept: 120, total: 4936, complete: false, cursor: 4900, synced_at: "2026-11-09T09:30:00.000Z" };
+    const up = node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777", replica }, { ok: true, version: "0.59.0" });
+    assert.match(node.presentation(up, local).stateLine, /copy of the board: 120\/4936/);
+    const done = node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777", replica: { ...replica, complete: true } }, { ok: true });
+    assert.match(node.presentation(done, local).stateLine, /copy of the board complete/);
+    const cut = node.daemonView({ ok: true, proxy: true, upstream: "https://a:7777", replica }, null);
+    assert.match(node.presentation(cut, local).stateLine, /unreachable — reads served from its copy \(as of 09:30 UTC\)/);
 });
 
 test("on a proxy node the actions say they act on the relay", () => {

@@ -3,6 +3,7 @@
 // through the business API. daemon.ts wraps this in the HTTP + UDS + WS servers;
 // tests call createApp() + listen on an ephemeral port (or use it directly).
 // No server bind, no side effects on import.
+import { replicaProgress } from "./replica-node.js";
 import { requestStatsMiddleware, requestStatsReport } from "./request-stats.js";
 import express from "express";
 import { fileURLToPath } from "node:url";
@@ -81,7 +82,8 @@ export function createApp(opts: { basePath?: string } = {}): express.Express {
         // it's a proxy. Mounted BEFORE the relay so it isn't forwarded to the
         // remote (in proxy mode /api/health relays → reports the REMOTE, not us).
         // The tray reads it to show a `[proxy]` badge; details live on the page.
-        app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: true, upstream: proxy.url }));
+        // #4867 — with where this node's copy of the board stands.
+        app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: true, upstream: proxy.url, replica: replicaProgress() }));
         mountVersionRoutes(app);
         const fwd = proxyMiddleware(proxy);
         app.use("/api", fwd);

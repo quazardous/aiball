@@ -357,7 +357,7 @@ export function buildSessionsPushFrame(sessions: Array<{ agent: string | null }>
     return { kind: "node_sessions_push", sessions: sessions.filter((s) => s.agent) };
 }
 
-export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessionsSource, hooks: { onConnected?: () => void; onReplicaRev?: (last: number) => void } = {}): ProxyWsClientHandle {
+export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessionsSource, hooks: { onConnected?: () => void; onReplicaRev?: (last: number) => void; replicaProgress?: () => unknown } = {}): ProxyWsClientHandle {
     // Convertit l'URL http(s):// → ws(s):// pour le canal WS.
     let wsUrl: string;
     try {
@@ -405,6 +405,8 @@ export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessions
             attempt = 0; // succès → reset le backoff
             // #4864 — the parent answers again: the node's spool can go up.
             try { hooks.onConnected?.(); } catch (e) { console.warn(`[proxy WS] onConnected: ${(e as Error).message}`); }
+            // #4867 — where this node's copy stands, for its master's Nodes panel.
+            pushReplica(true);
             // #524 : résout le display_host via la provider chain (tailscale →
             // hostname). Mémoïsé, donc ce 1er appel paie le `tailscale status`
             // ; les reconnects sont gratuits. Null si même hostname() fail.
@@ -587,6 +589,22 @@ export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessions
                 /* hello-back ou frame inconnue : on ignore */
                 break;
         }
+    }
+
+    let replicaSent = "";
+    /** #4867 — tell the master where this node's copy stands, when it moved (or `force`). */
+    function pushReplica(force = false): void {
+        if (!hooks.replicaProgress) return;
+        let progress: unknown;
+        try { progress = hooks.replicaProgress(); } catch { return; }
+        const text = JSON.stringify(progress);
+        if (!force && text === replicaSent) return;
+        replicaSent = text;
+        send({ kind: "node_replica_push", replica: progress });
+    }
+    if (hooks.replicaProgress) {
+        const t = setInterval(() => pushReplica(), 30_000);
+        t.unref?.();
     }
 
     function scheduleReconnect(): void {

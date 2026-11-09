@@ -1,10 +1,10 @@
 # Replica: a proxy node that keeps working when cut from its parent, and can take its place
 
-> **Status: the master's side is built** (numbers from sequences, a revision
-> per document, `replica.pull` and `replica.board`, the signal to nodes); the
-> node's copy, the switch and the rest are a design. This page states what a
-> proxy node does when it loses its parent (measured), how the board is
-> copied, the choices made and the order of the work left.
+> **Status: built up to the node's copy** (numbers from sequences, a revision
+> per document, the master's `replica.*` methods and signal, the node's lazy
+> copy, its background replication, its reads when cut); the planned switch and
+> the rest are a design. This page states what a proxy node does when it loses
+> its parent, how the board is copied, the choices made and the work left.
 
 A proxy node ([`REMOTE.md`](./REMOTE.md), type 1) is a relay: the daemon on
 machine B forwards every client call to the daemon on machine A, which holds
@@ -235,14 +235,40 @@ been sent, what has been seen), replay as checked calls with keys, and the
 report of what was refused. They differ on what is sent: a replica sends
 everything, the upstream sync only what may leave the machine.
 
+## The node's copy: lazy, ticket by ticket
+
+The node stays a proxy: while its master answers, every call is relayed. Its
+copy is beside, in its own database:
+
+- **Lazily**: a ticket the node relays a read of (`ticket.get`) is kept from
+  then on, with the board's small tables.
+- **Kept up to date**: at each `replica_rev`, the node asks what changed since
+  its cursor (`replica.changes`, headers only) and takes again the documents it
+  keeps (`replica.docs`), no other.
+- **In the background, quietly**, the rest of the board, until the node has it
+  all (the projects it already keeps tickets of first, the most recent first;
+  small batches, a rest between them, stepping aside while its clients are at
+  work and on battery; resumed where it stopped). Complete, the node takes
+  every change.
+- **Cut from its master**, the node serves its clients' connections itself: the
+  reads of a fixed list answer from its copy; a write is refused as
+  unavailable (503), and the client queues it for the master. Its `bus.hello`
+  says so (`replica: { cut, complete, as_of }`). Nothing is written to the copy
+  while cut; on return, the spool goes up first, then the copy catches up.
+- **Visible**: `/api/node` on the node, its master's Nodes panel ("copy 120/4936",
+  "copy complete") and the GNOME extension's state line.
+
+The copy is written with its foreign keys unchecked: a ticket kept may name one
+that is not (its parent, a relation), as a partial copy must allow.
+
 ## Order of work
 
 1. **The spool on a proxy node goes to its parent** (done). Writes made during
    a cut reach A on return, once.
 2. **The master's side** (done): sequences, a revision per document,
    `replica.pull` and `replica.board`, the signal to nodes.
-3. **A copy on B** fed by them: B serves reads and wakes from it when cut;
-   writes still go to A, or to the spool when cut.
+3. **A copy on B** (done): lazy, ticket by ticket, then the rest in the
+   background; reads served from it when cut, writes spooled.
 4. **Planned switch** (the copy covers the whole board): the human's gesture,
    A drains, B takes over, A follows.
 5. **Local writes while cut**, tickets numbered from the node's reserved range.

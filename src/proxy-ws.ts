@@ -59,6 +59,8 @@ interface ProxyNodeConn {
      *  première hello frame (rare : le proxy envoie hello juste après l'open). */
     node_version: string | null;
     node_commit: string | null;
+    /** #4867 — where the node's copy of the board stands, as it last said; null before. */
+    replica?: unknown;
 }
 
 const nodes = new Map<string, ProxyNodeConn>();
@@ -179,6 +181,8 @@ export interface ProxyNodeWsState {
      *  `AIBALL_VERSION` côté upstream pour signaler un drift. */
     node_version: string | null;
     node_commit: string | null;
+    /** #4867 — where the node's copy of the board stands, as it last said (kept, total, complete, cursor, synced_at); null before. */
+    replica: unknown;
 }
 
 export function getProxyNodeWsState(nid: string): ProxyNodeWsState {
@@ -186,7 +190,7 @@ export function getProxyNodeWsState(nid: string): ProxyNodeWsState {
     if (!c || c.socket.readyState !== WebSocket.OPEN) {
         return {
             connected: false, last_frame_at: null, silent_for_sec: null,
-            node_version: null, node_commit: null,
+            node_version: null, node_commit: null, replica: null,
         };
     }
     return {
@@ -195,6 +199,7 @@ export function getProxyNodeWsState(nid: string): ProxyNodeWsState {
         silent_for_sec: Math.round((Date.now() - c.last_frame_ms) / 1000),
         node_version: c.node_version,
         node_commit: c.node_commit,
+        replica: c.replica ?? null,
     };
 }
 
@@ -359,6 +364,8 @@ export function attachProxyWs(server: Server): void {
                     console.log(`[proxy WS] node_project_config_push from id=${nid}: project=${project} consumers=${consumers.length}`);
                 }
             }
+            // #4867 — where the node's copy of the board stands.
+            if (frame.kind === "node_replica_push") conn.replica = (frame as unknown as { replica?: unknown }).replica ?? null;
             // #3468 — the agents' sessions this node's own host holds, all at once.
             if (frame.kind === "node_sessions_push") {
                 const sessions = (frame as unknown as { sessions?: unknown }).sessions;

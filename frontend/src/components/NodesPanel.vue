@@ -221,6 +221,22 @@ function proxyVersionShort(s: WsState): string | null {
     return null;
 }
 
+// #4867 — the node's copy of the board, in a word: complete, or how far along.
+function replicaShort(s: WsState): string | null {
+    const r = s.replica;
+    if (!r) return null;
+    if (r.complete) return "copy complete";
+    return r.total ? `copy ${r.kept}/${r.total}` : `copy ${r.kept}`;
+}
+function replicaTitle(s: WsState): string {
+    const r = s.replica;
+    if (!r) return "";
+    const as = r.synced_at ? `, last caught up ${formatActivityAge(r.synced_at, nowMs.value)}` : "";
+    return r.complete
+        ? `this node holds a copy of the whole board, revision ${r.cursor}${as}`
+        : `this node holds ${r.kept} documents of ${r.total ?? "?"} so far (the tickets it read, then the rest in the background), revision ${r.cursor}${as}`;
+}
+
 // #592 — declarative columns. Sort by liveness (down < stale < up) when
 // status is the key, by date for activity, etc.
 const columns: DataListColumn[] = [
@@ -451,6 +467,11 @@ function sortValue(row: Row, key: string): string | number {
                         class="nodes-version"
                         :title="`proxy version (${asNode(row).ws_state?.node_version ?? '?'} commit ${asNode(row).ws_state?.node_commit ?? '?'})`"
                     >{{ proxyVersionShort(asNode(row).ws_state!) }}</code>
+                    <code
+                        v-if="asNode(row).ws_state?.connected && replicaShort(asNode(row).ws_state!)"
+                        class="nodes-version"
+                        :title="replicaTitle(asNode(row).ws_state!)"
+                    >{{ replicaShort(asNode(row).ws_state!) }}</code>
                 </template>
             </template>
             <template #cell-host="{ row }">

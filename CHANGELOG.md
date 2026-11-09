@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- A proxy node cut from its master answers its clients' reads from its copy instead of failing (a write is refused as unavailable and queued by the client), and says how far its copy is along: `/api/node`, its master's Nodes panel, the GNOME extension.
 - A proxy node replicates the rest of the board in the background, quietly (small batches, a rest between them, stepping aside while its clients are at work and on battery), until it has it all; then it follows every change. `proxy.replica` in the global config tunes it or turns it off.
 - A proxy node keeps a copy of the tickets it relays a read of, with the board's small tables, in its own database: when its master says its last revision moved, it asks what changed (`replica.changes`) and takes again the documents it keeps (`replica.docs`), and no other.
 - The board can be copied by a replica: every ticket and consumer is a document with a revision taken on each change, `replica.pull` serves the documents revised after a cursor and `replica.board` the tables that belong to none, and a master signals its nodes when its last revision moves. Ticket and message numbers come from sequences that refuse a number reserved to a node or already taken.
