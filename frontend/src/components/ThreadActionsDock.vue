@@ -44,9 +44,12 @@ const ACCEPT_LABELS: Record<CommentDecision["kind"], string> = {
     plan: "accept plan → keep open",
 };
 
-/** #4459 — the recommended option first, the others in the author's order. */
+/**
+ * #4459 — a plan's options. #4810 — in the order their author gave them: the
+ * recommendation is marked where it sits, never moved first (as tvty shows them).
+ */
 function orderedOptions(options: NonNullable<CommentDecision["options"]>) {
-    return [...options].sort((a, b) => Number(b.recommended === true) - Number(a.recommended === true));
+    return options;
 }
 
 type PlanOption = NonNullable<CommentDecision["options"]>[number];
@@ -169,7 +172,7 @@ const emit = defineEmits<{
                 : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
             @click="emit('reject-active')"
         />
-        <!-- #4459 — a plan that offers options is accepted on one of them, the recommended first. -->
+        <!-- #4459 — a plan that offers options is accepted on one of them, in the author's order (#4810). -->
         <!-- #4474 — a plan that takes several: tick, then accept them together. -->
         <template v-if="activeDecision.decision.options?.length && activeDecision.decision.multiple">
             <label

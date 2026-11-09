@@ -27,6 +27,10 @@ dates are YYYY-MM-DD.
 
 - A proxy node cut from its parent no longer loses the writes its loops made meanwhile: it replays its spool to the parent when the parent answers again, instead of into its own empty database, where every one was refused.
 
+### Changed
+
+- The web shows a plan's options in the order their author gave them, the recommended one marked where it sits rather than moved first.
+
 ## [0.58.0] — 2026-11-06
 
 ### Added

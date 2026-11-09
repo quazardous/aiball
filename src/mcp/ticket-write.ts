@@ -27,6 +27,7 @@ const OPTION_SCHEMA = z.object({
 });
 const OPTIONS_DESCRIPTION =
     "#4459 — with `then: \"plan\"`, when the human has a choice to make: 2 to 6 options, each a short `key` and a `label`. " +
+    "They are shown in the order you give them, usually their key order (A, B, C): mark your suggestion with `recommended`, don't move it first; it keeps its colour where it sits. " +
     "`recommended` marks your suggestion, what is ticked to start with: one at most when `multiple` is false; with `multiple: true`, the set you suggest (never every option). " +
     "#4788 — `confidence` (`high` / `medium` / `low`, optional, on any option) says how sure you are of it; the human sees it as a colour, so a recommendation you hold loosely says `low` and draws their eye. " +
     "The human accepts one option (or several when `multiple`), or rejects; the wake that follows names it. The body keeps the detail. Leave it out for a plan with one way to go.";
