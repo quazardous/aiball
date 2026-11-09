@@ -29,6 +29,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A loop no longer takes Claude for busy for a minute after a task notification Claude Code writes once a turn has ended: the notification counts as a turn only when Claude works on it, so the next wake is no longer held back.
 - A proxy node cut from its parent no longer loses the writes its loops made meanwhile: it replays its spool to the parent when the parent answers again, instead of into its own empty database, where every one was refused.
 
 ### Changed

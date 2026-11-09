@@ -15,6 +15,13 @@
  * queue of an idle Claude, and leave it (`remove`) without a turn; one that
  * does open a turn is held by that turn's prompt.
  *
+ * #4448 — a task notification or an agent message written as a prompt opens a
+ * turn only once the main thread works on it (an `api-request` of the main
+ * thread, an assistant line). Claude Code also writes one right after a turn's
+ * end with no turn to follow, the notification waiting for the next prompt:
+ * read as a prompt, it held the loop for the whole `TRANSCRIPT_OPEN_MAX_MS`
+ * (257 times in one helios session).
+ *
  * Open = the last prompt has no end of turn behind it. A turn may never get one
  * (a crash, a kill), so the answer also needs the file to have grown lately:
  * past `TRANSCRIPT_OPEN_MAX_MS` of silence this proof says nothing, and what
@@ -37,6 +44,10 @@ const RESOLVE_EVERY_MS = 15_000;
 /** What one transcript line says of the turn, or null when it says nothing. */
 export type TranscriptSignal =
     | { kind: "prompt" | "end"; atMs: number }
+    /** #4448 — a notification written as a prompt: a turn only if work follows. */
+    | { kind: "notice"; atMs: number }
+    /** #4448 — the main thread at work: an API request, an assistant line. */
+    | { kind: "work"; atMs: number }
     /** `content`: the queued text, `""` when it is not text (an image, say). */
     | { kind: "queued"; atMs: number; content: string }
     | { kind: "taken"; atMs: number; op: "dequeue" | "remove"; content: string | null };
@@ -47,6 +58,13 @@ export function isNotification(content: string): boolean {
 }
 
 export function transcriptLineSignal(line: string): TranscriptSignal | null {
+    // #4448 — the main thread at work, told by its first bytes: no parse of a long line.
+    if (line.startsWith('{"type":"api-request"')) {
+        return line.includes('"querySource":"repl_main_thread"') ? { kind: "work", atMs: timestampOf(line) } : null;
+    }
+    if (line.startsWith('{"parentUuid"') && line.includes('"type":"assistant"') && !line.includes('"isSidechain":true')) {
+        return { kind: "work", atMs: timestampOf(line) };
+    }
     // Cheap filter: the file is mostly tool output, parsed only when it can matter.
     if (!line.includes('"type":"user"') && !line.includes('"type":"system"') && !line.includes('"type":"queue-operation"')) return null;
     let e: {
@@ -72,7 +90,13 @@ export function transcriptLineSignal(line: string): TranscriptSignal | null {
     // Written with no turn to follow, or at the end of one.
     if (text.startsWith("[Request interrupted")) return { kind: "end", atMs };
     if (text.startsWith("<command-name>") || text.startsWith("<local-command")) return null;
+    if (isNotification(text)) return { kind: "notice", atMs };
     return { kind: "prompt", atMs };
+}
+
+function timestampOf(line: string): number {
+    const m = /"timestamp":"([^"]+)"/.exec(line);
+    return m ? Date.parse(m[1]) : 0;
 }
 
 /** Polled from the pane probe: one stat, and a read only when the file grew. */
@@ -81,6 +105,8 @@ export class TranscriptTurn {
     private offset = 0;
     private partial = "";
     private open = false;
+    /** #4448 — a notification was written since the last end: work after it opens a turn. */
+    private noticed = false;
     /** The queue in order: each entry's text. */
     private queue: string[] = [];
     private grewAtMs = 0;
@@ -121,6 +147,7 @@ export class TranscriptTurn {
         this.offset = 0;
         this.partial = "";
         this.open = false;
+        this.noticed = false;
         this.queue = [];
         this.lastEndMs = null;
         if (!file) return;
@@ -147,8 +174,16 @@ export class TranscriptTurn {
                 const at = s.op === "remove" && s.content !== null ? this.queue.indexOf(s.content) : 0;
                 if (at >= 0 && this.queue.length > 0) this.queue.splice(at, 1);
             }
+            else if (s.kind === "notice") {
+                if (!this.open) this.noticed = true;
+            }
+            else if (s.kind === "work") {
+                if (this.noticed) this.open = true;
+                this.noticed = false;
+            }
             else {
                 this.open = s.kind === "prompt";
+                this.noticed = false;
                 if (s.kind === "end") this.lastEndMs = s.atMs;
             }
         }

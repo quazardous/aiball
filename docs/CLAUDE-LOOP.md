@@ -298,7 +298,10 @@ hint while it holds text; task notifications in the queue do not count, an idle
 Claude lets them go without a turn), held for 1.5 s rather than 4. Claude writes it as it
 takes the prompt, and the hook that says so can come seconds later, so this is
 what stops a wake being typed into a turn the loop did not start (a task
-notification, say). It lets go after 60 s without the file growing.
+notification, say). A task notification or an agent message written as a
+prompt counts only once Claude works on it: Claude Code also writes one just
+after a turn's end, to go with the next prompt, and nothing follows. It lets go
+after 60 s without the file growing.
 When the last sign goes off, a wake waits 3 s more in case Claude is between two.
 Each sign coming on or going off is logged in `loop.log` as
 `busy proofs: +activity -turn → …`.
