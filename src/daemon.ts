@@ -13,6 +13,7 @@ import { AIBALL_HOME, ensureDirs } from "./paths.js";
 import { ensureMachineSecret } from "./machine-secret.js";
 import { drainSpool, setSpoolPoster, watchSpool } from "./spool.js";
 import { relaySpoolPoster } from "./spool-relay.js";
+import { keepWhatIsRead, startReplicaNode } from "./replica-node.js";
 import { backfillParentTicketRelations } from "./db.js";
 import { startScheduler, CRON_TASKS } from "./cron/index.js";
 import { registerAutomationRuntime } from "./automation/runtime.js";
@@ -142,7 +143,10 @@ function main(): void {
     // #3071 — a proxy node relays the bus to its upstream, as it relays /api.
     const relay = loadProxy();
     const relayTokens = relay ? loadProxyTokens() : null;
-    if (relay) attachBusRelay(server, relay, relayTokens!);
+    // #4867 — a proxy node keeps a copy of what concerns it, ticket by ticket.
+    const replica = relay ? startReplicaNode(relay, relayTokens!) : null;
+    const onRelayed = replica ? keepWhatIsRead(replica) : undefined;
+    if (relay) attachBusRelay(server, relay, relayTokens!, { onRelayed });
     // #4864 — a proxy node's spool goes to its parent, never into its own empty database.
     if (relay) setSpoolPoster(relaySpoolPoster(relay, relayTokens!));
     // #3066 — the session hosts still running from before this start. #3284 —
@@ -193,7 +197,10 @@ function main(): void {
         if (px) {
             // #3468 — with this node's own sessions, which its hub cannot see.
             // #4864 — back in touch with the parent: what was spooled meanwhile goes up.
-            startProxyWsClient(px, { list: listSessionViews, onChange: onSessionsChanged }, { onConnected: () => void drainSpool() });
+            startProxyWsClient(px, { list: listSessionViews, onChange: onSessionsChanged }, {
+                onConnected: () => void drainSpool(),
+                onReplicaRev: (last) => replica?.signal(last),
+            });
             console.log(`proxy WS client → ${px.url}/ws/proxy-node (persistent, with reconnect)`);
         }
     });
@@ -209,7 +216,7 @@ function main(): void {
             (sock as unknown as { __aiballUds: boolean }).__aiballUds = true;
         });
         if (core) attachBus(udsServer, { trusted: true });
-        else if (relay) attachBusRelay(udsServer, relay, relayTokens!, { trusted: true });
+        else if (relay) attachBusRelay(udsServer, relay, relayTokens!, { trusted: true, onRelayed });
         udsServer.listen(SOCK_PATH, () => {
             try { chmodSync(SOCK_PATH, 0o600); } catch { /* best effort */ }
             console.log(`aiball daemon listening on unix:${SOCK_PATH} (local-trust)`);

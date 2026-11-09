@@ -341,7 +341,7 @@ export function buildSessionsPushFrame(sessions: Array<{ agent: string | null }>
     return { kind: "node_sessions_push", sessions: sessions.filter((s) => s.agent) };
 }
 
-export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessionsSource, hooks: { onConnected?: () => void } = {}): ProxyWsClientHandle {
+export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessionsSource, hooks: { onConnected?: () => void; onReplicaRev?: (last: number) => void } = {}): ProxyWsClientHandle {
     // Convertit l'URL http(s):// → ws(s):// pour le canal WS.
     let wsUrl: string;
     try {
@@ -548,8 +548,11 @@ export function startProxyWsClient(cfg: ProxyConfig, nodeSessions?: NodeSessions
     }
 
     function handleServerFrame(raw: string): void {
-        let frame: { kind?: string; request_id?: string; consumer_id?: string; cwd?: string; keys?: string };
+        let frame: { kind?: string; request_id?: string; consumer_id?: string; cwd?: string; keys?: string; replica_rev?: unknown; last?: unknown };
         try { frame = JSON.parse(raw); } catch { return; }
+        // #4867 — the master's last revision, in its hello and when it moves: the node's copy catches up.
+        const rev = frame.kind === "replica_rev" ? frame.last : frame.kind === "hello" ? frame.replica_rev : undefined;
+        if (typeof rev === "number") { try { hooks.onReplicaRev?.(rev); } catch { /* never breaks the channel */ } }
         if (typeof frame.request_id !== "string") return;
         const rid = frame.request_id;
         switch (frame.kind) {

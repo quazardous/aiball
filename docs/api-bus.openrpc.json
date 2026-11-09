@@ -3968,6 +3968,81 @@
       ]
     },
     {
+      "name": "replica.changes",
+      "description": "What changed after `after`, as headers: `{ kind, key, rev, project }`, oldest revision first, and a signature per board table. A node takes from them the documents it keeps.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "after",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
+      "name": "replica.docs",
+      "description": "These documents, whole, at their current revision.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "keys",
+          "required": true,
+          "schema": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "ticket",
+                    "consumer"
+                  ]
+                },
+                "key": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "key"
+              ]
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-callers": [
+        "human",
+        "agent"
+      ]
+    },
+    {
       "name": "replica.pull",
       "description": "The documents (tickets, consumers) revised after `after`, oldest revision first, each whole; the master's last revision, and a signature per board table.",
       "paramStructure": "by-name",

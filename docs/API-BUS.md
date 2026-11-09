@@ -501,6 +501,8 @@ a boolean, and "1" is accepted too. Results are what the route answered.
 | `node.revoke` | human | `DELETE /api/nodes/:node_id` |
 | `replica.pull` | a node (its token), or a human on this machine's socket | — `{ after, limit? }` (500 at most): the documents revised after `after`, oldest revision first, each whole: `{ kind: ticket\|consumer, key, rev, deleted, rows, hash }`, where `rows` are the database's rows per table ([`REPLICA.md`](./REPLICA.md)); with `last`, the board's last revision, and `board`, a signature per table that belongs to no document |
 | `replica.board` | the same | — `{ tables? }`: the rows of those board tables (all of them without it), with their signatures |
+| `replica.changes` | the same | — `{ after, limit? }` (5000 at most): what changed after `after`, as headers `{ kind, key, rev, project }`, oldest revision first, with `last` and `board` (the signatures); a node takes from them the documents it keeps |
+| `replica.docs` | the same | — `{ keys: [{ kind, key }] }` (100 at most): those documents, whole, at their current revision |
 | `signal_key.list` | human | `GET /api/signal-keys` |
 | `signal_key.create` | human | `POST /api/signal-keys` — the only answer that carries the token |
 | `signal_key.update` | human | `PATCH /api/signal-keys/:key_id` |

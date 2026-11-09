@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { defineMethod, Refusal, type Caller } from "../methods.js";
 import { ERROR_CODES } from "../../domain.js";
-import { lastRev, revisedAfter } from "../../db/doc-revs.js";
+import { changesAfter, lastRev, revisedAfter, revOf, type DocKind } from "../../db/doc-revs.js";
 import { documentOf } from "../../db/documents.js";
 import { BOARD_TABLES, boardRows, boardSignatures } from "../../db/board-tables.js";
 
@@ -54,5 +54,44 @@ defineMethod({
     run: (caller, p) => {
         replicaOnly(caller);
         return { signatures: boardSignatures(), rows: boardRows(p.tables ?? BOARD_TABLES.map((t) => t.table)) };
+    },
+});
+
+/** #4867 — at most this many headers per call: a node catching up asks again. */
+export const CHANGES_MAX = 5000;
+/** #4867 — at most this many documents per call. */
+export const DOCS_MAX = 100;
+
+/**
+ * #4867 — what changed after `after`, as headers: `{ kind, key, rev, project }`,
+ * oldest revision first, and a signature per board table. A node takes from
+ * them the documents it keeps.
+ */
+defineMethod({
+    name: "replica.changes",
+    who: ["human", "agent"],
+    params: z.object({
+        after: z.number().int().min(0),
+        limit: z.number().int().min(1).max(CHANGES_MAX).optional(),
+    }),
+    run: (caller, p) => {
+        replicaOnly(caller);
+        return { last: lastRev(), changes: changesAfter(p.after, p.limit ?? CHANGES_MAX), board: boardSignatures() };
+    },
+});
+
+/** #4867 — these documents, whole, at their current revision. */
+defineMethod({
+    name: "replica.docs",
+    who: ["human", "agent"],
+    params: z.object({
+        keys: z.array(z.object({ kind: z.enum(["ticket", "consumer"]), key: z.string() })).max(DOCS_MAX),
+    }),
+    run: (caller, p) => {
+        replicaOnly(caller);
+        return {
+            last: lastRev(),
+            documents: p.keys.map((k) => documentOf(k.kind as DocKind, k.key, revOf(k.kind as DocKind, k.key) ?? 0)),
+        };
     },
 });

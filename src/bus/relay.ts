@@ -145,7 +145,7 @@ function refuse(socket: Duplex, status: number, body: string): void {
     socket.destroy();
 }
 
-export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTokenStore, opts: { trusted?: boolean } = {}): WebSocketServer {
+export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTokenStore, opts: { trusted?: boolean; onRelayed?: (msg: unknown) => void } = {}): WebSocketServer {
     const trusted = opts.trusted === true;
     const wss = new WebSocketServer({ noServer: true });
     const upstreamUrl = `${cfg.url.replace(/\/$/, "").replace(/^http/, "ws")}${BUS_PATH}`;
@@ -223,6 +223,8 @@ export function attachBusRelay(server: Server, cfg: ProxyConfig, store: ProxyTok
                         const d = await nodeAnswer(text, () => helloCaller, subs);
                         if (d.relay) {
                             if (up.readyState === WebSocket.OPEN) up.send(text);
+                            // #4867 — what the node relays tells it what to keep a copy of.
+                            if (opts.onRelayed) { try { opts.onRelayed(JSON.parse(text)); } catch { /* not one call */ } }
                         } else if (d.answer !== null && local.readyState === WebSocket.OPEN) {
                             local.send(d.answer);
                         }

@@ -83,6 +83,26 @@ export function revisedAfter(after: number, limit: number): Array<{ kind: DocKin
         .all() as Array<{ kind: DocKind; key: string; rev: number }>;
 }
 
+/**
+ * #4867 — what changed after `after`, as headers (no rows): each document's
+ * kind, key and revision, and a ticket's project (for a node that serves some
+ * projects first). Oldest revision first, at most `limit`.
+ */
+export function changesAfter(after: number, limit: number): Array<{ kind: DocKind; key: string; rev: number; project: string | null }> {
+    return getDb().select({
+        kind: schema.docRevs.kind,
+        key: schema.docRevs.key,
+        rev: schema.docRevs.rev,
+        project: schema.tickets.project,
+    })
+        .from(schema.docRevs)
+        .leftJoin(schema.tickets, and(eq(schema.docRevs.kind, "ticket"), sql`${schema.tickets.id} = CAST(${schema.docRevs.key} AS INTEGER)`))
+        .where(gt(schema.docRevs.rev, after))
+        .orderBy(asc(schema.docRevs.rev))
+        .limit(limit)
+        .all() as Array<{ kind: DocKind; key: string; rev: number; project: string | null }>;
+}
+
 /** A document's revision, or null when it never had one. */
 export function revOf(kind: DocKind, key: string | number): number | null {
     return getDb().select({ rev: schema.docRevs.rev }).from(schema.docRevs)
