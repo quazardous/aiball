@@ -27,6 +27,15 @@ import { onTicketChanged } from "./ticket-change.js";
 
 export type DocKind = "ticket" | "consumer";
 
+type RevisedListener = (last: number) => void;
+const revisedListeners = new Set<RevisedListener>();
+
+/** Hear each revision handed out, with the last one; returns the way to stop. */
+export function onRevised(fn: RevisedListener): () => void {
+    revisedListeners.add(fn);
+    return () => { revisedListeners.delete(fn); };
+}
+
 /** Give each of these documents (every one of the kind with `"all"`) its next revision. */
 export function revise(kind: DocKind, keys: ReadonlyArray<string | number> | "all"): void {
     const db = getDb();
@@ -48,6 +57,12 @@ export function revise(kind: DocKind, keys: ReadonlyArray<string | number> | "al
                 .run();
         }
     });
+    if (revisedListeners.size > 0) {
+        const last = lastRev();
+        for (const fn of revisedListeners) {
+            try { fn(last); } catch { /* a listener never breaks a write */ }
+        }
+    }
 }
 
 export const reviseTickets = (ids: ReadonlyArray<number> | "all") => revise("ticket", ids);

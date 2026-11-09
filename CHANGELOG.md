@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- The board can be copied by a replica: every ticket and consumer is a document with a revision taken on each change, `replica.pull` serves the documents revised after a cursor and `replica.board` the tables that belong to none, and a master signals its nodes when its last revision moves. Ticket and message numbers come from sequences that refuse a number reserved to a node or already taken.
 - `scripts/notification-report.ts`: Claude's task notifications per folder and per day, how many repeat one already sent, how many say an agent waits on its own background work, and how many the main thread worked on.
 - An agent whose aiball tools are older than the ones on disk hears it: every tool answer carries `_status.stale_tools`, saying that a field added since would be dropped unsaid and that a loop restart (or at least `/mcp`) reloads them. A plan option's key the session does not know now goes through to the daemon.
 

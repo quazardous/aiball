@@ -1,9 +1,10 @@
 # Replica: a proxy node that keeps working when cut from its parent, and can take its place
 
-> **Status: a design, not yet implemented.** This page states what a proxy
-> node does today when it loses its parent (measured), what a replica would
-> add, the choices it involves and the order to build it in. Each step gets
-> its own ticket and plan once the choices are made.
+> **Status: the master's side is built** (numbers from sequences, a revision
+> per document, `replica.pull` and `replica.board`, the signal to nodes); the
+> node's copy, the switch and the rest are a design. This page states what a
+> proxy node does when it loses its parent (measured), how the board is
+> copied, the choices made and the order of the work left.
 
 A proxy node ([`REMOTE.md`](./REMOTE.md), type 1) is a relay: the daemon on
 machine B forwards every client call to the daemon on machine A, which holds
@@ -76,59 +77,72 @@ touching ids. (b) lets B's agents see their own writes and create tickets that
 others can answer while cut. (c) is the only one that allows a role switch,
 since B must hold everything A holds.
 
-## How a copy is kept
+## How a copy is kept: documents, by revision
 
-Two ways, not exclusive:
+The board is copied as data, not replayed: a replica receives the rows as they
+are on the master (the same ids, dates and hashids), so nothing has to be
+recomputed the same way twice.
 
-- **Physical**: ship SQLite's pages (WAL shipping, as Litestream or LiteFS
-  do). The copy is exact and promotion is trivial (open the file as master).
-  But a copy that took writes of its own cannot be merged back: it fits a
-  read copy and a planned switch, not writes on both sides.
-- **Logical: an operation log.** The master records each successful write as
-  an entry: a sequence number, the method, its parameters, its caller, its
-  key, what it made. A replica pulls the entries after its cursor and applies
-  them. Writes made on a cut replica go into its own log, and on return are
-  sent to the master as calls, keys included, where they are checked like any
-  call: a refusal comes back as a refusal, to the agent that made it.
+- **Two kinds of document.** A **ticket**: its row and everything about it,
+  every consumer's state included (its thread, tags, payload, token usage, and
+  the pings, subscriptions, wakes and credit moves about it). A **consumer**:
+  its row (its live presence left out: each machine's loops report it), its
+  project subscriptions, and its credit moves tied to no ticket. What each
+  holds is listed once (`src/db/documents.ts`).
+- **A revision per document.** When a document changes it takes the next
+  number of the `rev` sequence. A ticket follows `ticketChanged`, which every
+  write of a ticket's state already announces, and the writers of the rest of
+  its document; a consumer, the writers of its row and its subscriptions.
+- **The other tables** (projects, tags, rules, settings, sequences, uploads…)
+  belong to no document: small, or only appended to, they are copied table by
+  table, each with a signature a replica compares. Every table of the schema
+  is placed once — in a document, among these, or left out with its reason
+  (credentials, node administration, derived caches and indexes); a test fails
+  on a new table placed nowhere.
+- **A document goes whole**, replacing the replica's copy of it. Measured on
+  the live board: 4,936 documents, 84 MB of JSON in all, 12 KB at the median,
+  212 KB for the busiest ticket. (Pings sit with their ticket, not their
+  recipient: as a consumer's, the most pinged one weighed 3.5 MB, sent again at
+  every event.)
 
-**Recommended: the operation log.** It is the only one that handles writes on
-both sides, and it is the bus's own unit (a method call), so it adds no second
-model. The ids it carries are the master's.
+A replica may only lose a revision if the master dies between a write and its
+revision; a per-document hash, compared now and then, catches it.
+
+Writes made on a node cut from the master do not go into a log: they are
+spooled as method calls and replayed to the master when it answers again,
+checked like any call, and come back through the revision of what they changed.
 
 ## Transport: the master signals, the replica pulls
 
 A replica must keep up without loading either machine, idle or catching up.
 
-- **The master pushes a signal**, never the data: "my last entry is N", on the
-  link a node already keeps open to its parent (the WebSocket that carries its
-  heartbeat, its sessions and its state). No new connection, and nothing sent
-  while nothing is written.
-- **The replica pulls** the entries after its cursor, in bounded batches (say
-  500), at its own pace. The master keeps no queue per replica: only the
-  cursor each replica reports, for retention.
-- **A lost signal costs nothing**: the next one, or a slow check on the
-  heartbeat (once a minute), catches up.
-- **Catching up after a cut** is the same path, from an older cursor: batches
-  until the replica is level. The link compresses (WebSocket deflate).
-- **The first copy** is a snapshot of the database (SQLite's backup), sent
-  once, then the log from the snapshot's entry.
-- **Retention**: the master keeps its log while a known replica has not read
-  it, up to a limit (say 30 days); a replica further behind starts again from
-  a snapshot.
+- **The master pushes a signal**, never the data: `replica_rev`, its last
+  revision, on the link a node already keeps open to its parent (the WebSocket
+  of its heartbeat and its sessions), at most once a second, and in the hello
+  of each connection. Nothing is sent while nothing is written.
+- **The replica pulls** the documents revised after its cursor
+  (`replica.pull`), 500 at most a time, at its own pace, and the board tables
+  whose signature moved (`replica.board`). The master keeps nothing per
+  replica.
+- **A lost signal costs nothing**: the next one, or the next hello, catches up.
+- **Catching up after a cut** is the same path, from an older cursor.
+- **A new node** starts from 0: every document and every board table. Its
+  order can be chosen (the projects it serves first, then open and recent
+  tickets), and it is usable before the end; a snapshot of the database is
+  the faster start for a large board.
 
 Pushing everything would make the master queue for each cut replica, without
 bound during a long cut, and track acknowledgements. Pulling alone means
 choosing between latency and idle calls (one a second is 86,400 a day for
-nothing). The volume is not the issue: an entry is a method call in JSON, and
-a board makes at most tens of writes a minute.
+nothing).
 
 ## Cascade: a replica of a replica
 
 A replica can serve replicas of its own, so nodes chain (A ← B ← C):
 
-- **Down the chain, the log is relayed as it is.** B pulls from A and serves
-  the same entries, under A's sequence numbers, to C; B's signal to C follows
-  its own pull. C never talks to A, and nothing is renumbered on the way.
+- **Down the chain, the documents are relayed as they are.** B pulls from A
+  and serves the same documents, under A's revisions, to C; B's signal to C
+  follows its own pull. C never talks to A, and nothing is renumbered on the way.
 - **Up the chain, a write goes hop by hop.** C's write goes to B, which relays
   it to A, as a proxy node does today; cut at any hop, it waits in the spool of
   the machine below the cut, and goes up when that hop answers again.
@@ -182,25 +196,21 @@ machine's state is already shown:
 Each gesture is confirmed, names the machine that becomes master, and is
 recorded on the board (who switched, when, from which machine).
 
-## Tickets created while cut: ids from a reserved range
+## Numbers: sequences, and ranges reserved to nodes
 
-A ticket made on a node cut from the master takes its id from a range above
-the master's: the highest ticket id the node's copy knows, plus an offset
-(1000 for the first node, 2000 for the second…). The id is final: on return
-the master inserts the ticket under it, and its own counter goes on from the
-highest id it holds. Nothing is renumbered, so a `#N` quoted during the cut
-stays right; the price is a gap in the numbering.
+Ticket and message numbers come from sequences (`src/db/sequences.ts`): one
+row per sequence and its next number. A sequence checks its next number
+before handing it out: one that lies in a range reserved to a node, or that a
+row already has (brought by a sync), is refused, naming the conflict, and the
+counter does not move. A number is never skipped over silently, nor written
+over.
 
-- It needs a copy that is up to date when the cut starts, so it comes with
-  level (a): a node that does not know the master's last id could collide.
-- Each node has its own offset, so two nodes cut at the same time do not draw
-  the same ids.
-- The master can still run into the range during a long cut (more tickets made
-  on it than the offset). The return checks it: an id already taken is
-  refused, never overwritten, and that ticket alone gets a new number, said
-  to its author.
-- Comments are not concerned: their ids are a separate range, and nothing
-  quotes them by number.
+A ticket made on a node cut from the master will take its number from a range
+reserved to that node, far above the master's (1000 for the first node, 2000
+for the second…). The number is final: on return the master inserts the
+ticket under it. Nothing is renumbered, so a `#N` quoted during the cut stays
+right; the price is a gap in the numbering. Each node has its own range, so
+two nodes cut at the same time do not draw the same numbers.
 
 ## Conflicts on return
 
@@ -229,13 +239,12 @@ everything, the upstream sync only what may leave the machine.
 
 1. **The spool on a proxy node goes to its parent** (done). Writes made during
    a cut reach A on return, once.
-2. **The operation log on the master**: every write recorded with its sequence
-   number; a replica pulls it. Nothing else changes for clients.
-3. **(a) A read copy on B** fed by the log: B serves reads and wakes from it,
-   cut or not; writes still go to A, or to the spool when cut.
-4. **Planned switch** (needs (c): the copy covers the whole board): the human's
-   gesture, A drains, B takes over, A follows.
-5. **(b) Local writes while cut**, tickets numbered from the node's reserved
-   range.
+2. **The master's side** (done): sequences, a revision per document,
+   `replica.pull` and `replica.board`, the signal to nodes.
+3. **A copy on B** fed by them: B serves reads and wakes from it when cut;
+   writes still go to A, or to the spool when cut.
+4. **Planned switch** (the copy covers the whole board): the human's gesture,
+   A drains, B takes over, A follows.
+5. **Local writes while cut**, tickets numbered from the node's reserved range.
 6. **Failover as a human gesture**, with the replay of A's writes after the
    split.

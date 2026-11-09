@@ -22,6 +22,7 @@
  * Phase 2 (à venir) ajoutera l'envelope d'ordres (`kind`, `request_id`) et le
  * routing depuis `agents.ts`.
  */
+import { lastRev, onRevised } from "./db/doc-revs.js";
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
 import { randomBytes } from "node:crypto";
@@ -128,6 +129,25 @@ export function sendToNode(nodeId: string, frame: PaneFrame): boolean {
         return false;
     }
 }
+
+/**
+ * #4866 — the master tells its nodes the board's last revision when it moves,
+ * at most once a second: a replica pulls what it lacks. Nothing is sent while
+ * nothing is written; a node that missed one hears the next, or the revision
+ * its next hello carries.
+ */
+const REPLICA_SIGNAL_MS = 1_000;
+let replicaSignalTimer: NodeJS.Timeout | null = null;
+let replicaSignalLast = 0;
+onRevised((last) => {
+    replicaSignalLast = last;
+    if (replicaSignalTimer) return;
+    replicaSignalTimer = setTimeout(() => {
+        replicaSignalTimer = null;
+        for (const id of listConnectedNodeIds()) sendToNode(id, { kind: "replica_rev", last: replicaSignalLast });
+    }, REPLICA_SIGNAL_MS);
+    replicaSignalTimer.unref?.();
+});
 
 /** Snapshot des nodes connectés (pour /api/nodes ou debug). */
 export function listConnectedNodeIds(): string[] {
@@ -273,7 +293,8 @@ export function attachProxyWs(server: Server): void {
         nodes.set(nid, conn);
         console.log(`[proxy WS] node connected: id=${nid} label=${row.label ?? "(unset)"} peer=${ip} map_size_after=${nodes.size}`);
         try {
-            ws.send(JSON.stringify({ kind: "hello", node_id: nid, server_ts: Date.now() }));
+            // #4866 — with the board's last revision: a replica behind it pulls.
+            ws.send(JSON.stringify({ kind: "hello", node_id: nid, server_ts: Date.now(), replica_rev: lastRev() }));
         } catch { /* noop — close prendra le relais */ }
         ws.on("message", (data) => {
             conn.last_frame_ms = Date.now();
