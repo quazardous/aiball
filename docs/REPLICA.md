@@ -116,6 +116,24 @@ Two cases, of very different risk:
 automatic. A machine cannot tell "A is down" from "the network between us is
 down", and an automatic promotion on a network cut is two masters by design.
 
+**Where the gesture lives.** Both switches are a human's, made where the
+machine's state is already shown:
+
+- **the GNOME extension's menu**: on a proxy node it already shows the relay's
+  state, and an orange icon when the parent does not answer. That menu offers
+  *Take over as master* (failover) next to the state that calls for it, and
+  *Hand over to …* (planned switch) on either machine. The extension talks to
+  its own daemon over the Unix socket, with no token, which is enough: a
+  machine promotes or demotes itself.
+- **the web UI**: the Nodes panel shows which machine is master, each
+  replica's lag (its cursor against the master's last entry) and the same two
+  gestures, with a dialog that says what the switch does and which loops it
+  restarts.
+- the CLI, for a machine without either.
+
+Each gesture is confirmed, names the machine that becomes master, and is
+recorded on the board (who switched, when, from which machine).
+
 ## Tickets created while cut: ids from a reserved range
 
 A ticket made on a node cut from the master takes its id from a range above
