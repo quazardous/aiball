@@ -42,3 +42,19 @@ export function writeProxyConfig(opts: ProxyConfigWrite): string {
     writeFileSync(path, doc.toString(), "utf8");
     return path;
 }
+
+/**
+ * #4868 — remove the `proxy:` block from the global config, preserving the
+ * rest: this daemon becomes a master. Returns the path written.
+ */
+export function removeProxyConfig(): string {
+    const path = globalConfigPath();
+    if (!existsSync(path)) return path;
+    const doc = parseDocument(readFileSync(path, "utf8"));
+    if (doc.errors.length) {
+        throw new Error(`${path} exists but isn't valid YAML — fix or remove it first`);
+    }
+    doc.deleteIn(["proxy"]);
+    writeFileSync(path, doc.toString(), "utf8");
+    return path;
+}

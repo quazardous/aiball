@@ -13,7 +13,7 @@
  * `$AIBALL_HOME/replica.json`, not in the database: the board tables it
  * copies (`settings` among them) are replaced whole.
  */
-import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BusClient } from "./bus-client.js";
 import { relayAuthorization, type ProxyConfig, type ProxyTokenStore } from "./proxy.js";
@@ -28,6 +28,7 @@ import { WebSocketServer } from "ws";
 import { authenticateUpgrade, openGated, type BusGate } from "./bus/server.js";
 import { callerOf, getMethod } from "./bus/methods.js";
 import { ERROR_CODES } from "./domain.js";
+import { BOARD_READS } from "./replica-reads.js";
 
 interface ReplicaState {
     /** The master's last revision this node has looked at. */
@@ -51,6 +52,16 @@ export function readReplicaState(): ReplicaState {
     }
 }
 
+/** #4868 — a master that became a node: its database is a complete copy, level with `cursor`. */
+export function markReplicaComplete(cursor: number, board: Record<string, string>): void {
+    writeReplicaState({ cursor, board, synced_at: new Date().toISOString(), complete: true });
+}
+
+/** #4868 — a node that became master keeps no copy state. */
+export function forgetReplicaState(): void {
+    rmSync(STATE_FILE(), { force: true });
+}
+
 function writeReplicaState(s: ReplicaState): void {
     const tmp = `${STATE_FILE()}.tmp`;
     writeFileSync(tmp, JSON.stringify(s));
@@ -70,6 +81,8 @@ export interface ReplicaNode {
     busy(): void;
     /** Where the copy stands: documents kept out of the master's, and whether it is complete. */
     progress(): ReplicaProgress;
+    /** #4868 — call the master, as this node (its token). */
+    call<T>(method: string, params: unknown): Promise<T>;
     close(): void;
 }
 
@@ -119,6 +132,11 @@ let current: ReplicaNode | null = null;
 /** #4867 — where this node's copy stands, or null when this daemon keeps none (not a proxy node). */
 export function replicaProgress(): ReplicaProgress | null {
     return current ? current.progress() : null;
+}
+
+/** #4868 — this daemon's copy, when it is a proxy node. */
+export function replicaNode(): ReplicaNode | null {
+    return current;
 }
 
 export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode {
@@ -277,6 +295,7 @@ function makeReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): ReplicaNode 
     }
 
     return {
+        call,
         busy() { busyAt = Date.now(); },
         progress() {
             const st = readReplicaState();
@@ -319,19 +338,8 @@ export function keepWhatIsRead(replica: ReplicaNode): (msg: unknown) => void {
     };
 }
 
-/**
- * #4867 — the reads a node answers from its copy while its master is out of
- * reach. Each reads the board and writes nothing; a write is refused (503),
- * and the client queues it for the master, as during any cut.
- */
-export const CUT_READS: ReadonlySet<string> = new Set([
-    "bus.whoami", "rpc.discover", "bus.subjects", "bus.subscribe", "bus.unsubscribe",
-    "ticket.get", "ticket.list", "ticket.bookends", "ticket.subscribers",
-    "message.get", "message.list", "message.search",
-    "inbox.list", "unread.list", "unread.count", "ping.list", "ping.count",
-    "consumer.micro_status", "consumer.get", "consumer.list", "consumer.me", "consumer.backlog",
-    "project.list", "project.milestones", "tag.list", "decision.mine", "decision.plans_to_execute",
-]);
+/** #4867 — the reads a node answers from its copy while cut (`src/replica-reads.ts`). */
+export const CUT_READS = BOARD_READS;
 
 /**
  * #4867 — the node's bus while cut: a connection its client opens is served

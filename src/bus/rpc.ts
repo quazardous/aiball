@@ -4,7 +4,8 @@
  */
 import { RPC_ERRORS, type RpcError, type RpcId, type RpcResponse } from "../bus-protocol.js";
 import { ERROR_CODES } from "../domain.js";
-import { accessRefusal, getMethod, Refusal, type Caller } from "./methods.js";
+import { accessRefusal, getMethod, Refusal, switchRefusal, type Caller } from "./methods.js";
+import { waitsForSwitch } from "../switch-state.js";
 import { beginCall, paramsShape, rowsOf } from "../request-stats.js";
 import { recordUiAction } from "../ui-actions-log.js";
 
@@ -46,6 +47,8 @@ export async function runOne(caller: Caller, msg: unknown): Promise<RpcResponse 
     }
     const denied = accessRefusal(m, caller);
     if (denied) return answer(fail(id, refusalError(denied)));
+    // #4868 — while the board is handed over, a write waits.
+    if (waitsForSwitch(m.name, m.machine === true)) return answer(fail(id, refusalError(switchRefusal())));
 
     const parsed = m.params.safeParse(req.params ?? {});
     if (!parsed.success) {

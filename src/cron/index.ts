@@ -11,6 +11,7 @@
  * `runner.ts` so no task has to re-implement it. See that file for why the
  * previous hand-wired `setInterval` block didn't extend.
  */
+import { boardWritesHere } from "../switch-state.js";
 import { captureTokenSnapshotIfDue } from "../db.js";
 import { checkSandboxPings } from "../sandbox/watcher.js";
 import { revealExpiredPostpones } from "./postpone.js";
@@ -29,6 +30,8 @@ export const CRON_TASKS: readonly CronTask[] = [
         // 60s is fine grain — users snooze for hours / days, not minutes.
         name: "postpone-reveal",
         everyMs: 60_000,
+        // #4868 — a board write: on its master only, and not while it hands the board over.
+        enabled: boardWritesHere,
         run: revealExpiredPostpones,
     },
     {
@@ -36,6 +39,7 @@ export const CRON_TASKS: readonly CronTask[] = [
         // self-throttles, so running it at boot is idempotent.
         name: "token-snapshot",
         everyMs: 60 * MINUTE,
+        enabled: boardWritesHere,
         // Wrapped: it returns a count, and a task's return value is meaningless
         // to the runner. Keeping `run` typed as void-or-promise is what makes
         // the async case explicit in the interface.
@@ -66,6 +70,7 @@ export const CRON_TASKS: readonly CronTask[] = [
         name: "upstream-watch",
         everyMs: 10 * MINUTE,
         runAtBoot: false,
+        enabled: boardWritesHere,
         run: async () => { await runUpstreamWatch(); },
     },
     {

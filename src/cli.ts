@@ -556,6 +556,41 @@ program
         }
     });
 
+// #4868 — handing the board over: the human's gesture, made on the node that takes over.
+const master = program.command("master").description("Which machine holds the board: hand it over between a master and its proxy node");
+master
+    .command("take")
+    .description(
+        "On a proxy node whose copy of the board is complete: take the board over from its master. " +
+            "The master stops taking writes (they wait, their clients queue them), this node catches up, " +
+            "takes the master's revisions and tokens, checks it holds what the master holds, and becomes the master; " +
+            "the old master becomes this node's node. Both daemons restart, and the loops of each machine with them. " +
+            "Refused, with why, when the copy is not complete, the link is not https / a tailnet / this machine, " +
+            "or another node is connected to the master.",
+    )
+    .requiredOption("--url <url>", "where the master reaches this machine (its proxy.url from then on)")
+    .option("--yes", "do not ask for confirmation")
+    .option("--no-restart", "leave both daemons to be restarted by hand")
+    .action(async (opts: { url: string; yes?: boolean; restart: boolean }, cmd) => {
+        if (!opts.yes) {
+            const { createInterface } = await import("node:readline/promises");
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            const answer = await rl.question(
+                `Take the board over: this machine becomes the master, the current one its node, reaching it at ${opts.url}. ` +
+                    `Both daemons restart, and every loop of both machines with them. Go? [y/N] `,
+            );
+            rl.close();
+            if (!/^y(es)?$/i.test(answer.trim())) die("nothing changed");
+        }
+        try {
+            const r = await new AiballClient().takeOverMaster(opts.url, opts.restart);
+            out(r, gOpts(cmd), (v) =>
+                `this machine is the master now (from ${v.from}, at revision ${v.last}); ${v.restarting ? "both daemons restart" : "restart both daemons by hand"}`);
+        } catch (e) {
+            die(`the switch did not happen: ${(e as Error).message}`);
+        }
+    });
+
 program
     .command("restart")
     .description(

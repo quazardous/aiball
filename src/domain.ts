@@ -204,6 +204,10 @@ export const ERROR_CODES = {
     WIZARD_RUNNING: "WIZARD_RUNNING",
     /** #4682 — `project.setting_wizard_cancel`: the run has started its point of no return. */
     WIZARD_PAST_RETURN: "WIZARD_PAST_RETURN",
+    /** #4868 — the board is being handed over to another machine: writes wait (the client queues them). */
+    SWITCHING: "SWITCHING",
+    /** #4868 — a master switch whose conditions do not hold (`reasons`). */
+    SWITCH_NOT_READY: "SWITCH_NOT_READY",
     /** #3066 — a handover waited for Claude to be idle, and it did not become so. */
     NOT_IDLE: "NOT_IDLE",
     /** #3036 — a body names an author other than the authenticated caller. */

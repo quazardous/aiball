@@ -555,6 +555,10 @@ export class AiballClient {
     reloadDaemon() {
         return this.call<{ reloaded: boolean; global_config: string; hot_window_sec: unknown }>("daemon.reload");
     }
+    /** #4868 — on a proxy node: take the board over from its master (`url`: where the master reaches this machine). */
+    takeOverMaster(url: string, restart: boolean) {
+        return this.call<{ from: string; to: string; last: number; counts: Record<string, number>; restarting: boolean }>("replica.take", { url, restart }, 10 * 60_000);
+    }
     /**
      * Explicitly register a project (#B.216 phase A pass 2). The CLI's
      * `aiball project init` and the Web UI's "Create project" button

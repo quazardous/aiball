@@ -116,6 +116,8 @@ branch on the status's generic code, and a precise code only ever narrows it.
 | `CLAUDE_RUNS_IN_FOLDER` | 409 | `project.settings_set` with `move_sessions`: a Claude runs in the folder and writes its sessions; `details.folder` and `details.pids` (`{ pid, cmd }`). Stop its loops, then move. Nothing was written. |
 | `WIZARD_RUNNING` | 409 | `project.setting_wizard_start`: a wizard already runs in the folder; `details.run` names it. |
 | `WIZARD_PAST_RETURN` | 409 | `project.setting_wizard_cancel`: the run has started its point of no return. |
+| `SWITCHING` | 503 | Any write to a master handing the board over to a node ([`REPLICA.md`](./REPLICA.md)): it waits, the client queues it for the new master. |
+| `SWITCH_NOT_READY` | 409 | `replica.take` and `replica.handover_begin`: a condition of the switch does not hold; `details.reasons` lists them (the copy is not complete, another node is connected, the link is not https or a tailnet…). Nothing was changed. |
 | `NOT_IDLE` | 409 | `consumer.restart_claude`: Claude works; the restart waits until it is idle (or pass `when_idle`). `loop.restart` and `loop.wake`: Claude works (or pass `force`). |
 | `NO_ROOT` | 409 | `project.rename_all` without `cwd`: aiball knows no folder for the project; `details.roots` is empty. |
 | `AMBIGUOUS_ROOT` | 409 | `project.rename_all` without `cwd`: the project is known in several folders; `details.roots` lists them. |

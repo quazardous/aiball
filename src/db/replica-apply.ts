@@ -85,3 +85,12 @@ export function keeps(kind: DocKind, key: string): boolean {
     const p = DOCUMENTS[kind][0];
     return getRawSqlite().prepare(`SELECT 1 FROM "${p.table}" WHERE ${p.where}`).get({ key: kind === "ticket" ? Number(key) : key }) !== undefined;
 }
+
+/**
+ * #4868 — at a master switch only: the master's revisions and its tokens,
+ * taken whole, so the node that becomes master continues its numbering and
+ * knows its clients. Neither is copied otherwise (`board-tables.ts`).
+ */
+export function applyTableWhole(table: "doc_revs" | "tokens", rows: ReadonlyArray<Record<string, unknown>>): void {
+    applyBoardTables({ [table]: rows });
+}

@@ -4,6 +4,7 @@
  * what it takes; it sees no HTTP request. The bus calls it (`callMethod`
  * checks who may, then the parameters, then runs it).
  */
+import { waitsForSwitch } from "../switch-state.js";
 import type { z } from "zod";
 import type { CallerContext } from "../auth.js";
 import type { BusSession } from "./subscriptions.js";
@@ -142,11 +143,18 @@ export function accessRefusal(m: AnyMethod, caller: Caller): Refusal | null {
  * method would; an unknown method is a 404, invalid parameters a 400 naming
  * the first one.
  */
+/** #4868 — the answer to a write that comes while the board is handed over. */
+export function switchRefusal(): Refusal {
+    return new Refusal(503, "the board is being handed over to another machine: the write waits for the new master", ERROR_CODES.SWITCHING);
+}
+
 export async function callMethod(caller: Caller, name: string, params: unknown): Promise<unknown> {
     const m = getMethod(name);
     if (!m) throw new Refusal(404, `no method ${name}`, ERROR_CODES.NOT_FOUND);
     const denied = accessRefusal(m, caller);
     if (denied) throw denied;
+    // #4868 — while the board is handed over, a write waits.
+    if (waitsForSwitch(m.name, m.machine === true)) throw switchRefusal();
     const parsed = m.params.safeParse(params ?? {});
     if (!parsed.success) {
         const first = parsed.error.issues[0];
