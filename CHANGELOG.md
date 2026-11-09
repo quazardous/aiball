@@ -25,6 +25,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- `scripts/notification-report.ts`: Claude's task notifications per folder and per day, how many repeat one already sent, how many say an agent waits on its own background work, and how many the main thread worked on.
 - An agent whose aiball tools are older than the ones on disk hears it: every tool answer carries `_status.stale_tools`, saying that a field added since would be dropped unsaid and that a loop restart (or at least `/mcp`) reloads them. A plan option's key the session does not know now goes through to the daemon.
 
 ### Fixed
