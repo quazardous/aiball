@@ -158,8 +158,31 @@ token-less over the UDS / `127.0.0.1`, as if A were local.
 
 The B daemon becomes a **transparent relay**: it forwards `/api/*` and
 `/uploads/*` to A (injecting the bearer), relays each local bus connection (`/bus`)
-to A's, and keeps no local DB. Local clients on B talk to the UDS /
-`127.0.0.1` token-less, exactly as if A were local.
+to A's. Local clients on B talk to the UDS / `127.0.0.1` token-less, exactly as
+if A were local.
+
+**B keeps a copy of the board, ticket by ticket** ([`REPLICA.md`](./REPLICA.md)),
+in its own database, while everything stays relayed:
+
+- a ticket B relays a read of is kept from then on, with the board's small
+  tables (projects, tags, settings…);
+- each time A says its last revision moved, B takes again the tickets it keeps,
+  and no other;
+- in the background, quietly, B takes the rest of the board until it has it all
+  (the projects it already keeps tickets of first, the most recent first), then
+  follows every change. It steps aside while B's clients are at work and on
+  battery, and resumes where it stopped. Tune it, or turn it off, in the
+  `proxy:` block:
+
+```yaml
+proxy:
+  replica:
+    background: true   # false: keep only what is read
+    batch: 20          # documents per batch
+    pause_ms: 2000     # rest between two batches
+```
+
+B's cursor and progress are in `$AIBALL_HOME/replica.json`.
 
 **When A is out of reach**, reads answer 502 and writes (replies, new tickets,
 decisions) are spooled on B (`$AIBALL_HOME/spool/`). B replays them to A as

@@ -64,8 +64,15 @@ test("a consumer's document leaves the node's own presence of it as it was", () 
 
 test("a relayed ticket.get names the ticket to keep", () => {
     const kept: string[] = [];
-    const hear = keepWhatIsRead({ keep: (_k: string, key: string) => kept.push(key) } as never);
+    const hear = keepWhatIsRead({ keep: (_k: string, key: string) => kept.push(key), busy: () => {} } as never);
     hear({ jsonrpc: "2.0", id: 1, method: "ticket.get", params: { id: 42 } });
     hear([{ jsonrpc: "2.0", id: 2, method: "ticket.list", params: {} }, { jsonrpc: "2.0", id: 3, method: "ticket.get", params: { id: 7 } }]);
     assert.deepEqual(kept, ["42", "7"]);
+});
+
+test("the background pass takes consumers, then the projects the node serves, the most recent first", async () => {
+    const { backfillOrder } = await import("../replica-node.js");
+    const h = (kind: "ticket" | "consumer", key: string, rev: number, project: string | null = null) => ({ kind, key, rev, project });
+    const order = backfillOrder([h("ticket", "1", 1, "other"), h("ticket", "2", 5, "mine"), h("consumer", "x", 2), h("ticket", "3", 9, "other"), h("ticket", "4", 3, "mine")], new Set(["mine"]));
+    assert.deepEqual(order.map((x) => x.key), ["x", "2", "4", "3", "1"]);
 });

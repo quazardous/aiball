@@ -73,6 +73,14 @@ export interface ProxyConfig {
      *     project_yaml: /path/to/project/.aiball.yaml
      */
     projectYaml?: string;
+    /**
+     * #4867 — the node's background replication: how much it takes at a time
+     * and how long it rests between two batches, or `false` to leave it off.
+     *
+     *   proxy:
+     *     replica: { background: true, batch: 20, pause_ms: 2000 }
+     */
+    replica?: { background: boolean; batch: number; pauseMs: number };
 }
 
 /** Read the `proxy:` block from the GLOBAL config. Null when absent → the
@@ -88,6 +96,7 @@ export function loadProxy(): ProxyConfig | null {
                 strict?: unknown;
                 node?: { label?: unknown };
                 project_yaml?: unknown;
+                replica?: { background?: unknown; batch?: unknown; pause_ms?: unknown };
             };
         };
         const px = raw.proxy;
@@ -105,7 +114,14 @@ export function loadProxy(): ProxyConfig | null {
         const projectYaml = typeof px.project_yaml === "string" && px.project_yaml.trim()
             ? px.project_yaml.trim()
             : undefined;
-        return { url, token, strict, nodeLabel, projectYaml };
+        const rp = px.replica ?? {};
+        const whole = (v: unknown, dflt: number, min: number) => (typeof v === "number" && Number.isInteger(v) && v >= min ? v : dflt);
+        const replica = {
+            background: rp.background !== false,
+            batch: whole(rp.batch, 20, 1),
+            pauseMs: whole(rp.pause_ms, 2000, 0),
+        };
+        return { url, token, strict, nodeLabel, projectYaml, replica };
     } catch {
         return null;
     }

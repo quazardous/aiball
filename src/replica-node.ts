@@ -13,7 +13,7 @@
  * `$AIBALL_HOME/replica.json`, not in the database: the board tables it
  * copies (`settings` among them) are replaced whole.
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BusClient } from "./bus-client.js";
 import { relayAuthorization, type ProxyConfig, type ProxyTokenStore } from "./proxy.js";
@@ -21,6 +21,7 @@ import { AIBALL_HOME } from "./paths.js";
 import type { Document } from "./db/documents.js";
 import type { DocKind } from "./db/doc-revs.js";
 import { applyBoardTables, applyDocuments, keeps } from "./db/replica-apply.js";
+import { getRawSqlite } from "./db/connection.js";
 
 interface ReplicaState {
     /** The master's last revision this node has looked at. */
@@ -29,6 +30,8 @@ interface ReplicaState {
     board: Record<string, string>;
     /** When the node last caught up with its master (ISO), null before. */
     synced_at: string | null;
+    /** The background replication reached every document: from then on, every change is taken. */
+    complete: boolean;
 }
 
 const STATE_FILE = () => join(AIBALL_HOME, "replica.json");
@@ -36,9 +39,9 @@ const STATE_FILE = () => join(AIBALL_HOME, "replica.json");
 export function readReplicaState(): ReplicaState {
     try {
         const s = JSON.parse(readFileSync(STATE_FILE(), "utf8")) as Partial<ReplicaState>;
-        return { cursor: s.cursor ?? 0, board: s.board ?? {}, synced_at: s.synced_at ?? null };
+        return { cursor: s.cursor ?? 0, board: s.board ?? {}, synced_at: s.synced_at ?? null, complete: s.complete === true };
     } catch {
-        return { cursor: 0, board: {}, synced_at: null };
+        return { cursor: 0, board: {}, synced_at: null, complete: false };
     }
 }
 
@@ -57,7 +60,44 @@ export interface ReplicaNode {
     keep(kind: DocKind, key: string): void;
     /** Catch up now; resolves when level, or when the master is out of reach. */
     sync(): Promise<void>;
+    /** The node's clients are at work: the background replication steps aside a while. */
+    busy(): void;
+    /** Where the copy stands: documents kept out of the master's, and whether it is complete. */
+    progress(): ReplicaProgress;
     close(): void;
+}
+
+export interface ReplicaProgress {
+    kept: number;
+    /** The master's documents, as last counted (null before a background pass). */
+    total: number | null;
+    complete: boolean;
+    cursor: number;
+    synced_at: string | null;
+}
+
+/** The background pass steps aside this long after the node's clients were last at work. */
+const BUSY_QUIET_MS = 5_000;
+
+/** On battery, the background pass waits (Linux: a battery discharging). */
+export function onBattery(): boolean {
+    try {
+        for (const d of readdirSync("/sys/class/power_supply")) {
+            const status = join("/sys/class/power_supply", d, "status");
+            if (existsSync(status) && readFileSync(status, "utf8").trim() === "Discharging") return true;
+        }
+    } catch { /* no such place: not a laptop, or not Linux */ }
+    return false;
+}
+
+/**
+ * #4867 — the order the background pass takes documents in: the consumers, the
+ * tickets of the projects the node already keeps tickets of, then the rest; the
+ * most recently revised first in each.
+ */
+export function backfillOrder(headers: readonly Header[], served: ReadonlySet<string>): Header[] {
+    const rank = (h: Header) => (h.kind === "consumer" ? 0 : h.project !== null && served.has(h.project) ? 1 : 2);
+    return [...headers].sort((a, b) => rank(a) - rank(b) || b.rev - a.rev);
 }
 
 /** Documents asked for at once, as the master allows. */
@@ -71,6 +111,11 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
     let again = false;
     const wanted = new Map<string, { kind: DocKind; key: string }>();
     let keepTimer: NodeJS.Timeout | null = null;
+    let busyAt = 0;
+    let total: number | null = null;
+    let stopped = false;
+    let backfilling = false;
+    const background = cfg.replica ?? { background: true, batch: 20, pauseMs: 2000 };
 
     async function bus(): Promise<BusClient> {
         if (client) return client;
@@ -116,10 +161,13 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
             const board = await syncBoard(got.board);
             // The documents this node keeps, at their newest revision in this batch.
             const kept = new Map<string, { kind: DocKind; key: string }>();
-            for (const h of got.changes) if (keeps(h.kind, h.key)) kept.set(`${h.kind}:${h.key}`, { kind: h.kind, key: h.key });
+            for (const h of got.changes) {
+                // Complete, the node takes every change; before, only what it keeps.
+                if (state.complete || keeps(h.kind, h.key)) kept.set(`${h.kind}:${h.key}`, { kind: h.kind, key: h.key });
+            }
             await fetchDocs([...kept.values()]);
             const cursor = got.changes.length > 0 ? got.changes[got.changes.length - 1].rev : got.last;
-            state = { cursor, board, synced_at: new Date().toISOString() };
+            state = { ...readReplicaState(), cursor, board, synced_at: new Date().toISOString() };
             writeReplicaState(state);
             if (got.changes.length < CHANGES_BATCH) return;
         }
@@ -153,13 +201,64 @@ export function startReplicaNode(cfg: ProxyConfig, store: ProxyTokenStore): Repl
         keepTimer.unref?.();
     }
 
+    const rest = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); t.unref?.(); });
+
+    /** One background pass: every document of the master the node lacks, a batch at a time, quietly. */
+    async function backfill(): Promise<void> {
+        if (backfilling || !background.background) return;
+        backfilling = true;
+        try {
+            await sync();
+            const headers: Header[] = [];
+            for (let after = 0; ;) {
+                const got = await call<{ changes: Header[] }>("replica.changes", { after, limit: CHANGES_BATCH });
+                headers.push(...got.changes);
+                if (got.changes.length < CHANGES_BATCH) break;
+                after = got.changes[got.changes.length - 1].rev;
+            }
+            total = headers.length;
+            const served = new Set(headers.filter((h) => h.kind === "ticket" && h.project !== null && keeps("ticket", h.key)).map((h) => h.project!));
+            const todo = backfillOrder(headers, served).filter((h) => !keeps(h.kind, h.key));
+            for (let i = 0; i < todo.length && !stopped; ) {
+                // Quietly: never while the node's clients are at work, nor on battery.
+                if (Date.now() - busyAt < BUSY_QUIET_MS || onBattery()) { await rest(Math.max(background.pauseMs, 1_000)); continue; }
+                await fetchDocs(todo.slice(i, i + background.batch).map((h) => ({ kind: h.kind, key: h.key })));
+                i += background.batch;
+                await rest(background.pauseMs);
+            }
+            if (!stopped) {
+                writeReplicaState({ ...readReplicaState(), complete: true });
+                console.log(`[replica] complete: ${total} documents`);
+                await sync();
+            }
+        } catch (e) {
+            console.warn(`[replica] background pass stopped: ${(e as Error).message}`);
+        } finally {
+            backfilling = false;
+        }
+    }
+
+    function countKept(): number {
+        const db = getRawSqlite();
+        const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+        return n(`SELECT count(*) AS n FROM tickets`) + n(`SELECT count(*) AS n FROM consumers`);
+    }
+
     return {
+        busy() { busyAt = Date.now(); },
+        progress() {
+            const st = readReplicaState();
+            return { kept: countKept(), total, complete: st.complete, cursor: st.cursor, synced_at: st.synced_at };
+        },
         signal(last) {
             if (last > readReplicaState().cursor) void sync();
+            // The first signal of a connection starts the background pass, until complete.
+            if (!readReplicaState().complete) void backfill();
         },
         keep,
         sync,
         close() {
+            stopped = true;
             client?.close();
             client = null;
             if (keepTimer) clearTimeout(keepTimer);
@@ -178,6 +277,7 @@ export function replicaStarted(): boolean {
  */
 export function keepWhatIsRead(replica: ReplicaNode): (msg: unknown) => void {
     return (msg) => {
+        replica.busy();
         const calls = Array.isArray(msg) ? msg : [msg];
         for (const c of calls) {
             const m = c as { method?: unknown; params?: { id?: unknown } };
