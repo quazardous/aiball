@@ -1834,7 +1834,7 @@ function decisionGateEvents(ticketIds?: readonly number[]): { events: Array<{ cr
     // those as synthetic `ticket_created` events to `computeDecisionGate`.
     //
     // Merge order: tickets.id and messages.id live in SEPARATE counters
-    // (`next_ticket_id` / `next_message_id`), so an id-asc merge does
+    // (the `ticket` and `message` sequences), so an id-asc merge does
     // NOT preserve chronology. Sort the merged stream by `createdAt`
     // instead — wall-clock is the only key that puts each ticket's own
     // events in posting order regardless of the two counters' relative

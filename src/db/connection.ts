@@ -14,6 +14,7 @@ import { eq, isNull, or } from "drizzle-orm";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
+import { next as nextInSequence } from "./sequences.js";
 import { existsSync } from "node:fs";
 import * as schema from "../schema.js";
 import { replayLastActor } from "./last-actor-gate.js";
@@ -466,43 +467,19 @@ export function nowIso(): string {
 }
 
 /**
- * Allocate the next ticket id. Tickets keep their own dense counter so the
- * user-facing `#B.NNN` series stays sequential — no longer shared with the
- * comment id space (see migration 0007 which split pings into ticket_id +
- * comment_id columns and dropped the global counter).
+ * The next ticket id, from the `ticket` sequence (#4866: checked, never
+ * skipped; see src/db/sequences.ts). Tickets keep their own dense counter so
+ * the user-facing `#NNN` series stays sequential.
  *
- * Must be called inside an active transaction for atomicity.
+ * Must be called inside the transaction that inserts the ticket.
  */
 export function nextTicketId(db: BetterSQLite3Database<typeof schema>): number {
-    return allocateCounter(db, "next_ticket_id");
+    return nextInSequence(db, "ticket");
 }
 
-/**
- * Allocate the next comment / lifecycle-event id. Distinct counter from
- * tickets; the two spaces are no longer shared because pings now has
- * explicit ticket_id / comment_id columns instead of a polymorphic
- * message_id.
- */
+/** The next comment / lifecycle-event id, from the `message` sequence (#4866). */
 export function nextMessageId(db: BetterSQLite3Database<typeof schema>): number {
-    return allocateCounter(db, "next_message_id");
-}
-
-function allocateCounter(
-    db: BetterSQLite3Database<typeof schema>,
-    key: string,
-): number {
-    const row = db.select().from(schema.settings)
-        .where(eq(schema.settings.key, key))
-        .get();
-    const current = row ? Number(row.value) : 1;
-    db.insert(schema.settings)
-        .values({ key, value: String(current + 1) })
-        .onConflictDoUpdate({
-            target: schema.settings.key,
-            set: { value: String(current + 1) },
-        })
-        .run();
-    return current;
+    return nextInSequence(db, "message");
 }
 
 export function ticketRowToMessage(t: schema.Ticket): Message {

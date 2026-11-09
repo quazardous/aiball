@@ -582,6 +582,13 @@
       "when": 1782700000040,
       "tag": "0082_consumer_afk_hold",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1782700000050,
+      "tag": "0083_sequences",
+      "breakpoints": true
     }
   ]
 }

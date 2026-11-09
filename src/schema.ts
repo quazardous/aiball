@@ -519,6 +519,24 @@ export const settings = sqliteTable("settings", {
 });
 
 /**
+ * #4866 — the board's numbers: one row per sequence (`ticket`, `message`) and
+ * its next number. Read and moved only by `src/db/sequences.ts`.
+ */
+export const sequences = sqliteTable("sequences", {
+    name: text("name").primaryKey(),
+    next: integer("next").notNull(),
+});
+
+/** #4866 — a range of a sequence reserved to a node: the sequence's next number never falls in it. */
+export const sequenceRanges = sqliteTable("sequence_ranges", {
+    sequence: text("sequence").notNull(),
+    start: integer("start").notNull(),
+    end: integer("end").notNull(),
+    owner: text("owner").notNull(),
+    createdAt: text("created_at").notNull(),
+}, (t) => [primaryKey({ columns: [t.sequence, t.start] })]);
+
+/**
  * Tracking table for files uploaded via POST /api/uploads (per #B.76).
  * Storage is content-addressable on disk (<AIBALL_HOME>/uploads/<sha>.<ext>);
  * this row is *just metadata* — useful for orphan GC, "who uploaded what"
