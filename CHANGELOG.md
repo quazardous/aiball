@@ -23,6 +23,14 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- Agents can create a tag in a project they lead (`tag_create`) and add or remove tags on an existing ticket (`ticket_update`). A global tag stays a human's gesture.
+
+### Fixed
+
+- Tagging a ticket by name picks its project's tag first, then a global one, never another project's tag of the same name.
+
 ## [0.59.0] — 2026-11-09
 
 ### Added

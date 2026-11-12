@@ -1,6 +1,7 @@
 /** #3063 — the board's catalogs (tags, milestones, who can be mentioned), and tagging a message. */
 import { z } from "zod";
-import { authorOf, defineMethod, Refusal } from "../methods.js";
+import { authorOf, consumerIdOf, defineMethod, Refusal } from "../methods.js";
+import { ERROR_CODES } from "../../domain.js";
 import { id } from "../params.js";
 import { addMessageTag, deleteTag, getTag, getTagByName, insertTag, listMessageTags, listTags, removeMessageTag, setMessageTags, updateTag } from "../../db/tags.js";
 import { configTagNames } from "../../config-tags.js";
@@ -10,7 +11,7 @@ import { emitLifecycle } from "../../event-bus.js";
 import { resolveTagRef, tagCatalog } from "../../queries/tag-catalog.js";
 import { listMilestones } from "../../db/milestones.js";
 import { listProjects } from "../../db/projects.js";
-import { listKnownAgents } from "../../db/subscriptions.js";
+import { listKnownAgents, listSubscriptions } from "../../db/subscriptions.js";
 
 /**
  * Without `project`, the database's tags (applied by numeric id). With it, the
@@ -57,8 +58,8 @@ defineMethod({
     run: (caller, p) => {
         const m = getMessage(p.id);
         if (!m) throw new Refusal(404, "not found");
-        const t = resolveTagRef(p.tag);
-        if (!t) throw new Refusal(400, `unknown tag: ${p.tag}`);
+        const t = resolveTagRef(p.tag, m.project);
+        if (!t) throw new Refusal(400, `unknown tag: ${p.tag}`, ERROR_CODES.TAG_UNKNOWN);
         const wasPresent = listMessageTags(p.id).some((x) => x.id === t.id);
         const setBy = authorOf(caller, p.set_by, "set_by");
         addMessageTag(p.id, t.id, setBy);
@@ -86,8 +87,8 @@ defineMethod({
         if (!Array.isArray(p.tag_ids)) throw new Refusal(400, "tag_ids must be an array of ids");
         const ids: number[] = [];
         for (const r of p.tag_ids) {
-            const tag = typeof r === "number" ? getTag(r) : getTagByName(String(r));
-            if (!tag) throw new Refusal(400, `unknown tag: ${r}`);
+            const tag = resolveTagRef(typeof r === "number" ? r : String(r), m.project);
+            if (!tag) throw new Refusal(400, `unknown tag: ${r}`, ERROR_CODES.TAG_UNKNOWN);
             ids.push(tag.id);
         }
         const before = new Set(listMessageTags(p.id).map((t) => t.name));
@@ -111,8 +112,9 @@ defineMethod({
     who: ["human", "agent"],
     params: z.object({ id, tag: z.string() }),
     run: (_c, p) => {
-        if (!getMessage(p.id)) throw new Refusal(404, "not found");
-        const t = /^\d+$/.test(p.tag) ? getTag(Number(p.tag)) : getTagByName(p.tag);
+        const m = getMessage(p.id);
+        if (!m) throw new Refusal(404, "not found");
+        const t = resolveTagRef(p.tag, m.project);
         if (!t) throw new Refusal(404, `unknown tag: ${p.tag}`);
         removeMessageTag(p.id, t.id);
         const tags = listMessageTags(p.id);
@@ -132,11 +134,20 @@ defineMethod({
     name: "tag.create",
     who: ["human", "agent"],
     params: z.object({ name: z.unknown(), color: z.unknown().optional(), note: z.unknown().optional(), position: z.unknown().optional(), project: z.unknown().optional() }),
-    run: (_c, p) => {
+    run: (caller, p) => {
         if (typeof p.name !== "string" || !p.name.trim()) throw new Refusal(400, "name required");
         const name = p.name.trim();
         if (configTagNames().has(name)) throw IN_CONFIG(p.name);
         const scope = typeof p.project === "string" && p.project.trim() && p.project.trim() !== "_global" ? p.project.trim() : null;
+        // #4957 — an agent creates the tags of a project it leads; a global tag,
+        // shown in every project, stays a human's gesture.
+        if (caller.kind !== "human") {
+            if (scope === null) throw new Refusal(403, "a global tag is a human's gesture: give the project the tag belongs to", ERROR_CODES.FORBIDDEN);
+            const me = consumerIdOf(caller);
+            if (!listSubscriptions(me).some((s) => s.project === scope && s.role === "owner")) {
+                throw new Refusal(403, `${me} does not lead ${scope}: only its owners create its tags`, ERROR_CODES.FORBIDDEN);
+            }
+        }
         if (getTagByName(name, scope)) throw new Refusal(400, `tag '${p.name}' already exists${scope ? ` in project '${scope}'` : " (global)"}`);
         const t = insertTag({
             name,

@@ -91,7 +91,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .array(z.string())
                     .optional()
                     .describe(
-                        "Optional tag names to apply to the new ticket. Resolved server-side (case-sensitive match on name). Unknown tag names fail the request — pre-create the tag via the tags settings panel first.",
+                        "Optional tag names to apply to the new ticket. Resolved server-side (case-sensitive match on name). A name is the project's tag first, then a global one. Unknown tag names fail the request: create the tag first with `tag_create` (a project you lead), or ask a human for a global one.",
                     ),
                 from_project: z
                     .string()
@@ -549,9 +549,19 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "#2910 — put the ticket in this milestone (the id of a ticket of level `milestone` in the same project, not yet released), or null to take it out. A ticket belongs to at most one. Planning: a human's or a cto agent's gesture; refused (403) for an agent that works on tasks only.",
                     ),
+                add_tags: z
+                    .array(z.string())
+                    .optional()
+                    .describe(
+                        "#4957 — tag names to add to the ticket (one already there changes nothing). A name is the ticket's project's tag first, then a global one. An unknown name is refused (TAG_UNKNOWN): create it first with `tag_create`.",
+                    ),
+                remove_tags: z
+                    .array(z.string())
+                    .optional()
+                    .describe("#4957 — tag names to take off the ticket."),
             },
         },
-        async ({ ticket_id, title, summary, body, intent, priority, milestone }) => {
+        async ({ ticket_id, title, summary, body, intent, priority, milestone, add_tags, remove_tags }) => {
             markActiveTicket(ticket_id); // focus = this ticket (token attribution)
             const results: Record<string, unknown> = { ticket_id };
             if (
@@ -566,10 +576,38 @@ export function registerTicketWriteTools(server: McpServer): void {
             if (milestone !== undefined) {
                 results.milestone = (await client.setTicketMilestone(ticket_id, milestone)).milestone;
             }
+            // #4957 — one call per tag, in order: a refusal names the tag it
+            // stopped on, and the tags before it stay set.
+            if (add_tags !== undefined || remove_tags !== undefined) {
+                let tags: Array<{ id: number; name: string }> | undefined;
+                for (const t of add_tags ?? []) tags = await client.addMessageTag(ticket_id, t);
+                for (const t of remove_tags ?? []) tags = await client.removeMessageTag(ticket_id, t);
+                if (tags) results.tags = tags.map((t) => t.name);
+            }
             if (Object.keys(results).length === 1) {
-                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority/milestone");
+                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority/milestone/add_tags/remove_tags");
             }
             return asText(results);
+        },
+    );
+
+    /** #4957 — create a tag of a project the agent leads; a global tag stays a human's. */
+    server.registerTool(
+        "tag_create",
+        {
+            description:
+                "Create a tag in a project you lead (its owners only), so `ticket_new` and `ticket_update` (`add_tags`) can use it. A global tag, shown in every project, is a human's gesture: ask on a thread. Refused when the project already has a tag of that name, or when the project's config defines it.",
+            inputSchema: {
+                name: z.string().min(1).describe("The tag's name, as tickets will carry it."),
+                project: z.string().optional().describe("The project the tag belongs to. Defaults to $AIBALL_PROJECT."),
+                color: z.string().optional().describe("Optional colour (a CSS colour, e.g. `#3b82f6`)."),
+                note: z.string().optional().describe("Optional note: what the tag means, shown beside it."),
+            },
+        },
+        async ({ name, project, color, note }) => {
+            const proj = project ?? client.defaultProject ?? undefined;
+            if (!proj) throw new Error("tag_create needs a project: pass `project` (no $AIBALL_PROJECT here)");
+            return asText(await client.createTag({ name, project: proj, color, note }));
         },
     );
 

@@ -132,6 +132,28 @@ test("tag admin: create, update, delete; a duplicate is refused", async () => {
     await assert.rejects(boss.call("tag.delete", { id: t.id }), status(404));
 });
 
+test("an agent creates the tags of a project it leads, never a global one; a name tags with its project's tag first (#4957)", async () => {
+    const { upsertSubscription } = await import("../db/subscriptions.js");
+    createProject({ name: "p-tags" });
+    createProject({ name: "p-other" });
+    upsertSubscription("worker", "p-tags", "owner");
+    const w = await as(WORKER);
+    await assert.rejects(w.call("tag.create", { name: "ag-x" }), status(403));
+    await assert.rejects(w.call("tag.create", { name: "ag-x", project: "p-other" }), status(403));
+    const mine = await w.call<{ id: number; project: string }>("tag.create", { name: "ag-x", project: "p-tags" });
+    assert.equal(mine.project, "p-tags");
+    // Another project's tag of the same name, created first: never picked.
+    const boss = await as(BOSS);
+    await boss.call("tag.create", { name: "ag-y", project: "p-other" });
+    const theirs = await boss.call<{ id: number }>("tag.create", { name: "ag-x", project: "p-other" });
+    const t = submitMessage({ project: "p-tags", kind: "ticket_created", title: "t4957", body: "b", by_agent: "worker" });
+    const tags = await w.call<Array<{ id: number }>>("message.add_tag", { id: t.id, tag: "ag-x" });
+    assert.deepEqual(tags.map((x) => x.id), [mine.id]);
+    assert.notEqual(mine.id, theirs.id);
+    await assert.rejects(w.call("message.add_tag", { id: t.id, tag: "ag-y" }), code("TAG_UNKNOWN"));
+    assert.deepEqual(await w.call("message.remove_tag", { id: t.id, tag: "ag-x" }), []);
+});
+
 test("me, mark unread; the moderator's gestures stay a human's", async () => {
     const boss = await as(BOSS);
     const w = await as(WORKER);

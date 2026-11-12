@@ -13,9 +13,13 @@ import {
 import { resolveConfigTags } from "../config-tags.js";
 
 
-export function resolveTagRef(ref: unknown): Tag | null {
+export function resolveTagRef(ref: unknown, project?: string | null): Tag | null {
     if (typeof ref === "number") return getTag(ref);
     if (typeof ref === "string") {
+        if (/^\d+$/.test(ref)) return getTag(Number(ref));
+        // #4957 — on a message, a name is its project's tag first, then a global
+        // one; never another project's tag of the same name.
+        if (project !== undefined) return (project ? getTagByName(ref, project) : null) ?? getTagByName(ref, null);
         return getTagByName(ref) ?? null;
     }
     return null;

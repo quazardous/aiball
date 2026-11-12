@@ -34,6 +34,7 @@ export const TOOL_AUDIENCE: AudienceTable = {
     ticket_reply: BOTH,
     plan_options: BOTH,
     ticket_update: BOTH,
+    tag_create: BOTH,
     ticket_close: BOTH,
     ticket_decide: BOTH,
     ticket_move: BOTH,

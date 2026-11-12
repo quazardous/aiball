@@ -1203,6 +1203,18 @@ export class AiballClient {
         // #3036 — who tags is the caller; the daemon takes it from the identity sent.
         return this.call("message.set_tags", { id, tag_ids: tag_names });
     }
+    /** #4957 — add one tag (name or id) to a message; a name is its project's tag first, then a global one. */
+    addMessageTag(id: number, tag: string) {
+        return this.call<Array<{ id: number; name: string }>>("message.add_tag", { id, tag });
+    }
+    /** #4957 — take one tag off a message. */
+    removeMessageTag(id: number, tag: string) {
+        return this.call<Array<{ id: number; name: string }>>("message.remove_tag", { id, tag });
+    }
+    /** #4957 — create a tag; for an agent, a tag of a project it leads. */
+    createTag(body: { name: string; project: string; color?: string; note?: string }) {
+        return this.call<{ id: number; name: string; project: string | null; color: string | null; note: string | null }>("tag.create", body);
+    }
     note(id: number, note: string | null) {
         return this.call("message.note", { id, note });
     }
