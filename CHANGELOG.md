@@ -33,6 +33,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- A prompt Claude Code takes ahead of task notifications queued before it no longer stays "queued" for the loop, which kept the agent marked working while only background agents ran.
 - Tagging a ticket by name picks its project's tag first, then a global one, never another project's tag of the same name.
 
 ## [0.59.0] — 2026-11-09

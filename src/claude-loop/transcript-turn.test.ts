@@ -105,6 +105,19 @@ test("#4684 task notifications that pass through an idle Claude's queue do not h
     assert.equal(t.poll(Date.now()), true, "a queued entry that is not text (an image) is a prompt");
 });
 
+test("helios, 12 November: a dequeue takes the prompt before the task notifications queued ahead of it", () => {
+    const f = fresh();
+    appendFileSync(f, end("stop_hook_summary") + end("turn_duration"));
+    const t = turnOn(f);
+    const note = (id: string) => `<task-notification> <task-id>${id}</task-id> done`;
+    appendFileSync(f, queueOp("enqueue", note("a")) + queueOp("enqueue", "egui pop does not know where its config is saved"));
+    assert.equal(t.poll(Date.now()), true, "a prompt waits behind a notification");
+    appendFileSync(f, queueOp("dequeue"));
+    assert.equal(t.poll(Date.now()), false, "the dequeue took the prompt, not the notification at the head");
+    appendFileSync(f, queueOp("dequeue"));
+    assert.equal(t.poll(Date.now()), false, "with no prompt left, a dequeue takes the head");
+});
+
 test("#4448 helios, 8 November: a notification written after the turn's end opens nothing; a prompt does", () => {
     const f = fresh();
     appendFileSync(f, prompt("Another Claude session sent a message: <agent-message from=\"a\">") + apiRequest() + assistant());

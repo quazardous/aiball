@@ -169,9 +169,15 @@ export class TranscriptTurn {
             if (!s) continue;
             if (s.kind === "queued") this.queue.push(s.content);
             else if (s.kind === "taken") {
-                // `dequeue` takes the head; `remove` names what it takes. An attach
-                // may start past an enqueue: a removal of nothing known does nothing.
-                const at = s.op === "remove" && s.content !== null ? this.queue.indexOf(s.content) : 0;
+                // `remove` names what it takes. `dequeue` names nothing and takes by
+                // priority: a prompt before task notifications queued ahead of it
+                // (helios, 12 November: taking the head left the prompt "queued" for
+                // good, and a file kept growing by background agents held the loop
+                // busy past the turn's end). An attach may start past an enqueue: a
+                // removal of nothing known does nothing.
+                const at = s.op === "remove" && s.content !== null
+                    ? this.queue.indexOf(s.content)
+                    : Math.max(0, this.queue.findIndex((c) => !isNotification(c)));
                 if (at >= 0 && this.queue.length > 0) this.queue.splice(at, 1);
             }
             else if (s.kind === "notice") {
