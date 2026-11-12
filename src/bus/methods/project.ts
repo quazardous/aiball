@@ -69,8 +69,8 @@ defineMethod({
     params: z.object({ detailed: flag, consumer_id: z.string().optional(), landscape: flag, project: z.string().optional() }),
     run: (_caller, p) => {
         if (p.detailed !== true) return listProjects();
-        const all = listProjectsDetailed(p.consumer_id, p.landscape === true);
-        const some = p.project ? all.filter((x) => x.name === p.project) : all;
+        // #5000 — one project asked for: only its row is worked out.
+        const some = listProjectsDetailed(p.consumer_id, p.landscape === true, Date.now(), p.project || undefined);
         return some.map((x) => {
             const s = standingPromptView(x.name);
             return { ...x, standing_prompt: s.standing_prompt, focus_active: s.focus_active, focus_line: s.focus_line };

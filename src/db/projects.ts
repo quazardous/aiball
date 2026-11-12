@@ -222,19 +222,77 @@ interface ProjectsBase {
     visibleOpen: { id: number; project: string }[];
     closedIds: Set<number>;
     snoozedIds: Set<number>;
+    /** #5000 — built for these projects alone, and every ticket they hold. */
+    only?: ReadonlySet<string>;
+    ticketIds?: ReadonlySet<number>;
 }
 
+/**
+ * #5000 — the base is kept per project. A write names its tickets
+ * (`ticketChanged`): only their projects are rebuilt at the next read, from the
+ * same queries narrowed to them. A write that cannot name what it touched (a
+ * thread moved between projects, a purge, a ticket gone) rebuilds the whole
+ * base, and so does the 5 s ceiling: what no write signals (a snooze running
+ * out, token usage, loop presence) is never older than that, as before. The
+ * web reloads this list on every board event, so it used to rebuild the whole
+ * base after nearly every write, for one project's change.
+ */
 let baseCache: { val: ProjectsBase; at: number } | null = null;
+/** Tickets written since the base was built; their projects are rebuilt at the next read. */
+const dirtyTickets = new Set<number>();
 
-export function invalidateProjectsDetailed(): void {
-    baseCache = null;
+export function invalidateProjectsDetailed(ticketIds?: readonly number[]): void {
+    if (!ticketIds || ticketIds.length === 0) {
+        baseCache = null;
+        dirtyTickets.clear();
+        return;
+    }
+    if (baseCache) for (const id of ticketIds) dirtyTickets.add(id);
 }
 
-export function listProjectsDetailed(consumer_id?: string, landscape = false, nowMs = Date.now()): ProjectMeta[] {
+export function listProjectsDetailed(consumer_id?: string, landscape = false, nowMs = Date.now(), project?: string): ProjectMeta[] {
     if (!baseCache || nowMs - baseCache.at >= DETAILED_TTL_MS) {
         baseCache = { val: buildProjectsBase(), at: nowMs };
+        dirtyTickets.clear();
+    } else if (dirtyTickets.size > 0) {
+        const ids = [...dirtyTickets];
+        dirtyTickets.clear();
+        const rows = getDb().select({ id: schema.tickets.id, project: schema.tickets.project })
+            .from(schema.tickets).where(inArray(schema.tickets.id, ids)).all();
+        // A ticket gone since (deleted with its thread) leaves no project to
+        // name: the whole base, the safe direction to be wrong in.
+        if (rows.length < ids.length) {
+            baseCache = { val: buildProjectsBase(), at: nowMs };
+        } else {
+            baseCache = { val: patchBase(baseCache.val, buildProjectsBase([...new Set(rows.map((r) => r.project))])), at: baseCache.at };
+        }
     }
-    return overlayConsumer(baseCache.val, consumer_id, landscape);
+    // #5000 — one project asked for: the consumer's part is worked out for it alone.
+    const base = project === undefined ? baseCache.val : {
+        ...baseCache.val,
+        projects: baseCache.val.projects.filter((p) => p.name === project),
+        visibleOpen: baseCache.val.visibleOpen.filter((t) => t.project === project),
+    };
+    return overlayConsumer(base, consumer_id, landscape);
+}
+
+/** #5000 — the base with the part of `part`'s projects replaced by `part`, built for them alone. */
+function patchBase(base: ProjectsBase, part: ProjectsBase): ProjectsBase {
+    const only = part.only!;
+    const theirs = part.ticketIds!;
+    const merge = (ids: Set<number>, partIds: Set<number>) => {
+        const out = new Set<number>();
+        for (const id of ids) if (!theirs.has(id)) out.add(id);
+        for (const id of partIds) out.add(id);
+        return out;
+    };
+    return {
+        projects: [...base.projects.filter((p) => !only.has(p.name)), ...part.projects]
+            .sort((a, b) => b.last_activity.localeCompare(a.last_activity)),
+        visibleOpen: [...base.visibleOpen.filter((t) => !only.has(t.project)), ...part.visibleOpen],
+        closedIds: merge(base.closedIds, part.closedIds),
+        snoozedIds: merge(base.snoozedIds, part.snoozedIds),
+    };
 }
 
 function overlayConsumer(base: ProjectsBase, consumer_id: string | undefined, landscape: boolean): ProjectMeta[] {
@@ -343,8 +401,8 @@ function overlayConsumer(base: ProjectsBase, consumer_id: string | undefined, la
  * (migration 0079) instead of walking the table; `project-list-indexes.test.ts`
  * holds the plan to it.
  */
-export function messageAggQuery(nowIsoStr: string) {
-    return getDb().select({
+export function messageAggQuery(nowIsoStr: string, only?: readonly string[]) {
+    const q = getDb().select({
         project: schema.tickets.project,
         last_activity: sql<string>`MAX(${schema.messages.createdAt})`,
         comment_count: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' THEN 1 ELSE 0 END)`,
@@ -356,8 +414,9 @@ export function messageAggQuery(nowIsoStr: string) {
             THEN 1 ELSE 0 END)`,
     })
         .from(schema.messages)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .groupBy(schema.tickets.project);
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId));
+    // #5000 — narrowed to some projects when only they are rebuilt.
+    return (only ? q.where(inArray(schema.tickets.project, [...only])) : q).groupBy(schema.tickets.project);
 }
 
 /**
@@ -373,7 +432,7 @@ export function messageAggQuery(nowIsoStr: string) {
  * `kind` index, walking every comment (~44 → ~7 ms measured on a live copy).
  * The constants are fixed; nothing from outside reaches this SQL.
  */
-export function pendingResolutionQuery() {
+export function pendingResolutionQuery(only?: readonly string[]) {
     return getDb().select({
         project: schema.tickets.project,
         ticket_id: schema.messages.ticketId,
@@ -381,12 +440,22 @@ export function pendingResolutionQuery() {
     })
         .from(schema.messages)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(sql`${schema.messages.kind} = 'comment_added' AND ${schema.messages.status} = 'approved'
-            AND ${schema.messages.meta} LIKE '%"resolution"%' AND ${schema.messages.meta} LIKE '%"pending"%'`);
+        .where(and(
+            sql`${schema.messages.kind} = 'comment_added' AND ${schema.messages.status} = 'approved'
+            AND ${schema.messages.meta} LIKE '%"resolution"%' AND ${schema.messages.meta} LIKE '%"pending"%'`,
+            only ? inArray(schema.tickets.project, [...only]) : undefined,
+        ));
 }
 
-function buildProjectsBase(): ProjectsBase {
+/**
+ * #5000 — with `only`, the base of those projects alone: every query narrowed
+ * to their tickets, the result to their names. Without, the whole board.
+ */
+function buildProjectsBase(onlyList?: readonly string[]): ProjectsBase {
     const db = getDb();
+    const only = onlyList ? new Set(onlyList) : undefined;
+    const inScope = (project: string | null | undefined): boolean => !only || (!!project && only.has(project));
+    const ticketScope = onlyList ? inArray(schema.tickets.project, [...onlyList]) : undefined;
     // Aggregates by project across tickets + messages. Two queries merged
     // in JS — small data sizes, simpler than a SQL UNION/GROUP dance.
     // Snoozed-pending tickets are explicitly set aside — they should NOT
@@ -404,7 +473,7 @@ function buildProjectsBase(): ProjectsBase {
              AND (${schema.tickets.postponedUntil} IS NULL
                   OR ${schema.tickets.postponedUntil} <= ${nowIsoStr})
             THEN 1 ELSE 0 END)`,
-    }).from(schema.tickets).groupBy(schema.tickets.project).all();
+    }).from(schema.tickets).where(ticketScope).groupBy(schema.tickets.project).all();
 
     // pending_count == "moderation backlog the human needs to look at".
     // Only `comment_added` lifecycle counts here — pending lifecycle events
@@ -416,7 +485,7 @@ function buildProjectsBase(): ProjectsBase {
     // backfill-rejected as a one-shot.
     // Snoozed parent tickets exclude their pending comments from the count
     // for the same reason as above.
-    const messageAgg = messageAggQuery(nowIsoStr).all();
+    const messageAgg = messageAggQuery(nowIsoStr, onlyList).all();
 
     const byProject = new Map<string, ProjectMeta>();
     // #B.227: seed from the projects registry first so a freshly-
@@ -427,7 +496,7 @@ function buildProjectsBase(): ProjectsBase {
     const registry = db.select({
         name: schema.projects.name,
         created_at: schema.projects.createdAt,
-    }).from(schema.projects).all();
+    }).from(schema.projects).all().filter((r) => inScope(r.name));
     for (const r of registry) {
         byProject.set(r.name, {
             name: r.name,
@@ -484,11 +553,12 @@ function buildProjectsBase(): ProjectsBase {
     })
         .from(schema.ticketTokenUsage)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.ticketTokenUsage.ticketId))
+        .where(ticketScope)
         .groupBy(schema.tickets.project)
         .all();
     // #634 david `svzkpw` — sum direct project tokens into the same aggregate.
     // A project's total cost = SUM(its tickets' usage) + this row.
-    const directAgg = db.select().from(schema.projectTokenUsage).all();
+    const directAgg = db.select().from(schema.projectTokenUsage).all().filter((d) => inScope(d.project));
     const directByProject = new Map<string, typeof directAgg[number]>();
     for (const d of directAgg) directByProject.set(d.project, d);
     for (const tk of tokenAgg) {
@@ -539,9 +609,11 @@ function buildProjectsBase(): ProjectsBase {
         id: schema.messages.id,
     })
         .from(schema.messages)
-        .where(
+        .where(and(
             inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked"]),
-        )
+            onlyList ? inArray(schema.messages.ticketId,
+                db.select({ id: schema.tickets.id }).from(schema.tickets).where(ticketScope)) : undefined,
+        ))
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
@@ -574,6 +646,7 @@ function buildProjectsBase(): ProjectsBase {
         .where(and(
             eq(schema.tickets.status, "pending"),
             or(isNull(schema.tickets.postponedUntil), lte(schema.tickets.postponedUntil, nowIsoStr)),
+            ticketScope,
         ))
         .all();
     for (const t of pendingTickets) {
@@ -600,9 +673,10 @@ function buildProjectsBase(): ProjectsBase {
         .where(and(
             eq(schema.messages.kind, "ticket_resolved"),
             eq(schema.messages.status, "pending"),
+            ticketScope,
         ))
         .all();
-    const decisionPendingResolveds = pendingResolutionQuery().all();
+    const decisionPendingResolveds = pendingResolutionQuery(onlyList).all();
     const pendingResolutionTickets = new Map<string, Set<number>>();
     function bumpPending(project: string, ticketId: number): void {
         let s = pendingResolutionTickets.get(project);
@@ -631,7 +705,8 @@ function buildProjectsBase(): ProjectsBase {
         // #379: `last_actor_at` (#374) ajouté au SELECT existant → zéro requête
         // en plus ; alimente le landscape_hash (gated par le flag `landscape`).
         lastActorAt: schema.tickets.lastActorAt,
-    }).from(schema.tickets).all();
+    }).from(schema.tickets).where(ticketScope).all();
+    const openById = new Map(openCounts.map((t) => [t.id, t]));
     const nowStr = nowIso();
     const openPerProject = new Map<string, number>();
     const snoozedPerProject = new Map<string, number>();
@@ -688,7 +763,7 @@ function buildProjectsBase(): ProjectsBase {
         } else {
             let n = 0;
             for (const tid of candidates) {
-                const t = openCounts.find((x) => x.id === tid);
+                const t = openById.get(tid);
                 if (!t || t.status !== "approved") continue;
                 if (closedByTicket.get(tid) === true) continue;
                 const snoozed = !!t.postponedUntil && t.postponedUntil > nowStr;
@@ -824,6 +899,7 @@ function buildProjectsBase(): ProjectsBase {
         visibleOpen,
         closedIds,
         snoozedIds,
+        ...(only ? { only, ticketIds: new Set(openCounts.map((t) => t.id)) } : {}),
     };
 }
 
@@ -2245,8 +2321,9 @@ function flagsRepairScope(ticketIds: readonly number[]): number[] {
  * for a whole thread), and it stays correct — just slower.
  */
 export function invalidateFlagsCache(ticketIds?: readonly number[]): void {
-    // #2682 — the per-project counts derive from the same state.
-    invalidateProjectsDetailed();
+    // #2682 — the per-project counts derive from the same state; #5000 — only
+    // the projects of the tickets named, when the write names them.
+    invalidateProjectsDetailed(ticketIds);
     if (!ticketIds || ticketIds.length === 0 || flagsCacheIsCold()) {
         clearFlagsCache();
         return;

@@ -23,6 +23,10 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Changed
+
+- The project list no longer recomputes every project after each board change: only the projects a change touches are recomputed, which took most of the daemon's stalls on a busy board.
+
 ### Added
 
 - Agents can create a tag in a project they lead (`tag_create`) and add or remove tags on an existing ticket (`ticket_update`). A global tag stays a human's gesture.
