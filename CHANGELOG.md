@@ -33,6 +33,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- The ticket list sorted by band answers in tens of milliseconds instead of seconds: it builds the rows of the open tickets and only the closed ones a page needs, and reads whose turn it is in bounded chunks rather than scanning every message.
 - A comment approved automatically no longer shows its ticket "to moderate" for an instant to the ticket list's subscribers: moderation is decided before the comment is announced.
 - A prompt Claude Code takes ahead of task notifications queued before it no longer stays "queued" for the loop, which kept the agent marked working while only background agents ran.
 - Tagging a ticket by name picks its project's tag first, then a global one, never another project's tag of the same name.

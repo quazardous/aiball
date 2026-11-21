@@ -116,6 +116,18 @@ defineMethod({
         tickets.sort((a, b) => compare(cheapOf.get(a.id)!, cheapOf.get(b.id)!));
         earlyTotal = tickets.length;
         tickets = tickets.slice(offset, offset + limit);
+    } else if (paged && sortBy === "band") {
+        // #5404 — a closed ticket is always in the last band, and within a band
+        // rows go by last activity, which the cheap fields carry. So the page
+        // needs every open ticket's row (their band is only known once built)
+        // but only as many closed rows as it takes to fill it: building one for
+        // every closed ticket of the board was most of an all-projects call.
+        const isClosed = (t: { id: number }) => cheapOf.get(t.id)!.closed;
+        const open = tickets.filter((t) => !isClosed(t));
+        const closed = tickets.filter(isClosed)
+            .sort((a, b) => cheapOf.get(b.id)!.last_activity.localeCompare(cheapOf.get(a.id)!.last_activity));
+        earlyTotal = tickets.length;
+        tickets = [...open, ...closed.slice(0, Math.max(0, offset + limit - open.length))];
     }
 
     // #2072 — the row is built by the shared builder, so a mutation that

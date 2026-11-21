@@ -1795,9 +1795,14 @@ export function lastActorExclusions(consumerId: string, ticketIds?: readonly num
         createdAt: schema.tickets.createdAt,
         meta: schema.tickets.meta,
     }).from(schema.tickets).where(idScope(schema.tickets.id, ticketIds)).all();
-    const hasForeign = foreignActorTickets(consumerId, ticketIds);
+    // #5404 — only a ticket the consumer acted on last can be excluded, so only
+    // those need the counterpart read. Asked about every ticket of a list, that
+    // read went past `SCOPED_READ_MAX_IDS` and scanned every approved message of
+    // the base, parsing each one's meta: 600 ms of a `sort=band` inbox.list.
+    const mine = rows.filter((r) => r.lastActor === consumerId);
+    const hasForeign = mine.length > 0 ? foreignActorTickets(consumerId, mine.map((r) => r.id)) : new Set<number>();
     // #2326 / #2331 — a step, or a `handback: false` comment, as the last action keeps its author in the pool.
-    const keptLast = ticketsWhereLastActionKeepsAuthor(consumerId, rows.filter((r) => r.lastActor === consumerId));
+    const keptLast = ticketsWhereLastActionKeepsAuthor(consumerId, mine);
     const out = new Set<number>();
     for (const r of rows) {
         // #2331 — the last action is still the creation, and it was filed handing the ticket back.

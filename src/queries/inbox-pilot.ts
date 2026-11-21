@@ -14,6 +14,7 @@ import { getDb } from "../db/connection.js";
 import * as schema from "../schema.js";
 import { getInboxAgg } from "../db/inbox-agg.js";
 import { lastActorExclusions } from "../db/projects.js";
+import { SCOPED_READ_MAX_IDS } from "../db/scope-ids.js";
 import { kindsByAttention, type DecisionKind } from "../ticket-transitions.js";
 import type { InboxRow } from "./inbox-row.js";
 
@@ -91,15 +92,29 @@ export function pilotFields(row: InboxRow, facts: PilotFacts, viewer: string, vi
     return { turn, band: BANDS.indexOf(band), band_name: band, state_glyph: glyph };
 }
 
+/** What a closed row's fields never read. */
+const CLOSED_FACTS: PilotFacts = { viewerActedLast: false, proposer: null, lastHandback: null };
+
 /**
  * The facts for a page of rows, read in two bounded queries: the gate's
  * exclusion set for these ids, and the author of each live pending decision.
  */
 export function buildPilotFacts(rows: readonly InboxRow[], viewer: string, project?: string): Map<number, PilotFacts> {
-    const ids = rows.map((r) => r.id);
     const out = new Map<number, PilotFacts>();
+    // #5404 — a closed row's fields do not read its facts (turn none, band and
+    // glyph closed), so they are gathered for the open rows only. A `sort=band`
+    // list asked them for every ticket of its filter, closed ones included: past
+    // `SCOPED_READ_MAX_IDS` the gate's read scanned every message of the base.
+    for (const r of rows) if (r.closed) out.set(r.id, CLOSED_FACTS);
+    rows = rows.filter((r) => !r.closed);
+    const ids = rows.map((r) => r.id);
     if (ids.length === 0) return out;
-    const excluded = lastActorExclusions(viewer, ids);
+    // #5404 — asked in bounded chunks: past `SCOPED_READ_MAX_IDS` the gate's
+    // read scans every message of the base instead of these tickets'.
+    const excluded = new Set<number>();
+    for (let i = 0; i < ids.length; i += SCOPED_READ_MAX_IDS) {
+        for (const id of lastActorExclusions(viewer, ids.slice(i, i + SCOPED_READ_MAX_IDS))) excluded.add(id);
+    }
     const aggs = getInboxAgg(project);
 
     // A pending decision lives on a comment (its latest id in the aggregate) or,
