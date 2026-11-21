@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.60.0] — 2026-11-21
+
 ### Changed
 
 - The project list no longer recomputes every project after each board change: only the projects a change touches are recomputed, which took most of the daemon's stalls on a busy board.
