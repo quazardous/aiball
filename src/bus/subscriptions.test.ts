@@ -243,6 +243,23 @@ test("a row that changes with time alone is pushed when it does, and only when i
     assert.equal((cooled.data as { row: { hot: boolean } }).row.hot, false);
 });
 
+test("an auto-approved comment pushes its row once, already approved: never a moment in moderation", async () => {
+    const t = ticket("auto-approved step");
+    const c = await open("boss");
+    await c.call<Sub>("bus.subscribe", { subject: "project.p-subs.tickets", open: true });
+    const posted = submitMessage({ project: "p-subs", kind: "comment_added", ticket_id: t, parent_id: t, body: "a step", by_agent: "worker" });
+    assert.equal(posted.status, "approved", "the comment is auto-approved in the same call");
+    await c.settle();
+    const rows = c.events
+        .filter((e) => e.subject === "project.p-subs.tickets")
+        .map((e) => e.data as { op: string; row?: { id: number; pending_comment_count: number; band_name?: string } })
+        .filter((d) => d.op === "upsert" && d.row?.id === t)
+        .map((d) => d.row!);
+    assert.ok(rows.length > 0, "the row is pushed");
+    assert.deepEqual(rows.filter((r) => r.pending_comment_count > 0 || r.band_name === "moderate"), [],
+        "no row with the comment still awaiting moderation");
+});
+
 test("an event that leaves a row as it was pushes nothing on the view", async () => {
     const t = ticket("seven");
     const c = await open("worker");

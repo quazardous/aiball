@@ -1040,6 +1040,37 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     // only @mentions (via fanOutMentions below) reach them.
     // #921 — opt-out for auto-emitted redundant messages (cf. SubmitOpts).
     if (!opts.skipFanOut) fanOutPings(msg);
+
+    const ownerLifecycle = isOwnerLifecycleEvent(input);
+    // Historically `ticket_blocked` auto-approved too. The kind is
+    // retired from the agent→human direction (david, 2026-05-15), so
+    // VALID_KINDS now blocks emission. The defensive special-case is
+    // kept in case a legacy MCP client still posts one — it'll fail
+    // validation upstream, but if it slipped through somehow, the
+    // historical auto-approve path stays.
+    const autoApproveLifecycle = ownerLifecycle || input.kind === "ticket_blocked" || opts.preApprovedByKey === true;
+    const decision = autoApproveLifecycle
+        ? { decision: "auto" as const, matched_rule_id: null }
+        : evaluate({
+            project: input.project,
+            kind: input.kind,
+            by_agent: input.by_agent ?? null,
+        });
+    // #5403 — moderation is decided before the message is announced. Announced
+    // while still pending, an auto-approved comment made every view of its
+    // ticket recompute once with a comment awaiting moderation: the
+    // `project.*.tickets` subscribers got the row in "moderate" for an
+    // instant, then its real band on `message_decided`.
+    const approved = decision.decision === "auto"
+        ? updateMessageStatus(
+            msg.id,
+            "approved",
+            ownerLifecycle ? "owner" : "auto",
+            decision.matched_rule_id,
+            input.kind, // #569 — disambiguate tickets vs messages on id collision
+        )
+        : null;
+    if (approved) msg = approved;
     // Always announce the message: every UI list (pending, approved, tickets,
     // open thread) wants to know that a new row exists, regardless of how
     // moderation will resolve it. #980 N2 — except a silent auto-close
@@ -1061,60 +1092,35 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
         postRelationEvents(msg, input);
     }
 
-    const ownerLifecycle = isOwnerLifecycleEvent(input);
-    // Historically `ticket_blocked` auto-approved too. The kind is
-    // retired from the agent→human direction (david, 2026-05-15), so
-    // VALID_KINDS now blocks emission. The defensive special-case is
-    // kept in case a legacy MCP client still posts one — it'll fail
-    // validation upstream, but if it slipped through somehow, the
-    // historical auto-approve path stays.
-    const autoApproveLifecycle = ownerLifecycle || input.kind === "ticket_blocked" || opts.preApprovedByKey === true;
-    const decision = autoApproveLifecycle
-        ? { decision: "auto" as const, matched_rule_id: null }
-        : evaluate({
-            project: input.project,
-            kind: input.kind,
-            by_agent: input.by_agent ?? null,
-        });
-    if (decision.decision === "auto") {
-        const updated = updateMessageStatus(
-            msg.id,
-            "approved",
-            ownerLifecycle ? "owner" : "auto",
-            decision.matched_rule_id,
-            input.kind, // #569 — disambiguate tickets vs messages on id collision
-        );
-        if (updated) {
-            msg = updated;
-            deliverToOutbox(msg);
-            // #921 — opt-out for auto-emitted redundant messages.
-            if (!opts.skipFanOut) fanOutPings(msg);
-            // Force-deliver pings to `@<name>` mentions (per #B.71): an agent
-            // gets a direct ping, a project its owners and followers.
-            // #3396 — once approved, never while the message awaits moderation.
-            fanOutMentions(msg);
-            // …and announce the auto-approval so subscribers transition state
-            // (status: pending → approved) without polling. #980 N2 — muted
-            // for a silent auto-close (the decision event already announced).
-            if (!opts.skipBroadcast) broadcast({ type: "message_decided", data: msg });
-            // #568 — use `input.kind` (immutable), not `msg.kind`: when
-            // tickets.id == messages.id (low counters), the legacy
-            // updateMessageStatus probe flips msg.kind to "ticket_created".
-            // #586 — close-time cleanup extracted to `close-cleanup.ts`.
-            if (input.kind === "ticket_closed" && input.ticket_id != null) {
-                const closedTicketId: number = input.ticket_id;
-                autoApproveStaleDecisionsOnClose(closedTicketId, input.by_agent ?? "owner");
-                rejectStaleClosedReopenedForTicket(closedTicketId, msg.id);
-                // #1185 (david) — drop the closed ticket's drained (seen) pings.
-                // Unseen ones (incl. the ticket_closed notification) survive.
-                purgeSeenPingsForTicket(closedTicketId);
-                // #418/#436 (révisé #568) : on relâche le claim seulement
-                // (transient focus), pas l'assignment (responsabilité audit
-                // qui reste pertinente sur un reopen ultérieur).
-                releaseTicketClaim(closedTicketId);
-                // #2297 — the tickets that were waiting on this one hear it closed.
-                postCloseRelationEvents(closedTicketId, input.by_agent ?? null, msg.scope);
-            }
+    if (approved) {
+        deliverToOutbox(msg);
+        // #921 — opt-out for auto-emitted redundant messages.
+        if (!opts.skipFanOut) fanOutPings(msg);
+        // Force-deliver pings to `@<name>` mentions (per #B.71): an agent
+        // gets a direct ping, a project its owners and followers.
+        // #3396 — once approved, never while the message awaits moderation.
+        fanOutMentions(msg);
+        // …and announce the auto-approval so subscribers transition state
+        // (status: pending → approved) without polling. #980 N2 — muted
+        // for a silent auto-close (the decision event already announced).
+        if (!opts.skipBroadcast) broadcast({ type: "message_decided", data: msg });
+        // #568 — use `input.kind` (immutable), not `msg.kind`: when
+        // tickets.id == messages.id (low counters), the legacy
+        // updateMessageStatus probe flips msg.kind to "ticket_created".
+        // #586 — close-time cleanup extracted to `close-cleanup.ts`.
+        if (input.kind === "ticket_closed" && input.ticket_id != null) {
+            const closedTicketId: number = input.ticket_id;
+            autoApproveStaleDecisionsOnClose(closedTicketId, input.by_agent ?? "owner");
+            rejectStaleClosedReopenedForTicket(closedTicketId, msg.id);
+            // #1185 (david) — drop the closed ticket's drained (seen) pings.
+            // Unseen ones (incl. the ticket_closed notification) survive.
+            purgeSeenPingsForTicket(closedTicketId);
+            // #418/#436 (révisé #568) : on relâche le claim seulement
+            // (transient focus), pas l'assignment (responsabilité audit
+            // qui reste pertinente sur un reopen ultérieur).
+            releaseTicketClaim(closedTicketId);
+            // #2297 — the tickets that were waiting on this one hear it closed.
+            postCloseRelationEvents(closedTicketId, input.by_agent ?? null, msg.scope);
         }
     }
     // #418: auto-claim (discipline A) — an agent posting an APPROVED comment on a
